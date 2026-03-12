@@ -1,0 +1,55 @@
+[
+  {
+    "id": "c001",
+    "scope": "global",
+    "rule": "Flash on a protection/reactive card means it can respond to threats at instant speed — tag as 'reactive-protection', not the generic 'flash-instant-speed'",
+    "pattern": "flash + ETB protection effect",
+    "wrong": "flash-instant-speed",
+    "correct": "reactive-protection",
+    "example_card": "Slippery Bogbonder"
+  },
+  {
+    "id": "c002",
+    "scope": "global",
+    "rule": "Cards that say 'This creature is the chosen type in addition to its other types' must include 'can-become-chosen-type' in synergy_tags. This is critical for tribal decks.",
+    "pattern": "this creature is the chosen type in addition",
+    "wrong": null,
+    "correct": "can-become-chosen-type",
+    "example_card": "Roaming Throne"
+  },
+  {
+    "id": "c003",
+    "scope": "global",
+    "rule": "Replacement effects that add extra counters ('that many plus one', 'twice that many') are passive-permanent by definition — always tag as 'passive-permanent' AND 'replacement-effect'",
+    "pattern": "replacement effect on counters",
+    "wrong": null,
+    "correct": "passive-permanent replacement-effect",
+    "example_card": "Hardened Scales"
+  },
+  {
+    "id": "c004",
+    "scope": "global",
+    "rule": "Do not use overly broad tags like 'tribal-synergy' — instead be specific: 'human-tribal', 'elf-tribal', etc. Generic 'tribal-synergy' is too vague to be useful for graph edges.",
+    "pattern": "tribal synergy without specifying tribe",
+    "wrong": "tribal-synergy",
+    "correct": "human-tribal (or specific tribe name)",
+    "example_card": "Thalia's Lieutenant"
+  },
+  {
+    "id": "c005",
+    "scope": "global",
+    "rule": "A card that puts counters on ALL creatures you control (board-wide) must be tagged 'board-wide-counter-placer'. A card that puts counters on a single target is 'single-target-counter-placer'. This distinction is critical for synergy matching.",
+    "pattern": "counter placement scope",
+    "wrong": "counter-placer (ambiguous)",
+    "correct": "board-wide-counter-placer OR single-target-counter-placer",
+    "example_card": "Gavony Township"
+  },
+  {
+    "id": "c006",
+    "scope": "card",
+    "card": "Sol Ring",
+    "rule": "Sol Ring must always have role='ramp' and include 'staple-mana-rock' and 'colorless-ramp' in synergy_tags. It is the most universal ramp piece in EDH.",
+    "wrong": null,
+    "correct": "role=ramp, synergy_tags includes staple-mana-rock and colorless-ramp"
+  }
+]

@@ -1,0 +1,79 @@
+{
+  "_meta": {
+    "description": "Golden dataset: manually verified correct tags for regression testing. When prompt changes, all cards here must still produce correct tags.",
+    "version": "0.1",
+    "last_updated": "2026-03-12"
+  },
+  "cards": [
+    {
+      "name": "Hardened Scales",
+      "type_line": "Enchantment",
+      "oracle_text": "If one or more +1/+1 counters would be put on a creature you control, that many plus one +1/+1 counters are put on it instead.",
+      "keywords": [],
+      "cmc": 1,
+      "expected": {
+        "role": "enabler",
+        "synergy_tags_must_include": ["counter-doubler", "passive-permanent", "replacement-effect"],
+        "synergy_tags_must_exclude": ["flash-instant-speed", "tribal-synergy"],
+        "provides_must_include": ["counter-amplification"],
+        "wants_must_include": ["counter-placement-events"]
+      }
+    },
+    {
+      "name": "Roaming Throne",
+      "type_line": "Artifact Creature — Construct",
+      "oracle_text": "As Roaming Throne enters, choose a creature type. This creature is the chosen type in addition to its other types. Creatures you control of the chosen type have ward {2}. Whenever a creature you control of the chosen type triggers an ability, that ability triggers an additional time.",
+      "keywords": [],
+      "cmc": 4,
+      "expected": {
+        "role": "enabler",
+        "synergy_tags_must_include": ["triggered-ability-doubler", "can-become-chosen-type", "passive-permanent"],
+        "synergy_tags_must_exclude": ["flash-instant-speed"],
+        "provides_must_include": ["trigger-doubling"],
+        "wants_must_include": ["triggered-ability-heavy-commanders"]
+      }
+    },
+    {
+      "name": "Slippery Bogbonder",
+      "type_line": "Creature — Human Scout",
+      "oracle_text": "Flash. When Slippery Bogbonder enters, move all counters from target creature onto another target creature. That creature gains hexproof until end of turn.",
+      "keywords": ["Flash"],
+      "cmc": 4,
+      "expected": {
+        "role": "utility",
+        "synergy_tags_must_include": ["counter-mover", "reactive-protection"],
+        "synergy_tags_must_exclude": ["flash-instant-speed"],
+        "provides_must_include": ["counter-redistribution"],
+        "wants_must_include": ["counter-placement-events"]
+      }
+    },
+    {
+      "name": "Sol Ring",
+      "type_line": "Artifact",
+      "oracle_text": "{T}: Add {C}{C}.",
+      "keywords": [],
+      "cmc": 1,
+      "expected": {
+        "role": "ramp",
+        "synergy_tags_must_include": ["staple-mana-rock", "colorless-ramp"],
+        "synergy_tags_must_exclude": ["counter-doubler", "tribal-synergy"],
+        "provides_must_include": ["mana-acceleration"],
+        "wants_must_include": []
+      }
+    },
+    {
+      "name": "Gavony Township",
+      "type_line": "Land",
+      "oracle_text": "{2}{G}{W}, {T}: Put a +1/+1 counter on each creature you control.",
+      "keywords": [],
+      "cmc": 0,
+      "expected": {
+        "role": "land",
+        "synergy_tags_must_include": ["board-wide-counter-placer", "utility-land", "mana-sink"],
+        "synergy_tags_must_exclude": ["single-target-counter-placer", "tribal-synergy"],
+        "provides_must_include": ["board-wide-counter-placement"],
+        "wants_must_include": ["counter-doublers"]
+      }
+    }
+  ]
+}

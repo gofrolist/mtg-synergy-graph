@@ -1,0 +1,515 @@
+{
+  "_meta": {
+    "description": "Living registry of all synergy_tags in use. Auto-updated when cards are tagged. Edit definitions and aliases manually.",
+    "version": "0.1",
+    "schema_version": "0.2",
+    "edge_types": {
+      "inherits": "is-a relationship \u2014 child is a more specific version of parent. Queries on parent match children too.",
+      "amplifies": "synergy edge \u2014 having this tag in deck increases value of target tag",
+      "requires": "dependency edge \u2014 this card needs target tag present in deck to be effective"
+    }
+  },
+  "tags": {
+    "counter-doubler": {
+      "definition": "Card applies a replacement effect that increases the number of +1/+1 counters placed (e.g. 'that many plus one', 'twice that many'). Always passive-permanent.",
+      "aliases": [],
+      "cards": [
+        "Hardened Scales",
+        "Pir, Imaginative Rascal"
+      ],
+      "count": 2,
+      "inherits": [
+        "counter-amplifier"
+      ],
+      "amplifies": [
+        "counter-placement-events"
+      ],
+      "requires": []
+    },
+    "replacement-effect": {
+      "definition": "Card uses a replacement effect (modifies how something happens, not a triggered ability). Key distinction from triggered abilities \u2014 applies to the event itself.",
+      "aliases": [],
+      "cards": [
+        "Hardened Scales",
+        "Pir, Imaginative Rascal"
+      ],
+      "count": 2,
+      "inherits": [
+        "passive-permanent"
+      ],
+      "amplifies": [],
+      "requires": []
+    },
+    "counter-amplifier": {
+      "definition": "General tag for cards that make counter placement produce more counters. Superset of counter-doubler.",
+      "aliases": [],
+      "cards": [
+        "Hardened Scales",
+        "Pir, Imaginative Rascal"
+      ],
+      "count": 2,
+      "inherits": [],
+      "amplifies": [
+        "counter-placement-events"
+      ],
+      "requires": []
+    },
+    "passive-permanent": {
+      "definition": "Card has an always-on effect requiring no activation \u2014 it just sits on the battlefield and modifies game rules. High priority: these are the most consistent effects.",
+      "aliases": [],
+      "related": [
+        "replacement-effect",
+        "counter-doubler"
+      ],
+      "cards": [
+        "Hardened Scales",
+        "Roaming Throne",
+        "Pir, Imaginative Rascal",
+        "Sol Ring"
+      ],
+      "count": 4
+    },
+    "triggered-ability-doubler": {
+      "definition": "Card causes triggered abilities of a specific permanent type to trigger an additional time. Distinct from replacement effects \u2014 fires after the trigger, not instead of it.",
+      "aliases": [],
+      "cards": [
+        "Roaming Throne"
+      ],
+      "count": 1,
+      "inherits": [
+        "passive-permanent"
+      ],
+      "amplifies": [
+        "human-etb-payoff",
+        "counter-distribution"
+      ],
+      "requires": []
+    },
+    "can-become-chosen-type": {
+      "definition": "Card changes its own creature type based on a choice made on ETB ('this creature is the chosen type in addition to its other types'). Critical for tribal decks \u2014 means the card itself benefits from and contributes to tribal synergies.",
+      "aliases": [],
+      "cards": [
+        "Roaming Throne"
+      ],
+      "count": 1,
+      "inherits": [
+        "tribal-enabler"
+      ],
+      "amplifies": [
+        "triggered-ability-doubler"
+      ],
+      "requires": []
+    },
+    "tribal-enabler": {
+      "definition": "Card enables or amplifies a tribal strategy without necessarily being a member of the tribe.",
+      "aliases": [],
+      "cards": [
+        "Roaming Throne"
+      ],
+      "count": 1,
+      "inherits": [
+        "tribal-synergy"
+      ],
+      "amplifies": [],
+      "requires": []
+    },
+    "human-tribal": {
+      "definition": "Card specifically references Humans by type, or IS a Human. Distinct from general tribal-enabler \u2014 only use for Human-specific synergies.",
+      "aliases": [],
+      "cards": [
+        "Thalia's Lieutenant",
+        "Pir, Imaginative Rascal",
+        "Champion of Lambholt",
+        "Slippery Bogbonder"
+      ],
+      "count": 4,
+      "inherits": [
+        "tribal-synergy"
+      ],
+      "amplifies": [
+        "human-etb-payoff"
+      ],
+      "requires": []
+    },
+    "human-etb-payoff": {
+      "definition": "Card triggers or gains value specifically when a Human enters the battlefield. More specific than etb-trigger \u2014 only fires on Human ETBs.",
+      "aliases": [],
+      "cards": [
+        "Kyler, Sigardian Emissary",
+        "Thalia's Lieutenant"
+      ],
+      "count": 2,
+      "inherits": [
+        "etb-trigger",
+        "tribal-payoff"
+      ],
+      "amplifies": [],
+      "requires": [
+        "human-tribal"
+      ]
+    },
+    "counter-distribution": {
+      "definition": "Card distributes counters across multiple creatures simultaneously (board-wide placement, not single target).",
+      "aliases": [
+        "board-wide-counter-placer"
+      ],
+      "related": [
+        "counter-placer",
+        "board-wide-counter-placer"
+      ],
+      "cards": [
+        "Kyler, Sigardian Emissary",
+        "Thalia's Lieutenant"
+      ],
+      "count": 2
+    },
+    "board-wide-counter-placer": {
+      "definition": "Card puts +1/+1 counters on ALL or EACH creature you control simultaneously. Distinct from single-target-counter-placer. Key synergy target for counter-doublers.",
+      "aliases": [],
+      "cards": [
+        "Gavony Township"
+      ],
+      "count": 1,
+      "inherits": [
+        "counter-placer"
+      ],
+      "amplifies": [
+        "counter-doubler"
+      ],
+      "requires": []
+    },
+    "single-target-counter-placer": {
+      "definition": "Card puts a counter on one specific target creature. Less powerful than board-wide-counter-placer in wide board strategies.",
+      "aliases": [],
+      "cards": [],
+      "count": 0,
+      "inherits": [
+        "counter-placer"
+      ],
+      "amplifies": [],
+      "requires": []
+    },
+    "counter-mover": {
+      "definition": "Card moves or redistributes existing counters from one permanent to another. Requires counters already on the board \u2014 high context-dependency.",
+      "aliases": [],
+      "cards": [
+        "Slippery Bogbonder"
+      ],
+      "count": 1,
+      "inherits": [
+        "counter-payoff"
+      ],
+      "amplifies": [],
+      "requires": [
+        "counter-placement-events"
+      ]
+    },
+    "counter-consolidator": {
+      "definition": "Card moves ALL counters from one permanent to another (not partial). Creates high-value single threat from distributed counters.",
+      "aliases": [],
+      "cards": [
+        "Slippery Bogbonder"
+      ],
+      "count": 1,
+      "inherits": [
+        "counter-mover"
+      ],
+      "amplifies": [],
+      "requires": [
+        "counter-placement-events"
+      ]
+    },
+    "reactive-protection": {
+      "definition": "Card with Flash that provides protection as a reaction to opponent's play (removal, wrath). The Flash is the key feature \u2014 it's protection that responds to a specific threat, not always-on.",
+      "aliases": [],
+      "cards": [
+        "Slippery Bogbonder"
+      ],
+      "count": 1,
+      "inherits": [
+        "protection"
+      ],
+      "amplifies": [],
+      "requires": []
+    },
+    "board-protection": {
+      "definition": "Card protects ALL permanents or creatures you control (board-wide hexproof, indestructible, etc). High-value protection for wide strategies.",
+      "aliases": [],
+      "cards": [
+        "Heroic Intervention"
+      ],
+      "count": 1,
+      "inherits": [
+        "protection"
+      ],
+      "amplifies": [],
+      "requires": []
+    },
+    "staple-protection": {
+      "definition": "Universally strong protection card that belongs in most EDH decks of its colors. Implies high necessity_score regardless of synergy with commander.",
+      "aliases": [],
+      "cards": [
+        "Heroic Intervention"
+      ],
+      "count": 1,
+      "inherits": [
+        "protection"
+      ],
+      "amplifies": [],
+      "requires": []
+    },
+    "wrath-counter": {
+      "definition": "Card specifically counters or negates board wipes (mass removal). One of the most important categories in multiplayer EDH.",
+      "aliases": [],
+      "cards": [
+        "Heroic Intervention"
+      ],
+      "count": 1,
+      "inherits": [
+        "board-protection"
+      ],
+      "amplifies": [],
+      "requires": []
+    },
+    "staple-mana-rock": {
+      "definition": "Artifact that produces mana and is universally played in EDH regardless of commander. Sol Ring is the archetype. High necessity_score by definition.",
+      "aliases": [],
+      "cards": [
+        "Sol Ring"
+      ],
+      "count": 1,
+      "inherits": [
+        "mana-rock",
+        "colorless-ramp"
+      ],
+      "amplifies": [],
+      "requires": []
+    },
+    "colorless-ramp": {
+      "definition": "Produces colorless mana ({C}). Useful in any deck regardless of color identity.",
+      "aliases": [],
+      "cards": [
+        "Sol Ring"
+      ],
+      "count": 1,
+      "inherits": [
+        "ramp"
+      ],
+      "amplifies": [],
+      "requires": []
+    },
+    "utility-land": {
+      "definition": "Non-basic land that provides an activated ability beyond just producing mana. Usually comes into play tapped or has conditions.",
+      "aliases": [],
+      "cards": [
+        "Gavony Township"
+      ],
+      "count": 1,
+      "inherits": [
+        "land"
+      ],
+      "amplifies": [],
+      "requires": []
+    },
+    "mana-sink": {
+      "definition": "Card provides a way to spend excess mana usefully in the late game. Important for decks that generate a lot of mana.",
+      "aliases": [],
+      "cards": [
+        "Gavony Township"
+      ],
+      "count": 1,
+      "inherits": [],
+      "amplifies": [
+        "ramp"
+      ],
+      "requires": []
+    },
+    "evasion-granter": {
+      "definition": "Card makes creatures harder or impossible to block. In counter strategies, unblockable = winning with big creatures.",
+      "aliases": [],
+      "cards": [
+        "Champion of Lambholt"
+      ],
+      "count": 1,
+      "inherits": [
+        "combat-enabler"
+      ],
+      "amplifies": [
+        "counter-payoff"
+      ],
+      "requires": []
+    },
+    "etb-counter": {
+      "definition": "Card gains a +1/+1 counter when a creature enters the battlefield (its own ETB or others'). Scales with creature density.",
+      "aliases": [],
+      "cards": [
+        "Champion of Lambholt"
+      ],
+      "count": 1,
+      "inherits": [
+        "counter-payoff",
+        "etb-trigger"
+      ],
+      "amplifies": [],
+      "requires": []
+    },
+    "scales-with-board": {
+      "definition": "Card's power or effect increases with the number of creatures on your side. High synergy with wide board strategies.",
+      "aliases": [],
+      "cards": [
+        "Kyler, Sigardian Emissary"
+      ],
+      "count": 1,
+      "inherits": [],
+      "amplifies": [
+        "human-tribal",
+        "token-generator"
+      ],
+      "requires": []
+    },
+    "tribal-lord": {
+      "definition": "\u26a0 AUTO-DISCOVERED \u2014 add definition manually",
+      "aliases": [],
+      "related": [],
+      "cards": [
+        "Kyler, Sigardian Emissary"
+      ],
+      "count": 1
+    },
+    "etb-counter-burst": {
+      "definition": "\u26a0 AUTO-DISCOVERED \u2014 add definition manually",
+      "aliases": [],
+      "related": [],
+      "cards": [
+        "Thalia's Lieutenant"
+      ],
+      "count": 1
+    },
+    "instant-speed": {
+      "definition": "\u26a0 AUTO-DISCOVERED \u2014 add definition manually",
+      "aliases": [],
+      "related": [],
+      "cards": [
+        "Heroic Intervention"
+      ],
+      "count": 1
+    },
+    "counter-payoff": {
+      "definition": "\u26a0 AUTO-DISCOVERED \u2014 add definition manually",
+      "aliases": [],
+      "related": [],
+      "cards": [
+        "Champion of Lambholt"
+      ],
+      "count": 1
+    },
+    "combat-enabler": {
+      "definition": "\u26a0 AUTO-DISCOVERED \u2014 add definition manually",
+      "aliases": [],
+      "related": [],
+      "cards": [
+        "Champion of Lambholt"
+      ],
+      "count": 1
+    },
+    "repeatable-ability": {
+      "definition": "\u26a0 AUTO-DISCOVERED \u2014 add definition manually",
+      "aliases": [],
+      "related": [],
+      "cards": [
+        "Gavony Township"
+      ],
+      "count": 1
+    },
+    "counter-placer": {
+      "definition": "Abstract parent: any card that places counters (board-wide or targeted)",
+      "abstract": true,
+      "inherits": [],
+      "amplifies": [],
+      "requires": [],
+      "cards": [],
+      "count": 0
+    },
+    "counter-placement-events": {
+      "definition": "Abstract: represents the event of counters being placed \u2014 used in requires/amplifies",
+      "abstract": true,
+      "inherits": [],
+      "amplifies": [],
+      "requires": [],
+      "cards": [],
+      "count": 0
+    },
+    "protection": {
+      "definition": "Abstract parent: any card that protects permanents",
+      "abstract": true,
+      "inherits": [],
+      "amplifies": [],
+      "requires": [],
+      "cards": [],
+      "count": 0
+    },
+    "tribal-synergy": {
+      "definition": "Abstract parent: any tribal-related tag",
+      "abstract": true,
+      "inherits": [],
+      "amplifies": [],
+      "requires": [],
+      "cards": [],
+      "count": 0
+    },
+    "tribal-payoff": {
+      "definition": "Abstract parent: any card that gains value from tribal members",
+      "abstract": true,
+      "inherits": [],
+      "amplifies": [],
+      "requires": [],
+      "cards": [],
+      "count": 0
+    },
+    "etb-trigger": {
+      "definition": "Abstract parent: any card with an enters-the-battlefield trigger",
+      "abstract": true,
+      "inherits": [],
+      "amplifies": [],
+      "requires": [],
+      "cards": [],
+      "count": 0
+    },
+    "mana-rock": {
+      "definition": "Abstract parent: artifact that produces mana",
+      "abstract": true,
+      "inherits": [],
+      "amplifies": [],
+      "requires": [],
+      "cards": [],
+      "count": 0
+    },
+    "ramp": {
+      "definition": "Abstract parent: any card that accelerates mana",
+      "abstract": true,
+      "inherits": [],
+      "amplifies": [],
+      "requires": [],
+      "cards": [],
+      "count": 0
+    },
+    "land": {
+      "definition": "Abstract parent: land cards",
+      "abstract": true,
+      "inherits": [],
+      "amplifies": [],
+      "requires": [],
+      "cards": [],
+      "count": 0
+    },
+    "token-generator": {
+      "definition": "Abstract parent: any card that creates tokens",
+      "abstract": true,
+      "inherits": [],
+      "amplifies": [],
+      "requires": [],
+      "cards": [],
+      "count": 0
+    }
+  }
+}
