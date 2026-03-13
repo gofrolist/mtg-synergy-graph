@@ -1,4 +1,15 @@
 data/oracle_cards.json
 # data/kyler_candidates.json
 # data/kyler_tags.json
+data/*_tags_*.json
+data/mtg_rules.txt
+data/rules_chunks.json
+data/rules_index.json
+data/scryfall_function_tags.json
+data/scryfall_rulings.json
+data/*_merged*.json
+data/*_synergy_graph.json
+data/synergy_graph.json
+data/*_synergy_viz.html
+data/*_candidates.json
 __pycache__/

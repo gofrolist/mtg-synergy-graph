@@ -120,7 +120,7 @@ def call_ollama(model: str, system: str, user: str) -> tuple[str | None, float]:
 
     start = time.time()
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=300) as resp:
             data = json.loads(resp.read())
             elapsed = time.time() - start
             return data["message"]["content"].strip(), elapsed

@@ -2,22 +2,25 @@
 prompt_builder.py
 Assembles the LLM tagger prompt dynamically from:
   1. Base instructions + schema
-  2. Category vocabulary
-  3. Corrections (injected as rules the model must follow)
-  4. Few-shot examples (best tagged cards from golden dataset)
+  2. Provides/wants vocabulary (derived from tag_registry.json)
+  3. Category vocabulary
+  4. Corrections (injected as rules the model must follow)
+  5. Few-shot examples (best tagged cards from golden dataset)
 """
 
 import json
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent
+REGISTRY_PATH = BASE_DIR / "tag_registry.json"
 
 SCHEMA = """{
   "name": "card name",
-  "categories": ["list of functional categories this card belongs to"],
-  "mechanics": ["list of MTG mechanics this card uses or references"],
-  "provides": ["what this card gives to the deck when it's on the battlefield or in hand"],
-  "wants": ["abstract tags — what other cards or conditions make this card better"],
+  "role": "ramp | draw | removal | protection | enabler | threat | utility | land",
+  "provides": ["what this card gives to the deck — abstract capabilities, e.g. mana-acceleration, counter-amplification, trigger-doubling"],
+  "wants": ["what other cards or conditions make this card better — abstract tags, e.g. counter-placement-events, creature-etb-triggers"],
+  "categories": ["functional categories, e.g. counter-doubler, tribal-enabler, mana-rock"],
+  "mechanics": ["MTG mechanics used, e.g. replacement effect, ward, flash"],
   "triggers": [
     {
       "condition": "when X happens",
@@ -26,10 +29,34 @@ SCHEMA = """{
       "permanent": true
     }
   ],
-  "synergy_tags": ["reusable abstract tags for graph edges, e.g. counter-doubler, human-tribal"],
-  "role": "ramp | draw | removal | protection | enabler | threat | utility | land",
   "notes": "one sentence: card's role in a deck"
 }"""
+
+def _load_tag_vocab() -> tuple[list[str], list[str]]:
+    """Load canonical provides/wants tags from tag_registry.json."""
+    with open(REGISTRY_PATH) as f:
+        registry = json.load(f)
+    provides = sorted(t for t, d in registry["tags"].items() if d["kind"] in ("provides", "both"))
+    wants = sorted(t for t, d in registry["tags"].items() if d["kind"] in ("wants", "both"))
+    return provides, wants
+
+
+def _build_tag_vocab_block() -> str:
+    """Build the provides/wants vocabulary block for the LLM prompt."""
+    provides, wants = _load_tag_vocab()
+    lines = [
+        "PROVIDES TAGS (use these for 'provides' field — extend only if truly needed):",
+        "  " + ", ".join(provides),
+        "",
+        "WANTS TAGS (use these for 'wants' field — extend only if truly needed):",
+        "  " + ", ".join(wants),
+    ]
+    return "\n".join(lines)
+
+
+# Cache at module level — registry doesn't change during a batch run
+_TAG_VOCAB_BLOCK = _build_tag_vocab_block()
+
 
 CATEGORY_VOCAB = """
 FUNCTIONAL CATEGORIES (use these, extend only if truly needed):
@@ -71,17 +98,30 @@ FUNCTIONAL CATEGORIES (use these, extend only if truly needed):
     mana-rock, equipment
 """
 
-SYSTEM_PROMPT = """You are an expert Magic: The Gathering card analyst building a knowledge graph.
-Your job is to analyze MTG cards and produce structured tags that will become edges in a synergy graph.
+_SYSTEM_PROMPT_BASE = """You are an expert Magic: The Gathering card analyst building a synergy knowledge graph.
+Your job is to analyze MTG cards and produce structured role/provides/wants tags that become directed edges in a synergy graph.
+
+NOTE: Synergy tags (function tags) are provided separately from Scryfall's community tagger.
+Your focus is on: role classification, provides (what the card gives), and wants (what makes it better).
 
 Core principles:
-- Tags must be REUSABLE across many cards — they are graph edges, not card descriptions
-- Be SPECIFIC: 'human-tribal' not 'tribal-synergy', 'board-wide-counter-placer' not 'counter-placer'
+- 'provides' = abstract capabilities this card contributes (e.g. 'mana-acceleration', 'counter-amplification', 'board-protection')
+- 'wants' = abstract conditions/cards that make this card better (e.g. 'counter-placement-events', 'creature-etb-triggers'), NOT specific card names
+- 'role' = the card's primary function in a deck — choose the single best fit
 - 'permanent' in triggers = true only if the card stays on battlefield producing ongoing effect
-- 'wants' = abstract tags (e.g. 'counter-placement-events'), NOT specific card names
-- 'provides' = what the card contributes to a deck's game plan
+- Be SPECIFIC in provides/wants — these are graph edges connecting cards
+- Capture ALL key functionalities of a card. A card that untaps creatures provides 'untap'. A card with multiple abilities should have provides tags for each.
+- The canonical tag lists below are preferred vocabulary. Use them when they fit, but invent a clear kebab-case tag if no canonical tag captures an important card function.
 
 Return ONLY valid JSON. No preamble, no explanation, no markdown fences."""
+
+
+def _build_system_prompt() -> str:
+    """Build system prompt with tag vocabulary baked in."""
+    return _SYSTEM_PROMPT_BASE + "\n\n" + _TAG_VOCAB_BLOCK
+
+
+SYSTEM_PROMPT = _build_system_prompt()
 
 
 def load_corrections() -> list[dict]:
@@ -103,7 +143,8 @@ def load_golden_examples(n: int = 3) -> list[dict]:
     cards = data.get("cards", [])
     ranked = sorted(
         cards,
-        key=lambda c: len(c["expected"].get("synergy_tags_must_include", [])),
+        key=lambda c: len(c["expected"].get("provides_must_include", []))
+                     + len(c["expected"].get("wants_must_include", [])),
         reverse=True,
     )
     return ranked[:n]
@@ -136,35 +177,32 @@ def build_examples_block(examples: list[dict]) -> str:
     VERIFIED_OUTPUTS = {
         "Hardened Scales": {
             "name": "Hardened Scales",
-            "categories": ["counter-doubler", "permanent-amplifier"],
-            "mechanics": ["replacement effect", "+1/+1 counters"],
+            "role": "enabler",
             "provides": ["counter-amplification", "passive-counter-boost"],
             "wants": ["counter-placement-events", "counter-distribution"],
+            "categories": ["counter-doubler", "permanent-amplifier"],
+            "mechanics": ["replacement effect", "+1/+1 counters"],
             "triggers": [],
-            "synergy_tags": ["counter-doubler", "replacement-effect", "counter-amplifier", "passive-permanent"],
-            "role": "enabler",
             "notes": "Passive enchantment adding one extra counter to every +1/+1 placement — stacks multiplicatively."
         },
         "Roaming Throne": {
             "name": "Roaming Throne",
-            "categories": ["triggered-ability-doubler", "tribal-enabler", "ward-granter", "can-become-chosen-type"],
-            "mechanics": ["triggered ability doubler", "ward", "type-selection on ETB"],
+            "role": "enabler",
             "provides": ["trigger-doubling", "tribal-ward-protection", "flexible-type-identity"],
             "wants": ["triggered-ability-heavy-commanders", "human-tribal"],
+            "categories": ["triggered-ability-doubler", "tribal-enabler", "ward-granter"],
+            "mechanics": ["triggered ability doubler", "ward", "type-selection on ETB"],
             "triggers": [{"condition": "creature of chosen type triggers an ability", "effect": "that ability triggers again", "scope": "board", "permanent": True}],
-            "synergy_tags": ["triggered-ability-doubler", "tribal-enabler", "can-become-chosen-type", "passive-permanent"],
-            "role": "enabler",
             "notes": "Doubles triggered abilities of chosen type — choosing Human makes it a Human itself and doubles Kyler's trigger."
         },
         "Sol Ring": {
             "name": "Sol Ring",
-            "categories": ["staple-mana-rock", "ramp"],
-            "mechanics": ["mana ability", "tap ability"],
+            "role": "ramp",
             "provides": ["mana-acceleration", "two-colorless-mana"],
             "wants": [],
+            "categories": ["staple-mana-rock", "ramp"],
+            "mechanics": ["mana ability", "tap ability"],
             "triggers": [],
-            "synergy_tags": ["staple-mana-rock", "colorless-ramp", "passive-permanent"],
-            "role": "ramp",
             "notes": "Universal EDH staple producing 2 colorless mana for 1 investment."
         },
     }
@@ -187,7 +225,7 @@ def build_examples_block(examples: list[dict]) -> str:
     return "\n".join(lines) if shown > 0 else ""
 
 
-def build_prompt(card: dict) -> tuple[str, str]:
+def build_prompt(card: dict, rules_context: str = "") -> tuple[str, str]:
     """
     Returns (system_prompt, user_prompt) ready to send to the API.
     """
@@ -209,6 +247,12 @@ def build_prompt(card: dict) -> tuple[str, str]:
 
     if examples_block:
         user_parts.append(examples_block)
+
+    if rules_context:
+        user_parts.append(f"""
+RELEVANT MTG RULES (use these to inform your tagging decisions):
+{rules_context}
+""")
 
     user_parts.append(f"""
 Now analyze this card using the schema and rules above.
@@ -233,7 +277,7 @@ Return JSON only.""")
     return system, user
 
 
-def build_batch_prompt(cards: list[dict]) -> tuple[str, str]:
+def build_batch_prompt(cards: list[dict], rules_context: str = "") -> tuple[str, str]:
     """
     Returns (system_prompt, user_prompt) for a batch of cards.
     System prompt + corrections + examples are shared across all cards in the batch.
@@ -254,6 +298,12 @@ def build_batch_prompt(cards: list[dict]) -> tuple[str, str]:
     user_parts = []
     if examples_block:
         user_parts.append(examples_block)
+
+    if rules_context:
+        user_parts.append(f"""
+RELEVANT MTG RULES (use these to inform your tagging decisions):
+{rules_context}
+""")
 
     cards_block = []
     for i, card in enumerate(cards, 1):

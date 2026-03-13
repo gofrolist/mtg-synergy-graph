@@ -1,16 +1,14 @@
 """
 Batch tagger — sends cards to LLM API in batches of 5.
 
-Supports both Anthropic (Claude) and OpenAI (GPT) APIs.
-
-Reads: data/kyler_candidates.json (from card_filter.py)
-Writes: data/kyler_tags.json
+Supports Anthropic (Claude), OpenAI (GPT), and Ollama (local) APIs.
 
 Usage:
-    OPENAI_API_KEY=sk-... python3 batch_tagger.py
-    ANTHROPIC_API_KEY=sk-... python3 batch_tagger.py
-    python3 batch_tagger.py --batch-size 3
-    python3 batch_tagger.py --dry-run
+    python3 batch_tagger.py --deck kyler
+    python3 batch_tagger.py --deck krenko --provider ollama --model phi4:14b
+    python3 batch_tagger.py --deck kyler --output data/kyler_tags_phi4.json
+    python3 batch_tagger.py --deck kyler --batch-size 3
+    python3 batch_tagger.py --deck kyler --dry-run
 """
 
 import argparse
@@ -24,21 +22,27 @@ import urllib.error
 from prompt_builder import build_batch_prompt
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
-CANDIDATES_FILE = os.path.join(DATA_DIR, "kyler_candidates.json")
-OUTPUT_FILE = os.path.join(DATA_DIR, "kyler_tags.json")
+CANDIDATES_FILE = None  # set by --deck
+OUTPUT_FILE = None  # set by --deck or --output
 
 MAX_TOKENS = 4096
 
 
-def detect_provider() -> tuple[str, str, str]:
-    """Detect API provider from environment. Returns (provider, api_key, model)."""
+OLLAMA_URL = "http://localhost:11434/api/chat"
+
+
+def detect_provider(cli_provider=None, cli_model=None) -> tuple[str, str, str]:
+    """Detect API provider from CLI args or environment. Returns (provider, api_key, model)."""
+    if cli_provider == "ollama":
+        return "ollama", "", cli_model or "phi4:14b"
+
     openai_key = os.environ.get("OPENAI_API_KEY")
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
 
     if openai_key:
-        return "openai", openai_key, "gpt-4o"
+        return "openai", openai_key, cli_model or "gpt-4o"
     elif anthropic_key:
-        return "anthropic", anthropic_key, "claude-sonnet-4-20250514"
+        return "anthropic", anthropic_key, cli_model or "claude-sonnet-4-20250514"
     else:
         return "none", "", ""
 
@@ -121,17 +125,48 @@ def call_anthropic(system: str, user: str, api_key: str, model: str) -> str | No
         return None
 
 
+def call_ollama(system: str, user: str, model: str) -> str | None:
+    """Send a message to Ollama API. Returns raw text response."""
+    payload = json.dumps({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "stream": False,
+        "options": {"temperature": 0.1},
+    }).encode()
+
+    req = urllib.request.Request(
+        OLLAMA_URL,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            data = json.loads(resp.read())
+            return data["message"]["content"].strip()
+    except Exception as e:
+        print(f"  [OLLAMA ERROR] {e}")
+        return None
+
+
 def call_api(system: str, user: str, api_key: str, provider: str, model: str) -> str | None:
     if provider == "openai":
         return call_openai(system, user, api_key, model)
+    elif provider == "ollama":
+        return call_ollama(system, user, model)
     else:
         return call_anthropic(system, user, api_key, model)
 
 
 def parse_response(raw: str, expected_count: int) -> list[dict] | None:
     """Parse JSON array from API response. Returns list of tagged card dicts."""
+    # Strip thinking tags (e.g. qwen3)
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
     # Strip markdown fences if present
-    raw = re.sub(r"^```json\s*", "", raw)
+    raw = re.sub(r"^```json\s*", "", raw.strip())
     raw = re.sub(r"\s*```$", "", raw)
 
     try:
@@ -155,18 +190,42 @@ def parse_response(raw: str, expected_count: int) -> list[dict] | None:
 
 
 def run():
+    from decks import list_decks
+
     parser = argparse.ArgumentParser(description="Batch card tagger")
+    parser.add_argument("--deck", required=True, choices=list_decks(), help="Deck config to use")
     parser.add_argument("--batch-size", type=int, default=5, help="Cards per API call")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be sent without calling API")
+    parser.add_argument("--provider", choices=["openai", "anthropic", "ollama"], help="API provider (auto-detected from env if not set)")
+    parser.add_argument("--model", type=str, help="Model name override")
+    parser.add_argument("--output", type=str, help="Output file path override")
+    parser.add_argument("--rag", action="store_true", help="Enable RAG — inject relevant MTG rules into prompts")
     args = parser.parse_args()
 
-    provider, api_key, model = detect_provider()
+    global CANDIDATES_FILE, OUTPUT_FILE
+    CANDIDATES_FILE = os.path.join(DATA_DIR, f"{args.deck}_candidates.json")
+    OUTPUT_FILE = os.path.join(DATA_DIR, f"{args.deck}_tags.json")
+    if args.output:
+        OUTPUT_FILE = args.output
+
+    provider, api_key, model = detect_provider(args.provider, args.model)
     if provider == "none" and not args.dry_run:
-        print("ERROR: Set OPENAI_API_KEY or ANTHROPIC_API_KEY environment variable")
+        print("ERROR: Set OPENAI_API_KEY or ANTHROPIC_API_KEY, or use --provider ollama")
         return
 
+    retrieve_rules = None
+    if args.rag:
+        try:
+            from rules_retriever import retrieve_rules_for_cards
+            retrieve_rules = retrieve_rules_for_cards
+            print("RAG enabled — will inject relevant MTG rules into prompts")
+        except Exception as e:
+            print(f"WARNING: Could not load RAG pipeline: {e}")
+            print("Run: python3 rules_fetcher.py && python3 rules_index.py")
+            print("Continuing without RAG...")
+
     if provider != "none":
-        print(f"Using {provider} API (model: {model})")
+        print(f"Using {provider} (model: {model})")
 
     # Load candidates
     candidates = load_candidates()
@@ -221,7 +280,11 @@ def run():
         names = [c["name"] for c in batch]
         print(f"\n[batch {batch_idx}/{total_batches}] {', '.join(names)}")
 
-        system, user = build_batch_prompt(batch)
+        rules_context = ""
+        if retrieve_rules:
+            rules_context = retrieve_rules(batch)
+
+        system, user = build_batch_prompt(batch, rules_context=rules_context)
 
         # Retry with exponential backoff
         raw = None
@@ -256,8 +319,9 @@ def run():
         save_tags(all_tagged)
         print(f"  Tagged {len(parsed)} cards (total: {len(all_tagged)})")
 
-        # Rate limiting
-        time.sleep(0.5)
+        # Rate limiting (skip for local models)
+        if provider != "ollama":
+            time.sleep(0.5)
 
     print(f"\n{'='*60}")
     print(f"DONE: {tagged_count} tagged, {failed_count} failed, {len(existing)} skipped (already tagged)")

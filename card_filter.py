@@ -1,33 +1,26 @@
 """
-Filter Kyler-relevant cards for LLM tagging.
+Filter commander-relevant cards for LLM tagging.
 
-Source 1 (primary): EDHREC API — curated cards for Kyler, Sigardian Emissary
+Source 1 (primary): EDHREC API — curated cards for the commander
 Source 2 (supplement): Scryfall bulk data — regex filters for cards EDHREC may miss
-Source 3 (forced): Current deck cards from main.py
+Source 3 (forced): Current deck cards from deck config
 
 Usage:
-    python3 card_filter.py
+    python3 card_filter.py --deck kyler
+    python3 card_filter.py --deck krenko
 """
 
+import argparse
 import json
 import os
-import re
-import sys
 import urllib.request
+
+from decks import load_deck, list_decks
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 SCRYFALL_FILE = os.path.join(DATA_DIR, "oracle_cards.json")
-OUTPUT_FILE = os.path.join(DATA_DIR, "kyler_candidates.json")
 
-EDHREC_URL = "https://json.edhrec.com/pages/commanders/kyler-sigardian-emissary.json"
 TOTAL_CAP = 500
-
-
-def _load_deck_names() -> set[str]:
-    """Load card names from main.py DECKLIST + DISTRACTORS."""
-    sys.path.insert(0, os.path.dirname(__file__))
-    from main import DECKLIST, DISTRACTORS
-    return set(DECKLIST) | set(DISTRACTORS) | {"Kyler, Sigardian Emissary"}
 
 
 def get_oracle_text(card: dict) -> str:
@@ -58,10 +51,11 @@ def build_scryfall_index(cards: list[dict]) -> dict[str, dict]:
     return index
 
 
-def fetch_edhrec() -> list[dict]:
-    """Fetch EDHREC card data for Kyler."""
-    print("Fetching EDHREC data for Kyler...")
-    req = urllib.request.Request(EDHREC_URL, headers={"User-Agent": "MTGDeckOptimizer/1.0"})
+def fetch_edhrec(slug: str, commander_name: str) -> list[dict]:
+    """Fetch EDHREC card data for a commander."""
+    url = f"https://json.edhrec.com/pages/commanders/{slug}.json"
+    print(f"Fetching EDHREC data for {commander_name}...")
+    req = urllib.request.Request(url, headers={"User-Agent": "MTGDeckOptimizer/1.0"})
     try:
         with urllib.request.urlopen(req) as resp:
             data = json.loads(resp.read())
@@ -90,8 +84,9 @@ def fetch_edhrec() -> list[dict]:
     return results
 
 
-def scryfall_supplement(scryfall_cards: list[dict], already_picked: set[str]) -> dict[str, dict]:
-    """Find high-synergy cards from Scryfall that EDHREC might miss (newer cards, niche picks)."""
+def scryfall_supplement(scryfall_cards: list[dict], already_picked: set[str],
+                        color_identity: set[str], filters: list[dict]) -> dict[str, dict]:
+    """Find high-synergy cards from Scryfall that EDHREC might miss."""
     result = {}
 
     for card in scryfall_cards:
@@ -100,53 +95,39 @@ def scryfall_supplement(scryfall_cards: list[dict], already_picked: set[str]) ->
             continue
         if card.get("layout") == "reversible_card":
             continue
-        if set(card.get("color_identity", [])) > {"G", "W"}:
+        if set(card.get("color_identity", [])) > color_identity:
             continue
 
         type_line = card.get("type_line", "")
-        oracle_text = get_oracle_text(card).lower()
+        oracle_text = get_oracle_text(card)
 
-        # Only pick high-value cards EDHREC might miss
-        picked = False
-        reason = ""
-
-        # Human + counter synergy (the Kyler sweet spot)
-        if "Human" in type_line and "+1/+1 counter" in oracle_text:
-            picked = True
-            reason = "human+counter"
-
-        # Board-wide counter placement
-        elif re.search(r"\+1/\+1 counter[s]? on (?:each|all)", oracle_text):
-            picked = True
-            reason = "board-counter"
-
-        # Counter doublers
-        elif re.search(r"twice.*counter|double.*counter|plus one.*counter", oracle_text):
-            picked = True
-            reason = "counter-doubler"
-
-        # Trigger doublers
-        elif re.search(r"trigger.*additional time|additional time", oracle_text):
-            picked = True
-            reason = "trigger-doubler"
-
-        if picked:
-            result[oracle_id] = {
-                "name": card.get("name", ""),
-                "oracle_id": oracle_id,
-                "type_line": type_line,
-                "oracle_text": get_oracle_text(card),
-                "keywords": card.get("keywords", []),
-                "cmc": card.get("cmc", 0),
-                "color_identity": card.get("color_identity", []),
-                "filter_pass": 2,
-                "filter_reason": reason,
-            }
+        for filt in filters:
+            if filt["check"](type_line, oracle_text):
+                result[oracle_id] = {
+                    "name": card.get("name", ""),
+                    "oracle_id": oracle_id,
+                    "type_line": type_line,
+                    "oracle_text": oracle_text,
+                    "keywords": card.get("keywords", []),
+                    "cmc": card.get("cmc", 0),
+                    "color_identity": card.get("color_identity", []),
+                    "filter_pass": 2,
+                    "filter_reason": filt["reason"],
+                }
+                break  # first matching filter wins
 
     return result
 
 
 def run():
+    parser = argparse.ArgumentParser(description="Filter cards for LLM tagging")
+    parser.add_argument("--deck", required=True, choices=list_decks(),
+                        help="Deck config to use")
+    args = parser.parse_args()
+
+    deck = load_deck(args.deck)
+    output_file = os.path.join(DATA_DIR, f"{args.deck}_candidates.json")
+
     # Load Scryfall bulk data
     print("Loading oracle_cards.json...")
     with open(SCRYFALL_FILE) as f:
@@ -155,7 +136,7 @@ def run():
     scryfall_index = build_scryfall_index(scryfall_cards)
 
     # Source 1: EDHREC
-    edhrec_cards = fetch_edhrec()
+    edhrec_cards = fetch_edhrec(deck.EDHREC_SLUG, deck.COMMANDER)
 
     # Resolve EDHREC names to Scryfall card data
     candidates = {}
@@ -190,7 +171,10 @@ def run():
 
     # Source 2: Scryfall supplement
     print("\nSource 2 (Scryfall supplement)...")
-    supplement = scryfall_supplement(scryfall_cards, set(candidates.keys()))
+    supplement = scryfall_supplement(
+        scryfall_cards, set(candidates.keys()),
+        deck.COLOR_IDENTITY, deck.SUPPLEMENT_FILTERS,
+    )
     print(f"  Found {len(supplement)} additional cards")
     reasons = {}
     for c in supplement.values():
@@ -200,7 +184,7 @@ def run():
         print(f"    {r}: {count}")
 
     # Source 3: Forced deck cards (guaranteed inclusion)
-    deck_names = _load_deck_names()
+    deck_names = set(deck.DECKLIST) | set(getattr(deck, "DISTRACTORS", [])) | {deck.COMMANDER}
     deck_name_lower = {n.lower() for n in deck_names}
     deck_forced = {}
     all_picked_ids = set(candidates.keys()) | set(supplement.keys())
@@ -255,9 +239,9 @@ def run():
     for r, count in sorted(reasons_final.items(), key=lambda x: -x[1]):
         print(f"  {r}: {count}")
 
-    with open(OUTPUT_FILE, "w") as f:
+    with open(output_file, "w") as f:
         json.dump(candidates_list, f, indent=2)
-    print(f"\nSaved to {OUTPUT_FILE}")
+    print(f"\nSaved to {output_file}")
 
 
 if __name__ == "__main__":

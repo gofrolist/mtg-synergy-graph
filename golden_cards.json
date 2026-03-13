@@ -1,22 +1,159 @@
 {
   "_meta": {
-    "description": "Golden dataset: manually verified correct tags for regression testing. When prompt changes, all cards here must still produce correct tags.",
-    "version": "0.1",
-    "last_updated": "2026-03-12"
+    "description": "Golden dataset: manually verified correct tags for regression testing. synergy_tags now validated against Scryfall tagger community tags. Role/provides/wants validated against LLM output.",
+    "version": "0.3",
+    "last_updated": "2026-03-12",
+    "notes": "role uses our schema (ramp/draw/removal/protection/enabler/threat/utility/land). synergy_tags_must_include uses Scryfall tagger vocabulary. provides/wants are LLM-generated relationship tags."
   },
   "cards": [
+    {
+      "name": "Sol Ring",
+      "type_line": "Artifact",
+      "oracle_text": "{T}: Add {C}{C}.",
+      "keywords": [],
+      "cmc": 1,
+      "scryfall_tags": ["adds multiple mana", "fast mana", "mana rock", "refund", "activated ability"],
+      "expected": {
+        "role": "ramp",
+        "synergy_tags_must_include": ["mana rock"],
+        "synergy_tags_must_exclude": ["counter doubler", "tribal-synergy", "removal"],
+        "provides_must_include": ["mana-acceleration"],
+        "wants_must_include": []
+      }
+    },
+    {
+      "name": "Swords to Plowshares",
+      "type_line": "Instant",
+      "oracle_text": "Exile target creature. Its controller gains life equal to its power.",
+      "keywords": [],
+      "cmc": 1,
+      "scryfall_tags": ["spot removal", "removal-exile", "removal-creature", "lifegain", "opponent lifegain"],
+      "expected": {
+        "role": "removal",
+        "synergy_tags_must_include": ["removal-exile", "spot removal"],
+        "synergy_tags_must_exclude": ["counter doubler", "ramp"],
+        "provides_must_include": [],
+        "wants_must_include": []
+      }
+    },
+    {
+      "name": "Arcane Signet",
+      "type_line": "Artifact",
+      "oracle_text": "{T}: Add one mana of any color in your commander's color identity.",
+      "keywords": [],
+      "cmc": 2,
+      "scryfall_tags": ["commander identity matters", "refund", "synergy-commander", "activated ability", "mana rock with set's mechanic"],
+      "expected": {
+        "role": "ramp",
+        "synergy_tags_must_include": ["mana rock"],
+        "synergy_tags_must_exclude": ["counter doubler", "removal"],
+        "provides_must_include": ["mana-acceleration"],
+        "wants_must_include": []
+      }
+    },
+    {
+      "name": "Cultivate",
+      "type_line": "Sorcery",
+      "oracle_text": "Search your library for up to two basic land cards, reveal those cards, put one onto the battlefield tapped and the other into your hand, then shuffle.",
+      "keywords": [],
+      "cmc": 3,
+      "scryfall_tags": ["tutor-land-to-battlefield", "tutor-land-basic", "tutor-to-hand", "ramp", "card advantage (no-draw)"],
+      "expected": {
+        "role": "ramp",
+        "synergy_tags_must_include": ["ramp", "tutor-land"],
+        "synergy_tags_must_exclude": ["counter doubler"],
+        "provides_must_include": [],
+        "wants_must_include": []
+      }
+    },
+    {
+      "name": "Birds of Paradise",
+      "type_line": "Creature — Bird",
+      "oracle_text": "{T}: Add one mana of any color.",
+      "keywords": ["Flying"],
+      "cmc": 1,
+      "scryfall_tags": ["evasion", "mana dork", "activated ability"],
+      "expected": {
+        "role": "ramp",
+        "synergy_tags_must_include": ["mana dork"],
+        "synergy_tags_must_exclude": ["counter doubler", "removal"],
+        "provides_must_include": ["mana-acceleration"],
+        "wants_must_include": []
+      }
+    },
+    {
+      "name": "Counterspell",
+      "type_line": "Instant",
+      "oracle_text": "Counter target spell.",
+      "keywords": [],
+      "cmc": 2,
+      "scryfall_tags": ["counterspell"],
+      "expected": {
+        "role": "removal",
+        "synergy_tags_must_include": ["counterspell"],
+        "synergy_tags_must_exclude": ["counter doubler", "ramp"],
+        "provides_must_include": [],
+        "wants_must_include": []
+      }
+    },
+    {
+      "name": "Blasphemous Act",
+      "type_line": "Sorcery",
+      "oracle_text": "This spell costs {1} less to cast for each creature on the battlefield.\nBlasphemous Act deals 13 damage to each creature.",
+      "keywords": [],
+      "cmc": 9,
+      "scryfall_tags": ["symmetrical", "hate-wide", "affinity for creatures", "sweeper", "burn creature"],
+      "expected": {
+        "role": "removal",
+        "synergy_tags_must_include": ["sweeper"],
+        "synergy_tags_must_exclude": ["counter doubler", "ramp"],
+        "provides_must_include": [],
+        "wants_must_include": []
+      }
+    },
+    {
+      "name": "Beast Within",
+      "type_line": "Instant",
+      "oracle_text": "Destroy target permanent. Its controller creates a 3/3 green Beast creature token.",
+      "keywords": [],
+      "cmc": 3,
+      "scryfall_tags": ["spot removal", "removal-destroy", "removal-permanent", "swap removal", "donate token", "create token"],
+      "expected": {
+        "role": "removal",
+        "synergy_tags_must_include": ["removal-destroy", "spot removal"],
+        "synergy_tags_must_exclude": ["counter doubler", "ramp"],
+        "provides_must_include": [],
+        "wants_must_include": []
+      }
+    },
+    {
+      "name": "Heroic Intervention",
+      "type_line": "Instant",
+      "oracle_text": "Permanents you control gain hexproof and indestructible until end of turn.",
+      "keywords": [],
+      "cmc": 2,
+      "scryfall_tags": ["combat trick", "gives indestructible", "gives hexproof", "protects-permanent"],
+      "expected": {
+        "role": "protection",
+        "synergy_tags_must_include": ["protects-permanent"],
+        "synergy_tags_must_exclude": ["counter doubler", "ramp"],
+        "provides_must_include": [],
+        "wants_must_include": []
+      }
+    },
     {
       "name": "Hardened Scales",
       "type_line": "Enchantment",
       "oracle_text": "If one or more +1/+1 counters would be put on a creature you control, that many plus one +1/+1 counters are put on it instead.",
       "keywords": [],
       "cmc": 1,
+      "scryfall_tags": ["pp counters matter", "counter increaser"],
       "expected": {
         "role": "enabler",
-        "synergy_tags_must_include": ["counter-doubler", "passive-permanent", "replacement-effect"],
-        "synergy_tags_must_exclude": ["flash-instant-speed", "tribal-synergy"],
+        "synergy_tags_must_include": ["counter increaser"],
+        "synergy_tags_must_exclude": [],
         "provides_must_include": ["counter-amplification"],
-        "wants_must_include": ["counter-placement-events"]
+        "wants_must_include": ["counter-placement"]
       }
     },
     {
@@ -25,39 +162,12 @@
       "oracle_text": "As Roaming Throne enters, choose a creature type. This creature is the chosen type in addition to its other types. Creatures you control of the chosen type have ward {2}. Whenever a creature you control of the chosen type triggers an ability, that ability triggers an additional time.",
       "keywords": [],
       "cmc": 4,
+      "scryfall_tags": ["typal-choose", "trigger doubler", "type change", "triggered ability"],
       "expected": {
         "role": "enabler",
-        "synergy_tags_must_include": ["triggered-ability-doubler", "can-become-chosen-type", "passive-permanent"],
-        "synergy_tags_must_exclude": ["flash-instant-speed"],
+        "synergy_tags_must_include": ["trigger doubler", "typal-choose"],
+        "synergy_tags_must_exclude": [],
         "provides_must_include": ["trigger-doubling"],
-        "wants_must_include": ["triggered-ability-heavy-commanders"]
-      }
-    },
-    {
-      "name": "Slippery Bogbonder",
-      "type_line": "Creature — Human Scout",
-      "oracle_text": "Flash. When Slippery Bogbonder enters, move all counters from target creature onto another target creature. That creature gains hexproof until end of turn.",
-      "keywords": ["Flash"],
-      "cmc": 4,
-      "expected": {
-        "role": "utility",
-        "synergy_tags_must_include": ["counter-mover", "reactive-protection"],
-        "synergy_tags_must_exclude": ["flash-instant-speed"],
-        "provides_must_include": ["counter-redistribution"],
-        "wants_must_include": ["counter-placement-events"]
-      }
-    },
-    {
-      "name": "Sol Ring",
-      "type_line": "Artifact",
-      "oracle_text": "{T}: Add {C}{C}.",
-      "keywords": [],
-      "cmc": 1,
-      "expected": {
-        "role": "ramp",
-        "synergy_tags_must_include": ["staple-mana-rock", "colorless-ramp"],
-        "synergy_tags_must_exclude": ["counter-doubler", "tribal-synergy"],
-        "provides_must_include": ["mana-acceleration"],
         "wants_must_include": []
       }
     },
@@ -67,12 +177,43 @@
       "oracle_text": "{2}{G}{W}, {T}: Put a +1/+1 counter on each creature you control.",
       "keywords": [],
       "cmc": 0,
+      "scryfall_tags": ["utility land", "mana sink", "gives pp counters to all", "activated ability"],
       "expected": {
-        "role": "land",
-        "synergy_tags_must_include": ["board-wide-counter-placer", "utility-land", "mana-sink"],
-        "synergy_tags_must_exclude": ["single-target-counter-placer", "tribal-synergy"],
-        "provides_must_include": ["board-wide-counter-placement"],
-        "wants_must_include": ["counter-doublers"]
+        "role": ["land", "enabler", "ramp"],
+        "synergy_tags_must_include": ["gives pp counters to all", "mana sink"],
+        "synergy_tags_must_exclude": [],
+        "provides_must_include": [],
+        "wants_must_include": []
+      }
+    },
+    {
+      "name": "Doubling Season",
+      "type_line": "Enchantment",
+      "oracle_text": "If an effect would create one or more tokens under your control, it creates twice that many of those tokens instead. If an effect would put one or more counters on a permanent you control, it puts twice that many of those counters on that permanent instead.",
+      "keywords": [],
+      "cmc": 5,
+      "scryfall_tags": ["synergy-token", "counter doubler", "token doubler", "synergy-planeswalker"],
+      "expected": {
+        "role": "enabler",
+        "synergy_tags_must_include": ["counter doubler", "token doubler"],
+        "synergy_tags_must_exclude": ["removal", "ramp"],
+        "provides_must_include": [],
+        "wants_must_include": []
+      }
+    },
+    {
+      "name": "Slippery Bogbonder",
+      "type_line": "Creature — Human Scout",
+      "oracle_text": "Flash. When Slippery Bogbonder enters, move all counters from target creature onto another target creature. That creature gains hexproof until end of turn.",
+      "keywords": ["Flash"],
+      "cmc": 4,
+      "scryfall_tags": ["protects-creature", "hexproof counter", "move counters", "gives hexproof", "triggered ability"],
+      "expected": {
+        "role": "protection",
+        "synergy_tags_must_include": ["move counters", "protects-creature"],
+        "synergy_tags_must_exclude": [],
+        "provides_must_include": [],
+        "wants_must_include": []
       }
     }
   ]

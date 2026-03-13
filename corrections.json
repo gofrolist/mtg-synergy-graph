@@ -51,5 +51,13 @@
     "rule": "Sol Ring must always have role='ramp' and include 'staple-mana-rock' and 'colorless-ramp' in synergy_tags. It is the most universal ramp piece in EDH.",
     "wrong": null,
     "correct": "role=ramp, synergy_tags includes staple-mana-rock and colorless-ramp"
+  },
+  {
+    "id": "c007",
+    "scope": "global",
+    "rule": "Cards that untap creatures or permanents (including the {Q} untap symbol, 'untap target creature', or granting untap abilities) MUST include 'untap' in provides. This is critical for combo detection — untap effects enable infinite loops with tap abilities like Krenko.",
+    "wrong": null,
+    "correct": "untap",
+    "example_card": "Umbral Mantle"
   }
 ]
