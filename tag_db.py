@@ -51,6 +51,15 @@ CREATE TABLE IF NOT EXISTS synergy_tags (
     PRIMARY KEY (oracle_id, tag)
 );
 CREATE INDEX IF NOT EXISTS idx_synergy_tags_tag ON synergy_tags(tag);
+
+CREATE TABLE IF NOT EXISTS scryfall_tags (
+    oracle_id TEXT NOT NULL,
+    tag TEXT NOT NULL,
+    weight INTEGER DEFAULT 0,
+    PRIMARY KEY (oracle_id, tag)
+);
+CREATE INDEX IF NOT EXISTS idx_scryfall_tags_tag ON scryfall_tags(tag);
+CREATE INDEX IF NOT EXISTS idx_scryfall_tags_oid ON scryfall_tags(oracle_id);
 """
 
 
@@ -308,6 +317,16 @@ def get_db_stats(db_path: str = DB_PATH) -> dict:
     stats["unique_wants"] = conn.execute("SELECT COUNT(DISTINCT tag) FROM wants").fetchone()[0]
     stats["unique_synergy"] = conn.execute("SELECT COUNT(DISTINCT tag) FROM synergy_tags").fetchone()[0]
 
+    # Scryfall tags stats
+    try:
+        stats["scryfall_tags_rows"] = conn.execute("SELECT COUNT(*) FROM scryfall_tags").fetchone()[0]
+        stats["scryfall_tags_cards"] = conn.execute("SELECT COUNT(DISTINCT oracle_id) FROM scryfall_tags").fetchone()[0]
+        stats["unique_scryfall"] = conn.execute("SELECT COUNT(DISTINCT tag) FROM scryfall_tags").fetchone()[0]
+    except sqlite3.OperationalError:
+        stats["scryfall_tags_rows"] = 0
+        stats["scryfall_tags_cards"] = 0
+        stats["unique_scryfall"] = 0
+
     # Top provides
     stats["top_provides"] = conn.execute(
         "SELECT tag, COUNT(*) as cnt FROM provides GROUP BY tag ORDER BY cnt DESC LIMIT 10"
@@ -319,6 +338,104 @@ def get_db_stats(db_path: str = DB_PATH) -> dict:
 
     conn.close()
     return stats
+
+
+# ── Scryfall Tags ──
+
+
+def import_scryfall_tags(cards: list[dict], db_path: str = DB_PATH):
+    """Import scryfall tagger data into the scryfall_tags table.
+
+    Accepts cards with either:
+      - scryfall_tags_detail: [{name, weight}, ...] (full detail)
+      - scryfall_tags: [str, ...] (names only, weight=0)
+    """
+    init_db(db_path)
+    conn = get_connection(db_path)
+    cur = conn.cursor()
+    cur.execute("BEGIN")
+
+    imported = 0
+    for card in cards:
+        oid = card.get("oracle_id")
+        if not oid:
+            continue
+
+        # Get detailed tags (with weight) or plain tags
+        detail = card.get("scryfall_tags_detail", [])
+        plain = card.get("scryfall_tags", [])
+
+        if detail:
+            for t in detail:
+                cur.execute(
+                    "INSERT OR REPLACE INTO scryfall_tags (oracle_id, tag, weight) VALUES (?, ?, ?)",
+                    (oid, t["name"], t.get("weight", 0)),
+                )
+        elif plain:
+            for tag in plain:
+                cur.execute(
+                    "INSERT OR REPLACE INTO scryfall_tags (oracle_id, tag, weight) VALUES (?, ?, ?)",
+                    (oid, tag, 0),
+                )
+        else:
+            continue
+        imported += 1
+
+    conn.commit()
+    conn.close()
+    return imported
+
+
+def import_scryfall_file(path: str, db_path: str = DB_PATH):
+    """Import scryfall tags from a JSON file."""
+    with open(path) as f:
+        cards = json.load(f)
+    print(f"Importing scryfall tags for {len(cards)} cards from {path}...")
+    count = import_scryfall_tags(cards, db_path)
+    print(f"Imported scryfall tags for {count} cards")
+
+
+def get_scryfall_tags(oracle_id: str, db_path: str = DB_PATH) -> list[dict]:
+    """Get scryfall tags for a card. Returns [{tag, weight}, ...]."""
+    conn = get_connection(db_path)
+    rows = conn.execute(
+        "SELECT tag, weight FROM scryfall_tags WHERE oracle_id = ? ORDER BY weight DESC",
+        (oracle_id,),
+    ).fetchall()
+    conn.close()
+    return [{"tag": r[0], "weight": r[1]} for r in rows]
+
+
+def get_cards_with_scryfall_tag(tag: str, db_path: str = DB_PATH) -> list[str]:
+    """Get oracle_ids of cards that have a specific scryfall tag."""
+    conn = get_connection(db_path)
+    rows = conn.execute(
+        "SELECT oracle_id FROM scryfall_tags WHERE tag = ?", (tag,)
+    ).fetchall()
+    conn.close()
+    return [r[0] for r in rows]
+
+
+def get_scryfall_tag_counts(db_path: str = DB_PATH) -> list[tuple[str, int]]:
+    """Get all scryfall tags sorted by frequency."""
+    conn = get_connection(db_path)
+    rows = conn.execute(
+        "SELECT tag, COUNT(*) as cnt FROM scryfall_tags GROUP BY tag ORDER BY cnt DESC"
+    ).fetchall()
+    conn.close()
+    return [(r[0], r[1]) for r in rows]
+
+
+def get_cards_without_scryfall_tags(db_path: str = DB_PATH) -> list[dict]:
+    """Get cards in the DB that don't have scryfall tags yet."""
+    conn = get_connection(db_path)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT c.* FROM cards c WHERE c.oracle_id NOT IN (SELECT DISTINCT oracle_id FROM scryfall_tags)"
+    ).fetchall()
+    cards = [_row_to_card(r) for r in rows]
+    conn.close()
+    return cards
 
 
 def find_synergy_candidates(deck_cards: list[dict], db_path: str = DB_PATH) -> list[dict]:
@@ -383,7 +500,19 @@ def main():
     query = sub.add_parser("query", help="Query cards by tag")
     query.add_argument("--provides", help="Find cards providing this tag")
     query.add_argument("--wants", help="Find cards wanting this tag")
+    query.add_argument("--scryfall", help="Find cards with this scryfall tag")
     query.add_argument("--db", default=DB_PATH, help="Database path")
+
+    scry = sub.add_parser("import-scryfall", help="Import scryfall tagger tags")
+    scry.add_argument("file", help="Scryfall tags JSON file")
+    scry.add_argument("--db", default=DB_PATH, help="Database path")
+
+    scry_stats = sub.add_parser("scryfall-stats", help="Show scryfall tag statistics")
+    scry_stats.add_argument("--db", default=DB_PATH, help="Database path")
+
+    gap = sub.add_parser("scryfall-gap", help="Show cards missing scryfall tags")
+    gap.add_argument("--db", default=DB_PATH, help="Database path")
+    gap.add_argument("--limit", type=int, default=20, help="Max cards to show")
 
     args = parser.parse_args()
 
@@ -391,20 +520,44 @@ def main():
         import_file(args.file, args.db)
         s = get_db_stats(args.db)
         print(f"\nDB stats: {s['cards']} cards, {s['provides_rows']} provides, "
-              f"{s['wants_rows']} wants, {s['synergy_tags_rows']} synergy_tags")
+              f"{s['wants_rows']} wants, {s['scryfall_tags_rows']} scryfall tags")
+
+    elif args.command == "import-scryfall":
+        import_scryfall_file(args.file, args.db)
+        s = get_db_stats(args.db)
+        print(f"\nDB: {s['scryfall_tags_cards']} cards with scryfall tags, "
+              f"{s['scryfall_tags_rows']} tag assignments, {s['unique_scryfall']} unique tags")
 
     elif args.command == "stats":
         s = get_db_stats(args.db)
         print(f"Cards: {s['cards']}")
-        print(f"Provides: {s['provides_rows']} rows, {s['unique_provides']} unique tags")
-        print(f"Wants: {s['wants_rows']} rows, {s['unique_wants']} unique tags")
-        print(f"Synergy tags: {s['synergy_tags_rows']} rows, {s['unique_synergy']} unique tags")
-        print(f"\nTop provides:")
+        print(f"LLM provides: {s['provides_rows']} rows, {s['unique_provides']} unique tags")
+        print(f"LLM wants: {s['wants_rows']} rows, {s['unique_wants']} unique tags")
+        print(f"Scryfall tags: {s['scryfall_tags_rows']} rows, {s['scryfall_tags_cards']} cards, "
+              f"{s['unique_scryfall']} unique tags")
+        print(f"\nTop LLM provides:")
         for tag, cnt in s["top_provides"]:
             print(f"  {tag:35s} {cnt}")
-        print(f"\nTop wants:")
+        print(f"\nTop LLM wants:")
         for tag, cnt in s["top_wants"]:
             print(f"  {tag:35s} {cnt}")
+
+    elif args.command == "scryfall-stats":
+        counts = get_scryfall_tag_counts(args.db)
+        s = get_db_stats(args.db)
+        print(f"Scryfall tags: {s['scryfall_tags_rows']} assignments, "
+              f"{s['scryfall_tags_cards']} cards, {s['unique_scryfall']} unique tags")
+        print(f"\nTop 30 scryfall tags:")
+        for tag, cnt in counts[:30]:
+            print(f"  {tag:40s} {cnt}")
+
+    elif args.command == "scryfall-gap":
+        missing = get_cards_without_scryfall_tags(args.db)
+        print(f"Cards without scryfall tags: {len(missing)}")
+        for c in missing[:args.limit]:
+            print(f"  {c['name']}")
+        if len(missing) > args.limit:
+            print(f"  ... and {len(missing) - args.limit} more")
 
     elif args.command == "query":
         if args.provides:
@@ -417,6 +570,14 @@ def main():
             print(f"Cards wanting '{args.wants}': {len(cards)}")
             for c in cards[:20]:
                 print(f"  {c['name']}")
+        elif args.scryfall:
+            oids = get_cards_with_scryfall_tag(args.scryfall, args.db)
+            print(f"Cards with scryfall tag '{args.scryfall}': {len(oids)}")
+            # Resolve names
+            if oids:
+                cards = get_cards_by_oids(oids[:20], args.db)
+                for c in cards:
+                    print(f"  {c['name']}")
     else:
         parser.print_help()
 

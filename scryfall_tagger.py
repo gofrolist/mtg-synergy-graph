@@ -161,18 +161,25 @@ def fetch_card_tags(set_code: str, number: str, csrf: str, cookies: str) -> list
 
 def run():
     parser = argparse.ArgumentParser(description="Fetch Scryfall tagger function tags")
-    parser.add_argument("--input", default=os.path.join(DATA_DIR, "kyler_candidates.json"),
-                        help="Candidates JSON file")
+    parser.add_argument("--input", help="Candidates JSON file (default: all cards from DB)")
     parser.add_argument("--output", default=OUTPUT_FILE, help="Output file path")
     parser.add_argument("--dry-run", action="store_true", help="Show plan without fetching")
     parser.add_argument("--refresh-csrf", type=int, default=50,
                         help="Refresh CSRF token every N requests")
+    parser.add_argument("--import-db", action="store_true",
+                        help="Import results into SQLite DB after fetching")
     args = parser.parse_args()
 
-    # Load candidates
-    with open(args.input) as f:
-        candidates = json.load(f)
-    print(f"Loaded {len(candidates)} candidates from {args.input}")
+    # Load candidates from file or DB
+    if args.input:
+        with open(args.input) as f:
+            candidates = json.load(f)
+        print(f"Loaded {len(candidates)} candidates from {args.input}")
+    else:
+        # Load all cards from DB that don't have scryfall tags yet
+        from tag_db import get_cards_without_scryfall_tags, DB_PATH
+        candidates = get_cards_without_scryfall_tags(DB_PATH)
+        print(f"Loaded {len(candidates)} cards from DB (missing scryfall tags)")
 
     # Load existing results for resume
     existing = {}
@@ -278,6 +285,12 @@ def run():
     cards_with_tags = sum(1 for item in all_results if item.get("scryfall_tags"))
     cards_without = sum(1 for item in all_results if not item.get("scryfall_tags"))
     print(f"Cards with tags: {cards_with_tags}, without: {cards_without}")
+
+    # Import into SQLite DB
+    if args.import_db:
+        from tag_db import import_scryfall_tags
+        count = import_scryfall_tags(all_results)
+        print(f"\nImported scryfall tags for {count} cards into DB")
 
 
 if __name__ == "__main__":
