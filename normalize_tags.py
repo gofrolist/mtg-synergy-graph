@@ -225,8 +225,8 @@ def run():
     from decks import list_decks
 
     parser = argparse.ArgumentParser(description="Normalize provides/wants tags")
-    parser.add_argument("--deck", type=str, choices=list_decks(), help="Deck config (sets default input)")
-    parser.add_argument("--input", type=str, help="Merged tags JSON (default: data/<deck>_merged.json)")
+    parser.add_argument("--input", type=str, default=os.path.join(DATA_DIR, "top10000_tags.json"),
+                        help="Tags JSON file (default: data/top10000_tags.json)")
     parser.add_argument("--output", help="Output file (default: overwrite input)")
     parser.add_argument("--stats", action="store_true", help="Show normalization stats")
     parser.add_argument("--unmapped", action="store_true", help="Show unmapped tags")
@@ -234,9 +234,6 @@ def run():
     args = parser.parse_args()
 
     input_path = args.input
-    if not input_path:
-        deck_name = args.deck or "kyler"
-        input_path = os.path.join(DATA_DIR, f"{deck_name}_merged.json")
 
     with open(input_path) as f:
         cards = json.load(f)

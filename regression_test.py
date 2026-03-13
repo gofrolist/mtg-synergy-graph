@@ -84,7 +84,7 @@ def load_golden() -> list[dict]:
     return data["cards"]
 
 
-def load_tagged(tags_file: str = "card_tags.json") -> dict[str, dict]:
+def load_tagged(tags_file: str = "data/top10000_tags.json") -> dict[str, dict]:
     """Load a tags JSON file, return dict keyed by card name."""
     path = BASE_DIR / tags_file
     if not path.exists():
@@ -188,7 +188,7 @@ def validate_card(actual: dict, golden: dict) -> list[str]:
 
 # ── MODES ─────────────────────────────────────────────────────────────────────
 
-def mode_static(tags_file: str = "card_tags.json"):
+def mode_static(tags_file: str = "data/top10000_tags.json"):
     """Validate a tags file against golden_cards.json."""
     golden = load_golden()
     tagged = load_tagged(tags_file)
@@ -204,7 +204,7 @@ def mode_static(tags_file: str = "card_tags.json"):
     for g in golden:
         name = g["name"]
         if name not in tagged:
-            print(f"\n  ⚠  SKIP  {name} — not found in card_tags.json")
+            print(f"\n  ⚠  SKIP  {name} — not found in data/top10000_tags.json")
             skipped += 1
             continue
 
@@ -411,8 +411,8 @@ def add_correction(wrong: str, correct: str, rule: str, scope: str = "global",
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MTG Tagger Regression Test")
     parser.add_argument("--mode", choices=["static", "scryfall", "live"], default="static")
-    parser.add_argument("--tags-file", type=str, default="card_tags.json",
-                        help="Tags JSON file to validate (default: card_tags.json)")
+    parser.add_argument("--tags-file", type=str, default="data/top10000_tags.json",
+                        help="Tags JSON file to validate (default: data/top10000_tags.json)")
     parser.add_argument("--add-correction", action="store_true")
     parser.add_argument("--wrong", type=str)
     parser.add_argument("--correct", type=str)

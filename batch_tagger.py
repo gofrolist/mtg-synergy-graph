@@ -193,7 +193,8 @@ def run():
     from decks import list_decks
 
     parser = argparse.ArgumentParser(description="Batch card tagger")
-    parser.add_argument("--deck", required=True, choices=list_decks(), help="Deck config to use")
+    parser.add_argument("--deck", choices=list_decks(), help="Deck config to use")
+    parser.add_argument("--candidates", type=str, help="Custom candidates JSON file (alternative to --deck)")
     parser.add_argument("--batch-size", type=int, default=5, help="Cards per API call")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be sent without calling API")
     parser.add_argument("--provider", choices=["openai", "anthropic", "ollama"], help="API provider (auto-detected from env if not set)")
@@ -202,9 +203,18 @@ def run():
     parser.add_argument("--rag", action="store_true", help="Enable RAG — inject relevant MTG rules into prompts")
     args = parser.parse_args()
 
+    if not args.deck and not args.candidates:
+        parser.error("Either --deck or --candidates is required")
+
     global CANDIDATES_FILE, OUTPUT_FILE
-    CANDIDATES_FILE = os.path.join(DATA_DIR, f"{args.deck}_candidates.json")
-    OUTPUT_FILE = os.path.join(DATA_DIR, f"{args.deck}_tags.json")
+    if args.candidates:
+        CANDIDATES_FILE = args.candidates
+        # Derive output from candidates filename: top5000_candidates.json → top5000_tags.json
+        base = os.path.basename(args.candidates).replace("_candidates", "_tags")
+        OUTPUT_FILE = os.path.join(os.path.dirname(args.candidates) or DATA_DIR, base)
+    else:
+        CANDIDATES_FILE = os.path.join(DATA_DIR, f"{args.deck}_candidates.json")
+        OUTPUT_FILE = os.path.join(DATA_DIR, f"{args.deck}_tags.json")
     if args.output:
         OUTPUT_FILE = args.output
 

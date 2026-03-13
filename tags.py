@@ -6,7 +6,7 @@ Commands:
   python tags.py search protection       # find tags matching a keyword  
   python tags.py show board-protection   # full details for one tag
   python tags.py similar protection      # find potentially duplicate/related tags
-  python tags.py sync                    # rebuild counts from card_tags.json
+  python tags.py sync                    # rebuild counts from top10000_tags.json
   python tags.py add <tag> <definition>  # add a new tag to registry
 """
 
@@ -18,7 +18,7 @@ from difflib import SequenceMatcher
 
 BASE_DIR = Path(__file__).parent
 REGISTRY_PATH = BASE_DIR / "tag_registry.json"
-TAGS_PATH = BASE_DIR / "card_tags.json"
+TAGS_PATH = BASE_DIR / "data" / "top10000_tags.json"
 
 
 def load_registry() -> dict:
@@ -49,7 +49,7 @@ def cmd_list(args):
     if sort_by == "alpha":
         items = sorted(tags.items())
     else:
-        items = sorted(tags.items(), key=lambda x: x[1]["count"], reverse=True)
+        items = sorted(tags.items(), key=lambda x: x[1].get("count", 0), reverse=True)
 
     print(f"\n{'TAG':<35} {'COUNT':>6}  DEFINITION (truncated)")
     print("─" * 80)
@@ -192,13 +192,13 @@ def cmd_similar(args):
 
 
 def cmd_sync(args):
-    """Rebuild tag counts and card lists from card_tags.json."""
+    """Rebuild tag counts and card lists from top10000_tags.json."""
     registry = load_registry()
     tags = registry["tags"]
     cards = load_tagged_cards()
 
     if not cards:
-        print("No card_tags.json found — nothing to sync")
+        print("No tags file found — nothing to sync")
         return
 
     # Reset counts
@@ -206,12 +206,13 @@ def cmd_sync(args):
         tags[tag]["count"] = 0
         tags[tag]["cards"] = []
 
-    # New tags discovered in card_tags.json but not in registry
+    # New tags discovered in tags file but not in registry
     new_tags = {}
 
     for card in cards:
         name = card.get("name") or card.get("_input_name", "unknown")
-        for tag in card.get("synergy_tags", []):
+        all_tags = card.get("provides", []) + card.get("wants", []) + card.get("synergy_tags", [])
+        for tag in all_tags:
             if tag in tags:
                 tags[tag]["count"] += 1
                 if name not in tags[tag]["cards"]:
@@ -435,7 +436,7 @@ Examples:
     p_similar = sub.add_parser("similar", help="Find similar/duplicate tags")
     p_similar.add_argument("tag")
 
-    p_sync = sub.add_parser("sync", help="Rebuild counts from card_tags.json")
+    p_sync = sub.add_parser("sync", help="Rebuild counts from top10000_tags.json")
 
     p_tree = sub.add_parser("tree", help="Show inheritance tree for a tag")
     p_tree.add_argument("tag")

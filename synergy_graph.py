@@ -275,50 +275,88 @@ def build_provides_wants_edges(cards: list[dict]) -> list[dict]:
     Uses exact matching on normalized vocabulary plus semantic bridges
     for cross-concept connections. Weights are scaled by IDF — rare tag
     matches score higher than common ones.
+
+    Optimized: iterates per-card wants → finds providers via inverted index.
+    Fan-out capped to avoid O(n²) explosion on common tags.
     """
     # Compute IDF multipliers
     idf = _compute_idf(cards)
 
-    # Index: what each card provides and wants
-    provides_index = defaultdict(list)  # tag -> [(card_name, oracle_id)]
-    wants_index = defaultdict(list)
-
+    # Build provides inverted index: tag -> [(card_name, oracle_id)]
+    provides_index = defaultdict(list)
     for card in cards:
         name = card["name"]
         oid = card["oracle_id"]
         for p in card.get("provides", []):
             provides_index[p].append((name, oid))
+
+    # Pre-compute reverse bridge lookup: want_tag -> [(provide_tag, base_weight)]
+    want_to_provides = defaultdict(list)
+    for (p_tag, w_tag), weight in SEMANTIC_BRIDGES.items():
+        if p_tag in provides_index:
+            want_to_provides[w_tag].append((p_tag, weight))
+    # Add identity matches (exact tag matches)
+    for tag in provides_index:
+        want_to_provides[tag].append((tag, 1.0))
+
+    # Fan-out cap: skip provides tags with too many cards.
+    # Common tags have low IDF anyway, so capping preserves quality.
+    # Scale: <=2k cards → 500, 10k cards → 100
+    n = len(cards)
+    MAX_PROVIDERS = max(50, min(500, 2000 * 500 // max(n, 1)))
+
+    # Pre-filter provides_index to stay within memory budget
+    for tag in list(provides_index):
+        if len(provides_index[tag]) > MAX_PROVIDERS:
+            del provides_index[tag]
+
+    # Accumulate best match and total weight per card pair.
+    # Stores (best_weight, best_ptag, best_wtag, total_weight, match_count) compactly.
+    pair_data = {}  # (provider_oid, wanter_oid) -> [best_weight, best_ptag, best_wtag, total_weight, count]
+
+    # For large card sets, also cap wanters per tag to control cross-product
+    MAX_WANTERS = max(50, min(500, 2000 * 500 // max(n, 1)))
+    wants_index = defaultdict(list)
+    for card in cards:
         for w in card.get("wants", []):
-            wants_index[w].append((name, oid))
+            wants_index[w].append(card["oracle_id"])
+    large_want_tags = {tag for tag, members in wants_index.items() if len(members) > MAX_WANTERS}
 
-    # Accumulate matches per card pair
-    pair_matches = defaultdict(list)  # (provider_oid, wanter_oid) -> [(provide_tag, want_tag, weight)]
-
-    for want_tag, wanters in wants_index.items():
-        for provide_tag, providers in provides_index.items():
-            base_weight = _provides_satisfies_want(provide_tag, want_tag)
-            if base_weight <= 0:
+    for card in cards:
+        wanter_oid = card["oracle_id"]
+        for want_tag in card.get("wants", []):
+            if want_tag in large_want_tags:
                 continue
-            # IDF: geometric mean of provider and wanter tag rarity
-            p_idf = idf.get(provide_tag, 1.0)
-            w_idf = idf.get(want_tag, 1.0)
-            weight = base_weight * (p_idf * w_idf) ** 0.5
-            for provider_name, provider_oid in providers:
-                for wanter_name, wanter_oid in wanters:
+            for provide_tag, base_weight in want_to_provides.get(want_tag, []):
+                providers = provides_index.get(provide_tag)
+                if not providers:
+                    continue
+
+                p_idf = idf.get(provide_tag, 1.0)
+                w_idf = idf.get(want_tag, 1.0)
+                weight = base_weight * (p_idf * w_idf) ** 0.5
+
+                for provider_name, provider_oid in providers:
                     if provider_oid == wanter_oid:
                         continue
-                    pair_matches[(provider_oid, wanter_oid)].append(
-                        (provide_tag, want_tag, weight)
-                    )
+                    key = (provider_oid, wanter_oid)
+                    cur = pair_data.get(key)
+                    if cur is None:
+                        pair_data[key] = [weight, provide_tag, want_tag, weight, 1]
+                    else:
+                        cur[3] += weight  # total_weight
+                        cur[4] += 1       # count
+                        if weight > cur[0]:
+                            cur[0] = weight
+                            cur[1] = provide_tag
+                            cur[2] = want_tag
 
     edges = []
     card_names = {c["oracle_id"]: c["name"] for c in cards}
 
-    for (prov_oid, want_oid), matches in pair_matches.items():
-        # Pick the best match for the reason
-        best = max(matches, key=lambda m: m[2])
-        # Weight = sum of match weights (preserves fractional weights from bridges)
-        total_weight = min(sum(m[2] for m in matches), 5.0)
+    for (prov_oid, want_oid), data in pair_data.items():
+        best_weight, best_ptag, best_wtag, total_weight, count = data
+        total_weight = min(total_weight, 5.0)
 
         edges.append({
             "source": card_names.get(prov_oid, prov_oid),
@@ -326,7 +364,7 @@ def build_provides_wants_edges(cards: list[dict]) -> list[dict]:
             "target": card_names.get(want_oid, want_oid),
             "target_id": want_oid,
             "type": "provides-wants",
-            "reason": f"provides '{best[0]}' → wants '{best[1]}' ({len(matches)} matches, best={best[2]:.0%})",
+            "reason": f"provides '{best_ptag}' → wants '{best_wtag}' ({count} matches, best={best_weight:.0%})",
             "weight": round(total_weight, 2),
         })
 
@@ -351,8 +389,9 @@ def build_peer_edges(cards: list[dict], min_shared: int = 2) -> list[dict]:
 
     # Find pairs sharing provides tags
     pair_shared = defaultdict(list)  # (oid_a, oid_b) -> [shared_provides]
+    max_members = max(30, len(cards) // 100)
     for tag, members in provides_index.items():
-        if len(members) > 30:
+        if len(members) > max_members:
             continue  # skip overly common provides
         for i, (name_a, oid_a) in enumerate(members):
             for name_b, oid_b in members[i+1:]:
@@ -408,11 +447,14 @@ def build_shared_wants_edges(cards: list[dict], min_shared: int = 2) -> list[dic
         tag_weight[tag] = max(0.1, min(1.0, 1.0 - freq))
 
     # Build pairs with weighted overlap
+    max_wants_members = max(50, len(cards) // 50)
     pair_data = defaultdict(lambda: {"tags": [], "weight": 0.0})
     for tag, members in wants_index.items():
         w = tag_weight[tag]
         if w < 0.15:  # skip extremely common wants (>85% of cards)
             continue
+        if len(members) > max_wants_members:
+            continue  # skip tags shared by too many cards
         for i, (name_a, oid_a) in enumerate(members):
             for name_b, oid_b in members[i+1:]:
                 key = tuple(sorted([oid_a, oid_b]))
@@ -465,8 +507,9 @@ def build_shared_tag_edges(cards: list[dict], min_weight: int = 2) -> list[dict]
     # Build edges from shared tags
     pair_tags = defaultdict(list)  # (oid1, oid2) -> [shared_tags]
 
+    max_members = max(50, len(cards) // 100)
     for tag, members in tag_cards.items():
-        if len(members) > 50:
+        if len(members) > max_members:
             continue  # skip overly common tags
         for i, (name_a, oid_a) in enumerate(members):
             for name_b, oid_b in members[i+1:]:
@@ -1650,7 +1693,7 @@ def run():
 
     parser = argparse.ArgumentParser(description="Build MTG synergy graph")
     parser.add_argument("--deck", required=True, choices=list_decks(), help="Deck config to use")
-    parser.add_argument("--input", type=str, help="Merged tags JSON (default: data/<deck>_merged.json)")
+    parser.add_argument("--input", type=str, help="Override: load cards from JSON file instead of DB")
     parser.add_argument("--card", type=str, help="Show synergies for specific card")
     parser.add_argument("--deck-view", action="store_true",
                         help="Show synergy network within the deck")
@@ -1668,10 +1711,29 @@ def run():
     parser.add_argument("--top", type=int, default=30, help="Top N edges to show")
     args = parser.parse_args()
 
-    input_path = args.input or os.path.join(DATA_DIR, f"{args.deck}_merged.json")
+    if args.input:
+        # Manual override: load from JSON file
+        cards = load_merged(args.input)
+        print(f"Loaded {len(cards)} cards from {args.input}")
+    else:
+        # Default: load deck cards from SQLite DB
+        from tag_db import get_cards_by_names, find_synergy_candidates, DB_PATH
+        from decks import load_deck
+        deck = load_deck(args.deck)
+        deck_names = deck.DECKLIST + [deck.COMMANDER]
 
-    cards = load_merged(input_path)
-    print(f"Loaded {len(cards)} cards from {input_path}")
+        cards = get_cards_by_names(deck_names, DB_PATH)
+        print(f"Loaded {len(cards)} deck cards from DB")
+
+        if args.recommend:
+            # Find synergy candidates from DB (targeted, not full 10k)
+            candidates = find_synergy_candidates(cards, DB_PATH)
+            print(f"Found {len(candidates)} synergy candidates from DB")
+            deck_oids = {c["oracle_id"] for c in cards}
+            for c in candidates:
+                if c["oracle_id"] not in deck_oids:
+                    cards.append(c)
+            print(f"Building graph for {len(cards)} cards (deck + candidates)")
 
     graph = build_graph(cards)
     stats = graph["stats"]
@@ -1684,17 +1746,18 @@ def run():
     print(f"  composite edges:       {stats['pruned_edges']} (unique card pairs)")
     print(f"  cards with edges:      {stats['cards_with_edges']}/{stats['cards_total']}")
 
+    # Ensure deck config is loaded (already set in DB path, need it for --input path)
+    if args.input:
+        from decks import load_deck
+        deck = load_deck(args.deck)
+
     if args.card:
         show_card_synergies(graph, args.card)
     elif args.visualize:
-        from decks import load_deck
-        deck = load_deck(args.deck)
         deck_set = set(deck.DECKLIST) | {deck.COMMANDER}
         combos = find_combos(graph, deck_set, deck.COMMANDER, top_n=20)
         generate_visualization(graph, cards, deck_set, deck.COMMANDER, args.deck, combos)
     elif args.deck_view or args.recommend or args.combos or args.swaps:
-        from decks import load_deck
-        deck = load_deck(args.deck)
         deck_set = set(deck.DECKLIST) | {deck.COMMANDER}
         if args.deck_view:
             show_deck_synergies(graph, deck_set, deck.COMMANDER, args.top)
@@ -1707,8 +1770,6 @@ def run():
         if args.recommend:
             recommend_cards(graph, deck_set, args.top)
     elif args.validate:
-        from decks import load_deck
-        deck = load_deck(args.deck)
         validate_against_curated(graph, deck.SYNERGY_PAIRS)
     elif args.export:
         graph_output = os.path.join(DATA_DIR, f"{args.deck}_synergy_graph.json")
