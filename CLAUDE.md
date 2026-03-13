@@ -4,21 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MTG Synergy Graph — a tool for analyzing Magic: The Gathering EDH/Commander deck synergies. Supports multiple decks via `decks/` config modules (currently: Kyler GW Humans/counters, Krenko mono-R Goblins/combo). The system has three main subsystems:
+MTG Synergy Graph — a tool for analyzing Magic: The Gathering EDH/Commander deck synergies. Supports multiple decks via `decks/` config modules (currently: Kyler GW Humans/counters, Krenko mono-R Goblins/combo). The system has two data sources feeding a synergy graph:
 
-1. **Rule-based scorer** — scores cards by tribal fit, counter synergy, role fulfillment, and commander interaction using hand-coded heuristics
-2. **Scryfall tagger integration** — fetches community-curated function tags from tagger.scryfall.com via GraphQL API (canonical synergy_tags source)
-3. **LLM-based tagger** — uses Claude/GPT/Ollama APIs to produce structured JSON tags (role, provides, wants) for graph relationships
+1. **Scryfall tagger integration** — fetches community-curated function tags from tagger.scryfall.com via GraphQL API (canonical synergy_tags source)
+2. **LLM-based tagger** — uses Claude/GPT/Ollama APIs to produce structured JSON tags (role, provides, wants) for graph relationships
 
 ## Common Commands
 
 ```bash
 # Download Scryfall bulk data (required first step, ~150MB)
 python3 download_cards.py
-
-# Run deck scoring (needle test or full deck ranking)
-python3 main.py --mode needle_test
-python3 main.py --mode rank_deck
 
 # Filter commander-relevant cards for LLM tagging (~500 cards)
 python3 card_filter.py --deck kyler
@@ -49,6 +44,9 @@ python3 synergy_graph.py --deck krenko --deck-view              # synergy networ
 python3 synergy_graph.py --deck krenko --recommend              # recommend cards to add
 python3 synergy_graph.py --deck krenko --deck-view --recommend  # both at once
 python3 synergy_graph.py --deck krenko --export                 # export graph as JSON
+python3 synergy_graph.py --deck kyler --visualize               # interactive HTML graph
+python3 synergy_graph.py --deck kyler --combos                  # detect 3-4 card combos
+python3 synergy_graph.py --deck kyler --swaps                   # suggest card swaps
 
 # Normalize provides/wants vocabulary (standalone)
 python3 normalize_tags.py --deck kyler --stats
@@ -94,8 +92,9 @@ Scryfall Tagger (community tags)     LLM (Claude/GPT/Ollama)
 
 - **synergy_tags** come from Scryfall's community tagger — standardized vocabulary, crowd-validated
 - **role/provides/wants** come from LLM — semantic relationships that Scryfall doesn't capture
-- `normalize_tags.py` maps freeform LLM provides/wants to a controlled vocabulary (~70 provides, ~35 wants), infers missing wants from card properties (trigger-doubling, creature-etb, creature-death, counter-placement-events), applied automatically during load
-- `synergy_graph.py` builds composite-scored edges from 4 signal types: provides→wants (with semantic bridges), shared Scryfall tags, peer-enabler (shared provides), shared-wants. Multi-signal edges score higher (1.1-1.3x bonus). Validates at 96% for both Kyler (24/25) and Krenko (24/25). `--deck-view` shows in-deck synergy network + cut candidates; `--recommend` ranks non-deck cards by synergy with the decklist.
+- `tag_registry.json` is the single source of truth for canonical vocabulary. Tags have `kind` (provides/wants/both/synergy), aliases, definitions, and graph edges (inherits/amplifies/requires)
+- `normalize_tags.py` loads PROVIDES_MAP and WANTS_MAP from the registry, maps freeform LLM tags to canonical terms, infers missing wants from card properties
+- `synergy_graph.py` builds composite-scored edges from 4 signal types: provides→wants (with semantic bridges + IDF weighting), shared Scryfall tags, peer-enabler (shared provides), shared-wants. Multi-signal edges score higher (1.1-1.3x bonus). Validates at 100% Kyler (25/25) and 96% Krenko (24/25). Features: `--deck-view`, `--recommend`, `--combos`, `--swaps`, `--visualize`
 - `golden_cards.json` validates both sources: synergy_tags against Scryfall vocab, role/provides/wants against LLM output
 
 ### Data Flow
@@ -104,15 +103,20 @@ Scryfall Tagger (community tags)     LLM (Claude/GPT/Ollama)
 Scryfall API → download_cards.py → data/oracle_cards.json
                                         ↓
                               card_db.py (loads on import, builds CARD_DB + NAME_INDEX)
+                                        ↓
+                              card_filter.py → data/<deck>_candidates.json
                                    ↓                    ↓
-                            enricher.py              card_filter.py → data/kyler_candidates.json
-                         (extract_features)               ↓                    ↓
-                                ↓              scryfall_tagger.py    batch_tagger.py
-                            scorer.py                ↓                    ↓
-                                ↓         scryfall_function_tags.json   kyler_tags.json
-                          necessity.py
-                                ↓
-                            main.py (CLI output)
+                        scryfall_tagger.py        batch_tagger.py
+                                   ↓                    ↓
+                   scryfall_function_tags.json    <deck>_tags.json
+                                   ↓                    ↓
+                                merge_tags.py + normalize_tags.py
+                                        ↓
+                              <deck>_merged.json
+                                        ↓
+                              synergy_graph.py
+                                        ↓
+               deck-view / recommend / combos / swaps / visualize
 ```
 
 ### RAG Pipeline (rules_fetcher → rules_index → rules_retriever)
@@ -138,5 +142,4 @@ Scryfall API → download_cards.py → data/oracle_cards.json
 - The tag registry has three edge types: `inherits` (is-a), `amplifies` (synergy), `requires` (dependency)
 - Deck configs live in `decks/` (commander, EDHREC slug, color identity, decklist, synergy pairs, supplement filters)
 - All pipeline scripts accept `--deck <name>` to select which deck to process
-- Scoring in `scorer.py`/`main.py` is still hardcoded for Kyler commander (not yet multi-deck)
 - RTX 5080 (16GB VRAM): phi4:14b is optimal local model for tagging; 30B+ models cause CPU spillover

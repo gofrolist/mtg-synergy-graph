@@ -1031,14 +1031,8 @@ def show_combos(combos: dict, commander: str, top_n: int = 15):
             print(f"     min edge: {quad['min_edge']}")
 
 
-def validate_against_curated(graph: dict, synergy_pairs: list[tuple] = None):
-    """Compare graph edges against hand-curated synergy pairs.
-
-    If synergy_pairs is not provided, falls back to scorer.SYNERGY_PAIRS (Kyler).
-    """
-    if synergy_pairs is None:
-        from scorer import SYNERGY_PAIRS
-        synergy_pairs = SYNERGY_PAIRS
+def validate_against_curated(graph: dict, synergy_pairs: list[tuple]):
+    """Compare graph edges against hand-curated synergy pairs."""
 
     adj = graph["adjacency"]
 
