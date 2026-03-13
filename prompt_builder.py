@@ -305,14 +305,34 @@ RELEVANT MTG RULES (use these to inform your tagging decisions):
 {rules_context}
 """)
 
+    # Pre-tag cards with rule-based tagger for hints
+    try:
+        from rule_tagger import tag_card
+        use_hints = True
+    except ImportError:
+        use_hints = False
+
     cards_block = []
     for i, card in enumerate(cards, 1):
+        hint = ""
+        if use_hints:
+            rule_tags = tag_card(card)
+            hints = []
+            if rule_tags.get("role"):
+                hints.append(f"role={rule_tags['role']}")
+            if rule_tags.get("provides"):
+                hints.append(f"provides={rule_tags['provides']}")
+            if rule_tags.get("wants"):
+                hints.append(f"wants={rule_tags['wants']}")
+            if hints:
+                hint = f"\nPre-analysis hints (validate and extend): {', '.join(hints)}"
+
         cards_block.append(f"""CARD {i}:
 Name: {card['name']}
 Type: {card['type_line']}
 CMC: {card.get('cmc', 0)}
 Keywords: {', '.join(card.get('keywords', [])) or 'none'}
-Oracle text: {card.get('oracle_text', '')}""")
+Oracle text: {card.get('oracle_text', '')}{hint}""")
 
     user_parts.append(f"""
 Analyze each of the following {len(cards)} cards using the schema and rules above.
