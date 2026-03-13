@@ -43,6 +43,13 @@ python3 synergy_graph.py --deck kyler --combos                  # detect 3-4 car
 python3 synergy_graph.py --deck kyler --swaps                   # suggest card swaps
 python3 synergy_graph.py --deck kyler --input data/custom.json  # override: use JSON instead of DB
 
+# New-set update workflow
+python3 update_cards.py --check                    # dry run: show new/errata'd cards
+python3 update_cards.py --update                   # full pipeline: download, diff, tag, import
+python3 update_cards.py --update --top 15000       # expand DB to 15k cards
+python3 update_cards.py --errata-only              # show oracle text changes
+python3 update_cards.py --tag-only                 # resume tagging after crash
+
 # Fetch Scryfall tagger function tags (optional, enriches synergy_tags)
 python3 scryfall_tagger.py                        # fetch all 500 candidates
 python3 scryfall_tagger.py --dry-run              # show plan without fetching
@@ -52,7 +59,7 @@ python3 rules_fetcher.py                          # download + chunk MTG rules
 python3 rules_index.py                            # embed chunks via Ollama
 
 # Normalize provides/wants vocabulary (standalone)
-python3 normalize_tags.py --deck kyler --stats
+python3 normalize_tags.py --stats
 python3 normalize_tags.py --unmapped --dry-run     # show unmapped tags
 
 # Regression tests against golden dataset

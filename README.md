@@ -209,6 +209,53 @@ python3 normalize_tags.py --unmapped
 python3 normalize_tags.py --input data/top10000_tags.json --stats
 ```
 
+### New Set Updates
+
+#### `update_cards.py` -- New-Set Update Workflow
+
+Detects new cards from set releases and oracle text changes (errata), tags them, and updates the database. Run this whenever a new MTG set is released.
+
+```bash
+# Check what changed (dry run)
+python3 update_cards.py --check
+
+# Check with verbose errata diff
+python3 update_cards.py --check --verbose
+
+# Full pipeline: download fresh data, diff, tag new cards, import
+python3 update_cards.py --update
+
+# Expand the DB to top 15k cards
+python3 update_cards.py --update --top 15000
+
+# Skip download if you already updated oracle_cards.json
+python3 update_cards.py --update --skip-download
+
+# Show only errata changes
+python3 update_cards.py --errata-only
+
+# Resume tagging after a crash
+python3 update_cards.py --tag-only
+
+# Merge an external tags file into the DB
+python3 update_cards.py --merge data/custom_tags.json
+```
+
+**Typical new-set workflow:**
+```bash
+# 1. Download fresh Scryfall data (includes new set)
+python3 download_cards.py
+
+# 2. Check what's new
+python3 update_cards.py --check -v
+
+# 3. Run the full update
+python3 update_cards.py --update --skip-download
+
+# 4. Verify decks still work
+python3 synergy_graph.py --deck kyler --validate
+```
+
 ### Optional Tools
 
 #### `scryfall_tagger.py` -- Scryfall Community Tags
@@ -327,6 +374,7 @@ python3 tag_db.py import data/top15000_tags.json
 ├── tag_db.py                  # SQLite tag database
 ├── synergy_graph.py           # Synergy graph engine + CLI
 │
+├── update_cards.py            # New-set update workflow
 ├── card_db.py                 # Scryfall card lookup (oracle_cards.json)
 ├── prompt_builder.py          # LLM prompt construction
 ├── normalize_tags.py          # Tag vocabulary normalization

@@ -15,6 +15,9 @@ data/scryfall_rulings.json
 # Scryfall tagger cache (regenerable)
 data/scryfall_function_tags.json
 
+# Update workflow temp files
+data/pending_*.json
+
 # Legacy deck-specific files (replaced by unified DB)
 data/*_tags_*.json
 data/*_merged*.json
