@@ -180,6 +180,55 @@ SEMANTIC_BRIDGES = {
     # Counter placement → creature-board (placing counters means having creatures)
     ("counter-placement", "creature-board"): 0.4,
     ("board-wide-counter-placement", "creature-board"): 0.5,
+
+    # ── Spellslinger / Drain bridges ──
+
+    # Life drain → life gain events (draining opponents = gaining life for payoffs)
+    ("life-drain", "life-gain-events"): 0.9,
+    ("life-gain", "life-gain-events"): 0.9,
+    ("life-drain", "life-payment"): 0.5,
+
+    # Card discard → discard events (Windfall → Bloodchief Ascension)
+    ("card-discard", "discard-events"): 0.9,
+
+    # Flash grant → spell casting (flash enables casting on every turn)
+    ("flash-grant", "spell-casting"): 0.8,
+
+    # Stax/tax → opponent spell casting (taxing opponents when they cast)
+    ("stax-tax", "opponent-spell-casting"): 0.8,
+    ("stax", "opponent-spell-casting"): 0.7,
+
+    # Card draw payoff → card draw events
+    ("card-draw-payoff", "card-draw-events"): 0.9,
+    ("card-draw", "card-draw-events"): 0.8,
+
+    # Graveyard casting → spell casting (casting from GY = casting spells)
+    ("graveyard-casting", "spell-casting"): 0.7,
+
+    # Blink → creature ETB (blinking = re-entering)
+    ("blink", "creature-etb"): 0.8,
+
+    # Board protection ↔ board threats
+    ("board-protection", "board-threats"): 0.5,
+
+    # Tutor → opponent search (Opposition Agent pattern — both care about searches)
+    ("tutor", "opponent-spell-casting"): 0.3,
+
+    # Cost reduction → spell casting (cheaper spells = more spells cast)
+    ("cost-reduction", "spell-casting"): 0.6,
+    ("cost-reduction", "opponent-spell-casting"): 0.3,
+
+    # Card discard → card draw events (discard wheels trigger draw payoffs)
+    ("card-discard", "card-draw-events"): 0.5,
+
+    # Reactive protection → spell casting (protects key spells)
+    ("reactive-protection", "spell-casting"): 0.3,
+
+    # Life gain ↔ life gain events (same concept, different field)
+    ("life-drain", "spell-casting"): 0.3,
+
+    # Stax tax ↔ card draw events (Rhystic Study pattern)
+    ("stax-tax", "card-draw-events"): 0.6,
 }
 
 

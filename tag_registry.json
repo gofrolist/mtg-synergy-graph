@@ -2013,8 +2013,8 @@
       "requires": []
     },
     "spell-casting": {
-      "kind": "wants",
-      "definition": "",
+      "kind": "both",
+      "definition": "Card casts spells frequently or enables spell casting. Also: card benefits when spells are cast.",
       "aliases": [
         "artifact-instant-sorcery-casting",
         "assistance-payments",
@@ -2459,6 +2459,70 @@
       "kind": "synergy",
       "definition": "Abstract parent: any card that creates tokens",
       "aliases": [],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "flash-grant": {
+      "kind": "provides",
+      "definition": "Gives flash or instant-speed casting to other spells/permanents.",
+      "aliases": [
+        "flash-instant-speed",
+        "flash-enabler",
+        "flash-granting",
+        "instant-speed-casting"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "card-draw-payoff": {
+      "kind": "provides",
+      "definition": "Card benefits from or triggers when cards are drawn (by any player).",
+      "aliases": [
+        "draw-payoff",
+        "draw-trigger",
+        "opponent-card-draw-payoff"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "stax-tax": {
+      "kind": "provides",
+      "definition": "Taxes opponents for casting spells or taking actions (Rhystic Study, Painful Quandary pattern).",
+      "aliases": [
+        "opponent-tax",
+        "spell-tax",
+        "cast-tax",
+        "mana-tax"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "blink": {
+      "kind": "provides",
+      "definition": "Exiles and returns permanents (blink/flicker effects).",
+      "aliases": [
+        "flicker",
+        "blink-effect",
+        "exile-return",
+        "permanent-blink"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "graveyard-casting": {
+      "kind": "provides",
+      "definition": "Casts spells from graveyard or gives flashback.",
+      "aliases": [
+        "flashback",
+        "cast-from-graveyard",
+        "graveyard-spell-casting",
+        "spell-recursion"
+      ],
       "inherits": [],
       "amplifies": [],
       "requires": []
