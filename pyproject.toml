@@ -1,0 +1,10 @@
+[project]
+name = "mtg-synergy-graph"
+version = "0.1.0"
+description = "MTG EDH/Commander deck synergy analysis using LLM tags and card embeddings"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.4.3",
+    "sentence-transformers>=5.3.0",
+    "torch>=2.10.0",
+]

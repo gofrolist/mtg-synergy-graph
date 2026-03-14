@@ -62,6 +62,11 @@ python3 rules_index.py                            # embed chunks via Ollama
 python3 normalize_tags.py --stats
 python3 normalize_tags.py --unmapped --dry-run     # show unmapped tags
 
+# Card embeddings (768-dim vectors via gte-modernbert-base)
+python3 card_embeddings.py                    # embed all cards in tags.db → data/embeddings.npy
+python3 card_embeddings.py --query "Sol Ring"  # find similar cards by embedding
+python3 card_embeddings.py --stats             # show embedding stats
+
 # Regression tests against golden dataset
 python3 regression_test.py --mode scryfall        # validate Scryfall tags vs golden
 python3 regression_test.py --mode static          # validate card_tags.json vs golden
@@ -91,17 +96,19 @@ Scryfall API → download_cards.py → data/oracle_cards.json
                               data/top10000_tags.json
                                         ↓
                     tag_db.py import → data/tags.db (SQLite, single source of truth)
-                                        ↓
-                              synergy_graph.py --deck <name>
-                                        ↓
-               deck-view / recommend / combos / swaps / visualize
+                                        ↓                     ↓
+                              card_embeddings.py        synergy_graph.py --deck <name>
+                              (gte-modernbert-base)     (5 signal types + hybrid recommend)
+                                        ↓                     ↓
+                              data/embeddings.npy → deck-view / recommend / combos / swaps / visualize
 ```
 
 - **`data/tags.db`** is the single source of truth for card tags (10k+ cards)
 - **`data/top10000_tags.json`** is the canonical tags file — grow this to add more cards
 - `tag_registry.json` defines canonical vocabulary: `kind` (provides/wants/both/synergy), aliases, definitions, graph edges (inherits/amplifies/requires)
 - `normalize_tags.py` loads PROVIDES_MAP and WANTS_MAP from the registry, maps freeform LLM tags to canonical terms
-- `synergy_graph.py` loads deck cards from DB, builds composite-scored edges from 4 signal types: provides→wants (with semantic bridges + IDF weighting), shared Scryfall tags, peer-enabler (shared provides), shared-wants. Fan-out caps scale with card count to prevent O(n²) explosion. Features: `--deck-view`, `--recommend`, `--combos`, `--swaps`, `--visualize`
+- `synergy_graph.py` loads deck cards from DB, builds composite-scored edges from 5 signal types: provides→wants (with semantic bridges + IDF weighting), shared Scryfall tags, peer-enabler (shared provides), shared-wants, embedding similarity (cosine sim from gte-modernbert-base vectors). Fan-out caps scale with card count to prevent O(n²) explosion. Features: `--deck-view`, `--recommend` (hybrid: tag + embedding candidates), `--combos`, `--swaps`, `--visualize`
+- `card_embeddings.py` serializes cards as prettified JSON and embeds with `gte-modernbert-base` (768-dim, L2-normalized). Embeddings stored in `data/embeddings.npy` + `data/embeddings_index.json`. Used as 5th signal in synergy graph and for hybrid recommendation candidate generation
 - Validates at 96% Kyler (24/25), 96% Krenko (24/25), 80% Y'Shtola (20/25)
 
 ### Adding New Cards to the DB
@@ -119,6 +126,8 @@ Scryfall API → download_cards.py → data/oracle_cards.json
 
 ### Key Data Files
 
+- `data/embeddings.npy`: Card embeddings (N×768 float32 array, ~30MB for 10k cards)
+- `data/embeddings_index.json`: Oracle ID index mapping rows to card identities
 - `data/tags.db`: SQLite database with 10k+ tagged cards (provides, wants, synergy_tags)
 - `data/top10000_tags.json`: LLM-generated tags for top 10k EDHREC cards (canonical, grow this file)
 - `data/top10000_candidates.json`: Card data extracted from Scryfall for tagging

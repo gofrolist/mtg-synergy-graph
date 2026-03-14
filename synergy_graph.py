@@ -481,6 +481,89 @@ def build_shared_wants_edges(cards: list[dict], min_shared: int = 2) -> list[dic
     return edges
 
 
+def build_embedding_edges(cards: list[dict], min_similarity: float = 0.75,
+                          max_edges_per_card: int = 5) -> list[dict]:
+    """Build undirected edges from card embedding cosine similarity.
+
+    Uses pre-computed embeddings from card_embeddings.py. Only creates edges
+    above min_similarity threshold, capped to top-N per card to avoid noise.
+
+    This is the 5th signal type — catches mechanical similarity that
+    tag-based signals miss (e.g., cards with similar oracle text patterns).
+    """
+    try:
+        from card_embeddings import load_embeddings
+    except ImportError:
+        print("  [embedding] card_embeddings.py not available, skipping")
+        return []
+
+    import os
+    emb_path = os.path.join(DATA_DIR, "embeddings.npy")
+    if not os.path.exists(emb_path):
+        print("  [embedding] No embeddings found, skipping. Run: python3 card_embeddings.py")
+        return []
+
+    import numpy as np
+    embeddings, oracle_ids = load_embeddings()
+    oid_to_idx = {oid: i for i, oid in enumerate(oracle_ids)}
+
+    # Filter to cards in our working set
+    card_indices = []
+    card_oids = []
+    card_names = {}
+    for card in cards:
+        oid = card["oracle_id"]
+        idx = oid_to_idx.get(oid)
+        if idx is not None:
+            card_indices.append(idx)
+            card_oids.append(oid)
+            card_names[oid] = card["name"]
+
+    if len(card_indices) < 2:
+        return []
+
+    # Extract sub-matrix for our cards
+    indices = np.array(card_indices)
+    sub_embeddings = embeddings[indices]  # (n_cards, 768)
+
+    # Compute pairwise similarities via dot product (already L2-normalized)
+    sim_matrix = sub_embeddings @ sub_embeddings.T  # (n_cards, n_cards)
+
+    # Build edges: for each card, take top-N similar above threshold
+    edges = []
+    n = len(card_indices)
+    seen = set()
+
+    for i in range(n):
+        # Get similarities for card i, excluding self
+        sims = sim_matrix[i].copy()
+        sims[i] = -1.0  # exclude self
+
+        # Top-N above threshold
+        top_idx = np.argpartition(-sims, min(max_edges_per_card, n - 1))[:max_edges_per_card]
+        top_idx = [j for j in top_idx if sims[j] >= min_similarity]
+        top_idx.sort(key=lambda j: -sims[j])
+
+        for j in top_idx:
+            pair = tuple(sorted([card_oids[i], card_oids[j]]))
+            if pair in seen:
+                continue
+            seen.add(pair)
+
+            sim = float(sims[j])
+            edges.append({
+                "source": card_names[card_oids[i]],
+                "source_id": card_oids[i],
+                "target": card_names[card_oids[j]],
+                "target_id": card_oids[j],
+                "type": "embedding",
+                "reason": f"embedding similarity {sim:.0%}",
+                "weight": round(sim * 3.0, 2),  # scale to comparable range with other signals
+            })
+
+    return edges
+
+
 def build_shared_tag_edges(cards: list[dict], min_weight: int = 2) -> list[dict]:
     """Build undirected edges between cards sharing Scryfall function tags.
 
@@ -546,8 +629,9 @@ def build_graph(cards: list[dict], min_score: float = 0.5) -> dict:
     st_edges = build_shared_tag_edges(cards)
     pe_edges = build_peer_edges(cards)
     sw_edges = build_shared_wants_edges(cards)
+    emb_edges = build_embedding_edges(cards)
 
-    raw_edges = pw_edges + st_edges + pe_edges + sw_edges
+    raw_edges = pw_edges + st_edges + pe_edges + sw_edges + emb_edges
 
     # Merge all signals per card pair into composite scores
     # Key by sorted (name_a, name_b) to deduplicate direction
@@ -556,6 +640,7 @@ def build_graph(cards: list[dict], min_score: float = 0.5) -> dict:
         "shared_tag": [],
         "peer_enabler": [],
         "shared_wants": [],
+        "embedding": [],
     })
 
     for edge in raw_edges:
@@ -601,6 +686,14 @@ def build_graph(cards: list[dict], min_score: float = 0.5) -> dict:
             score += sw_weight * 1.0
             best_sw = max(sw, key=lambda e: e["weight"])
             reasons.append(f"[wants] {best_sw['reason'][:60]}")
+
+        # Embedding similarity: mechanical text similarity
+        emb = signals["embedding"]
+        if emb:
+            emb_weight = max(e["weight"] for e in emb)
+            score += emb_weight * 1.0
+            best_emb = max(emb, key=lambda e: e["weight"])
+            reasons.append(f"[emb] {best_emb['reason'][:60]}")
 
         # Bonus for multi-signal edges (confirmed from multiple sources)
         n_signals = sum(1 for v in signals.values() if v)
@@ -653,6 +746,7 @@ def build_graph(cards: list[dict], min_score: float = 0.5) -> dict:
             "shared_tag_edges": len(st_edges),
             "peer_enabler_edges": len(pe_edges),
             "shared_wants_edges": len(sw_edges),
+            "embedding_edges": len(emb_edges),
             "cards_with_edges": len(adjacency),
             "cards_total": len(cards),
         },
@@ -683,7 +777,8 @@ def show_card_synergies(graph: dict, card_name: str, top_n: int = 20):
             print(f"    {reason}")
 
 
-def show_deck_synergies(graph: dict, deck_cards: set[str], commander: str, top_n: int = 30):
+def show_deck_synergies(graph: dict, deck_cards: set[str], commander: str,
+                        cards: list[dict] = None, top_n: int = 30):
     """Show the synergy network within the deck — which cards synergize with each other."""
     adj = graph["adjacency"]
 
@@ -736,9 +831,21 @@ def show_deck_synergies(graph: dict, deck_cards: set[str], commander: str, top_n
         median_score = ranked[len(ranked) // 2][1]
         weak = [(c, s) for c, s in ranked if s < median_score * 0.3]
         if weak:
-            print(f"\nWeakly connected cards (potential cut candidates):")
-            for card, total in weak:
-                print(f"  {card:<35} {total:7.1f} ({card_partners[card]} partners)")
+            # Classify cards to distinguish cuttable from infrastructure
+            card_list = cards or []
+            slot_labels = {c: _classify_card_slot(c, card_list) for c, _ in weak}
+            cuttable = [(c, s) for c, s in weak if slot_labels[c] == "spell"]
+            protected = [(c, s) for c, s in weak if slot_labels[c] != "spell"]
+
+            if cuttable:
+                print(f"\nWeakly connected cards (potential cut candidates):")
+                for card, total in cuttable:
+                    print(f"  {card:<35} {total:7.1f} ({card_partners[card]} partners)")
+            if protected:
+                print(f"\nLow synergy but protected (infrastructure / lands):")
+                for card, total in protected:
+                    label = slot_labels[card]
+                    print(f"  {card:<35} {total:7.1f} ({card_partners[card]} partners) [{label}]")
 
 
 def recommend_cards(graph: dict, deck_cards: set[str], top_n: int = 20):
@@ -817,6 +924,15 @@ def _classify_card_slot(name: str, cards: list[dict]) -> str:
     # and shouldn't be swapped for synergy pieces
     INFRASTRUCTURE_ROLES = {"removal", "ramp", "protection", "draw", "tutor"}
 
+    # Provides tags that indicate synergy value beyond infrastructure role.
+    # Cards with these are synergy pieces even if their role is "protection" etc.
+    SYNERGY_PROVIDES = {
+        "token-generation", "counter-placement", "board-wide-counter-placement",
+        "counter-amplification", "trigger-doubling", "creature-pump",
+        "card-draw-payoff", "etb-payoff", "sacrifice-payoff", "goblin-tribal",
+        "life-gain", "life-drain", "combat-trigger",
+    }
+
     # Check merged card data
     for card in cards:
         if card["name"] != name:
@@ -826,6 +942,11 @@ def _classify_card_slot(name: str, cards: list[dict]) -> str:
         if role == "land" or "staple-land" in categories:
             return "land"
         if role in INFRASTRUCTURE_ROLES:
+            # Check if the card also has synergy-relevant provides tags —
+            # if so, it's a synergy piece that happens to have an infra role
+            provides = set(card.get("provides", []))
+            if provides & SYNERGY_PROVIDES:
+                break  # fall through to "spell"
             return "staple"
         break
 
@@ -1688,6 +1809,90 @@ simulation.on("tick", () => {
 </html>"""
 
 
+def _build_color_identity_filter(color_identity: set[str]):
+    """Build a filter function that checks if a card's color identity is a subset of the deck's.
+
+    Loads Scryfall bulk data once for color identity lookup.
+    Returns a function: oracle_id -> bool.
+    """
+    from card_db import CARD_DB
+
+    # Build oracle_id -> color_identity lookup
+    oid_colors = {}
+    for oid, card in CARD_DB.items():
+        oid_colors[oid] = set(card.get("color_identity", []))
+
+    def is_legal(oracle_id: str) -> bool:
+        card_colors = oid_colors.get(oracle_id, set())
+        return card_colors <= color_identity  # subset check
+
+    return is_legal
+
+
+def _find_embedding_candidates(deck_cards: list[dict], deck_oids: set[str],
+                               db_path: str, top_per_card: int = 3,
+                               min_similarity: float = 0.70) -> list[dict]:
+    """Find recommendation candidates via embedding similarity.
+
+    For each deck card, finds top-N most similar cards not already in the deck.
+    Returns deduplicated list of candidate cards loaded from DB.
+    """
+    try:
+        from card_embeddings import load_embeddings
+        import numpy as np
+    except ImportError:
+        return []
+
+    import os
+    emb_path = os.path.join(DATA_DIR, "embeddings.npy")
+    if not os.path.exists(emb_path):
+        return []
+
+    embeddings, oracle_ids = load_embeddings()
+    oid_to_idx = {oid: i for i, oid in enumerate(oracle_ids)}
+
+    # Get indices for deck cards
+    deck_indices = []
+    for card in deck_cards:
+        idx = oid_to_idx.get(card["oracle_id"])
+        if idx is not None:
+            deck_indices.append(idx)
+
+    if not deck_indices:
+        return []
+
+    # Compute average deck embedding for centroid-based search
+    deck_matrix = embeddings[np.array(deck_indices)]
+    deck_centroid = deck_matrix.mean(axis=0)
+    deck_centroid = deck_centroid / np.linalg.norm(deck_centroid)
+
+    # Find cards similar to the deck centroid
+    all_sims = embeddings @ deck_centroid
+
+    # Also find per-card similar cards (catches specific synergies)
+    candidate_oids = set()
+    for deck_idx in deck_indices:
+        card_sims = embeddings[deck_idx] @ embeddings.T
+        top_idx = np.argpartition(-card_sims, top_per_card + 1)[:top_per_card + 1]
+        for idx in top_idx:
+            oid = oracle_ids[idx]
+            if oid not in deck_oids and card_sims[idx] >= min_similarity:
+                candidate_oids.add(oid)
+
+    # Also add top centroid-similar cards
+    centroid_top = np.argpartition(-all_sims, 100)[:100]
+    for idx in centroid_top:
+        oid = oracle_ids[idx]
+        if oid not in deck_oids and all_sims[idx] >= min_similarity:
+            candidate_oids.add(oid)
+
+    if not candidate_oids:
+        return []
+
+    from tag_db import get_cards_by_oids
+    return get_cards_by_oids(list(candidate_oids), db_path)
+
+
 def run():
     from decks import list_decks
 
@@ -1728,11 +1933,33 @@ def run():
         if args.recommend:
             # Find synergy candidates from DB (targeted, not full 10k)
             candidates = find_synergy_candidates(cards, DB_PATH)
-            print(f"Found {len(candidates)} synergy candidates from DB")
+            print(f"Found {len(candidates)} tag-based candidates from DB")
             deck_oids = {c["oracle_id"] for c in cards}
+
+            # Hybrid: also find candidates via embedding similarity
+            emb_candidates = _find_embedding_candidates(cards, deck_oids, DB_PATH)
+            if emb_candidates:
+                print(f"Found {len(emb_candidates)} embedding-based candidates")
+
+            # Filter all candidates by color identity
+            color_id = deck.COLOR_IDENTITY
+            ci_filter = _build_color_identity_filter(color_id)
+            candidates = [c for c in candidates if ci_filter(c["oracle_id"])]
+            if emb_candidates:
+                emb_candidates = [c for c in emb_candidates if ci_filter(c["oracle_id"])]
+            print(f"After color identity filter ({','.join(sorted(color_id))}): "
+                  f"{len(candidates)} tag + {len(emb_candidates)} embedding candidates")
+
+            # Merge: union of tag-based and embedding-based candidates
+            all_candidate_oids = set()
             for c in candidates:
                 if c["oracle_id"] not in deck_oids:
+                    all_candidate_oids.add(c["oracle_id"])
                     cards.append(c)
+            for c in emb_candidates:
+                if c["oracle_id"] not in deck_oids and c["oracle_id"] not in all_candidate_oids:
+                    cards.append(c)
+
             print(f"Building graph for {len(cards)} cards (deck + candidates)")
 
     graph = build_graph(cards)
@@ -1743,6 +1970,7 @@ def run():
     print(f"    shared-tag:          {stats['shared_tag_edges']}")
     print(f"    peer-enabler:        {stats['peer_enabler_edges']}")
     print(f"    shared-wants:        {stats['shared_wants_edges']}")
+    print(f"    embedding:           {stats.get('embedding_edges', 0)}")
     print(f"  composite edges:       {stats['pruned_edges']} (unique card pairs)")
     print(f"  cards with edges:      {stats['cards_with_edges']}/{stats['cards_total']}")
 
@@ -1760,7 +1988,7 @@ def run():
     elif args.deck_view or args.recommend or args.combos or args.swaps:
         deck_set = set(deck.DECKLIST) | {deck.COMMANDER}
         if args.deck_view:
-            show_deck_synergies(graph, deck_set, deck.COMMANDER, args.top)
+            show_deck_synergies(graph, deck_set, deck.COMMANDER, cards, args.top)
         if args.combos:
             combos = find_combos(graph, deck_set, deck.COMMANDER, args.top)
             show_combos(combos, deck.COMMANDER, args.top)
