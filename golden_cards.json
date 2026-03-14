@@ -864,7 +864,7 @@
         "hand-neutral"
       ],
       "expected": {
-        "role": "utility",
+        "role": "ramp",
         "synergy_tags_must_include": [],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
@@ -1108,7 +1108,7 @@
         "repeatable pure draw"
       ],
       "expected": {
-        "role": "utility",
+        "role": "draw",
         "synergy_tags_must_include": [
           "draw engine",
           "repeatable pure draw"
@@ -5140,11 +5140,11 @@
         "self-replacement effect"
       ],
       "expected": {
-        "role": "protection",
+        "role": "removal",
         "synergy_tags_must_include": [],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "counter-placement"
+          "targeted-removal"
         ],
         "wants_must_include": [
           "opponent-spell-casting"
@@ -6321,15 +6321,15 @@
         "toughness boost to all"
       ],
       "expected": {
-        "role": "draw",
+        "role": "enabler",
         "synergy_tags_must_include": [],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
           "creature-pump",
-          "haste-grant"
+          "haste-grant",
+          "tutor"
         ],
         "wants_must_include": [
-          "card-draw-events",
           "creature-board"
         ]
       }
@@ -10759,7 +10759,7 @@
         "hate-black"
       ],
       "expected": {
-        "role": "threat",
+        "role": "enabler",
         "synergy_tags_must_include": [],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
