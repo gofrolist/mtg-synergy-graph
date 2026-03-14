@@ -66,7 +66,14 @@ def train(
     )
 
     # Apply chat template
-    tokenizer = get_chat_template(tokenizer, chat_template="qwen-2.5")
+    model_lower = model_name.lower()
+    if "qwen3" in model_lower or "qwen-3" in model_lower:
+        template = "qwen-2.5"  # Qwen3 uses same <|im_start|> template
+    elif "qwen2" in model_lower or "qwen-2" in model_lower:
+        template = "qwen-2.5"
+    else:
+        template = "chatml"
+    tokenizer = get_chat_template(tokenizer, chat_template=template)
 
     # Add LoRA adapters
     model = FastLanguageModel.get_peft_model(
@@ -133,9 +140,16 @@ def train(
         packing=True,
     )
 
+    # Check for existing checkpoint to resume from
+    import glob
+    checkpoints = sorted(glob.glob(os.path.join(OUTPUT_DIR, "checkpoint-*")))
+    resume_from = checkpoints[-1] if checkpoints else None
+
     print(f"\nStarting training: {epochs} epochs, lr={lr}, batch={batch_size}")
     print(f"LoRA rank: {lora_rank}, max_seq: {max_seq_length}")
-    trainer.train()
+    if resume_from:
+        print(f"Resuming from {resume_from}")
+    trainer.train(resume_from_checkpoint=resume_from)
 
     # Save
     print(f"\nSaving model to {OUTPUT_DIR}")
@@ -201,8 +215,8 @@ Return ONLY valid JSON. No explanation."""
 
 def main():
     parser = argparse.ArgumentParser(description="Fine-tune MTG card tagger")
-    parser.add_argument("--model", default="unsloth/Qwen2.5-3B-Instruct",
-                        help="Base model (default: Qwen2.5-3B-Instruct)")
+    parser.add_argument("--model", default="unsloth/Qwen3-4B-Instruct-2507-unsloth-bnb-4bit",
+                        help="Base model (default: Qwen3-4B-Instruct)")
     parser.add_argument("--epochs", type=int, default=3, help="Training epochs")
     parser.add_argument("--lr", type=float, default=2e-4, help="Learning rate")
     parser.add_argument("--batch-size", type=int, default=4, help="Batch size")
