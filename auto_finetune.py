@@ -132,17 +132,28 @@ def run_finetune(config: dict) -> str:
     env["UNSLOTH_SKIP_TORCHVISION_CHECK"] = "1"
     env["LD_LIBRARY_PATH"] = CUDA_LIB + ":" + env.get("LD_LIBRARY_PATH", "")
 
-    print(f"  Training: {' '.join(cmd)}")
+    print(f"  Training: {config['model']} (rank={config['lora_rank']}, "
+          f"lr={config['lr']}, ep={config['epochs']}, batch={config['batch_size']})",
+          flush=True)
     t0 = time.time()
-    result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=14400)
+
+    # Stream output so progress is visible
+    process = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, text=True)
+    for line in process.stdout:
+        line = line.strip()
+        # Show key progress lines (loss, eval, saving)
+        if any(k in line for k in ["loss", "eval_loss", "Saving", "Training",
+                                    "epochs", "Loading", "Epoch"]):
+            print(f"    {line}", flush=True)
+    process.wait()
     elapsed = time.time() - t0
 
-    if result.returncode != 0:
-        print(f"  Training FAILED ({elapsed/60:.1f}m)")
-        print(f"  stderr: {result.stderr[-500:]}")
+    if process.returncode != 0:
+        print(f"  Training FAILED ({elapsed/60:.1f}m)", flush=True)
         return None
 
-    print(f"  Training complete ({elapsed/60:.1f}m)")
+    print(f"  Training complete ({elapsed/60:.1f}m)", flush=True)
     return exp_output
 
 
@@ -153,7 +164,7 @@ def export_gguf(exp_output: str, config: dict) -> str:
 
     # Check if already exported
     if os.path.exists(gguf_file):
-        print(f"  GGUF already exists: {gguf_file}")
+        print(f"  GGUF already exists: {gguf_file}", flush=True)
         return gguf_file
 
     t0 = time.time()
@@ -165,7 +176,7 @@ def export_gguf(exp_output: str, config: dict) -> str:
     # Check if already merged from a previous attempt
     merged_files = [f for f in os.listdir(gguf_dir) if f.endswith(".safetensors")] if os.path.exists(gguf_dir) else []
     if not merged_files:
-        print(f"  Merging LoRA weights...")
+        print(f"  Merging LoRA weights...", flush=True)
         merge_script = f"""
 import os
 os.environ["TORCHDYNAMO_DISABLE"] = "1"
@@ -176,21 +187,21 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     max_seq_length=2048, dtype=None, load_in_4bit=True,
 )
 model.save_pretrained_merged("{gguf_dir}", tokenizer, save_method="merged_16bit")
-print("MERGE_OK")
+print("MERGE_OK", flush=True)
 """
         result = subprocess.run(
             [TRAIN_PYTHON, "-c", merge_script],
             env=env, capture_output=True, text=True, timeout=1800,
         )
         if "MERGE_OK" not in result.stdout:
-            print(f"  Merge FAILED")
-            print(f"  stderr: {result.stderr[-300:]}")
+            print(f"  Merge FAILED", flush=True)
+            print(f"  stderr: {result.stderr[-300:]}", flush=True)
             return None
 
     # Step 2: Convert merged safetensors to GGUF via Python converter
     converter = os.path.expanduser("~/.unsloth/llama.cpp/convert_hf_to_gguf.py")
     if not os.path.exists(converter):
-        print(f"  Converter not found: {converter}")
+        print(f"  Converter not found: {converter}", flush=True)
         return None
 
     print(f"  Converting to GGUF (f16)...", flush=True)
@@ -204,7 +215,7 @@ print("MERGE_OK")
 
     if result.returncode != 0 or not os.path.exists(gguf_file):
         print(f"  GGUF conversion FAILED ({elapsed/60:.1f}m)")
-        print(f"  stderr: {result.stderr[-300:]}")
+        print(f"  stderr: {result.stderr[-300:]}", flush=True)
         return None
 
     size_mb = os.path.getsize(gguf_file) / (1024 * 1024)
@@ -217,35 +228,47 @@ def import_to_ollama(gguf_path: str, model_name: str) -> bool:
     gguf_dir = os.path.dirname(gguf_path)
     modelfile = os.path.join(gguf_dir, "Modelfile")
 
-    # Use absolute path in Modelfile.
-    # Use chatml template WITHOUT <|im_start|>think to prevent Qwen3 thinking mode.
+    # Use absolute path in Modelfile with model-appropriate template.
     abs_gguf = os.path.abspath(gguf_path)
+    model_name_lower = config.get("model", "").lower()
+
     with open(modelfile, "w") as f:
         f.write(f'FROM {abs_gguf}\n')
-        f.write('TEMPLATE """{{- if .System }}<|im_start|>system\n')
-        f.write('{{ .System }}<|im_end|>\n')
-        f.write('{{ end }}{{- range .Messages }}{{- if eq .Role "user" }}<|im_start|>user\n')
-        f.write('{{ .Content }}<|im_end|>\n')
-        f.write('{{ end }}{{- if eq .Role "assistant" }}<|im_start|>assistant\n')
-        f.write('{{ .Content }}<|im_end|>\n')
-        f.write('{{ end }}{{- end }}<|im_start|>assistant\n')
-        f.write('"""\n')
-        f.write('PARAMETER num_ctx 2048\n')
-        f.write('PARAMETER stop <|im_end|>\n')
+
+        if "phi" in model_name_lower:
+            # Phi-4 uses <|system|>/<|user|>/<|assistant|> format
+            f.write('TEMPLATE """{{- if .System }}<|system|>\n{{ .System }}<|end|>\n{{ end }}')
+            f.write('{{- range .Messages }}{{- if eq .Role "user" }}<|user|>\n{{ .Content }}<|end|>\n{{ end }}')
+            f.write('{{- if eq .Role "assistant" }}<|assistant|>\n{{ .Content }}<|end|>\n{{ end }}{{- end }}')
+            f.write('<|assistant|>\n"""\n')
+            f.write('PARAMETER stop <|end|>\n')
+        else:
+            # Qwen/chatml: no <|im_start|>think to prevent thinking mode
+            f.write('TEMPLATE """{{- if .System }}<|im_start|>system\n')
+            f.write('{{ .System }}<|im_end|>\n')
+            f.write('{{ end }}{{- range .Messages }}{{- if eq .Role "user" }}<|im_start|>user\n')
+            f.write('{{ .Content }}<|im_end|>\n')
+            f.write('{{ end }}{{- if eq .Role "assistant" }}<|im_start|>assistant\n')
+            f.write('{{ .Content }}<|im_end|>\n')
+            f.write('{{ end }}{{- end }}<|im_start|>assistant\n')
+            f.write('"""\n')
+            f.write('PARAMETER stop <|im_end|>\n')
+
+        f.write('PARAMETER num_ctx 1024\n')
         f.write('PARAMETER temperature 0.1\n')
         f.write(f'SYSTEM """{SYSTEM_PROMPT}"""\n')
 
-    print(f"  Importing to Ollama as '{model_name}'...")
+    print(f"  Importing to Ollama as '{model_name}'...", flush=True)
     result = subprocess.run(
         ["ollama", "create", model_name, "-f", modelfile],
         capture_output=True, text=True, timeout=300,
     )
 
     if result.returncode != 0:
-        print(f"  Ollama import FAILED: {result.stderr[:200]}")
+        print(f"  Ollama import FAILED: {result.stderr[:200]}", flush=True)
         return False
 
-    print(f"  Ollama import OK")
+    print(f"  Ollama import OK", flush=True)
     return True
 
 
@@ -408,12 +431,12 @@ def run_experiment(config: dict) -> dict | None:
     exp_name = config["name"]
     ollama_name = f"mtg-exp-{exp_name}"
 
-    print(f"\n{'═' * 70}")
-    print(f"EXPERIMENT: {exp_name}")
-    print(f"  model={config['model']}")
+    print(f"\n{'═' * 70}", flush=True)
+    print(f"EXPERIMENT: {exp_name}", flush=True)
+    print(f"  model={config['model']}", flush=True)
     print(f"  lora_rank={config['lora_rank']}, lr={config['lr']}, "
-          f"epochs={config['epochs']}, batch={config['batch_size']}")
-    print(f"{'═' * 70}")
+          f"epochs={config['epochs']}, batch={config['batch_size']}", flush=True)
+    print(f"{'═' * 70}", flush=True)
 
     t0 = time.time()
 
@@ -432,7 +455,7 @@ def run_experiment(config: dict) -> dict | None:
         return None
 
     # Step 4: Warm up model (first inference is slow due to model loading)
-    print(f"  Warming up model...")
+    print(f"  Warming up model...", flush=True)
     for attempt in range(3):
         result = call_ollama("Name: Sol Ring\nType: Artifact\nCMC: 1\nKeywords: none\nOracle text: {T}: Add {C}{C}.", ollama_name)
         if result:
@@ -440,7 +463,7 @@ def run_experiment(config: dict) -> dict | None:
         time.sleep(5)
 
     # Step 5: Evaluate
-    print(f"  Evaluating against {500} golden cards...")
+    print(f"  Evaluating against {500} golden cards...", flush=True)
     scores = evaluate_model(ollama_name)
 
     total_time = time.time() - t0
@@ -448,16 +471,16 @@ def run_experiment(config: dict) -> dict | None:
     scores["config"] = config
     scores["total_time_m"] = round(total_time / 60, 1)
 
-    print(f"\n  RESULTS: {exp_name}")
-    print(f"    Composite: {scores['composite_score']:.1%}")
+    print(f"\n  RESULTS: {exp_name}", flush=True)
+    print(f"    Composite: {scores['composite_score']:.1%}", flush=True)
     print(f"    Role:      {scores['role_accuracy']:.1%} ({scores['role_correct']}/{scores['total']})")
     print(f"    Provides:  {scores['provides_accuracy']:.1%} ({scores['provides_correct']}/{scores['total']})")
     print(f"    Wants:     {scores['wants_accuracy']:.1%} ({scores['wants_correct']}/{scores['total']})")
-    print(f"    Parse fail: {scores['parse_failures']}")
-    print(f"    Total time: {scores['total_time_m']}m")
+    print(f"    Parse fail: {scores['parse_failures']}", flush=True)
+    print(f"    Total time: {scores['total_time_m']}m", flush=True)
 
     if scores["role_errors"]:
-        print(f"    Sample role errors: {scores['role_errors'][:5]}")
+        print(f"    Sample role errors: {scores['role_errors'][:5]}", flush=True)
 
     # Cleanup: remove Ollama model to save disk
     subprocess.run(["ollama", "rm", ollama_name], capture_output=True)
@@ -474,17 +497,17 @@ def main():
     args = parser.parse_args()
 
     if args.eval_only:
-        print(f"Evaluating model: {args.eval_only}")
+        print(f"Evaluating model: {args.eval_only}", flush=True)
         scores = evaluate_model(args.eval_only)
-        print(f"\nComposite: {scores['composite_score']:.1%}")
+        print(f"\nComposite: {scores['composite_score']:.1%}", flush=True)
         print(f"Role:      {scores['role_accuracy']:.1%} ({scores['role_correct']}/{scores['total']})")
         print(f"Provides:  {scores['provides_accuracy']:.1%} ({scores['provides_correct']}/{scores['total']})")
         print(f"Wants:     {scores['wants_accuracy']:.1%} ({scores['wants_correct']}/{scores['total']})")
-        print(f"Parse fail: {scores['parse_failures']}")
+        print(f"Parse fail: {scores['parse_failures']}", flush=True)
         if scores["role_errors"]:
-            print(f"\nRole errors:")
+            print(f"\nRole errors:", flush=True)
             for err in scores["role_errors"]:
-                print(f"  {err}")
+                print(f"  {err}", flush=True)
         return
 
     experiments = EXPERIMENTS
@@ -507,7 +530,7 @@ def main():
         print(f"  {i}. {config['name']} (~{est_time}m)")
         if args.dry_run:
             print(f"     model={config['model']}, rank={config['lora_rank']}, "
-                  f"lr={config['lr']}, epochs={config['epochs']}")
+                  f"lr={config['lr']}, epochs={config['epochs']}", flush=True)
 
     if args.dry_run:
         return
@@ -526,21 +549,21 @@ def main():
 
             if scores["composite_score"] > best_score:
                 best_score = scores["composite_score"]
-                print(f"  ★ NEW BEST: {scores['composite_score']:.1%}")
+                print(f"  ★ NEW BEST: {scores['composite_score']:.1%}", flush=True)
             else:
-                print(f"  Current best: {best_score:.1%}")
+                print(f"  Current best: {best_score:.1%}", flush=True)
 
     # Summary
-    print(f"\n{'═' * 70}")
-    print(f"EXPERIMENT SUMMARY")
-    print(f"{'═' * 70}")
+    print(f"\n{'═' * 70}", flush=True)
+    print(f"EXPERIMENT SUMMARY", flush=True)
+    print(f"{'═' * 70}", flush=True)
     results.sort(key=lambda r: r.get("composite_score", 0), reverse=True)
-    print(f"\n{'Experiment':<35} {'Composite':>10} {'Role':>8} {'Provides':>10} {'Wants':>8} {'Time':>8}")
-    print(f"{'─' * 85}")
+    print(f"\n{'Experiment':<35} {'Composite':>10} {'Role':>8} {'Provides':>10} {'Wants':>8} {'Time':>8}", flush=True)
+    print(f"{'─' * 85}", flush=True)
     for r in results:
         print(f"  {r['experiment']:<33} {r['composite_score']:>9.1%} "
               f"{r['role_accuracy']:>7.1%} {r['provides_accuracy']:>9.1%} "
-              f"{r['wants_accuracy']:>7.1%} {r['total_time_m']:>6.1f}m")
+              f"{r['wants_accuracy']:>7.1%} {r['total_time_m']:>6.1f}m", flush=True)
 
     if results:
         best = results[0]

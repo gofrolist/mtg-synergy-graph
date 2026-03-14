@@ -66,12 +66,14 @@ def train(
         load_in_4bit=True,
     )
 
-    # Apply chat template
+    # Apply chat template based on model family
     model_lower = model_name.lower()
-    if "qwen3" in model_lower or "qwen-3" in model_lower:
-        template = "qwen-2.5"  # Qwen3 uses same <|im_start|> template
-    elif "qwen2" in model_lower or "qwen-2" in model_lower:
-        template = "qwen-2.5"
+    if "phi" in model_lower:
+        template = "phi-4"
+    elif "qwen" in model_lower:
+        template = "qwen-2.5"  # Qwen 2.5/3/3.5 all use <|im_start|> chatml
+    elif "gemma" in model_lower:
+        template = "gemma"
     else:
         template = "chatml"
     tokenizer = get_chat_template(tokenizer, chat_template=template)
