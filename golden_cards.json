@@ -1488,7 +1488,8 @@
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
           "life-drain",
-          "targeted-removal"
+          "targeted-removal",
+          "board-wipe"
         ],
         "wants_must_include": [
           "life-payment"
@@ -1742,7 +1743,8 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "mana-flexibility"
+          "mana-flexibility",
+          "mana-acceleration"
         ],
         "wants_must_include": []
       }
@@ -2056,7 +2058,7 @@
         "hate full hand"
       ],
       "expected": {
-        "role": "removal",
+        "role": "ramp",
         "synergy_tags_must_include": [],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
@@ -2540,7 +2542,8 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "mana-flexibility"
+          "mana-flexibility",
+          "mana-acceleration"
         ],
         "wants_must_include": []
       }
@@ -2595,7 +2598,8 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "mana-flexibility"
+          "mana-flexibility",
+          "mana-acceleration"
         ],
         "wants_must_include": []
       }
@@ -2641,7 +2645,8 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "mana-flexibility"
+          "mana-flexibility",
+          "mana-acceleration"
         ],
         "wants_must_include": []
       }
@@ -2686,7 +2691,8 @@
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
           "mana-flexibility",
-          "two-color-mana"
+          "two-color-mana",
+          "mana-acceleration"
         ],
         "wants_must_include": []
       }
@@ -2873,7 +2879,8 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "targeted-removal"
+          "targeted-removal",
+          "board-wipe"
         ],
         "wants_must_include": [
           "artifact-presence",
@@ -3002,7 +3009,8 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "mana-flexibility"
+          "mana-flexibility",
+          "mana-acceleration"
         ],
         "wants_must_include": []
       }
@@ -3046,7 +3054,8 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "mana-flexibility"
+          "mana-flexibility",
+          "mana-acceleration"
         ],
         "wants_must_include": []
       }
@@ -3189,7 +3198,8 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "mana-flexibility"
+          "mana-flexibility",
+          "mana-acceleration"
         ],
         "wants_must_include": []
       }
@@ -3378,7 +3388,8 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "mana-flexibility"
+          "mana-flexibility",
+          "mana-acceleration"
         ],
         "wants_must_include": []
       }
@@ -3577,7 +3588,8 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "mana-flexibility"
+          "mana-flexibility",
+          "mana-acceleration"
         ],
         "wants_must_include": []
       }
@@ -4058,7 +4070,8 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "three-colorless-mana"
+          "three-colorless-mana",
+          "mana-acceleration"
         ],
         "wants_must_include": []
       }
@@ -4427,7 +4440,8 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "mana-flexibility"
+          "mana-flexibility",
+          "mana-acceleration"
         ],
         "wants_must_include": []
       }
@@ -6265,7 +6279,8 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "targeted-removal"
+          "targeted-removal",
+          "board-wipe"
         ],
         "wants_must_include": [
           "creature-targeting"
@@ -7446,7 +7461,7 @@
         "repeatable pure draw"
       ],
       "expected": {
-        "role": "threat",
+        "role": "draw",
         "synergy_tags_must_include": [
           "draw engine",
           "repeatable pure draw"
@@ -8170,7 +8185,7 @@
         "activated ability"
       ],
       "expected": {
-        "role": "utility",
+        "role": "ramp",
         "synergy_tags_must_include": [
           "tutor-land-to-battlefield",
           "ramp"
@@ -8270,7 +8285,8 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "mana-flexibility"
+          "mana-flexibility",
+          "mana-acceleration"
         ],
         "wants_must_include": []
       }
@@ -9237,7 +9253,7 @@
         "repeatable pure draw"
       ],
       "expected": {
-        "role": "threat",
+        "role": "draw",
         "synergy_tags_must_include": [
           "draw engine",
           "repeatable pure draw"
@@ -9600,7 +9616,8 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "mana-flexibility"
+          "mana-flexibility",
+          "mana-acceleration"
         ],
         "wants_must_include": []
       }
@@ -9626,7 +9643,8 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "board-wipe"
+          "board-wipe",
+          "graveyard-recursion"
         ],
         "wants_must_include": [
           "graveyard-filling"
@@ -10114,7 +10132,8 @@
         "provides_must_include": [
           "life-drain",
           "life-gain",
-          "targeted-removal"
+          "targeted-removal",
+          "board-wipe"
         ],
         "wants_must_include": [
           "creature-death"
@@ -10868,7 +10887,8 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "mana-flexibility"
+          "mana-flexibility",
+          "mana-acceleration"
         ],
         "wants_must_include": []
       }
@@ -11406,7 +11426,8 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "targeted-removal"
+          "targeted-removal",
+          "board-wipe"
         ],
         "wants_must_include": [
           "creature-board"
@@ -11659,7 +11680,8 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "mana-flexibility"
+          "mana-flexibility",
+          "mana-acceleration"
         ],
         "wants_must_include": []
       }
@@ -11916,7 +11938,7 @@
         "repeatable crime"
       ],
       "expected": {
-        "role": "utility",
+        "role": "ramp",
         "synergy_tags_must_include": [
           "mana dork"
         ],
@@ -11952,7 +11974,8 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "targeted-removal"
+          "targeted-removal",
+          "board-wipe"
         ],
         "wants_must_include": [
           "low-mana-value-permanents"
@@ -12152,7 +12175,7 @@
         "intervening if clause"
       ],
       "expected": {
-        "role": "enabler",
+        "role": "ramp",
         "synergy_tags_must_include": [
           "tutor-land-to-battlefield",
           "ramp"
@@ -12687,7 +12710,7 @@
         "ritual"
       ],
       "expected": {
-        "role": "removal",
+        "role": "ramp",
         "synergy_tags_must_include": [],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
@@ -12777,7 +12800,7 @@
         "triggered ability"
       ],
       "expected": {
-        "role": "enabler",
+        "role": "draw",
         "synergy_tags_must_include": [
           "draw engine",
           "repeatable pure draw"
@@ -12834,7 +12857,8 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "black-mana"
+          "black-mana",
+          "mana-acceleration"
         ],
         "wants_must_include": []
       }
@@ -12857,7 +12881,8 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "mana-flexibility"
+          "mana-flexibility",
+          "mana-acceleration"
         ],
         "wants_must_include": []
       }
