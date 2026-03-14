@@ -156,12 +156,12 @@ def run_finetune(config: dict) -> str:
     exp_output = os.path.join(OUTPUT_DIR, config["name"])
     os.makedirs(exp_output, exist_ok=True)
 
-    # Clean previous checkpoints
-    for item in os.listdir(exp_output):
-        path = os.path.join(exp_output, item)
-        if os.path.isdir(path) and item.startswith("checkpoint"):
-            import shutil
-            shutil.rmtree(path)
+    # Skip training if adapter already exists (resume from previous run)
+    adapter_path = os.path.join(exp_output, "adapter_model.safetensors")
+    if os.path.exists(adapter_path):
+        size_mb = os.path.getsize(adapter_path) / (1024 * 1024)
+        print(f"  Adapter already exists ({size_mb:.0f}MB), skipping training")
+        return exp_output
 
     cmd = [
         CONDA_PYTHON, "finetune.py",
@@ -180,7 +180,7 @@ def run_finetune(config: dict) -> str:
 
     print(f"  Training: {' '.join(cmd)}")
     t0 = time.time()
-    result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=7200)
+    result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=14400)
     elapsed = time.time() - t0
 
     if result.returncode != 0:
@@ -203,15 +203,15 @@ def export_gguf(exp_output: str, config: dict) -> str:
         return gguf_file
 
     t0 = time.time()
+    env = os.environ.copy()
+    env["UNSLOTH_SKIP_TORCHVISION_CHECK"] = "1"
+    env["LD_LIBRARY_PATH"] = CONDA_CUDA_LIB + ":" + env.get("LD_LIBRARY_PATH", "")
 
     # Step 1: Merge LoRA into base model (saves merged safetensors)
     # Check if already merged from a previous attempt
     merged_files = [f for f in os.listdir(gguf_dir) if f.endswith(".safetensors")] if os.path.exists(gguf_dir) else []
     if not merged_files:
         print(f"  Merging LoRA weights...")
-        env = os.environ.copy()
-        env["UNSLOTH_SKIP_TORCHVISION_CHECK"] = "1"
-        env["LD_LIBRARY_PATH"] = CONDA_CUDA_LIB + ":" + env.get("LD_LIBRARY_PATH", "")
         merge_script = f"""
 import os
 os.environ["TORCHDYNAMO_DISABLE"] = "1"
@@ -239,10 +239,10 @@ print("MERGE_OK")
         print(f"  Converter not found: {converter}")
         return None
 
-    print(f"  Converting to GGUF (q8_0)...")
+    print(f"  Converting to GGUF (f16)...", flush=True)
     result = subprocess.run(
         [CONDA_PYTHON, converter, gguf_dir,
-         "--outfile", gguf_file, "--outtype", "q8_0"],
+         "--outfile", gguf_file, "--outtype", "f16"],
         env=env, capture_output=True, text=True, timeout=1800,
     )
 
@@ -263,12 +263,22 @@ def import_to_ollama(gguf_path: str, model_name: str) -> bool:
     gguf_dir = os.path.dirname(gguf_path)
     modelfile = os.path.join(gguf_dir, "Modelfile")
 
-    # Use absolute path in Modelfile
+    # Use absolute path in Modelfile.
+    # Use chatml template WITHOUT <|im_start|>think to prevent Qwen3 thinking mode.
     abs_gguf = os.path.abspath(gguf_path)
     with open(modelfile, "w") as f:
         f.write(f'FROM {abs_gguf}\n')
-        f.write('PARAMETER temperature 0.1\n')
+        f.write('TEMPLATE """{{- if .System }}<|im_start|>system\n')
+        f.write('{{ .System }}<|im_end|>\n')
+        f.write('{{ end }}{{- range .Messages }}{{- if eq .Role "user" }}<|im_start|>user\n')
+        f.write('{{ .Content }}<|im_end|>\n')
+        f.write('{{ end }}{{- if eq .Role "assistant" }}<|im_start|>assistant\n')
+        f.write('{{ .Content }}<|im_end|>\n')
+        f.write('{{ end }}{{- end }}<|im_start|>assistant\n')
+        f.write('"""\n')
         f.write('PARAMETER num_ctx 2048\n')
+        f.write('PARAMETER stop <|im_end|>\n')
+        f.write('PARAMETER temperature 0.1\n')
         f.write(f'SYSTEM """{SYSTEM_PROMPT}"""\n')
 
     print(f"  Importing to Ollama as '{model_name}'...")
