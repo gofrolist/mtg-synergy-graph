@@ -39,10 +39,11 @@ RESULTS_FILE = os.path.join(os.path.dirname(__file__), "experiment_results.json"
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
 
-# Conda environment for fine-tuning (has unsloth + torch)
-CONDA_PYTHON = os.path.expanduser("~/miniconda3/envs/finetune/bin/python3")
-CONDA_CUDA_LIB = os.path.expanduser(
-    "~/miniconda3/envs/finetune/lib/python3.11/site-packages/nvidia/cu13/lib"
+# Python for fine-tuning (uv venv with unsloth + torch cu130)
+TRAIN_PYTHON = os.path.join(os.path.dirname(__file__), ".venv", "bin", "python3")
+CUDA_LIB = os.path.join(
+    os.path.dirname(__file__), ".venv", "lib", "python3.12",
+    "site-packages", "nvidia", "cu13", "lib"
 )
 
 SYSTEM_PROMPT = """You are an MTG card analyst. Analyze the card and return JSON with:
@@ -164,7 +165,7 @@ def run_finetune(config: dict) -> str:
         return exp_output
 
     cmd = [
-        CONDA_PYTHON, "finetune.py",
+        TRAIN_PYTHON, "finetune.py",
         "--model", config["model"],
         "--epochs", str(config["epochs"]),
         "--lr", str(config["lr"]),
@@ -176,7 +177,7 @@ def run_finetune(config: dict) -> str:
     env = os.environ.copy()
     env["FINETUNE_OUTPUT_DIR"] = exp_output
     env["UNSLOTH_SKIP_TORCHVISION_CHECK"] = "1"
-    env["LD_LIBRARY_PATH"] = CONDA_CUDA_LIB + ":" + env.get("LD_LIBRARY_PATH", "")
+    env["LD_LIBRARY_PATH"] = CUDA_LIB + ":" + env.get("LD_LIBRARY_PATH", "")
 
     print(f"  Training: {' '.join(cmd)}")
     t0 = time.time()
@@ -205,7 +206,7 @@ def export_gguf(exp_output: str, config: dict) -> str:
     t0 = time.time()
     env = os.environ.copy()
     env["UNSLOTH_SKIP_TORCHVISION_CHECK"] = "1"
-    env["LD_LIBRARY_PATH"] = CONDA_CUDA_LIB + ":" + env.get("LD_LIBRARY_PATH", "")
+    env["LD_LIBRARY_PATH"] = CUDA_LIB + ":" + env.get("LD_LIBRARY_PATH", "")
 
     # Step 1: Merge LoRA into base model (saves merged safetensors)
     # Check if already merged from a previous attempt
@@ -225,7 +226,7 @@ model.save_pretrained_merged("{gguf_dir}", tokenizer, save_method="merged_16bit"
 print("MERGE_OK")
 """
         result = subprocess.run(
-            [CONDA_PYTHON, "-c", merge_script],
+            [TRAIN_PYTHON, "-c", merge_script],
             env=env, capture_output=True, text=True, timeout=1800,
         )
         if "MERGE_OK" not in result.stdout:
@@ -241,7 +242,7 @@ print("MERGE_OK")
 
     print(f"  Converting to GGUF (f16)...", flush=True)
     result = subprocess.run(
-        [CONDA_PYTHON, converter, gguf_dir,
+        [TRAIN_PYTHON, converter, gguf_dir,
          "--outfile", gguf_file, "--outtype", "f16"],
         env=env, capture_output=True, text=True, timeout=1800,
     )
