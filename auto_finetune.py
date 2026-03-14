@@ -57,96 +57,49 @@ Return ONLY valid JSON. No explanation."""
 # ── Experiment Configurations ──
 
 EXPERIMENTS = [
-    # Baseline: current best config
-    {
-        "name": "qwen3-4b-r32-lr2e4-ep3",
-        "model": "unsloth/Qwen3-4B-Instruct-2507-unsloth-bnb-4bit",
-        "lora_rank": 32,
-        "lr": 2e-4,
-        "epochs": 3,
-        "batch_size": 8,
-    },
-    # Higher LoRA rank
-    {
-        "name": "qwen3-4b-r64-lr2e4-ep3",
-        "model": "unsloth/Qwen3-4B-Instruct-2507-unsloth-bnb-4bit",
-        "lora_rank": 64,
-        "lr": 2e-4,
-        "epochs": 3,
-        "batch_size": 8,
-    },
-    # Lower LoRA rank (faster, less overfitting)
-    {
-        "name": "qwen3-4b-r16-lr2e4-ep3",
-        "model": "unsloth/Qwen3-4B-Instruct-2507-unsloth-bnb-4bit",
-        "lora_rank": 16,
-        "lr": 2e-4,
-        "epochs": 3,
-        "batch_size": 8,
-    },
-    # Lower learning rate
-    {
-        "name": "qwen3-4b-r32-lr1e4-ep3",
-        "model": "unsloth/Qwen3-4B-Instruct-2507-unsloth-bnb-4bit",
-        "lora_rank": 32,
-        "lr": 1e-4,
-        "epochs": 3,
-        "batch_size": 8,
-    },
-    # More epochs
-    {
-        "name": "qwen3-4b-r32-lr2e4-ep5",
-        "model": "unsloth/Qwen3-4B-Instruct-2507-unsloth-bnb-4bit",
-        "lora_rank": 32,
-        "lr": 2e-4,
-        "epochs": 5,
-        "batch_size": 8,
-    },
-    # Fewer epochs (less overfitting)
-    {
-        "name": "qwen3-4b-r32-lr2e4-ep1",
-        "model": "unsloth/Qwen3-4B-Instruct-2507-unsloth-bnb-4bit",
-        "lora_rank": 32,
-        "lr": 2e-4,
-        "epochs": 1,
-        "batch_size": 8,
-    },
-    # Higher LR + fewer epochs
-    {
-        "name": "qwen3-4b-r32-lr5e4-ep2",
-        "model": "unsloth/Qwen3-4B-Instruct-2507-unsloth-bnb-4bit",
-        "lora_rank": 32,
-        "lr": 5e-4,
-        "epochs": 2,
-        "batch_size": 8,
-    },
-    # Larger base model
-    {
-        "name": "qwen3-8b-r32-lr2e4-ep2",
-        "model": "unsloth/Qwen3-8B-Instruct-2507-unsloth-bnb-4bit",
-        "lora_rank": 32,
-        "lr": 2e-4,
-        "epochs": 2,
-        "batch_size": 2,
-    },
-    # Smaller base model (faster iteration)
-    {
-        "name": "qwen25-3b-r32-lr2e4-ep3",
-        "model": "unsloth/Qwen2.5-3B-Instruct",
-        "lora_rank": 32,
-        "lr": 2e-4,
-        "epochs": 3,
-        "batch_size": 8,
-    },
-    # High rank + low LR (stable, expressive)
-    {
-        "name": "qwen3-4b-r64-lr1e4-ep3",
-        "model": "unsloth/Qwen3-4B-Instruct-2507-unsloth-bnb-4bit",
-        "lora_rank": 64,
-        "lr": 1e-4,
-        "epochs": 3,
-        "batch_size": 8,
-    },
+    # === Qwen 3.5 models (newest architecture) ===
+
+    # Qwen3.5-4B: direct upgrade from Qwen3-4B
+    {"name": "qwen35-4b-r32-lr2e4-ep3",
+     "model": "unsloth/Qwen3.5-4B", "lora_rank": 32, "lr": 2e-4, "epochs": 3, "batch_size": 8},
+
+    # Qwen3.5-35B-A3B MoE: 35B knowledge, 3B active params
+    {"name": "qwen35-35b-a3b-r32-lr2e4-ep3",
+     "model": "unsloth/Qwen3.5-35B-A3B", "lora_rank": 32, "lr": 2e-4, "epochs": 3, "batch_size": 4},
+
+    # Qwen3.5-2B: fast iteration
+    {"name": "qwen35-2b-r32-lr2e4-ep3",
+     "model": "unsloth/Qwen3.5-2B", "lora_rank": 32, "lr": 2e-4, "epochs": 3, "batch_size": 8},
+
+    # Qwen3.5-0.8B: minimum viable model
+    {"name": "qwen35-08b-r32-lr2e4-ep3",
+     "model": "unsloth/Qwen3.5-0.8B", "lora_rank": 32, "lr": 2e-4, "epochs": 3, "batch_size": 8},
+
+    # === Qwen 3 baseline (retrain with fixed data) ===
+
+    # Qwen3-4B: same as current model, fresh training data
+    {"name": "qwen3-4b-r32-lr2e4-ep3",
+     "model": "unsloth/Qwen3-4B-Instruct-2507-unsloth-bnb-4bit", "lora_rank": 32, "lr": 2e-4, "epochs": 3, "batch_size": 8},
+
+    # === Hyperparameter variants on best Qwen3.5 ===
+
+    # Qwen3.5-4B with lower LR
+    {"name": "qwen35-4b-r32-lr1e4-ep3",
+     "model": "unsloth/Qwen3.5-4B", "lora_rank": 32, "lr": 1e-4, "epochs": 3, "batch_size": 8},
+
+    # Qwen3.5-4B with higher rank
+    {"name": "qwen35-4b-r64-lr2e4-ep3",
+     "model": "unsloth/Qwen3.5-4B", "lora_rank": 64, "lr": 2e-4, "epochs": 3, "batch_size": 8},
+
+    # Qwen3.5-4B fewer epochs (less overfitting)
+    {"name": "qwen35-4b-r32-lr2e4-ep2",
+     "model": "unsloth/Qwen3.5-4B", "lora_rank": 32, "lr": 2e-4, "epochs": 2, "batch_size": 8},
+
+    # === Other architectures ===
+
+    # Phi-4-mini (3.8B, Microsoft, different architecture)
+    {"name": "phi4-mini-r32-lr2e4-ep3",
+     "model": "unsloth/Phi-4-mini-instruct", "lora_rank": 32, "lr": 2e-4, "epochs": 3, "batch_size": 8},
 ]
 
 
