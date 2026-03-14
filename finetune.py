@@ -49,8 +49,8 @@ def train(
     model_name: str = "unsloth/Qwen2.5-3B-Instruct",
     epochs: int = 3,
     lr: float = 2e-4,
-    batch_size: int = 4,
-    max_seq_length: int = 2048,
+    batch_size: int = 8,
+    max_seq_length: int = 1024,
     lora_rank: int = 32,
 ):
     from unsloth import FastLanguageModel
@@ -113,7 +113,7 @@ def train(
     training_args = TrainingArguments(
         output_dir=OUTPUT_DIR,
         per_device_train_batch_size=batch_size,
-        gradient_accumulation_steps=4,
+        gradient_accumulation_steps=2,
         num_train_epochs=epochs,
         learning_rate=lr,
         bf16=True,

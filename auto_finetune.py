@@ -63,7 +63,7 @@ EXPERIMENTS = [
         "lora_rank": 32,
         "lr": 2e-4,
         "epochs": 3,
-        "batch_size": 4,
+        "batch_size": 8,
     },
     # Higher LoRA rank
     {
@@ -72,7 +72,7 @@ EXPERIMENTS = [
         "lora_rank": 64,
         "lr": 2e-4,
         "epochs": 3,
-        "batch_size": 4,
+        "batch_size": 8,
     },
     # Lower LoRA rank (faster, less overfitting)
     {
@@ -81,7 +81,7 @@ EXPERIMENTS = [
         "lora_rank": 16,
         "lr": 2e-4,
         "epochs": 3,
-        "batch_size": 4,
+        "batch_size": 8,
     },
     # Lower learning rate
     {
@@ -90,7 +90,7 @@ EXPERIMENTS = [
         "lora_rank": 32,
         "lr": 1e-4,
         "epochs": 3,
-        "batch_size": 4,
+        "batch_size": 8,
     },
     # More epochs
     {
@@ -99,7 +99,7 @@ EXPERIMENTS = [
         "lora_rank": 32,
         "lr": 2e-4,
         "epochs": 5,
-        "batch_size": 4,
+        "batch_size": 8,
     },
     # Fewer epochs (less overfitting)
     {
@@ -108,7 +108,7 @@ EXPERIMENTS = [
         "lora_rank": 32,
         "lr": 2e-4,
         "epochs": 1,
-        "batch_size": 4,
+        "batch_size": 8,
     },
     # Higher LR + fewer epochs
     {
@@ -117,7 +117,7 @@ EXPERIMENTS = [
         "lora_rank": 32,
         "lr": 5e-4,
         "epochs": 2,
-        "batch_size": 4,
+        "batch_size": 8,
     },
     # Larger base model
     {
@@ -135,7 +135,7 @@ EXPERIMENTS = [
         "lora_rank": 32,
         "lr": 2e-4,
         "epochs": 3,
-        "batch_size": 4,
+        "batch_size": 8,
     },
     # High rank + low LR (stable, expressive)
     {
@@ -144,7 +144,7 @@ EXPERIMENTS = [
         "lora_rank": 64,
         "lr": 1e-4,
         "epochs": 3,
-        "batch_size": 4,
+        "batch_size": 8,
     },
 ]
 

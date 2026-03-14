@@ -17,7 +17,7 @@ import os
 import random
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
-TAGS_FILE = os.path.join(DATA_DIR, "top10000_tags.json")
+TAGS_FILE = os.path.join(DATA_DIR, "top10000_tags_finetuned.json")
 SCRYFALL_FILE = os.path.join(DATA_DIR, "oracle_cards.json")
 
 TRAIN_FILE = os.path.join(DATA_DIR, "train.jsonl")
