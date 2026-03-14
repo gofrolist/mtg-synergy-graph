@@ -39,6 +39,12 @@ RESULTS_FILE = os.path.join(os.path.dirname(__file__), "experiment_results.json"
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
 
+# Conda environment for fine-tuning (has unsloth + torch)
+CONDA_PYTHON = os.path.expanduser("~/miniconda3/envs/finetune/bin/python3")
+CONDA_CUDA_LIB = os.path.expanduser(
+    "~/miniconda3/envs/finetune/lib/python3.11/site-packages/nvidia/cu13/lib"
+)
+
 SYSTEM_PROMPT = """You are an MTG card analyst. Analyze the card and return JSON with:
 - role: one of enabler, threat, draw, removal, ramp, utility, protection, land
 - provides: what this card gives (kebab-case tags, e.g. token-generation, counter-placement)
@@ -158,7 +164,7 @@ def run_finetune(config: dict) -> str:
             shutil.rmtree(path)
 
     cmd = [
-        sys.executable, "finetune.py",
+        CONDA_PYTHON, "finetune.py",
         "--model", config["model"],
         "--epochs", str(config["epochs"]),
         "--lr", str(config["lr"]),
@@ -169,6 +175,8 @@ def run_finetune(config: dict) -> str:
     # Patch finetune.py to use experiment-specific output dir
     env = os.environ.copy()
     env["FINETUNE_OUTPUT_DIR"] = exp_output
+    env["UNSLOTH_SKIP_TORCHVISION_CHECK"] = "1"
+    env["LD_LIBRARY_PATH"] = CONDA_CUDA_LIB + ":" + env.get("LD_LIBRARY_PATH", "")
 
     print(f"  Training: {' '.join(cmd)}")
     t0 = time.time()
@@ -185,37 +193,69 @@ def run_finetune(config: dict) -> str:
 
 
 def export_gguf(exp_output: str, config: dict) -> str:
-    """Export model to GGUF. Returns path to GGUF file."""
-    cmd = [
-        sys.executable, "finetune.py",
-        "--model", config["model"],
-        "--export-only",
-        "--quant", "q4_k_m",
-    ]
+    """Export model to GGUF via merge + Python converter. Returns path to GGUF file."""
+    gguf_dir = os.path.join(exp_output, "gguf")
+    gguf_file = os.path.join(gguf_dir, "model.gguf")
 
-    env = os.environ.copy()
-    env["FINETUNE_OUTPUT_DIR"] = exp_output
+    # Check if already exported
+    if os.path.exists(gguf_file):
+        print(f"  GGUF already exists: {gguf_file}")
+        return gguf_file
 
-    print(f"  Exporting GGUF...")
     t0 = time.time()
-    result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=1800)
+
+    # Step 1: Merge LoRA into base model (saves merged safetensors)
+    # Check if already merged from a previous attempt
+    merged_files = [f for f in os.listdir(gguf_dir) if f.endswith(".safetensors")] if os.path.exists(gguf_dir) else []
+    if not merged_files:
+        print(f"  Merging LoRA weights...")
+        env = os.environ.copy()
+        env["UNSLOTH_SKIP_TORCHVISION_CHECK"] = "1"
+        env["LD_LIBRARY_PATH"] = CONDA_CUDA_LIB + ":" + env.get("LD_LIBRARY_PATH", "")
+        merge_script = f"""
+import os
+os.environ["TORCHDYNAMO_DISABLE"] = "1"
+os.environ["UNSLOTH_SKIP_TORCHVISION_CHECK"] = "1"
+from unsloth import FastLanguageModel
+model, tokenizer = FastLanguageModel.from_pretrained(
+    model_name="{exp_output}",
+    max_seq_length=2048, dtype=None, load_in_4bit=True,
+)
+model.save_pretrained_merged("{gguf_dir}", tokenizer, save_method="merged_16bit")
+print("MERGE_OK")
+"""
+        result = subprocess.run(
+            [CONDA_PYTHON, "-c", merge_script],
+            env=env, capture_output=True, text=True, timeout=1800,
+        )
+        if "MERGE_OK" not in result.stdout:
+            print(f"  Merge FAILED")
+            print(f"  stderr: {result.stderr[-300:]}")
+            return None
+
+    # Step 2: Convert merged safetensors to GGUF via Python converter
+    converter = os.path.expanduser("~/.unsloth/llama.cpp/convert_hf_to_gguf.py")
+    if not os.path.exists(converter):
+        print(f"  Converter not found: {converter}")
+        return None
+
+    print(f"  Converting to GGUF (q8_0)...")
+    result = subprocess.run(
+        [CONDA_PYTHON, converter, gguf_dir,
+         "--outfile", gguf_file, "--outtype", "q8_0"],
+        env=env, capture_output=True, text=True, timeout=1800,
+    )
+
     elapsed = time.time() - t0
 
-    if result.returncode != 0:
-        print(f"  Export FAILED ({elapsed/60:.1f}m)")
+    if result.returncode != 0 or not os.path.exists(gguf_file):
+        print(f"  GGUF conversion FAILED ({elapsed/60:.1f}m)")
         print(f"  stderr: {result.stderr[-300:]}")
         return None
 
-    # Find GGUF file
-    gguf_dir = os.path.join(exp_output, "gguf")
-    if os.path.exists(gguf_dir):
-        for f in os.listdir(gguf_dir):
-            if f.endswith(".gguf"):
-                print(f"  GGUF exported ({elapsed/60:.1f}m)")
-                return os.path.join(gguf_dir, f)
-
-    print(f"  No GGUF file found")
-    return None
+    size_mb = os.path.getsize(gguf_file) / (1024 * 1024)
+    print(f"  GGUF exported: {size_mb:.0f}MB ({elapsed/60:.1f}m)")
+    return gguf_file
 
 
 def import_to_ollama(gguf_path: str, model_name: str) -> bool:
@@ -223,9 +263,10 @@ def import_to_ollama(gguf_path: str, model_name: str) -> bool:
     gguf_dir = os.path.dirname(gguf_path)
     modelfile = os.path.join(gguf_dir, "Modelfile")
 
-    # Write Modelfile
+    # Use absolute path in Modelfile
+    abs_gguf = os.path.abspath(gguf_path)
     with open(modelfile, "w") as f:
-        f.write(f'FROM {gguf_path}\n')
+        f.write(f'FROM {abs_gguf}\n')
         f.write('PARAMETER temperature 0.1\n')
         f.write('PARAMETER num_ctx 2048\n')
         f.write(f'SYSTEM """{SYSTEM_PROMPT}"""\n')
@@ -278,7 +319,7 @@ def call_ollama(prompt: str, model: str) -> str | None:
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with urllib.request.urlopen(req, timeout=120) as resp:
             data = json.loads(resp.read())
             return data["message"]["content"].strip()
     except Exception as e:
@@ -426,7 +467,15 @@ def run_experiment(config: dict) -> dict | None:
     if not import_to_ollama(gguf_path, ollama_name):
         return None
 
-    # Step 4: Evaluate
+    # Step 4: Warm up model (first inference is slow due to model loading)
+    print(f"  Warming up model...")
+    for attempt in range(3):
+        result = call_ollama("Name: Sol Ring\nType: Artifact\nCMC: 1\nKeywords: none\nOracle text: {T}: Add {C}{C}.", ollama_name)
+        if result:
+            break
+        time.sleep(5)
+
+    # Step 5: Evaluate
     print(f"  Evaluating against {500} golden cards...")
     scores = evaluate_model(ollama_name)
 
