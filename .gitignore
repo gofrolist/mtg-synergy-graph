@@ -18,6 +18,12 @@ data/scryfall_function_tags.json
 # Update workflow temp files
 data/pending_*.json
 
+# Fine-tuning artifacts
+data/train.jsonl
+data/val.jsonl
+model_output/
+.venv/
+
 # Legacy deck-specific files (replaced by unified DB)
 data/*_tags_*.json
 data/*_merged*.json
