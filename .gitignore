@@ -18,11 +18,22 @@ data/scryfall_function_tags.json
 # Update workflow temp files
 data/pending_*.json
 
+# Embeddings (regenerable via card_embeddings.py)
+data/embeddings.npy
+data/embeddings_index.json
+
 # Fine-tuning artifacts
 data/train.jsonl
 data/val.jsonl
+data/val_sample.json
+data/retag1k_mtg_tagger.json
 model_output/
+experiment_results.json
 .venv/
+
+# Build artifacts
+*.egg-info/
+main.py
 
 # Legacy deck-specific files (replaced by unified DB)
 data/*_tags_*.json
