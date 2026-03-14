@@ -4919,7 +4919,7 @@
         "toughness boost to all"
       ],
       "expected": {
-        "role": "enabler",
+        "role": "ramp",
         "synergy_tags_must_include": [],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
@@ -6054,18 +6054,16 @@
         "activated ability"
       ],
       "expected": {
-        "role": "ramp",
-        "synergy_tags_must_include": [
-          "mana rock"
-        ],
+        "role": "enabler",
+        "synergy_tags_must_include": [],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
           "mana-flexibility",
           "sacrifice-payoff"
         ],
         "wants_must_include": [
-          "creature-death",
-          "sacrifice-events"
+          "sacrifice-events",
+          "creature-death"
         ]
       }
     },
@@ -8880,7 +8878,7 @@
         "activated ability"
       ],
       "expected": {
-        "role": "enabler",
+        "role": "ramp",
         "synergy_tags_must_include": [],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
