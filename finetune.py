@@ -19,6 +19,9 @@ import argparse
 import json
 import os
 
+# Disable torch.compile (requires nvcc which may not be available)
+os.environ["TORCHDYNAMO_DISABLE"] = "1"
+
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 TRAIN_FILE = os.path.join(DATA_DIR, "train.jsonl")
 VAL_FILE = os.path.join(DATA_DIR, "val.jsonl")
@@ -105,7 +108,7 @@ def train(
         gradient_accumulation_steps=4,
         num_train_epochs=epochs,
         learning_rate=lr,
-        fp16=True,
+        bf16=True,
         logging_steps=25,
         eval_strategy="steps",
         eval_steps=100,
