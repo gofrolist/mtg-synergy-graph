@@ -161,6 +161,7 @@ def _attach_tags(conn: sqlite3.Connection, cards: list[dict]) -> list[dict]:
         c["provides"] = []
         c["wants"] = []
         c["synergy_tags"] = []
+        c["scryfall_tags"] = []
 
     # Batch query tags using chunked IN clauses
     chunk_size = 500
@@ -186,16 +187,16 @@ def _attach_tags(conn: sqlite3.Connection, cards: list[dict]) -> list[dict]:
         ):
             card_idx[row[0]]["synergy_tags"].append(row[1])
 
-        # Load scryfall community tags into synergy_tags (merged)
+        # Load scryfall community tags into separate field (validation only,
+        # not used for graph edge building — avoids inheriting Scryfall's
+        # inconsistencies into synergy scores)
         try:
             for row in conn.execute(
                 f"SELECT oracle_id, tag FROM scryfall_tags WHERE oracle_id IN ({placeholders})",
                 chunk,
             ):
                 if row[0] in card_idx:
-                    tag = row[1]
-                    if tag not in card_idx[row[0]]["synergy_tags"]:
-                        card_idx[row[0]]["synergy_tags"].append(tag)
+                    card_idx[row[0]]["scryfall_tags"].append(row[1])
         except Exception:
             pass  # scryfall_tags table may not exist in older DBs
 

@@ -565,7 +565,11 @@ def build_embedding_edges(cards: list[dict], min_similarity: float = 0.75,
 
 
 def build_shared_tag_edges(cards: list[dict], min_weight: int = 2) -> list[dict]:
-    """Build undirected edges between cards sharing Scryfall function tags.
+    """Build undirected edges between cards sharing synergy_tags.
+
+    Uses LLM-generated synergy_tags only (not Scryfall community tags,
+    which are kept separate as a validation signal). Currently dormant
+    until the synergy_tags table is populated with our own tag vocabulary.
 
     Only considers functional tags (not meta tags like 'activated ability').
     Weight = number of shared tags.
