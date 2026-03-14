@@ -1,9 +1,9 @@
 {
   "_meta": {
-    "description": "Golden dataset: manually verified correct tags for regression testing. synergy_tags now validated against Scryfall tagger community tags. Role/provides/wants validated against LLM output.",
-    "version": "0.3",
-    "last_updated": "2026-03-12",
-    "notes": "role uses our schema (ramp/draw/removal/protection/enabler/threat/utility/land). synergy_tags_must_include uses Scryfall tagger vocabulary. provides/wants are LLM-generated relationship tags."
+    "description": "Golden dataset: manually verified correct tags for regression testing. synergy_tags validated against Scryfall tagger community tags. Role/provides/wants validated against LLM output.",
+    "version": "0.4",
+    "last_updated": "2026-03-14",
+    "notes": "role uses our schema (ramp/draw/removal/protection/enabler/threat/utility/land). synergy_tags_must_include uses Scryfall tagger vocabulary. provides/wants are LLM-generated relationship tags. All provides/wants expectations are manually verified."
   },
   "cards": [
     {
@@ -12,12 +12,26 @@
       "oracle_text": "{T}: Add {C}{C}.",
       "keywords": [],
       "cmc": 1,
-      "scryfall_tags": ["adds multiple mana", "fast mana", "mana rock", "refund", "activated ability"],
+      "scryfall_tags": [
+        "adds multiple mana",
+        "fast mana",
+        "mana rock",
+        "refund",
+        "activated ability"
+      ],
       "expected": {
         "role": "ramp",
-        "synergy_tags_must_include": ["mana rock"],
-        "synergy_tags_must_exclude": ["counter doubler", "tribal-synergy", "removal"],
-        "provides_must_include": ["mana-acceleration"],
+        "synergy_tags_must_include": [
+          "mana rock"
+        ],
+        "synergy_tags_must_exclude": [
+          "counter doubler",
+          "tribal-synergy",
+          "removal"
+        ],
+        "provides_must_include": [
+          "mana-acceleration"
+        ],
         "wants_must_include": []
       }
     },
@@ -27,12 +41,26 @@
       "oracle_text": "Exile target creature. Its controller gains life equal to its power.",
       "keywords": [],
       "cmc": 1,
-      "scryfall_tags": ["spot removal", "removal-exile", "removal-creature", "lifegain", "opponent lifegain"],
+      "scryfall_tags": [
+        "spot removal",
+        "removal-exile",
+        "removal-creature",
+        "lifegain",
+        "opponent lifegain"
+      ],
       "expected": {
         "role": "removal",
-        "synergy_tags_must_include": ["removal-exile", "spot removal"],
-        "synergy_tags_must_exclude": ["counter doubler", "ramp"],
-        "provides_must_include": [],
+        "synergy_tags_must_include": [
+          "removal-exile",
+          "spot removal"
+        ],
+        "synergy_tags_must_exclude": [
+          "counter doubler",
+          "ramp"
+        ],
+        "provides_must_include": [
+          "targeted-removal"
+        ],
         "wants_must_include": []
       }
     },
@@ -42,12 +70,25 @@
       "oracle_text": "{T}: Add one mana of any color in your commander's color identity.",
       "keywords": [],
       "cmc": 2,
-      "scryfall_tags": ["commander identity matters", "refund", "synergy-commander", "activated ability", "mana rock with set's mechanic"],
+      "scryfall_tags": [
+        "commander identity matters",
+        "refund",
+        "synergy-commander",
+        "activated ability",
+        "mana rock with set's mechanic"
+      ],
       "expected": {
         "role": "ramp",
-        "synergy_tags_must_include": ["mana rock"],
-        "synergy_tags_must_exclude": ["counter doubler", "removal"],
-        "provides_must_include": ["mana-acceleration"],
+        "synergy_tags_must_include": [
+          "mana rock"
+        ],
+        "synergy_tags_must_exclude": [
+          "counter doubler",
+          "removal"
+        ],
+        "provides_must_include": [
+          "mana-flexibility"
+        ],
         "wants_must_include": []
       }
     },
@@ -57,27 +98,53 @@
       "oracle_text": "Search your library for up to two basic land cards, reveal those cards, put one onto the battlefield tapped and the other into your hand, then shuffle.",
       "keywords": [],
       "cmc": 3,
-      "scryfall_tags": ["tutor-land-to-battlefield", "tutor-land-basic", "tutor-to-hand", "ramp", "card advantage (no-draw)"],
+      "scryfall_tags": [
+        "tutor-land-to-battlefield",
+        "tutor-land-basic",
+        "tutor-to-hand",
+        "ramp",
+        "card advantage (no-draw)"
+      ],
       "expected": {
         "role": "ramp",
-        "synergy_tags_must_include": ["ramp", "tutor-land"],
-        "synergy_tags_must_exclude": ["counter doubler"],
-        "provides_must_include": [],
+        "synergy_tags_must_include": [
+          "ramp",
+          "tutor-land"
+        ],
+        "synergy_tags_must_exclude": [
+          "counter doubler"
+        ],
+        "provides_must_include": [
+          "land-search"
+        ],
         "wants_must_include": []
       }
     },
     {
       "name": "Birds of Paradise",
-      "type_line": "Creature — Bird",
-      "oracle_text": "{T}: Add one mana of any color.",
-      "keywords": ["Flying"],
+      "type_line": "Creature \u2014 Bird",
+      "oracle_text": "Flying\n{T}: Add one mana of any color.",
+      "keywords": [
+        "Flying"
+      ],
       "cmc": 1,
-      "scryfall_tags": ["evasion", "mana dork", "activated ability"],
+      "scryfall_tags": [
+        "evasion",
+        "mana dork",
+        "activated ability"
+      ],
       "expected": {
         "role": "ramp",
-        "synergy_tags_must_include": ["mana dork"],
-        "synergy_tags_must_exclude": ["counter doubler", "removal"],
-        "provides_must_include": ["mana-acceleration"],
+        "synergy_tags_must_include": [
+          "mana dork"
+        ],
+        "synergy_tags_must_exclude": [
+          "counter doubler",
+          "removal"
+        ],
+        "provides_must_include": [
+          "mana-flexibility"
+        ],
         "wants_must_include": []
       }
     },
@@ -87,13 +154,24 @@
       "oracle_text": "Counter target spell.",
       "keywords": [],
       "cmc": 2,
-      "scryfall_tags": ["counterspell"],
+      "scryfall_tags": [
+        "counterspell"
+      ],
       "expected": {
         "role": "removal",
-        "synergy_tags_must_include": ["counterspell"],
-        "synergy_tags_must_exclude": ["counter doubler", "ramp"],
-        "provides_must_include": [],
-        "wants_must_include": []
+        "synergy_tags_must_include": [
+          "counterspell"
+        ],
+        "synergy_tags_must_exclude": [
+          "counter doubler",
+          "ramp"
+        ],
+        "provides_must_include": [
+          "targeted-removal"
+        ],
+        "wants_must_include": [
+          "opponent-spell-casting"
+        ]
       }
     },
     {
@@ -102,13 +180,28 @@
       "oracle_text": "This spell costs {1} less to cast for each creature on the battlefield.\nBlasphemous Act deals 13 damage to each creature.",
       "keywords": [],
       "cmc": 9,
-      "scryfall_tags": ["symmetrical", "hate-wide", "affinity for creatures", "sweeper", "burn creature"],
+      "scryfall_tags": [
+        "symmetrical",
+        "hate-wide",
+        "affinity for creatures",
+        "sweeper",
+        "burn creature"
+      ],
       "expected": {
         "role": "removal",
-        "synergy_tags_must_include": ["sweeper"],
-        "synergy_tags_must_exclude": ["counter doubler", "ramp"],
-        "provides_must_include": [],
-        "wants_must_include": []
+        "synergy_tags_must_include": [
+          "sweeper"
+        ],
+        "synergy_tags_must_exclude": [
+          "counter doubler",
+          "ramp"
+        ],
+        "provides_must_include": [
+          "board-wipe"
+        ],
+        "wants_must_include": [
+          "creature-board"
+        ]
       }
     },
     {
@@ -117,12 +210,27 @@
       "oracle_text": "Destroy target permanent. Its controller creates a 3/3 green Beast creature token.",
       "keywords": [],
       "cmc": 3,
-      "scryfall_tags": ["spot removal", "removal-destroy", "removal-permanent", "swap removal", "donate token", "create token"],
+      "scryfall_tags": [
+        "spot removal",
+        "removal-destroy",
+        "removal-permanent",
+        "swap removal",
+        "donate token",
+        "create token"
+      ],
       "expected": {
         "role": "removal",
-        "synergy_tags_must_include": ["removal-destroy", "spot removal"],
-        "synergy_tags_must_exclude": ["counter doubler", "ramp"],
-        "provides_must_include": [],
+        "synergy_tags_must_include": [
+          "removal-destroy",
+          "spot removal"
+        ],
+        "synergy_tags_must_exclude": [
+          "counter doubler",
+          "ramp"
+        ],
+        "provides_must_include": [
+          "targeted-removal"
+        ],
         "wants_must_include": []
       }
     },
@@ -132,12 +240,25 @@
       "oracle_text": "Permanents you control gain hexproof and indestructible until end of turn.",
       "keywords": [],
       "cmc": 2,
-      "scryfall_tags": ["combat trick", "gives indestructible", "gives hexproof", "protects-permanent"],
+      "scryfall_tags": [
+        "combat trick",
+        "gives indestructible",
+        "gives hexproof",
+        "protects-permanent"
+      ],
       "expected": {
         "role": "protection",
-        "synergy_tags_must_include": ["protects-permanent"],
-        "synergy_tags_must_exclude": ["counter doubler", "ramp"],
-        "provides_must_include": [],
+        "synergy_tags_must_include": [
+          "protects-permanent"
+        ],
+        "synergy_tags_must_exclude": [
+          "counter doubler",
+          "ramp"
+        ],
+        "provides_must_include": [
+          "hexproof-grant",
+          "indestructible-grant"
+        ],
         "wants_must_include": []
       }
     },
@@ -147,73 +268,278 @@
       "oracle_text": "If one or more +1/+1 counters would be put on a creature you control, that many plus one +1/+1 counters are put on it instead.",
       "keywords": [],
       "cmc": 1,
-      "scryfall_tags": ["pp counters matter", "counter increaser"],
+      "scryfall_tags": [
+        "pp counters matter",
+        "counter increaser"
+      ],
       "expected": {
         "role": "enabler",
-        "synergy_tags_must_include": ["counter increaser"],
+        "synergy_tags_must_include": [
+          "counter increaser"
+        ],
         "synergy_tags_must_exclude": [],
-        "provides_must_include": ["counter-amplification"],
-        "wants_must_include": ["counter-placement"]
+        "provides_must_include": [
+          "counter-amplification"
+        ],
+        "wants_must_include": [
+          "counter-placement"
+        ]
       }
     },
     {
       "name": "Roaming Throne",
-      "type_line": "Artifact Creature — Construct",
-      "oracle_text": "As Roaming Throne enters, choose a creature type. This creature is the chosen type in addition to its other types. Creatures you control of the chosen type have ward {2}. Whenever a creature you control of the chosen type triggers an ability, that ability triggers an additional time.",
+      "type_line": "Artifact Creature \u2014 Golem",
+      "oracle_text": "Ward {2}\nAs this creature enters, choose a creature type.\nThis creature is the chosen type in addition to its other types.\nIf a triggered ability of another creature you control of the chosen type triggers, that ability triggers an additional time.",
       "keywords": [],
       "cmc": 4,
-      "scryfall_tags": ["typal-choose", "trigger doubler", "type change", "triggered ability"],
+      "scryfall_tags": [
+        "typal-choose",
+        "trigger doubler",
+        "type change",
+        "triggered ability"
+      ],
       "expected": {
         "role": "enabler",
-        "synergy_tags_must_include": ["trigger doubler", "typal-choose"],
+        "synergy_tags_must_include": [
+          "trigger doubler",
+          "typal-choose"
+        ],
         "synergy_tags_must_exclude": [],
-        "provides_must_include": ["trigger-doubling"],
-        "wants_must_include": []
+        "provides_must_include": [
+          "trigger-doubling"
+        ],
+        "wants_must_include": [
+          "creature-etb"
+        ]
       }
     },
     {
       "name": "Gavony Township",
       "type_line": "Land",
-      "oracle_text": "{2}{G}{W}, {T}: Put a +1/+1 counter on each creature you control.",
+      "oracle_text": "{T}: Add {C}.\n{2}{G}{W}, {T}: Put a +1/+1 counter on each creature you control.",
       "keywords": [],
       "cmc": 0,
-      "scryfall_tags": ["utility land", "mana sink", "gives pp counters to all", "activated ability"],
+      "scryfall_tags": [
+        "utility land",
+        "mana sink",
+        "gives pp counters to all",
+        "activated ability"
+      ],
       "expected": {
-        "role": ["land", "enabler", "ramp"],
-        "synergy_tags_must_include": ["gives pp counters to all", "mana sink"],
+        "role": "ramp",
+        "synergy_tags_must_include": [
+          "gives pp counters to all",
+          "mana sink"
+        ],
         "synergy_tags_must_exclude": [],
-        "provides_must_include": [],
-        "wants_must_include": []
+        "provides_must_include": [
+          "board-wide-counter-placement"
+        ],
+        "wants_must_include": [
+          "creature-board"
+        ]
       }
     },
     {
       "name": "Doubling Season",
       "type_line": "Enchantment",
-      "oracle_text": "If an effect would create one or more tokens under your control, it creates twice that many of those tokens instead. If an effect would put one or more counters on a permanent you control, it puts twice that many of those counters on that permanent instead.",
+      "oracle_text": "If an effect would create one or more tokens under your control, it creates twice that many of those tokens instead.\nIf an effect would put one or more counters on a permanent you control, it puts twice that many of those counters on that permanent instead.",
       "keywords": [],
       "cmc": 5,
-      "scryfall_tags": ["synergy-token", "counter doubler", "token doubler", "synergy-planeswalker"],
+      "scryfall_tags": [
+        "synergy-token",
+        "counter doubler",
+        "token doubler",
+        "synergy-planeswalker"
+      ],
       "expected": {
         "role": "enabler",
-        "synergy_tags_must_include": ["counter doubler", "token doubler"],
-        "synergy_tags_must_exclude": ["removal", "ramp"],
-        "provides_must_include": [],
-        "wants_must_include": []
+        "synergy_tags_must_include": [
+          "counter doubler",
+          "token doubler"
+        ],
+        "synergy_tags_must_exclude": [
+          "removal",
+          "ramp"
+        ],
+        "provides_must_include": [
+          "counter-amplification",
+          "token-generation"
+        ],
+        "wants_must_include": [
+          "counter-placement",
+          "token-generation"
+        ]
       }
     },
     {
       "name": "Slippery Bogbonder",
-      "type_line": "Creature — Human Scout",
-      "oracle_text": "Flash. When Slippery Bogbonder enters, move all counters from target creature onto another target creature. That creature gains hexproof until end of turn.",
-      "keywords": ["Flash"],
+      "type_line": "Creature \u2014 Human Druid",
+      "oracle_text": "Flash\nHexproof\nWhen this creature enters, put a hexproof counter on target creature. Then move any number of counters from among creatures you control onto that creature.",
+      "keywords": [
+        "Flash"
+      ],
       "cmc": 4,
-      "scryfall_tags": ["protects-creature", "hexproof counter", "move counters", "gives hexproof", "triggered ability"],
+      "scryfall_tags": [
+        "protects-creature",
+        "hexproof counter",
+        "move counters",
+        "gives hexproof",
+        "triggered ability"
+      ],
       "expected": {
         "role": "protection",
-        "synergy_tags_must_include": ["move counters", "protects-creature"],
+        "synergy_tags_must_include": [
+          "move counters",
+          "protects-creature"
+        ],
         "synergy_tags_must_exclude": [],
-        "provides_must_include": [],
-        "wants_must_include": []
+        "provides_must_include": [
+          "counter-mover",
+          "hexproof-grant"
+        ],
+        "wants_must_include": [
+          "counter-placement-events"
+        ]
+      }
+    },
+    {
+      "name": "Ghostly Flicker",
+      "type_line": "Instant",
+      "oracle_text": "Exile two target artifacts, creatures, and/or lands you control, then return those cards to the battlefield under your control.",
+      "keywords": [],
+      "cmc": 3,
+      "scryfall_tags": [
+        "flicker-creature",
+        "flicker-land",
+        "protects-creature",
+        "synergy-artifact",
+        "flicker-artifact",
+        "multiple targets"
+      ],
+      "expected": {
+        "role": "utility",
+        "synergy_tags_must_include": [
+          "flicker-creature"
+        ],
+        "synergy_tags_must_exclude": [
+          "removal-destroy",
+          "ramp"
+        ],
+        "provides_must_include": [
+          "blink",
+          "board-protection"
+        ],
+        "wants_must_include": [
+          "creature-etb"
+        ]
+      }
+    },
+    {
+      "name": "Bojuka Bog",
+      "type_line": "Land",
+      "oracle_text": "This land enters tapped.\nWhen this land enters, exile target player's graveyard.\n{T}: Add {B}.",
+      "keywords": [],
+      "cmc": 0.0,
+      "scryfall_tags": [
+        "alliteration",
+        "sweeper-graveyard",
+        "utility land",
+        "activated ability",
+        "triggered ability"
+      ],
+      "expected": {
+        "role": "land",
+        "synergy_tags_must_include": [],
+        "synergy_tags_must_exclude": [],
+        "provides_must_include": [
+          "graveyard-hate",
+          "mana-acceleration"
+        ],
+        "wants_must_include": [
+          "graveyard-filling"
+        ]
+      }
+    },
+    {
+      "name": "Yavimaya, Cradle of Growth",
+      "type_line": "Legendary Land",
+      "oracle_text": "Each land is a Forest in addition to its other land types.",
+      "keywords": [],
+      "cmc": 0.0,
+      "scryfall_tags": [
+        "land conversion",
+        "universal type change",
+        "symmetrical",
+        "mana fix"
+      ],
+      "expected": {
+        "role": "land",
+        "synergy_tags_must_include": [],
+        "synergy_tags_must_exclude": [],
+        "provides_must_include": [
+          "land-type-flexibility",
+          "mana-flexibility"
+        ],
+        "wants_must_include": [
+          "land-density"
+        ]
+      }
+    },
+    {
+      "name": "Urborg, Tomb of Yawgmoth",
+      "type_line": "Legendary Land",
+      "oracle_text": "Each land is a Swamp in addition to its other land types.",
+      "keywords": [],
+      "cmc": 0.0,
+      "scryfall_tags": [
+        "universal type change",
+        "land conversion",
+        "namesake spell",
+        "symmetrical",
+        "mana fix"
+      ],
+      "expected": {
+        "role": "land",
+        "synergy_tags_must_include": [],
+        "synergy_tags_must_exclude": [],
+        "provides_must_include": [
+          "land-type-modification",
+          "mana-flexibility"
+        ],
+        "wants_must_include": [
+          "land-density"
+        ]
+      }
+    },
+    {
+      "name": "Ashnod's Altar",
+      "type_line": "Artifact",
+      "oracle_text": "Sacrifice a creature: Add {C}{C}.",
+      "keywords": [],
+      "cmc": 3.0,
+      "scryfall_tags": [
+        "namesake spell",
+        "adds multiple mana",
+        "alliteration",
+        "virtual legendary",
+        "free sacrifice outlet",
+        "sacrifice outlet-creature",
+        "mana rock",
+        "activated ability"
+      ],
+      "expected": {
+        "role": "enabler",
+        "synergy_tags_must_include": [],
+        "synergy_tags_must_exclude": [],
+        "provides_must_include": [
+          "mana-acceleration",
+          "sacrifice-payoff"
+        ],
+        "wants_must_include": [
+          "sacrifice-events",
+          "creature-death"
+        ]
       }
     }
   ]
