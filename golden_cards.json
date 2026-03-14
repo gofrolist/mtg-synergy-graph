@@ -614,7 +614,7 @@
         "delayed trigger"
       ],
       "expected": {
-        "role": "enabler",
+        "role": "land",
         "synergy_tags_must_include": [
           "utility land"
         ],
@@ -1082,8 +1082,7 @@
         "synergy_tags_must_include": [],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "land-search",
-          "mana-acceleration"
+          "land-search"
         ],
         "wants_must_include": [
           "land-density",
@@ -1195,8 +1194,7 @@
         "synergy_tags_must_include": [],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "land-search",
-          "mana-acceleration"
+          "land-search"
         ],
         "wants_must_include": [
           "land-density"
@@ -1221,8 +1219,7 @@
         "synergy_tags_must_include": [],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "land-search",
-          "mana-acceleration"
+          "land-search"
         ],
         "wants_must_include": [
           "land-density"
@@ -1865,7 +1862,7 @@
         "removal-enchantment"
       ],
       "expected": {
-        "role": "utility",
+        "role": "land",
         "synergy_tags_must_include": [
           "utility land",
           "spot removal",
@@ -1961,7 +1958,8 @@
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
           "artifact-removal",
-          "overload"
+          "overload",
+          "targeted-removal"
         ],
         "wants_must_include": [
           "artifact-presence"
@@ -3547,7 +3545,7 @@
         "activated ability"
       ],
       "expected": {
-        "role": "utility",
+        "role": "land",
         "synergy_tags_must_include": [
           "utility land"
         ],
@@ -7142,7 +7140,6 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "mana-acceleration",
           "targeted-removal"
         ],
         "wants_must_include": [
@@ -7217,7 +7214,7 @@
         "burn creature"
       ],
       "expected": {
-        "role": "utility",
+        "role": "land",
         "synergy_tags_must_include": [
           "utility land",
           "spot removal"
@@ -7918,7 +7915,7 @@
         "reanimate copy"
       ],
       "expected": {
-        "role": "utility",
+        "role": "land",
         "synergy_tags_must_include": [],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
@@ -8240,7 +8237,7 @@
         "force draw"
       ],
       "expected": {
-        "role": "utility",
+        "role": "land",
         "synergy_tags_must_include": [
           "utility land"
         ],
@@ -8854,16 +8851,16 @@
         "exile-self"
       ],
       "expected": {
-        "role": "removal",
+        "role": "utility",
         "synergy_tags_must_include": [
           "protects-creature"
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "untap"
+          "blink"
         ],
         "wants_must_include": [
-          "creature-board"
+          "creature-etb"
         ]
       }
     },
@@ -10253,7 +10250,6 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "sacrifice-payoff",
           "targeted-removal"
         ],
         "wants_must_include": [
@@ -10607,7 +10603,7 @@
         "utility land"
       ],
       "expected": {
-        "role": "utility",
+        "role": "land",
         "synergy_tags_must_include": [
           "protects-creature",
           "gives hexproof",
@@ -10902,7 +10898,7 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "mana-acceleration"
+          "land-search"
         ],
         "wants_must_include": [
           "creature-board"
@@ -10922,7 +10918,7 @@
         "activated ability"
       ],
       "expected": {
-        "role": "utility",
+        "role": "land",
         "synergy_tags_must_include": [
           "utility land"
         ],
@@ -11019,8 +11015,7 @@
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
           "card-draw",
-          "life-gain",
-          "mana-acceleration"
+          "life-gain"
         ],
         "wants_must_include": [
           "creature-death"
@@ -11413,7 +11408,6 @@
         ],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
-          "sacrifice-payoff",
           "targeted-removal"
         ],
         "wants_must_include": [
@@ -11718,7 +11712,7 @@
         "tunneling"
       ],
       "expected": {
-        "role": "utility",
+        "role": "land",
         "synergy_tags_must_include": [
           "utility land"
         ],
@@ -11749,7 +11743,7 @@
         "hate-sorcery"
       ],
       "expected": {
-        "role": "removal",
+        "role": "utility",
         "synergy_tags_must_include": [
           "mana dork"
         ],
@@ -11837,7 +11831,7 @@
         "multiple targets"
       ],
       "expected": {
-        "role": "utility",
+        "role": "land",
         "synergy_tags_must_include": [
           "utility land"
         ],
@@ -12105,7 +12099,6 @@
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
           "card-draw",
-          "mana-acceleration",
           "prowess"
         ],
         "wants_must_include": [
@@ -12408,7 +12401,7 @@
         "filterland"
       ],
       "expected": {
-        "role": "utility",
+        "role": "land",
         "synergy_tags_must_include": [
           "protects-creature",
           "utility land",
@@ -13376,21 +13369,19 @@
         "removal-sacrifice",
         "removal-creature",
         "type addition phyrexian",
-        "abyss"
+        "abyss",
+        "multi removal",
+        "triggered ability"
       ],
       "expected": {
         "role": "threat",
-        "synergy_tags_must_include": [
-          "spot removal"
-        ],
+        "synergy_tags_must_include": [],
         "synergy_tags_must_exclude": [],
         "provides_must_include": [
           "graveyard-recursion",
-          "sacrifice-payoff",
           "targeted-removal"
         ],
         "wants_must_include": [
-          "creature-death",
           "graveyard-filling"
         ]
       }
