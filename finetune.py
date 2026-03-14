@@ -25,7 +25,8 @@ os.environ["TORCHDYNAMO_DISABLE"] = "1"
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 TRAIN_FILE = os.path.join(DATA_DIR, "train.jsonl")
 VAL_FILE = os.path.join(DATA_DIR, "val.jsonl")
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "model_output")
+OUTPUT_DIR = os.environ.get("FINETUNE_OUTPUT_DIR",
+                             os.path.join(os.path.dirname(__file__), "model_output"))
 
 
 def load_dataset(path: str):

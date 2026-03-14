@@ -72,6 +72,12 @@ python3 regression_test.py --mode scryfall        # validate Scryfall tags vs go
 python3 regression_test.py --mode static          # validate card_tags.json vs golden
 python3 regression_test.py --mode live            # call API + validate
 
+# Automated fine-tuning experiments (autoresearch-style)
+python3 auto_finetune.py --dry-run              # show experiment plan
+python3 auto_finetune.py                         # run all experiments overnight
+python3 auto_finetune.py --experiments 3         # run first 3 only
+python3 auto_finetune.py --eval-only mtg-tagger  # evaluate existing model
+
 # Compare local LLM models (Ollama) against GPT-4o
 python3 llm_compare.py --models qwen3:8b gemma3:12b
 
