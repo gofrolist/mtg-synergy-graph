@@ -1,0 +1,1258 @@
+{
+  "_meta": {
+    "description": "Controlled vocabulary for 3-layer card tagging system. Function tags from Scryfall tagger, themes from EDHREC, provides/wants derived from both.",
+    "version": "3.1",
+    "created": "2026-03-15",
+    "stats": {
+      "provides_count": 240,
+      "wants_count": 213,
+      "source": "gpt-4.1-mini on 10k cards (500 golden + 9500 candidates)",
+      "min_frequency": 3
+    }
+  },
+  "function_tags": {
+    "_description": "What a card DOES mechanically. Derived from top Scryfall tagger community tags. A card can have multiple functions.",
+    "removal": {
+      "spot-removal": {
+        "desc": "Targeted removal of a single permanent",
+        "scryfall": [
+          "removal-destroy",
+          "removal-nonland",
+          "spot removal"
+        ]
+      },
+      "sweeper": {
+        "desc": "Mass removal / board wipe",
+        "scryfall": [
+          "multi removal",
+          "sweeper",
+          "sweeper-one-sided"
+        ]
+      },
+      "removal-creature": {
+        "desc": "Removes creatures specifically",
+        "scryfall": [
+          "removal-creature",
+          "removal-toughness"
+        ]
+      },
+      "removal-artifact": {
+        "desc": "Removes artifacts/enchantments",
+        "scryfall": [
+          "removal-artifact",
+          "disenchant/naturalize"
+        ]
+      },
+      "removal-enchantment": {
+        "desc": "Removes enchantments",
+        "scryfall": [
+          "removal-enchantment"
+        ]
+      },
+      "removal-exile": {
+        "desc": "Removes by exiling",
+        "scryfall": [
+          "removal-exile"
+        ]
+      },
+      "removal-bounce": {
+        "desc": "Removes by returning to hand/library",
+        "scryfall": [
+          "removal-bounce"
+        ]
+      },
+      "removal-sacrifice": {
+        "desc": "Forces opponent to sacrifice",
+        "scryfall": [
+          "removal-sacrifice"
+        ]
+      },
+      "counterspell": {
+        "desc": "Counters spells on the stack",
+        "scryfall": [
+          "counterspell with set mechanic"
+        ]
+      }
+    },
+    "card_advantage": {
+      "draw-engine": {
+        "desc": "Repeatable card draw",
+        "scryfall": [
+          "curiosity",
+          "draw engine",
+          "force draw",
+          "repeatable pure draw"
+        ]
+      },
+      "burst-draw": {
+        "desc": "One-shot card draw (2+ cards)",
+        "scryfall": [
+          "burst draw",
+          "pure draw"
+        ]
+      },
+      "cantrip": {
+        "desc": "Replaces itself with a draw",
+        "scryfall": [
+          "cantrip"
+        ]
+      },
+      "impulse-draw": {
+        "desc": "Exile-and-cast draw",
+        "scryfall": [
+          "repeatable impulsive draw"
+        ]
+      },
+      "looting": {
+        "desc": "Draw then discard",
+        "scryfall": [
+          "repeatable loot"
+        ]
+      },
+      "scry": {
+        "desc": "Library manipulation / selection",
+        "scryfall": [
+          "scry",
+          "surveil"
+        ]
+      },
+      "tutor": {
+        "desc": "Searches library for specific cards",
+        "scryfall": [
+          "tutor-to-hand",
+          "tutor-card",
+          "tutor-creature",
+          "tutor-to-battlefield"
+        ]
+      },
+      "life-for-cards": {
+        "desc": "Pays life to draw cards",
+        "scryfall": [
+          "life for cards",
+          "life payment",
+          "deal with the devil"
+        ]
+      }
+    },
+    "ramp": {
+      "mana-dork": {
+        "desc": "Creature that taps for mana",
+        "scryfall": [
+          "mana dork"
+        ]
+      },
+      "mana-rock": {
+        "desc": "Artifact that produces mana",
+        "scryfall": [
+          "mana rock",
+          "utility mana rock"
+        ]
+      },
+      "land-ramp": {
+        "desc": "Puts lands onto the battlefield",
+        "scryfall": [
+          "combat ramp",
+          "ramp",
+          "tutor-land-basic",
+          "tutor-land-to-battlefield"
+        ]
+      },
+      "treasure-generator": {
+        "desc": "Creates treasure tokens",
+        "scryfall": [
+          "refund",
+          "repeatable treasures"
+        ]
+      },
+      "cost-reducer": {
+        "desc": "Reduces spell casting costs",
+        "scryfall": [
+          "cost reducer",
+          "cost ignorer"
+        ]
+      },
+      "adds-multiple-mana": {
+        "desc": "Produces 2+ mana at once",
+        "scryfall": [
+          "adds multiple mana"
+        ]
+      }
+    },
+    "tokens": {
+      "token-generator": {
+        "desc": "Creates creature tokens",
+        "scryfall": [
+          "create token",
+          "repeatable creature tokens",
+          "token doubler",
+          "token generator"
+        ]
+      },
+      "populate": {
+        "desc": "Copies existing tokens",
+        "scryfall": []
+      }
+    },
+    "combat": {
+      "anthem": {
+        "desc": "Pumps all your creatures",
+        "scryfall": [
+          "anthem",
+          "overrun",
+          "power boost to all",
+          "toughness boost to all"
+        ]
+      },
+      "evasion": {
+        "desc": "Grants evasion abilities",
+        "scryfall": [
+          "evasion",
+          "gives flying",
+          "gives menace",
+          "gives trample",
+          "gives unblockable",
+          "gives vigilance"
+        ]
+      },
+      "combat-trick": {
+        "desc": "Instant-speed combat modifier",
+        "scryfall": [
+          "combat trick"
+        ]
+      },
+      "gives-haste": {
+        "desc": "Grants haste",
+        "scryfall": [
+          "gives haste"
+        ]
+      },
+      "gives-indestructible": {
+        "desc": "Grants indestructible",
+        "scryfall": [
+          "gives indestructible"
+        ]
+      },
+      "gives-hexproof": {
+        "desc": "Grants hexproof",
+        "scryfall": [
+          "gives hexproof"
+        ]
+      },
+      "gives-double-strike": {
+        "desc": "Grants double strike",
+        "scryfall": [
+          "gives double strike"
+        ]
+      },
+      "gives-deathtouch": {
+        "desc": "Grants deathtouch",
+        "scryfall": [
+          "gives deathtouch"
+        ]
+      },
+      "gives-lifelink": {
+        "desc": "Grants lifelink",
+        "scryfall": [
+          "gives lifelink"
+        ]
+      }
+    },
+    "sacrifice": {
+      "sacrifice-outlet": {
+        "desc": "Lets you sacrifice permanents at will",
+        "scryfall": [
+          "sacrifice outlet-creature",
+          "sacrifice outlet-artifact",
+          "free sacrifice outlet"
+        ]
+      },
+      "death-trigger": {
+        "desc": "Triggers when creatures die",
+        "scryfall": [
+          "death trigger",
+          "death trigger-self"
+        ]
+      },
+      "martyr": {
+        "desc": "Sacrifices itself for value",
+        "scryfall": [
+          "martyr",
+          "sacrifice self"
+        ]
+      }
+    },
+    "recursion": {
+      "reanimate": {
+        "desc": "Returns permanents from graveyard to battlefield",
+        "scryfall": [
+          "reanimate-creature",
+          "reanimate-cast",
+          "reanimate-self"
+        ]
+      },
+      "regrowth": {
+        "desc": "Returns cards from graveyard to hand",
+        "scryfall": [
+          "regrowth-any",
+          "regrowth-creature",
+          "regrowth-self"
+        ]
+      },
+      "graveyard-hate": {
+        "desc": "Exiles cards from opponents' graveyards",
+        "scryfall": [
+          "hate-graveyard"
+        ]
+      }
+    },
+    "blink_and_copy": {
+      "flicker": {
+        "desc": "Exiles and returns permanents (blink)",
+        "scryfall": [
+          "flicker-creature",
+          "flicker-slow"
+        ]
+      },
+      "clone": {
+        "desc": "Copies creatures",
+        "scryfall": [
+          "copy-creature",
+          "clone"
+        ]
+      },
+      "spell-copy": {
+        "desc": "Copies instant/sorcery spells",
+        "scryfall": [
+          "copy-spell",
+          "copy-instant",
+          "copy-sorcery"
+        ]
+      }
+    },
+    "life": {
+      "lifegain": {
+        "desc": "Gains life",
+        "scryfall": [
+          "life payment",
+          "lifegain",
+          "repeatable lifegain"
+        ]
+      },
+      "life-drain": {
+        "desc": "Drains opponent life",
+        "scryfall": [
+          "drain life",
+          "opponent loses life"
+        ]
+      },
+      "burn": {
+        "desc": "Deals direct damage",
+        "scryfall": [
+          "burn player",
+          "burn any",
+          "burn creature",
+          "pinger"
+        ]
+      }
+    },
+    "mill": {
+      "mill-opponent": {
+        "desc": "Mills opponents' libraries",
+        "scryfall": [
+          "mill-opponent",
+          "mill-any"
+        ]
+      },
+      "mill-self": {
+        "desc": "Mills yourself for graveyard fuel",
+        "scryfall": [
+          "mill-self"
+        ]
+      }
+    },
+    "counters": {
+      "counter-placement": {
+        "desc": "Places +1/+1 or other counters",
+        "scryfall": [
+          "counter doubler",
+          "gains pp counters",
+          "gives pp counters"
+        ]
+      },
+      "counters-matter": {
+        "desc": "Cares about counters on permanents",
+        "scryfall": [
+          "counters matter",
+          "pp counters matter"
+        ]
+      },
+      "proliferate": {
+        "desc": "Proliferates all counter types",
+        "scryfall": []
+      }
+    },
+    "triggers": {
+      "attack-trigger": {
+        "desc": "Triggers on attacking",
+        "scryfall": [
+          "attack trigger",
+          "attacking matters",
+          "attacking matters-self",
+          "saboteur"
+        ]
+      },
+      "cast-trigger": {
+        "desc": "Triggers when spells are cast",
+        "scryfall": [
+          "cast trigger-other",
+          "cast trigger-self",
+          "cast trigger-you"
+        ]
+      },
+      "etb-trigger": {
+        "desc": "Triggers on creatures/permanents entering",
+        "scryfall": [
+          "creaturefall"
+        ]
+      },
+      "landfall": {
+        "desc": "Triggers on lands entering",
+        "scryfall": [
+          "landfall"
+        ]
+      }
+    },
+    "enablers": {
+      "discard-outlet": {
+        "desc": "Lets you discard cards for value",
+        "scryfall": [
+          "discard outlet",
+          "discard"
+        ]
+      },
+      "theft": {
+        "desc": "Steals opponents' cards or permanents",
+        "scryfall": [
+          "theft-cast",
+          "theft-creature"
+        ]
+      },
+      "mana-sink": {
+        "desc": "Converts excess mana into value",
+        "scryfall": [
+          "mana sink",
+          "bottomless mana sink"
+        ]
+      },
+      "utility-land": {
+        "desc": "Land with useful non-mana abilities",
+        "scryfall": [
+          "rainbow land",
+          "utility land"
+        ]
+      },
+      "group-slug": {
+        "desc": "Symmetrical damage/tax effects",
+        "scryfall": [
+          "group slug"
+        ]
+      },
+      "group-hug": {
+        "desc": "Benefits all players",
+        "scryfall": [
+          "group hug"
+        ]
+      },
+      "stax": {
+        "desc": "Taxes or restricts opponents' actions",
+        "scryfall": [
+          "rhystic",
+          "toll"
+        ]
+      },
+      "protection": {
+        "desc": "Protects your permanents from removal",
+        "scryfall": [
+          "protects-creature"
+        ]
+      },
+      "energy-generator": {
+        "desc": "Produces energy counters",
+        "scryfall": [
+          "energy generator"
+        ]
+      },
+      "force-combat": {
+        "desc": "Forces opponents' creatures to attack",
+        "scryfall": [
+          "force attacker"
+        ]
+      },
+      "untapper": {
+        "desc": "Untaps permanents for extra activations",
+        "scryfall": [
+          "extra untap",
+          "untapper-creature",
+          "untapper-land",
+          "untapper-permanent"
+        ]
+      },
+      "repeatable-removal": {
+        "desc": "Removes permanents repeatedly",
+        "scryfall": [
+          "repeatable removal"
+        ]
+      },
+      "tapper": {
+        "desc": "Taps opponents creatures",
+        "scryfall": [
+          "tapper-creature"
+        ]
+      },
+      "token-doubler": {
+        "desc": "Doubles token creation",
+        "scryfall": [
+          "token doubler"
+        ]
+      },
+      "counter-doubler": {
+        "desc": "Doubles counter placement",
+        "scryfall": [
+          "counter doubler"
+        ]
+      }
+    }
+  },
+  "themes": {
+    "_description": "EDHREC deck archetypes / strategies. Shared themes between cards = synergy signal. Excludes color identity, IP-specific, and ultra-niche themes.",
+    "archetype": [
+      "tokens",
+      "+1/+1-counters",
+      "artifacts",
+      "combo",
+      "lifegain",
+      "treasure",
+      "aggro",
+      "spellslinger",
+      "aristocrats",
+      "lands-matter",
+      "equipment",
+      "reanimator",
+      "control",
+      "enchantress",
+      "burn",
+      "mill",
+      "ramp",
+      "wheels",
+      "sacrifice",
+      "voltron",
+      "midrange",
+      "auras",
+      "blink",
+      "discard",
+      "clones",
+      "landfall",
+      "infect",
+      "big-mana",
+      "flying",
+      "graveyard",
+      "stax",
+      "planeswalkers",
+      "card-draw",
+      "storm",
+      "historic",
+      "group-slug",
+      "cantrips",
+      "extra-combats",
+      "vehicles",
+      "theft",
+      "exile",
+      "x-spells",
+      "group-hug",
+      "forced-combat",
+      "toughness-matters",
+      "topdeck",
+      "self-mill",
+      "energy",
+      "hatebears",
+      "cascade",
+      "commander-matters",
+      "spell-copy",
+      "-1/-1-counters",
+      "toolbox",
+      "pillow-fort",
+      "stompy",
+      "clues",
+      "sagas",
+      "extra-turns",
+      "lifedrain",
+      "tempo",
+      "land-destruction",
+      "etb",
+      "monarch",
+      "self-damage",
+      "dredge",
+      "deathtouch",
+      "proliferate",
+      "morph",
+      "snow",
+      "counterspells",
+      "mutate",
+      "cycling",
+      "affinity",
+      "attack-triggers",
+      "defenders",
+      "prowess",
+      "politics",
+      "devotion",
+      "food",
+      "pingers",
+      "fight",
+      "foretell",
+      "anthems",
+      "power-matters",
+      "populate",
+      "tap-untap",
+      "activated-abilities",
+      "flash",
+      "unblockable",
+      "discover",
+      "curses",
+      "triggered-abilities",
+      "bounce",
+      "keywords",
+      "donate",
+      "eggs",
+      "madness",
+      "aikido",
+      "haste",
+      "prison",
+      "self-discard",
+      "convoke",
+      "polymorph",
+      "multicolor-matters",
+      "impulse-draw",
+      "counters-matter",
+      "modular",
+      "modified-creatures",
+      "scry",
+      "flashback",
+      "die-roll",
+      "amass",
+      "land-animation",
+      "coin-flip",
+      "fling",
+      "enrage",
+      "outlaws",
+      "shrines",
+      "experience-counters",
+      "sneak-attack",
+      "glass-cannon",
+      "crime",
+      "blood",
+      "suspend",
+      "surveil",
+      "exalted",
+      "time-counters",
+      "adventures",
+      "charge-counters",
+      "hand-size",
+      "deserts",
+      "myriad",
+      "connive",
+      "extra-upkeeps",
+      "life-exchange",
+      "looting",
+      "delirium",
+      "villainous-choice",
+      "saboteurs",
+      "turbo-fog",
+      "heroic",
+      "kicker",
+      "descend",
+      "day-night",
+      "voting",
+      "battles",
+      "hellbent",
+      "phasing",
+      "ltb-effects",
+      "oil-counters",
+      "plot",
+      "exploit",
+      "bloodthirst",
+      "sunburst",
+      "spore-counters",
+      "improvise",
+      "transform",
+      "evoke",
+      "offspring",
+      "indestructible",
+      "annihilator",
+      "craft",
+      "paradox",
+      "creatureless",
+      "reach"
+    ],
+    "typal": [
+      "dragons",
+      "elves",
+      "zombies",
+      "vampires",
+      "eldrazi",
+      "humans",
+      "dinosaurs",
+      "goblins",
+      "angels",
+      "pirates",
+      "wizards",
+      "assassins",
+      "merfolk",
+      "cats",
+      "slivers",
+      "demons",
+      "faeries",
+      "knights",
+      "phyrexians",
+      "rats",
+      "spirits",
+      "horrors",
+      "soldiers",
+      "hydras",
+      "birds",
+      "saprolings",
+      "ninjas",
+      "shapeshifters",
+      "elementals",
+      "frogs",
+      "rogues",
+      "insects",
+      "myr",
+      "spiders",
+      "warriors",
+      "werewolves",
+      "bears",
+      "mutants",
+      "squirrels",
+      "gods",
+      "clerics",
+      "dwarves",
+      "dogs",
+      "allies",
+      "snakes",
+      "lizards",
+      "beasts",
+      "otters",
+      "treefolk",
+      "rabbits",
+      "samurai",
+      "wolves",
+      "mice",
+      "fungi",
+      "giants",
+      "bats",
+      "oozes",
+      "wurms",
+      "apes",
+      "artificers",
+      "sphinxes",
+      "scarecrows",
+      "halflings",
+      "raccoons",
+      "golems",
+      "thopters",
+      "minotaurs",
+      "skeletons",
+      "druids",
+      "monks",
+      "constructs",
+      "orcs",
+      "crabs",
+      "phoenixes",
+      "devils",
+      "robots",
+      "shamans",
+      "foxes",
+      "gorgons",
+      "gnomes",
+      "drakes",
+      "elephants",
+      "barbarians",
+      "berserkers",
+      "specters",
+      "whales",
+      "goats",
+      "sharks",
+      "ogres",
+      "unicorns",
+      "horses",
+      "nightmares",
+      "griffins",
+      "rebels",
+      "avatars",
+      "turtles"
+    ]
+  },
+  "provides": {
+    "_description": "What a card gives to the deck \u2014 from gpt-4.1-mini tagging of 10k cards, filtered to 3+ occurrences",
+    "tags": [
+      "ability-copying",
+      "activated-abilities",
+      "additional-combat-phase",
+      "artifact-animation",
+      "artifact-creature",
+      "artifact-enabler",
+      "artifact-enchantment-removal",
+      "artifact-presence",
+      "artifact-sacrifice-payoff",
+      "attack-events",
+      "aura-enchantment",
+      "blink",
+      "board-control",
+      "board-pressure",
+      "board-protection",
+      "board-threat",
+      "board-threats",
+      "board-wide-counter-placement",
+      "board-wide-creature-pump",
+      "board-wide-damage",
+      "board-wide-removal",
+      "board-wide-sacrifice",
+      "board-wide-targeted-removal",
+      "board-wipe",
+      "bounce",
+      "can-become-chosen-type",
+      "card-cast-from-exile",
+      "card-casting",
+      "card-discard",
+      "card-draw",
+      "card-draw-events",
+      "card-draw-payoff",
+      "card-exile",
+      "card-filtering",
+      "card-mill",
+      "card-play-from-exile",
+      "card-play-from-top",
+      "card-recursion",
+      "cascade",
+      "charge-counter-placement",
+      "charge-counters",
+      "cloak",
+      "color-fixing",
+      "colorless-mana",
+      "colorless-mana-fixing",
+      "colorless-ramp",
+      "combat-enabler",
+      "combat-trigger",
+      "commander-presence",
+      "companion",
+      "control-effects",
+      "control-shift",
+      "convoke",
+      "cost-reduction",
+      "counter-amplification",
+      "counter-distribution",
+      "counter-mover",
+      "counter-payoff",
+      "counter-placement",
+      "counter-placement-events",
+      "counter-removal",
+      "countering",
+      "counterspell",
+      "creature-animation",
+      "creature-board",
+      "creature-casting",
+      "creature-control",
+      "creature-copying",
+      "creature-death",
+      "creature-etb",
+      "creature-etb-payoff",
+      "creature-etb-triggers",
+      "creature-power",
+      "creature-pump",
+      "creature-reanimation",
+      "creature-recursion",
+      "creature-sacrifice",
+      "creature-search",
+      "creature-tap",
+      "creature-type-flexibility",
+      "crew",
+      "cycling",
+      "damage-amplification",
+      "damage-dealing",
+      "damage-prevention",
+      "day-night",
+      "deathtouch-grant",
+      "defender",
+      "devotion-payoff",
+      "discard-events",
+      "discard-payoff",
+      "double-strike",
+      "double-strike-grant",
+      "elf-tribal",
+      "enchantment-presence",
+      "enchantment-removal",
+      "end-step-events",
+      "energy-generation",
+      "equip",
+      "equipment",
+      "equipment-attachment",
+      "equipment-enabler",
+      "equipment-presence",
+      "escape",
+      "etb-payoff",
+      "evade-grant",
+      "evasion-grant",
+      "evoke",
+      "exalted",
+      "exile-replacement",
+      "explore",
+      "extra-combat-phase",
+      "extra-turn",
+      "fight",
+      "first-strike",
+      "first-strike-grant",
+      "flash-grant",
+      "flashback",
+      "flying",
+      "flying-grant",
+      "foretell",
+      "goad",
+      "goblin-tribal",
+      "graveyard-casting",
+      "graveyard-filling",
+      "graveyard-hate",
+      "graveyard-recursion",
+      "hand-disruption",
+      "hand-size-increase",
+      "haste",
+      "haste-grant",
+      "hexproof-grant",
+      "hideaway",
+      "human-tribal",
+      "indestructible",
+      "indestructible-grant",
+      "infect",
+      "initiative",
+      "instant-speed",
+      "intimidate-grant",
+      "land-animation",
+      "land-bounce",
+      "land-recursion",
+      "land-search",
+      "landfall",
+      "legendary-enabler",
+      "legendary-presence",
+      "life-drain",
+      "life-gain",
+      "life-gain-events",
+      "life-gain-payoff",
+      "life-gain-prevention",
+      "life-loss",
+      "life-payment",
+      "life-prevention",
+      "lifelink",
+      "lifelink-grant",
+      "madness",
+      "mana-acceleration",
+      "mana-cost-reduction",
+      "mana-flexibility",
+      "mana-sink",
+      "manifest",
+      "menace",
+      "menace-grant",
+      "mill",
+      "modular",
+      "monarch",
+      "monarch-mechanic",
+      "morbid",
+      "morph",
+      "mutate",
+      "ninjutsu",
+      "partner",
+      "passive-permanent",
+      "permanent",
+      "persist",
+      "phasing",
+      "planeswalker-presence",
+      "poison-counter-placement",
+      "populate",
+      "proliferate",
+      "protection",
+      "protection-grant",
+      "prowess",
+      "reach-grant",
+      "reactive-protection",
+      "rebound",
+      "regeneration",
+      "removal-destroy",
+      "replacement-effect",
+      "sacrifice-payoff",
+      "scry",
+      "self-bounce",
+      "self-mill",
+      "single-target-counter-placement",
+      "single-target-counter-placer",
+      "sliver-tribal",
+      "soulbond",
+      "spell-casting",
+      "spell-casting-restriction",
+      "spell-casting-tax",
+      "spell-copying",
+      "staple-mana-rock",
+      "stax",
+      "stax-tax",
+      "storm",
+      "surveil",
+      "suspend",
+      "tap",
+      "tap-ability",
+      "tapped-creatures",
+      "tapping",
+      "targeted-protection",
+      "targeted-removal",
+      "targeted-spells",
+      "targeting-bonus",
+      "token-copying",
+      "token-doubling",
+      "token-generation",
+      "top-of-library",
+      "top-of-library-access",
+      "toxic",
+      "trample",
+      "trample-grant",
+      "transform",
+      "transmute",
+      "treasure-generation",
+      "tribal-enabler",
+      "trigger-doubling",
+      "triggered-abilities",
+      "tutor",
+      "uncounterable",
+      "undying",
+      "untap",
+      "vigilance",
+      "vigilance-grant",
+      "ward-grant",
+      "win-condition",
+      "zombie-tribal"
+    ]
+  },
+  "wants": {
+    "_description": "What conditions make a card better \u2014 from gpt-4.1-mini tagging of 10k cards, filtered to 3+ occurrences",
+    "tags": [
+      "activated-abilities",
+      "ally-tribal",
+      "angel-tribal",
+      "artifact-casting",
+      "artifact-creature-board",
+      "artifact-creature-presence",
+      "artifact-enchantment-removal",
+      "artifact-etb",
+      "artifact-graveyard",
+      "artifact-presence",
+      "artifact-sacrifice",
+      "assassin-tribal",
+      "attack-events",
+      "aura-presence",
+      "basic-land-presence",
+      "bird-tribal",
+      "board-pressure",
+      "board-protection",
+      "board-threats",
+      "board-wide-counter-placement",
+      "card-discard",
+      "card-discard-events",
+      "card-draw",
+      "card-draw-events",
+      "card-draw-payoff",
+      "card-type-diversity",
+      "cat-tribal",
+      "colorless-creature-board",
+      "colorless-creature-casting",
+      "colorless-ramp",
+      "colorless-spell-casting",
+      "colorless-spells",
+      "combat-enabler",
+      "combat-events",
+      "combat-trigger",
+      "commander-presence",
+      "counter-amplification",
+      "counter-placement-events",
+      "creature-activated-abilities",
+      "creature-artifact-presence",
+      "creature-attack-events",
+      "creature-board",
+      "creature-card-graveyard",
+      "creature-cards-in-graveyard",
+      "creature-cards-in-hand",
+      "creature-cards-in-library",
+      "creature-casting",
+      "creature-damage",
+      "creature-death",
+      "creature-discard",
+      "creature-etb",
+      "creature-etb-triggers",
+      "creature-graveyard",
+      "creature-power",
+      "creature-presence",
+      "creature-pump",
+      "creature-sacrifice",
+      "creature-spell-casting",
+      "creature-spells",
+      "creature-targeting",
+      "creature-token-board",
+      "creature-token-presence",
+      "creature-toughness",
+      "creature-type-flexibility",
+      "creature-type-selection",
+      "cycling-triggers",
+      "damage-amplification",
+      "damage-dealing",
+      "damage-prevention",
+      "demon-tribal",
+      "devotion-payoff",
+      "dice-roll-effects",
+      "dinosaur-tribal",
+      "discard-events",
+      "dog-tribal",
+      "dragon-tribal",
+      "dungeon-completion",
+      "elemental-tribal",
+      "elf-tribal",
+      "enchantment-casting",
+      "enchantment-presence",
+      "end-step-events",
+      "energy-counters",
+      "energy-use",
+      "equipment-presence",
+      "etb-payoff",
+      "exile-presence",
+      "faerie-tribal",
+      "flash-use",
+      "food-presence",
+      "food-token-presence",
+      "forest-presence",
+      "gate-tribal",
+      "goblin-tribal",
+      "graveyard-casting",
+      "graveyard-filling",
+      "graveyard-hate",
+      "graveyard-presence",
+      "graveyard-recursion",
+      "hand-size",
+      "high-cmc-spells",
+      "historic-permanents",
+      "historic-spell-casting",
+      "historic-spells",
+      "human-tribal",
+      "instant-sorcery",
+      "instant-sorcery-cards",
+      "instant-sorcery-casting",
+      "instant-sorcery-graveyard",
+      "instant-sorcery-presence",
+      "instant-sorcery-spells",
+      "island-presence",
+      "kicker-payment",
+      "knight-tribal",
+      "land-animation",
+      "land-density",
+      "land-presence",
+      "land-sacrifice",
+      "land-search",
+      "landfall",
+      "landfall-triggers",
+      "legendary-creature-board",
+      "legendary-creature-presence",
+      "legendary-presence",
+      "library-composition",
+      "library-density",
+      "life-drain",
+      "life-gain",
+      "life-gain-events",
+      "life-loss-events",
+      "life-payment",
+      "low-cmc-spells",
+      "mana-acceleration",
+      "mana-flexibility",
+      "mana-needs",
+      "mana-sink",
+      "merfolk-tribal",
+      "metalcraft",
+      "mill-triggers",
+      "monarch-mechanic",
+      "monarch-status",
+      "mountain-presence",
+      "multicolor-spells",
+      "mutate-triggers",
+      "nonbasic-land-presence",
+      "noncreature-spell-casting",
+      "noncreature-spells",
+      "nonland-permanents",
+      "opponent-artifact-presence",
+      "opponent-artifacts",
+      "opponent-count",
+      "opponent-creature-board",
+      "opponent-creature-death",
+      "opponent-creatures",
+      "opponent-graveyard",
+      "opponent-hand-size",
+      "opponent-life",
+      "opponent-life-gain",
+      "opponent-presence",
+      "opponent-spell-casting",
+      "opponent-threats",
+      "orc-tribal",
+      "partner",
+      "permanent-board",
+      "permanent-board-presence",
+      "permanent-casting",
+      "permanent-counters",
+      "permanent-death",
+      "permanent-etb-triggers",
+      "permanent-presence",
+      "pirate-tribal",
+      "planeswalker-presence",
+      "poison-counter-accumulation",
+      "rat-tribal",
+      "red-spells",
+      "rogue-tribal",
+      "sacrifice-events",
+      "sacrifice-payoff",
+      "saga-presence",
+      "self-mill",
+      "shrine-tribal",
+      "sliver-tribal",
+      "snow-mana-sources",
+      "snow-permanents",
+      "soldier-tribal",
+      "spell-casting",
+      "spell-copying",
+      "spirit-tribal",
+      "swamp-presence",
+      "tapped-creatures",
+      "tapped-permanents",
+      "targeted-spells",
+      "targeting-bonus",
+      "token-doubling",
+      "token-events",
+      "token-generation",
+      "token-sacrifice-payoff",
+      "top-of-library",
+      "top-of-library-manipulation",
+      "treasure-presence",
+      "treefolk-tribal",
+      "tribal-enabler",
+      "triggered-abilities",
+      "tutor",
+      "untap",
+      "untapped-creatures",
+      "vampire-tribal",
+      "vehicle-presence",
+      "werewolf-tribal",
+      "white-creature-board",
+      "wizard-tribal",
+      "wolf-tribal",
+      "zombie-tribal"
+    ]
+  }
+}

@@ -22,7 +22,7 @@ import urllib.error
 
 from prompt_builder import build_prompt
 
-MODELS = ["qwen3:8b", "gemma3:12b", "phi4:14b"]
+MODELS = ["gemma3:12b", "granite4", "lfm25"]
 OLLAMA_URL = "http://localhost:11434/api/chat"
 
 # Test cards: 5 golden + 5 extras for consistency check

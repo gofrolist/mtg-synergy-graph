@@ -22,6 +22,9 @@ import os
 # Disable torch.compile (requires nvcc which may not be available)
 os.environ["TORCHDYNAMO_DISABLE"] = "1"
 
+# Import unsloth first to ensure all optimizations are applied
+import unsloth  # noqa: F401, E402
+
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 TRAIN_FILE = os.path.join(DATA_DIR, "train.jsonl")
 VAL_FILE = os.path.join(DATA_DIR, "val.jsonl")
@@ -50,48 +53,78 @@ def train(
     epochs: int = 3,
     lr: float = 2e-4,
     batch_size: int = 8,
-    max_seq_length: int = 1024,
+    max_seq_length: int = 512,
     lora_rank: int = 32,
 ):
-    from unsloth import FastLanguageModel
     from trl import SFTTrainer
     from transformers import TrainingArguments
-    from unsloth.chat_templates import get_chat_template
 
-    print(f"Loading base model: {model_name}")
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=model_name,
-        max_seq_length=max_seq_length,
-        dtype=None,  # auto-detect
-        load_in_4bit=True,
-    )
+    model_lower = model_name.lower()
+    is_gemma = "gemma" in model_lower
+
+    # Use FastModel for Gemma 3 (newer API with vision layer control),
+    # FastLanguageModel for everything else
+    if is_gemma:
+        from unsloth import FastModel
+        print(f"Loading base model (FastModel): {model_name}")
+        model, tokenizer = FastModel.from_pretrained(
+            model_name=model_name,
+            max_seq_length=max_seq_length,
+            load_in_4bit=True,
+            load_in_8bit=False,
+            full_finetuning=False,
+        )
+    else:
+        from unsloth import FastLanguageModel
+        print(f"Loading base model: {model_name}")
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=model_name,
+            max_seq_length=max_seq_length,
+            dtype=None,  # auto-detect
+            load_in_4bit=True,
+        )
 
     # Apply chat template based on model family
-    model_lower = model_name.lower()
+    from unsloth.chat_templates import get_chat_template
     if "phi" in model_lower:
         template = "phi-4"
     elif "qwen" in model_lower:
         template = "qwen-2.5"  # Qwen 2.5/3/3.5 all use <|im_start|> chatml
-    elif "gemma" in model_lower:
+    elif is_gemma:
         template = "gemma"
     else:
         template = "chatml"
     tokenizer = get_chat_template(tokenizer, chat_template=template)
 
-    # Add LoRA adapters
-    model = FastLanguageModel.get_peft_model(
-        model,
-        r=lora_rank,
-        target_modules=[
-            "q_proj", "k_proj", "v_proj", "o_proj",
-            "gate_proj", "up_proj", "down_proj",
-        ],
-        lora_alpha=lora_rank,
-        lora_dropout=0,
-        bias="none",
-        use_gradient_checkpointing="unsloth",
-        random_state=42,
-    )
+    # Add LoRA adapters — Gemma 3 uses layer-level controls, others use target_modules
+    if is_gemma:
+        model = FastModel.get_peft_model(
+            model,
+            finetune_vision_layers=False,
+            finetune_language_layers=True,
+            finetune_attention_modules=True,
+            finetune_mlp_modules=True,
+            r=lora_rank,
+            lora_alpha=lora_rank,
+            lora_dropout=0,
+            bias="none",
+            random_state=3407,
+        )
+    else:
+        model = FastLanguageModel.get_peft_model(
+            model,
+            r=lora_rank,
+            target_modules=[
+                "q_proj", "k_proj", "v_proj", "o_proj",
+                "gate_proj", "up_proj", "down_proj",
+            ],
+            lora_alpha=lora_rank,
+            lora_dropout=0,
+            bias="none",
+            use_rslora=True,
+            use_gradient_checkpointing="unsloth",
+            random_state=42,
+        )
 
     # Load datasets
     print("Loading training data...")
@@ -110,31 +143,58 @@ def train(
     train_dataset = train_dataset.map(formatting_func, batched=True, remove_columns=train_dataset.column_names)
     val_dataset = val_dataset.map(formatting_func, batched=True, remove_columns=val_dataset.column_names)
 
-    # Training args
+    # Training args — Gemma 3 uses Unsloth-recommended settings
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    training_args = TrainingArguments(
-        output_dir=OUTPUT_DIR,
-        per_device_train_batch_size=batch_size,
-        gradient_accumulation_steps=2,
-        num_train_epochs=epochs,
-        learning_rate=lr,
-        bf16=True,
-        logging_steps=25,
-        eval_strategy="steps",
-        eval_steps=100,
-        save_steps=500,
-        save_total_limit=2,
-        warmup_steps=50,
-        weight_decay=0.01,
-        lr_scheduler_type="cosine",
-        seed=42,
-        report_to="none",
-    )
+    if is_gemma:
+        training_args = TrainingArguments(
+            output_dir=OUTPUT_DIR,
+            per_device_train_batch_size=2,
+            gradient_accumulation_steps=4,
+            num_train_epochs=epochs,
+            learning_rate=lr,
+            bf16=True,
+            logging_steps=25,
+            eval_strategy="steps",
+            eval_steps=100,
+            save_steps=100,
+            save_total_limit=3,
+            load_best_model_at_end=True,
+            metric_for_best_model="eval_loss",
+            greater_is_better=False,
+            warmup_steps=5,
+            weight_decay=0.001,
+            lr_scheduler_type="linear",
+            optim="adamw_8bit",
+            seed=3407,
+            report_to="none",
+        )
+    else:
+        training_args = TrainingArguments(
+            output_dir=OUTPUT_DIR,
+            per_device_train_batch_size=batch_size,
+            gradient_accumulation_steps=2,
+            num_train_epochs=epochs,
+            learning_rate=lr,
+            bf16=True,
+            logging_steps=25,
+            eval_strategy="steps",
+            eval_steps=100,
+            save_steps=100,
+            save_total_limit=3,
+            load_best_model_at_end=True,
+            metric_for_best_model="eval_loss",
+            greater_is_better=False,
+            warmup_steps=100,
+            weight_decay=0.01,
+            lr_scheduler_type="cosine",
+            seed=42,
+            report_to="none",
+        )
 
-    # Trainer
+    # Trainer — newer trl uses processing_class instead of tokenizer
     trainer = SFTTrainer(
         model=model,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
         args=training_args,
@@ -143,10 +203,21 @@ def train(
         packing=True,
     )
 
-    # Check for existing checkpoint to resume from
+    # Check for existing checkpoint to resume from (only if training args match)
     import glob
+    resume_from = None
     checkpoints = sorted(glob.glob(os.path.join(OUTPUT_DIR, "checkpoint-*")))
-    resume_from = checkpoints[-1] if checkpoints else None
+    if checkpoints:
+        try:
+            state_file = os.path.join(checkpoints[-1], "trainer_state.json")
+            with open(state_file) as f:
+                state = json.load(f)
+            # Only resume if epoch count and batch size match (same run config)
+            if (state.get("num_train_epochs") == epochs
+                    and state.get("train_batch_size") == batch_size):
+                resume_from = checkpoints[-1]
+        except (FileNotFoundError, json.JSONDecodeError, KeyError):
+            pass
 
     print(f"\nStarting training: {epochs} epochs, lr={lr}, batch={batch_size}")
     print(f"LoRA rank: {lora_rank}, max_seq: {max_seq_length}")
@@ -165,14 +236,23 @@ def train(
 def export_gguf(model=None, tokenizer=None, model_name: str = "unsloth/Qwen2.5-3B-Instruct", quant: str = "q4_k_m"):
     """Export fine-tuned model to GGUF for Ollama."""
     if model is None:
-        from unsloth import FastLanguageModel
-        print(f"Loading fine-tuned model from {OUTPUT_DIR}")
-        model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name=OUTPUT_DIR,
-            max_seq_length=2048,
-            dtype=None,
-            load_in_4bit=True,
-        )
+        if "gemma" in model_name.lower():
+            from unsloth import FastModel
+            print(f"Loading fine-tuned model from {OUTPUT_DIR}")
+            model, tokenizer = FastModel.from_pretrained(
+                model_name=OUTPUT_DIR,
+                max_seq_length=2048,
+                load_in_4bit=True,
+            )
+        else:
+            from unsloth import FastLanguageModel
+            print(f"Loading fine-tuned model from {OUTPUT_DIR}")
+            model, tokenizer = FastLanguageModel.from_pretrained(
+                model_name=OUTPUT_DIR,
+                max_seq_length=2048,
+                dtype=None,
+                load_in_4bit=True,
+            )
 
     gguf_dir = os.path.join(OUTPUT_DIR, "gguf")
     os.makedirs(gguf_dir, exist_ok=True)
@@ -209,20 +289,21 @@ def export_gguf(model=None, tokenizer=None, model_name: str = "unsloth/Qwen2.5-3
 
 
 SYSTEM_PROMPT = """You are an MTG card analyst. Analyze the card and return JSON with:
-- role: one of enabler, threat, draw, removal, ramp, utility, protection, land
-- provides: what this card gives (kebab-case tags, e.g. token-generation, counter-placement)
-- wants: what conditions make this card better (e.g. creature-etb, attack-events)
+- function: what the card DOES mechanically (e.g. draw-engine, spot-removal, token-generator, sacrifice-outlet)
+- themes: EDH deck archetypes this card fits (e.g. aristocrats, tokens, storm, voltron)
+- provides: what this card GIVES to the board (e.g. card-draw, targeted-removal, counter-placement)
+- wants: what conditions make this card BETTER (e.g. creature-death, wide-board, spell-cast)
 
-Return ONLY valid JSON. No explanation."""
+Select tags from the controlled vocabulary used in training. Return ONLY valid JSON. No explanation."""
 
 
 def main():
     parser = argparse.ArgumentParser(description="Fine-tune MTG card tagger")
     parser.add_argument("--model", default="unsloth/Qwen3-4B-Instruct-2507-unsloth-bnb-4bit",
                         help="Base model (default: Qwen3-4B-Instruct)")
-    parser.add_argument("--epochs", type=int, default=3, help="Training epochs")
+    parser.add_argument("--epochs", type=int, default=2, help="Training epochs")
     parser.add_argument("--lr", type=float, default=2e-4, help="Learning rate")
-    parser.add_argument("--batch-size", type=int, default=4, help="Batch size")
+    parser.add_argument("--batch-size", type=int, default=8, help="Batch size")
     parser.add_argument("--lora-rank", type=int, default=32, help="LoRA rank")
     parser.add_argument("--export-only", action="store_true",
                         help="Export existing checkpoint to GGUF without training")

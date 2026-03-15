@@ -18,18 +18,7 @@ SCHEMA = """{
   "name": "card name",
   "role": "ramp | draw | removal | protection | enabler | threat | utility | land",
   "provides": ["what this card gives to the deck — abstract capabilities, e.g. mana-acceleration, counter-amplification, trigger-doubling"],
-  "wants": ["what other cards or conditions make this card better — abstract tags, e.g. counter-placement-events, creature-etb-triggers"],
-  "categories": ["functional categories, e.g. counter-doubler, tribal-enabler, mana-rock"],
-  "mechanics": ["MTG mechanics used, e.g. replacement effect, ward, flash"],
-  "triggers": [
-    {
-      "condition": "when X happens",
-      "effect": "Y happens",
-      "scope": "self | board | targeted | opponent",
-      "permanent": true
-    }
-  ],
-  "notes": "one sentence: card's role in a deck"
+  "wants": ["what other cards or conditions make this card better — abstract tags, e.g. counter-placement-events, creature-etb-triggers"]
 }"""
 
 def _load_tag_vocab() -> tuple[list[str], list[str]]:
@@ -58,45 +47,6 @@ def _build_tag_vocab_block() -> str:
 _TAG_VOCAB_BLOCK = _build_tag_vocab_block()
 
 
-CATEGORY_VOCAB = """
-FUNCTIONAL CATEGORIES (use these, extend only if truly needed):
-  Counter mechanics:
-    counter-doubler, counter-placer, board-wide-counter-placer, single-target-counter-placer
-    counter-payoff, counter-mover, counter-consolidator, proliferate-effect
-    replacement-effect (for Hardened Scales / Pir style)
-
-  Tribal:
-    human-tribal, elf-tribal, dragon-tribal, wizard-tribal
-    tribal-lord, tribal-enabler, can-become-chosen-type
-
-  Triggers:
-    etb-trigger, attack-trigger, death-trigger, cast-trigger
-    triggered-ability-doubler, activated-ability-copier
-    human-etb-payoff (specific: fires when a Human enters)
-
-  Card advantage:
-    card-draw-engine, conditional-draw, looting, top-of-library-access
-    tutor-creature, tutor-spell, tutor-land
-
-  Ramp:
-    staple-mana-rock, colorless-ramp, land-fetch, mana-dork, mana-sink
-
-  Protection:
-    board-protection, reactive-protection, targeted-protection
-    hexproof-granter, indestructible-granter, ward-granter
-    wrath-counter, staple-protection
-
-  Removal:
-    removal-exile, removal-destroy, board-wipe, artifact-removal, enchantment-removal
-
-  Combat:
-    evasion-granter, combat-enabler, pump-spell, anthem, finisher
-
-  Other:
-    passive-permanent (always-on effect, no activation cost)
-    utility-land, staple-land
-    mana-rock, equipment
-"""
 
 _SYSTEM_PROMPT_BASE = """You are an expert Magic: The Gathering card analyst building a synergy knowledge graph.
 Your job is to analyze MTG cards and produce structured role/provides/wants tags that become directed edges in a synergy graph.
@@ -180,30 +130,18 @@ def build_examples_block(examples: list[dict]) -> str:
             "role": "enabler",
             "provides": ["counter-amplification", "passive-counter-boost"],
             "wants": ["counter-placement-events", "counter-distribution"],
-            "categories": ["counter-doubler", "permanent-amplifier"],
-            "mechanics": ["replacement effect", "+1/+1 counters"],
-            "triggers": [],
-            "notes": "Passive enchantment adding one extra counter to every +1/+1 placement — stacks multiplicatively."
         },
         "Roaming Throne": {
             "name": "Roaming Throne",
             "role": "enabler",
             "provides": ["trigger-doubling", "tribal-ward-protection", "flexible-type-identity"],
             "wants": ["triggered-ability-heavy-commanders", "human-tribal"],
-            "categories": ["triggered-ability-doubler", "tribal-enabler", "ward-granter"],
-            "mechanics": ["triggered ability doubler", "ward", "type-selection on ETB"],
-            "triggers": [{"condition": "creature of chosen type triggers an ability", "effect": "that ability triggers again", "scope": "board", "permanent": True}],
-            "notes": "Doubles triggered abilities of chosen type — choosing Human makes it a Human itself and doubles Kyler's trigger."
         },
         "Sol Ring": {
             "name": "Sol Ring",
             "role": "ramp",
             "provides": ["mana-acceleration", "two-colorless-mana"],
             "wants": [],
-            "categories": ["staple-mana-rock", "ramp"],
-            "mechanics": ["mana ability", "tap ability"],
-            "triggers": [],
-            "notes": "Universal EDH staple producing 2 colorless mana for 1 investment."
         },
     }
 
@@ -259,9 +197,6 @@ Now analyze this card using the schema and rules above.
 
 SCHEMA:
 {SCHEMA}
-
-CATEGORY VOCABULARY:
-{CATEGORY_VOCAB}
 
 CARD TO TAG:
 Name: {card['name']}
@@ -341,14 +276,112 @@ Return a JSON ARRAY with one object per card, in the same order.
 SCHEMA (for each card):
 {SCHEMA}
 
-CATEGORY VOCABULARY:
-{CATEGORY_VOCAB}
-
 {chr(10).join(cards_block)}
 
 Return a JSON array of {len(cards)} objects. JSON only, no other text.""")
 
     user = "\n".join(user_parts)
+    return system, user
+
+
+REVIEW_SYSTEM_PROMPT = """You are a senior Magic: The Gathering analyst reviewing card tags produced by a junior tagger.
+Your job is to verify that the tags are accurate, complete, and follow the project conventions.
+
+You will receive:
+1. The original card data (name, type, oracle text)
+2. The tags produced by the tagger
+
+Check each card for these issues:
+- WRONG ROLE: Does the role accurately reflect the card's primary function?
+- MISSING PROVIDES: Are there capabilities the card clearly offers that are missing from provides?
+  Pay special attention to: untap effects, mana generation, counter placement, tribal types, protection.
+- WRONG PROVIDES: Are there provides tags that don't match what the card actually does?
+- MISSING WANTS: Are there conditions that clearly make this card better that are missing from wants?
+- WRONG WANTS: Are there wants tags that don't apply to this card?
+- TAG SPECIFICITY: Are tags too vague (e.g. 'tribal-synergy' instead of 'goblin-tribal')?
+- SCOPE ERRORS: Is board-wide vs single-target counter placement distinguished correctly?
+
+Return a JSON object with this structure:
+{
+  "cards": [
+    {
+      "name": "card name",
+      "verdict": "APPROVE" or "REVISE",
+      "issues": ["list of specific issues found — empty if APPROVE"],
+      "suggested_fixes": {"field": "corrected value"}
+    }
+  ]
+}
+
+Be strict but fair. Only flag genuine errors, not stylistic preferences.
+Return JSON only, no other text."""
+
+
+def build_review_prompt(cards: list[dict], tagged: list[dict]) -> tuple[str, str]:
+    """Build prompt for the reviewer agent to check tagged output."""
+    corrections = load_corrections()
+    corrections_block = build_corrections_block(corrections)
+
+    system = REVIEW_SYSTEM_PROMPT
+    if corrections_block:
+        system += "\n\n" + corrections_block
+
+    # Build user prompt with card data + tagger output side by side
+    review_blocks = []
+    for i, (card, tags) in enumerate(zip(cards, tagged), 1):
+        review_blocks.append(f"""CARD {i}:
+  Name: {card['name']}
+  Type: {card['type_line']}
+  Oracle text: {card.get('oracle_text', '')}
+  Keywords: {', '.join(card.get('keywords', [])) or 'none'}
+
+  TAGGER OUTPUT:
+  {json.dumps(tags, indent=2)}""")
+
+    user = f"""Review the following {len(cards)} tagged cards for accuracy.
+
+{_TAG_VOCAB_BLOCK}
+
+{chr(10).join(review_blocks)}
+
+Return your review as JSON. For each card, verdict is APPROVE or REVISE."""
+
+    return system, user
+
+
+def build_retag_prompt(cards: list[dict], tagged: list[dict],
+                       review: list[dict], rules_context: str = "") -> tuple[str, str]:
+    """Build a re-tagging prompt that includes reviewer feedback for flagged cards."""
+    # Only re-tag cards that got REVISE verdict
+    revise_indices = []
+    feedback_map = {}
+    for i, r in enumerate(review):
+        if r.get("verdict") == "REVISE":
+            revise_indices.append(i)
+            feedback_map[i] = r
+
+    if not revise_indices:
+        return "", ""
+
+    cards_to_retag = [cards[i] for i in revise_indices]
+
+    # Build the base batch prompt
+    system, user = build_batch_prompt(cards_to_retag, rules_context=rules_context)
+
+    # Inject reviewer feedback into the user prompt
+    feedback_lines = ["\nREVIEWER FEEDBACK (fix these issues in your re-tagging):"]
+    for idx in revise_indices:
+        r = feedback_map[idx]
+        card_name = cards[idx]["name"]
+        issues = r.get("issues", [])
+        fixes = r.get("suggested_fixes", {})
+        feedback_lines.append(f"\n  {card_name}:")
+        for issue in issues:
+            feedback_lines.append(f"    - {issue}")
+        if fixes:
+            feedback_lines.append(f"    Suggested fixes: {json.dumps(fixes)}")
+
+    user = "\n".join(feedback_lines) + "\n\n" + user
     return system, user
 
 

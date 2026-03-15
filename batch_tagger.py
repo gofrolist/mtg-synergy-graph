@@ -19,13 +19,14 @@ import time
 import urllib.request
 import urllib.error
 
-from prompt_builder import build_batch_prompt
+from prompt_builder import build_batch_prompt, build_review_prompt, build_retag_prompt
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 CANDIDATES_FILE = None  # set by --deck
 OUTPUT_FILE = None  # set by --deck or --output
 
 MAX_TOKENS = 4096
+MAX_REVIEW_ITERATIONS = 2
 
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
@@ -161,6 +162,50 @@ def call_api(system: str, user: str, api_key: str, provider: str, model: str) ->
         return call_anthropic(system, user, api_key, model)
 
 
+def review_batch(batch: list[dict], tagged: list[dict], api_key: str,
+                  provider: str, model: str) -> list[dict] | None:
+    """Send tagged cards to reviewer agent. Returns list of review verdicts."""
+    system, user = build_review_prompt(batch, tagged)
+    raw = call_api(system, user, api_key, provider, model)
+    if not raw:
+        return None
+    parsed = parse_response(raw, 1)  # Single JSON object with "cards" array
+    if not parsed:
+        return None
+    # Handle both {"cards": [...]} and [{...}] formats
+    result = parsed[0] if isinstance(parsed, list) else parsed
+    if isinstance(result, dict) and "cards" in result:
+        return result["cards"]
+    # If the model returned a flat list of card reviews
+    return parsed
+
+
+def retag_with_feedback(batch: list[dict], tagged: list[dict], reviews: list[dict],
+                        api_key: str, provider: str, model: str,
+                        rules_context: str = "") -> list[dict] | None:
+    """Re-tag cards that the reviewer flagged, injecting feedback into the prompt."""
+    system, user = build_retag_prompt(batch, tagged, reviews, rules_context=rules_context)
+    if not system:
+        return tagged  # Nothing to revise
+
+    # Find which cards need re-tagging
+    revise_indices = [i for i, r in enumerate(reviews) if r.get("verdict") == "REVISE"]
+
+    raw = call_api(system, user, api_key, provider, model)
+    if not raw:
+        return tagged  # Keep original on failure
+
+    retagged = parse_response(raw, len(revise_indices))
+    if not retagged:
+        return tagged  # Keep original on failure
+
+    # Merge re-tagged cards back into the full batch
+    result = list(tagged)
+    for new_tags, idx in zip(retagged, revise_indices):
+        result[idx] = new_tags
+    return result
+
+
 def parse_response(raw: str, expected_count: int) -> list[dict] | None:
     """Parse JSON array from API response. Returns list of tagged card dicts."""
     # Strip thinking tags (e.g. qwen3)
@@ -201,6 +246,7 @@ def run():
     parser.add_argument("--model", type=str, help="Model name override")
     parser.add_argument("--output", type=str, help="Output file path override")
     parser.add_argument("--rag", action="store_true", help="Enable RAG — inject relevant MTG rules into prompts")
+    parser.add_argument("--review", action="store_true", help="Enable multi-agent review loop — a reviewer LLM checks tags and triggers re-tagging on errors")
     args = parser.parse_args()
 
     if not args.deck and not args.candidates:
@@ -233,6 +279,10 @@ def run():
             print(f"WARNING: Could not load RAG pipeline: {e}")
             print("Run: python3 rules_fetcher.py && python3 rules_index.py")
             print("Continuing without RAG...")
+
+    review_enabled = args.review
+    if review_enabled:
+        print("Review loop enabled — reviewer agent will check tags after each batch")
 
     if provider != "none":
         print(f"Using {provider} (model: {model})")
@@ -317,11 +367,43 @@ def run():
             failed_count += len(batch)
             continue
 
+        # Multi-agent review loop
+        if review_enabled:
+            final_tags = parsed
+            for review_iter in range(MAX_REVIEW_ITERATIONS):
+                print(f"  Review pass {review_iter + 1}/{MAX_REVIEW_ITERATIONS}...")
+                reviews = review_batch(batch, final_tags, api_key, provider, model)
+                if not reviews:
+                    print(f"  Review failed — keeping current tags")
+                    break
+
+                revise_count = sum(1 for r in reviews if r.get("verdict") == "REVISE")
+                approve_count = len(reviews) - revise_count
+                print(f"  Review: {approve_count} approved, {revise_count} need revision")
+
+                if revise_count == 0:
+                    break
+
+                # Show what the reviewer flagged
+                for r in reviews:
+                    if r.get("verdict") == "REVISE":
+                        issues = r.get("issues", [])
+                        print(f"    {r.get('name', '?')}: {'; '.join(issues[:3])}")
+
+                # Re-tag with feedback
+                print(f"  Re-tagging {revise_count} cards with reviewer feedback...")
+                final_tags = retag_with_feedback(
+                    batch, final_tags, reviews, api_key, provider, model,
+                    rules_context=rules_context,
+                )
+
+                if provider != "ollama":
+                    time.sleep(0.5)
+            parsed = final_tags
+
         # Attach oracle_id from candidates to tagged results
         for card_data, tagged in zip(batch, parsed):
             tagged["oracle_id"] = card_data["oracle_id"]
-            tagged["filter_pass"] = card_data["filter_pass"]
-            tagged["filter_reason"] = card_data["filter_reason"]
             all_tagged.append(tagged)
             tagged_count += 1
 
