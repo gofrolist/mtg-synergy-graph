@@ -39,3 +39,4 @@ main.py
 data/*_tags_*.json
 data/*_merged*.json
 unsloth_compiled_cache/
+.env
