@@ -154,23 +154,23 @@ def parse_json(raw: str) -> dict | None:
 
 def score_golden(tagged: dict, expected: dict) -> dict:
     """Score a tagged card against golden expected values."""
-    st = set(tagged.get("synergy_tags", []))
-    must_have = set(expected.get("synergy_tags_must_include", []))
-    must_not = set(expected.get("synergy_tags_must_exclude", []))
+    t_provides = set(tagged.get("provides", []))
+    e_provides = set(expected.get("provides", []))
+    t_wants = set(tagged.get("wants", []))
+    e_wants = set(expected.get("wants", []))
 
-    hits = must_have & st
-    missing = must_have - st
-    bad = must_not & st
-
+    p_hits = len(t_provides & e_provides)
+    w_hits = len(t_wants & e_wants)
+    total_required = len(e_provides) + len(e_wants)
     role_match = tagged.get("role", "") == expected.get("role", "")
 
     return {
-        "hits": len(hits),
-        "total_required": len(must_have),
-        "missing": list(missing),
-        "unwanted": list(bad),
+        "hits": p_hits + w_hits,
+        "total_required": total_required,
+        "missing_provides": list(e_provides - t_provides),
+        "missing_wants": list(e_wants - t_wants),
         "role_match": role_match,
-        "pass": len(missing) == 0 and len(bad) == 0,
+        "pass": total_required == 0 or (p_hits + w_hits) / total_required >= 0.5,
     }
 
 
@@ -228,9 +228,9 @@ def run():
                 continue
 
             model_results["json_success"] += 1
-            synergy_tags = tagged.get("synergy_tags", [])
             role = tagged.get("role", "?")
-            print(f"OK ({elapsed:.1f}s) role={role} tags={synergy_tags[:4]}")
+            provides = tagged.get("provides", [])
+            print(f"OK ({elapsed:.1f}s) role={role} provides={provides[:4]}")
 
             # Score against golden if available
             if name in golden:

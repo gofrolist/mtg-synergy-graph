@@ -630,12 +630,11 @@ def build_graph(cards: list[dict], min_score: float = 0.5) -> dict:
     per-card views.
     """
     pw_edges = build_provides_wants_edges(cards)
-    st_edges = build_shared_tag_edges(cards)
     pe_edges = build_peer_edges(cards)
     sw_edges = build_shared_wants_edges(cards)
     emb_edges = build_embedding_edges(cards)
 
-    raw_edges = pw_edges + st_edges + pe_edges + sw_edges + emb_edges
+    raw_edges = pw_edges + pe_edges + sw_edges + emb_edges
 
     # Merge all signals per card pair into composite scores
     # Key by sorted (name_a, name_b) to deduplicate direction
@@ -747,7 +746,6 @@ def build_graph(cards: list[dict], min_score: float = 0.5) -> dict:
             "unique_pairs": len(composite_edges),
             "pruned_edges": len(pruned_edges),
             "provides_wants_edges": len(pw_edges),
-            "shared_tag_edges": len(st_edges),
             "peer_enabler_edges": len(pe_edges),
             "shared_wants_edges": len(sw_edges),
             "embedding_edges": len(emb_edges),
@@ -1310,8 +1308,6 @@ def generate_visualization(graph: dict, cards: list[dict], deck_set: set,
             "role": card.get("role", "unknown"),
             "provides": card.get("provides", []),
             "wants": card.get("wants", []),
-            "synergy_tags": card.get("synergy_tags", [])[:10],
-            "notes": card.get("notes", ""),
             "is_commander": name == commander,
             "edge_count": len(edges_for_card),
             "total_synergy": round(total_syn, 1),
@@ -1651,8 +1647,6 @@ function selectNode(d) {
   d3.select("#panel-role").text(`Role: ${d.role} | Edges: ${d.edge_count} | Total synergy: ${d.total_synergy}`);
   d3.select("#panel-provides").html(d.provides.map(t => `<span class="tag provides">${t}</span>`).join(""));
   d3.select("#panel-wants").html(d.wants.map(t => `<span class="tag wants">${t}</span>`).join(""));
-  d3.select("#panel-synergy").html(d.synergy_tags.map(t => `<span class="tag synergy">${t}</span>`).join(""));
-  d3.select("#panel-notes").text(d.notes);
   d3.select("#panel-connections").html(
     connEdges.slice(0, 20).map(c => `<div class="conn"><span class="conn-name" data-name="${c.name}">${c.name}</span><span class="conn-score">${c.score}</span></div>`).join("")
   );
@@ -1971,7 +1965,6 @@ def run():
     print(f"\nGraph stats:")
     print(f"  raw signal edges:      {stats['total_raw_edges']}")
     print(f"    provides→wants:      {stats['provides_wants_edges']}")
-    print(f"    shared-tag:          {stats['shared_tag_edges']}")
     print(f"    peer-enabler:        {stats['peer_enabler_edges']}")
     print(f"    shared-wants:        {stats['shared_wants_edges']}")
     print(f"    embedding:           {stats.get('embedding_edges', 0)}")

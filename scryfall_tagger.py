@@ -2,7 +2,7 @@
 Fetch function tags from Scryfall Tagger via GraphQL API.
 
 Downloads community-curated oracle/function tags for candidate cards.
-These tags replace LLM-generated synergy_tags as the canonical tag source.
+These tags are used for function classification in the golden evaluation set.
 
 Usage:
     python3 scryfall_tagger.py

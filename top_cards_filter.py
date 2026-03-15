@@ -73,8 +73,6 @@ def extract_top_cards(n: int) -> list[dict]:
             "cmc": card.get("cmc", 0),
             "color_identity": card.get("color_identity", []),
             "edhrec_rank": card["edhrec_rank"],
-            "filter_pass": 1,
-            "filter_reason": f"edhrec-top-{n}",
         })
 
     return candidates

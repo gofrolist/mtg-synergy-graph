@@ -211,7 +211,7 @@ def cmd_sync(args):
 
     for card in cards:
         name = card.get("name") or card.get("_input_name", "unknown")
-        all_tags = card.get("provides", []) + card.get("wants", []) + card.get("synergy_tags", [])
+        all_tags = card.get("provides", []) + card.get("wants", [])
         for tag in all_tags:
             if tag in tags:
                 tags[tag]["count"] += 1

@@ -45,13 +45,6 @@ CREATE TABLE IF NOT EXISTS wants (
 );
 CREATE INDEX IF NOT EXISTS idx_wants_tag ON wants(tag);
 
-CREATE TABLE IF NOT EXISTS synergy_tags (
-    oracle_id TEXT NOT NULL REFERENCES cards(oracle_id),
-    tag TEXT NOT NULL,
-    PRIMARY KEY (oracle_id, tag)
-);
-CREATE INDEX IF NOT EXISTS idx_synergy_tags_tag ON synergy_tags(tag);
-
 CREATE TABLE IF NOT EXISTS scryfall_tags (
     oracle_id TEXT NOT NULL,
     tag TEXT NOT NULL,
@@ -108,14 +101,10 @@ def import_cards(cards: list[dict], db_path: str = DB_PATH, normalize: bool = Tr
         # Clear existing tags for this card
         cur.execute("DELETE FROM provides WHERE oracle_id = ?", (oid,))
         cur.execute("DELETE FROM wants WHERE oracle_id = ?", (oid,))
-        cur.execute("DELETE FROM synergy_tags WHERE oracle_id = ?", (oid,))
-
         for tag in card.get("provides", []):
             cur.execute("INSERT OR IGNORE INTO provides VALUES (?, ?)", (oid, tag))
         for tag in card.get("wants", []):
             cur.execute("INSERT OR IGNORE INTO wants VALUES (?, ?)", (oid, tag))
-        for tag in card.get("synergy_tags", []):
-            cur.execute("INSERT OR IGNORE INTO synergy_tags VALUES (?, ?)", (oid, tag))
 
     conn.commit()
     conn.close()
@@ -148,7 +137,7 @@ def _row_to_card(row: sqlite3.Row) -> dict:
 
 
 def _attach_tags(conn: sqlite3.Connection, cards: list[dict]) -> list[dict]:
-    """Batch-load provides/wants/synergy_tags for a list of cards."""
+    """Batch-load provides/wants for a list of cards."""
     if not cards:
         return cards
 
@@ -160,7 +149,6 @@ def _attach_tags(conn: sqlite3.Connection, cards: list[dict]) -> list[dict]:
     for c in cards:
         c["provides"] = []
         c["wants"] = []
-        c["synergy_tags"] = []
         c["scryfall_tags"] = []
 
     # Batch query tags using chunked IN clauses
@@ -180,12 +168,6 @@ def _attach_tags(conn: sqlite3.Connection, cards: list[dict]) -> list[dict]:
             chunk,
         ):
             card_idx[row[0]]["wants"].append(row[1])
-
-        for row in conn.execute(
-            f"SELECT oracle_id, tag FROM synergy_tags WHERE oracle_id IN ({placeholders})",
-            chunk,
-        ):
-            card_idx[row[0]]["synergy_tags"].append(row[1])
 
         # Load scryfall community tags into separate field (validation only,
         # not used for graph edge building — avoids inheriting Scryfall's
@@ -326,10 +308,8 @@ def get_db_stats(db_path: str = DB_PATH) -> dict:
     stats["cards"] = conn.execute("SELECT COUNT(*) FROM cards").fetchone()[0]
     stats["provides_rows"] = conn.execute("SELECT COUNT(*) FROM provides").fetchone()[0]
     stats["wants_rows"] = conn.execute("SELECT COUNT(*) FROM wants").fetchone()[0]
-    stats["synergy_tags_rows"] = conn.execute("SELECT COUNT(*) FROM synergy_tags").fetchone()[0]
     stats["unique_provides"] = conn.execute("SELECT COUNT(DISTINCT tag) FROM provides").fetchone()[0]
     stats["unique_wants"] = conn.execute("SELECT COUNT(DISTINCT tag) FROM wants").fetchone()[0]
-    stats["unique_synergy"] = conn.execute("SELECT COUNT(DISTINCT tag) FROM synergy_tags").fetchone()[0]
 
     # Scryfall tags stats
     try:

@@ -1,14 +1,13 @@
 """
 Prepare training data for fine-tuning a card tagger model.
 
-Converts the 10k tagged cards into instruction-following format for
-supervised fine-tuning (SFT) with unsloth/LoRA.
+Uses gpt-4.1-mini tagged cards as ground truth for provides/wants.
+Excludes golden set cards (reserved for evaluation).
 
 Usage:
     python3 prepare_training.py                    # generate train/val split
-    python3 prepare_training.py --format chat      # chat format (default)
-    python3 prepare_training.py --format alpaca    # alpaca format
     python3 prepare_training.py --val-ratio 0.1    # 10% validation
+    python3 prepare_training.py --stats            # show data quality stats
 """
 
 import argparse
@@ -17,19 +16,20 @@ import os
 import random
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
-TAGS_FILE = os.path.join(DATA_DIR, "top10000_tags_finetuned.json")
+TAGS_FILE = os.path.join(DATA_DIR, "top10000_tags_gpt41mini.json")
 SCRYFALL_FILE = os.path.join(DATA_DIR, "oracle_cards.json")
+GOLDEN_FILE = os.path.join(os.path.dirname(__file__), "golden_cards.json")
 
 TRAIN_FILE = os.path.join(DATA_DIR, "train.jsonl")
 VAL_FILE = os.path.join(DATA_DIR, "val.jsonl")
 
-# Compact system prompt for fine-tuning (shorter than production prompt)
 SYSTEM_PROMPT = """You are an MTG card analyst. Analyze the card and return JSON with:
-- role: one of enabler, threat, draw, removal, ramp, utility, protection, land
-- provides: what this card gives (kebab-case tags, e.g. token-generation, counter-placement)
-- wants: what conditions make this card better (e.g. creature-etb, attack-events)
+- name: card name
+- role: the card's primary function (ramp, draw, removal, protection, enabler, threat, utility, land)
+- provides: what this card GIVES to the deck (e.g. card-draw, targeted-removal, counter-placement)
+- wants: what conditions make this card BETTER (e.g. creature-death, wide-board, spell-cast)
 
-Return ONLY valid JSON. No explanation."""
+Select tags from the controlled vocabulary used in training. Return ONLY valid JSON. No explanation."""
 
 
 def load_oracle_texts() -> dict[str, dict]:
@@ -62,67 +62,58 @@ def load_oracle_texts() -> dict[str, dict]:
 def card_to_user_prompt(card_info: dict) -> str:
     """Build the user prompt for a single card."""
     keywords = ", ".join(card_info.get("keywords", [])) or "none"
-    return (
-        f"Name: {card_info['name']}\n"
-        f"Type: {card_info['type_line']}\n"
-        f"CMC: {card_info.get('cmc', 0)}\n"
-        f"Keywords: {keywords}\n"
-        f"Oracle text: {card_info['oracle_text']}"
-    )
+    parts = [
+        f"Name: {card_info['name']}",
+        f"Type: {card_info['type_line']}",
+        f"CMC: {card_info.get('cmc', 0)}",
+        f"Keywords: {keywords}",
+        f"Oracle text: {card_info['oracle_text']}",
+    ]
+    return "\n".join(parts)
 
 
-def card_to_response(tagged: dict) -> str:
+def card_to_response(name: str, role: str, provides: list, wants: list) -> str:
     """Build the expected JSON response."""
     output = {
-        "name": tagged["name"],
-        "role": tagged.get("role", ""),
-        "provides": tagged.get("provides", []),
-        "wants": tagged.get("wants", []),
+        "name": name,
+        "role": role,
+        "provides": provides,
+        "wants": wants,
     }
     return json.dumps(output, separators=(",", ":"))
 
 
-def prepare_chat_format(tagged: dict, card_info: dict) -> dict:
-    """Convert to chat/conversational format for SFT."""
-    return {
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": card_to_user_prompt(card_info)},
-            {"role": "assistant", "content": card_to_response(tagged)},
-        ]
-    }
-
-
-def prepare_alpaca_format(tagged: dict, card_info: dict) -> dict:
-    """Convert to alpaca instruction format."""
-    return {
-        "instruction": SYSTEM_PROMPT,
-        "input": card_to_user_prompt(card_info),
-        "output": card_to_response(tagged),
-    }
-
-
 def main():
     parser = argparse.ArgumentParser(description="Prepare fine-tuning training data")
-    parser.add_argument("--format", choices=["chat", "alpaca"], default="chat",
-                        help="Output format (default: chat)")
     parser.add_argument("--val-ratio", type=float, default=0.05,
                         help="Validation split ratio (default: 0.05)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument("--stats", action="store_true",
+                        help="Show stats on generated data")
     args = parser.parse_args()
 
-    # Load tagged cards
+    # Load tagged cards (gpt-4.1-mini output)
     with open(TAGS_FILE) as f:
         tagged_cards = json.load(f)
 
-    # Load oracle texts (needed for input prompts)
+    # Golden cards to exclude (reserved for evaluation)
+    golden_names = set()
+    if os.path.exists(GOLDEN_FILE):
+        with open(GOLDEN_FILE) as f:
+            golden_data = json.load(f)
+            golden_names = {c["name"] for c in golden_data["cards"]}
+        print(f"Golden cards to exclude: {len(golden_names)}")
+
+    # Oracle texts for card input prompts
     oracle = load_oracle_texts()
     print(f"Tagged cards: {len(tagged_cards)}")
     print(f"Oracle texts: {len(oracle)}")
 
-    # Match tagged cards with oracle texts
+    # Build training examples
     examples = []
     skipped = 0
+    excluded_golden = 0
+
     for tagged in tagged_cards:
         oid = tagged.get("oracle_id", "")
         card_info = oracle.get(oid)
@@ -130,17 +121,32 @@ def main():
             skipped += 1
             continue
 
-        if not tagged.get("provides") and not tagged.get("wants"):
+        name = tagged.get("name", card_info.get("name", ""))
+        if name in golden_names:
+            excluded_golden += 1
+            continue
+
+        provides = tagged.get("provides", [])
+        wants = tagged.get("wants", [])
+        role = tagged.get("role", "utility")
+
+        # Skip cards with no tags
+        if not provides and not wants:
             skipped += 1
             continue
 
-        if args.format == "chat":
-            example = prepare_chat_format(tagged, card_info)
-        else:
-            example = prepare_alpaca_format(tagged, card_info)
+        example = {
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": card_to_user_prompt(card_info)},
+                {"role": "assistant", "content": card_to_response(
+                    name, role, provides, wants)},
+            ]
+        }
         examples.append(example)
 
-    print(f"Valid examples: {len(examples)} (skipped {skipped})")
+    print(f"Valid examples: {len(examples)} (skipped {skipped}, "
+          f"excluded {excluded_golden} golden)")
 
     # Shuffle and split
     random.seed(args.seed)
@@ -162,7 +168,7 @@ def main():
     print(f"\nTrain: {len(train_examples)} examples → {TRAIN_FILE}")
     print(f"Val:   {len(val_examples)} examples → {VAL_FILE}")
 
-    # Stats
+    # File sizes
     train_size = os.path.getsize(TRAIN_FILE) / 1024 / 1024
     val_size_mb = os.path.getsize(VAL_FILE) / 1024 / 1024
     print(f"Train file: {train_size:.1f}MB")
@@ -171,12 +177,26 @@ def main():
     # Sample
     print(f"\nSample training example:")
     sample = train_examples[0]
-    if args.format == "chat":
-        print(f"  User: {sample['messages'][1]['content'][:100]}...")
-        print(f"  Asst: {sample['messages'][2]['content'][:150]}...")
-    else:
-        print(f"  Input: {sample['input'][:100]}...")
-        print(f"  Output: {sample['output'][:150]}...")
+    print(f"  User: {sample['messages'][1]['content'][:100]}...")
+    print(f"  Asst: {sample['messages'][2]['content'][:200]}...")
+
+    if args.stats:
+        from collections import Counter
+        all_provides = Counter()
+        all_wants = Counter()
+        roles = Counter()
+        for ex in examples:
+            resp = json.loads(ex["messages"][2]["content"])
+            all_provides.update(resp.get("provides", []))
+            all_wants.update(resp.get("wants", []))
+            roles[resp.get("role", "")] += 1
+
+        print(f"\n--- Stats ---")
+        print(f"Unique provides: {len(all_provides)}")
+        print(f"Unique wants:    {len(all_wants)}")
+        print(f"Roles: {dict(roles.most_common())}")
+        print(f"Avg provides/card: {sum(all_provides.values())/len(examples):.1f}")
+        print(f"Avg wants/card:    {sum(all_wants.values())/len(examples):.1f}")
 
 
 if __name__ == "__main__":

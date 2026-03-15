@@ -76,8 +76,6 @@ def to_candidate(card: dict, reason: str) -> dict:
         "cmc": card.get("cmc", 0),
         "color_identity": card.get("color_identity", []),
         "edhrec_rank": card.get("edhrec_rank"),
-        "filter_pass": 1,
-        "filter_reason": reason,
     }
 
 

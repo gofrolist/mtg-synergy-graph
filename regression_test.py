@@ -2,9 +2,7 @@
 regression_test.py
 Validates that tagged cards match golden dataset expectations.
 
-Two-source architecture:
-  - synergy_tags: validated against Scryfall tagger community tags
-  - role/provides/wants: validated against LLM output
+Validates role/provides/wants against golden expected values.
 
 Modes:
   --mode static   : validate against golden_cards.json (no API call)
@@ -128,26 +126,6 @@ def check_role(actual: dict, expected: dict, card_name: str) -> list[str]:
     return failures
 
 
-def check_synergy_tags(actual: dict, expected: dict, card_name: str) -> list[str]:
-    failures = []
-    actual_tags = set(actual.get("synergy_tags", []))
-
-    must_include = expected.get("synergy_tags_must_include", [])
-    must_exclude = expected.get("synergy_tags_must_exclude", [])
-
-    for tag in must_include:
-        if not _semantic_tag_match(tag, actual_tags):
-            failures.append(
-                f"  MISSING TAG: '{tag}' (or semantic equivalent) must be in synergy_tags, "
-                f"got: {sorted(actual_tags)}"
-            )
-
-    for tag in must_exclude:
-        # Exclusions use exact match only — we don't want fuzzy false positives
-        if tag in actual_tags:
-            failures.append(f"  FORBIDDEN TAG: '{tag}' must NOT be in synergy_tags")
-
-    return failures
 
 
 def check_provides(actual: dict, expected: dict, card_name: str) -> list[str]:
@@ -180,7 +158,6 @@ def validate_card(actual: dict, golden: dict) -> list[str]:
     exp = golden["expected"]
     failures = []
     failures += check_role(actual, exp, name)
-    failures += check_synergy_tags(actual, exp, name)
     failures += check_provides(actual, exp, name)
     failures += check_wants(actual, exp, name)
     return failures
@@ -228,49 +205,10 @@ def mode_static(tags_file: str = "data/top10000_tags.json"):
 
 
 def mode_scryfall():
-    """Validate Scryfall tagger tags against golden expectations."""
-    golden = load_golden()
-    scryfall = load_scryfall_tags()
-
-    if not scryfall:
-        print("ERROR: No Scryfall tags found. Run: python3 scryfall_tagger.py")
-        return False
-
-    print("═" * 60)
-    print("REGRESSION TEST — Scryfall tagger tags vs golden")
-    print("═" * 60)
-
-    passed = 0
-    failed = 0
-    skipped = 0
-
-    for g in golden:
-        name = g["name"]
-        sf_tags = scryfall.get(name)
-        if sf_tags is None:
-            print(f"\n  ⚠  SKIP  {name} — not found in Scryfall tags")
-            skipped += 1
-            continue
-
-        # Build a fake "actual" dict with synergy_tags from Scryfall
-        actual = {"synergy_tags": sf_tags}
-        exp = g["expected"]
-        failures = check_synergy_tags(actual, exp, name)
-
-        if failures:
-            failed += 1
-            print(f"\n  ✗  FAIL  {name}")
-            for f in failures:
-                print(f)
-        else:
-            passed += 1
-            print(f"  ✓  PASS  {name} — tags: {sf_tags}")
-
-    print(f"\n{'═'*60}")
-    print(f"Results: {passed} passed, {failed} failed, {skipped} skipped")
-    print(f"{'═'*60}")
-
-    return failed == 0
+    """Deprecated — Scryfall tag validation removed."""
+    print("ERROR: Scryfall tag validation mode has been removed.")
+    print("Use --mode static or --mode live instead.")
+    return False
 
 
 def mode_live():
@@ -344,10 +282,11 @@ def mode_live():
             print(f"  ✗ FAIL")
             for f in failures:
                 print(f"      {f}")
-            print(f"  Actual synergy_tags: {actual.get('synergy_tags', [])}")
+            print(f"  Actual provides: {actual.get('provides', [])}")
+            print(f"  Actual wants: {actual.get('wants', [])}")
         else:
             passed += 1
-            print(f"  ✓ PASS — synergy_tags: {actual.get('synergy_tags', [])}")
+            print(f"  ✓ PASS")
 
     # Save live results for analysis
     output_path = BASE_DIR / "regression_results.json"
