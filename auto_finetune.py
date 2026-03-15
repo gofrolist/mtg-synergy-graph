@@ -27,10 +27,12 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 GOLDEN_FILE = os.path.join(os.path.dirname(__file__), "golden_cards.json")
@@ -47,11 +49,12 @@ CUDA_LIB = os.path.join(
 )
 
 SYSTEM_PROMPT = """You are an MTG card analyst. Analyze the card and return JSON with:
-- role: one of enabler, threat, draw, removal, ramp, utility, protection, land
-- provides: what this card gives (kebab-case tags, e.g. token-generation, counter-placement)
-- wants: what conditions make this card better (e.g. creature-etb, attack-events)
+- function: what the card DOES mechanically (e.g. draw-engine, spot-removal, token-generator, sacrifice-outlet)
+- themes: EDH deck archetypes this card fits (e.g. aristocrats, tokens, storm, voltron)
+- provides: what this card GIVES to the board (e.g. card-draw, targeted-removal, counter-placement)
+- wants: what conditions make this card BETTER (e.g. creature-death, wide-board, spell-cast)
 
-Return ONLY valid JSON. No explanation."""
+Select tags from the controlled vocabulary used in training. Return ONLY valid JSON. No explanation."""
 
 
 # ── Experiment Configurations ──
@@ -60,46 +63,46 @@ EXPERIMENTS = [
     # === Qwen 3.5 models (newest architecture) ===
 
     # Qwen3.5-4B: direct upgrade from Qwen3-4B
-    {"name": "qwen35-4b-r32-lr2e4-ep3",
-     "model": "unsloth/Qwen3.5-4B", "lora_rank": 32, "lr": 2e-4, "epochs": 3, "batch_size": 8},
+    {"name": "qwen35-4b-r32-lr2e4-ep2",
+     "model": "unsloth/Qwen3.5-4B", "lora_rank": 32, "lr": 2e-4, "epochs": 2, "batch_size": 4},
 
     # Qwen3.5-35B-A3B MoE: 35B knowledge, 3B active params
-    {"name": "qwen35-35b-a3b-r32-lr2e4-ep3",
-     "model": "unsloth/Qwen3.5-35B-A3B", "lora_rank": 32, "lr": 2e-4, "epochs": 3, "batch_size": 4},
+    {"name": "qwen35-35b-a3b-r32-lr2e4-ep2",
+     "model": "unsloth/Qwen3.5-35B-A3B", "lora_rank": 32, "lr": 2e-4, "epochs": 2, "batch_size": 4},
 
     # Qwen3.5-2B: fast iteration
-    {"name": "qwen35-2b-r32-lr2e4-ep3",
-     "model": "unsloth/Qwen3.5-2B", "lora_rank": 32, "lr": 2e-4, "epochs": 3, "batch_size": 8},
+    {"name": "qwen35-2b-r32-lr2e4-ep2",
+     "model": "unsloth/Qwen3.5-2B", "lora_rank": 32, "lr": 2e-4, "epochs": 2, "batch_size": 4},
 
     # Qwen3.5-0.8B: minimum viable model
-    {"name": "qwen35-08b-r32-lr2e4-ep3",
-     "model": "unsloth/Qwen3.5-0.8B", "lora_rank": 32, "lr": 2e-4, "epochs": 3, "batch_size": 8},
+    {"name": "qwen35-08b-r32-lr2e4-ep2",
+     "model": "unsloth/Qwen3.5-0.8B", "lora_rank": 32, "lr": 2e-4, "epochs": 2, "batch_size": 4},
 
     # === Qwen 3 baseline (retrain with fixed data) ===
 
     # Qwen3-4B: same as current model, fresh training data
-    {"name": "qwen3-4b-r32-lr2e4-ep3",
-     "model": "unsloth/Qwen3-4B-Instruct-2507-unsloth-bnb-4bit", "lora_rank": 32, "lr": 2e-4, "epochs": 3, "batch_size": 8},
+    {"name": "qwen3-4b-r32-lr2e4-ep2",
+     "model": "unsloth/Qwen3-4B-Instruct-2507-unsloth-bnb-4bit", "lora_rank": 32, "lr": 2e-4, "epochs": 2, "batch_size": 4},
 
     # === Hyperparameter variants on best Qwen3.5 ===
 
     # Qwen3.5-4B with lower LR
-    {"name": "qwen35-4b-r32-lr1e4-ep3",
-     "model": "unsloth/Qwen3.5-4B", "lora_rank": 32, "lr": 1e-4, "epochs": 3, "batch_size": 8},
+    {"name": "qwen35-4b-r32-lr1e4-ep2",
+     "model": "unsloth/Qwen3.5-4B", "lora_rank": 32, "lr": 1e-4, "epochs": 2, "batch_size": 4},
 
     # Qwen3.5-4B with higher rank
-    {"name": "qwen35-4b-r64-lr2e4-ep3",
-     "model": "unsloth/Qwen3.5-4B", "lora_rank": 64, "lr": 2e-4, "epochs": 3, "batch_size": 8},
+    {"name": "qwen35-4b-r64-lr2e4-ep2",
+     "model": "unsloth/Qwen3.5-4B", "lora_rank": 64, "lr": 2e-4, "epochs": 2, "batch_size": 4},
 
-    # Qwen3.5-4B fewer epochs (less overfitting)
-    {"name": "qwen35-4b-r32-lr2e4-ep2",
-     "model": "unsloth/Qwen3.5-4B", "lora_rank": 32, "lr": 2e-4, "epochs": 2, "batch_size": 8},
+    # Qwen3.5-4B with 3 epochs (overfitting check)
+    {"name": "qwen35-4b-r32-lr2e4-ep3",
+     "model": "unsloth/Qwen3.5-4B", "lora_rank": 32, "lr": 2e-4, "epochs": 3, "batch_size": 4},
 
     # === Other architectures ===
 
     # Phi-4-mini (3.8B, Microsoft, different architecture)
-    {"name": "phi4-mini-r32-lr2e4-ep3",
-     "model": "unsloth/Phi-4-mini-instruct", "lora_rank": 32, "lr": 2e-4, "epochs": 3, "batch_size": 8},
+    {"name": "phi4-mini-r32-lr2e4-ep2",
+     "model": "unsloth/Phi-4-mini-instruct", "lora_rank": 32, "lr": 2e-4, "epochs": 2, "batch_size": 4},
 ]
 
 
@@ -204,10 +207,10 @@ print("MERGE_OK", flush=True)
         print(f"  Converter not found: {converter}", flush=True)
         return None
 
-    print(f"  Converting to GGUF (f16)...", flush=True)
+    print(f"  Converting to GGUF (q8_0)...", flush=True)
     result = subprocess.run(
         [TRAIN_PYTHON, converter, gguf_dir,
-         "--outfile", gguf_file, "--outtype", "f16"],
+         "--outfile", gguf_file, "--outtype", "q8_0"],
         env=env, capture_output=True, text=True, timeout=1800,
     )
 
@@ -223,7 +226,7 @@ print("MERGE_OK", flush=True)
     return gguf_file
 
 
-def import_to_ollama(gguf_path: str, model_name: str) -> bool:
+def import_to_ollama(gguf_path: str, model_name: str, config: dict) -> bool:
     """Import GGUF into Ollama."""
     gguf_dir = os.path.dirname(gguf_path)
     modelfile = os.path.join(gguf_dir, "Modelfile")
@@ -284,11 +287,18 @@ def format_card_prompt(card: dict) -> str:
         f"Keywords: {keywords}",
         f"Oracle text: {card.get('oracle_text', '')}",
     ]
+    power = card.get("power")
+    toughness = card.get("toughness")
+    if power is not None and toughness is not None:
+        parts.append(f"Power/Toughness: {power}/{toughness}")
+    loyalty = card.get("loyalty")
+    if loyalty is not None:
+        parts.append(f"Loyalty: {loyalty}")
     return "\n".join(parts)
 
 
-def call_ollama(prompt: str, model: str) -> str | None:
-    """Call Ollama API for a single card."""
+def call_ollama(prompt: str, model: str, retries: int = 2) -> str | None:
+    """Call Ollama API for a single card with retry."""
     payload = json.dumps({
         "model": model,
         "messages": [
@@ -305,12 +315,15 @@ def call_ollama(prompt: str, model: str) -> str | None:
         headers={"Content-Type": "application/json"},
     )
 
-    try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            data = json.loads(resp.read())
-            return data["message"]["content"].strip()
-    except Exception as e:
-        return None
+    for attempt in range(retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                data = json.loads(resp.read())
+                return data["message"]["content"].strip()
+        except Exception:
+            if attempt < retries:
+                time.sleep(1)
+    return None
 
 
 def parse_response(raw: str) -> dict | None:
@@ -327,84 +340,116 @@ def parse_response(raw: str) -> dict | None:
         return None
 
 
-def evaluate_model(model_name: str) -> dict:
+def _eval_single_card(g: dict, model_name: str) -> dict:
+    """Evaluate a single golden card. Returns result dict for aggregation."""
+    prompt = format_card_prompt(g)
+    raw = call_ollama(prompt, model_name)
+
+    if not raw:
+        return {"parse_fail": True}
+
+    result = parse_response(raw)
+    if not result:
+        return {"parse_fail": True}
+
+    exp = g["expected"]
+
+    # Function recall: what fraction of expected functions did the model produce?
+    r_funcs = set(result.get("function", []))
+    g_funcs = set(exp.get("function", []))
+    func_recall = (len(r_funcs & g_funcs) / len(g_funcs)) if g_funcs else 1.0
+
+    # Theme recall: what fraction of expected themes did the model produce?
+    r_themes = set(result.get("themes", []))
+    g_themes = set(exp.get("themes", []))
+    theme_recall = (len(r_themes & g_themes) / len(g_themes)) if g_themes else 1.0
+
+    # High-synergy theme recall (bonus signal — these are the most important themes)
+    g_high = set(exp.get("high_synergy_themes", []))
+    high_recall = (len(r_themes & g_high) / len(g_high)) if g_high else 1.0
+
+    # Provides recall (may be empty in golden set)
+    r_provides = set(result.get("provides", []))
+    g_provides = set(exp.get("provides_must_include", []))
+    prov_recall = (len(r_provides & g_provides) / len(g_provides)) if g_provides else 1.0
+
+    # Wants recall (may be empty in golden set)
+    r_wants = set(result.get("wants", []))
+    g_wants = set(exp.get("wants_must_include", []))
+    wants_recall = (len(r_wants & g_wants) / len(g_wants)) if g_wants else 1.0
+
+    return {
+        "parse_fail": False,
+        "func_recall": func_recall,
+        "theme_recall": theme_recall,
+        "high_recall": high_recall,
+        "prov_recall": prov_recall,
+        "wants_recall": wants_recall,
+        "name": g["name"],
+        "func_error": None if func_recall == 1.0 else f"{g['name']}: got {sorted(r_funcs)[:4]} expected {sorted(g_funcs)[:4]}",
+    }
+
+
+def evaluate_model(model_name: str, max_workers: int = 4) -> dict:
     """Evaluate a model against the golden dataset. Returns detailed scores."""
     golden = json.load(open(GOLDEN_FILE))["cards"]
 
-    # Synonym groups for semantic matching
-    from regression_test import _semantic_tag_match
-
     total = 0
-    role_correct = 0
-    provides_correct = 0
-    wants_correct = 0
     parse_failures = 0
-    role_details = []
+    func_recalls = []
+    theme_recalls = []
+    high_recalls = []
+    prov_recalls = []
+    wants_recalls = []
+    func_errors = []
 
     t0 = time.time()
+    done = 0
 
-    for i, g in enumerate(golden):
-        prompt = format_card_prompt(g)
-        raw = call_ollama(prompt, model_name)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_eval_single_card, g, model_name): g for g in golden}
+        for future in as_completed(futures):
+            r = future.result()
+            done += 1
 
-        if not raw:
-            parse_failures += 1
-            continue
+            if r["parse_fail"]:
+                parse_failures += 1
+            else:
+                total += 1
+                func_recalls.append(r["func_recall"])
+                theme_recalls.append(r["theme_recall"])
+                high_recalls.append(r["high_recall"])
+                prov_recalls.append(r["prov_recall"])
+                wants_recalls.append(r["wants_recall"])
+                if r["func_error"]:
+                    func_errors.append(r["func_error"])
 
-        result = parse_response(raw)
-        if not result:
-            parse_failures += 1
-            continue
-
-        total += 1
-        exp = g["expected"]
-
-        # Role check
-        g_role = exp.get("role", "")
-        r_role = result.get("role", "")
-        if isinstance(g_role, list):
-            role_ok = r_role in g_role
-        else:
-            role_ok = r_role == g_role
-        if role_ok:
-            role_correct += 1
-        else:
-            role_details.append(f"{g['name']}: {r_role} != {g_role}")
-
-        # Provides check
-        r_provides = set(result.get("provides", []))
-        g_provides = exp.get("provides_must_include", [])
-        prov_ok = all(_semantic_tag_match(t, r_provides) for t in g_provides)
-        if prov_ok:
-            provides_correct += 1
-
-        # Wants check
-        r_wants = set(result.get("wants", []))
-        g_wants = exp.get("wants_must_include", [])
-        wants_ok = all(_semantic_tag_match(t, r_wants) for t in g_wants)
-        if wants_ok:
-            wants_correct += 1
-
-        if (i + 1) % 100 == 0:
-            elapsed = time.time() - t0
-            print(f"    [{i+1}/{len(golden)}] {elapsed:.0f}s")
+            if done % 100 == 0:
+                elapsed = time.time() - t0
+                print(f"    [{done}/{len(golden)}] {elapsed:.0f}s", flush=True)
 
     elapsed = time.time() - t0
+
+    func_avg = sum(func_recalls) / max(total, 1)
+    theme_avg = sum(theme_recalls) / max(total, 1)
+    high_avg = sum(high_recalls) / max(total, 1)
+    prov_avg = sum(prov_recalls) / max(total, 1)
+    wants_avg = sum(wants_recalls) / max(total, 1)
+
+    # Composite: weight function and themes higher (they have ground truth)
+    composite = 0.35 * func_avg + 0.35 * theme_avg + 0.15 * prov_avg + 0.15 * wants_avg
 
     scores = {
         "total": total,
         "parse_failures": parse_failures,
-        "role_accuracy": round(role_correct / max(total, 1), 4),
-        "provides_accuracy": round(provides_correct / max(total, 1), 4),
-        "wants_accuracy": round(wants_correct / max(total, 1), 4),
-        "composite_score": round(
-            (role_correct + provides_correct + wants_correct) / (3 * max(total, 1)), 4
-        ),
-        "role_correct": role_correct,
-        "provides_correct": provides_correct,
-        "wants_correct": wants_correct,
+        "function_recall": round(func_avg, 4),
+        "theme_recall": round(theme_avg, 4),
+        "high_synergy_recall": round(high_avg, 4),
+        "provides_recall": round(prov_avg, 4),
+        "wants_recall": round(wants_avg, 4),
+        "composite_score": round(composite, 4),
         "eval_time_s": round(elapsed, 1),
-        "role_errors": role_details[:10],
+        "func_errors": func_errors[:10],
     }
 
     return scores
@@ -451,7 +496,7 @@ def run_experiment(config: dict) -> dict | None:
         return None
 
     # Step 3: Import to Ollama
-    if not import_to_ollama(gguf_path, ollama_name):
+    if not import_to_ollama(gguf_path, ollama_name, config):
         return None
 
     # Step 4: Warm up model (first inference is slow due to model loading)
@@ -463,7 +508,8 @@ def run_experiment(config: dict) -> dict | None:
         time.sleep(5)
 
     # Step 5: Evaluate
-    print(f"  Evaluating against {500} golden cards...", flush=True)
+    golden_count = len(json.load(open(GOLDEN_FILE))["cards"])
+    print(f"  Evaluating against {golden_count} golden cards...", flush=True)
     scores = evaluate_model(ollama_name)
 
     total_time = time.time() - t0
@@ -472,18 +518,22 @@ def run_experiment(config: dict) -> dict | None:
     scores["total_time_m"] = round(total_time / 60, 1)
 
     print(f"\n  RESULTS: {exp_name}", flush=True)
-    print(f"    Composite: {scores['composite_score']:.1%}", flush=True)
-    print(f"    Role:      {scores['role_accuracy']:.1%} ({scores['role_correct']}/{scores['total']})")
-    print(f"    Provides:  {scores['provides_accuracy']:.1%} ({scores['provides_correct']}/{scores['total']})")
-    print(f"    Wants:     {scores['wants_accuracy']:.1%} ({scores['wants_correct']}/{scores['total']})")
+    print(f"    Composite:  {scores['composite_score']:.1%}", flush=True)
+    print(f"    Function:   {scores['function_recall']:.1%}", flush=True)
+    print(f"    Themes:     {scores['theme_recall']:.1%} (high-syn: {scores['high_synergy_recall']:.1%})", flush=True)
+    print(f"    Provides:   {scores['provides_recall']:.1%}", flush=True)
+    print(f"    Wants:      {scores['wants_recall']:.1%}", flush=True)
     print(f"    Parse fail: {scores['parse_failures']}", flush=True)
     print(f"    Total time: {scores['total_time_m']}m", flush=True)
 
-    if scores["role_errors"]:
-        print(f"    Sample role errors: {scores['role_errors'][:5]}", flush=True)
+    if scores["func_errors"]:
+        print(f"    Sample errors: {scores['func_errors'][:5]}", flush=True)
 
-    # Cleanup: remove Ollama model to save disk
+    # Cleanup: remove Ollama model and intermediate merge files to save disk
     subprocess.run(["ollama", "rm", ollama_name], capture_output=True)
+    gguf_dir = os.path.join(exp_output, "gguf")
+    if os.path.isdir(gguf_dir):
+        shutil.rmtree(gguf_dir)
 
     return scores
 
@@ -499,14 +549,15 @@ def main():
     if args.eval_only:
         print(f"Evaluating model: {args.eval_only}", flush=True)
         scores = evaluate_model(args.eval_only)
-        print(f"\nComposite: {scores['composite_score']:.1%}", flush=True)
-        print(f"Role:      {scores['role_accuracy']:.1%} ({scores['role_correct']}/{scores['total']})")
-        print(f"Provides:  {scores['provides_accuracy']:.1%} ({scores['provides_correct']}/{scores['total']})")
-        print(f"Wants:     {scores['wants_accuracy']:.1%} ({scores['wants_correct']}/{scores['total']})")
+        print(f"\nComposite:  {scores['composite_score']:.1%}", flush=True)
+        print(f"Function:   {scores['function_recall']:.1%}", flush=True)
+        print(f"Themes:     {scores['theme_recall']:.1%} (high-syn: {scores['high_synergy_recall']:.1%})", flush=True)
+        print(f"Provides:   {scores['provides_recall']:.1%}", flush=True)
+        print(f"Wants:      {scores['wants_recall']:.1%}", flush=True)
         print(f"Parse fail: {scores['parse_failures']}", flush=True)
-        if scores["role_errors"]:
-            print(f"\nRole errors:", flush=True)
-            for err in scores["role_errors"]:
+        if scores["func_errors"]:
+            print(f"\nFunction errors:", flush=True)
+            for err in scores["func_errors"]:
                 print(f"  {err}", flush=True)
         return
 
@@ -558,12 +609,13 @@ def main():
     print(f"EXPERIMENT SUMMARY", flush=True)
     print(f"{'═' * 70}", flush=True)
     results.sort(key=lambda r: r.get("composite_score", 0), reverse=True)
-    print(f"\n{'Experiment':<35} {'Composite':>10} {'Role':>8} {'Provides':>10} {'Wants':>8} {'Time':>8}", flush=True)
-    print(f"{'─' * 85}", flush=True)
+    print(f"\n{'Experiment':<35} {'Composite':>10} {'Function':>10} {'Themes':>8} {'Provides':>10} {'Wants':>8} {'Time':>8}", flush=True)
+    print(f"{'─' * 95}", flush=True)
     for r in results:
-        print(f"  {r['experiment']:<33} {r['composite_score']:>9.1%} "
-              f"{r['role_accuracy']:>7.1%} {r['provides_accuracy']:>9.1%} "
-              f"{r['wants_accuracy']:>7.1%} {r['total_time_m']:>6.1f}m", flush=True)
+        print(f"  {r['experiment']:<33} {r.get('composite_score', 0):>9.1%} "
+              f"{r.get('function_recall', 0):>9.1%} {r.get('theme_recall', 0):>7.1%} "
+              f"{r.get('provides_recall', 0):>9.1%} {r.get('wants_recall', 0):>7.1%} "
+              f"{r.get('total_time_m', 0):>6.1f}m", flush=True)
 
     if results:
         best = results[0]

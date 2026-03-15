@@ -50,14 +50,14 @@ def serialize_card(card: dict) -> str:
 
     oracle_text = card.get("oracle_text", "")
     if oracle_text:
-        # Replace card's own name with ~ for generalization
+        # Replace card's own name with @ for generalization
         name = card.get("name", "")
         if name and " // " in name:
             # For multi-face cards, replace each face name
             for face in name.split(" // "):
-                oracle_text = oracle_text.replace(face.strip(), "~")
+                oracle_text = oracle_text.replace(face.strip(), "@")
         elif name:
-            oracle_text = oracle_text.replace(name, "~")
+            oracle_text = oracle_text.replace(name, "@")
         data["text"] = oracle_text
 
     if card.get("power") is not None:
@@ -239,16 +239,356 @@ def get_embedding_similarity(oid_a: str, oid_b: str,
     return float(embeddings[idx_a] @ embeddings[idx_b])
 
 
+UMAP_PATH = os.path.join(DATA_DIR, "embeddings_2d.json")
+UMAP_HTML_PATH = os.path.join(DATA_DIR, "embeddings_umap.html")
+
+# Major card type extraction order (first match wins)
+MAJOR_TYPES = [
+    "Creature", "Planeswalker", "Artifact", "Enchantment",
+    "Instant", "Sorcery", "Land", "Battle",
+]
+
+TYPE_COLORS = {
+    "Creature": "#4CAF50",
+    "Planeswalker": "#9C27B0",
+    "Artifact": "#78909C",
+    "Enchantment": "#FF9800",
+    "Instant": "#2196F3",
+    "Sorcery": "#F44336",
+    "Land": "#795548",
+    "Battle": "#E91E63",
+    "Other": "#607D8B",
+}
+
+
+def get_major_type(type_line: str) -> str:
+    """Extract the primary card type from a type line."""
+    for t in MAJOR_TYPES:
+        if t in type_line:
+            return t
+    return "Other"
+
+
+def build_umap(n_neighbors: int = 30, min_dist: float = 0.05) -> dict:
+    """Reduce embeddings to 2D via UMAP and save results."""
+    import umap
+
+    embeddings, oracle_ids = load_embeddings()
+    print(f"Running UMAP on {embeddings.shape[0]} cards (n_neighbors={n_neighbors}, min_dist={min_dist})...")
+
+    reducer = umap.UMAP(
+        n_neighbors=n_neighbors,
+        min_dist=min_dist,
+        n_components=2,
+        metric="cosine",
+        random_state=42,
+    )
+    coords_2d = reducer.fit_transform(embeddings)
+
+    # Center the coordinates
+    coords_2d -= coords_2d.mean(axis=0)
+
+    # Load card metadata for labels
+    from tag_db import get_all_cards
+    all_cards = get_all_cards()
+    oid_to_card = {c["oracle_id"]: c for c in all_cards}
+
+    points = []
+    for i, oid in enumerate(oracle_ids):
+        card = oid_to_card.get(oid, {})
+        type_line = card.get("type_line", "")
+        points.append({
+            "x": float(coords_2d[i, 0]),
+            "y": float(coords_2d[i, 1]),
+            "name": card.get("name", oid),
+            "type_line": type_line,
+            "major_type": get_major_type(type_line),
+            "role": card.get("role", "unknown"),
+            "oracle_id": oid,
+        })
+
+    with open(UMAP_PATH, "w") as f:
+        json.dump(points, f)
+    print(f"Saved 2D coordinates to {UMAP_PATH}")
+
+    return {"points": points}
+
+
+def generate_umap_html(deck_name: str = None):
+    """Generate interactive HTML visualization of the UMAP embedding space."""
+    if not os.path.exists(UMAP_PATH):
+        print("No UMAP data found. Run with --umap first.")
+        return
+
+    with open(UMAP_PATH) as f:
+        points = json.load(f)
+
+    # Optionally highlight deck cards
+    deck_cards = set()
+    if deck_name:
+        try:
+            import importlib
+            deck = importlib.import_module(f"decks.{deck_name}")
+            deck_cards = set(deck.DECKLIST) | {deck.COMMANDER}
+            print(f"Highlighting {len(deck_cards)} cards from {deck_name} deck")
+        except ImportError:
+            print(f"Deck '{deck_name}' not found, showing all cards")
+
+    points_json = json.dumps(points)
+    deck_json = json.dumps(list(deck_cards))
+    type_colors_json = json.dumps(TYPE_COLORS)
+
+    html = f"""<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<title>MTG Card Embedding Space</title>
+<style>
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{ background: #1a1a2e; color: #eee; font-family: system-ui, sans-serif; overflow: hidden; }}
+  #canvas {{ display: block; cursor: crosshair; }}
+  #tooltip {{
+    position: absolute; display: none; background: #16213e; border: 1px solid #0f3460;
+    padding: 8px 12px; border-radius: 6px; font-size: 13px; max-width: 320px;
+    pointer-events: none; z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  }}
+  #tooltip .name {{ font-weight: bold; font-size: 14px; margin-bottom: 4px; }}
+  #tooltip .type {{ color: #aaa; font-size: 12px; }}
+  #tooltip .role {{ color: #7ec8e3; font-size: 12px; }}
+  #controls {{
+    position: absolute; top: 12px; left: 12px; display: flex; gap: 8px; align-items: center;
+  }}
+  #controls button, #controls select {{
+    background: #16213e; color: #eee; border: 1px solid #0f3460; padding: 6px 12px;
+    border-radius: 4px; cursor: pointer; font-size: 13px;
+  }}
+  #controls button:hover {{ background: #0f3460; }}
+  #legend {{
+    position: absolute; bottom: 12px; left: 12px; background: #16213ecc;
+    border: 1px solid #0f3460; border-radius: 6px; padding: 10px 14px; font-size: 12px;
+  }}
+  #legend div {{ display: flex; align-items: center; gap: 6px; margin: 3px 0; }}
+  #legend .dot {{ width: 10px; height: 10px; border-radius: 50%; }}
+  #search {{
+    position: absolute; top: 12px; right: 12px;
+  }}
+  #search input {{
+    background: #16213e; color: #eee; border: 1px solid #0f3460; padding: 6px 12px;
+    border-radius: 4px; font-size: 13px; width: 220px;
+  }}
+  #stats {{
+    position: absolute; top: 48px; right: 12px; font-size: 12px; color: #888;
+  }}
+</style>
+</head><body>
+<canvas id="canvas"></canvas>
+<div id="tooltip"><div class="name"></div><div class="type"></div><div class="role"></div></div>
+<div id="controls">
+  <button id="resetBtn">Reset View</button>
+  <select id="colorBy">
+    <option value="type">Color by Type</option>
+    <option value="role">Color by Role</option>
+    {"<option value='deck'>Color by Deck</option>" if deck_cards else ""}
+  </select>
+</div>
+<div id="legend"></div>
+<div id="search"><input id="searchInput" type="text" placeholder="Search cards..."></div>
+<div id="stats"></div>
+
+<script>
+const points = {points_json};
+const deckCards = new Set({deck_json});
+const typeColors = {type_colors_json};
+const roleColors = {{
+  "ramp": "#4CAF50", "removal": "#F44336", "draw": "#2196F3",
+  "threat": "#FF9800", "combo-piece": "#9C27B0", "support": "#00BCD4",
+  "protection": "#FFEB3B", "utility": "#795548", "finisher": "#E91E63",
+  "enabler": "#8BC34A", "payoff": "#FF5722", "lord": "#673AB7",
+  "tutor": "#3F51B5", "stax": "#607D8B", "token-generator": "#CDDC39",
+  "anthem": "#FFC107", "sacrifice-outlet": "#B71C1C",
+}};
+const defaultRoleColor = "#607D8B";
+
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const tooltip = document.getElementById("tooltip");
+
+let width, height, transform = {{ x: 0, y: 0, scale: 1 }};
+let dragging = false, dragStart = {{ x: 0, y: 0 }};
+let searchTerm = "", colorMode = "type";
+
+function resize() {{
+  width = canvas.width = window.innerWidth;
+  height = canvas.height = window.innerHeight;
+  draw();
+}}
+
+function worldToScreen(wx, wy) {{
+  return {{
+    x: (wx * transform.scale) + transform.x + width / 2,
+    y: (wy * transform.scale) + transform.y + height / 2,
+  }};
+}}
+
+function screenToWorld(sx, sy) {{
+  return {{
+    x: (sx - width / 2 - transform.x) / transform.scale,
+    y: (sy - height / 2 - transform.y) / transform.scale,
+  }};
+}}
+
+function getColor(p) {{
+  if (colorMode === "deck") return deckCards.has(p.name) ? "#FFD700" : "#334";
+  if (colorMode === "role") return roleColors[p.role] || defaultRoleColor;
+  return typeColors[p.major_type] || typeColors["Other"];
+}}
+
+function getRadius(p) {{
+  if (colorMode === "deck" && deckCards.has(p.name)) return 5;
+  if (searchTerm && p.name.toLowerCase().includes(searchTerm)) return 6;
+  return 2.5;
+}}
+
+function getAlpha(p) {{
+  if (searchTerm && !p.name.toLowerCase().includes(searchTerm)) return 0.1;
+  if (colorMode === "deck" && !deckCards.has(p.name)) return 0.15;
+  return 0.85;
+}}
+
+function draw() {{
+  ctx.fillStyle = "#1a1a2e";
+  ctx.fillRect(0, 0, width, height);
+
+  for (const p of points) {{
+    const {{ x, y }} = worldToScreen(p.x, p.y);
+    if (x < -10 || x > width + 10 || y < -10 || y > height + 10) continue;
+    const r = getRadius(p) * Math.min(transform.scale / 15, 2);
+    ctx.globalAlpha = getAlpha(p);
+    ctx.fillStyle = getColor(p);
+    ctx.beginPath();
+    ctx.arc(x, y, Math.max(r, 1), 0, Math.PI * 2);
+    ctx.fill();
+  }}
+  ctx.globalAlpha = 1;
+}}
+
+function autoFit() {{
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const p of points) {{
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+  }}
+  const rangeX = maxX - minX || 1, rangeY = maxY - minY || 1;
+  const padding = 0.9;
+  transform.scale = Math.min(width / rangeX, height / rangeY) * padding;
+  transform.x = -(minX + rangeX / 2) * transform.scale;
+  transform.y = -(minY + rangeY / 2) * transform.scale;
+  draw();
+}}
+
+canvas.addEventListener("wheel", (e) => {{
+  e.preventDefault();
+  const factor = e.deltaY > 0 ? 0.9 : 1.1;
+  const wx = (e.clientX - width / 2 - transform.x) / transform.scale;
+  const wy = (e.clientY - height / 2 - transform.y) / transform.scale;
+  transform.scale *= factor;
+  transform.x = e.clientX - width / 2 - wx * transform.scale;
+  transform.y = e.clientY - height / 2 - wy * transform.scale;
+  draw();
+}});
+
+canvas.addEventListener("mousedown", (e) => {{
+  dragging = true;
+  dragStart = {{ x: e.clientX - transform.x, y: e.clientY - transform.y }};
+}});
+
+canvas.addEventListener("mousemove", (e) => {{
+  if (dragging) {{
+    transform.x = e.clientX - dragStart.x;
+    transform.y = e.clientY - dragStart.y;
+    draw();
+    return;
+  }}
+  // Find nearest point for tooltip
+  let nearest = null, minDist = 20;
+  for (const p of points) {{
+    const {{ x, y }} = worldToScreen(p.x, p.y);
+    const d = Math.hypot(x - e.clientX, y - e.clientY);
+    if (d < minDist) {{ minDist = d; nearest = p; }}
+  }}
+  if (nearest) {{
+    tooltip.style.display = "block";
+    tooltip.style.left = (e.clientX + 14) + "px";
+    tooltip.style.top = (e.clientY - 10) + "px";
+    tooltip.querySelector(".name").textContent = nearest.name;
+    tooltip.querySelector(".type").textContent = nearest.type_line;
+    tooltip.querySelector(".role").textContent = "Role: " + nearest.role;
+  }} else {{
+    tooltip.style.display = "none";
+  }}
+}});
+
+canvas.addEventListener("mouseup", () => {{ dragging = false; }});
+canvas.addEventListener("mouseleave", () => {{ dragging = false; tooltip.style.display = "none"; }});
+
+document.getElementById("resetBtn").addEventListener("click", autoFit);
+document.getElementById("colorBy").addEventListener("change", (e) => {{
+  colorMode = e.target.value;
+  updateLegend();
+  draw();
+}});
+document.getElementById("searchInput").addEventListener("input", (e) => {{
+  searchTerm = e.target.value.toLowerCase();
+  draw();
+}});
+
+function updateLegend() {{
+  const legend = document.getElementById("legend");
+  legend.innerHTML = "";
+  let items = {{}};
+  if (colorMode === "type") items = typeColors;
+  else if (colorMode === "role") {{
+    const seen = new Set(points.map(p => p.role));
+    for (const r of [...seen].sort()) items[r] = roleColors[r] || defaultRoleColor;
+  }} else if (colorMode === "deck") {{
+    items = {{ "In deck": "#FFD700", "Other": "#334" }};
+  }}
+  for (const [label, color] of Object.entries(items)) {{
+    const row = document.createElement("div");
+    row.innerHTML = '<span class="dot" style="background:' + color + '"></span>' + label;
+    legend.appendChild(row);
+  }}
+}}
+
+document.getElementById("stats").textContent = points.length + " cards";
+window.addEventListener("resize", resize);
+resize();
+updateLegend();
+autoFit();
+</script>
+</body></html>"""
+
+    with open(UMAP_HTML_PATH, "w") as f:
+        f.write(html)
+    print(f"Saved interactive visualization to {UMAP_HTML_PATH}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Card embeddings with gte-modernbert-base")
     parser.add_argument("--query", type=str, help="Find cards similar to this card")
     parser.add_argument("--top", type=int, default=20, help="Number of results")
     parser.add_argument("--stats", action="store_true", help="Show embedding stats")
+    parser.add_argument("--umap", action="store_true", help="Generate UMAP 2D visualization")
+    parser.add_argument("--deck", type=str, help="Highlight deck cards in UMAP (e.g. kyler)")
+    parser.add_argument("--n-neighbors", type=int, default=30, help="UMAP n_neighbors parameter")
+    parser.add_argument("--min-dist", type=float, default=0.05, help="UMAP min_dist parameter")
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE, help="Batch size for encoding")
     args = parser.parse_args()
 
     if args.query:
         find_similar(args.query, args.top)
+    elif args.umap:
+        build_umap(n_neighbors=args.n_neighbors, min_dist=args.min_dist)
+        generate_umap_html(deck_name=args.deck)
     elif args.stats:
         embeddings, oracle_ids = load_embeddings()
         size_mb = os.path.getsize(EMBEDDINGS_PATH) / (1024 * 1024)
