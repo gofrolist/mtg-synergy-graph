@@ -22,9 +22,9 @@ GOLDEN_FILE = os.path.join(os.path.dirname(__file__), "golden_cards.json")
 OLLAMA_URL = "http://localhost:11434/api/chat"
 
 SYSTEM_PROMPT = """You are an MTG card analyst. Analyze the card and return JSON with:
-- function: what the card DOES mechanically (e.g. draw-engine, spot-removal, token-generator, sacrifice-outlet)
-- themes: EDH deck archetypes this card fits (e.g. aristocrats, tokens, storm, voltron)
-- provides: what this card GIVES to the board (e.g. card-draw, targeted-removal, counter-placement)
+- name: card name
+- role: the card's primary function (ramp, draw, removal, protection, enabler, threat, utility, land)
+- provides: what this card GIVES to the deck (e.g. card-draw, targeted-removal, counter-placement)
 - wants: what conditions make this card BETTER (e.g. creature-death, wide-board, spell-cast)
 
 Select tags from the controlled vocabulary used in training. Return ONLY valid JSON. No explanation."""
@@ -103,25 +103,29 @@ def eval_card(card: dict, model: str) -> dict:
 
     exp = card["expected"]
 
-    r_funcs = set(result.get("function", []))
-    g_funcs = set(exp.get("function", []))
-    func_recall = (len(r_funcs & g_funcs) / len(g_funcs)) if g_funcs else 1.0
+    # Role match
+    r_role = result.get("role", "")
+    g_role = exp.get("role", "")
+    role_match = 1.0 if r_role == g_role else 0.0
 
-    r_themes = set(result.get("themes", []))
-    g_themes = set(exp.get("themes", []))
-    theme_recall = (len(r_themes & g_themes) / len(g_themes)) if g_themes else 1.0
+    # Provides recall
+    r_provides = set(result.get("provides", []))
+    g_provides = set(exp.get("provides", []))
+    prov_recall = (len(r_provides & g_provides) / len(g_provides)) if g_provides else 1.0
 
-    g_high = set(exp.get("high_synergy_themes", []))
-    high_recall = (len(r_themes & g_high) / len(g_high)) if g_high else 1.0
+    # Wants recall
+    r_wants = set(result.get("wants", []))
+    g_wants = set(exp.get("wants", []))
+    wants_recall = (len(r_wants & g_wants) / len(g_wants)) if g_wants else 1.0
 
     return {
         "parse_fail": False,
-        "func_recall": func_recall,
-        "theme_recall": theme_recall,
-        "high_recall": high_recall,
+        "role_match": role_match,
+        "prov_recall": prov_recall,
+        "wants_recall": wants_recall,
         "latency": latency,
-        "func_predicted": len(r_funcs),
-        "theme_predicted": len(r_themes),
+        "prov_predicted": len(r_provides),
+        "wants_predicted": len(r_wants),
     }
 
 
@@ -150,29 +154,29 @@ def benchmark_model(model: str, cards: list[dict]) -> dict:
     if not parsed:
         return {
             "model": model, "total": 0, "parse_failures": parse_failures,
-            "function_recall": 0, "theme_recall": 0, "high_recall": 0,
+            "role_accuracy": 0, "provides_recall": 0, "wants_recall": 0,
             "composite": 0, "avg_latency": 0, "total_time": total_time,
-            "avg_funcs": 0, "avg_themes": 0,
+            "avg_provides": 0, "avg_wants": 0,
         }
 
-    func_avg = sum(r["func_recall"] for r in parsed) / len(parsed)
-    theme_avg = sum(r["theme_recall"] for r in parsed) / len(parsed)
-    high_avg = sum(r["high_recall"] for r in parsed) / len(parsed)
+    role_avg = sum(r["role_match"] for r in parsed) / len(parsed)
+    prov_avg = sum(r["prov_recall"] for r in parsed) / len(parsed)
+    wants_avg = sum(r["wants_recall"] for r in parsed) / len(parsed)
     latency_avg = sum(r["latency"] for r in parsed) / len(parsed)
-    composite = 0.5 * func_avg + 0.5 * theme_avg
+    composite = 0.45 * prov_avg + 0.45 * wants_avg + 0.1 * role_avg
 
     return {
         "model": model,
         "total": len(parsed),
         "parse_failures": parse_failures,
-        "function_recall": round(func_avg, 4),
-        "theme_recall": round(theme_avg, 4),
-        "high_recall": round(high_avg, 4),
+        "role_accuracy": round(role_avg, 4),
+        "provides_recall": round(prov_avg, 4),
+        "wants_recall": round(wants_avg, 4),
         "composite": round(composite, 4),
         "avg_latency": round(latency_avg, 2),
         "total_time": round(total_time, 1),
-        "avg_funcs": round(sum(r["func_predicted"] for r in parsed) / len(parsed), 1),
-        "avg_themes": round(sum(r["theme_predicted"] for r in parsed) / len(parsed), 1),
+        "avg_provides": round(sum(r["prov_predicted"] for r in parsed) / len(parsed), 1),
+        "avg_wants": round(sum(r["wants_predicted"] for r in parsed) / len(parsed), 1),
     }
 
 
@@ -233,16 +237,16 @@ def main():
     print(f"\n{'=' * 100}")
     print(f"BENCHMARK RESULTS ({len(sample)} golden cards)")
     print(f"{'=' * 100}")
-    print(f"{'Model':<25} {'Composite':>10} {'Function':>10} {'Themes':>8} {'HighSyn':>8} "
-          f"{'Parse%':>7} {'Latency':>8} {'Time':>7} {'#Func':>6} {'#Theme':>7}")
+    print(f"{'Model':<25} {'Composite':>10} {'Role':>8} {'Provides':>10} {'Wants':>8} "
+          f"{'Parse%':>7} {'Latency':>8} {'Time':>7} {'#Prov':>6} {'#Want':>7}")
     print(f"{'-' * 100}")
 
     for r in sorted(all_results, key=lambda x: -x["composite"]):
         parse_pct = r["total"] / (r["total"] + r["parse_failures"]) * 100 if (r["total"] + r["parse_failures"]) else 0
-        print(f"  {r['model']:<23} {r['composite']:>9.1%} {r['function_recall']:>9.1%} "
-              f"{r['theme_recall']:>7.1%} {r['high_recall']:>7.1%} "
+        print(f"  {r['model']:<23} {r['composite']:>9.1%} {r['role_accuracy']:>7.1%} "
+              f"{r['provides_recall']:>9.1%} {r['wants_recall']:>7.1%} "
               f"{parse_pct:>6.0f}% {r['avg_latency']:>7.1f}s {r['total_time']:>6.0f}s "
-              f"{r['avg_funcs']:>5.1f} {r['avg_themes']:>6.1f}")
+              f"{r['avg_provides']:>5.1f} {r['avg_wants']:>6.1f}")
 
     # Final save
     with open(results_file, "w") as f:

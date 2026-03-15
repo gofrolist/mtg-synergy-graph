@@ -49,9 +49,9 @@ CUDA_LIB = os.path.join(
 )
 
 SYSTEM_PROMPT = """You are an MTG card analyst. Analyze the card and return JSON with:
-- function: what the card DOES mechanically (e.g. draw-engine, spot-removal, token-generator, sacrifice-outlet)
-- themes: EDH deck archetypes this card fits (e.g. aristocrats, tokens, storm, voltron)
-- provides: what this card GIVES to the board (e.g. card-draw, targeted-removal, counter-placement)
+- name: card name
+- role: the card's primary function (ramp, draw, removal, protection, enabler, threat, utility, land)
+- provides: what this card GIVES to the deck (e.g. card-draw, targeted-removal, counter-placement)
 - wants: what conditions make this card BETTER (e.g. creature-death, wide-board, spell-cast)
 
 Select tags from the controlled vocabulary used in training. Return ONLY valid JSON. No explanation."""
@@ -354,39 +354,28 @@ def _eval_single_card(g: dict, model_name: str) -> dict:
 
     exp = g["expected"]
 
-    # Function recall: what fraction of expected functions did the model produce?
-    r_funcs = set(result.get("function", []))
-    g_funcs = set(exp.get("function", []))
-    func_recall = (len(r_funcs & g_funcs) / len(g_funcs)) if g_funcs else 1.0
+    # Role match
+    r_role = result.get("role", "")
+    g_role = exp.get("role", "")
+    role_match = 1.0 if r_role == g_role else 0.0
 
-    # Theme recall: what fraction of expected themes did the model produce?
-    r_themes = set(result.get("themes", []))
-    g_themes = set(exp.get("themes", []))
-    theme_recall = (len(r_themes & g_themes) / len(g_themes)) if g_themes else 1.0
-
-    # High-synergy theme recall (bonus signal — these are the most important themes)
-    g_high = set(exp.get("high_synergy_themes", []))
-    high_recall = (len(r_themes & g_high) / len(g_high)) if g_high else 1.0
-
-    # Provides recall (may be empty in golden set)
+    # Provides recall
     r_provides = set(result.get("provides", []))
-    g_provides = set(exp.get("provides_must_include", []))
+    g_provides = set(exp.get("provides", []))
     prov_recall = (len(r_provides & g_provides) / len(g_provides)) if g_provides else 1.0
 
-    # Wants recall (may be empty in golden set)
+    # Wants recall
     r_wants = set(result.get("wants", []))
-    g_wants = set(exp.get("wants_must_include", []))
+    g_wants = set(exp.get("wants", []))
     wants_recall = (len(r_wants & g_wants) / len(g_wants)) if g_wants else 1.0
 
     return {
         "parse_fail": False,
-        "func_recall": func_recall,
-        "theme_recall": theme_recall,
-        "high_recall": high_recall,
+        "role_match": role_match,
         "prov_recall": prov_recall,
         "wants_recall": wants_recall,
         "name": g["name"],
-        "func_error": None if func_recall == 1.0 else f"{g['name']}: got {sorted(r_funcs)[:4]} expected {sorted(g_funcs)[:4]}",
+        "error": None if prov_recall == 1.0 else f"{g['name']}: got {sorted(r_provides)[:4]} expected {sorted(g_provides)[:4]}",
     }
 
 
@@ -396,12 +385,10 @@ def evaluate_model(model_name: str, max_workers: int = 4) -> dict:
 
     total = 0
     parse_failures = 0
-    func_recalls = []
-    theme_recalls = []
-    high_recalls = []
+    role_matches = []
     prov_recalls = []
     wants_recalls = []
-    func_errors = []
+    errors = []
 
     t0 = time.time()
     done = 0
@@ -416,13 +403,11 @@ def evaluate_model(model_name: str, max_workers: int = 4) -> dict:
                 parse_failures += 1
             else:
                 total += 1
-                func_recalls.append(r["func_recall"])
-                theme_recalls.append(r["theme_recall"])
-                high_recalls.append(r["high_recall"])
+                role_matches.append(r["role_match"])
                 prov_recalls.append(r["prov_recall"])
                 wants_recalls.append(r["wants_recall"])
-                if r["func_error"]:
-                    func_errors.append(r["func_error"])
+                if r["error"]:
+                    errors.append(r["error"])
 
             if done % 100 == 0:
                 elapsed = time.time() - t0
@@ -430,26 +415,22 @@ def evaluate_model(model_name: str, max_workers: int = 4) -> dict:
 
     elapsed = time.time() - t0
 
-    func_avg = sum(func_recalls) / max(total, 1)
-    theme_avg = sum(theme_recalls) / max(total, 1)
-    high_avg = sum(high_recalls) / max(total, 1)
+    role_avg = sum(role_matches) / max(total, 1)
     prov_avg = sum(prov_recalls) / max(total, 1)
     wants_avg = sum(wants_recalls) / max(total, 1)
 
-    # Composite: weight function and themes higher (they have ground truth)
-    composite = 0.35 * func_avg + 0.35 * theme_avg + 0.15 * prov_avg + 0.15 * wants_avg
+    # Composite: provides/wants are the core value, role is secondary
+    composite = 0.45 * prov_avg + 0.45 * wants_avg + 0.1 * role_avg
 
     scores = {
         "total": total,
         "parse_failures": parse_failures,
-        "function_recall": round(func_avg, 4),
-        "theme_recall": round(theme_avg, 4),
-        "high_synergy_recall": round(high_avg, 4),
+        "role_accuracy": round(role_avg, 4),
         "provides_recall": round(prov_avg, 4),
         "wants_recall": round(wants_avg, 4),
         "composite_score": round(composite, 4),
         "eval_time_s": round(elapsed, 1),
-        "func_errors": func_errors[:10],
+        "errors": errors[:10],
     }
 
     return scores
@@ -519,15 +500,14 @@ def run_experiment(config: dict) -> dict | None:
 
     print(f"\n  RESULTS: {exp_name}", flush=True)
     print(f"    Composite:  {scores['composite_score']:.1%}", flush=True)
-    print(f"    Function:   {scores['function_recall']:.1%}", flush=True)
-    print(f"    Themes:     {scores['theme_recall']:.1%} (high-syn: {scores['high_synergy_recall']:.1%})", flush=True)
+    print(f"    Role:       {scores['role_accuracy']:.1%}", flush=True)
     print(f"    Provides:   {scores['provides_recall']:.1%}", flush=True)
     print(f"    Wants:      {scores['wants_recall']:.1%}", flush=True)
     print(f"    Parse fail: {scores['parse_failures']}", flush=True)
     print(f"    Total time: {scores['total_time_m']}m", flush=True)
 
-    if scores["func_errors"]:
-        print(f"    Sample errors: {scores['func_errors'][:5]}", flush=True)
+    if scores["errors"]:
+        print(f"    Sample errors: {scores['errors'][:5]}", flush=True)
 
     # Cleanup: remove Ollama model and intermediate merge files to save disk
     subprocess.run(["ollama", "rm", ollama_name], capture_output=True)
@@ -550,14 +530,13 @@ def main():
         print(f"Evaluating model: {args.eval_only}", flush=True)
         scores = evaluate_model(args.eval_only)
         print(f"\nComposite:  {scores['composite_score']:.1%}", flush=True)
-        print(f"Function:   {scores['function_recall']:.1%}", flush=True)
-        print(f"Themes:     {scores['theme_recall']:.1%} (high-syn: {scores['high_synergy_recall']:.1%})", flush=True)
+        print(f"Role:       {scores['role_accuracy']:.1%}", flush=True)
         print(f"Provides:   {scores['provides_recall']:.1%}", flush=True)
         print(f"Wants:      {scores['wants_recall']:.1%}", flush=True)
         print(f"Parse fail: {scores['parse_failures']}", flush=True)
-        if scores["func_errors"]:
-            print(f"\nFunction errors:", flush=True)
-            for err in scores["func_errors"]:
+        if scores["errors"]:
+            print(f"\nErrors:", flush=True)
+            for err in scores["errors"]:
                 print(f"  {err}", flush=True)
         return
 
@@ -609,11 +588,11 @@ def main():
     print(f"EXPERIMENT SUMMARY", flush=True)
     print(f"{'═' * 70}", flush=True)
     results.sort(key=lambda r: r.get("composite_score", 0), reverse=True)
-    print(f"\n{'Experiment':<35} {'Composite':>10} {'Function':>10} {'Themes':>8} {'Provides':>10} {'Wants':>8} {'Time':>8}", flush=True)
-    print(f"{'─' * 95}", flush=True)
+    print(f"\n{'Experiment':<35} {'Composite':>10} {'Role':>8} {'Provides':>10} {'Wants':>8} {'Time':>8}", flush=True)
+    print(f"{'─' * 85}", flush=True)
     for r in results:
         print(f"  {r['experiment']:<33} {r.get('composite_score', 0):>9.1%} "
-              f"{r.get('function_recall', 0):>9.1%} {r.get('theme_recall', 0):>7.1%} "
+              f"{r.get('role_accuracy', 0):>7.1%} "
               f"{r.get('provides_recall', 0):>9.1%} {r.get('wants_recall', 0):>7.1%} "
               f"{r.get('total_time_m', 0):>6.1f}m", flush=True)
 
