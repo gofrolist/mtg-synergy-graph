@@ -26,8 +26,18 @@ CREATE TABLE IF NOT EXISTS cards (
     name TEXT NOT NULL,
     type_line TEXT DEFAULT '',
     oracle_text TEXT DEFAULT '',
-    role TEXT DEFAULT '',
-    edhrec_rank INTEGER
+    mana_cost TEXT DEFAULT '',
+    cmc REAL DEFAULT 0,
+    colors TEXT DEFAULT '[]',
+    color_identity TEXT DEFAULT '[]',
+    keywords TEXT DEFAULT '[]',
+    power TEXT,
+    toughness TEXT,
+    loyalty TEXT,
+    rarity TEXT DEFAULT '',
+    edhrec_rank INTEGER,
+    legal_commander INTEGER DEFAULT 1,
+    role TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_cards_name ON cards(name);
 
@@ -86,15 +96,28 @@ def import_cards(cards: list[dict], db_path: str = DB_PATH, normalize: bool = Tr
             continue
 
         cur.execute(
-            "INSERT OR REPLACE INTO cards (oracle_id, name, type_line, oracle_text, role, edhrec_rank) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO cards "
+            "(oracle_id, name, type_line, oracle_text, mana_cost, cmc, colors, "
+            "color_identity, keywords, power, toughness, loyalty, rarity, "
+            "edhrec_rank, legal_commander, role) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 oid,
                 card.get("name", ""),
                 card.get("type_line", ""),
                 card.get("oracle_text", ""),
-                card.get("role", ""),
+                card.get("mana_cost", ""),
+                card.get("cmc", 0),
+                json.dumps(card.get("colors", [])),
+                json.dumps(card.get("color_identity", [])),
+                json.dumps(card.get("keywords", [])),
+                card.get("power"),
+                card.get("toughness"),
+                card.get("loyalty"),
+                card.get("rarity", ""),
                 card.get("edhrec_rank"),
+                1 if card.get("legalities", {}).get("commander") == "legal" else 0,
+                card.get("role", ""),
             ),
         )
 
@@ -108,6 +131,58 @@ def import_cards(cards: list[dict], db_path: str = DB_PATH, normalize: bool = Tr
 
     conn.commit()
     conn.close()
+
+
+def backfill_scryfall(scryfall_path: str, db_path: str = DB_PATH):
+    """Backfill Scryfall metadata (mana_cost, colors, legality, etc.) into existing cards."""
+    with open(scryfall_path) as f:
+        scryfall = json.load(f)
+
+    lookup = {}
+    for c in scryfall:
+        oid = c.get("oracle_id")
+        if not oid:
+            continue
+        text = c.get("oracle_text", "")
+        if not text:
+            faces = c.get("card_faces", [])
+            if faces:
+                text = " // ".join(f.get("oracle_text", "") for f in faces)
+        lookup[oid] = {
+            "type_line": c.get("type_line", ""),
+            "oracle_text": text,
+            "mana_cost": c.get("mana_cost", ""),
+            "cmc": c.get("cmc", 0),
+            "colors": json.dumps(c.get("colors", [])),
+            "color_identity": json.dumps(c.get("color_identity", [])),
+            "keywords": json.dumps(c.get("keywords", [])),
+            "power": c.get("power"),
+            "toughness": c.get("toughness"),
+            "loyalty": c.get("loyalty"),
+            "rarity": c.get("rarity", ""),
+            "edhrec_rank": c.get("edhrec_rank"),
+            "legal_commander": 1 if c.get("legalities", {}).get("commander") == "legal" else 0,
+        }
+
+    conn = get_connection(db_path)
+    cur = conn.cursor()
+    updated = 0
+    for oid, info in lookup.items():
+        res = cur.execute(
+            "UPDATE cards SET type_line=?, oracle_text=?, mana_cost=?, cmc=?, "
+            "colors=?, color_identity=?, keywords=?, power=?, toughness=?, "
+            "loyalty=?, rarity=?, edhrec_rank=?, legal_commander=? "
+            "WHERE oracle_id=?",
+            (info["type_line"], info["oracle_text"], info["mana_cost"],
+             info["cmc"], info["colors"], info["color_identity"],
+             info["keywords"], info["power"], info["toughness"],
+             info["loyalty"], info["rarity"], info["edhrec_rank"],
+             info["legal_commander"], oid),
+        )
+        updated += res.rowcount
+    conn.commit()
+    conn.close()
+    print(f"Backfilled {updated} cards with Scryfall metadata")
 
 
 def import_file(path: str, db_path: str = DB_PATH):
@@ -501,6 +576,11 @@ def main():
     scry.add_argument("file", help="Scryfall tags JSON file")
     scry.add_argument("--db", default=DB_PATH, help="Database path")
 
+    bf = sub.add_parser("backfill", help="Backfill Scryfall metadata into cards table")
+    bf.add_argument("--scryfall", default=os.path.join(DATA_DIR, "oracle_cards.json"),
+                    help="Scryfall oracle cards JSON")
+    bf.add_argument("--db", default=DB_PATH, help="Database path")
+
     scry_stats = sub.add_parser("scryfall-stats", help="Show scryfall tag statistics")
     scry_stats.add_argument("--db", default=DB_PATH, help="Database path")
 
@@ -510,7 +590,11 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command == "import":
+    if args.command == "backfill":
+        init_db(args.db)
+        backfill_scryfall(args.scryfall, args.db)
+
+    elif args.command == "import":
         import_file(args.file, args.db)
         s = get_db_stats(args.db)
         print(f"\nDB stats: {s['cards']} cards, {s['provides_rows']} provides, "
