@@ -1052,13 +1052,13 @@ def show_swaps(swaps: list[dict], top_n: int = 15):
             print(f"         top synergies: {partners_str}")
 
 
-def find_combos(graph: dict, deck_cards: set[str], commander: str,
+def find_combos(graph: dict, cards: list[dict], deck_cards: set[str], commander: str,
                 top_n: int = 15, min_triangle_score: float = 5.0) -> list[dict]:
-    """Find 3-card combos (triangles) and 4-card combos in the deck's synergy subgraph.
+    """Find 2/3/4-card combos in the deck's synergy subgraph.
 
-    Triangle detection via adjacency intersection. Scores weighted by bottleneck
-    (weakest edge matters most). Extends to 4-card combos by merging triangles
-    that share an edge.
+    - 2-card: provides→wants cycles (potential infinite combos)
+    - 3-card: triangles via adjacency intersection
+    - 4-card: merged triangle pairs sharing an edge
     """
     adj = graph["adjacency"]
 
@@ -1121,12 +1121,79 @@ def find_combos(graph: dict, deck_cards: set[str], commander: str,
     # Extend to 4-card combos: pairs of triangles sharing an edge
     quads = _find_quad_combos(triangles, deck_adj, commander)
 
+    # Find 2-card infinite combos (provides→wants cycles)
+    pairs = _find_two_card_combos(cards, deck_cards, commander)
+
     return {
+        "pairs": pairs,
         "triangles": triangles[:top_n],
         "quads": quads[:top_n],
+        "total_pairs": len(pairs),
         "total_triangles": len(triangles),
         "total_quads": len(quads),
     }
+
+
+def _find_two_card_combos(cards: list[dict], deck_cards: set[str],
+                          commander: str) -> list[dict]:
+    """Find 2-card infinite combo candidates via provides→wants cycles.
+
+    A cycle exists when Card A provides tag X which Card B wants,
+    AND Card B provides tag Y which Card A wants. This circular
+    dependency suggests a potential infinite loop (e.g. Sanguine Bond
+    + Exquisite Blood).
+    """
+    # Build card lookup
+    card_lookup = {}
+    for c in cards:
+        name = c["name"]
+        if name in deck_cards:
+            card_lookup[name] = {
+                "provides": set(c.get("provides", [])),
+                "wants": set(c.get("wants", [])),
+            }
+
+    pairs = []
+    deck_sorted = sorted(deck_cards)
+
+    for i, a in enumerate(deck_sorted):
+        if a not in card_lookup:
+            continue
+        a_provides = card_lookup[a]["provides"]
+        a_wants = card_lookup[a]["wants"]
+        if not a_provides or not a_wants:
+            continue
+
+        for b in deck_sorted[i + 1:]:
+            if b not in card_lookup:
+                continue
+            b_provides = card_lookup[b]["provides"]
+            b_wants = card_lookup[b]["wants"]
+            if not b_provides or not b_wants:
+                continue
+
+            # A provides something B wants
+            a_to_b = a_provides & b_wants
+            # B provides something A wants
+            b_to_a = b_provides & a_wants
+
+            if a_to_b and b_to_a:
+                # Circular dependency found — score by number of shared tags
+                score = len(a_to_b) + len(b_to_a)
+                has_commander = commander in (a, b)
+                if has_commander:
+                    score *= 1.5
+
+                pairs.append({
+                    "cards": (a, b),
+                    "score": round(score, 1),
+                    "a_provides_b_wants": sorted(a_to_b),
+                    "b_provides_a_wants": sorted(b_to_a),
+                    "commander": has_commander,
+                })
+
+    pairs.sort(key=lambda p: p["score"], reverse=True)
+    return pairs
 
 
 def _classify_combo(reason_text: str) -> str:
@@ -1218,13 +1285,26 @@ def _find_quad_combos(triangles: list[dict], deck_adj: dict,
 
 def show_combos(combos: dict, commander: str, top_n: int = 15):
     """Display detected combos."""
+    pairs = combos.get("pairs", [])
     triangles = combos["triangles"]
     quads = combos["quads"]
 
     print(f"\n{'═' * 70}")
-    print(f"COMBO DETECTION — {combos['total_triangles']} triangles, "
+    print(f"COMBO DETECTION — {combos.get('total_pairs', 0)} pairs, "
+          f"{combos['total_triangles']} triangles, "
           f"{combos['total_quads']} four-card combos found")
     print(f"{'═' * 70}")
+
+    if pairs:
+        print(f"\nTop 2-card combos (provides→wants cycles):")
+        print(f"{'─' * 70}")
+        for i, pair in enumerate(pairs[:top_n], 1):
+            star = " ★ commander" if pair["commander"] else ""
+            a, b = pair["cards"]
+            print(f"\n  #{i} score: {pair['score']}{star}")
+            print(f"     {a} + {b}")
+            print(f"     {a} provides → {b} wants: {pair['a_provides_b_wants']}")
+            print(f"     {b} provides → {a} wants: {pair['b_provides_a_wants']}")
 
     if triangles:
         print(f"\nTop 3-card combos:")
@@ -1980,14 +2060,14 @@ def run():
         show_card_synergies(graph, args.card)
     elif args.visualize:
         deck_set = set(deck.DECKLIST) | {deck.COMMANDER}
-        combos = find_combos(graph, deck_set, deck.COMMANDER, top_n=20)
+        combos = find_combos(graph, cards, deck_set, deck.COMMANDER, top_n=20)
         generate_visualization(graph, cards, deck_set, deck.COMMANDER, args.deck, combos)
     elif args.deck_view or args.recommend or args.combos or args.swaps:
         deck_set = set(deck.DECKLIST) | {deck.COMMANDER}
         if args.deck_view:
             show_deck_synergies(graph, deck_set, deck.COMMANDER, cards, args.top)
         if args.combos:
-            combos = find_combos(graph, deck_set, deck.COMMANDER, args.top)
+            combos = find_combos(graph, cards, deck_set, deck.COMMANDER, args.top)
             show_combos(combos, deck.COMMANDER, args.top)
         if args.swaps:
             swaps = suggest_swaps(graph, deck_set, deck.COMMANDER, cards, args.top)
