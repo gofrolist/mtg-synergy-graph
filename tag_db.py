@@ -201,7 +201,7 @@ def import_file(path: str, db_path: str = DB_PATH):
 
 
 def _row_to_card(row: sqlite3.Row) -> dict:
-    return {
+    card = {
         "oracle_id": row["oracle_id"],
         "name": row["name"],
         "type_line": row["type_line"],
@@ -209,6 +209,14 @@ def _row_to_card(row: sqlite3.Row) -> dict:
         "role": row["role"],
         "edhrec_rank": row["edhrec_rank"],
     }
+    # Include Scryfall metadata if available
+    for field in ("mana_cost", "cmc", "colors", "color_identity", "keywords",
+                  "power", "toughness", "loyalty", "rarity", "legal_commander"):
+        try:
+            card[field] = row[field]
+        except (IndexError, KeyError):
+            pass
+    return card
 
 
 def _attach_tags(conn: sqlite3.Connection, cards: list[dict]) -> list[dict]:
