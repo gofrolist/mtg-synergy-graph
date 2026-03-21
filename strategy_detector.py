@@ -206,7 +206,69 @@ def detect_strategies(oracle_id, db_path=None):
                             "signals": [f"oracle:{ctype}"],
                         }
 
+    # Ability-based strategy derivation: use parsed abilities to infer strategies
+    # that the provides/wants tags missed
+    if db_path:
+        ab_strategies = _strategies_from_abilities(oracle_id, db_path)
+        for strat_name, conf in ab_strategies.items():
+            if strat_name not in strategies or strategies[strat_name]["confidence"] < conf:
+                strategies[strat_name] = {
+                    "name": strat_name,
+                    "confidence": conf,
+                    "signals": [f"ability-derived"],
+                }
+
     return sorted(strategies.values(), key=lambda s: -s["confidence"])
+
+
+# Maps ability effect_tags/trigger_tags to strategies.
+# Only includes tags that are SPECIFIC to a strategy (not generic creature tags).
+ABILITY_STRATEGY_MAP = {
+    # Effect tags → strategies
+    "token-generation": ("tokens", 0.9),
+    "counter-placement": ("+1/+1-counters", 0.8),
+    "life-gain": ("lifegain", 0.7),
+    "life-drain": ("lifedrain", 0.7),
+    "mill": ("mill", 0.8),
+    "graveyard-recursion": ("reanimator", 0.7),
+    "copy-effect": ("spellslinger", 0.6),
+    "untap": ("combo", 0.5),
+    "treasure-generation": ("treasure", 0.8),
+    "proliferate": ("proliferate", 0.8),
+    # Trigger tags → strategies (these are triggers, so the card CARES about the event)
+    "counter-placement-events": ("+1/+1-counters", 0.7),
+    "life-gain-events": ("lifegain", 0.6),
+    "sacrifice-events": ("aristocrats", 0.6),
+    "draw-events": ("card-draw", 0.5),
+    "landfall": ("landfall", 0.7),
+}
+
+
+def _strategies_from_abilities(oracle_id, db_path):
+    """Derive strategies from a card's parsed abilities.
+
+    Returns dict of {strategy_name: confidence}.
+    """
+    conn = sqlite3.connect(db_path)
+    abilities = conn.execute(
+        "SELECT trigger_tags, effect_tags FROM abilities WHERE oracle_id = ?",
+        (oracle_id,)
+    ).fetchall()
+    conn.close()
+
+    strategies = {}
+    for trigger_tags_json, effect_tags_json in abilities:
+        for tags_json in (trigger_tags_json, effect_tags_json):
+            if not tags_json:
+                continue
+            tags = json.loads(tags_json)
+            for tag in tags:
+                if tag in ABILITY_STRATEGY_MAP:
+                    strat_name, conf = ABILITY_STRATEGY_MAP[tag]
+                    if strat_name not in strategies or strategies[strat_name] < conf:
+                        strategies[strat_name] = conf
+
+    return strategies
 
 
 def _load_edhrec_strategies():
@@ -251,6 +313,13 @@ def populate_card_strategies(db_path=None):
     for oid, tag in conn.execute("SELECT oracle_id, tag FROM wants").fetchall():
         wants_by_card.setdefault(oid, set()).add(tag)
 
+    # Load parsed abilities (trigger_tags, effect_tags per card)
+    abilities_by_card = {}
+    for oid, ttags, etags in conn.execute(
+        "SELECT oracle_id, trigger_tags, effect_tags FROM abilities"
+    ).fetchall():
+        abilities_by_card.setdefault(oid, []).append((ttags, etags))
+
     # Load EDHREC data
     edhrec = _load_edhrec_strategies()
 
@@ -277,6 +346,19 @@ def populate_card_strategies(db_path=None):
             if card_wants & tag_set:
                 if strategy not in strategies or strategies[strategy] < confidence:
                     strategies[strategy] = confidence
+
+        # Ability-based strategy derivation
+        card_abilities = abilities_by_card.get(oracle_id, [])
+        for trigger_tags, effect_tags in card_abilities:
+            for tags_json in (trigger_tags, effect_tags):
+                if not tags_json:
+                    continue
+                tags = json.loads(tags_json)
+                for tag in tags:
+                    if tag in ABILITY_STRATEGY_MAP:
+                        strat_name, conf = ABILITY_STRATEGY_MAP[tag]
+                        if strat_name not in strategies or strategies[strat_name] < conf:
+                            strategies[strat_name] = conf
 
         # Oracle text tribal detection
         oracle_lower = (oracle_text or "").lower()
