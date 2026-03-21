@@ -345,6 +345,46 @@ def get_cards_wanting(tag: str, db_path: str = DB_PATH) -> list[dict]:
     return cards
 
 
+def fix_tribal_wants(db_path=None):
+    """Remove wants tribal tags where oracle text doesn't mention the creature type.
+    Returns list of dicts with removed entries: {oracle_id, name, tag, oracle_text}.
+    """
+    if db_path is None:
+        db_path = DB_PATH
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    rows = conn.execute("""
+        SELECT w.oracle_id, w.tag, c.name, c.oracle_text
+        FROM wants w JOIN cards c ON w.oracle_id = c.oracle_id
+        WHERE w.tag LIKE '%-tribal'
+    """).fetchall()
+
+    removed = []
+    for row in rows:
+        tag = row["tag"]
+        creature_type = tag.replace("-tribal", "")
+        oracle = (row["oracle_text"] or "").lower()
+        if creature_type.lower() not in oracle:
+            removed.append({
+                "oracle_id": row["oracle_id"],
+                "name": row["name"],
+                "tag": tag,
+                "oracle_text": row["oracle_text"]
+            })
+
+    if removed:
+        for entry in removed:
+            conn.execute(
+                "DELETE FROM wants WHERE oracle_id = ? AND tag = ?",
+                (entry["oracle_id"], entry["tag"])
+            )
+        conn.commit()
+
+    conn.close()
+    return removed
+
+
 def get_all_cards(db_path: str = DB_PATH) -> list[dict]:
     conn = get_connection(db_path)
     conn.row_factory = sqlite3.Row
@@ -596,6 +636,10 @@ def main():
     gap.add_argument("--db", default=DB_PATH, help="Database path")
     gap.add_argument("--limit", type=int, default=20, help="Max cards to show")
 
+    fix_tribal_parser = sub.add_parser("fix-tribal", help="Remove false positive tribal wants tags")
+    fix_tribal_parser.add_argument("--dry-run", action="store_true", help="Show what would be removed without deleting")
+    fix_tribal_parser.add_argument("--db", default=DB_PATH, help="Database path")
+
     args = parser.parse_args()
 
     if args.command == "backfill":
@@ -644,6 +688,33 @@ def main():
             print(f"  {c['name']}")
         if len(missing) > args.limit:
             print(f"  ... and {len(missing) - args.limit} more")
+
+    elif args.command == "fix-tribal":
+        if args.dry_run:
+            conn = sqlite3.connect(args.db)
+            rows = conn.execute("""
+                SELECT w.oracle_id, w.tag, c.name, c.oracle_text
+                FROM wants w JOIN cards c ON w.oracle_id = c.oracle_id
+                WHERE w.tag LIKE '%-tribal'
+            """).fetchall()
+            conn.close()
+            false_pos = []
+            for oid, tag, name, oracle in rows:
+                creature_type = tag.replace("-tribal", "")
+                if creature_type.lower() not in (oracle or "").lower():
+                    false_pos.append((name, tag))
+            print(f"Would remove {len(false_pos)} false positive tribal wants:")
+            for name, tag in false_pos[:20]:
+                print(f"  {name}: {tag}")
+            if len(false_pos) > 20:
+                print(f"  ... and {len(false_pos) - 20} more")
+        else:
+            removed = fix_tribal_wants(args.db)
+            print(f"Removed {len(removed)} false positive tribal wants tags")
+            for entry in removed[:20]:
+                print(f"  {entry['name']}: {entry['tag']}")
+            if len(removed) > 20:
+                print(f"  ... and {len(removed) - 20} more")
 
     elif args.command == "query":
         if args.provides:
