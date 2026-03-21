@@ -44,3 +44,7 @@ data/*_tags_*.json
 data/*_merged*.json
 unsloth_compiled_cache/
 .env
+
+# Commander Spellbook cache files
+data/commander_spellbook.json
+data/spellbook_unresolved.txt
