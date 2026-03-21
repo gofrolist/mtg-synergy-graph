@@ -24,11 +24,14 @@ data/embeddings_index.json
 
 # Fine-tuning artifacts
 data/train.jsonl
+data/train_*.jsonl*
 data/val.jsonl
 data/val_sample.json
 data/retag1k_mtg_tagger.json
+data/kyler_tags.json
 model_output/
 experiment_results.json
+EXPERIMENT_LOG.md
 .venv/
 
 # Build artifacts
