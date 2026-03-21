@@ -77,8 +77,162 @@ def _is_keyword_only_paragraph(para, keywords):
     return all(p in kw_lower or p == "" for p in parts)
 
 
+# Planeswalker loyalty cost pattern: +N, -N, 0
+_LOYALTY_RE = re.compile(r'^([+\-\u2212]?\d+): (.+)$')
+
+# Saga chapter pattern: I, II, III, IV, etc.
+_SAGA_RE = re.compile(r'^(I{1,3}V?|IV|V|VI{0,3}) \u2014 (.+)$')
+
+# Triggered ability: When/Whenever/At ...
+_TRIGGERED_RE = re.compile(r'^(When(?:ever)?|At) (.+)')
+
+# Activated ability: cost: effect (cost must contain mana symbol, tap, or sacrifice-like word)
+_ACTIVATED_RE = re.compile(r'^(.+?): (.+)$')
+_COST_INDICATORS = re.compile(r'\{|(?:^|\W)[Tt]ap\b|Sacrifice|Remove|Discard|Pay|Exile .* from')
+
+# Replacement effect
+_REPLACEMENT_RE = re.compile(r'\bwould\b.*\binstead\b', re.IGNORECASE)
+
+# Mana ability: effect produces mana
+_MANA_EFFECT_RE = re.compile(r'[Aa]dd \{')
+
+
+def _split_trigger_effect(text):
+    """Split a triggered ability into trigger_condition and effect.
+
+    Handles 'if' clauses by greedily including them in the trigger.
+    'Whenever X, if Y, effect' -> trigger='X, if Y', effect='effect'
+    'Whenever X, effect' -> trigger='X', effect='effect'
+    """
+    match = _TRIGGERED_RE.match(text)
+    if not match:
+        return text, text
+
+    trigger_word = match.group(1)
+    rest = match.group(2)
+
+    # Split on commas, looking for the main effect
+    effect_verbs = r'(?:put|draw|create|destroy|exile|return|deal|add|gain|lose|sacrifice|search|discard|counter|tap|untap|each|that|it|you|target|all|choose)'
+
+    parts = rest.split(', ')
+    for i in range(len(parts) - 1, 0, -1):
+        candidate = parts[i].strip()
+        if re.match(effect_verbs, candidate, re.IGNORECASE):
+            trigger = ', '.join(parts[:i])
+            effect = ', '.join(parts[i:])
+            return f"{trigger_word} {trigger}", effect
+
+    # Fallback: first comma split
+    if ', ' in rest:
+        idx = rest.index(', ')
+        return f"{trigger_word} {rest[:idx]}", rest[idx + 2:]
+
+    return f"{trigger_word} {rest}", rest
+
+
+def _extract_targets(text):
+    """Extract target description from effect text."""
+    match = re.search(r'target ([\w\s]+?)(?:\.|,|$)', text, re.IGNORECASE)
+    return match.group(1).strip() if match else None
+
+
+def _infer_zone(text):
+    """Infer which zone an ability operates from."""
+    text_lower = text.lower()
+    if 'from your graveyard' in text_lower or 'from a graveyard' in text_lower:
+        return 'graveyard'
+    if 'from your hand' in text_lower:
+        return 'hand'
+    if 'from exile' in text_lower:
+        return 'exile'
+    return 'battlefield'
+
+
 def _parse_paragraph(para):
-    """Parse a single paragraph into an ability dict. Phase 2 placeholder."""
+    """Parse a single oracle text paragraph into a structured ability."""
+
+    # Check for saga chapters
+    saga_match = _SAGA_RE.match(para)
+    if saga_match:
+        chapter = saga_match.group(1)
+        effect = saga_match.group(2)
+        return {
+            "ability_type": "triggered",
+            "trigger_condition": f"chapter {chapter}",
+            "trigger_tags": None,
+            "cost": None,
+            "effect": effect,
+            "effect_tags": None,
+            "zone": "battlefield",
+            "targets": _extract_targets(effect),
+            "is_mana_ability": False,
+        }
+
+    # Check for planeswalker loyalty abilities
+    loyalty_match = _LOYALTY_RE.match(para)
+    if loyalty_match:
+        cost = loyalty_match.group(1)
+        effect = loyalty_match.group(2)
+        return {
+            "ability_type": "activated",
+            "trigger_condition": None,
+            "trigger_tags": None,
+            "cost": cost,
+            "effect": effect,
+            "effect_tags": None,
+            "zone": "battlefield",
+            "targets": _extract_targets(effect),
+            "is_mana_ability": False,
+        }
+
+    # Check for replacement effects
+    if _REPLACEMENT_RE.search(para):
+        return {
+            "ability_type": "replacement",
+            "trigger_condition": None,
+            "trigger_tags": None,
+            "cost": None,
+            "effect": para,
+            "effect_tags": None,
+            "zone": "battlefield",
+            "targets": None,
+            "is_mana_ability": False,
+        }
+
+    # Check for triggered abilities
+    if _TRIGGERED_RE.match(para):
+        trigger, effect = _split_trigger_effect(para)
+        return {
+            "ability_type": "triggered",
+            "trigger_condition": trigger,
+            "trigger_tags": None,
+            "cost": None,
+            "effect": effect,
+            "effect_tags": None,
+            "zone": "battlefield",
+            "targets": _extract_targets(effect),
+            "is_mana_ability": False,
+        }
+
+    # Check for activated abilities
+    activated_match = _ACTIVATED_RE.match(para)
+    if activated_match and _COST_INDICATORS.search(activated_match.group(1)):
+        cost = activated_match.group(1)
+        effect = activated_match.group(2)
+        is_mana = bool(_MANA_EFFECT_RE.search(effect))
+        return {
+            "ability_type": "mana" if is_mana else "activated",
+            "trigger_condition": None,
+            "trigger_tags": None,
+            "cost": cost,
+            "effect": effect,
+            "effect_tags": None,
+            "zone": "battlefield",
+            "targets": _extract_targets(effect),
+            "is_mana_ability": is_mana,
+        }
+
+    # Default: static ability
     return {
         "ability_type": "static",
         "trigger_condition": None,
@@ -86,8 +240,8 @@ def _parse_paragraph(para):
         "cost": None,
         "effect": para,
         "effect_tags": None,
-        "zone": "battlefield",
-        "targets": None,
+        "zone": _infer_zone(para),
+        "targets": _extract_targets(para),
         "is_mana_ability": False,
     }
 
