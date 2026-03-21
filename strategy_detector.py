@@ -190,8 +190,8 @@ def populate_card_strategies(db_path=None):
     # Clear existing
     conn.execute("DELETE FROM card_strategies")
 
-    # Get all cards with their provides tags
-    cards = conn.execute("SELECT oracle_id, name FROM cards").fetchall()
+    # Get all cards with their provides tags and oracle text
+    cards = conn.execute("SELECT oracle_id, name, oracle_text FROM cards").fetchall()
     provides_by_card = {}
     for oid, tag in conn.execute("SELECT oracle_id, tag FROM provides").fetchall():
         provides_by_card.setdefault(oid, set()).add(tag)
@@ -199,8 +199,14 @@ def populate_card_strategies(db_path=None):
     # Load EDHREC data
     edhrec = _load_edhrec_strategies()
 
+    # Tribal context patterns for oracle text scanning
+    _TRIBAL_PATTERNS = [
+        "you control get", "you control have", "enter", "die", "whenever",
+        "each other", "all ", "other ", "among ", "number of",
+    ]
+
     count = 0
-    for oracle_id, name in cards:
+    for oracle_id, name, oracle_text in cards:
         card_provides = provides_by_card.get(oracle_id, set())
 
         # Rule-based strategies
@@ -209,6 +215,14 @@ def populate_card_strategies(db_path=None):
             if card_provides & tag_set:
                 if strategy not in strategies or strategies[strategy] < confidence:
                     strategies[strategy] = confidence
+
+        # Oracle text tribal detection
+        oracle_lower = (oracle_text or "").lower()
+        if oracle_lower:
+            for ctype, strat_name in CREATURE_TYPE_STRATEGIES.items():
+                if ctype in oracle_lower and any(p in oracle_lower for p in _TRIBAL_PATTERNS):
+                    if strat_name not in strategies or strategies[strat_name] < 0.8:
+                        strategies[strat_name] = 0.8
 
         # EDHREC-based strategies
         if name in edhrec:
