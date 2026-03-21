@@ -2772,6 +2772,25 @@ def run():
 
             print(f"Building graph for {len(cards)} cards (deck + candidates)")
 
+    # --- Strategy detection ---
+    active_strategies = set()
+    db_path = None
+    if not args.input:
+        from tag_db import DB_PATH as _db_path
+        db_path = _db_path
+        from strategy_detector import detect_strategies
+        commander_card = next((c for c in cards if c["name"] == deck.COMMANDER), None)
+        commander_oid = commander_card["oracle_id"] if commander_card else None
+        if args.strategies == "auto" and commander_oid:
+            detected = detect_strategies(commander_oid, db_path)
+            active_strategies = {s["name"] for s in detected if s["confidence"] >= 0.3}
+        elif args.strategies != "auto":
+            active_strategies = set(args.strategies.split(","))
+        if args.exclude_strategies:
+            active_strategies -= set(args.exclude_strategies.split(","))
+        if active_strategies:
+            print(f"Active strategies: {', '.join(sorted(active_strategies))}")
+
     graph = build_graph(cards)
     stats = graph["stats"]
     print(f"\nGraph stats:")
@@ -2796,11 +2815,20 @@ def run():
         generate_visualization(graph, cards, deck_set, deck.COMMANDER, args.deck, combos)
     elif args.deck_view or args.recommend or args.combos or args.swaps:
         deck_set = set(deck.DECKLIST) | {deck.COMMANDER}
+        deck_oids = {c["oracle_id"] for c in cards if c["name"] in deck_set}
         if args.deck_view:
             show_deck_synergies(graph, deck_set, deck.COMMANDER, cards, args.top)
+            if db_path and active_strategies:
+                deck_cards_in_set = [c for c in cards if c["name"] in deck_set]
+                show_deck_analysis(deck_cards_in_set, deck_oids, active_strategies, deck.COMMANDER, db_path)
         if args.combos:
-            combos = find_combos(graph, cards, deck_set, deck.COMMANDER, args.top)
-            show_combos(combos, deck.COMMANDER, args.top)
+            if db_path:
+                # Use enhanced 3-tier combo detection
+                show_combos_tiered(deck_oids, deck.COMMANDER, db_path)
+            else:
+                # Fallback to legacy combo detection
+                combos = find_combos(graph, cards, deck_set, deck.COMMANDER, args.top)
+                show_combos(combos, deck.COMMANDER, args.top)
         if args.swaps:
             swaps = suggest_swaps(graph, deck_set, deck.COMMANDER, cards, args.top)
             show_swaps(swaps, args.top)
