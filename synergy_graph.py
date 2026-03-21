@@ -1167,14 +1167,51 @@ def find_combos(graph: dict, cards: list[dict], deck_cards: set[str], commander:
     }
 
 
+def _expand_through_bridges(tags: set[str]) -> set[str]:
+    """Expand provides tags through semantic bridges to match wants tags."""
+    expanded = set(tags)
+    for p_tag in tags:
+        for (bridge_p, bridge_w), weight in SEMANTIC_BRIDGES.items():
+            if bridge_p == p_tag and weight >= 0.6:
+                expanded.add(bridge_w)
+    return expanded
+
+
+# Oracle text patterns that indicate combo/loop potential
+_COMBO_PATTERNS = [
+    r"whenever .+ you gain life",
+    r"whenever .+ you lose life",
+    r"whenever .+ opponent loses life",
+    r"untap (it|target|all|~)",
+    r"return .+ from .+ graveyard to the battlefield",
+    r"create a .+ copy",
+    r"you may repeat this process",
+    r"infinite",
+    r"whenever .+ enters .+ put .+ counter",
+    r"whenever .+ dies",
+    r"whenever .+ is dealt damage",
+    r"whenever .+ is put into .+ graveyard",
+    r"sacrifice .+:",
+]
+import re as _re
+_COMBO_RE = [_re.compile(p, _re.IGNORECASE) for p in _COMBO_PATTERNS]
+
+
+def _combo_potential(oracle_text: str) -> float:
+    """Score how likely a card is to be part of an infinite combo (0-1)."""
+    if not oracle_text:
+        return 0.0
+    hits = sum(1 for pat in _COMBO_RE if pat.search(oracle_text))
+    return min(hits / 3.0, 1.0)  # 3+ patterns = max combo potential
+
+
 def _find_two_card_combos(cards: list[dict], deck_cards: set[str],
                           commander: str) -> list[dict]:
-    """Find 2-card infinite combo candidates via provides→wants cycles.
+    """Find 2-card combo candidates via provides→wants cycles with semantic bridges.
 
-    A cycle exists when Card A provides tag X which Card B wants,
-    AND Card B provides tag Y which Card A wants. This circular
-    dependency suggests a potential infinite loop (e.g. Sanguine Bond
-    + Exquisite Blood).
+    Uses SEMANTIC_BRIDGES to expand provides before matching (e.g. life-gain
+    matches life-gain-events). Scores by tag overlap * combo potential from
+    oracle text pattern matching.
     """
     # Build card lookup
     card_lookup = {}
@@ -1184,6 +1221,7 @@ def _find_two_card_combos(cards: list[dict], deck_cards: set[str],
             card_lookup[name] = {
                 "provides": set(c.get("provides", [])),
                 "wants": set(c.get("wants", [])),
+                "oracle_text": c.get("oracle_text", ""),
             }
 
     pairs = []
@@ -1192,30 +1230,46 @@ def _find_two_card_combos(cards: list[dict], deck_cards: set[str],
     for i, a in enumerate(deck_sorted):
         if a not in card_lookup:
             continue
-        a_provides = card_lookup[a]["provides"]
-        a_wants = card_lookup[a]["wants"]
+        a_data = card_lookup[a]
+        a_provides = a_data["provides"]
+        a_wants = a_data["wants"]
         if not a_provides or not a_wants:
             continue
+        # Expand provides through bridges
+        a_expanded = _expand_through_bridges(a_provides)
 
         for b in deck_sorted[i + 1:]:
             if b not in card_lookup:
                 continue
-            b_provides = card_lookup[b]["provides"]
-            b_wants = card_lookup[b]["wants"]
+            b_data = card_lookup[b]
+            b_provides = b_data["provides"]
+            b_wants = b_data["wants"]
             if not b_provides or not b_wants:
                 continue
+            b_expanded = _expand_through_bridges(b_provides)
 
-            # A provides something B wants
-            a_to_b = a_provides & b_wants
-            # B provides something A wants
-            b_to_a = b_provides & a_wants
+            # A provides (expanded) something B wants
+            a_to_b = a_expanded & b_wants
+            # B provides (expanded) something A wants
+            b_to_a = b_expanded & a_wants
 
             if a_to_b and b_to_a:
-                # Circular dependency found — score by number of shared tags
+                # Circular dependency found
+                # Base score from tag overlap
                 score = len(a_to_b) + len(b_to_a)
+
+                # Combo potential bonus from oracle text
+                cp_a = _combo_potential(a_data["oracle_text"])
+                cp_b = _combo_potential(b_data["oracle_text"])
+                combo_bonus = 1.0 + (cp_a + cp_b)  # 1.0 to 3.0 multiplier
+
+                score *= combo_bonus
+
                 has_commander = commander in (a, b)
                 if has_commander:
                     score *= 1.5
+
+                combo_label = "combo" if (cp_a + cp_b) >= 0.6 else "synergy"
 
                 pairs.append({
                     "cards": (a, b),
@@ -1223,6 +1277,8 @@ def _find_two_card_combos(cards: list[dict], deck_cards: set[str],
                     "a_provides_b_wants": sorted(a_to_b),
                     "b_provides_a_wants": sorted(b_to_a),
                     "commander": has_commander,
+                    "combo_potential": round(cp_a + cp_b, 2),
+                    "label": combo_label,
                 })
 
     pairs.sort(key=lambda p: p["score"], reverse=True)
@@ -1329,15 +1385,17 @@ def show_combos(combos: dict, commander: str, top_n: int = 15):
     print(f"{'═' * 70}")
 
     if pairs:
-        print(f"\nTop 2-card combos (provides→wants cycles):")
+        print(f"\nTop 2-card pairs (provides→wants cycles):")
         print(f"{'─' * 70}")
         for i, pair in enumerate(pairs[:top_n], 1):
             star = " ★ commander" if pair["commander"] else ""
+            label = pair.get("label", "synergy").upper()
+            cp = pair.get("combo_potential", 0)
             a, b = pair["cards"]
-            print(f"\n  #{i} score: {pair['score']}{star}")
+            print(f"\n  #{i} [{label}] score: {pair['score']}{star}")
             print(f"     {a} + {b}")
-            print(f"     {a} provides → {b} wants: {pair['a_provides_b_wants']}")
-            print(f"     {b} provides → {a} wants: {pair['b_provides_a_wants']}")
+            print(f"     {a} → {b}: {pair['a_provides_b_wants']}")
+            print(f"     {b} → {a}: {pair['b_provides_a_wants']}")
 
     if triangles:
         print(f"\nTop 3-card combos:")
