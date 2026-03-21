@@ -974,6 +974,13 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
     # Sort by total synergy
     ranked = sorted(candidate_scores.items(), key=lambda x: x[1]["total"], reverse=True)
 
+    # Normalize scores to 0-100% scale (top card = 100%)
+    max_score = ranked[0][1]["total"] if ranked else 1.0
+    if max_score <= 0:
+        max_score = 1.0
+    for card, info in ranked:
+        info["pct"] = round(info["total"] / max_score * 100, 1)
+
     # --- Output ---
     print(f"\n{'═' * 70}")
     header = f"TOP {top_n} RECOMMENDED CARDS (not in deck)"
@@ -1007,12 +1014,15 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
         strat_rel = info.get("strategy_rel")
         strat_str = f" [strat×{strat_rel:.1f}]" if strat_rel and strat_rel != 1.0 else ""
         high_cmc = " [high CMC]" if info.get("high_cmc") else ""
-        print(f"\n  {card}{tribal}{combo}{strat_str}{high_cmc}  — synergy: {info['total']:.1f}, "
-              f"{len(partners)} partners{multi}")
-        print(f"    {type_line} | CMC {cmc}")
+        pct = info["pct"]
+        # Visual bar: filled blocks proportional to percentage
+        bar_len = round(pct / 5)  # 20 chars max at 100%
+        bar = "█" * bar_len + "░" * (20 - bar_len)
+        print(f"\n  {pct:5.1f}% {bar} {card}{tribal}{combo}{strat_str}{high_cmc}")
+        print(f"    {type_line} | CMC {cmc} | {len(partners)} partners{multi}")
         for partner, score, sigs in partners[:5]:
             sig = f"{sigs}sig" if sigs > 1 else "1sig"
-            print(f"    ↔ {partner:<30} (score: {score}, {sig})")
+            print(f"    ↔ {partner:<30} ({score:.1f}, {sig})")
         if len(partners) > 5:
             print(f"    ... and {len(partners) - 5} more")
 
