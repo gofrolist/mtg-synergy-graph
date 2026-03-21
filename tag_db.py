@@ -385,6 +385,74 @@ def fix_tribal_wants(db_path=None):
     return removed
 
 
+def rebuild_registry(db_path=None, output_path=None, min_freq=3):
+    """Rebuild synergy_tag_registry.json from all cards in the DB.
+    Collects all provides/wants tags with min_freq or more occurrences.
+    """
+    if db_path is None:
+        db_path = DB_PATH
+    if output_path is None:
+        output_path = os.path.join(os.path.dirname(__file__), "synergy_tag_registry.json")
+
+    conn = sqlite3.connect(db_path)
+
+    provides_counts = conn.execute(
+        "SELECT tag, COUNT(*) as cnt FROM provides GROUP BY tag HAVING cnt >= ? ORDER BY tag",
+        (min_freq,)
+    ).fetchall()
+
+    wants_counts = conn.execute(
+        "SELECT tag, COUNT(*) as cnt FROM wants GROUP BY tag HAVING cnt >= ? ORDER BY tag",
+        (min_freq,)
+    ).fetchall()
+
+    total_cards = conn.execute("SELECT COUNT(*) FROM cards").fetchone()[0]
+    conn.close()
+
+    provides_tags = [row[0] for row in provides_counts]
+    wants_tags = [row[0] for row in wants_counts]
+
+    # Load existing registry to preserve function_tags and themes
+    existing = {}
+    existing_path = os.path.join(os.path.dirname(__file__), "synergy_tag_registry.json")
+    if os.path.exists(existing_path):
+        with open(existing_path) as f:
+            existing = json.load(f)
+
+    registry = {
+        "_meta": {
+            "description": "Controlled vocabulary for 3-layer card tagging system.",
+            "version": "4.0",
+            "created": __import__('datetime').date.today().isoformat(),
+            "stats": {
+                "provides_count": len(provides_tags),
+                "wants_count": len(wants_tags),
+                "source": f"Rebuilt from {total_cards} cards in tags.db (min {min_freq} occurrences)",
+                "min_frequency": min_freq
+            }
+        },
+        "provides": {
+            "_description": "What card gives to deck",
+            "tags": provides_tags
+        },
+        "wants": {
+            "_description": "Conditions making card better",
+            "tags": wants_tags
+        }
+    }
+
+    # Preserve function_tags and themes from existing registry
+    if "function_tags" in existing:
+        registry["function_tags"] = existing["function_tags"]
+    if "themes" in existing:
+        registry["themes"] = existing["themes"]
+
+    with open(output_path, "w") as f:
+        json.dump(registry, f, indent=2)
+
+    return registry
+
+
 def get_all_cards(db_path: str = DB_PATH) -> list[dict]:
     conn = get_connection(db_path)
     conn.row_factory = sqlite3.Row
@@ -640,6 +708,10 @@ def main():
     fix_tribal_parser.add_argument("--dry-run", action="store_true", help="Show what would be removed without deleting")
     fix_tribal_parser.add_argument("--db", default=DB_PATH, help="Database path")
 
+    rebuild_parser = sub.add_parser("rebuild-registry", help="Rebuild tag registry from all DB cards")
+    rebuild_parser.add_argument("--min-freq", type=int, default=3, help="Minimum tag frequency (default: 3)")
+    rebuild_parser.add_argument("--output", default=None, help="Output path (default: synergy_tag_registry.json)")
+
     args = parser.parse_args()
 
     if args.command == "backfill":
@@ -715,6 +787,12 @@ def main():
                 print(f"  {entry['name']}: {entry['tag']}")
             if len(removed) > 20:
                 print(f"  ... and {len(removed) - 20} more")
+
+    elif args.command == "rebuild-registry":
+        registry = rebuild_registry(output_path=args.output, min_freq=args.min_freq)
+        meta = registry["_meta"]["stats"]
+        print(f"Registry v4.0: {meta['provides_count']} provides, {meta['wants_count']} wants")
+        print(f"Source: {meta['source']}")
 
     elif args.command == "query":
         if args.provides:
