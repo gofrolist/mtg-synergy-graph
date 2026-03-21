@@ -2560,6 +2560,135 @@ def find_anti_synergy(deck_oids, active_strategies, db_path=None):
     return anti
 
 
+def show_combos_tiered(deck_oids, commander_name=None, db_path=None):
+    """Display 3-tier combo output."""
+    combos = find_combos_tiered(deck_oids, db_path)
+    partials = find_partial_combos(deck_oids, db_path)
+
+    confirmed = [c for c in combos if c["tier"] == "infinite-confirmed"]
+    likely = [c for c in combos if c["tier"] == "combo-likely"]
+    synergy = [c for c in combos if c["tier"] == "synergy"]
+
+    if confirmed:
+        print(f"\n{'='*60}")
+        print(f"CONFIRMED INFINITE COMBOS ({len(confirmed)})")
+        print(f"{'='*60}")
+        for c in confirmed:
+            print(f"  {' + '.join(c['cards'])}")
+            print(f"    Result: {c['result']}")
+            print(f"    Source: {c['reason']}")
+
+    if likely:
+        print(f"\n{'='*60}")
+        print(f"LIKELY COMBOS ({len(likely)})")
+        print(f"{'='*60}")
+        for c in likely:
+            print(f"  {' + '.join(c['cards'])}")
+            print(f"    Chain: {c['result']}")
+
+    if partials:
+        print(f"\n{'='*60}")
+        print(f"NEAR-COMPLETE COMBOS — 1 card away ({len(partials)})")
+        print(f"{'='*60}")
+        for p in partials:
+            print(f"  {' + '.join(p['present_cards'])} + [{p['missing_cards'][0]}]")
+            print(f"    Result: {p['result']}")
+
+    if synergy:
+        print(f"\n  Synergy pairs: {len(synergy)} (use --verbose to list)")
+
+    print(f"\n  Total: {len(confirmed)} confirmed, {len(likely)} likely, {len(synergy)} synergy")
+
+
+def show_recommendations_enhanced(candidates, active_strategies, partial_combos, deck_name):
+    """Enhanced recommendation output with strategy annotations."""
+    print(f"\n{'='*60}")
+    print(f"RECOMMENDATIONS for {deck_name} (strategies: {', '.join(sorted(active_strategies)) or 'none'})")
+    print(f"{'='*60}")
+
+    # Combo completions
+    combo_cards = set()
+    for pc in partial_combos:
+        for name in pc["missing_cards"]:
+            combo_cards.add(name)
+
+    completions = [c for c in candidates if c["name"] in combo_cards]
+    if completions:
+        print(f"\nCOMBO COMPLETIONS (1 card away from confirmed infinite):")
+        for c in completions[:5]:
+            matching = [pc for pc in partial_combos if c["name"] in pc["missing_cards"]]
+            for pc in matching:
+                print(f"  {' + '.join(pc['present_cards'])} + [{c['name']}] -> {pc['result']}")
+
+    # Best fit
+    best = [c for c in candidates if c["name"] not in combo_cards]
+    print(f"\nBEST FIT:")
+    for i, c in enumerate(best[:15], 1):
+        strats = c.get("strategies", [])
+        strat_str = f" [{', '.join(strats)}]" if strats else ""
+        tribal = " [tribal]" if c.get("tribal") else ""
+        print(f"  {i}. {c['name']}{strat_str}{tribal} score: {c['score']:.1f}")
+
+
+def show_deck_analysis(deck_cards, deck_oids, active_strategies, commander_name, db_path=None):
+    """Enhanced deck analysis with strategy coverage."""
+    import sqlite3
+    if db_path is None:
+        db_path = os.path.join(os.path.dirname(__file__), "data", "tags.db")
+    conn = sqlite3.connect(db_path)
+
+    # Count cards per strategy
+    strat_counts = {}
+    for oid in deck_oids:
+        for row in conn.execute(
+            "SELECT strategy FROM card_strategies WHERE oracle_id = ? AND confidence >= 0.3", (oid,)
+        ):
+            strat_counts[row[0]] = strat_counts.get(row[0], 0) + 1
+
+    # Count non-land cards
+    non_land = sum(1 for c in deck_cards if "Land" not in (c.get("type_line") or ""))
+
+    # Count strategy-aligned cards
+    aligned = 0
+    if active_strategies:
+        placeholders = ','.join('?' * len(active_strategies))
+        for oid in deck_oids:
+            rows = conn.execute(
+                f"SELECT 1 FROM card_strategies WHERE oracle_id = ? AND confidence >= 0.3 AND strategy IN ({placeholders})",
+                (oid, *active_strategies)
+            ).fetchall()
+            if rows:
+                aligned += 1
+
+    combos = find_combos_tiered(deck_oids, db_path)
+    anti = find_anti_synergy(deck_oids, active_strategies, db_path)
+    conn.close()
+
+    print(f"\n{'='*60}")
+    print(f"DECK ANALYSIS: {commander_name}")
+    print(f"{'='*60}")
+
+    print(f"Detected strategies:")
+    for strat in sorted(active_strategies):
+        cnt = strat_counts.get(strat, 0)
+        print(f"  {strat}: {cnt} cards")
+
+    coverage = aligned * 100 // max(non_land, 1)
+    print(f"Strategy coverage: {coverage}% of {non_land} non-land cards align with >=1 strategy")
+
+    confirmed = sum(1 for c in combos if c["tier"] == "infinite-confirmed")
+    likely = sum(1 for c in combos if c["tier"] == "combo-likely")
+    synergy = sum(1 for c in combos if c["tier"] == "synergy")
+    print(f"Confirmed combos: {confirmed} (Spellbook)")
+    print(f"Likely combos: {likely} (trigger chain)")
+    print(f"Synergy pairs: {synergy}")
+
+    if anti:
+        print(f"Anti-synergy cards: {len(anti)} (swap candidates)")
+        for a in anti[:5]:
+            print(f"  {a['name']} ({a['role'] or 'unknown role'})")
+
+
 def run():
     from decks import list_decks
 
