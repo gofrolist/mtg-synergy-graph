@@ -39,6 +39,7 @@ STRATEGY_RULES = [
     # Aristocrats / sacrifice
     ({"sacrifice-outlet"}, "aristocrats", 0.9),
     ({"death-trigger"}, "aristocrats", 0.8),
+    ({"sacrifice-payoff"}, "aristocrats", 0.8),  # Payoff for sacrificing creatures
 
     # Spellslinger
     ({"spell-copy"}, "spellslinger", 1.0),
@@ -49,6 +50,7 @@ STRATEGY_RULES = [
     ({"graveyard-recursion"}, "reanimator", 0.9),
     ({"self-mill"}, "self-mill", 0.9),
     ({"dredge"}, "dredge", 1.0),
+    ({"graveyard-payoff"}, "reanimator", 0.8),  # Payoff for graveyard filling
 
     # Artifacts
     ({"artifact-enabler", "artifact-presence"}, "artifacts", 0.8),
@@ -68,6 +70,7 @@ STRATEGY_RULES = [
 
     # Card advantage
     ({"card-draw"}, "card-draw", 0.5),  # Low confidence — almost everything draws
+    ({"card-draw-payoff"}, "card-draw", 0.7),  # Payoff specifically for drawing cards
     ({"tutor"}, "toolbox", 0.7),
 
     # Life
@@ -89,6 +92,12 @@ STRATEGY_RULES = [
 
     # Go wide
     ({"board-wide-creature-pump", "creature-pump"}, "go-wide", 0.7),
+
+    # Payoff patterns — cards that benefit from a strategy's output
+    # etb-payoff: cards like Impact Tremors that fire on every creature ETB (tokens spam ETBs)
+    ({"etb-payoff"}, "tokens", 0.7),
+    # damage-dealing + direct: also flags burn/spellslinger payoffs like Guttersnipe
+    ({"damage-dealing"}, "burn", 0.6),
 ]
 
 
@@ -97,17 +106,28 @@ STRATEGY_RULES = [
 WANTS_STRATEGY_RULES = [
     ({"counter-placement-events", "counter-distribution"}, "+1/+1-counters", 0.7),
     ({"creature-etb"}, "blink", 0.5),
+    # creature-etb want also signals tokens payoff: tokens create many ETB triggers
+    ({"creature-etb"}, "tokens", 0.5),
     ({"creature-death", "sacrifice-events"}, "aristocrats", 0.7),
+    # creature-death also signals tokens payoff: tokens produce disposable creatures that die (Skullclamp)
+    ({"creature-death"}, "tokens", 0.5),
     ({"spell-casting", "instant-sorcery-casting", "noncreature-spells", "cast-spell-events",
       "second-spell-casting", "instant-or-sorcery-spells"}, "spellslinger", 0.7),
     ({"token-events", "wide-board"}, "tokens", 0.6),
+    # creature-board: cards that want a wide creature board are tokens/go-wide payoffs
+    ({"creature-board"}, "tokens", 0.5),
+    ({"creature-board"}, "go-wide", 0.5),
     ({"life-gain-events"}, "lifegain", 0.7),
     ({"graveyard-events", "graveyard-fill"}, "reanimator", 0.6),
+    # graveyard-filling: cards wanting graveyard fill benefit from self-mill strategy
+    ({"graveyard-filling"}, "self-mill", 0.6),
     ({"artifact-etb", "artifact-presence", "artifact-casting"}, "artifacts", 0.6),
     ({"enchantment-presence", "enchantment-casting-events"}, "enchantress", 0.6),
     ({"landfall", "land-play"}, "landfall", 0.7),
     ({"attack-events", "combat-damage-events"}, "voltron", 0.5),
     ({"commander-casting"}, "commander-matters", 0.7),
+    # opponent-life-loss wants: lifedrain strategy payoffs
+    ({"opponent-life-loss"}, "lifedrain", 0.6),
 ]
 
 
