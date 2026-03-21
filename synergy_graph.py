@@ -2328,6 +2328,238 @@ def build_from_commander(commander_name: str, top_n: int = 30):
             print(f"    benefits from: {tags}")
 
 
+def find_combos_tiered(deck_oids, db_path=None):
+    """Three-tier combo detection: infinite-confirmed, combo-likely, synergy.
+
+    Args:
+        deck_oids: set of oracle_ids in the deck
+        db_path: optional DB path override
+
+    Returns:
+        list of combo dicts with 'tier', 'cards', 'result', 'reason' fields
+    """
+    import sqlite3
+    if db_path is None:
+        db_path = os.path.join(os.path.dirname(__file__), "data", "tags.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    combos = []
+
+    # --- Tier 1: Spellbook confirmed ---
+    spellbook_combos = conn.execute("""
+        SELECT combo_id, card_oracle_ids, card_names, result, prerequisites
+        FROM spellbook_combos
+    """).fetchall()
+
+    confirmed_pairs = set()  # Track confirmed pairs to avoid duplicate synergy entries
+    for row in spellbook_combos:
+        combo_oids = set(json.loads(row["card_oracle_ids"]))
+        if combo_oids <= deck_oids:  # All combo cards in deck
+            combo_names = json.loads(row["card_names"])
+            combos.append({
+                "tier": "infinite-confirmed",
+                "cards": combo_names,
+                "card_oids": list(combo_oids),
+                "result": row["result"],
+                "reason": f"Spellbook #{row['combo_id']}",
+            })
+            # Mark all pairs as confirmed
+            oid_list = list(combo_oids)
+            for i in range(len(oid_list)):
+                for j in range(i + 1, len(oid_list)):
+                    confirmed_pairs.add(frozenset([oid_list[i], oid_list[j]]))
+
+    # --- Load provides/wants for deck cards ---
+    deck_list = list(deck_oids)
+    provides_by_card = {}
+    wants_by_card = {}
+    for oid in deck_list:
+        for tag, in conn.execute("SELECT tag FROM provides WHERE oracle_id = ?", (oid,)):
+            provides_by_card.setdefault(oid, set()).add(tag)
+        for tag, in conn.execute("SELECT tag FROM wants WHERE oracle_id = ?", (oid,)):
+            wants_by_card.setdefault(oid, set()).add(tag)
+
+    # --- Load abilities for deck cards ---
+    abilities_by_card = {}
+    for oid in deck_list:
+        rows = conn.execute("""
+            SELECT ability_type, trigger_tags, effect_tags
+            FROM abilities WHERE oracle_id = ?
+        """, (oid,)).fetchall()
+        trigger_tags = set()
+        effect_tags = set()
+        for row in rows:
+            if row["trigger_tags"]:
+                trigger_tags.update(json.loads(row["trigger_tags"]))
+            if row["effect_tags"]:
+                effect_tags.update(json.loads(row["effect_tags"]))
+        if trigger_tags or effect_tags:
+            abilities_by_card[oid] = {"trigger_tags": trigger_tags, "effect_tags": effect_tags}
+
+    conn_names = {}
+    for oid in deck_list:
+        row = conn.execute("SELECT name FROM cards WHERE oracle_id = ?", (oid,)).fetchone()
+        if row:
+            conn_names[oid] = row["name"]
+
+    conn.close()
+
+    # --- Find provides->wants cycles ---
+    for i, oid_a in enumerate(deck_list):
+        for oid_b in deck_list[i + 1:]:
+            pair = frozenset([oid_a, oid_b])
+            if pair in confirmed_pairs:
+                continue
+
+            prov_a = provides_by_card.get(oid_a, set())
+            want_a = wants_by_card.get(oid_a, set())
+            prov_b = provides_by_card.get(oid_b, set())
+            want_b = wants_by_card.get(oid_b, set())
+
+            # Check cycle: A provides what B wants AND B provides what A wants
+            a_to_b = prov_a & want_b
+            b_to_a = prov_b & want_a
+
+            if not (a_to_b and b_to_a):
+                continue
+
+            name_a = conn_names.get(oid_a, oid_a)
+            name_b = conn_names.get(oid_b, oid_b)
+
+            # --- Tier 2: Check trigger chain ---
+            ab_a = abilities_by_card.get(oid_a)
+            ab_b = abilities_by_card.get(oid_b)
+
+            if ab_a and ab_b:
+                # A's effect_tags intersect B's trigger_tags AND vice versa
+                a_triggers_b = ab_a["effect_tags"] & ab_b["trigger_tags"]
+                b_triggers_a = ab_b["effect_tags"] & ab_a["trigger_tags"]
+
+                if a_triggers_b and b_triggers_a:
+                    combos.append({
+                        "tier": "combo-likely",
+                        "cards": [name_a, name_b],
+                        "card_oids": [oid_a, oid_b],
+                        "result": f"Trigger chain: {name_a} -> {', '.join(a_triggers_b)} -> {name_b} -> {', '.join(b_triggers_a)}",
+                        "reason": f"Circular triggers via {a_triggers_b} / {b_triggers_a}",
+                    })
+                    continue
+
+            # --- Tier 3: Synergy ---
+            combos.append({
+                "tier": "synergy",
+                "cards": [name_a, name_b],
+                "card_oids": [oid_a, oid_b],
+                "result": f"Provides/wants cycle: {a_to_b} / {b_to_a}",
+                "reason": "Tag cycle without trigger chain",
+            })
+
+    # Sort: confirmed first, then likely, then synergy
+    tier_order = {"infinite-confirmed": 0, "combo-likely": 1, "synergy": 2}
+    combos.sort(key=lambda c: tier_order.get(c["tier"], 9))
+
+    return combos
+
+
+def compute_strategy_relevance(oracle_id, active_strategies, db_path=None):
+    """Compute strategy relevance multiplier for a card.
+
+    Returns: float multiplier (0.5 for no match, 1.0+ for matches)
+    """
+    import sqlite3
+    if not active_strategies:
+        return 1.0
+
+    if db_path is None:
+        db_path = os.path.join(os.path.dirname(__file__), "data", "tags.db")
+    conn = sqlite3.connect(db_path)
+    card_strats = {row[0] for row in conn.execute(
+        "SELECT strategy FROM card_strategies WHERE oracle_id = ? AND confidence >= 0.3",
+        (oracle_id,)
+    ).fetchall()}
+    conn.close()
+
+    overlap = card_strats & active_strategies
+    if not overlap:
+        return 0.5
+    return 1.0 + 0.2 * len(overlap)
+
+
+def find_partial_combos(deck_oids, db_path=None):
+    """Find Spellbook combos where deck is missing exactly 1 card.
+
+    Returns list of dicts with: combo_id, result, present_cards, missing_cards, missing_oids.
+    """
+    import sqlite3
+    if db_path is None:
+        db_path = os.path.join(os.path.dirname(__file__), "data", "tags.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    combos = conn.execute("SELECT * FROM spellbook_combos").fetchall()
+    conn.close()
+
+    partials = []
+    for combo in combos:
+        combo_oids = json.loads(combo["card_oracle_ids"])
+        combo_names = json.loads(combo["card_names"])
+
+        present = [oid for oid in combo_oids if oid in deck_oids]
+        missing = [oid for oid in combo_oids if oid not in deck_oids]
+
+        if len(missing) == 1:
+            missing_idx = combo_oids.index(missing[0])
+            partials.append({
+                "combo_id": combo["combo_id"],
+                "result": combo["result"],
+                "present_cards": [combo_names[combo_oids.index(oid)] for oid in present],
+                "missing_cards": [combo_names[missing_idx]],
+                "missing_oids": missing,
+            })
+
+    return partials
+
+
+STAPLE_ROLES = {"ramp", "draw", "removal", "protection", "land"}
+
+
+def find_anti_synergy(deck_oids, active_strategies, db_path=None):
+    """Find deck cards with zero strategy overlap that aren't staples.
+
+    Returns list of dicts: {oracle_id, name, role}.
+    """
+    import sqlite3
+    if not active_strategies:
+        return []
+    if db_path is None:
+        db_path = os.path.join(os.path.dirname(__file__), "data", "tags.db")
+    conn = sqlite3.connect(db_path)
+
+    anti = []
+    for oid in deck_oids:
+        row = conn.execute("SELECT name, role FROM cards WHERE oracle_id = ?", (oid,)).fetchone()
+        if not row:
+            continue
+        name, role = row
+
+        # Skip staples
+        if role and role.lower() in STAPLE_ROLES:
+            continue
+
+        # Check strategy overlap
+        card_strats = {r[0] for r in conn.execute(
+            "SELECT strategy FROM card_strategies WHERE oracle_id = ? AND confidence >= 0.3",
+            (oid,)
+        ).fetchall()}
+
+        if not (card_strats & active_strategies):
+            anti.append({"oracle_id": oid, "name": name, "role": role})
+
+    conn.close()
+    return anti
+
+
 def run():
     from decks import list_decks
 
@@ -2352,6 +2584,10 @@ def run():
                         help="Generate interactive HTML visualization")
     parser.add_argument("--export", action="store_true", help="Export graph as JSON")
     parser.add_argument("--top", type=int, default=30, help="Top N edges to show")
+    parser.add_argument("--strategies", default="auto",
+                        help="Comma-separated strategies to focus (default: auto-detect)")
+    parser.add_argument("--exclude-strategies", default=None,
+                        help="Comma-separated strategies to exclude")
     args = parser.parse_args()
 
     # Commander build mode — no deck needed
