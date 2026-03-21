@@ -231,6 +231,48 @@ SEMANTIC_BRIDGES = {
     ("stax-tax", "card-draw-events"): 0.6,
 }
 
+# Maps effect tags to the trigger tags they would cause in-game.
+# Used by find_combos_tiered to expand effect_tags before intersection,
+# so that e.g. token-generation (effect) can match creature-etb (trigger).
+TRIGGER_EFFECT_BRIDGES = {
+    # Creating tokens/creatures triggers ETB
+    "token-generation": {"creature-etb"},
+    "graveyard-recursion": {"creature-etb"},
+    "copy-effect": {"creature-etb"},
+
+    # Removal/sacrifice causes death triggers
+    "spot-removal": {"creature-death"},
+    "sacrifice-outlet": {"creature-death"},
+    "exile-removal": {"leaves-battlefield"},
+
+    # Damage triggers life-loss which can trigger life-gain (Exquisite Blood pattern)
+    "life-drain": {"life-gain"},   # Sanguine Bond: drain → opponent loses life → you gain
+    "life-gain": {"life-drain"},   # Exquisite Blood: gain → opponent loses life
+
+    # Direct damage can trigger damage events
+    "direct-damage": {"combat-damage-events"},
+    "group-damage": {"combat-damage-events"},
+
+    # Card draw triggers draw events
+    "card-draw": {"draw-events"},
+
+    # Counter placement triggers counter events
+    "counter-placement": {"counter-placement-events"},
+
+    # Mana can enable untap loops
+    "mana-acceleration": {"untap"},
+    "untap": {"tap-cost"},
+
+    # Discard triggers discard events
+    "discard": {"discard-events"},
+
+    # Mill triggers graveyard events
+    "mill": {"graveyard-events"},
+
+    # Creature pump with wide board triggers attack events
+    "creature-pump": {"attack-events"},
+}
+
 
 def _compute_idf(cards: list[dict]) -> dict[str, float]:
     """Compute IDF multipliers for provides and wants tags.
@@ -1531,7 +1573,8 @@ def validate_against_curated(graph: dict, synergy_pairs: list[tuple]):
 
 def generate_visualization(graph: dict, cards: list[dict], deck_set: set,
                            commander: str, deck_name: str, combos: list = None,
-                           output_path: str = None, min_edge_score: float = 0.8):
+                           output_path: str = None, min_edge_score: float = 0.8,
+                           tiered_combos: list = None):
     """Generate a self-contained interactive HTML visualization of the deck synergy graph."""
 
     card_by_name = {c["name"]: c for c in cards}
@@ -1553,6 +1596,21 @@ def generate_visualization(graph: dict, cards: list[dict], deck_set: set,
             "total_synergy": round(total_syn, 1),
         })
 
+    # Build card-pair sets for tiered combo edge highlighting
+    confirmed_edge_pairs: set = set()
+    likely_edge_pairs: set = set()
+    if tiered_combos:
+        for tc in tiered_combos:
+            tc_cards = tc.get("cards", [])
+            pairs = set()
+            for i in range(len(tc_cards)):
+                for j in range(i + 1, len(tc_cards)):
+                    pairs.add(tuple(sorted([tc_cards[i], tc_cards[j]])))
+            if tc.get("tier") == "infinite-confirmed":
+                confirmed_edge_pairs.update(pairs)
+            elif tc.get("tier") == "combo-likely":
+                likely_edge_pairs.update(pairs)
+
     # Build edges (deck-internal only, above threshold)
     edges = []
     seen = set()
@@ -1562,15 +1620,22 @@ def generate_visualization(graph: dict, cards: list[dict], deck_set: set,
                 key = tuple(sorted([edge["source"], edge["target"]]))
                 if key not in seen:
                     seen.add(key)
+                    if key in confirmed_edge_pairs:
+                        combo_tier = "infinite-confirmed"
+                    elif key in likely_edge_pairs:
+                        combo_tier = "combo-likely"
+                    else:
+                        combo_tier = None
                     edges.append({
                         "source": edge["source"],
                         "target": edge["target"],
                         "score": edge["score"],
                         "signals": edge["signals"],
                         "reasons": edge["reasons"],
+                        "combo_tier": combo_tier,
                     })
 
-    # Combos
+    # Combos (legacy triangles for the combo overlay)
     combo_data = []
     if combos:
         triangles = combos.get("triangles", []) if isinstance(combos, dict) else combos
@@ -1581,15 +1646,32 @@ def generate_visualization(graph: dict, cards: list[dict], deck_set: set,
                 "type": combo.get("type", "synergy-triangle"),
             })
 
+    # Tiered combos for the side panel
+    tiered_combo_data = []
+    if tiered_combos:
+        for tc in tiered_combos:
+            tiered_combo_data.append({
+                "cards": tc.get("cards", []),
+                "tier": tc.get("tier", "synergy"),
+                "result": tc.get("result", ""),
+                "reason": tc.get("reason", ""),
+            })
+
+    n_confirmed = sum(1 for tc in tiered_combos if tc.get("tier") == "infinite-confirmed") if tiered_combos else 0
+    n_likely = sum(1 for tc in tiered_combos if tc.get("tier") == "combo-likely") if tiered_combos else 0
+
     viz_data = json.dumps({
         "nodes": nodes,
         "edges": edges,
         "combos": combo_data,
+        "tiered_combos": tiered_combo_data,
         "meta": {
             "deck": deck_name,
             "commander": commander,
             "total_cards": len(nodes),
             "total_edges": len(edges),
+            "confirmed_combos": n_confirmed,
+            "likely_combos": n_likely,
         },
     })
 
@@ -1601,6 +1683,10 @@ def generate_visualization(graph: dict, cards: list[dict], deck_set: set,
         f.write(html)
     print(f"\nVisualization written to {output_path}")
     print(f"  {len(nodes)} nodes, {len(edges)} edges, {len(combo_data)} combos")
+    if n_confirmed:
+        print(f"  Spellbook confirmed combos: {n_confirmed} (highlighted gold in visualization)")
+    if n_likely:
+        print(f"  Likely combos: {n_likely} (highlighted orange in visualization)")
 
 
 _VIZ_HTML_TEMPLATE = r"""<!DOCTYPE html>
@@ -1793,12 +1879,28 @@ const simulation = d3.forceSimulation(DATA.nodes)
   .force("collision", d3.forceCollide().radius(d => nodeRadius(d) + 3))
   .alphaDecay(0.02);
 
+function edgeBaseColor(d) {
+  if (d.combo_tier === "infinite-confirmed") return "#FFD700";
+  if (d.combo_tier === "combo-likely") return "#FF8C00";
+  return "#555";
+}
+function edgeBaseOpacity(d) {
+  if (d.combo_tier === "infinite-confirmed") return 0.75;
+  if (d.combo_tier === "combo-likely") return 0.55;
+  return Math.max(0.08, Math.min(0.6, d.score / 15));
+}
+function edgeBaseWidth(d) {
+  if (d.combo_tier === "infinite-confirmed") return Math.max(2, Math.min(5, d.score / 3));
+  if (d.combo_tier === "combo-likely") return Math.max(1.5, Math.min(4, d.score / 3));
+  return Math.max(0.5, Math.min(4, d.score / 3));
+}
+
 // Render edges
 const edgeGroup = g.append("g").attr("class", "edges");
 let edgeElements = edgeGroup.selectAll("line").data(visibleEdges).join("line")
-  .attr("stroke", "#555")
-  .attr("stroke-width", d => Math.max(0.5, Math.min(4, d.score / 3)))
-  .attr("stroke-opacity", d => Math.max(0.08, Math.min(0.6, d.score / 15)));
+  .attr("stroke", d => edgeBaseColor(d))
+  .attr("stroke-width", d => edgeBaseWidth(d))
+  .attr("stroke-opacity", d => edgeBaseOpacity(d));
 
 // Combo overlays
 const comboGroup = g.append("g").attr("class", "combos").style("display", "none");
@@ -1874,11 +1976,16 @@ function selectNode(d) {
   edgeElements.attr("stroke-opacity", e => {
     const src = e.source.name || e.source;
     const tgt = e.target.name || e.target;
-    return (src === d.name || tgt === d.name) ? 0.8 : 0.02;
+    return (src === d.name || tgt === d.name) ? 0.9 : 0.02;
   }).attr("stroke", e => {
     const src = e.source.name || e.source;
     const tgt = e.target.name || e.target;
-    return (src === d.name || tgt === d.name) ? "#e94560" : "#555";
+    if (src === d.name || tgt === d.name) return "#e94560";
+    return edgeBaseColor(e);
+  }).attr("stroke-width", e => {
+    const src = e.source.name || e.source;
+    const tgt = e.target.name || e.target;
+    return (src === d.name || tgt === d.name) ? Math.max(1.5, Math.min(5, e.score / 3)) : edgeBaseWidth(e);
   });
 
   // Side panel
@@ -1904,8 +2011,9 @@ function clearSelection() {
   nodeElements.select("circle").attr("opacity", 1);
   if (!showLabels) labelElements.filter(d => !d.is_commander).style("display", "none");
   edgeElements
-    .attr("stroke-opacity", d => Math.max(0.08, Math.min(0.6, d.score / 15)))
-    .attr("stroke", "#555");
+    .attr("stroke-opacity", d => edgeBaseOpacity(d))
+    .attr("stroke", d => edgeBaseColor(d))
+    .attr("stroke-width", d => edgeBaseWidth(d));
   d3.select("#side-panel").classed("open", false);
 }
 
@@ -1924,9 +2032,9 @@ function updateEdges() {
   edgeElements = edgeGroup.selectAll("line").data(visibleEdges, d => (d.source.name || d.source) + "-" + (d.target.name || d.target));
   edgeElements.exit().remove();
   const newEdges = edgeElements.enter().append("line")
-    .attr("stroke", "#555")
-    .attr("stroke-width", d => Math.max(0.5, Math.min(4, d.score / 3)))
-    .attr("stroke-opacity", d => Math.max(0.08, Math.min(0.6, d.score / 15)))
+    .attr("stroke", d => edgeBaseColor(d))
+    .attr("stroke-width", d => edgeBaseWidth(d))
+    .attr("stroke-opacity", d => edgeBaseOpacity(d))
     .on("mouseover", (ev, d) => {
       const src = d.source.name || d.source;
       const tgt = d.target.name || d.target;
@@ -1965,22 +2073,54 @@ d3.select("#btn-combos").on("click", function() {
 
 function renderCombos() {
   comboGroup.selectAll("*").remove();
-  if (!DATA.combos.length) return;
-  const comboColors = { "infinite-combo": "#e94560", "sac-combo": "#FF5722", "counter-combo": "#4CAF50", "token-combo": "#FFEB3B", "etb-combo": "#2196F3", "tribal-combo": "#9C27B0", "damage-combo": "#f44336" };
-  DATA.combos.forEach(combo => {
-    const positions = combo.cards.map(name => DATA.nodes.find(n => n.name === name)).filter(Boolean);
-    if (positions.length >= 3) {
-      const color = comboColors[combo.type] || "#e94560";
-      comboGroup.append("polygon")
-        .datum(positions)
-        .attr("fill", color)
-        .attr("fill-opacity", 0.12)
-        .attr("stroke", color)
-        .attr("stroke-width", 2)
-        .attr("stroke-opacity", 0.5)
-        .attr("stroke-dasharray", "4,2");
-    }
-  });
+  // Legacy synergy triangles
+  if (DATA.combos.length) {
+    const comboColors = { "infinite-combo": "#e94560", "sac-combo": "#FF5722", "counter-combo": "#4CAF50", "token-combo": "#FFEB3B", "etb-combo": "#2196F3", "tribal-combo": "#9C27B0", "damage-combo": "#f44336" };
+    DATA.combos.forEach(combo => {
+      const positions = combo.cards.map(name => DATA.nodes.find(n => n.name === name)).filter(Boolean);
+      if (positions.length >= 3) {
+        const color = comboColors[combo.type] || "#e94560";
+        comboGroup.append("polygon")
+          .datum(positions)
+          .attr("fill", color)
+          .attr("fill-opacity", 0.12)
+          .attr("stroke", color)
+          .attr("stroke-width", 2)
+          .attr("stroke-opacity", 0.5)
+          .attr("stroke-dasharray", "4,2");
+      }
+    });
+  }
+  // Tiered combos: confirmed (gold) and likely (orange) overlays
+  if (DATA.tiered_combos && DATA.tiered_combos.length) {
+    DATA.tiered_combos.forEach(tc => {
+      const positions = tc.cards.map(name => DATA.nodes.find(n => n.name === name)).filter(Boolean);
+      if (positions.length < 2) return;
+      const isConfirmed = tc.tier === "infinite-confirmed";
+      const isLikely = tc.tier === "combo-likely";
+      if (!isConfirmed && !isLikely) return;
+      const color = isConfirmed ? "#FFD700" : "#FF8C00";
+      const opacity = isConfirmed ? 0.18 : 0.12;
+      if (positions.length === 2) {
+        // Draw a thick highlighted line between the two cards
+        comboGroup.append("line")
+          .attr("stroke", color)
+          .attr("stroke-width", isConfirmed ? 4 : 3)
+          .attr("stroke-opacity", isConfirmed ? 0.8 : 0.6)
+          .attr("stroke-dasharray", isConfirmed ? "none" : "6,3")
+          .datum(positions);
+      } else {
+        comboGroup.append("polygon")
+          .datum(positions)
+          .attr("fill", color)
+          .attr("fill-opacity", opacity)
+          .attr("stroke", color)
+          .attr("stroke-width", isConfirmed ? 3 : 2)
+          .attr("stroke-opacity", isConfirmed ? 0.8 : 0.6)
+          .attr("stroke-dasharray", isConfirmed ? "none" : "6,3");
+      }
+    });
+  }
 }
 
 // Reset
@@ -2501,9 +2641,17 @@ def find_combos_tiered(deck_oids, db_path=None):
             ab_b = abilities_by_card.get(oid_b)
 
             if ab_a and ab_b:
-                # A's effect_tags intersect B's trigger_tags AND vice versa
-                a_triggers_b = ab_a["effect_tags"] & ab_b["trigger_tags"]
-                b_triggers_a = ab_b["effect_tags"] & ab_a["trigger_tags"]
+                # Expand effect tags with bridge mappings so that e.g.
+                # token-generation (effect) matches creature-etb (trigger).
+                a_effects_expanded = set(ab_a["effect_tags"])
+                for et in ab_a["effect_tags"]:
+                    a_effects_expanded |= TRIGGER_EFFECT_BRIDGES.get(et, set())
+                b_effects_expanded = set(ab_b["effect_tags"])
+                for et in ab_b["effect_tags"]:
+                    b_effects_expanded |= TRIGGER_EFFECT_BRIDGES.get(et, set())
+
+                a_triggers_b = a_effects_expanded & ab_b["trigger_tags"]
+                b_triggers_a = b_effects_expanded & ab_a["trigger_tags"]
 
                 if a_triggers_b and b_triggers_a:
                     combos.append({
@@ -2891,7 +3039,16 @@ def run():
     elif args.visualize:
         deck_set = set(deck.DECKLIST) | {deck.COMMANDER}
         combos = find_combos(graph, cards, deck_set, deck.COMMANDER, top_n=20)
-        generate_visualization(graph, cards, deck_set, deck.COMMANDER, args.deck, combos)
+        # Enrich with Spellbook / inferred tiered combo data if DB is available
+        tiered = None
+        if db_path:
+            deck_oids = {c["oracle_id"] for c in cards if c["name"] in deck_set}
+            tiered = find_combos_tiered(deck_oids, db_path)
+            confirmed = [c for c in tiered if c["tier"] == "infinite-confirmed"]
+            if confirmed:
+                print(f"\n  Spellbook confirmed combos: {len(confirmed)} (highlighted in visualization)")
+        generate_visualization(graph, cards, deck_set, deck.COMMANDER, args.deck, combos,
+                               tiered_combos=tiered)
     elif args.deck_view or args.recommend or args.combos or args.swaps:
         deck_set = set(deck.DECKLIST) | {deck.COMMANDER}
         deck_oids = {c["oracle_id"] for c in cards if c["name"] in deck_set}

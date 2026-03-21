@@ -94,3 +94,41 @@ def test_synergy_tier_fallback(tmp_db):
 
     synergy = [c for c in combos if c["tier"] == "synergy"]
     assert len(synergy) >= 1
+
+
+def test_trigger_chain_with_bridges(tmp_db):
+    """Token generation should bridge to creature-etb for trigger chain detection."""
+    from synergy_graph import find_combos_tiered
+
+    conn = sqlite3.connect(tmp_db)
+    # Card A: triggers on creature-death, creates tokens.
+    # Provides token-generation and wants creature-death (direct cycle with card B's sacrifice-outlet).
+    # Trigger chain: effect_tag token-generation bridges → creature-etb (card B's trigger_tag).
+    conn.execute("INSERT INTO cards (oracle_id, name) VALUES ('oid-tokener', 'Token Death')")
+    conn.execute("INSERT INTO provides (oracle_id, tag) VALUES ('oid-tokener', 'token-generation')")
+    conn.execute("INSERT INTO wants (oracle_id, tag) VALUES ('oid-tokener', 'sacrifice-outlet')")
+    conn.execute("""INSERT INTO abilities (oracle_id, ability_index, ability_type, trigger_condition,
+                    trigger_tags, effect, effect_tags)
+                    VALUES ('oid-tokener', 0, 'triggered', 'Whenever a creature dies',
+                    '["creature-death"]', 'create a 1/1 token', '["token-generation"]')""")
+
+    # Card B: triggers on creature-etb, sacrifices a creature.
+    # Provides sacrifice-outlet and wants token-generation (direct cycle with card A).
+    # Trigger chain: effect_tag sacrifice-outlet bridges → creature-death (card A's trigger_tag).
+    conn.execute("INSERT INTO cards (oracle_id, name) VALUES ('oid-saccer', 'ETB Sac')")
+    conn.execute("INSERT INTO provides (oracle_id, tag) VALUES ('oid-saccer', 'sacrifice-outlet')")
+    conn.execute("INSERT INTO wants (oracle_id, tag) VALUES ('oid-saccer', 'token-generation')")
+    conn.execute("""INSERT INTO abilities (oracle_id, ability_index, ability_type, trigger_condition,
+                    trigger_tags, effect, effect_tags)
+                    VALUES ('oid-saccer', 0, 'triggered', 'Whenever a creature enters',
+                    '["creature-etb"]', 'sacrifice a creature', '["sacrifice-outlet"]')""")
+
+    conn.commit()
+    conn.close()
+
+    deck_oids = {"oid-tokener", "oid-saccer"}
+    combos = find_combos_tiered(deck_oids, tmp_db)
+
+    likely = [c for c in combos if c["tier"] == "combo-likely"]
+    # token-generation bridges to creature-etb, sacrifice-outlet bridges to creature-death
+    assert len(likely) >= 1, f"Expected combo-likely, got: {[c['tier'] for c in combos]}"
