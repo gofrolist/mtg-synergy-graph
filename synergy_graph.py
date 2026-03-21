@@ -873,6 +873,11 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
         }
         card_oid_lookup[c["name"]] = c.get("oracle_id", "")
 
+    # Calculate deck average CMC (excluding lands)
+    deck_cmc_values = [card_meta[n]["cmc"] for n in deck_cards
+                       if n in card_meta and "Land" not in card_meta[n].get("type_line", "")]
+    deck_avg_cmc = sum(deck_cmc_values) / max(len(deck_cmc_values), 1)
+
     # Find partial Spellbook combos for combo completion bonus
     partial_missing_oids = set()
     partial_combos = []
@@ -912,6 +917,17 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
         else:
             info["combo_completion"] = False
 
+    # Apply mana cost penalty for high-CMC cards
+    for card_name, info in candidate_scores.items():
+        meta = card_meta.get(card_name, {})
+        cmc = meta.get("cmc", 0) or 0
+        if cmc > deck_avg_cmc + 3:
+            penalty = max(0.3, 1.0 - 0.15 * (cmc - deck_avg_cmc - 3))
+            info["total"] *= penalty
+            info["high_cmc"] = True
+        else:
+            info["high_cmc"] = False
+
     # Sort by total synergy
     ranked = sorted(candidate_scores.items(), key=lambda x: x[1]["total"], reverse=True)
 
@@ -947,7 +963,8 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
         combo = " [COMBO]" if info.get("combo_completion") else ""
         strat_rel = info.get("strategy_rel")
         strat_str = f" [strat×{strat_rel:.1f}]" if strat_rel and strat_rel != 1.0 else ""
-        print(f"\n  {card}{tribal}{combo}{strat_str}  — synergy: {info['total']:.1f}, "
+        high_cmc = " [high CMC]" if info.get("high_cmc") else ""
+        print(f"\n  {card}{tribal}{combo}{strat_str}{high_cmc}  — synergy: {info['total']:.1f}, "
               f"{len(partners)} partners{multi}")
         print(f"    {type_line} | CMC {cmc}")
         for partner, score, sigs in partners[:5]:
