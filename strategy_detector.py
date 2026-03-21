@@ -98,14 +98,16 @@ WANTS_STRATEGY_RULES = [
     ({"counter-placement-events", "counter-distribution"}, "+1/+1-counters", 0.7),
     ({"creature-etb"}, "blink", 0.5),
     ({"creature-death", "sacrifice-events"}, "aristocrats", 0.7),
-    ({"spell-cast", "instant-sorcery-cast"}, "spellslinger", 0.7),
+    ({"spell-casting", "instant-sorcery-casting", "noncreature-spells", "cast-spell-events",
+      "second-spell-casting", "instant-or-sorcery-spells"}, "spellslinger", 0.7),
     ({"token-events", "wide-board"}, "tokens", 0.6),
     ({"life-gain-events"}, "lifegain", 0.7),
     ({"graveyard-events", "graveyard-fill"}, "reanimator", 0.6),
-    ({"artifact-etb", "artifact-presence"}, "artifacts", 0.6),
-    ({"enchantment-presence"}, "enchantress", 0.6),
+    ({"artifact-etb", "artifact-presence", "artifact-casting"}, "artifacts", 0.6),
+    ({"enchantment-presence", "enchantment-casting-events"}, "enchantress", 0.6),
     ({"landfall", "land-play"}, "landfall", 0.7),
     ({"attack-events", "combat-damage-events"}, "voltron", 0.5),
+    ({"commander-casting"}, "commander-matters", 0.7),
 ]
 
 
