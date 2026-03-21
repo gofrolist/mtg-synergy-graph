@@ -1865,10 +1865,20 @@ roles.forEach(role => {
   item.append("div").attr("class", "legend-dot").style("background", ROLE_COLORS[role] || ROLE_COLORS.unknown);
   item.append("span").text(role);
 });
+// Edge color legend
+const edgeLegend = legendItems.append("div").attr("class", "legend-item").style("margin-top", "6px");
+edgeLegend.append("div").style("width", "24px").style("height", "3px").style("background", "#FFD700").style("border-radius", "2px");
+edgeLegend.append("span").text("Spellbook combo");
+const edgeLegend2 = legendItems.append("div").attr("class", "legend-item");
+edgeLegend2.append("div").style("width", "24px").style("height", "3px").style("background", "#FF8C00").style("border-radius", "2px");
+edgeLegend2.append("span").text("Likely combo");
 
 // Stats
+const comboStats = DATA.meta.confirmed_combos > 0
+  ? ` | ${DATA.meta.confirmed_combos} confirmed combos` + (DATA.meta.likely_combos > 0 ? ` | ${DATA.meta.likely_combos} likely` : "")
+  : "";
 d3.select("#stats-bar").html(
-  `${DATA.meta.deck} | ${DATA.meta.total_cards} cards | ${DATA.meta.total_edges} edges | Commander: ${DATA.meta.commander}`
+  `${DATA.meta.deck} | ${DATA.meta.total_cards} cards | ${DATA.meta.total_edges} edges | Commander: ${DATA.meta.commander}${comboStats}`
 );
 
 // Force simulation
@@ -2175,11 +2185,14 @@ simulation.on("tick", () => {
 
   nodeElements.attr("transform", d => `translate(${d.x},${d.y})`);
 
-  // Update combo polygons
+  // Update combo polygons and lines
   if (showCombos) {
     comboGroup.selectAll("polygon").attr("points", d =>
       d.map(n => `${n.x},${n.y}`).join(" ")
     );
+    comboGroup.selectAll("line")
+      .attr("x1", d => d[0].x).attr("y1", d => d[0].y)
+      .attr("x2", d => d[1].x).attr("y2", d => d[1].y);
   }
 });
 </script>
