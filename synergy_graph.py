@@ -2754,10 +2754,12 @@ def find_partial_combos(deck_oids, db_path=None):
 STAPLE_ROLES = {"ramp", "draw", "removal", "protection", "land"}
 
 
-def find_anti_synergy(deck_oids, active_strategies, db_path=None):
+def find_anti_synergy(deck_oids, active_strategies, db_path=None, graph=None, deck_cards_set=None):
     """Find deck cards with zero strategy overlap that aren't staples.
 
-    Returns list of dicts: {oracle_id, name, role}.
+    Returns list of dicts: {oracle_id, name, role, synergy_score, partners}.
+    Cards with strong synergy connections (>=5 partners or >=20.0 total score) are exempt
+    even if their strategy doesn't match.
     """
     import sqlite3
     if not active_strategies:
@@ -2784,7 +2786,25 @@ def find_anti_synergy(deck_oids, active_strategies, db_path=None):
         ).fetchall()}
 
         if not (card_strats & active_strategies):
-            anti.append({"oracle_id": oid, "name": name, "role": role})
+            # Before flagging, check if card has strong synergy connections
+            synergy_score = 0.0
+            partner_count = 0
+            if graph and deck_cards_set:
+                adj = graph.get("adjacency", {})
+                for edge in adj.get(name, []):
+                    if edge["target"] in deck_cards_set:
+                        synergy_score += edge["score"]
+                        partner_count += 1
+
+            # Only flag if also low synergy (< 5 partners or < 20.0 total score)
+            if partner_count < 5 or synergy_score < 20.0:
+                anti.append({
+                    "oracle_id": oid,
+                    "name": name,
+                    "role": role,
+                    "synergy_score": round(synergy_score, 1),
+                    "partners": partner_count,
+                })
 
     conn.close()
     return anti
@@ -2860,7 +2880,7 @@ def show_recommendations_enhanced(candidates, active_strategies, partial_combos,
         print(f"  {i}. {c['name']}{strat_str}{tribal} score: {c['score']:.1f}")
 
 
-def show_deck_analysis(deck_cards, deck_oids, active_strategies, commander_name, db_path=None):
+def show_deck_analysis(deck_cards, deck_oids, active_strategies, commander_name, db_path=None, graph=None, deck_set=None):
     """Enhanced deck analysis with strategy coverage."""
     import sqlite3
     if db_path is None:
@@ -2891,7 +2911,7 @@ def show_deck_analysis(deck_cards, deck_oids, active_strategies, commander_name,
                 aligned += 1
 
     combos = find_combos_tiered(deck_oids, db_path)
-    anti = find_anti_synergy(deck_oids, active_strategies, db_path)
+    anti = find_anti_synergy(deck_oids, active_strategies, db_path, graph=graph, deck_cards_set=deck_set)
     conn.close()
 
     print(f"\n{'='*60}")
@@ -2916,7 +2936,7 @@ def show_deck_analysis(deck_cards, deck_oids, active_strategies, commander_name,
     if anti:
         print(f"Anti-synergy cards: {len(anti)} (swap candidates)")
         for a in anti[:5]:
-            print(f"  {a['name']} ({a['role'] or 'unknown role'})")
+            print(f"  {a['name']} ({a['role'] or 'unknown'}) — {a['partners']} partners, score {a['synergy_score']}")
 
 
 def run():
@@ -3069,7 +3089,7 @@ def run():
             show_deck_synergies(graph, deck_set, deck.COMMANDER, cards, args.top)
             if db_path and active_strategies:
                 deck_cards_in_set = [c for c in cards if c["name"] in deck_set]
-                show_deck_analysis(deck_cards_in_set, deck_oids, active_strategies, deck.COMMANDER, db_path)
+                show_deck_analysis(deck_cards_in_set, deck_oids, active_strategies, deck.COMMANDER, db_path, graph=graph, deck_set=deck_set)
         if args.combos:
             if db_path:
                 # Use enhanced 3-tier combo detection

@@ -61,3 +61,34 @@ def test_no_active_strategies_returns_empty(tmp_db):
 
     anti = find_anti_synergy({"x"}, set(), tmp_db)
     assert anti == []
+
+
+def test_high_synergy_not_flagged(tmp_db):
+    """Cards with many synergy connections should not be flagged even without strategy match."""
+    from synergy_graph import find_anti_synergy
+
+    conn = sqlite3.connect(tmp_db)
+    conn.execute("INSERT INTO cards (oracle_id, name, role) VALUES ('connected', 'Well Connected', 'threat')")
+    conn.commit()
+    conn.close()
+
+    # Mock graph where the card has many connections
+    mock_graph = {
+        "adjacency": {
+            "Well Connected": [
+                {"target": "Deck Card 1", "source": "Well Connected", "score": 5.0, "signals": 1},
+                {"target": "Deck Card 2", "source": "Well Connected", "score": 5.0, "signals": 1},
+                {"target": "Deck Card 3", "source": "Well Connected", "score": 5.0, "signals": 1},
+                {"target": "Deck Card 4", "source": "Well Connected", "score": 5.0, "signals": 1},
+                {"target": "Deck Card 5", "source": "Well Connected", "score": 5.0, "signals": 1},
+            ]
+        }
+    }
+    deck_set = {"Well Connected", "Deck Card 1", "Deck Card 2", "Deck Card 3", "Deck Card 4", "Deck Card 5"}
+    deck_oids = {"connected"}
+    active_strategies = {"tokens"}
+
+    anti = find_anti_synergy(deck_oids, active_strategies, tmp_db,
+                             graph=mock_graph, deck_cards_set=deck_set)
+    # Should NOT be flagged because it has 5 partners with 25.0 total score
+    assert len(anti) == 0
