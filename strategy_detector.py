@@ -92,8 +92,22 @@ STRATEGY_RULES = [
 ]
 
 
+# Common creature types for oracle text scanning
+CREATURE_TYPE_STRATEGIES = {
+    "human": "humans", "goblin": "goblins", "elf": "elves", "zombie": "zombies",
+    "vampire": "vampires", "dragon": "dragons", "angel": "angels", "demon": "demons",
+    "sliver": "slivers", "dinosaur": "dinosaurs", "pirate": "pirates", "wizard": "wizards",
+    "knight": "knights", "merfolk": "merfolk", "elemental": "elementals", "spirit": "spirits",
+    "soldier": "soldiers", "cat": "cats", "bird": "birds", "warrior": "warriors",
+    "rogue": "rogues", "cleric": "clerics", "rat": "rats", "faerie": "faeries",
+}
+
+
 def detect_strategies(oracle_id, db_path=None):
-    """Detect strategies for a single card based on its provides/wants tags.
+    """Detect strategies for a single card based on provides tags + oracle text.
+
+    Also scans oracle text for creature type references to detect tribal strategies
+    even when the LLM tagger didn't assign X-tribal provides tags.
 
     Returns list of {"name": str, "confidence": float, "signals": [str]}.
     """
@@ -104,6 +118,11 @@ def detect_strategies(oracle_id, db_path=None):
     provides = {row[0] for row in conn.execute(
         "SELECT tag FROM provides WHERE oracle_id = ?", (oracle_id,)
     ).fetchall()}
+
+    oracle_text = conn.execute(
+        "SELECT oracle_text FROM cards WHERE oracle_id = ?", (oracle_id,)
+    ).fetchone()
+    oracle_text = (oracle_text[0] or "").lower() if oracle_text else ""
 
     conn.close()
 
@@ -117,6 +136,24 @@ def detect_strategies(oracle_id, db_path=None):
                     "confidence": confidence,
                     "signals": [f"provides:{t}" for t in matching],
                 }
+
+    # Oracle text tribal detection: if oracle text references a creature type
+    # with tribal-relevant verbs, infer the tribal strategy
+    if oracle_text:
+        _TRIBAL_PATTERNS = [
+            "you control get", "you control have", "enter", "die", "whenever",
+            "each other", "all ", "other ", "among ", "number of",
+        ]
+        for ctype, strat_name in CREATURE_TYPE_STRATEGIES.items():
+            if ctype in oracle_text:
+                # Check if it's in a tribal-relevant context (not just mentioning the type)
+                if any(p in oracle_text for p in _TRIBAL_PATTERNS):
+                    if strat_name not in strategies or strategies[strat_name]["confidence"] < 0.8:
+                        strategies[strat_name] = {
+                            "name": strat_name,
+                            "confidence": 0.8,
+                            "signals": [f"oracle:{ctype}"],
+                        }
 
     return sorted(strategies.values(), key=lambda s: -s["confidence"])
 

@@ -851,43 +851,92 @@ def show_deck_synergies(graph: dict, deck_cards: set[str], commander: str,
 
 
 def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
-                    deck_types: set[str] = None, top_n: int = 20):
+                    deck_types: set[str] = None, top_n: int = 20,
+                    active_strategies: set = None, db_path: str = None):
     """Rank non-deck cards by total synergy with the current decklist.
 
     If deck_types is provided (e.g. {'Human'}), cards matching those types
-    get a synergy boost.
+    get a synergy boost. If active_strategies is provided, cards matching
+    strategies get a relevance multiplier. Combo completions get x2.0.
     """
     candidate_scores = _candidate_scores(graph, deck_cards)
 
     # Build card metadata lookup from cards list
     card_meta = {}
+    card_oid_lookup = {}
     for c in cards:
         card_meta[c["name"]] = {
             "type_line": c.get("type_line", ""),
             "cmc": c.get("cmc", 0),
             "mana_cost": c.get("mana_cost", ""),
+            "oracle_id": c.get("oracle_id", ""),
         }
+        card_oid_lookup[c["name"]] = c.get("oracle_id", "")
+
+    # Find partial Spellbook combos for combo completion bonus
+    partial_missing_oids = set()
+    partial_combos = []
+    if db_path:
+        deck_oids = {card_oid_lookup[n] for n in deck_cards if n in card_oid_lookup}
+        partial_combos = find_partial_combos(deck_oids, db_path)
+        for pc in partial_combos:
+            for oid in pc.get("missing_oids", []):
+                partial_missing_oids.add(oid)
 
     # Apply tribal boost if deck has dominant creature types
     if deck_types:
         for card_name, info in candidate_scores.items():
             meta = card_meta.get(card_name, {})
             type_line = meta.get("type_line", "")
-            # Check if card has any of the deck's creature types
             if any(t.lower() in type_line.lower() for t in deck_types):
                 info["tribal_match"] = True
                 info["total"] *= 1.3  # 30% boost for tribal match
             else:
                 info["tribal_match"] = False
 
+    # Apply strategy relevance multiplier
+    if active_strategies and db_path:
+        for card_name, info in candidate_scores.items():
+            oid = card_oid_lookup.get(card_name, "")
+            if oid:
+                rel = compute_strategy_relevance(oid, active_strategies, db_path)
+                info["total"] *= rel
+                info["strategy_rel"] = rel
+
+    # Apply combo completion multiplier
+    for card_name, info in candidate_scores.items():
+        oid = card_oid_lookup.get(card_name, "")
+        if oid in partial_missing_oids:
+            info["total"] *= 2.0
+            info["combo_completion"] = True
+        else:
+            info["combo_completion"] = False
+
     # Sort by total synergy
     ranked = sorted(candidate_scores.items(), key=lambda x: x[1]["total"], reverse=True)
 
+    # --- Output ---
     print(f"\n{'═' * 70}")
-    print(f"TOP {top_n} RECOMMENDED CARDS (not in deck)")
+    header = f"TOP {top_n} RECOMMENDED CARDS (not in deck)"
+    if active_strategies:
+        header += f" | strategies: {', '.join(sorted(active_strategies))}"
+    print(header)
     if deck_types:
         print(f"  Tribal boost: {', '.join(sorted(deck_types))} (+30%)")
     print(f"{'═' * 70}")
+
+    # Show combo completions first
+    completions = [(c, i) for c, i in ranked if i.get("combo_completion")]
+    if completions:
+        print(f"\n  COMBO COMPLETIONS (1 card away from confirmed infinite):")
+        for card, info in completions[:5]:
+            matching = [pc for pc in partial_combos
+                        if card_oid_lookup.get(card) in pc.get("missing_oids", [])]
+            for pc in matching[:2]:
+                print(f"    {' + '.join(pc['present_cards'])} + [{card}]")
+                print(f"      → {pc['result']}")
+        print()
+
     for card, info in ranked[:top_n]:
         partners = sorted(info["partners"], key=lambda x: x[1], reverse=True)
         multi = f" ({info['multi_sig']} multi-signal)" if info["multi_sig"] else ""
@@ -895,7 +944,10 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
         type_line = meta.get("type_line", "")
         cmc = meta.get("cmc", 0)
         tribal = " [tribal]" if info.get("tribal_match") else ""
-        print(f"\n  {card}{tribal}  — synergy: {info['total']:.1f}, "
+        combo = " [COMBO]" if info.get("combo_completion") else ""
+        strat_rel = info.get("strategy_rel")
+        strat_str = f" [strat×{strat_rel:.1f}]" if strat_rel and strat_rel != 1.0 else ""
+        print(f"\n  {card}{tribal}{combo}{strat_str}  — synergy: {info['total']:.1f}, "
               f"{len(partners)} partners{multi}")
         print(f"    {type_line} | CMC {cmc}")
         for partner, score, sigs in partners[:5]:
@@ -2784,6 +2836,16 @@ def run():
         if args.strategies == "auto" and commander_oid:
             detected = detect_strategies(commander_oid, db_path)
             active_strategies = {s["name"] for s in detected if s["confidence"] >= 0.3}
+            # Also detect tribal strategies from deck composition
+            deck_names_set = set(deck.DECKLIST) | {deck.COMMANDER}
+            deck_cards_for_types = [c for c in cards if c["name"] in deck_names_set]
+            deck_types = _detect_deck_types(deck_cards_for_types, deck_names_set)
+            if deck_types:
+                from strategy_detector import CREATURE_TYPE_STRATEGIES
+                for dtype in deck_types:
+                    strat = CREATURE_TYPE_STRATEGIES.get(dtype.lower())
+                    if strat and strat not in active_strategies:
+                        active_strategies.add(strat)
         elif args.strategies != "auto":
             active_strategies = set(args.strategies.split(","))
         if args.exclude_strategies:
@@ -2835,7 +2897,8 @@ def run():
         if args.recommend:
             # Auto-detect dominant creature types for tribal boost
             deck_types = _detect_deck_types(cards, deck_set)
-            recommend_cards(graph, deck_set, cards, deck_types, args.top)
+            recommend_cards(graph, deck_set, cards, deck_types, args.top,
+                            active_strategies=active_strategies, db_path=db_path)
     elif args.validate:
         validate_against_curated(graph, deck.SYNERGY_PAIRS)
     elif args.export:
