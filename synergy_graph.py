@@ -894,7 +894,8 @@ def show_deck_synergies(graph: dict, deck_cards: set[str], commander: str,
 
 def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                     deck_types: set[str] = None, top_n: int = 20,
-                    active_strategies: set = None, db_path: str = None):
+                    active_strategies: set = None, db_path: str = None,
+                    color_identity: set = None):
     """Rank non-deck cards by total synergy with the current decklist.
 
     If deck_types is provided (e.g. {'Human'}), cards matching those types
@@ -925,7 +926,7 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
     partial_combos = []
     if db_path:
         deck_oids = {card_oid_lookup[n] for n in deck_cards if n in card_oid_lookup}
-        partial_combos = find_partial_combos(deck_oids, db_path)
+        partial_combos = find_partial_combos(deck_oids, db_path, color_identity=color_identity)
         for pc in partial_combos:
             for oid in pc.get("missing_oids", []):
                 partial_missing_oids.add(oid)
@@ -2716,8 +2717,14 @@ def compute_strategy_relevance(oracle_id, active_strategies, db_path=None):
     return 1.0 + 0.2 * len(overlap)
 
 
-def find_partial_combos(deck_oids, db_path=None):
+def find_partial_combos(deck_oids, db_path=None, color_identity=None):
     """Find Spellbook combos where deck is missing exactly 1 card.
+
+    Args:
+        deck_oids: set of oracle_ids in the deck
+        db_path: optional DB path override
+        color_identity: set of colors (e.g. {"G", "W"}) to filter missing cards.
+                        If provided, missing cards outside this color identity are excluded.
 
     Returns list of dicts with: combo_id, result, present_cards, missing_cards, missing_oids.
     """
@@ -2728,7 +2735,6 @@ def find_partial_combos(deck_oids, db_path=None):
     conn.row_factory = sqlite3.Row
 
     combos = conn.execute("SELECT * FROM spellbook_combos").fetchall()
-    conn.close()
 
     partials = []
     for combo in combos:
@@ -2739,7 +2745,20 @@ def find_partial_combos(deck_oids, db_path=None):
         missing = [oid for oid in combo_oids if oid not in deck_oids]
 
         if len(missing) == 1:
-            missing_idx = combo_oids.index(missing[0])
+            missing_oid = missing[0]
+
+            # Filter by color identity if specified
+            if color_identity is not None:
+                row = conn.execute(
+                    "SELECT color_identity FROM cards WHERE oracle_id = ?",
+                    (missing_oid,)
+                ).fetchone()
+                if row and row["color_identity"]:
+                    card_colors = set(json.loads(row["color_identity"]))
+                    if not card_colors <= color_identity:
+                        continue  # Card has colors outside commander's identity
+
+            missing_idx = combo_oids.index(missing_oid)
             partials.append({
                 "combo_id": combo["combo_id"],
                 "result": combo["result"],
@@ -2748,6 +2767,7 @@ def find_partial_combos(deck_oids, db_path=None):
                 "missing_oids": missing,
             })
 
+    conn.close()
     return partials
 
 
@@ -2810,10 +2830,10 @@ def find_anti_synergy(deck_oids, active_strategies, db_path=None, graph=None, de
     return anti
 
 
-def show_combos_tiered(deck_oids, commander_name=None, db_path=None):
+def show_combos_tiered(deck_oids, commander_name=None, db_path=None, color_identity=None):
     """Display 3-tier combo output."""
     combos = find_combos_tiered(deck_oids, db_path)
-    partials = find_partial_combos(deck_oids, db_path)
+    partials = find_partial_combos(deck_oids, db_path, color_identity=color_identity)
 
     confirmed = [c for c in combos if c["tier"] == "infinite-confirmed"]
     likely = [c for c in combos if c["tier"] == "combo-likely"]
@@ -3093,7 +3113,7 @@ def run():
         if args.combos:
             if db_path:
                 # Use enhanced 3-tier combo detection
-                show_combos_tiered(deck_oids, deck.COMMANDER, db_path)
+                show_combos_tiered(deck_oids, deck.COMMANDER, db_path, color_identity=deck.COLOR_IDENTITY)
             else:
                 # Fallback to legacy combo detection
                 combos = find_combos(graph, cards, deck_set, deck.COMMANDER, args.top)
@@ -3105,7 +3125,8 @@ def run():
             # Auto-detect dominant creature types for tribal boost
             deck_types = _detect_deck_types(cards, deck_set)
             recommend_cards(graph, deck_set, cards, deck_types, args.top,
-                            active_strategies=active_strategies, db_path=db_path)
+                            active_strategies=active_strategies, db_path=db_path,
+                            color_identity=deck.COLOR_IDENTITY)
     elif args.validate:
         validate_against_curated(graph, deck.SYNERGY_PAIRS)
     elif args.export:
