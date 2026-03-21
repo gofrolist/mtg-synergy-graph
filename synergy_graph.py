@@ -1118,14 +1118,65 @@ def _classify_card_slot(name: str, cards: list[dict]) -> str:
 
 
 def suggest_swaps(graph: dict, deck_cards: set[str], commander: str,
-                  cards: list[dict], top_n: int = 15) -> list[dict]:
+                  cards: list[dict], top_n: int = 15,
+                  active_strategies: set = None, db_path: str = None) -> list[dict]:
     """Suggest swaps: pair weak deck cards with strong non-deck candidates.
 
     Lands swap with lands, spells swap with spells. Commander and staple
     infrastructure (mana rocks, removal, protection) are never cut.
+    Strategy-weighted: candidates matching active strategies score higher,
+    deck cards with zero strategy overlap are prioritized for cutting.
     """
     deck_scores = _deck_card_scores(graph, deck_cards)
     cand_scores = _candidate_scores(graph, deck_cards)
+
+    # Build card metadata for strategy/anti-synergy checks
+    card_oid_lookup = {}
+    card_meta = {}
+    for c in cards:
+        card_oid_lookup[c["name"]] = c.get("oracle_id", "")
+        card_meta[c["name"]] = {
+            "type_line": c.get("type_line", ""),
+            "cmc": c.get("cmc", 0),
+        }
+
+    # Apply strategy relevance to candidate scores
+    if active_strategies and db_path:
+        for card_name, info in cand_scores.items():
+            oid = card_oid_lookup.get(card_name, "")
+            if oid:
+                rel = compute_strategy_relevance(oid, active_strategies, db_path)
+                info["total"] *= rel
+                info["strategy_rel"] = rel
+
+    # Apply mana cost penalty to candidates
+    deck_cmc_values = [card_meta[n]["cmc"] for n in deck_cards
+                       if n in card_meta and "Land" not in card_meta[n].get("type_line", "")
+                       and card_meta[n]["cmc"]]
+    deck_avg_cmc = sum(deck_cmc_values) / max(len(deck_cmc_values), 1)
+    for card_name, info in cand_scores.items():
+        meta = card_meta.get(card_name, {})
+        cmc = meta.get("cmc", 0) or 0
+        if cmc > deck_avg_cmc + 3:
+            penalty = max(0.3, 1.0 - 0.15 * (cmc - deck_avg_cmc - 3))
+            info["total"] *= penalty
+
+    # Check which deck cards have zero strategy overlap (cut priority)
+    anti_synergy_cards = set()
+    if active_strategies and db_path:
+        import sqlite3 as _sq
+        _conn = _sq.connect(db_path)
+        for card_name in deck_cards:
+            oid = card_oid_lookup.get(card_name, "")
+            if not oid:
+                continue
+            card_strats = {r[0] for r in _conn.execute(
+                "SELECT strategy FROM card_strategies WHERE oracle_id = ? AND confidence >= 0.3",
+                (oid,)
+            ).fetchall()}
+            if not (card_strats & active_strategies):
+                anti_synergy_cards.add(card_name)
+        _conn.close()
 
     # Classify every deck card and candidate by slot type
     deck_slots = {name: _classify_card_slot(name, cards) for name in deck_cards}
@@ -1137,16 +1188,18 @@ def suggest_swaps(graph: dict, deck_cards: set[str], commander: str,
         slot = deck_slots.get(card, "spell")
         if card == commander or slot == "staple":
             continue
+        info["anti_synergy"] = card in anti_synergy_cards
         cuttable[slot].append((card, info))
 
+    # Sort cuttable: anti-synergy cards first (worst cuts), then by lowest synergy
     for bucket in cuttable.values():
-        bucket.sort(key=lambda x: x[1]["total"])
+        bucket.sort(key=lambda x: (not x[1].get("anti_synergy", False), x[1]["total"]))
 
     candidate_lists = {"land": [], "spell": []}
     for card, info in sorted(cand_scores.items(), key=lambda x: x[1]["total"], reverse=True):
         slot = cand_slots.get(card, "spell")
         if slot == "staple":
-            slot = "spell"  # staple candidates are fine to recommend adding
+            slot = "spell"
         candidate_lists[slot].append((card, info))
 
     # Pair within each bucket
@@ -1155,7 +1208,7 @@ def suggest_swaps(graph: dict, deck_cards: set[str], commander: str,
 
     for bucket in ("spell", "land"):
         for cut_card, cut_info in cuttable[bucket]:
-            if len(swaps) >= top_n * 2:  # collect extras, sort later
+            if len(swaps) >= top_n * 2:
                 break
 
             for add_card, add_info in candidate_lists[bucket]:
@@ -1171,12 +1224,14 @@ def suggest_swaps(graph: dict, deck_cards: set[str], commander: str,
                     "cut": cut_card,
                     "cut_score": round(cut_info["total"], 1),
                     "cut_partners": cut_info["partners"],
+                    "cut_anti_synergy": cut_info.get("anti_synergy", False),
                     "slot": bucket,
                     "add": add_card,
                     "add_score": round(add_info["total"], 1),
                     "add_partners": len(add_info["partners"]),
                     "add_multi_sig": add_info["multi_sig"],
                     "add_top_partners": top_partners[:5],
+                    "add_strategy_rel": add_info.get("strategy_rel"),
                     "net_delta": round(net, 1),
                 })
                 break
@@ -1186,19 +1241,34 @@ def suggest_swaps(graph: dict, deck_cards: set[str], commander: str,
 
 
 def show_swaps(swaps: list[dict], top_n: int = 15):
-    """Display suggested swaps."""
+    """Display suggested swaps with strategy annotations."""
     print(f"\n{'═' * 70}")
     print(f"SUGGESTED SWAPS — {len(swaps)} upgrades found")
     print(f"{'═' * 70}")
 
+    if not swaps:
+        print("  No beneficial swaps found.")
+        return
+
+    # Normalize net_delta to percentage (best swap = 100%)
+    max_delta = max(s["net_delta"] for s in swaps) if swaps else 1.0
+    if max_delta <= 0:
+        max_delta = 1.0
+
     for i, swap in enumerate(swaps[:top_n], 1):
-        multi = f" ({swap['add_multi_sig']} multi-signal)" if swap["add_multi_sig"] else ""
-        slot_label = f" [{swap['slot']}]" if swap.get("slot") == "land" else ""
-        print(f"\n  #{i}  Net: +{swap['net_delta']}{slot_label}")
-        print(f"    Cut: {swap['cut']:<35} (synergy: {swap['cut_score']:>6.1f}, "
-              f"{swap['cut_partners']} partners)")
-        print(f"    Add: {swap['add']:<35} (synergy: {swap['add_score']:>6.1f}, "
-              f"{swap['add_partners']} partners{multi})")
+        pct = round(swap["net_delta"] / max_delta * 100, 1)
+        bar_len = round(pct / 5)
+        bar = "█" * bar_len + "░" * (20 - bar_len)
+        slot_label = f" [land]" if swap.get("slot") == "land" else ""
+        anti = " ← no strategy match" if swap.get("cut_anti_synergy") else ""
+        strat_rel = swap.get("add_strategy_rel")
+        strat_str = f" [strat×{strat_rel:.1f}]" if strat_rel and strat_rel != 1.0 else ""
+
+        print(f"\n  {pct:5.1f}% {bar}{slot_label}")
+        print(f"    OUT: {swap['cut']:<35} (synergy: {swap['cut_score']:>5.1f}, "
+              f"{swap['cut_partners']} partners){anti}")
+        print(f"     IN: {swap['add']:<35} (synergy: {swap['add_score']:>5.1f}, "
+              f"{swap['add_partners']} partners){strat_str}")
         if swap["add_top_partners"]:
             top = swap["add_top_partners"][:3]
             partners_str = ", ".join(
@@ -3139,7 +3209,8 @@ def run():
                 combos = find_combos(graph, cards, deck_set, deck.COMMANDER, args.top)
                 show_combos(combos, deck.COMMANDER, args.top)
         if args.swaps:
-            swaps = suggest_swaps(graph, deck_set, deck.COMMANDER, cards, args.top)
+            swaps = suggest_swaps(graph, deck_set, deck.COMMANDER, cards, args.top,
+                                  active_strategies=active_strategies, db_path=db_path)
             show_swaps(swaps, args.top)
         if args.recommend:
             # Auto-detect dominant creature types for tribal boost
