@@ -92,6 +92,23 @@ STRATEGY_RULES = [
 ]
 
 
+# Wants-based strategy rules: (wants_tag_set, strategy_name, base_confidence)
+# Lower confidence than provides-based rules since wanting something doesn't mean you enable it.
+WANTS_STRATEGY_RULES = [
+    ({"counter-placement-events", "counter-distribution"}, "+1/+1-counters", 0.7),
+    ({"creature-etb"}, "blink", 0.5),
+    ({"creature-death", "sacrifice-events"}, "aristocrats", 0.7),
+    ({"spell-cast", "instant-sorcery-cast"}, "spellslinger", 0.7),
+    ({"token-events", "wide-board"}, "tokens", 0.6),
+    ({"life-gain-events"}, "lifegain", 0.7),
+    ({"graveyard-events", "graveyard-fill"}, "reanimator", 0.6),
+    ({"artifact-etb", "artifact-presence"}, "artifacts", 0.6),
+    ({"enchantment-presence"}, "enchantress", 0.6),
+    ({"landfall", "land-play"}, "landfall", 0.7),
+    ({"attack-events", "combat-damage-events"}, "voltron", 0.5),
+]
+
+
 # Common creature types for oracle text scanning
 CREATURE_TYPE_STRATEGIES = {
     "human": "humans", "goblin": "goblins", "elf": "elves", "zombie": "zombies",
@@ -119,6 +136,10 @@ def detect_strategies(oracle_id, db_path=None):
         "SELECT tag FROM provides WHERE oracle_id = ?", (oracle_id,)
     ).fetchall()}
 
+    wants = {row[0] for row in conn.execute(
+        "SELECT tag FROM wants WHERE oracle_id = ?", (oracle_id,)
+    ).fetchall()}
+
     oracle_text = conn.execute(
         "SELECT oracle_text FROM cards WHERE oracle_id = ?", (oracle_id,)
     ).fetchone()
@@ -135,6 +156,16 @@ def detect_strategies(oracle_id, db_path=None):
                     "name": strategy,
                     "confidence": confidence,
                     "signals": [f"provides:{t}" for t in matching],
+                }
+
+    for tag_set, strategy, confidence in WANTS_STRATEGY_RULES:
+        matching = wants & tag_set
+        if matching:
+            if strategy not in strategies or strategies[strategy]["confidence"] < confidence:
+                strategies[strategy] = {
+                    "name": strategy,
+                    "confidence": confidence,
+                    "signals": [f"wants:{t}" for t in matching],
                 }
 
     # Oracle text tribal detection: if oracle text references a creature type
@@ -190,11 +221,15 @@ def populate_card_strategies(db_path=None):
     # Clear existing
     conn.execute("DELETE FROM card_strategies")
 
-    # Get all cards with their provides tags and oracle text
+    # Get all cards with their provides tags, wants tags, and oracle text
     cards = conn.execute("SELECT oracle_id, name, oracle_text FROM cards").fetchall()
     provides_by_card = {}
     for oid, tag in conn.execute("SELECT oracle_id, tag FROM provides").fetchall():
         provides_by_card.setdefault(oid, set()).add(tag)
+
+    wants_by_card = {}
+    for oid, tag in conn.execute("SELECT oracle_id, tag FROM wants").fetchall():
+        wants_by_card.setdefault(oid, set()).add(tag)
 
     # Load EDHREC data
     edhrec = _load_edhrec_strategies()
@@ -209,10 +244,17 @@ def populate_card_strategies(db_path=None):
     for oracle_id, name, oracle_text in cards:
         card_provides = provides_by_card.get(oracle_id, set())
 
-        # Rule-based strategies
+        # Rule-based strategies (provides-based)
         strategies = {}
         for tag_set, strategy, confidence in STRATEGY_RULES:
             if card_provides & tag_set:
+                if strategy not in strategies or strategies[strategy] < confidence:
+                    strategies[strategy] = confidence
+
+        # Wants-based strategies
+        card_wants = wants_by_card.get(oracle_id, set())
+        for tag_set, strategy, confidence in WANTS_STRATEGY_RULES:
+            if card_wants & tag_set:
                 if strategy not in strategies or strategies[strategy] < confidence:
                     strategies[strategy] = confidence
 

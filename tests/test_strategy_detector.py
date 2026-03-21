@@ -4,7 +4,7 @@ import json
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from strategy_detector import detect_strategies, populate_card_strategies, STRATEGY_RULES
+from strategy_detector import detect_strategies, populate_card_strategies, STRATEGY_RULES, WANTS_STRATEGY_RULES
 
 
 def test_detect_commander_strategies(tmp_db):
@@ -62,3 +62,16 @@ def test_populate_card_strategies(tmp_db):
 def test_strategy_rules_are_defined():
     """Verify we have at least 20 strategy mapping rules."""
     assert len(STRATEGY_RULES) >= 20
+
+
+def test_wants_based_strategy(tmp_db):
+    """Cards wanting counter-placement-events should detect +1/+1-counters strategy."""
+    conn = sqlite3.connect(tmp_db)
+    conn.execute("INSERT INTO cards (oracle_id, name) VALUES ('wants-card', 'Counter Wanter')")
+    conn.execute("INSERT INTO wants (oracle_id, tag) VALUES ('wants-card', 'counter-placement-events')")
+    conn.commit()
+    conn.close()
+
+    strategies = detect_strategies("wants-card", tmp_db)
+    strat_names = {s["name"] for s in strategies}
+    assert "+1/+1-counters" in strat_names
