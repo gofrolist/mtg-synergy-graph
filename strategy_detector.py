@@ -105,9 +105,11 @@ STRATEGY_RULES = [
 # Lower confidence than provides-based rules since wanting something doesn't mean you enable it.
 WANTS_STRATEGY_RULES = [
     ({"counter-placement-events", "counter-distribution"}, "+1/+1-counters", 0.7),
-    ({"creature-etb"}, "blink", 0.5),
-    # creature-etb want also signals tokens payoff: tokens create many ETB triggers
-    ({"creature-etb"}, "tokens", 0.5),
+    # NOTE: creature-etb removed from blink mapping — too generic. Cards wanting ETB
+    # are just "likes creatures entering" (humans, counters, tokens all trigger ETB).
+    # Blink strategy only detects from provides:blink tag.
+    # creature-etb still maps to tokens at low confidence (tokens spam ETBs).
+    ({"creature-etb"}, "tokens", 0.4),
     ({"creature-death", "sacrifice-events"}, "aristocrats", 0.7),
     # creature-death also signals tokens payoff: tokens produce disposable creatures that die (Skullclamp)
     ({"creature-death"}, "tokens", 0.5),
