@@ -8,6 +8,7 @@ Usage:
 """
 
 import json
+import re
 import sqlite3
 import os
 
@@ -196,7 +197,8 @@ def detect_strategies(oracle_id, db_path=None):
             "each other", "all ", "other ", "among ", "number of",
         ]
         for ctype, strat_name in CREATURE_TYPE_STRATEGIES.items():
-            if ctype in oracle_text:
+            # Word boundary match to avoid "rat" matching "proliferate"
+            if re.search(r'\b' + re.escape(ctype) + r's?\b', oracle_text):
                 # Check if it's in a tribal-relevant context (not just mentioning the type)
                 if any(p in oracle_text for p in _TRIBAL_PATTERNS):
                     if strat_name not in strategies or strategies[strat_name]["confidence"] < 0.8:
@@ -364,7 +366,7 @@ def populate_card_strategies(db_path=None):
         oracle_lower = (oracle_text or "").lower()
         if oracle_lower:
             for ctype, strat_name in CREATURE_TYPE_STRATEGIES.items():
-                if ctype in oracle_lower and any(p in oracle_lower for p in _TRIBAL_PATTERNS):
+                if re.search(r'\b' + re.escape(ctype) + r's?\b', oracle_lower) and any(p in oracle_lower for p in _TRIBAL_PATTERNS):
                     if strat_name not in strategies or strategies[strat_name] < 0.8:
                         strategies[strat_name] = 0.8
 
