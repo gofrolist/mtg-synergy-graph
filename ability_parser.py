@@ -246,6 +246,106 @@ def _parse_paragraph(para):
     }
 
 
+# ── Phase 3: Effect text -> tag mappings ──
+
+EFFECT_TAG_PATTERNS = [
+    (re.compile(r'create.*token', re.I), "token-generation"),
+    (re.compile(r'draw.*card|draws.*card', re.I), "card-draw"),
+    (re.compile(r'destroy.*(?:creature|permanent|artifact|enchantment)', re.I), "spot-removal"),
+    (re.compile(r'deals?\s+\d+\s+damage|damage to', re.I), "direct-damage"),
+    (re.compile(r'return.*from.*graveyard|return.*to the battlefield', re.I), "graveyard-recursion"),
+    (re.compile(r'\+1/\+1 counter', re.I), "counter-placement"),
+    (re.compile(r'gain.*life|gains?\s+\d+\s+life', re.I), "life-gain"),
+    (re.compile(r'lose.*life|loses?\s+\d+\s+life', re.I), "life-drain"),
+    (re.compile(r'exile.*(?:creature|permanent|card)', re.I), "exile-removal"),
+    (re.compile(r'search.*library', re.I), "tutor"),
+    (re.compile(r'add \{', re.I), "mana-acceleration"),
+    (re.compile(r'scry|look at the top', re.I), "card-filtering"),
+    (re.compile(r'mill|put.*from.*library into.*graveyard', re.I), "mill"),
+    (re.compile(r'discard', re.I), "discard"),
+    (re.compile(r'counter target.*spell', re.I), "counterspell"),
+    (re.compile(r'tap.*(?:creature|permanent)|doesn\'t untap', re.I), "tap-control"),
+    (re.compile(r'untap', re.I), "untap"),
+    (re.compile(r'copy.*(?:spell|creature|permanent)', re.I), "copy-effect"),
+    (re.compile(r'each opponent|all opponents', re.I), "group-damage"),
+    (re.compile(r'get[s]?\s+[+\-]\d+/[+\-]\d+', re.I), "creature-pump"),
+    (re.compile(r'additional combat', re.I), "extra-combat"),
+    (re.compile(r'extra turn', re.I), "extra-turn"),
+    (re.compile(r'can\'t be blocked|unblockable', re.I), "evasion"),
+    (re.compile(r'indestructible|hexproof|shroud', re.I), "board-protection"),
+    (re.compile(r'treasure token', re.I), "treasure-generation"),
+    (re.compile(r'food token', re.I), "food-generation"),
+    (re.compile(r'clue token', re.I), "clue-generation"),
+    (re.compile(r'equip|reconfigure', re.I), "equipment-synergy"),
+    (re.compile(r'enchant|aura', re.I), "aura-synergy"),
+    (re.compile(r'proliferate', re.I), "proliferate"),
+    (re.compile(r'transform|flip', re.I), "transform"),
+]
+
+# Trigger condition -> tag mappings
+TRIGGER_TAG_PATTERNS = [
+    (re.compile(r'creature.*enters|enters the battlefield', re.I), "creature-etb"),
+    (re.compile(r'creature.*dies|a creature.*is put into a graveyard', re.I), "creature-death"),
+    (re.compile(r'you gain life|whenever you gain', re.I), "life-gain-events"),
+    (re.compile(r'you cast.*spell|whenever you cast', re.I), "spell-cast"),
+    (re.compile(r'deals.*combat damage|whenever.*deals damage', re.I), "combat-damage-events"),
+    (re.compile(r'attacks|declared as an attacker', re.I), "attack-events"),
+    (re.compile(r'becomes? the target|target.*you control', re.I), "targeting-events"),
+    (re.compile(r'draw.*card|whenever you draw', re.I), "draw-events"),
+    (re.compile(r'discard|whenever.*discard', re.I), "discard-events"),
+    (re.compile(r'sacrifice|whenever.*sacrifice', re.I), "sacrifice-events"),
+    (re.compile(r'counter.*is.*placed|counter.*is.*put', re.I), "counter-placement-events"),
+    (re.compile(r'token.*created|token.*enters', re.I), "token-events"),
+    (re.compile(r'beginning of your upkeep', re.I), "upkeep-trigger"),
+    (re.compile(r'beginning of your end step', re.I), "end-step-trigger"),
+    (re.compile(r'land.*enters|play a land', re.I), "landfall"),
+    (re.compile(r'leaves the battlefield', re.I), "leaves-battlefield"),
+    (re.compile(r'from.*graveyard|put into.*graveyard from', re.I), "graveyard-events"),
+]
+
+# Cost -> tag mappings (for activated abilities)
+COST_TAG_PATTERNS = [
+    (re.compile(r'[Ss]acrifice', re.I), "sacrifice-outlet"),
+    (re.compile(r'[Dd]iscard', re.I), "discard-outlet"),
+    (re.compile(r'[Ee]xile.*from.*graveyard', re.I), "graveyard-exile-cost"),
+    (re.compile(r'[Pp]ay.*life|\{[WUBRG]/P\}', re.I), "life-payment"),
+    (re.compile(r'\{[Tt]\}|[Tt]ap', re.I), "tap-cost"),
+]
+
+
+def _tag_effect(text):
+    """Map effect text to tags using pattern matching."""
+    if not text:
+        return []
+    tags = []
+    for pattern, tag in EFFECT_TAG_PATTERNS:
+        if pattern.search(text):
+            tags.append(tag)
+    return tags
+
+
+def _tag_trigger(text):
+    """Map trigger condition text to tags."""
+    if not text:
+        return []
+    tags = []
+    for pattern, tag in TRIGGER_TAG_PATTERNS:
+        if pattern.search(text):
+            tags.append(tag)
+    return tags
+
+
+def _tag_cost(text):
+    """Map activation cost text to tags."""
+    if not text:
+        return []
+    tags = []
+    for pattern, tag in COST_TAG_PATTERNS:
+        if pattern.search(text):
+            tags.append(tag)
+    return tags
+
+
 def parse_card(card):
     """Parse a single card's oracle text into structured abilities.
 
@@ -282,6 +382,20 @@ def parse_card(card):
             ability = _parse_paragraph(para)
             if ability:
                 all_abilities.append(ability)
+
+    # Phase 3: Tag effects and triggers
+    for ab in all_abilities:
+        # Tag effects
+        effect_tags = _tag_effect(ab.get("effect") or "")
+        # For activated abilities, also tag the cost
+        cost_tags = _tag_cost(ab.get("cost") or "")
+        effect_tags.extend(cost_tags)
+        ab["effect_tags"] = effect_tags if effect_tags else None
+
+        # Tag trigger conditions
+        if ab.get("trigger_condition"):
+            trigger_tags = _tag_trigger(ab["trigger_condition"])
+            ab["trigger_tags"] = trigger_tags if trigger_tags else None
 
     # Assign sequential indices
     for i, ab in enumerate(all_abilities):
