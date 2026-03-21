@@ -257,16 +257,16 @@ def run_full_update(top_n: int, provider: str, model: str, skip_download: bool =
     # Step 1: Download fresh Scryfall data
     if not skip_download:
         print("=" * 60)
-        print("Step 1/4: Downloading fresh Scryfall data...")
+        print("Step 1/5: Downloading fresh Scryfall data...")
         print("=" * 60)
         from download_cards import download
         download()
     else:
-        print("Step 1/4: Skipping download (--skip-download)")
+        print("Step 1/5: Skipping download (--skip-download)")
 
     # Step 2: Diff against existing DB
     print("\n" + "=" * 60)
-    print("Step 2/4: Comparing against existing tags...")
+    print("Step 2/5: Comparing against existing tags...")
     print("=" * 60)
     diff = diff_cards(top_n)
     show_diff(diff, verbose=True)
@@ -278,7 +278,7 @@ def run_full_update(top_n: int, provider: str, model: str, skip_download: bool =
         return
 
     print("\n" + "=" * 60)
-    print(f"Step 3/4: Tagging {pending_count} cards...")
+    print(f"Step 3/5: Tagging {pending_count} cards...")
     print("=" * 60)
 
     pending_tags = PENDING_FILE.replace("_candidates", "_tags")
@@ -299,7 +299,7 @@ def run_full_update(top_n: int, provider: str, model: str, skip_download: bool =
 
     # Step 4: Merge and import to DB
     print("\n" + "=" * 60)
-    print("Step 4/4: Merging tags and updating DB...")
+    print("Step 4/5: Merging tags and updating DB...")
     print("=" * 60)
     merge_new_tags(pending_tags)
 
@@ -307,11 +307,43 @@ def run_full_update(top_n: int, provider: str, model: str, skip_download: bool =
     from tag_db import import_file
     import_file(TAGS_FILE)
 
+    # Step 5: Enrichment pipeline
+    print("\n" + "=" * 60)
+    print("Step 5/5: Running enrichment pipeline...")
+    print("=" * 60)
+
+    # Backfill Scryfall metadata
+    from tag_db import backfill_scryfall
+    backfill_scryfall(SCRYFALL_FILE)
+    print("  ✓ Backfilled Scryfall metadata")
+
+    # Fix tribal tags
+    from tag_db import fix_tribal_wants
+    removed = fix_tribal_wants()
+    print(f"  ✓ Fixed {len(removed)} tribal false positives")
+
+    # Rebuild tag registry
+    from tag_db import rebuild_registry
+    registry = rebuild_registry()
+    meta = registry["_meta"]["stats"]
+    print(f"  ✓ Rebuilt registry: {meta['provides_count']} provides, {meta['wants_count']} wants")
+
+    # Parse abilities
+    from ability_parser import parse_all_cards
+    total, low_conf = parse_all_cards()
+    print(f"  ✓ Parsed {total} cards ({low_conf} low confidence)")
+
+    # Populate strategies
+    from strategy_detector import populate_card_strategies
+    count = populate_card_strategies()
+    print(f"  ✓ Populated {count} strategy assignments")
+
     # Cleanup
     for f in [PENDING_FILE, pending_tags]:
         if os.path.exists(f):
             os.remove(f)
-    print("\nUpdate complete!")
+    print("\nUpdate complete! Enrichment pipeline finished.")
+    print("Run: python3 synergy_graph.py --deck <name> --deck-view --combos --recommend")
 
 
 def main():
@@ -336,6 +368,8 @@ def main():
                         help="LLM model for tagging (default: phi4:14b)")
     parser.add_argument("--skip-download", action="store_true",
                         help="Skip Scryfall download (use existing oracle_cards.json)")
+    parser.add_argument("--enrich-only", action="store_true",
+                        help="Run enrichment pipeline only (backfill, fix-tribal, parse, strategies)")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Show detailed diff output")
     args = parser.parse_args()
@@ -385,6 +419,24 @@ def main():
         merge_new_tags(args.merge)
         from tag_db import import_file
         import_file(TAGS_FILE)
+
+    elif args.enrich_only:
+        print("Running enrichment pipeline...")
+        from tag_db import backfill_scryfall, fix_tribal_wants, rebuild_registry
+        backfill_scryfall(SCRYFALL_FILE)
+        print("  ✓ Backfilled Scryfall metadata")
+        removed = fix_tribal_wants()
+        print(f"  ✓ Fixed {len(removed)} tribal false positives")
+        registry = rebuild_registry()
+        meta = registry["_meta"]["stats"]
+        print(f"  ✓ Rebuilt registry: {meta['provides_count']} provides, {meta['wants_count']} wants")
+        from ability_parser import parse_all_cards
+        total, low_conf = parse_all_cards()
+        print(f"  ✓ Parsed {total} cards ({low_conf} low confidence)")
+        from strategy_detector import populate_card_strategies
+        count = populate_card_strategies()
+        print(f"  ✓ Populated {count} strategy assignments")
+        print("\nEnrichment complete!")
 
     elif args.update:
         run_full_update(args.top, args.provider, args.model, args.skip_download)
