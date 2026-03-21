@@ -2941,7 +2941,8 @@ def show_deck_analysis(deck_cards, deck_oids, active_strategies, commander_name,
     print(f"Detected strategies:")
     for strat in sorted(active_strategies):
         cnt = strat_counts.get(strat, 0)
-        print(f"  {strat}: {cnt} cards")
+        if cnt > 0:
+            print(f"  {strat}: {cnt} cards")
 
     coverage = aligned * 100 // max(non_land, 1)
     print(f"Strategy coverage: {coverage}% of {non_land} non-land cards align with >=1 strategy")
@@ -3060,10 +3061,19 @@ def run():
             deck_types = _detect_deck_types(deck_cards_for_types, deck_names_set)
             if deck_types:
                 from strategy_detector import CREATURE_TYPE_STRATEGIES
+                import sqlite3 as _sqlite3
+                _conn = _sqlite3.connect(db_path)
                 for dtype in deck_types:
                     strat = CREATURE_TYPE_STRATEGIES.get(dtype.lower())
                     if strat and strat not in active_strategies:
-                        active_strategies.add(strat)
+                        # Only add if strategy has cards in the DB (avoids "warriors: 0")
+                        has_cards = _conn.execute(
+                            "SELECT 1 FROM card_strategies WHERE strategy = ? LIMIT 1",
+                            (strat,)
+                        ).fetchone()
+                        if has_cards:
+                            active_strategies.add(strat)
+                _conn.close()
         elif args.strategies != "auto":
             active_strategies = set(args.strategies.split(","))
         if args.exclude_strategies:
