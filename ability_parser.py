@@ -8,6 +8,10 @@ Three phases:
 
 import re
 import json
+import sqlite3
+import os
+
+DB_PATH = os.path.join(os.path.dirname(__file__), "data", "tags.db")
 
 # MTG keywords recognized by Scryfall (subset — the keywords field is authoritative)
 KEYWORD_ZONES = {
@@ -402,3 +406,124 @@ def parse_card(card):
         ab["ability_index"] = i
 
     return all_abilities
+
+
+def save_abilities_to_db(parsed_cards, db_path=None):
+    """Save parsed abilities to the abilities table.
+
+    Args:
+        parsed_cards: list of (oracle_id, abilities_list) tuples
+        db_path: optional DB path override
+    """
+    if db_path is None:
+        db_path = DB_PATH
+    conn = sqlite3.connect(db_path)
+
+    for oracle_id, abilities in parsed_cards:
+        # Clear old abilities for this card
+        conn.execute("DELETE FROM abilities WHERE oracle_id = ?", (oracle_id,))
+
+        for ab in abilities:
+            conn.execute("""
+                INSERT INTO abilities (oracle_id, ability_index, ability_type, trigger_condition,
+                    trigger_tags, cost, effect, effect_tags, zone, targets, is_mana_ability)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                oracle_id,
+                ab["ability_index"],
+                ab["ability_type"],
+                ab.get("trigger_condition"),
+                json.dumps(ab["trigger_tags"]) if ab.get("trigger_tags") else None,
+                ab.get("cost"),
+                ab.get("effect"),
+                json.dumps(ab["effect_tags"]) if ab.get("effect_tags") else None,
+                ab.get("zone", "battlefield"),
+                ab.get("targets"),
+                1 if ab.get("is_mana_ability") else 0,
+            ))
+
+    conn.commit()
+    conn.close()
+
+
+def parse_all_cards(db_path=None):
+    """Parse all cards in the DB and save abilities.
+
+    Returns (total_parsed, low_confidence_count).
+    """
+    if db_path is None:
+        db_path = DB_PATH
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    cards = conn.execute("""
+        SELECT oracle_id, name, type_line, oracle_text, keywords
+        FROM cards WHERE oracle_text IS NOT NULL AND oracle_text != ''
+    """).fetchall()
+    conn.close()
+
+    parsed = []
+    low_confidence = 0
+
+    for row in cards:
+        card = {
+            "oracle_id": row["oracle_id"],
+            "name": row["name"],
+            "type_line": row["type_line"],
+            "oracle_text": row["oracle_text"],
+            "keywords": json.loads(row["keywords"]) if row["keywords"] else [],
+        }
+        abilities = parse_card(card)
+        parsed.append((row["oracle_id"], abilities))
+
+        # Check confidence: <50% of non-keyword abilities got tags
+        non_kw = [a for a in abilities if a["ability_type"] != "keyword"]
+        if non_kw:
+            tagged = sum(1 for a in non_kw if a.get("effect_tags") or a.get("trigger_tags"))
+            if tagged / len(non_kw) < 0.5:
+                low_confidence += 1
+
+    # Save in batches
+    batch_size = 500
+    for i in range(0, len(parsed), batch_size):
+        save_abilities_to_db(parsed[i:i + batch_size], db_path)
+
+    return len(parsed), low_confidence
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Parse oracle text into structured abilities")
+    parser.add_argument("--db", default=None, help="DB path (default: data/tags.db)")
+    parser.add_argument("--card", default=None, help="Parse a single card by name (for inspection)")
+    args = parser.parse_args()
+
+    db = args.db or DB_PATH
+
+    if args.card:
+        conn = sqlite3.connect(db)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM cards WHERE name = ?", (args.card,)).fetchone()
+        conn.close()
+        if not row:
+            print(f"Card not found: {args.card}")
+            exit(1)
+        card = dict(row)
+        card["keywords"] = json.loads(card["keywords"]) if card["keywords"] else []
+        abilities = parse_card(card)
+        print(f"\n{card['name']} ({card['type_line']})")
+        print(f"Oracle: {card['oracle_text']}\n")
+        for ab in abilities:
+            print(f"  [{ab['ability_type']}] {ab.get('trigger_condition') or ''}")
+            if ab.get('cost'):
+                print(f"    Cost: {ab['cost']}")
+            print(f"    Effect: {ab['effect']}")
+            if ab.get('effect_tags'):
+                print(f"    Effect tags: {ab['effect_tags']}")
+            if ab.get('trigger_tags'):
+                print(f"    Trigger tags: {ab['trigger_tags']}")
+            print()
+    else:
+        print(f"Parsing all cards in {db}...")
+        total, low_conf = parse_all_cards(db)
+        print(f"Parsed {total} cards. Low confidence: {low_conf} ({low_conf*100//max(total,1)}%)")

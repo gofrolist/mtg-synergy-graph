@@ -256,3 +256,40 @@ def test_sacrifice_outlet_tagging():
     abilities = parse_card(card)
     activated = [a for a in abilities if a["ability_type"] in ("activated", "mana")]
     assert any("sacrifice-outlet" in (a.get("effect_tags") or []) for a in activated)
+
+
+def test_bulk_parse_and_save(tmp_db):
+    """Parse multiple cards and save to DB."""
+    import sqlite3
+    from ability_parser import parse_card, save_abilities_to_db
+    import tag_db
+
+    conn = sqlite3.connect(tmp_db)
+    # Insert sample cards
+    cards = [
+        ("kyler-001", "Kyler, Sigardian Emissary", "Legendary Creature — Human Cleric",
+         "Whenever a Human enters the battlefield under your control, put a +1/+1 counter on Kyler, Sigardian Emissary.\nHuman creatures you control get +1/+1 for each +1/+1 counter on Kyler."),
+        ("skirk-001", "Skirk Prospector", "Creature — Goblin",
+         "Sacrifice a Goblin: Add {R}."),
+    ]
+    for oid, name, tl, oracle in cards:
+        conn.execute("INSERT INTO cards (oracle_id, name, type_line, oracle_text) VALUES (?,?,?,?)",
+                     (oid, name, tl, oracle))
+    conn.commit()
+    conn.close()
+
+    # Parse and save
+    parsed_cards = []
+    for oid, name, tl, oracle in cards:
+        card = {"oracle_id": oid, "name": name, "type_line": tl, "oracle_text": oracle, "keywords": []}
+        parsed_cards.append((oid, parse_card(card)))
+
+    save_abilities_to_db(parsed_cards, tmp_db)
+
+    # Verify
+    conn = sqlite3.connect(tmp_db)
+    kyler_abs = conn.execute("SELECT * FROM abilities WHERE oracle_id = 'kyler-001'").fetchall()
+    assert len(kyler_abs) >= 2  # triggered + static
+    skirk_abs = conn.execute("SELECT * FROM abilities WHERE oracle_id = 'skirk-001'").fetchall()
+    assert len(skirk_abs) >= 1
+    conn.close()
