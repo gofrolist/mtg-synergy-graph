@@ -63,6 +63,50 @@ CREATE TABLE IF NOT EXISTS scryfall_tags (
 );
 CREATE INDEX IF NOT EXISTS idx_scryfall_tags_tag ON scryfall_tags(tag);
 CREATE INDEX IF NOT EXISTS idx_scryfall_tags_oid ON scryfall_tags(oracle_id);
+
+CREATE TABLE IF NOT EXISTS abilities (
+    oracle_id TEXT NOT NULL,
+    ability_index INTEGER NOT NULL,
+    ability_type TEXT NOT NULL,
+    trigger_condition TEXT,
+    trigger_tags TEXT,
+    cost TEXT,
+    effect TEXT,
+    effect_tags TEXT,
+    zone TEXT DEFAULT 'battlefield',
+    targets TEXT,
+    is_mana_ability BOOLEAN DEFAULT 0,
+    PRIMARY KEY (oracle_id, ability_index),
+    FOREIGN KEY (oracle_id) REFERENCES cards(oracle_id)
+);
+CREATE INDEX IF NOT EXISTS idx_abilities_type ON abilities(ability_type);
+CREATE INDEX IF NOT EXISTS idx_abilities_oracle ON abilities(oracle_id);
+
+CREATE TABLE IF NOT EXISTS card_strategies (
+    oracle_id TEXT NOT NULL,
+    strategy TEXT NOT NULL,
+    confidence REAL NOT NULL DEFAULT 0.0,
+    PRIMARY KEY (oracle_id, strategy),
+    FOREIGN KEY (oracle_id) REFERENCES cards(oracle_id)
+);
+CREATE INDEX IF NOT EXISTS idx_strategies_strategy ON card_strategies(strategy);
+
+CREATE TABLE IF NOT EXISTS spellbook_combos (
+    combo_id TEXT PRIMARY KEY,
+    card_oracle_ids TEXT NOT NULL,
+    card_names TEXT NOT NULL,
+    result TEXT,
+    prerequisites TEXT,
+    card_count INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS spellbook_combo_cards (
+    combo_id TEXT NOT NULL,
+    oracle_id TEXT NOT NULL,
+    PRIMARY KEY (combo_id, oracle_id),
+    FOREIGN KEY (combo_id) REFERENCES spellbook_combos(combo_id)
+);
+CREATE INDEX IF NOT EXISTS idx_spellbook_cards_oracle ON spellbook_combo_cards(oracle_id);
 """
 
 
