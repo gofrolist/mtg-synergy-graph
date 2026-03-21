@@ -40,6 +40,7 @@ main.py
 
 # Legacy deck-specific files (replaced by unified DB)
 data/*_tags_*.json
+!data/all_tags_gpt41mini.json
 data/*_merged*.json
 unsloth_compiled_cache/
 .env
