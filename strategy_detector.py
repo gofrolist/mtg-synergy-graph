@@ -105,20 +105,16 @@ STRATEGY_RULES = [
 # Lower confidence than provides-based rules since wanting something doesn't mean you enable it.
 WANTS_STRATEGY_RULES = [
     ({"counter-placement-events", "counter-distribution"}, "+1/+1-counters", 0.7),
-    # NOTE: creature-etb removed from blink mapping — too generic. Cards wanting ETB
-    # are just "likes creatures entering" (humans, counters, tokens all trigger ETB).
-    # Blink strategy only detects from provides:blink tag.
-    # creature-etb still maps to tokens at low confidence (tokens spam ETBs).
-    ({"creature-etb"}, "tokens", 0.4),
+    # NOTE: creature-etb, creature-death, creature-board are too generic for strategy
+    # mapping. Any creature-heavy deck wants these (humans, counters, tribal, etc.).
+    # Blink only detects from provides:blink. Tokens only from provides:token-generation
+    # or token-specific wants (token-events, wide-board).
     ({"creature-death", "sacrifice-events"}, "aristocrats", 0.7),
-    # creature-death also signals tokens payoff: tokens produce disposable creatures that die (Skullclamp)
-    ({"creature-death"}, "tokens", 0.5),
     ({"spell-casting", "instant-sorcery-casting", "noncreature-spells", "cast-spell-events",
       "second-spell-casting", "instant-or-sorcery-spells"}, "spellslinger", 0.7),
     ({"token-events", "wide-board"}, "tokens", 0.6),
-    # creature-board: cards that want a wide creature board are tokens/go-wide payoffs
-    ({"creature-board"}, "tokens", 0.5),
-    ({"creature-board"}, "go-wide", 0.5),
+    # creature-board is too generic — any creature deck wants it. Only wide-board maps to go-wide.
+    ({"wide-board"}, "go-wide", 0.6),
     ({"life-gain-events"}, "lifegain", 0.7),
     ({"graveyard-events", "graveyard-fill"}, "reanimator", 0.6),
     # graveyard-filling: cards wanting graveyard fill benefit from self-mill strategy
