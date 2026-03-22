@@ -121,6 +121,9 @@ def compute_features(commander: dict, candidate: dict) -> dict:
         "cmc_diff": cmc_diff,
         "rank_log": round(rank_log, 2),
         "total_tags": total_tags,
+        # Interaction features: combinations of signals are stronger
+        "bridge_x_oracle": round(bridge_score * oracle_overlap, 2),
+        "provides_x_bridge": round(provides_to_wants * bridge_score, 2),
     }
 
 
@@ -246,7 +249,9 @@ def train_model(training_data=None):
 
     feature_names = ["provides_to_wants", "wants_from_provides", "bridge_score",
                      "oracle_overlap", "keyword_overlap", "shared_types",
-                     "type_match", "cmc_diff", "rank_log", "total_tags"]
+                     "type_match", "cmc_diff", "rank_log", "total_tags",
+                     # Interaction features
+                     "bridge_x_oracle", "provides_x_bridge"]
 
     # Compute feature means and stds for normalization
     means = {f: 0.0 for f in feature_names}

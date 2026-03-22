@@ -164,11 +164,11 @@ def get_our_recommendations(deck_name, top_n=100):
                 ml_scores[card["name"]] = ml_predict(model, commander_card_data, card)
 
             ml_ranked = sorted(ml_scores.items(), key=lambda x: -x[1])
-            # Merge: use ML ranking but boost cards that also have graph connections
-            graph_names = {name for name, _ in ranked[:200]}
+            # Boost cards that also appear in graph candidates (confirms tag synergy)
+            graph_names = {name for name, _ in ranked[:500]}
             final = []
             for name, ml_score in ml_ranked:
-                boost = 1.3 if name in graph_names else 1.0
+                boost = 1.5 if name in graph_names else 1.0
                 final.append((name, ml_score * boost))
             final.sort(key=lambda x: -x[1])
             return [name for name, _ in final[:top_n]]
