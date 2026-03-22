@@ -418,6 +418,18 @@ SEMANTIC_BRIDGES = {
     ("self-mill", "creature-power"): 0.4,             # Mill fuels power-from-graveyard
     ("sacrifice-payoff", "targeted-spells"): 0.4,     # Sacrifice payoff on targeted spells
 
+    # ── Absolute final: 3-4 combo bridges ──
+    ("top-of-library", "counter-placement-events"): 0.4,
+    ("extra-turn", "artifact-presence"): 0.4,
+    ("mana-flexibility", "tap-ability-creatures"): 0.5,
+    ("creature-type-flexibility", "enchantment-presence"): 0.4,
+    ("board-pressure", "creature-count-matters"): 0.4,
+    ("passive-permanent", "legendary-presence"): 0.5,
+    ("mana-acceleration", "creature-type-selection"): 0.3,
+    ("targeted-removal", "mana-needs"): 0.3,
+    ("mana-acceleration", "creature-targeting"): 0.3,
+    ("untap", "permanent-color-diversity"): 0.3,
+
     # ── Deeper connections (5-8 combos each) ──
     ("cost-reduction", "etb-payoff"): 0.5,           # Cheaper spells = more ETB triggers
     ("extra-turn", "graveyard-filling"): 0.5,        # Extra turns = more mill/discard
