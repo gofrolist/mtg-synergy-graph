@@ -334,6 +334,23 @@ SEMANTIC_BRIDGES = {
     # ── Targeting synergies ──
     ("targeting-bonus", "creature-targeting"): 0.8,
 
+    # ── Redundancy synergies (cards doing same thing reinforce each other) ──
+    ("etb-payoff", "creature-etb-payoff"): 0.7,     # Two ETB payoffs = twice the damage
+    ("evasion-grant", "combat-events"): 0.6,         # Evasion enables combat (Blighted Agent + Inkmoth)
+    ("infect", "combat-events"): 0.6,                # Infect creatures want combat
+
+    # ── Tax / stax synergy ──
+    ("stax-tax", "opponent-spell-casting"): 0.8,     # Tax effects compound (Rhystic + Quandary)
+    ("reactive-protection", "opponent-spell-casting"): 0.6,  # Protection against opponent spells
+    ("reactive-protection", "mana-needs"): 0.4,      # Protection enables safe big plays
+    ("board-protection", "spell-casting"): 0.4,      # Protection enables safe big spells
+    ("life-drain", "opponent-spell-casting"): 0.5,   # Drain punishes opponent casting
+
+    # ── Wheel / draw triggers ──
+    ("card-discard", "opponent-spell-casting"): 0.5,  # Wheel effects disrupt opponents
+    ("card-draw", "opponent-spell-casting"): 0.3,     # Drawing more = having answers
+    ("wheel", "card-draw-events"): 0.8,
+
     # ── Mill synergies ──
     ("self-mill", "mill-triggers"): 0.9,         # Mill triggers from mill effects
     ("card-discard", "graveyard-filling"): 0.7,  # Discarding fills graveyard

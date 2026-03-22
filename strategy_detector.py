@@ -114,10 +114,26 @@ STRATEGY_RULES = [
     ({"infect", "poison-counter-placement", "toxic-ability", "toxic-1", "toxic-deal"}, "infect", 0.9),
 
     # Payoff patterns — cards that benefit from a strategy's output
-    # etb-payoff: cards like Impact Tremors that fire on every creature ETB (tokens spam ETBs)
     ({"etb-payoff"}, "tokens", 0.7),
-    # damage-dealing + direct: also flags burn/spellslinger payoffs like Guttersnipe
+    ({"etb-payoff"}, "blink", 0.7),              # ETB payoffs ARE blink payoffs
     ({"damage-dealing"}, "burn", 0.6),
+
+    # Landfall enablers
+    ({"land-search"}, "landfall", 0.7),           # Fetching lands triggers landfall
+    ({"land-ramp", "land-animation"}, "landfall", 0.6),
+
+    # Lifedrain: life-gain provides also enable drain combos
+    ({"life-gain"}, "lifedrain", 0.5),            # Life gain enables drain payoffs
+
+    # Reanimator enablers
+    ({"self-mill"}, "reanimator", 0.7),           # Self-mill fuels reanimation
+    ({"graveyard-recursion"}, "blink", 0.5),      # Recursion from graveyard = pseudo-blink
+
+    # Treasure: token-generation of artifact tokens
+    ({"treasure-generation"}, "artifacts", 0.5),  # Treasures are artifacts
+
+    # Storm enablers: mana acceleration fuels storm (but low confidence - generic)
+    ({"mana-acceleration"}, "storm", 0.3),
 ]
 
 
@@ -167,6 +183,25 @@ WANTS_STRATEGY_RULES = [
 
     # Lifedrain: wants life loss events
     ({"life-payment"}, "lifedrain", 0.5),
+
+    # Landfall: cards wanting lands
+    ({"land-density"}, "landfall", 0.5),
+
+    # Proliferate: cards wanting counters
+    ({"counter-placement-events"}, "proliferate", 0.6),
+
+    # Reanimator: cards wanting graveyard
+    ({"graveyard-filling"}, "reanimator", 0.6),
+
+    # Blink: cards wanting ETB
+    ({"creature-etb"}, "blink", 0.3),  # Low — creature-etb is generic. Only adds via deck composition threshold.
+
+    # Treasure: cards wanting artifacts or tokens
+    ({"token-events"}, "treasure", 0.5),
+
+    # Storm: cards wanting spell casting + mana
+    ({"mana-needs"}, "storm", 0.3),  # Low — too generic. Only triggers via deck composition.
+    ({"life-payment"}, "storm", 0.4),  # Storm often involves paying life
 ]
 
 
