@@ -214,6 +214,38 @@ SEMANTIC_BRIDGES = {
     ("spell-copying", "spell-casting"): 0.8,
     ("spell-copying", "instant-sorcery-casting"): 0.8,
 
+    # ── creature-board is a generic wants tag — only connect specific provides to it ──
+    # These are provides that genuinely help build/maintain a board of creatures
+    ("token-generation", "creature-board"): 0.6,       # Tokens build board
+    ("graveyard-recursion", "creature-board"): 0.5,    # Recurring creatures builds board
+    ("haste-grant", "creature-board"): 0.4,            # Haste lets new creatures act
+    ("board-protection", "creature-board"): 0.5,       # Protection keeps creatures alive
+    ("combat-enabler", "combat-events"): 0.7,          # Combat enablers benefit from combat
+
+    # ── Extra turn / combat bridges ──
+    ("extra-turn", "spell-casting"): 0.6,       # Extra turns let you cast more spells
+    ("extra-turn", "combat-events"): 0.7,        # Extra turns = extra combat steps
+    ("extra-turn", "card-draw-events"): 0.6,     # Extra turns = extra draw steps
+    ("extra-turn", "creature-etb"): 0.5,         # Extra turns = more creatures played
+
+    # ── Damage bridges ──
+    ("damage-dealing", "combat-events"): 0.6,    # Damage dealers benefit from combat
+    ("damage-dealing", "life-gain-events"): 0.7, # Damage to opponents = life loss events
+    ("damage-dealing", "board-threats"): 0.5,    # Damage dealers ARE threats
+    ("damage-dealing", "opponent-threats"): 0.5,
+
+    # ── Graveyard / recursion bridges ──
+    ("graveyard-recursion", "creature-etb"): 0.7,  # Recurring creatures trigger ETB
+    ("self-mill", "graveyard-filling"): 0.9,     # Self-mill IS graveyard filling
+    ("self-mill", "graveyard-events"): 0.8,
+
+    # ── Copy / clone bridges ──
+    ("ability-copying", "card-draw-events"): 0.6,  # Copy draw abilities = more draws
+    ("ability-copying", "creature-etb"): 0.6,      # Copy ETB abilities
+    ("spell-copying", "creature-etb"): 0.5,        # Copy creature spells = more ETBs
+    ("flash-grant", "creature-etb"): 0.5,          # Flash enables surprise ETBs
+    ("token-generation", "spell-casting"): 0.4,    # Token makers that trigger on cast
+
     # ── Spellslinger / Drain bridges ──
 
     # Life drain → life gain events (draining opponents = gaining life for payoffs)
