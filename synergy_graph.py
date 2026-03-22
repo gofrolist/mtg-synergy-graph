@@ -359,6 +359,20 @@ SEMANTIC_BRIDGES = {
     # ── Life gain → artifact presence (artifact-based lifegain combos) ──
     ("life-gain", "artifact-presence"): 0.3,  # Low — indirect connection
 
+    # ── Last batch: diminishing returns but still safe ──
+    ("board-wipe", "creature-count-matters"): 0.5,  # Wipe resets counts, enables rebuild
+    ("board-wipe", "graveyard-filling"): 0.6,        # Wipe fills graveyard
+    ("board-wipe", "creature-etb"): 0.4,             # Wipe + recursion = re-ETB
+    ("ability-copying", "artifact-presence"): 0.5,    # Copy artifact abilities
+    ("ability-copying", "mana-needs"): 0.4,
+    ("targeted-removal", "artifact-presence"): 0.4,   # Artifact removal = interaction
+    ("targeted-removal", "enchantment-presence"): 0.4,
+    ("cost-reduction", "creature-etb-payoff"): 0.6,   # Already added above but reinforce
+    ("damage-dealing", "sacrifice-events"): 0.5,      # Damage + sacrifice patterns
+    ("mana-flexibility", "permanent-recursion"): 0.4,  # Mana to fuel recursion
+    ("mana-flexibility", "life-gain-events"): 0.3,
+    ("evasion-grant", "life-gain-events"): 0.4,  # Evasion + lifelink = life gain
+
     # ── Extra turn / combat bridges ──
     ("extra-turn", "spell-casting"): 0.6,       # Extra turns let you cast more spells
     ("extra-turn", "combat-events"): 0.7,        # Extra turns = extra combat steps
