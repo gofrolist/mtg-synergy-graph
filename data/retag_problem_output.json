@@ -1,0 +1,2244 @@
+[
+  {
+    "name": "Lightning Greaves",
+    "role": "protection",
+    "provides": [
+      "haste-grant",
+      "shroud-grant",
+      "equip-cost-reduction"
+    ],
+    "wants": [
+      "equip-target"
+    ],
+    "oracle_id": "ca204b66-8d0c-431a-8d34-282f7c2d17da"
+  },
+  {
+    "name": "The One Ring",
+    "role": "draw",
+    "provides": [
+      "card-draw-payoff",
+      "indestructible-grant",
+      "life-drain",
+      "reactive-protection"
+    ],
+    "wants": [
+      "life-gain-events",
+      "top-of-library"
+    ],
+    "oracle_id": "3aa83ed2-f48b-4ce6-a614-2c54ddf50538"
+  },
+  {
+    "name": "Teferi's Protection",
+    "role": "protection",
+    "provides": [
+      "board-protection",
+      "life-gain",
+      "reactive-protection"
+    ],
+    "wants": [
+      "life-gain-events"
+    ],
+    "oracle_id": "0d4ecdb1-ec90-497f-a7a4-1c68092b8757"
+  },
+  {
+    "name": "Reality Shift",
+    "role": "removal",
+    "provides": [
+      "targeted-removal",
+      "blink"
+    ],
+    "wants": [
+      "creature-targeting"
+    ],
+    "oracle_id": "70dc830e-d05b-4fc7-88dd-879e140b3fbf"
+  },
+  {
+    "name": "Damn",
+    "role": "removal",
+    "provides": [
+      "targeted-removal",
+      "board-wipe"
+    ],
+    "wants": [
+      "creature-targeting"
+    ],
+    "oracle_id": "b01d61cc-9844-4191-86a0-f2db6d42d6e5"
+  },
+  {
+    "name": "Damnation",
+    "role": "board-wipe",
+    "provides": [
+      "board-wipe"
+    ],
+    "wants": [],
+    "oracle_id": "d57a8f0b-7989-4db5-8756-6f2690097252"
+  },
+  {
+    "name": "Aetherflux Reservoir",
+    "role": "utility",
+    "provides": [
+      "damage-dealing",
+      "life-gain"
+    ],
+    "wants": [
+      "spell-casting"
+    ],
+    "oracle_id": "5f15125e-ae89-471e-b055-226a783bc7c1"
+  },
+  {
+    "name": "Vault of the Archangel",
+    "role": "ramp",
+    "provides": [
+      "mana-acceleration",
+      "deathtouch-grant",
+      "lifelink-grant"
+    ],
+    "wants": [
+      "creature-count-matters",
+      "combat-attackers"
+    ],
+    "oracle_id": "eeaac65a-3480-475a-bb28-e6375d53f487"
+  },
+  {
+    "name": "Avacyn's Pilgrim",
+    "role": "ramp",
+    "provides": [
+      "mana-acceleration"
+    ],
+    "wants": [
+      "mana-needs"
+    ],
+    "oracle_id": "069f6530-e65c-4d52-85f3-e0a2acd148c5"
+  },
+  {
+    "name": "Unbreakable Formation",
+    "role": "protection",
+    "provides": [
+      "board-protection",
+      "counter-placement",
+      "vigilance-grant",
+      "triggered-abilities"
+    ],
+    "wants": [
+      "main-phase-casting",
+      "creature-board"
+    ],
+    "oracle_id": "97435e03-2fff-4fe0-8fa9-69ab0a046a33"
+  },
+  {
+    "name": "Maze of Ith",
+    "role": "protection",
+    "provides": [
+      "untap",
+      "reactive-protection"
+    ],
+    "wants": [
+      "combat-attackers",
+      "board-threats"
+    ],
+    "oracle_id": "38a12bd7-4394-44a8-91a0-6a4ff7fa4f71"
+  },
+  {
+    "name": "Strionic Resonator",
+    "role": "enabler",
+    "provides": [
+      "spell-copying",
+      "triggered-abilities"
+    ],
+    "wants": [
+      "triggered-abilities",
+      "spell-casting"
+    ],
+    "oracle_id": "cf751552-156f-4f81-ac94-9814dce099f9"
+  },
+  {
+    "name": "Enduring Vitality",
+    "role": "ramp",
+    "provides": [
+      "mana-flexibility",
+      "vigilance-grant",
+      "graveyard-recursion"
+    ],
+    "wants": [
+      "mana-needs",
+      "creature-death"
+    ],
+    "oracle_id": "3577c47e-76d3-4659-b922-31c4b74be3a0"
+  },
+  {
+    "name": "Blasphemous Edict",
+    "role": "board-wipe",
+    "provides": [
+      "board-wipe",
+      "sacrifice-payoff",
+      "stax-tax"
+    ],
+    "wants": [
+      "board-threats",
+      "creature-count-matters"
+    ],
+    "oracle_id": "6cf50e21-0f60-4e9a-b910-ebe1bad2a29e"
+  },
+  {
+    "name": "Talon Gates of Madara",
+    "role": "ramp",
+    "provides": [
+      "mana-flexibility",
+      "land-search",
+      "reactive-protection"
+    ],
+    "wants": [
+      "creature-targeting",
+      "land-density"
+    ],
+    "oracle_id": "8c45bf9d-a017-43bf-9e32-67810a8a217b"
+  },
+  {
+    "name": "Aggravated Assault",
+    "role": "enabler",
+    "provides": [
+      "untap",
+      "additional-combat-phases"
+    ],
+    "wants": [
+      "tap-ability-creatures",
+      "creature-board",
+      "combat-attackers"
+    ],
+    "oracle_id": "20129459-a386-41eb-899d-1aede3427300"
+  },
+  {
+    "name": "Elesh Norn, Grand Cenobite",
+    "role": "board-protection",
+    "provides": [
+      "vigilance-grant",
+      "board-wide-creature-pump",
+      "board-wide-creature-debuff"
+    ],
+    "wants": [
+      "creature-board",
+      "board-threats"
+    ],
+    "oracle_id": "958d71ff-c9f7-46f0-96ca-79e7f4d65a16"
+  },
+  {
+    "name": "Avacyn, Angel of Hope",
+    "role": "board-protection",
+    "provides": [
+      "flying",
+      "vigilance-grant",
+      "indestructible-grant",
+      "board-protection"
+    ],
+    "wants": [
+      "permanent-board",
+      "board-threats"
+    ],
+    "oracle_id": "216cb26e-8da9-478b-bfbc-8030f7adee72"
+  },
+  {
+    "name": "Ashaya, Soul of the Wild",
+    "role": "threat",
+    "provides": [
+      "land-animation",
+      "land-count-payoff",
+      "creature-type-flexibility"
+    ],
+    "wants": [
+      "land-density"
+    ],
+    "oracle_id": "162572f2-1757-42e9-bd97-e6bd9a762c0e"
+  },
+  {
+    "name": "Cryptolith Rite",
+    "role": "mana",
+    "provides": [
+      "mana-flexibility",
+      "mana-acceleration"
+    ],
+    "wants": [
+      "creature-board"
+    ],
+    "oracle_id": "043f869d-b11c-4c0d-9591-2bf0df7bde55"
+  },
+  {
+    "name": "Tyvar's Stand",
+    "role": "protection",
+    "provides": [
+      "creature-pump",
+      "hexproof-grant",
+      "indestructible-grant"
+    ],
+    "wants": [
+      "combat-attackers",
+      "combat-events"
+    ],
+    "oracle_id": "4247b667-a0a8-4995-97c7-622d20132f7d"
+  },
+  {
+    "name": "Nadier's Nightblade",
+    "role": "threat",
+    "provides": [
+      "life-drain",
+      "life-gain"
+    ],
+    "wants": [
+      "token-events",
+      "creature-death"
+    ],
+    "oracle_id": "391978f6-0bbc-41e8-9246-f7d0e21c7900"
+  },
+  {
+    "name": "Mizzix's Mastery",
+    "role": "draw",
+    "provides": [
+      "spell-copying",
+      "spell-casting"
+    ],
+    "wants": [
+      "graveyard-filling",
+      "spell-casting",
+      "card-draw-events"
+    ],
+    "oracle_id": "40362fe0-a1a9-4d76-8c35-eac474b91af5"
+  },
+  {
+    "name": "Mirror Entity",
+    "role": "enabler",
+    "provides": [
+      "creature-type-flexibility",
+      "creature-pump",
+      "can-become-chosen-type"
+    ],
+    "wants": [
+      "creature-board",
+      "creature-power"
+    ],
+    "oracle_id": "17e905ca-c0bd-473d-95a7-e180ba5fea43"
+  },
+  {
+    "name": "Mechanized Production",
+    "role": "threat",
+    "provides": [
+      "token-generation",
+      "board-wide-counter-placement"
+    ],
+    "wants": [
+      "artifact-presence",
+      "token-events"
+    ],
+    "oracle_id": "39d8406a-90c3-460c-b4e8-0f590573db51"
+  },
+  {
+    "name": "Devoted Druid",
+    "role": "ramp",
+    "provides": [
+      "mana-acceleration",
+      "untap"
+    ],
+    "wants": [
+      "counter-placement-events",
+      "self-mill"
+    ],
+    "oracle_id": "cb814e16-acf7-41d5-a357-1323dcc369f3"
+  },
+  {
+    "name": "Sakashima of a Thousand Faces",
+    "role": "enabler",
+    "provides": [
+      "ability-copying",
+      "partner"
+    ],
+    "wants": [
+      "creature-etb",
+      "legendary-presence",
+      "creature-type-flexibility"
+    ],
+    "oracle_id": "8ecdaf4b-4442-42da-9714-4257a83faf50"
+  },
+  {
+    "name": "Promise of Loyalty",
+    "role": "stax-tax",
+    "provides": [
+      "stax-tax",
+      "board-protection"
+    ],
+    "wants": [
+      "creature-board",
+      "board-threats"
+    ],
+    "oracle_id": "e1d294e8-67b1-4a4a-86b8-f98f28a327d9"
+  },
+  {
+    "name": "Akroma's Memorial",
+    "role": "board-protection",
+    "provides": [
+      "evasion-grant",
+      "combat-enabler",
+      "vigilance-grant",
+      "haste-grant",
+      "protection-grant"
+    ],
+    "wants": [
+      "creature-board"
+    ],
+    "oracle_id": "967e8b3f-8266-4d9a-a38b-d0e10184e1e4"
+  },
+  {
+    "name": "Elven Chorus",
+    "role": "ramp",
+    "provides": [
+      "mana-flexibility",
+      "mana-acceleration",
+      "top-of-library"
+    ],
+    "wants": [
+      "land-density",
+      "creature-count-matters"
+    ],
+    "oracle_id": "4d5df2d9-06bf-4bec-9be0-dabe75a858fb"
+  },
+  {
+    "name": "Legion Leadership // Legion Stronghold",
+    "role": "ramp",
+    "provides": [
+      "mana-acceleration",
+      "creature-pump",
+      "first-strike-grant"
+    ],
+    "wants": [
+      "combat-attackers",
+      "creature-power"
+    ],
+    "oracle_id": "ad225ec2-ff3a-48f6-81a7-dfdd1b75e1f7"
+  },
+  {
+    "name": "Clever Impersonator",
+    "role": "enabler",
+    "provides": [
+      "ability-copying"
+    ],
+    "wants": [
+      "nonland-permanents"
+    ],
+    "oracle_id": "d4ec0df9-a4a3-48cf-a0aa-b1aea5c49142"
+  },
+  {
+    "name": "Deadeye Navigator",
+    "role": "enabler",
+    "provides": [
+      "blink",
+      "soulbond"
+    ],
+    "wants": [
+      "paired-creatures",
+      "creature-etb-triggers",
+      "tap-ability-creatures"
+    ],
+    "oracle_id": "ebef6d84-b724-4a84-bcde-8eb6dc06717d"
+  },
+  {
+    "name": "Morophon, the Boundless",
+    "role": "enabler",
+    "provides": [
+      "cost-reduction",
+      "creature-pump",
+      "creature-type-flexibility"
+    ],
+    "wants": [
+      "creature-type-selection",
+      "legendary-presence"
+    ],
+    "oracle_id": "bf418a2f-e639-4e52-9cad-5a0713a1829b"
+  },
+  {
+    "name": "Nissa, Who Shakes the World",
+    "role": "ramp",
+    "provides": [
+      "mana-acceleration",
+      "land-animation",
+      "untap",
+      "vigilance-grant",
+      "haste-grant",
+      "indestructible-grant",
+      "emblem-generation"
+    ],
+    "wants": [
+      "forest-presence",
+      "noncreature-lands"
+    ],
+    "oracle_id": "5aa3abf1-d56b-4f42-8c84-7e5a2c15ee0f"
+  },
+  {
+    "name": "Relentless Assault",
+    "role": "enabler",
+    "provides": [
+      "untap",
+      "additional-combat-phase"
+    ],
+    "wants": [
+      "combat-attackers",
+      "combat-trigger"
+    ],
+    "oracle_id": "dc1c0e8c-d0c1-445c-968f-7dec91e5d5fc"
+  },
+  {
+    "name": "Concordant Crossroads",
+    "role": "enabler",
+    "provides": [
+      "haste-grant"
+    ],
+    "wants": [
+      "combat-attackers",
+      "creature-board"
+    ],
+    "oracle_id": "ff01b408-6d17-40a3-9efd-a1b341ec1307"
+  },
+  {
+    "name": "Gratuitous Violence",
+    "role": "enabler",
+    "provides": [
+      "damage-dealing",
+      "damage-amplification"
+    ],
+    "wants": [
+      "combat-attackers",
+      "creature-board"
+    ],
+    "oracle_id": "7c340a39-4ee0-4ba1-bb66-6674f8020fda"
+  },
+  {
+    "name": "Ulamog, the Defiler",
+    "role": "threat",
+    "provides": [
+      "ward-grant",
+      "counter-placement",
+      "annihilator",
+      "board-protection",
+      "etb-payoff",
+      "board-wipe"
+    ],
+    "wants": [
+      "exile-zone-presence",
+      "mana-acceleration",
+      "sacrifice-events",
+      "targeting-bonus"
+    ],
+    "oracle_id": "97836c48-8777-4b4e-98fb-e99204f38bdd"
+  },
+  {
+    "name": "Lithoform Engine",
+    "role": "utility",
+    "provides": [
+      "spell-copying",
+      "ability-copying",
+      "token-generation"
+    ],
+    "wants": [
+      "spell-casting",
+      "triggered-abilities",
+      "activated-abilities",
+      "targeted-spells"
+    ],
+    "oracle_id": "0bf299da-1854-4153-baea-3cee2eb01ee8"
+  },
+  {
+    "name": "Maddening Cacophony",
+    "role": "draw",
+    "provides": [
+      "self-mill",
+      "card-discard"
+    ],
+    "wants": [
+      "opponent-library-density"
+    ],
+    "oracle_id": "e0f0f290-c83f-4d97-9f5d-786c7136b0d1"
+  },
+  {
+    "name": "Hydroid Krasis",
+    "role": "threat",
+    "provides": [
+      "card-draw",
+      "life-gain",
+      "creature-pump",
+      "flying-grant",
+      "trample-grant",
+      "etb-payoff"
+    ],
+    "wants": [
+      "mana-acceleration",
+      "life-gain-events"
+    ],
+    "oracle_id": "6bd872b2-5c40-4e11-9a7f-0136a51b0642"
+  },
+  {
+    "name": "Urabrask the Hidden",
+    "role": "board-protection",
+    "provides": [
+      "haste-grant",
+      "resource-denial"
+    ],
+    "wants": [
+      "creature-board",
+      "board-threats",
+      "combat-attackers",
+      "opponent-threats"
+    ],
+    "oracle_id": "5b2ffb53-86b7-4665-a5c7-b85b035b6c81"
+  },
+  {
+    "name": "Retreat to Coralhelm",
+    "role": "utility",
+    "provides": [
+      "untap",
+      "scry",
+      "triggered-abilities"
+    ],
+    "wants": [
+      "land-density",
+      "combat-events",
+      "creature-board"
+    ],
+    "oracle_id": "c450f6b7-bb2a-4b8c-aec7-d27555137b63"
+  },
+  {
+    "name": "Vampire Nighthawk",
+    "role": "threat",
+    "provides": [
+      "flying-grant",
+      "deathtouch-grant",
+      "lifelink-grant",
+      "combat-enabler"
+    ],
+    "wants": [
+      "combat-attackers",
+      "life-gain-events"
+    ],
+    "oracle_id": "feb244f8-bcb1-44cf-9940-2719221a7309"
+  },
+  {
+    "name": "Intruder Alarm",
+    "role": "enabler",
+    "provides": [
+      "untap",
+      "stax-tax"
+    ],
+    "wants": [
+      "creature-etb",
+      "combat-attackers",
+      "creature-power-matters"
+    ],
+    "oracle_id": "1e943e04-e213-4781-b1a7-935aad8790e1"
+  },
+  {
+    "name": "Seize the Day",
+    "role": "combat-enabler",
+    "provides": [
+      "untap",
+      "combat-enabler"
+    ],
+    "wants": [
+      "combat-attackers",
+      "mana-needs"
+    ],
+    "oracle_id": "2a6abd59-e448-46f1-9af8-bb9040645971"
+  },
+  {
+    "name": "Overprotect",
+    "role": "protection",
+    "provides": [
+      "creature-pump",
+      "trample-grant",
+      "hexproof-grant",
+      "indestructible-grant"
+    ],
+    "wants": [
+      "combat-attackers",
+      "creature-power"
+    ],
+    "oracle_id": "c8c3a293-ae6d-4c52-be2d-2d4b6a8edb66"
+  },
+  {
+    "name": "Drana and Linvala",
+    "role": "threat",
+    "provides": [
+      "flying",
+      "vigilance-grant",
+      "activated-abilities",
+      "mana-flexibility",
+      "stax-tax",
+      "ability-copying"
+    ],
+    "wants": [
+      "opponent-threats",
+      "mana-needs",
+      "creature-board"
+    ],
+    "oracle_id": "7abc2a1b-b758-480b-9415-f8f5369ab52f"
+  },
+  {
+    "name": "Shore Up",
+    "role": "protection",
+    "provides": [
+      "creature-pump",
+      "hexproof-grant",
+      "untap"
+    ],
+    "wants": [
+      "combat-attackers",
+      "combat-events",
+      "creature-power"
+    ],
+    "oracle_id": "c9d8c983-2845-42e6-b6b8-bf7cf2729b23"
+  },
+  {
+    "name": "Evacuation",
+    "role": "removal",
+    "provides": [
+      "board-protection",
+      "board-reset"
+    ],
+    "wants": [
+      "creature-board",
+      "board-threats"
+    ],
+    "oracle_id": "fdd94383-b573-439a-8e1c-925af887c5a6"
+  },
+  {
+    "name": "Archetype of Imagination",
+    "role": "enabler",
+    "provides": [
+      "evasion-grant",
+      "board-wide-evasion-denial",
+      "human-tribal"
+    ],
+    "wants": [
+      "creature-board",
+      "board-threats",
+      "legendary-presence"
+    ],
+    "oracle_id": "a5458de0-0f61-49a3-a013-d90f92559809"
+  },
+  {
+    "name": "Varragoth, Bloodsky Sire",
+    "role": "utility",
+    "provides": [
+      "deathtouch-grant",
+      "tutor",
+      "combat-trigger"
+    ],
+    "wants": [
+      "combat-attackers",
+      "attack-events",
+      "spell-casting"
+    ],
+    "oracle_id": "68b41a04-8cb0-4edf-b488-a219494453ae"
+  },
+  {
+    "name": "Mina and Denn, Wildborn",
+    "role": "ramp",
+    "provides": [
+      "mana-flexibility",
+      "land-search",
+      "trample-grant"
+    ],
+    "wants": [
+      "land-density",
+      "combat-attackers",
+      "creature-power"
+    ],
+    "oracle_id": "e091718c-0c26-46d9-b694-f95effbac3e5"
+  },
+  {
+    "name": "Wound Reflection",
+    "role": "threat",
+    "provides": [
+      "life-drain",
+      "damage-dealing",
+      "end-step-events"
+    ],
+    "wants": [
+      "damage-dealing",
+      "opponent-threats",
+      "life-gain-events"
+    ],
+    "oracle_id": "b09206a4-8b73-4125-8b79-53f6fd511b16"
+  },
+  {
+    "name": "Time Warp",
+    "role": "utility",
+    "provides": [
+      "extra-turn"
+    ],
+    "wants": [
+      "mana-acceleration",
+      "extra-turn-amplifiers"
+    ],
+    "oracle_id": "dbd6a94b-62ff-4a10-9d52-bdd90b26e425"
+  },
+  {
+    "name": "Poison Dart Frog",
+    "role": "ramp",
+    "provides": [
+      "mana-flexibility",
+      "reach-grant",
+      "deathtouch-grant"
+    ],
+    "wants": [
+      "untap",
+      "mana-needs"
+    ],
+    "oracle_id": "e88a2b71-c90d-4e16-99a3-93d11fe7a968"
+  },
+  {
+    "name": "Maha, Its Feathers Night",
+    "role": "stax",
+    "provides": [
+      "ward-grant",
+      "board-wide-toughness-modification",
+      "flying-grant",
+      "trample-grant",
+      "stax-tax"
+    ],
+    "wants": [
+      "discard-events",
+      "creature-board",
+      "board-threats"
+    ],
+    "oracle_id": "129476ae-9dab-4e04-8e8e-f249afd56ff9"
+  },
+  {
+    "name": "Teferi, Master of Time",
+    "role": "utility",
+    "provides": [
+      "card-draw",
+      "targeted-removal",
+      "extra-turn",
+      "instant-speed-loyalty-activation"
+    ],
+    "wants": [
+      "card-draw-events",
+      "opponent-threats"
+    ],
+    "oracle_id": "e802fb53-7cf5-46bc-8a0b-f99cf5c20f74"
+  },
+  {
+    "name": "Insurrection",
+    "role": "board-protection",
+    "provides": [
+      "untap",
+      "haste-grant",
+      "board-pressure"
+    ],
+    "wants": [
+      "creature-board",
+      "combat-attackers"
+    ],
+    "oracle_id": "7f7c204f-be1a-47e4-91c6-ba6f906d9012"
+  },
+  {
+    "name": "Guardian of Faith",
+    "role": "protection",
+    "provides": [
+      "flash-grant",
+      "vigilance-grant",
+      "board-protection",
+      "phasing"
+    ],
+    "wants": [
+      "creature-board",
+      "combat-events"
+    ],
+    "oracle_id": "8e04a5e0-e22c-430b-a39a-c9f38e16ea86"
+  },
+  {
+    "name": "Eldritch Immunity",
+    "role": "protection",
+    "provides": [
+      "protection-grant",
+      "board-wide-protection-grant"
+    ],
+    "wants": [
+      "creature-board",
+      "combat-attackers",
+      "creature-targeting"
+    ],
+    "oracle_id": "7dce1e8c-5cfd-4626-9f23-7bb3f1b10c1e"
+  },
+  {
+    "name": "Bruvac the Grandiloquent",
+    "role": "utility",
+    "provides": [
+      "mill-amplification",
+      "graveyard-filling"
+    ],
+    "wants": [
+      "mill-triggers",
+      "opponent-graveyard-dependence"
+    ],
+    "oracle_id": "274b999f-f193-48fd-9a4a-0fdaf535e6c3"
+  },
+  {
+    "name": "Bulk Up",
+    "role": "combat-enabler",
+    "provides": [
+      "creature-pump",
+      "instant-speed-pump"
+    ],
+    "wants": [
+      "combat-attackers",
+      "creature-power"
+    ],
+    "oracle_id": "fade8af0-5fdb-4237-9dd6-48bfd1d62767"
+  },
+  {
+    "name": "Whelming Wave",
+    "role": "removal",
+    "provides": [
+      "board-wide-bounce",
+      "board-protection"
+    ],
+    "wants": [
+      "board-threats",
+      "creature-board"
+    ],
+    "oracle_id": "e510eaaf-6497-480f-baa8-f4796b5f1086"
+  },
+  {
+    "name": "Archangel of Tithes",
+    "role": "protection",
+    "provides": [
+      "board-protection",
+      "stax-tax",
+      "evasion-grant",
+      "flying"
+    ],
+    "wants": [
+      "untap",
+      "attack-events",
+      "blocked-creatures"
+    ],
+    "oracle_id": "ff5caed4-0276-476d-8fae-edae2536df7f"
+  },
+  {
+    "name": "Shock",
+    "role": "removal",
+    "provides": [
+      "damage-dealing",
+      "targeted-removal"
+    ],
+    "wants": [
+      "creature-targeting",
+      "opponent-threats"
+    ],
+    "oracle_id": "a9d288b8-cdc1-4e55-a0c9-d6edfc95e65d"
+  },
+  {
+    "name": "Tainted Strike",
+    "role": "combat-enabler",
+    "provides": [
+      "combat-enabler",
+      "poison-counter-placement",
+      "creature-pump"
+    ],
+    "wants": [
+      "combat-attackers",
+      "combat-events"
+    ],
+    "oracle_id": "95a53dd7-76dc-46f1-8833-fafd02ba49c4"
+  },
+  {
+    "name": "Cloudstone Curio",
+    "role": "enabler",
+    "provides": [
+      "blink",
+      "recursive-temporary-bounce"
+    ],
+    "wants": [
+      "etb-payoff",
+      "permanent-etb-triggers",
+      "permanents-with-value"
+    ],
+    "oracle_id": "5cd2fd32-4da2-40eb-b003-c0b9a9ec91c1"
+  },
+  {
+    "name": "Nexus of Fate",
+    "role": "utility",
+    "provides": [
+      "extra-turn",
+      "self-recursion"
+    ],
+    "wants": [
+      "card-draw-events",
+      "untap",
+      "mana-needs"
+    ],
+    "oracle_id": "6c1d22d4-f28e-4041-a9b6-1575e8929b61"
+  },
+  {
+    "name": "Crystal Barricade",
+    "role": "protection",
+    "provides": [
+      "hexproof-grant",
+      "damage-prevention"
+    ],
+    "wants": [],
+    "oracle_id": "291c7abf-9d64-4ba0-ae21-e3459edc9a95"
+  },
+  {
+    "name": "Hermit Druid",
+    "role": "utility",
+    "provides": [
+      "self-mill",
+      "card-draw"
+    ],
+    "wants": [
+      "graveyard-filling",
+      "land-density"
+    ],
+    "oracle_id": "16f6438d-2a29-41cb-bf0c-4d02bd66112b"
+  },
+  {
+    "name": "Retreat to Kazandu",
+    "role": "enabler",
+    "provides": [
+      "counter-placement",
+      "life-gain",
+      "triggered-abilities"
+    ],
+    "wants": [
+      "land-density",
+      "creature-board"
+    ],
+    "oracle_id": "3f8e5ff1-af89-427e-924c-19a44f9a3788"
+  },
+  {
+    "name": "Crib Swap",
+    "role": "removal",
+    "provides": [
+      "targeted-removal",
+      "token-generation",
+      "changeling",
+      "creature-type-flexibility"
+    ],
+    "wants": [
+      "creature-board",
+      "token-events"
+    ],
+    "oracle_id": "2987c385-011a-4032-a516-a46d1e9dc9e8"
+  },
+  {
+    "name": "Linvala, Keeper of Silence",
+    "role": "protection",
+    "provides": [
+      "flying",
+      "stax-tax",
+      "board-protection"
+    ],
+    "wants": [
+      "opponent-threats",
+      "creature-board"
+    ],
+    "oracle_id": "88dadc31-dfac-41b3-bf2a-65fa89e3c16d"
+  },
+  {
+    "name": "Lae'zel's Acrobatics",
+    "role": "utility",
+    "provides": [
+      "blink",
+      "top-of-library"
+    ],
+    "wants": [
+      "creature-etb-triggers",
+      "token-generation"
+    ],
+    "oracle_id": "3efe6ac8-f92e-4108-913b-077e41c0a841"
+  },
+  {
+    "name": "Baird, Steward of Argive",
+    "role": "protection",
+    "provides": [
+      "vigilance-grant",
+      "stax-tax",
+      "board-protection"
+    ],
+    "wants": [
+      "board-threats",
+      "creature-board"
+    ],
+    "oracle_id": "69aa6809-5468-413a-94c9-562e6de93957"
+  },
+  {
+    "name": "Ioreth of the Healing House",
+    "role": "utility",
+    "provides": [
+      "untap"
+    ],
+    "wants": [
+      "tap-ability-creatures",
+      "legendary-presence"
+    ],
+    "oracle_id": "af6e4c3e-0276-4f72-9a70-25868fe8bba5"
+  },
+  {
+    "name": "Crimson Wisps",
+    "role": "draw",
+    "provides": [
+      "haste-grant",
+      "card-draw"
+    ],
+    "wants": [
+      "combat-attackers"
+    ],
+    "oracle_id": "e699d140-eb13-4f15-aecb-85c76e8b1b14"
+  },
+  {
+    "name": "Fog Bank",
+    "role": "protection",
+    "provides": [
+      "damage-prevention",
+      "flying",
+      "defender"
+    ],
+    "wants": [
+      "combat-attackers"
+    ],
+    "oracle_id": "3a2bb47d-228d-499e-a34b-9e10d99e9b2c"
+  },
+  {
+    "name": "Anzrag, the Quake-Mole",
+    "role": "enabler",
+    "provides": [
+      "untap",
+      "additional-combat-phase"
+    ],
+    "wants": [
+      "combat-attackers",
+      "combat-events"
+    ],
+    "oracle_id": "4adcd967-9ff7-4940-b8b9-0c4215bbcb75"
+  },
+  {
+    "name": "Stormtide Leviathan",
+    "role": "threat",
+    "provides": [
+      "board-protection",
+      "evasion-grant",
+      "land-animation"
+    ],
+    "wants": [
+      "land-density"
+    ],
+    "oracle_id": "131a7475-0b9e-46eb-9ade-fef1b9820184"
+  },
+  {
+    "name": "Mizzium Mortars",
+    "role": "removal",
+    "provides": [
+      "damage-dealing"
+    ],
+    "wants": [
+      "targeted-spells"
+    ],
+    "oracle_id": "48ddba1e-2ad7-463f-9307-d2379a800e51"
+  },
+  {
+    "name": "Nirkana Revenant",
+    "role": "ramp",
+    "provides": [
+      "mana-acceleration",
+      "creature-pump"
+    ],
+    "wants": [
+      "land-density",
+      "tap-ability-creatures"
+    ],
+    "oracle_id": "6dff1def-5b94-40c8-a942-dea8743ab47c"
+  },
+  {
+    "name": "Archfiend of Despair",
+    "role": "threat",
+    "provides": [
+      "flying",
+      "life-drain",
+      "life-loss"
+    ],
+    "wants": [
+      "opponent-threats",
+      "damage-dealing"
+    ],
+    "oracle_id": "9c36760b-57c5-488b-afc9-ef141942c6ab"
+  },
+  {
+    "name": "Dracogenesis",
+    "role": "enabler",
+    "provides": [
+      "mana-free-casting",
+      "dragon-tribal"
+    ],
+    "wants": [
+      "dragon-spells",
+      "mana-needs"
+    ],
+    "oracle_id": "9b06f2bf-146d-4b30-b467-e16f1a942253"
+  },
+  {
+    "name": "Phyresis",
+    "role": "enabler",
+    "provides": [
+      "infect-grant",
+      "poison-counter-placement"
+    ],
+    "wants": [
+      "equip-target",
+      "creature-board",
+      "combat-attackers"
+    ],
+    "oracle_id": "958628af-243c-4eb0-8620-5d483b6da768"
+  },
+  {
+    "name": "Meekstone",
+    "role": "stax",
+    "provides": [
+      "resource-denial",
+      "tap-permanent-denial"
+    ],
+    "wants": [
+      "board-threats",
+      "creature-power"
+    ],
+    "oracle_id": "5ba73182-30a7-4bad-9cb6-c0feecc2db33"
+  },
+  {
+    "name": "Pyrohemia",
+    "role": "damage-dealing",
+    "provides": [
+      "damage-dealing",
+      "board-wide-damage",
+      "self-sacrifice-condition"
+    ],
+    "wants": [
+      "mana-needs",
+      "board-threats"
+    ],
+    "oracle_id": "9ac57a10-3402-4656-9079-f713884cde35"
+  },
+  {
+    "name": "Jidoor, Aristocratic Capital // Overture",
+    "role": "ramp",
+    "provides": [
+      "mana-acceleration",
+      "land-search",
+      "mill"
+    ],
+    "wants": [
+      "land-density",
+      "opponent-threats"
+    ],
+    "oracle_id": "bd513d9d-5aa2-4860-bd86-8b5d9430f133"
+  },
+  {
+    "name": "Archetype of Endurance",
+    "role": "protection",
+    "provides": [
+      "hexproof-grant",
+      "board-wide-hexproof-removal"
+    ],
+    "wants": [],
+    "oracle_id": "79254223-3fa6-4b7c-8163-1e48bf5cb708"
+  },
+  {
+    "name": "Flumph",
+    "role": "draw",
+    "provides": [
+      "card-draw",
+      "combat-trigger",
+      "flying",
+      "defender"
+    ],
+    "wants": [
+      "damage-events",
+      "targeted-spells"
+    ],
+    "oracle_id": "bc328acc-8521-4581-88c3-99a7cb2c1cdb"
+  },
+  {
+    "name": "Ranging Raptors",
+    "role": "ramp",
+    "provides": [
+      "land-search",
+      "combat-trigger"
+    ],
+    "wants": [
+      "damage-dealing",
+      "combat-attackers"
+    ],
+    "oracle_id": "2a86b70b-34ca-45df-8aa1-c3fb2da72dc3"
+  },
+  {
+    "name": "The Mightstone and Weakstone",
+    "role": "removal",
+    "provides": [
+      "card-draw",
+      "mana-acceleration",
+      "targeted-removal"
+    ],
+    "wants": [
+      "mana-needs",
+      "creature-targeting",
+      "artifact-presence"
+    ],
+    "oracle_id": "c396db03-bf11-4e20-b630-4f9aa8fd78da"
+  },
+  {
+    "name": "Heartless Hidetsugu",
+    "role": "threat",
+    "provides": [
+      "damage-dealing",
+      "tap-ability"
+    ],
+    "wants": [
+      "untap"
+    ],
+    "oracle_id": "b68e965a-96f4-447a-99be-35dbd27846e9"
+  },
+  {
+    "name": "Shadow Rift",
+    "role": "draw",
+    "provides": [
+      "evasion-grant",
+      "card-draw"
+    ],
+    "wants": [],
+    "oracle_id": "66810ef7-ea3a-4afa-92f0-b21ec52cc8d0"
+  },
+  {
+    "name": "Aetheric Amplifier",
+    "role": "enabler",
+    "provides": [
+      "counter-amplification",
+      "mana-flexibility",
+      "mana-acceleration"
+    ],
+    "wants": [
+      "counter-placement-events",
+      "mana-needs"
+    ],
+    "oracle_id": "295cd8e1-0830-46c1-9957-556afd4bcee6"
+  },
+  {
+    "name": "Unsummon",
+    "role": "removal",
+    "provides": [
+      "targeted-removal"
+    ],
+    "wants": [
+      "creature-targeting"
+    ],
+    "oracle_id": "837182db-1bf3-4a2c-bd01-1af9d9873561"
+  },
+  {
+    "name": "Captivating Crew",
+    "role": "enabler",
+    "provides": [
+      "haste-grant",
+      "untap"
+    ],
+    "wants": [
+      "combat-attackers",
+      "creature-targeting"
+    ],
+    "oracle_id": "1049bc06-83de-4ed6-ae38-f259e5038a95"
+  },
+  {
+    "name": "Temporal Manipulation",
+    "role": "utility",
+    "provides": [
+      "extra-turn"
+    ],
+    "wants": [],
+    "oracle_id": "6b6ac99a-7548-4cad-9fe5-ea611618ab9e"
+  },
+  {
+    "name": "Frontline Medic",
+    "role": "removal",
+    "provides": [
+      "targeted-removal",
+      "board-protection",
+      "combat-trigger"
+    ],
+    "wants": [
+      "combat-attackers",
+      "creature-board",
+      "creature-count-matters"
+    ],
+    "oracle_id": "36a3c910-95b8-45a2-9f84-5681336d868c"
+  },
+  {
+    "name": "Tifa Lockhart",
+    "role": "threat",
+    "provides": [
+      "board-pressure",
+      "trample-grant",
+      "land-animation",
+      "combat-trigger"
+    ],
+    "wants": [
+      "land-density",
+      "combat-attackers"
+    ],
+    "oracle_id": "878df304-9d6d-4ce9-b65b-1439c251f3e0"
+  },
+  {
+    "name": "Vampire of the Dire Moon",
+    "role": "threat",
+    "provides": [
+      "deathtouch-grant",
+      "lifelink-grant",
+      "board-pressure"
+    ],
+    "wants": [
+      "combat-attackers"
+    ],
+    "oracle_id": "5a938371-8428-48e3-85ed-6a84a39b29c6"
+  },
+  {
+    "name": "The Walls of Ba Sing Se",
+    "role": "protection",
+    "provides": [
+      "board-protection",
+      "indestructible-grant"
+    ],
+    "wants": [],
+    "oracle_id": "af7d7da5-aff5-48e1-901a-f81257a85f71"
+  },
+  {
+    "name": "Mass Hysteria",
+    "role": "enabler",
+    "provides": [
+      "haste-grant",
+      "board-wide-counter-placement"
+    ],
+    "wants": [
+      "creature-board",
+      "combat-attackers"
+    ],
+    "oracle_id": "4500131b-7417-4f30-a1b0-97d51b2e6458"
+  },
+  {
+    "name": "The Necrobloom",
+    "role": "enabler",
+    "provides": [
+      "token-generation",
+      "graveyard-recursion",
+      "self-mill",
+      "land-animation"
+    ],
+    "wants": [
+      "land-density",
+      "landfall",
+      "token-events"
+    ],
+    "oracle_id": "b981af39-4ee6-4fbc-9a89-618dcad9dfbf"
+  },
+  {
+    "name": "Fervor",
+    "role": "enabler",
+    "provides": [
+      "haste-grant"
+    ],
+    "wants": [
+      "creature-board",
+      "combat-attackers"
+    ],
+    "oracle_id": "8e0cea9c-3110-4728-9378-76849e33bb90"
+  },
+  {
+    "name": "Blasting Station",
+    "role": "removal",
+    "provides": [
+      "damage-dealing",
+      "untap",
+      "sacrifice-payoff"
+    ],
+    "wants": [
+      "token-generation",
+      "sacrifice-fodder",
+      "creature-etb"
+    ],
+    "oracle_id": "3a38d2d1-c4ff-4088-b1df-5feb9602ee2e"
+  },
+  {
+    "name": "Phyresis Outbreak",
+    "role": "damage",
+    "provides": [
+      "poison-counter-placement",
+      "damage-dealing",
+      "counter-placement"
+    ],
+    "wants": [
+      "poison-counter-placement",
+      "board-threats"
+    ],
+    "oracle_id": "47148b5d-3850-4614-822e-6ef2755996f8"
+  },
+  {
+    "name": "Wirewood Channeler",
+    "role": "ramp",
+    "provides": [
+      "mana-acceleration",
+      "mana-flexibility",
+      "elf-tribal"
+    ],
+    "wants": [
+      "creature-count-matters",
+      "elf-tribal"
+    ],
+    "oracle_id": "8badfd34-9b63-4ada-8012-b8cddaf5b492"
+  },
+  {
+    "name": "Bladewing the Risen",
+    "role": "threat",
+    "provides": [
+      "flying",
+      "graveyard-recursion",
+      "creature-pump"
+    ],
+    "wants": [
+      "dragon-tribal",
+      "graveyard-filling",
+      "creature-board"
+    ],
+    "oracle_id": "c22cc70a-9533-4bfc-b3ce-b2d43a73f0c1"
+  },
+  {
+    "name": "Omnath, Locus of Mana",
+    "role": "threat",
+    "provides": [
+      "mana-flexibility",
+      "mana-retention",
+      "creature-pump"
+    ],
+    "wants": [
+      "mana-acceleration",
+      "mana-needs"
+    ],
+    "oracle_id": "9da896e1-2256-425b-b801-1ae6f0470559"
+  },
+  {
+    "name": "Singularity Rupture",
+    "role": "board-wipe",
+    "provides": [
+      "board-wipe",
+      "self-mill"
+    ],
+    "wants": [
+      "land-density"
+    ],
+    "oracle_id": "e1976b6c-7e43-4f4a-b082-f95495a1b260"
+  },
+  {
+    "name": "Wall of Roots",
+    "role": "ramp",
+    "provides": [
+      "mana-acceleration",
+      "defender"
+    ],
+    "wants": [
+      "creature-board"
+    ],
+    "oracle_id": "3a21a6ae-b2f2-4f0c-acfd-5f3e8d63fd2f"
+  },
+  {
+    "name": "Gogo, Mysterious Mime",
+    "role": "enabler",
+    "provides": [
+      "ability-copying",
+      "creature-pump",
+      "haste-grant",
+      "combat-enabler"
+    ],
+    "wants": [
+      "combat-attackers",
+      "creature-board"
+    ],
+    "oracle_id": "6fdcb563-9279-4365-8a78-26e75fbfd917"
+  },
+  {
+    "name": "Extinguish All Hope",
+    "role": "removal",
+    "provides": [
+      "targeted-removal",
+      "board-protection"
+    ],
+    "wants": [
+      "creature-board",
+      "board-threats"
+    ],
+    "oracle_id": "c7ca25f3-7a22-477b-8546-4c2597d5d1ff"
+  },
+  {
+    "name": "Whitemane Lion",
+    "role": "utility",
+    "provides": [
+      "flash-grant",
+      "etb-payoff"
+    ],
+    "wants": [
+      "creature-etb",
+      "creature-board"
+    ],
+    "oracle_id": "e8d6084b-9b72-438e-a30a-851b888f3e4d"
+  },
+  {
+    "name": "Grievous Wound",
+    "role": "threat",
+    "provides": [
+      "life-drain",
+      "damage-prevention"
+    ],
+    "wants": [
+      "damage-dealing",
+      "life-gain-events"
+    ],
+    "oracle_id": "4d97b9d1-1138-40da-b593-8065ea6ed7b3"
+  },
+  {
+    "name": "Luminarch Aspirant",
+    "role": "enabler",
+    "provides": [
+      "counter-placement"
+    ],
+    "wants": [
+      "combat-attackers",
+      "creature-board"
+    ],
+    "oracle_id": "cb9994b9-924b-4e10-9075-9cfbec88f2bf"
+  },
+  {
+    "name": "Harbinger of the Seas",
+    "role": "utility",
+    "provides": [
+      "land-animation"
+    ],
+    "wants": [
+      "land-density",
+      "nonbasic-land-presence"
+    ],
+    "oracle_id": "84910453-e5dc-4bff-8554-86a5f4ab2746"
+  },
+  {
+    "name": "Nekusar, the Mindrazer",
+    "role": "threat",
+    "provides": [
+      "card-draw",
+      "damage-dealing",
+      "etb-payoff",
+      "triggered-abilities"
+    ],
+    "wants": [
+      "card-draw-events",
+      "opponent-threats"
+    ],
+    "oracle_id": "8a5e3c8e-8e22-49b9-8ee5-4a36361f0da6"
+  },
+  {
+    "name": "Roil Elemental",
+    "role": "utility",
+    "provides": [
+      "board-control",
+      "evasion-grant",
+      "land-animation",
+      "triggered-abilities",
+      "board-threat"
+    ],
+    "wants": [
+      "land-density",
+      "creature-board",
+      "landfall-events",
+      "permanent-presence"
+    ],
+    "oracle_id": "7e0d2965-bbcd-4214-b1b6-c0d2601ce078"
+  },
+  {
+    "name": "Master Chef",
+    "role": "enabler",
+    "provides": [
+      "counter-placement",
+      "counter-amplification",
+      "commander-payoff",
+      "passive-permanent"
+    ],
+    "wants": [
+      "creature-etb-triggers",
+      "counter-placement-events",
+      "commander-presence"
+    ],
+    "oracle_id": "9eab87ff-82a0-4655-b6ea-00b27e882449"
+  },
+  {
+    "name": "Brave the Elements",
+    "role": "protection",
+    "provides": [
+      "board-protection",
+      "reactive-protection"
+    ],
+    "wants": [
+      "combat-attackers",
+      "targeted-spells"
+    ],
+    "oracle_id": "9d73a51a-1c8e-40cd-8124-aeff406a0884"
+  },
+  {
+    "name": "Giant Growth",
+    "role": "combat-enabler",
+    "provides": [
+      "creature-pump",
+      "combat-enabler"
+    ],
+    "wants": [
+      "combat-attackers",
+      "equip-target"
+    ],
+    "oracle_id": "5748ebf1-24e3-499d-ab7c-c2cebd462a24"
+  },
+  {
+    "name": "Shared Summons",
+    "role": "draw",
+    "provides": [
+      "card-draw"
+    ],
+    "wants": [
+      "creature-etb-triggers",
+      "creature-board"
+    ],
+    "oracle_id": "c2c9dbd0-2062-4ee1-b32e-8eeacd95589c"
+  },
+  {
+    "name": "Spell Stutter",
+    "role": "removal",
+    "provides": [
+      "targeted-removal",
+      "stax-tax"
+    ],
+    "wants": [
+      "faerie-tribal",
+      "creature-board"
+    ],
+    "oracle_id": "f9bf996e-ae14-40a3-a8d8-f5725ddaa270"
+  },
+  {
+    "name": "Solemnity",
+    "role": "protection",
+    "provides": [
+      "counter-prevention",
+      "passive-permanent"
+    ],
+    "wants": [
+      "counter-placement-events",
+      "counter-payoff"
+    ],
+    "oracle_id": "f0b4331b-ddd3-4f11-ba16-67c651c8954c"
+  },
+  {
+    "name": "Mana Echoes",
+    "role": "ramp",
+    "provides": [
+      "mana-acceleration",
+      "creature-type-flexibility",
+      "passive-permanent"
+    ],
+    "wants": [
+      "creature-etb",
+      "creature-type-selection"
+    ],
+    "oracle_id": "369e90e5-a31b-49cc-b594-8a853f244be1"
+  },
+  {
+    "name": "Anara, Wolvid Familiar",
+    "role": "utility",
+    "provides": [
+      "indestructible-grant",
+      "partner",
+      "passive-permanent"
+    ],
+    "wants": [
+      "commander-presence",
+      "combat-attackers"
+    ],
+    "oracle_id": "a59ff932-f758-476e-ba31-0623bd748231"
+  },
+  {
+    "name": "Electrickery",
+    "role": "removal",
+    "provides": [
+      "damage-dealing",
+      "board-wide-damage"
+    ],
+    "wants": [],
+    "oracle_id": "99fd4b51-1698-4168-9366-a6ea2df22361"
+  },
+  {
+    "name": "Innocent Blood",
+    "role": "removal",
+    "provides": [
+      "board-protection",
+      "sacrifice-payoff"
+    ],
+    "wants": [
+      "creature-board",
+      "sacrifice-fodder"
+    ],
+    "oracle_id": "6791ec3c-c397-4087-8c8c-84d3797df415"
+  },
+  {
+    "name": "Assault Suit",
+    "role": "enabler",
+    "provides": [
+      "creature-pump",
+      "haste-grant",
+      "untap",
+      "creature-targeting",
+      "combat-enabler"
+    ],
+    "wants": [
+      "combat-attackers"
+    ],
+    "oracle_id": "c3b6e114-7bc8-4890-97d9-edbeea1f425f"
+  },
+  {
+    "name": "Artful Dodge",
+    "role": "enabler",
+    "provides": [
+      "evasion-grant",
+      "spell-casting",
+      "graveyard-recursion"
+    ],
+    "wants": [
+      "combat-attackers"
+    ],
+    "oracle_id": "c174dcbb-03a0-439c-b3d8-ed61bd46dc67"
+  },
+  {
+    "name": "Zo-Zu the Punisher",
+    "role": "threat",
+    "provides": [
+      "board-pressure",
+      "damage-dealing",
+      "goblin-tribal"
+    ],
+    "wants": [
+      "land-density",
+      "opponent-threats"
+    ],
+    "oracle_id": "0e412b68-9179-4094-960a-95692428855b"
+  },
+  {
+    "name": "Pestilence",
+    "role": "board-protection",
+    "provides": [
+      "damage-dealing",
+      "board-wide-damage"
+    ],
+    "wants": [
+      "creature-board",
+      "board-threats"
+    ],
+    "oracle_id": "dafe63ef-f3d6-45e7-877a-573da92ba85e"
+  },
+  {
+    "name": "Idyllic Grange",
+    "role": "ramp",
+    "provides": [
+      "mana-acceleration",
+      "counter-placement"
+    ],
+    "wants": [
+      "land-density",
+      "creature-board"
+    ],
+    "oracle_id": "23d349a0-e441-40b8-b634-13e61440a7c8"
+  },
+  {
+    "name": "Magic Damper",
+    "role": "utility",
+    "provides": [
+      "creature-pump",
+      "hexproof-grant",
+      "untap"
+    ],
+    "wants": [
+      "combat-attackers",
+      "combat-events"
+    ],
+    "oracle_id": "ada82f93-dc93-4a95-a13f-42b5942b3413"
+  },
+  {
+    "name": "Leap",
+    "role": "draw",
+    "provides": [
+      "evasion-grant",
+      "card-draw"
+    ],
+    "wants": [
+      "combat-attackers"
+    ],
+    "oracle_id": "e89a3ce0-6b38-4326-a7af-8575af371baa"
+  },
+  {
+    "name": "Mightform Harmonizer",
+    "role": "combat-enabler",
+    "provides": [
+      "creature-pump",
+      "trigger-doubling"
+    ],
+    "wants": [
+      "land-density",
+      "combat-attackers"
+    ],
+    "oracle_id": "8e025cda-71c5-4d06-8436-decd408667af"
+  },
+  {
+    "name": "Akroma, Angel of Wrath",
+    "role": "threat",
+    "provides": [
+      "board-pressure",
+      "evasion-grant",
+      "vigilance-grant",
+      "first-strike-grant",
+      "haste-grant",
+      "trample-grant",
+      "protection-grant"
+    ],
+    "wants": [],
+    "oracle_id": "107f204c-9fd3-490d-8887-be63d14fc6a4"
+  },
+  {
+    "name": "Doomskar",
+    "role": "removal",
+    "provides": [
+      "board-wipe"
+    ],
+    "wants": [],
+    "oracle_id": "38ece0fa-2c94-4eae-b6ab-74b783862f3e"
+  },
+  {
+    "name": "Cerulean Wisps",
+    "role": "utility",
+    "provides": [
+      "untap",
+      "card-draw",
+      "creature-type-flexibility"
+    ],
+    "wants": [
+      "combat-attackers",
+      "mana-needs"
+    ],
+    "oracle_id": "a6605c50-558e-417c-8c75-6c45b06d6e13"
+  },
+  {
+    "name": "Archetype of Courage",
+    "role": "enabler",
+    "provides": [
+      "first-strike-grant",
+      "stax-tax"
+    ],
+    "wants": [
+      "combat-attackers",
+      "opponent-threats"
+    ],
+    "oracle_id": "79b48704-480d-4905-b87a-40b127894670"
+  },
+  {
+    "name": "Titan's Strength",
+    "role": "utility",
+    "provides": [
+      "creature-pump",
+      "card-draw-payoff"
+    ],
+    "wants": [
+      "combat-attackers",
+      "card-draw-events"
+    ],
+    "oracle_id": "b0206b34-68b4-4b1f-ae79-6e2d0432ad4b"
+  },
+  {
+    "name": "Planar Bridge",
+    "role": "ramp",
+    "provides": [
+      "tutor",
+      "mana-sink"
+    ],
+    "wants": [
+      "mana-needs"
+    ],
+    "oracle_id": "853c6cc0-ed2b-4d65-add1-2449ade8cf68"
+  },
+  {
+    "name": "Ride the Shoopuf",
+    "role": "enabler",
+    "provides": [
+      "counter-placement",
+      "land-animation",
+      "creature-pump"
+    ],
+    "wants": [
+      "land-density",
+      "creature-power"
+    ],
+    "oracle_id": "81b67745-0b1f-4433-963d-9b9653fb4d95"
+  },
+  {
+    "name": "Angelic Skirmisher",
+    "role": "enabler",
+    "provides": [
+      "combat-enabler",
+      "vigilance-grant",
+      "flying-grant",
+      "lifelink-grant",
+      "first-strike-grant",
+      "triggered-abilities"
+    ],
+    "wants": [
+      "combat-attackers"
+    ],
+    "oracle_id": "29e07d57-0f05-441c-844f-cf1d71102b2d"
+  },
+  {
+    "name": "Riverchurn Monument",
+    "role": "enabler",
+    "provides": [
+      "self-mill",
+      "card-draw-payoff"
+    ],
+    "wants": [
+      "graveyard-filling"
+    ],
+    "oracle_id": "71c714a2-baa9-4082-bc8e-ceadbea231e0"
+  },
+  {
+    "name": "Retraction Helix",
+    "role": "utility",
+    "provides": [
+      "blink"
+    ],
+    "wants": [
+      "targeted-spells",
+      "tap-ability-creatures"
+    ],
+    "oracle_id": "2707f9f4-2b80-47ac-af0a-99fc53af94bf"
+  },
+  {
+    "name": "Bilious Skulldweller",
+    "role": "threat",
+    "provides": [
+      "toxic",
+      "deathtouch-grant",
+      "damage-dealing"
+    ],
+    "wants": [
+      "combat-attackers"
+    ],
+    "oracle_id": "83bf5610-a798-4508-88d2-c60d96f60d23"
+  },
+  {
+    "name": "Gifted Aetherborn",
+    "role": "threat",
+    "provides": [
+      "deathtouch-grant",
+      "lifelink-grant",
+      "damage-dealing",
+      "life-gain"
+    ],
+    "wants": [
+      "combat-attackers"
+    ],
+    "oracle_id": "0c6a6587-2b3f-40d1-a5f2-06128da0d52e"
+  },
+  {
+    "name": "Act of Treason",
+    "role": "enabler",
+    "provides": [
+      "haste-grant",
+      "untap",
+      "temporary-control"
+    ],
+    "wants": [
+      "creature-board",
+      "combat-attackers"
+    ],
+    "oracle_id": "9d08af23-9f4a-4097-9abc-3b17475ab744"
+  },
+  {
+    "name": "Yasharn, Implacable Earth",
+    "role": "utility",
+    "provides": [
+      "land-search",
+      "stax-tax",
+      "resource-denial"
+    ],
+    "wants": [
+      "land-density",
+      "legendary-presence"
+    ],
+    "oracle_id": "6dc23410-4d8f-4c8a-92b4-a8b3fae1af4e"
+  },
+  {
+    "name": "Mindslaver",
+    "role": "utility",
+    "provides": [
+      "targeting-bonus",
+      "control-manipulation",
+      "reactive-protection"
+    ],
+    "wants": [
+      "mana-needs"
+    ],
+    "oracle_id": "a806f4ee-f48a-46c3-8772-5aaabebe4c7e"
+  },
+  {
+    "name": "Tromokratis",
+    "role": "threat",
+    "provides": [
+      "hexproof-grant",
+      "combat-enabler",
+      "evasion-grant"
+    ],
+    "wants": [
+      "combat-attackers",
+      "board-threats"
+    ],
+    "oracle_id": "9aa2f27b-4c00-44c1-8bc4-014350f05b6d"
+  },
+  {
+    "name": "Deadly Recluse",
+    "role": "threat",
+    "provides": [
+      "reach-grant",
+      "deathtouch-grant",
+      "board-pressure"
+    ],
+    "wants": [
+      "combat-attackers"
+    ],
+    "oracle_id": "6b941291-1802-4ced-9869-39fa43825550"
+  },
+  {
+    "name": "Bloatfly Swarm",
+    "role": "threat",
+    "provides": [
+      "flying",
+      "counter-placement",
+      "damage-prevention",
+      "board-pressure"
+    ],
+    "wants": [
+      "counter-placement-events",
+      "life-payment"
+    ],
+    "oracle_id": "fc50e254-71bc-46b3-93e6-c6eb820a3473"
+  },
+  {
+    "name": "Obeka, Splitter of Seconds",
+    "role": "threat",
+    "provides": [
+      "menace",
+      "combat-enabler",
+      "triggered-abilities"
+    ],
+    "wants": [
+      "combat-events",
+      "combat-attackers"
+    ],
+    "oracle_id": "1d15a06f-5471-48f2-8c4a-9b0886bef5af"
+  },
+  {
+    "name": "Angelfire Ignition",
+    "role": "enabler",
+    "provides": [
+      "counter-placement",
+      "vigilance-grant",
+      "trample-grant",
+      "lifelink-grant",
+      "indestructible-grant",
+      "haste-grant",
+      "card-draw-payoff"
+    ],
+    "wants": [
+      "equip-target",
+      "combat-attackers",
+      "counter-placement-events"
+    ],
+    "oracle_id": "29e1c6e3-d76e-4388-b4e9-f732fdec4338"
+  },
+  {
+    "name": "Timestream Navigator",
+    "role": "enabler",
+    "provides": [
+      "extra-turn",
+      "ascend"
+    ],
+    "wants": [
+      "permanent-accumulation"
+    ],
+    "oracle_id": "d0896996-ee31-402e-b642-4e7cca4929fe"
+  },
+  {
+    "name": "Phyrexian Revoker",
+    "role": "removal",
+    "provides": [
+      "activated-ability-shutdown",
+      "nontoken-creature-disruption"
+    ],
+    "wants": [
+      "activated-abilities"
+    ],
+    "oracle_id": "786b3657-b595-4b38-83f2-d40915e51e2b"
+  },
+  {
+    "name": "Response // Resurgence",
+    "role": "combat-enabler",
+    "provides": [
+      "damage-dealing",
+      "first-strike-grant",
+      "vigilance-grant",
+      "extra-combat-phase"
+    ],
+    "wants": [
+      "combat-attackers"
+    ],
+    "oracle_id": "ae93854b-c808-44cb-b0be-7d1035c597d7"
+  },
+  {
+    "name": "Akroma, Vision of Ixidor",
+    "role": "threat",
+    "provides": [
+      "combat-enabler",
+      "flying-grant",
+      "first-strike-grant",
+      "vigilance-grant",
+      "trample-grant",
+      "partner"
+    ],
+    "wants": [
+      "creature-board",
+      "combat-attackers",
+      "creatures-with-key-abilities"
+    ],
+    "oracle_id": "b9be5ce9-08bb-4361-940c-9031e429ba86"
+  },
+  {
+    "name": "Nylea's Intervention",
+    "role": "utility",
+    "provides": [
+      "land-search",
+      "damage-dealing"
+    ],
+    "wants": [
+      "land-density",
+      "board-threats",
+      "creatures-with-flying"
+    ],
+    "oracle_id": "acf388b2-c4e3-4f1b-a16c-88f991d5c17b"
+  }
+]
