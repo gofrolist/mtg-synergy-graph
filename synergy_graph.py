@@ -1337,18 +1337,25 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
             else:
                 info["commander_affinity"] = 0.0
 
-    # Commander affinity multiplier: boost cards that specifically connect
-    # to the commander via tag-level analysis (bypasses graph fan-out caps).
+    # Commander affinity: compute tag-level + oracle text affinity
+    # and use it as the PRIMARY score signal, with graph as secondary.
     if commander:
         commander_card_data = next((c for c in cards if c["name"] == commander), None)
         candidate_cards_data = [c for c in cards if c["name"] not in deck_cards]
         affinities = _compute_commander_affinity(commander_card_data, candidate_cards_data)
 
+        # Normalize graph scores to 0-1
+        max_graph = max((info["total"] for info in candidate_scores.values()), default=1.0) or 1.0
+        # Normalize affinity to 0-1
+        max_aff = max(affinities.values(), default=1.0) or 1.0
+
         for card_name, info in candidate_scores.items():
             affinity = affinities.get(card_name, 0.0)
-            if affinity > 0:
-                # Multiplier: 1.0 + affinity (affinity 4 → 5.0x, affinity 10 → 11.0x)
-                info["total"] *= (1.0 + affinity)
+            graph_norm = info["total"] / max_graph
+            aff_norm = affinity / max_aff
+
+            # Score = 60% affinity + 40% graph (affinity is primary)
+            info["total"] = (aff_norm * 0.6 + graph_norm * 0.4) * 100.0
             info["commander_affinity"] = round(affinity, 1)
 
     # Sort by total synergy
@@ -1436,21 +1443,45 @@ def _compute_commander_affinity(commander_card: dict, candidate_cards: list[dict
                                 db_path: str = None) -> dict:
     """Compute commander-specific affinity for each candidate.
 
-    For each candidate, measures how specifically it synergizes with
-    the commander vs how it connects to an average card.
+    Three signals:
+    1. Tag overlap: provides↔wants connections (direct + bridges)
+    2. Oracle text: candidate references the same mechanics/creature types
+    3. Keyword synergy: shared or complementary keywords
 
     Returns {candidate_name: affinity_score}.
-    Affinity > 1.0 = specifically good for this commander.
-    Affinity < 1.0 = generic card, nothing special for this commander.
     """
     if not commander_card:
         return {}
 
     cmdr_provides = set(commander_card.get("provides", []))
     cmdr_wants = set(commander_card.get("wants", []))
+    cmdr_oracle = (commander_card.get("oracle_text") or "").lower()
+    cmdr_type_line = (commander_card.get("type_line") or "").lower()
+    cmdr_keywords = {k.lower() for k in (commander_card.get("keywords") or [])}
+
+    # Extract key concepts from commander's oracle text
+    # These are words that define what the commander cares about
+    import re
+    cmdr_concepts = set()
+
+    # Creature types mentioned in oracle text
+    for ctype in ["human", "goblin", "elf", "zombie", "vampire", "dragon", "angel",
+                  "demon", "sliver", "artifact", "enchantment", "equipment", "aura",
+                  "instant", "sorcery", "planeswalker", "land", "token", "counter",
+                  "poison", "infect"]:
+        if re.search(r'\b' + ctype + r's?\b', cmdr_oracle):
+            cmdr_concepts.add(ctype)
+
+    # Key mechanic words from oracle text
+    for mechanic in ["mill", "draw", "discard", "sacrifice", "exile", "return",
+                     "graveyard", "library", "counter", "damage", "life", "mana",
+                     "untap", "tap", "equip", "enchant", "proliferate", "toxic",
+                     "attack", "combat", "enters", "dies", "cast"]:
+        if mechanic in cmdr_oracle:
+            cmdr_concepts.add(mechanic)
 
     # Load bridges
-    bridge_provides = {}  # want_tag -> [(provide_tag, weight)]
+    bridge_provides = {}
     for (p_tag, w_tag), weight in SEMANTIC_BRIDGES.items():
         bridge_provides.setdefault(w_tag, []).append((p_tag, weight))
 
@@ -1459,31 +1490,42 @@ def _compute_commander_affinity(commander_card: dict, candidate_cards: list[dict
         name = card["name"]
         card_provides = set(card.get("provides", []))
         card_wants = set(card.get("wants", []))
+        card_oracle = (card.get("oracle_text") or "").lower()
+        card_keywords = {k.lower() for k in (card.get("keywords") or [])}
 
-        # Score: how well does this card connect to the commander?
-        cmdr_score = 0.0
+        score = 0.0
 
-        # Direct: card provides what commander wants
+        # Signal 1: Tag connections (direct + bridges)
         for tag in card_provides & cmdr_wants:
-            cmdr_score += 2.0
-
-        # Direct: card wants what commander provides
+            score += 2.0
         for tag in card_wants & cmdr_provides:
-            cmdr_score += 2.0
-
-        # Bridge: card provides something that bridges to commander's wants
+            score += 2.0
         for want in cmdr_wants:
             for p_tag, weight in bridge_provides.get(want, []):
                 if p_tag in card_provides:
-                    cmdr_score += weight * 1.5
-
-        # Bridge: commander provides something that bridges to card's wants
+                    score += weight * 1.5
         for want in card_wants:
             for p_tag, weight in bridge_provides.get(want, []):
                 if p_tag in cmdr_provides:
-                    cmdr_score += weight * 1.5
+                    score += weight * 1.5
 
-        affinities[name] = cmdr_score
+        # Signal 2: Oracle text concept overlap
+        # Candidate mentioning same key concepts as commander = high affinity
+        if cmdr_concepts and card_oracle:
+            concept_matches = 0
+            for concept in cmdr_concepts:
+                if re.search(r'\b' + concept + r's?\b', card_oracle):
+                    concept_matches += 1
+            if concept_matches > 0:
+                # Scale: 1 match = +1, 3 matches = +4, 5 matches = +8
+                score += concept_matches ** 1.5
+
+        # Signal 3: Keyword synergy
+        shared_kw = card_keywords & cmdr_keywords
+        if shared_kw:
+            score += len(shared_kw) * 0.5
+
+        affinities[name] = score
 
     return affinities
 
