@@ -214,13 +214,125 @@ SEMANTIC_BRIDGES = {
     ("spell-copying", "spell-casting"): 0.8,
     ("spell-copying", "instant-sorcery-casting"): 0.8,
 
-    # ── creature-board is a generic wants tag — only connect specific provides to it ──
-    # These are provides that genuinely help build/maintain a board of creatures
-    ("token-generation", "creature-board"): 0.6,       # Tokens build board
-    ("graveyard-recursion", "creature-board"): 0.5,    # Recurring creatures builds board
-    ("haste-grant", "creature-board"): 0.4,            # Haste lets new creatures act
-    ("board-protection", "creature-board"): 0.5,       # Protection keeps creatures alive
-    ("combat-enabler", "combat-events"): 0.7,          # Combat enablers benefit from combat
+    # ── Refined creature-board sub-tag bridges ──
+    # These are SPECIFIC versions of creature-board, enabling precise connections
+
+    # Sacrifice fodder: token generation provides disposable creatures
+    ("token-generation", "sacrifice-fodder"): 0.9,
+    ("graveyard-recursion", "sacrifice-fodder"): 0.7,
+    ("creature-pump", "sacrifice-fodder"): 0.3,  # Low — pumped creatures aren't great sac targets
+
+    # Death payoff: sacrifice outlets and removal cause deaths
+    ("sacrifice-outlet", "creature-death-payoff"): 0.9,
+    ("token-generation", "creature-death-payoff"): 0.7,  # Tokens to sacrifice
+    ("spot-removal", "creature-death-payoff"): 0.4,
+
+    # ETB payoff: anything that puts creatures onto the battlefield
+    ("token-generation", "creature-etb-payoff"): 0.9,
+    ("graveyard-recursion", "creature-etb-payoff"): 0.8,
+    ("blink", "creature-etb-payoff"): 0.9,
+
+    # Equipment target: token generation provides bodies to equip
+    ("token-generation", "equip-target"): 0.6,
+    ("haste-grant", "equip-target"): 0.5,
+
+    # Power matters: counter placement and creature pump increase power
+    ("counter-placement", "creature-power-matters"): 0.8,
+    ("creature-pump", "creature-power-matters"): 0.9,
+    ("board-wide-counter-placement", "creature-power-matters"): 0.8,
+
+    # Creature count matters: token generation creates many creatures
+    ("token-generation", "creature-count-matters"): 0.9,
+    ("graveyard-recursion", "creature-count-matters"): 0.6,
+
+    # Tap ability creatures: untap effects let them tap again
+    ("untap", "tap-ability-creatures"): 0.9,
+    ("haste-grant", "tap-ability-creatures"): 0.8,  # Haste lets them tap immediately
+    ("vigilance-grant", "tap-ability-creatures"): 0.6,
+
+    # Combat attackers: haste/evasion/pump help attackers
+    ("haste-grant", "combat-attackers"): 0.8,
+    ("evasion-grant", "combat-attackers"): 0.7,
+    ("creature-pump", "combat-attackers"): 0.7,
+    ("token-generation", "combat-attackers"): 0.6,  # More bodies to attack with
+
+    # Creature type matters: changeling fits all types
+    ("tribal-enabler", "creature-type-matters"): 0.8,
+    ("creature-type-flexibility", "creature-type-matters"): 0.9,
+
+    # Copy target: graveyard recursion provides targets
+    ("graveyard-recursion", "creature-copy-target"): 0.6,
+    ("token-generation", "creature-copy-target"): 0.5,
+
+    # General creature-board bridges (kept but lower weight since generic)
+    ("token-generation", "creature-board"): 0.5,
+    ("graveyard-recursion", "creature-board"): 0.4,
+    ("board-protection", "creature-board"): 0.4,
+    ("combat-enabler", "combat-events"): 0.7,
+
+    # ── Bidirectional combat/mana loops ──
+    ("untap", "combat-events"): 0.5,           # Untap after combat enables re-use
+    ("combat-enabler", "combat-attackers"): 0.8,
+    ("creature-pump", "combat-attackers"): 0.7,  # Already have this, reinforce
+
+    # ── Counter/ETB cycles ──
+    ("counter-placement", "counter-placement-events"): 1.0,  # Already have, ensure both directions
+    ("creature-etb-payoff", "token-generation"): 0.7,  # ETB payoff benefits from tokens entering
+
+    # ── Graveyard filling ↔ recursion ──
+    ("graveyard-filling", "graveyard-recursion"): 0.7,  # Fill enables recursion (NOT same as recursion→filling)
+
+    # ── Equipment synergies ──
+    ("equipment-synergy", "equip-target"): 0.8,
+    ("creature-pump", "equip-target"): 0.5,    # Pumped creatures are good equip targets
+    ("untap", "equip-target"): 0.4,            # Untap equipped creature for re-use
+
+    # ── Life gain loops ──
+    ("life-gain", "life-gain-events"): 0.9,    # Already have but ensure
+    ("life-drain", "life-gain"): 0.8,          # Draining opponents = gaining life (Exquisite Blood)
+
+    # ── Spell synergies ──
+    ("spell-cost-reduction", "spell-casting"): 0.7,
+    ("card-draw", "spell-casting"): 0.5,       # Drawing gives more spells to cast
+
+    # ── Mana/untap → specific needs ──
+    ("mana-acceleration", "creature-etb"): 0.4,     # Mana enables casting creatures (ETB)
+    ("mana-acceleration", "counter-placement-events"): 0.4,  # Mana enables counter-placing cards
+    ("mana-acceleration", "equip-target"): 0.4,      # Mana to cast+equip
+    ("mana-acceleration", "spell-casting"): 0.5,     # Mana enables spells
+    ("mana-acceleration", "tap-ability-creatures"): 0.5,  # Mana rocks that tap = combo with untappers
+    ("untap", "counter-placement-events"): 0.5,      # Untap counter-placing permanents
+    ("untap", "creature-etb"): 0.4,                  # Untap bounce/blink sources
+    ("mana-flexibility", "equip-target"): 0.4,
+
+    # ── Counter → sacrifice/mana (Persist/Undying loops) ──
+    ("counter-placement", "sacrifice-events"): 0.6,   # Counters reset persist/undying
+    ("counter-placement", "mana-needs"): 0.4,         # Counter-based mana (Devoted Druid)
+
+    # ── Creature type → ETB (Changeling/type matters) ──
+    ("creature-type-flexibility", "creature-etb"): 0.5,
+    ("tribal-enabler", "creature-etb"): 0.4,
+
+    # ── Land synergies (land-density = wants many lands) ──
+    ("land-search", "land-density"): 0.9,        # Tutoring lands
+    ("land-animation", "land-density"): 0.7,     # Animated lands care about land count
+    ("mana-acceleration", "land-density"): 0.3,  # Low — mana rocks aren't lands
+
+    # ── Artifact synergies (artifact-presence = wants artifacts on board) ──
+    ("artifact-enabler", "artifact-presence"): 0.8,
+    ("treasure-generation", "artifact-presence"): 0.7,  # Treasures are artifacts
+    ("mana-acceleration", "artifact-presence"): 0.5,    # Mana rocks are artifacts
+    ("equipment-synergy", "artifact-presence"): 0.6,    # Equipment are artifacts
+
+    # ── Protection / prevention → life gain events ──
+    ("board-protection", "life-gain-events"): 0.3,  # Low — indirect connection
+    ("damage-prevention", "life-gain-events"): 0.5,  # Preventing damage ≈ gaining life
+
+    # ── Combat enabler → equip target ──
+    ("combat-enabler", "equip-target"): 0.5,  # Combat enablers work well equipped
+
+    # ── Targeting synergies ──
+    ("targeting-bonus", "creature-targeting"): 0.8,
 
     # ── Extra turn / combat bridges ──
     ("extra-turn", "spell-casting"): 0.6,       # Extra turns let you cast more spells
