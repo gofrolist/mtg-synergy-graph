@@ -1226,6 +1226,7 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
             "cmc": c.get("cmc", 0),
             "mana_cost": c.get("mana_cost", ""),
             "oracle_id": c.get("oracle_id", ""),
+            "edhrec_rank": c.get("edhrec_rank"),
         }
         card_oid_lookup[c["name"]] = c.get("oracle_id", "")
 
@@ -1283,6 +1284,23 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
             info["high_cmc"] = True
         else:
             info["high_cmc"] = False
+
+    # Apply EDHREC popularity weighting
+    # Cards with better EDHREC rank (lower = more popular) get a boost.
+    # This prevents obscure cards from outranking proven EDH staples.
+    # Scale: rank 1 = 2.0x, rank 1000 = 1.5x, rank 5000 = 1.0x, rank 20000 = 0.5x, unranked = 0.3x
+    import math
+    for card_name, info in candidate_scores.items():
+        meta = card_meta.get(card_name, {})
+        rank = meta.get("edhrec_rank")
+        if rank and rank > 0:
+            # Log scale: rank 1→2.0, rank 100→1.7, rank 1000→1.4, rank 5000→1.0, rank 20000→0.5
+            popularity = max(0.3, 2.0 - 0.25 * math.log10(max(rank, 1)))
+            info["total"] *= popularity
+            info["popularity"] = round(popularity, 2)
+        else:
+            info["total"] *= 0.3  # Unranked cards are heavily penalized
+            info["popularity"] = 0.3
 
     # Sort by total synergy
     ranked = sorted(candidate_scores.items(), key=lambda x: x[1]["total"], reverse=True)
