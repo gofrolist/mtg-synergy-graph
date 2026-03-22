@@ -201,6 +201,19 @@ SEMANTIC_BRIDGES = {
     # Infect provides what counter-synergy wants
     ("infect", "creature-board"): 0.4,
 
+    # ── Untap / Mana loop bridges ──
+    # Untap effects enable cards that tap for value (mana, abilities)
+    ("untap", "tapped-creatures"): 0.8,
+    ("untap", "mana-needs"): 0.6,
+    ("untap", "spell-casting"): 0.5,
+    # Mana acceleration enables tap-based combos
+    ("mana-acceleration", "tapped-creatures"): 0.6,
+    # Haste enables tap abilities immediately (Krenko + haste = combo)
+    ("haste-grant", "tapped-creatures"): 0.7,
+    # Spell copying enables spell-based combos
+    ("spell-copying", "spell-casting"): 0.8,
+    ("spell-copying", "instant-sorcery-casting"): 0.8,
+
     # ── Spellslinger / Drain bridges ──
 
     # Life drain → life gain events (draining opponents = gaining life for payoffs)
