@@ -61,6 +61,8 @@ def patch_all(db_path=None, dry_run=False):
         "wheel": _patch_wheel(conn, dry_run),
         "blink": _patch_blink(conn, dry_run),
         "sacrifice": _patch_sacrifice(conn, dry_run),
+        "high_power": _patch_high_power(conn, dry_run),
+        "cost_reduction": _patch_cost_reduction(conn, dry_run),
     }
 
     if not dry_run:
@@ -244,6 +246,50 @@ def _patch_sacrifice(conn, dry_run):
                 break
 
     return {"patched": patched, "description": "sacrifice cost oracle text → sacrifice-outlet provides"}
+
+
+def _patch_high_power(conn, dry_run):
+    """Patch 7: Creatures with power >= 5 provide creature-power."""
+    cards = conn.execute("""
+        SELECT oracle_id, name, power FROM cards
+        WHERE type_line LIKE '%Creature%' AND power IS NOT NULL
+    """).fetchall()
+
+    patched = 0
+    for oid, name, power in cards:
+        try:
+            p = int(power)
+        except (ValueError, TypeError):
+            continue
+        if p >= 5:
+            if _add_provides(conn, oid, "creature-power", dry_run):
+                patched += 1
+
+    return {"patched": patched, "description": "creatures with power >= 5 → creature-power provides"}
+
+
+def _patch_cost_reduction(conn, dry_run):
+    """Patch 8: Cards with cost reduction provide cost-reduction."""
+    cards = conn.execute(
+        "SELECT oracle_id, name, oracle_text FROM cards WHERE oracle_text IS NOT NULL"
+    ).fetchall()
+
+    patterns = [
+        re.compile(r'costs? \{?\d+\}? less', re.I),
+        re.compile(r'cost \{?\d+\}? less', re.I),
+        re.compile(r'reduce the cost', re.I),
+        re.compile(r'without paying .* mana cost', re.I),
+    ]
+
+    patched = 0
+    for oid, name, oracle_text in cards:
+        for p in patterns:
+            if p.search(oracle_text):
+                if _add_provides(conn, oid, "cost-reduction", dry_run):
+                    patched += 1
+                break
+
+    return {"patched": patched, "description": "cost reduction oracle text → cost-reduction provides"}
 
 
 if __name__ == "__main__":
