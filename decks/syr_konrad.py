@@ -1,113 +1,73 @@
-"""Syr Konrad, the Grim — Mono-Black graveyard / aristocrats."""
+"""Syr Konrad, the Grim — mono-B graveyard/aristocrats/mill."""
 
 COMMANDER = "Syr Konrad, the Grim"
 EDHREC_SLUG = "syr-konrad-the-grim"
 COLOR_IDENTITY = {"B"}
 
 DECKLIST = [
-    # Self-mill engines
-    "Mesmeric Orb", "Altar of Dementia", "Stitcher's Supplier",
-    "Corpse Connoisseur", "Gravebreaker Lamia",
-    # Reanimation
-    "Animate Dead", "Reanimate", "Exhume", "Stitch Together",
-    "Living Death", "Victimize", "Whip of Erebos", "Champion of Stray Souls",
-    "Phyrexian Reclamation", "Rise of the Dark Realms",
+    # Self-mill / graveyard filling
+    "Altar of Dementia", "Altar of the Brood", "Mesmeric Orb",
+    "Stitcher's Supplier", "Eye Collector", "Millikin",
+    "Mindwrack Harpy", "Mire Triton", "Stinkweed Imp",
+    "Golgari Thug", "Dakmor Salvage", "Doom Whisperer",
+    "Dread Summons", "Morality Shift", "Perpetual Timepiece",
+    "Ghoulcaller's Bell", "Ripples of Undeath",
+    "Corpse Churn", "Unseal the Necropolis",
+    # Combo / synergy
+    "Mindcrank", "Bloodchief Ascension", "Angel of Suffering",
+    "Phyresis",
+    # Death triggers / aristocrats
+    "Blood Artist", "Zulaport Cutthroat", "Gray Merchant of Asphodel",
+    "Ayara, First of Locthwain", "Dreadhound",
+    "Pawn of Ulamog", "Tormod, the Desecrator",
     # Sacrifice outlets
-    "Viscera Seer", "Carrion Feeder", "Ashnod's Altar", "Phyrexian Altar",
-    "Altar of Dementia",
-    # Death/graveyard triggers — the Konrad damage engine
-    "Blood Artist", "Zulaport Cutthroat", "Midnight Reaper",
-    "Pawn of Ulamog", "Grim Haruspex", "Desecrated Tomb",
-    "Secrets of the Dead",
-    # Aristocrats payoffs
-    "Gray Merchant of Asphodel", "Dictate of Erebos", "Grave Pact",
-    "Butcher of Malakir", "Fleshbag Marauder", "Merciless Executioner",
-    "Plaguecrafter",
-    # Recursion / graveyard support
-    "Relentless Dead", "Tortured Existence", "Nim Deathmantle",
-    "Mikaeus, the Unhallowed", "Coffin Queen",
-    # Finishers / game-changers
-    "Sheoldred, the Apocalypse", "Massacre Wurm", "Bolas's Citadel",
-    "Liliana, Dreadhorde General",
-    # Board wipes
-    "Damnation", "Toxic Deluge",
+    "Viscera Seer", "Carrion Feeder", "Woe Strider",
+    # Sacrifice payoffs / edict effects
+    "Braids, Arisen Nightmare", "Fleshbag Marauder",
+    "Merciless Executioner", "Demon's Disciple",
+    "Plaguecrafter", "Accursed Marauder",
+    # Reanimation
+    "Dread Return", "Victimize", "Living Death",
+    "Breach the Multiverse", "Wake the Dead",
+    "Reassembling Skeleton", "Undead Butler",
+    # Recursion / graveyard manipulation
+    "Tortured Existence", "Forever Young", "Footbottom Feast",
+    "Gravepurge", "Returned Reveler",
+    # Card draw / value
+    "Grim Haruspex", "Midnight Reaper", "Fell Stinger",
+    "Songs of the Damned",
     # Removal
-    "Infernal Grasp", "Deadly Rollick", "Hero's Downfall",
-    # Ramp
-    "Sol Ring", "Arcane Signet", "Dark Ritual", "Crypt Ghast",
-    # Card draw / advantage
-    "Phyrexian Arena", "Read the Bones", "Necropotence", "Skullclamp",
-    "Sign in Blood", "Night's Whisper", "Dark Prophecy", "Peer into the Abyss",
-    # Tutors
-    "Demonic Tutor", "Entomb", "Buried Alive",
-    # Graveyard hate tech
-    "Filth",
-    # Lands
-    "Cabal Coffers", "Cabal Stronghold", "Urborg, Tomb of Yawgmoth",
-    "Phyrexian Tower", "Volrath's Stronghold", "Command Beacon",
-    "Bojuka Bog", "Unholy Grotto", "Mortuary Mire", "Castle Locthwain",
-    "Witch's Cottage",
-    "Swamp", "Swamp", "Swamp", "Swamp", "Swamp",
-    "Swamp", "Swamp", "Swamp", "Swamp", "Swamp",
-    "Swamp", "Swamp", "Swamp", "Swamp", "Swamp",
-    "Swamp", "Swamp", "Swamp", "Swamp", "Swamp",
-    "Swamp", "Swamp", "Swamp", "Swamp", "Swamp",
+    "Massacre Girl", "Massacre Wurm", "Ravenous Chupacabra",
+    "Shriekmaw",
+    # Ramp / mana
+    "Burnished Hart", "Leaden Myr", "Ornithopter of Paradise",
+    "Solemn Simulacrum",
+    "Undercity Informer",
+    # Lands (non-basic)
+    "Bojuka Bog", "Crypt of Agadeem", "Memorial to Folly",
+    "Mortuary Mire", "Scavenger Grounds", "Witch's Cottage",
 ]
 
 DISTRACTORS = [
-    "Haunting Voyage",     # only good if many creatures died this turn — inconsistent
-    "Patriarch's Bidding", # symmetric reanimate — helps opponents too
-    "Living End",          # requires cascade setup, awkward without it
-    "Lolth, Spider Queen", # needs steady creature deaths but isn't a drain payoff
-    "Dark Prophecy",       # already in deck — this is a distractor slot placeholder
-    "Zombie Infestation",  # makes tokens but wastes cards in hand
-    "Haakon, Stromgald Scourge",  # only recurs Knights, doesn't combo with Konrad
-    "Death's Caress",      # overcosted removal with minor upside
-    "Bitter Ordeal",       # win-more storm card — requires combo to be online already
+    "Necropotence", "Phyrexian Arena", "Bolas's Citadel",
+    "Grave Titan", "Sheoldred, Whispering One", "Entomb",
+    "Reanimate", "Exsanguinate", "Cabal Coffers",
 ]
 
 SYNERGY_PAIRS = [
-    ("Syr Konrad, the Grim", "Altar of Dementia", "mill yourself → every creature entering graveyard pings each opponent"),
-    ("Syr Konrad, the Grim", "Mesmeric Orb", "Orb mills on every untap — chains with Konrad pings"),
-    ("Syr Konrad, the Grim", "Living Death", "wipe + reanimate → every creature leaving and re-entering graveyard triggers Konrad"),
-    ("Syr Konrad, the Grim", "Mikaeus, the Unhallowed", "Mikaeus undying keeps creatures looping back through graveyard for Konrad triggers"),
-    ("Syr Konrad, the Grim", "Blood Artist", "creatures dying = double drain: Artist + Konrad"),
-    ("Syr Konrad, the Grim", "Nim Deathmantle", "Deathmantle loops a dying creature repeatedly for repeated Konrad triggers"),
-    ("Viscera Seer", "Blood Artist", "free sac outlet + drain on each death"),
-    ("Ashnod's Altar", "Living Death", "sac board before Living Death → generate mana, then reanimate everything"),
-    ("Dictate of Erebos", "Fleshbag Marauder", "Fleshbag + Dictate forces opponents to sac two creatures"),
-    ("Grave Pact", "Plaguecrafter", "Plaguecrafter ETB clears boards via Grave Pact"),
-    ("Bolas's Citadel", "Necropotence", "Citadel lets you cast from top; Necropotence refills hand as resource"),
-    ("Cabal Coffers", "Urborg, Tomb of Yawgmoth", "Urborg makes all lands Swamps → Coffers generates massive mana"),
-    ("Buried Alive", "Animate Dead", "Buried Alive places targets, Animate Dead brings them back immediately"),
-    ("Entomb", "Reanimate", "instant-speed combo: Entomb + Reanimate at end of opponent's turn"),
-    ("Midnight Reaper", "Dictate of Erebos", "each opponent sac → Reaper draws you a card per creature you sac in response"),
-]
-
-# Scryfall supplement filters for Syr Konrad
-SUPPLEMENT_FILTERS = [
-    {
-        "check": lambda type_line, oracle_text: (
-            "graveyard" in oracle_text.lower() and "damage" in oracle_text.lower()
-        ),
-        "reason": "graveyard-damage",
-    },
-    {
-        "check": lambda type_line, oracle_text: (
-            bool(__import__("re").search(r"whenever.*creature.*dies", oracle_text.lower()))
-        ),
-        "reason": "creature-death-trigger",
-    },
-    {
-        "check": lambda type_line, oracle_text: (
-            bool(__import__("re").search(r"sacrifice.*creature.*:", oracle_text.lower()))
-        ),
-        "reason": "sac-outlet",
-    },
-    {
-        "check": lambda type_line, oracle_text: (
-            "mill" in oracle_text.lower() and ("you" in oracle_text.lower())
-        ),
-        "reason": "self-mill",
-    },
+    ("Syr Konrad, the Grim", "Mindcrank", "Konrad deals damage when creatures enter/leave graveyard → Mindcrank mills → more creatures enter graveyard → infinite loop"),
+    ("Syr Konrad, the Grim", "Mesmeric Orb", "every untap mills → creatures enter graveyard → Konrad deals damage"),
+    ("Syr Konrad, the Grim", "Morality Shift", "swap library and graveyard → every creature changes zones → massive damage"),
+    ("Syr Konrad, the Grim", "Altar of Dementia", "sacrifice creatures → mill yourself → Konrad triggers on death + mill"),
+    ("Mindcrank", "Bloodchief Ascension", "infinite combo: opponent loses life → mill → cards enter graveyard → Ascension triggers → opponent loses life"),
+    ("Blood Artist", "Viscera Seer", "sacrifice creatures for scry + drain"),
+    ("Zulaport Cutthroat", "Living Death", "Living Death kills + reanimates → double drain triggers"),
+    ("Gray Merchant of Asphodel", "Victimize", "reanimate Gary for repeated devotion drain"),
+    ("Stinkweed Imp", "Tortured Existence", "discard Imp → dredge 5 → discard another creature → repeat"),
+    ("Reassembling Skeleton", "Altar of Dementia", "sacrifice Skeleton → mill → reanimate Skeleton → repeat"),
+    ("Grim Haruspex", "Fleshbag Marauder", "Marauder forces sacrifice → Haruspex draws on each death"),
+    ("Dreadhound", "Syr Konrad, the Grim", "both trigger on creatures entering graveyard → double damage"),
+    ("Angel of Suffering", "Syr Konrad, the Grim", "damage becomes mill → Konrad triggers on milled creatures"),
+    ("Braids, Arisen Nightmare", "Pawn of Ulamog", "Braids sacrifices → Pawn makes tokens → sacrifice tokens"),
+    ("Phyresis", "Syr Konrad, the Grim", "Konrad's damage becomes infect → 10 poison counters kills"),
 ]
