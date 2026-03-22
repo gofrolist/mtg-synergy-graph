@@ -334,6 +334,31 @@ SEMANTIC_BRIDGES = {
     # ── Targeting synergies ──
     ("targeting-bonus", "creature-targeting"): 0.8,
 
+    # ── Mill synergies ──
+    ("self-mill", "mill-triggers"): 0.9,         # Mill triggers from mill effects
+    ("card-discard", "graveyard-filling"): 0.7,  # Discarding fills graveyard
+    ("card-mill", "graveyard-filling"): 0.9,     # Milling fills graveyard
+    ("counter-amplification", "mill-triggers"): 0.7,  # Doubling mill (Bruvac)
+
+    # ── Planeswalker synergies ──
+    ("planeswalker-activation", "planeswalker-presence"): 0.9,
+    ("untap", "planeswalker-presence"): 0.4,     # Untap can reset chain veil etc
+    ("proliferate", "planeswalker-presence"): 0.8,  # Proliferate adds loyalty
+
+    # ── Blink/bounce → spell cast ──
+    ("blink", "spell-casting"): 0.5,             # Blinking is re-casting
+    ("cost-reduction", "creature-etb-payoff"): 0.6,  # Cheaper creatures = more ETBs
+
+    # ── Board wipe → death payoff ──
+    ("board-wipe", "creature-death-payoff"): 0.7,  # Wipes cause mass death
+    ("board-wipe", "sacrifice-events"): 0.5,
+
+    # ── Graveyard recursion → mana ──
+    ("graveyard-recursion", "mana-needs"): 0.4,  # Recurring cheap cards = mana efficiency
+
+    # ── Life gain → artifact presence (artifact-based lifegain combos) ──
+    ("life-gain", "artifact-presence"): 0.3,  # Low — indirect connection
+
     # ── Extra turn / combat bridges ──
     ("extra-turn", "spell-casting"): 0.6,       # Extra turns let you cast more spells
     ("extra-turn", "combat-events"): 0.7,        # Extra turns = extra combat steps
