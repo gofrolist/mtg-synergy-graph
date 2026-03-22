@@ -149,6 +149,18 @@ def compute_features(commander: dict, candidate: dict) -> dict:
     # Feature 21: EDHREC saltiness (how powerful/disruptive the card is)
     card_saltiness = candidate.get("edhrec_saltiness") or 0.0
 
+    # Feature 22: Oracle text similarity (Jaccard on words, excluding stop words)
+    _stops = {'a', 'an', 'the', 'of', 'to', 'and', 'or', 'in', 'on', 'at', 'is',
+              'it', 'that', 'this', 'for', 'you', 'your', 'its', 'may', 'if', 'with',
+              'from', 'by', 'be', 'as', 'are', 'was', 'has', 'have', 'had', 'not',
+              'but', 'all', 'each', 'any', 'one', 'two', 'three', 'can', 'do'}
+    cmdr_words = set(cmdr_oracle.split()) - _stops if cmdr_oracle else set()
+    card_words = set(card_oracle.split()) - _stops if card_oracle else set()
+    if cmdr_words and card_words:
+        text_similarity = len(cmdr_words & card_words) / len(cmdr_words | card_words)
+    else:
+        text_similarity = 0.0
+
     # Feature 18: Total Spellbook combos candidate appears in (overall combo versatility)
     total_spellbook = 0
     if card_oid and hasattr(compute_features, '_spellbook_cache'):
@@ -222,6 +234,7 @@ def compute_features(commander: dict, candidate: dict) -> dict:
         "strategy_match": strategy_match,
         "theme_overlap": theme_overlap,
         "card_saltiness": round(card_saltiness, 2),
+        "text_similarity": round(text_similarity, 3),
     }
 
 
@@ -403,7 +416,7 @@ def train_model(training_data=None):
                      "cmdr_type_in_oracle", "card_type_in_cmdr_oracle",
                      "spellbook_combos", "ability_match", "color_overlap",
                      "card_rarity", "total_spellbook", "strategy_match", "theme_overlap",
-                     "card_saltiness"]
+                     "card_saltiness", "text_similarity"]
 
     # Compute feature means and stds for normalization
     means = {f: 0.0 for f in feature_names}
@@ -481,43 +494,165 @@ def train_model(training_data=None):
         if (epoch + 1) % 10 == 0:
             print(f"  Ranking epoch {epoch+1}: loss={total_loss/max(pairs,1):.4f}")
 
-    # Save model
-    model = {
+    # Save linear model
+    linear_model = {
         "weights": weights,
         "bias": bias,
         "means": means,
         "stds": stds,
         "feature_names": feature_names,
     }
-    with open(MODEL_PATH, "w") as f:
-        json.dump(model, f, indent=2)
 
-    # Print feature importance
-    print(f"\nFeature importance (|weight|):")
+    print(f"\nLinear feature importance (|weight|):")
     for f in sorted(feature_names, key=lambda x: -abs(weights[x])):
         print(f"  {f:<25} {weights[f]:>7.3f}")
+
+    # Phase 3: Gradient Boosted Trees (simple implementation)
+    print(f"\nTraining gradient boosted trees...")
+    # Subsample for faster tree training
+    import random
+    random.seed(42)
+    subsample = random.sample(training_data, min(15000, len(training_data)))
+    trees = _train_gbt(subsample, feature_names, means, stds, n_trees=50, max_depth=3, lr=0.1)
+    print(f"  Trained {len(trees['trees'])} trees")
+
+    # Save combined model
+    model = {
+        "weights": weights,
+        "bias": bias,
+        "means": means,
+        "stds": stds,
+        "feature_names": feature_names,
+        "trees": trees,
+        "model_type": "gbt+linear",
+    }
+    with open(MODEL_PATH, "w") as f:
+        json.dump(model, f, indent=2)
 
     return model
 
 
-def predict(model: dict, commander: dict, candidate: dict) -> float:
-    """Predict synergy score for a commander-candidate pair.
+def _train_gbt(data, feature_names, means, stds, n_trees=30, max_depth=4, lr=0.1):
+    """Train gradient boosted decision trees."""
 
-    Caps rank_log influence to prevent popular staples from dominating.
-    """
+    # Normalize features
+    X = []
+    y = []
+    for row in data:
+        x = {f: (row[f] - means[f]) / stds[f] for f in feature_names}
+        X.append(x)
+        y.append(row["label"])
+
+    # Initialize residuals with log-odds
+    pos = sum(y)
+    neg = len(y) - pos
+    init_pred = math.log(pos / max(neg, 1))
+    residuals = [y[i] - 1.0 / (1.0 + math.exp(-init_pred)) for i in range(len(y))]
+
+    trees = []
+    trees_init = init_pred
+    # Accumulate predictions to avoid O(n²) recomputation
+    accumulated = [init_pred] * len(X)
+
+    for t in range(n_trees):
+        tree = _fit_tree(X, residuals, feature_names, max_depth=max_depth)
+        trees.append(tree)
+
+        # Update accumulated predictions and residuals
+        for i in range(len(X)):
+            accumulated[i] += _predict_tree(tree, X[i]) * lr
+            clamped = max(-10, min(10, accumulated[i]))
+            prob = 1.0 / (1.0 + math.exp(-clamped))
+            residuals[i] = y[i] - prob
+
+        if (t + 1) % 10 == 0:
+            avg_res = sum(abs(r) for r in residuals) / len(residuals)
+            print(f"    Tree {t+1}/{n_trees}: avg |residual| = {avg_res:.4f}")
+
+    return {"init": trees_init, "trees": trees, "lr": lr}
+
+
+def _fit_tree(X, residuals, feature_names, max_depth):
+    """Fit a simple decision tree stump to residuals."""
+    if max_depth == 0 or len(X) < 10:
+        return {"leaf": sum(residuals) / max(len(residuals), 1)}
+
+    best_gain = 0
+    best_split = None
+
+    for feat in feature_names:
+        values = sorted(set(X[i][feat] for i in range(len(X))))
+        if len(values) < 2:
+            continue
+        # Try a few split points
+        for split_val in values[::max(1, len(values)//10)]:
+            left_r = [residuals[i] for i in range(len(X)) if X[i][feat] <= split_val]
+            right_r = [residuals[i] for i in range(len(X)) if X[i][feat] > split_val]
+            if len(left_r) < 5 or len(right_r) < 5:
+                continue
+            gain = (sum(left_r)**2 / len(left_r)) + (sum(right_r)**2 / len(right_r))
+            if gain > best_gain:
+                best_gain = gain
+                best_split = (feat, split_val)
+
+    if best_split is None:
+        return {"leaf": sum(residuals) / max(len(residuals), 1)}
+
+    feat, split_val = best_split
+    left_idx = [i for i in range(len(X)) if X[i][feat] <= split_val]
+    right_idx = [i for i in range(len(X)) if X[i][feat] > split_val]
+
+    return {
+        "feature": feat,
+        "threshold": split_val,
+        "left": _fit_tree([X[i] for i in left_idx], [residuals[i] for i in left_idx],
+                          feature_names, max_depth - 1),
+        "right": _fit_tree([X[i] for i in right_idx], [residuals[i] for i in right_idx],
+                           feature_names, max_depth - 1),
+    }
+
+
+def _predict_tree(tree, x):
+    """Predict using a single decision tree."""
+    if "leaf" in tree:
+        return tree["leaf"]
+    if x[tree["feature"]] <= tree["threshold"]:
+        return _predict_tree(tree["left"], x)
+    else:
+        return _predict_tree(tree["right"], x)
+
+
+def predict(model: dict, commander: dict, candidate: dict) -> float:
+    """Predict synergy score using GBT + linear ensemble."""
     features = compute_features(commander, candidate)
     x = {f: (features[f] - model["means"][f]) / model["stds"][f]
          for f in model["feature_names"]}
 
-    # Cap rank_log and cmc_diff contribution to prevent dominating
-    # Without this, rank alone determines most recommendations
+    # Cap rank_log and cmc_diff
     for dampened in ["rank_log", "cmc_diff"]:
         if dampened in x:
             x[dampened] = max(-0.5, min(0.5, x[dampened]))
 
-    z = sum(model["weights"][f] * x[f] for f in model["feature_names"]) + model["bias"]
-    z = max(-20, min(20, z))
-    return 1.0 / (1.0 + math.exp(-z))
+    # Linear model score
+    z_linear = sum(model["weights"][f] * x[f] for f in model["feature_names"]) + model["bias"]
+    z_linear = max(-20, min(20, z_linear))
+    linear_score = 1.0 / (1.0 + math.exp(-z_linear))
+
+    # GBT score (if available)
+    trees_data = model.get("trees")
+    if trees_data and "trees" in trees_data:
+        z_gbt = trees_data["init"]
+        for tree in trees_data["trees"]:
+            z_gbt += _predict_tree(tree, x) * trees_data["lr"]
+        z_gbt = max(-10, min(10, z_gbt))
+        gbt_score = 1.0 / (1.0 + math.exp(-z_gbt))
+
+        # Use GBT only for tiebreaking when linear scores are close
+        if abs(gbt_score - linear_score) < 0.1:
+            return (gbt_score + linear_score) / 2
+        return linear_score
+    else:
+        return linear_score
 
 
 def evaluate_model(model=None):

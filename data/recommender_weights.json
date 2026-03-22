@@ -1,31 +1,32 @@
 {
   "weights": {
-    "provides_to_wants": 0.09395108127442998,
-    "wants_from_provides": 0.22228687343504577,
-    "bridge_score": 0.4508198515307075,
-    "oracle_overlap": 0.4132833510488916,
-    "keyword_overlap": 0.2850168080234062,
-    "shared_types": 0.30150037166580773,
-    "type_match": 0.1706209331333983,
-    "cmc_diff": -0.9393849773917317,
-    "rank_log": -2.054212548038206,
-    "total_tags": -0.2938188668827914,
-    "bridge_x_oracle": -0.39254129143255745,
-    "provides_x_bridge": -0.17703191864271894,
-    "bidirectional": 0.08187444354161146,
-    "rare_overlap": 0.09103086584142814,
-    "cmdr_type_in_oracle": 0.32960127018070495,
-    "card_type_in_cmdr_oracle": 0.3104847074466786,
-    "spellbook_combos": 0.4896728316940652,
-    "ability_match": -0.006821840198460483,
-    "color_overlap": 0.6496280304117856,
-    "card_rarity": 0.1709343211896162,
-    "total_spellbook": 0.12086310424555267,
-    "strategy_match": 0.5038816540446477,
-    "theme_overlap": 1.9681606928696642,
-    "card_saltiness": -0.08692227603427434
+    "provides_to_wants": 0.08483092525572442,
+    "wants_from_provides": 0.22852005942946213,
+    "bridge_score": 0.4154871562633285,
+    "oracle_overlap": 0.2526745710137492,
+    "keyword_overlap": 0.24447691244161115,
+    "shared_types": 0.29444114006965844,
+    "type_match": 0.16823643445955364,
+    "cmc_diff": -0.8956687171154664,
+    "rank_log": -2.0716011156506333,
+    "total_tags": -0.3021316812031089,
+    "bridge_x_oracle": -0.38130242938680725,
+    "provides_x_bridge": -0.18408040357098887,
+    "bidirectional": 0.08543442621256629,
+    "rare_overlap": 0.10631225404400349,
+    "cmdr_type_in_oracle": 0.33447669818803916,
+    "card_type_in_cmdr_oracle": 0.3152785440202397,
+    "spellbook_combos": 0.48146605519623553,
+    "ability_match": -0.015008087733487718,
+    "color_overlap": 0.6381010597704995,
+    "card_rarity": 0.1672829982468087,
+    "total_spellbook": 0.14900570065355645,
+    "strategy_match": 0.47643873758778915,
+    "theme_overlap": 1.9218080176945065,
+    "card_saltiness": -0.10369636408513826,
+    "text_similarity": 0.35539107647885265
   },
-  "bias": -2.007816730592716,
+  "bias": -2.0709656221788815,
   "means": {
     "provides_to_wants": 0.03140632252075705,
     "wants_from_provides": 0.035342856651711274,
@@ -50,7 +51,8 @@
     "total_spellbook": 3.6539803688996613,
     "strategy_match": 0.5874890413078232,
     "theme_overlap": 0.2841868220652193,
-    "card_saltiness": 0.30366527426813644
+    "card_saltiness": 0.30366527426813644,
+    "text_similarity": 0.05837924810478882
   },
   "stds": {
     "provides_to_wants": 0.17753910039895734,
@@ -76,7 +78,8 @@
     "total_spellbook": 7.0826058410686965,
     "strategy_match": 0.8464938951551453,
     "theme_overlap": 0.9142475862639874,
-    "card_saltiness": 0.33104498301344426
+    "card_saltiness": 0.33104498301344426,
+    "text_similarity": 0.06535829811630336
   },
   "feature_names": [
     "provides_to_wants",
@@ -102,6 +105,2614 @@
     "total_spellbook",
     "strategy_match",
     "theme_overlap",
-    "card_saltiness"
-  ]
+    "card_saltiness",
+    "text_similarity"
+  ],
+  "trees": {
+    "init": -0.7175472062586017,
+    "trees": [
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": -1.2328978051615906,
+            "left": {
+              "leaf": 0.11759195849546039
+            },
+            "right": {
+              "leaf": 0.40817082290101814
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": 0.7829533144953701,
+            "left": {
+              "leaf": 0.6077325808878856
+            },
+            "right": {
+              "leaf": 0.6562563899868247
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.3018150520405583,
+          "left": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.03407858472998142
+            },
+            "right": {
+              "leaf": 0.5792831615120274
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.3027173957462618
+            },
+            "right": {
+              "leaf": 0.6720666666666666
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": -1.2328978051615906,
+            "left": {
+              "leaf": 0.1149950888202971
+            },
+            "right": {
+              "leaf": 0.39911266088933073
+            }
+          },
+          "right": {
+            "feature": "color_overlap",
+            "threshold": -0.45355597926092794,
+            "left": {
+              "leaf": 0.5818608416558803
+            },
+            "right": {
+              "leaf": 0.6349240636316568
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.3018150520405583,
+          "left": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.03332795724402867
+            },
+            "right": {
+              "leaf": 0.5663912670503718
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.2960807896290277
+            },
+            "right": {
+              "leaf": 0.6570871983886077
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": -1.2328978051615906,
+            "left": {
+              "leaf": 0.11244553711374206
+            },
+            "right": {
+              "leaf": 0.39013816174172744
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": 0.7829533144953701,
+            "left": {
+              "leaf": 0.5801334584445659
+            },
+            "right": {
+              "leaf": 0.6275515680330124
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.1767881439865153,
+          "left": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": 0.0018652492988172782
+            },
+            "right": {
+              "leaf": 0.5468902190624915
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.2781301718740653
+            },
+            "right": {
+              "leaf": 0.6437891009327482
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": -1.2328978051615906,
+            "left": {
+              "leaf": 0.1099430278818179
+            },
+            "right": {
+              "leaf": 0.3812581301951552
+            }
+          },
+          "right": {
+            "feature": "color_overlap",
+            "threshold": -0.45355597926092794,
+            "left": {
+              "leaf": 0.5546569337446108
+            },
+            "right": {
+              "leaf": 0.6064912674624945
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.3018150520405583,
+          "left": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.031207291719444516
+            },
+            "right": {
+              "leaf": 0.5408045228338679
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.283689802767794
+            },
+            "right": {
+              "leaf": 0.6272069031483798
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": 0.09343687195048683,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": 0.14295547781001183
+            },
+            "right": {
+              "leaf": 0.5258038490505716
+            }
+          },
+          "right": {
+            "feature": "strategy_match",
+            "threshold": -0.6940263180517661,
+            "left": {
+              "leaf": 0.5341542137746842
+            },
+            "right": {
+              "leaf": 0.5904017533084054
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.3573825667312439,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": -0.15038459206444757
+            },
+            "right": {
+              "leaf": 0.3327812543064931
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.28320320232628016
+            },
+            "right": {
+              "leaf": 0.6124285869533075
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": -1.2328978051615906,
+            "left": {
+              "leaf": 0.10415465833164672
+            },
+            "right": {
+              "leaf": 0.36751656692245804
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": 0.7829533144953701,
+            "left": {
+              "leaf": 0.5392913274649214
+            },
+            "right": {
+              "leaf": 0.5854160365195319
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.1767881439865153,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": -0.052076856827253305,
+            "left": {
+              "leaf": -0.09344141165075545
+            },
+            "right": {
+              "leaf": 0.2009872581239805
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.26106030915322953
+            },
+            "right": {
+              "leaf": 0.607941782475009
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": -1.2328978051615906,
+            "left": {
+              "leaf": 0.10180903614628134
+            },
+            "right": {
+              "leaf": 0.35892323622098155
+            }
+          },
+          "right": {
+            "feature": "color_overlap",
+            "threshold": -0.45355597926092794,
+            "left": {
+              "leaf": 0.5145992857235582
+            },
+            "right": {
+              "leaf": 0.5649452788258759
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.3018150520405583,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": -0.04300616596698791
+            },
+            "right": {
+              "leaf": 0.4010695883168113
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.2664608755079716
+            },
+            "right": {
+              "leaf": 0.5856158181465724
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": -1.2328978051615906,
+            "left": {
+              "leaf": 0.09950884592015251
+            },
+            "right": {
+              "leaf": 0.35045559901310647
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": 0.7829533144953701,
+            "left": {
+              "leaf": 0.5129460924182099
+            },
+            "right": {
+              "leaf": 0.5579029921564064
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.1767881439865153,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": -0.052076856827253305,
+            "left": {
+              "leaf": -0.09102454120619786
+            },
+            "right": {
+              "leaf": 0.19572821238041485
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.25058922729929134
+            },
+            "right": {
+              "leaf": 0.5841446811711255
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": 0.09343687195048683,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "strategy_match",
+            "threshold": -0.6940263180517661,
+            "left": {
+              "leaf": 0.06417802425454976
+            },
+            "right": {
+              "leaf": 0.3064155872949804
+            }
+          },
+          "right": {
+            "feature": "strategy_match",
+            "threshold": -0.6940263180517661,
+            "left": {
+              "leaf": 0.4841711313060503
+            },
+            "right": {
+              "leaf": 0.5390088957410838
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.3573825667312439,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": -0.1384761275312193
+            },
+            "right": {
+              "leaf": 0.32340190071140174
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.26127348655994553
+            },
+            "right": {
+              "leaf": 0.5544134323523043
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": -1.2328978051615906,
+            "left": {
+              "leaf": 0.09397764494568926
+            },
+            "right": {
+              "leaf": 0.33762707392916896
+            }
+          },
+          "right": {
+            "feature": "color_overlap",
+            "threshold": -0.45355597926092794,
+            "left": {
+              "leaf": 0.4762166578333211
+            },
+            "right": {
+              "leaf": 0.5250692427899616
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.3018150520405583,
+          "left": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.032530342098510336
+            },
+            "right": {
+              "leaf": 0.4999009557317882
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.2507923787746723
+            },
+            "right": {
+              "leaf": 0.5455322172404813
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "strategy_match",
+            "threshold": -0.6940263180517661,
+            "left": {
+              "leaf": 0.14577544377249982
+            },
+            "right": {
+              "leaf": 0.37546619460201314
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": 0.7829533144953701,
+            "left": {
+              "leaf": 0.4749028397079424
+            },
+            "right": {
+              "leaf": 0.5185685653690714
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.3018150520405583,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": -0.04329521451763273
+            },
+            "right": {
+              "leaf": 0.38434221343763697
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.24580918890055722
+            },
+            "right": {
+              "leaf": 0.5319833631289205
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": 0.09343687195048683,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": 0.1170741016014195
+            },
+            "right": {
+              "leaf": 0.47505236891694136
+            }
+          },
+          "right": {
+            "feature": "strategy_match",
+            "threshold": -0.6940263180517661,
+            "left": {
+              "leaf": 0.44825111944576995
+            },
+            "right": {
+              "leaf": 0.5016266484505643
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.4407338387672718,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": -0.14928907935453858
+            },
+            "right": {
+              "leaf": 0.2911057318462633
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.2517507096603323
+            },
+            "right": {
+              "leaf": 0.5138280306887045
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": -1.2328978051615906,
+            "left": {
+              "leaf": 0.08392603480057421
+            },
+            "right": {
+              "leaf": 0.3186820409308519
+            }
+          },
+          "right": {
+            "feature": "color_overlap",
+            "threshold": -0.45355597926092794,
+            "left": {
+              "leaf": 0.4400466487678218
+            },
+            "right": {
+              "leaf": 0.4874558367864194
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.1767881439865153,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": -0.052076856827253305,
+            "left": {
+              "leaf": -0.09380342173319513
+            },
+            "right": {
+              "leaf": 0.1820889627971188
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.2271518155714719
+            },
+            "right": {
+              "leaf": 0.5363509615391768
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "strategy_match",
+            "threshold": -0.6940263180517661,
+            "left": {
+              "leaf": 0.13336598825466592
+            },
+            "right": {
+              "leaf": 0.3558940480601312
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": 0.7829533144953701,
+            "left": {
+              "leaf": 0.43920059242795784
+            },
+            "right": {
+              "leaf": 0.48164058471196264
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.3018150520405583,
+          "left": {
+            "feature": "strategy_match",
+            "threshold": -0.6940263180517661,
+            "left": {
+              "leaf": -0.1146867235975498
+            },
+            "right": {
+              "leaf": 0.1435782334771533
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.23202272339114927
+            },
+            "right": {
+              "leaf": 0.4958077976059946
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "strategy_match",
+            "threshold": -0.6940263180517661,
+            "left": {
+              "leaf": 0.13018750724277073
+            },
+            "right": {
+              "leaf": 0.34724749656936166
+            }
+          },
+          "right": {
+            "feature": "color_overlap",
+            "threshold": -0.45355597926092794,
+            "left": {
+              "leaf": 0.4175019256417821
+            },
+            "right": {
+              "leaf": 0.46373179778808027
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.3018150520405583,
+          "left": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.032573996487915084
+            },
+            "right": {
+              "leaf": 0.47314127842722414
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.22761472175311795
+            },
+            "right": {
+              "leaf": 0.4834315208358778
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": 0.09343687195048683,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": 0.1038916331573306
+            },
+            "right": {
+              "leaf": 0.4490272368196109
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": -1.0377105934391728,
+            "left": {
+              "leaf": 0.3948755242692593
+            },
+            "right": {
+              "leaf": 0.4526229291387768
+            }
+          }
+        },
+        "right": {
+          "feature": "shared_types",
+          "threshold": -0.2973902694871059,
+          "left": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.21943175661082073
+            },
+            "right": {
+              "leaf": 0.49040419331716134
+            }
+          },
+          "right": {
+            "feature": "rank_log",
+            "threshold": 0.5240851108033009,
+            "left": {
+              "leaf": 0.24851513891569216
+            },
+            "right": {
+              "leaf": -0.15678941470495228
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": -1.2328978051615906,
+            "left": {
+              "leaf": 0.06990227061784376
+            },
+            "right": {
+              "leaf": 0.29479618220982273
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": 0.7829533144953701,
+            "left": {
+              "leaf": 0.40596534488743946
+            },
+            "right": {
+              "leaf": 0.44745946163538075
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.3018150520405583,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": 0.34940226560642146,
+            "left": {
+              "leaf": -0.11265510994368819
+            },
+            "right": {
+              "leaf": 0.1387869264854103
+            }
+          },
+          "right": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": -0.22586841318378406
+            },
+            "right": {
+              "leaf": -0.05928413464033419
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": 0.09343687195048683,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": 0.09822789045143485
+            },
+            "right": {
+              "leaf": 0.43285849535449245
+            }
+          },
+          "right": {
+            "feature": "strategy_match",
+            "threshold": -0.6940263180517661,
+            "left": {
+              "leaf": 0.38378557439397387
+            },
+            "right": {
+              "leaf": 0.4348864990225536
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.4407338387672718,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": -0.13277672332220483
+            },
+            "right": {
+              "leaf": 0.2829575730391115
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.22587533588188996
+            },
+            "right": {
+              "leaf": 0.457445633653019
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "strategy_match",
+            "threshold": -0.6940263180517661,
+            "left": {
+              "leaf": 0.1156327800382114
+            },
+            "right": {
+              "leaf": 0.32517798801246967
+            }
+          },
+          "right": {
+            "feature": "color_overlap",
+            "threshold": -1.2328978051615906,
+            "left": {
+              "leaf": 0.37019292308965734
+            },
+            "right": {
+              "leaf": 0.41834676424364703
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.1767881439865153,
+          "left": {
+            "feature": "strategy_match",
+            "threshold": -0.6940263180517661,
+            "left": {
+              "leaf": -0.09614109473128572
+            },
+            "right": {
+              "leaf": 0.1675411267729669
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.20346357083101987
+            },
+            "right": {
+              "leaf": 0.49056120836802397
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": -1.2328978051615906,
+            "left": {
+              "leaf": 0.0614561820082819
+            },
+            "right": {
+              "leaf": 0.27803148370895464
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": 0.7829533144953701,
+            "left": {
+              "leaf": 0.37547903282304745
+            },
+            "right": {
+              "leaf": 0.4159385903397723
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.3018150520405583,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": 0.34940226560642146,
+            "left": {
+              "leaf": -0.11079925734959437
+            },
+            "right": {
+              "leaf": 0.13343722073512884
+            }
+          },
+          "right": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": -0.2142251541352434
+            },
+            "right": {
+              "leaf": -0.052068932220880555
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": 0.09343687195048683,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "strategy_match",
+            "threshold": -0.6940263180517661,
+            "left": {
+              "leaf": 0.03396163495881316
+            },
+            "right": {
+              "leaf": 0.24673899846469555
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": -1.0377105934391728,
+            "left": {
+              "leaf": 0.3458742622874386
+            },
+            "right": {
+              "leaf": 0.40275336185276805
+            }
+          }
+        },
+        "right": {
+          "feature": "shared_types",
+          "threshold": -0.2973902694871059,
+          "left": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.2010103496250114
+            },
+            "right": {
+              "leaf": 0.4711543549706342
+            }
+          },
+          "right": {
+            "feature": "rank_log",
+            "threshold": 0.5240851108033009,
+            "left": {
+              "leaf": 0.24122423796688636
+            },
+            "right": {
+              "leaf": -0.14412590236505202
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": -1.2328978051615906,
+            "left": {
+              "leaf": 0.057509961353077246
+            },
+            "right": {
+              "leaf": 0.26758342697216614
+            }
+          },
+          "right": {
+            "feature": "color_overlap",
+            "threshold": -0.45355597926092794,
+            "left": {
+              "leaf": 0.3466322555349277
+            },
+            "right": {
+              "leaf": 0.3906053124009413
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.3018150520405583,
+          "left": {
+            "feature": "strategy_match",
+            "threshold": -0.6940263180517661,
+            "left": {
+              "leaf": -0.11002182587868314
+            },
+            "right": {
+              "leaf": 0.12882648597723823
+            }
+          },
+          "right": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": -0.20692725986322222
+            },
+            "right": {
+              "leaf": -0.050549085100976617
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "strategy_match",
+          "threshold": -0.6940263180517661,
+          "left": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": 0.10294878627818357
+            },
+            "right": {
+              "leaf": 0.3428375852955036
+            }
+          },
+          "right": {
+            "feature": "color_overlap",
+            "threshold": -0.45355597926092794,
+            "left": {
+              "leaf": 0.27187380848701564
+            },
+            "right": {
+              "leaf": 0.36495557575628773
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.4268419600946007,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": -0.06356351317883627
+            },
+            "right": {
+              "leaf": 0.3280714647927683
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.20720593954148536
+            },
+            "right": {
+              "leaf": 0.4333262284320402
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": 0.09343687195048683,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": 0.08092729149544209
+            },
+            "right": {
+              "leaf": 0.39731175584824036
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": -1.0377105934391728,
+            "left": {
+              "leaf": 0.3210133399717788
+            },
+            "right": {
+              "leaf": 0.3769159616008907
+            }
+          }
+        },
+        "right": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": -0.19116172475063292
+            },
+            "right": {
+              "leaf": 0.017764131888145848
+            }
+          },
+          "right": {
+            "feature": "total_tags",
+            "threshold": -0.9809143031618341,
+            "left": {
+              "leaf": 0.36506935539771346
+            },
+            "right": {
+              "leaf": 0.5104846687680383
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "strategy_match",
+          "threshold": -0.6940263180517661,
+          "left": {
+            "feature": "rank_log",
+            "threshold": -0.9067783924818534,
+            "left": {
+              "leaf": 0.24523888693381032
+            },
+            "right": {
+              "leaf": 0.03667062505630203
+            }
+          },
+          "right": {
+            "feature": "rank_log",
+            "threshold": -0.948454028499868,
+            "left": {
+              "leaf": 0.3634214274928768
+            },
+            "right": {
+              "leaf": 0.2809998868137427
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.4268419600946007,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": -0.06173602856324449
+            },
+            "right": {
+              "leaf": 0.3145878178057923
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.2005812186322164
+            },
+            "right": {
+              "leaf": 0.41283171453898265
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": 0.09343687195048683,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": 0.075998904524484
+            },
+            "right": {
+              "leaf": 0.3812032914465235
+            }
+          },
+          "right": {
+            "feature": "color_overlap",
+            "threshold": -1.2328978051615906,
+            "left": {
+              "leaf": 0.30752487437130693
+            },
+            "right": {
+              "leaf": 0.3618590915268072
+            }
+          }
+        },
+        "right": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": -0.18493980098375476
+            },
+            "right": {
+              "leaf": 0.017356273188632573
+            }
+          },
+          "right": {
+            "feature": "total_tags",
+            "threshold": -0.9809143031618341,
+            "left": {
+              "leaf": 0.35036365750817805
+            },
+            "right": {
+              "leaf": 0.49558936917227936
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "strategy_match",
+          "threshold": -0.6940263180517661,
+          "left": {
+            "feature": "rank_log",
+            "threshold": -0.9067783924818534,
+            "left": {
+              "leaf": 0.234886488033533
+            },
+            "right": {
+              "leaf": 0.032201352904739876
+            }
+          },
+          "right": {
+            "feature": "rank_log",
+            "threshold": -0.948454028499868,
+            "left": {
+              "leaf": 0.34872574450470956
+            },
+            "right": {
+              "leaf": 0.26889296738179363
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.4268419600946007,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": -0.05996695705111245
+            },
+            "right": {
+              "leaf": 0.30153145766294026
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.1943102415016576
+            },
+            "right": {
+              "leaf": 0.39347889073642456
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": 0.09343687195048683,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": 0.34940226560642146,
+            "left": {
+              "leaf": 0.023406116960282695
+            },
+            "right": {
+              "leaf": 0.2213639347808055
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": -1.0377105934391728,
+            "left": {
+              "leaf": 0.29276544561040935
+            },
+            "right": {
+              "leaf": 0.34735265319557934
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.4407338387672718,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": -0.10973753002277516
+            },
+            "right": {
+              "leaf": 0.25014112827641566
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.1914970942633889
+            },
+            "right": {
+              "leaf": 0.3841302718489642
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "strategy_match",
+          "threshold": -0.6940263180517661,
+          "left": {
+            "feature": "rank_log",
+            "threshold": -0.9067783924818534,
+            "left": {
+              "leaf": 0.2251333933879555
+            },
+            "right": {
+              "leaf": 0.028133154414111797
+            }
+          },
+          "right": {
+            "feature": "color_overlap",
+            "threshold": -0.45355597926092794,
+            "left": {
+              "leaf": 0.2359146629875347
+            },
+            "right": {
+              "leaf": 0.32263255648658967
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.4268419600946007,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": -0.0591297207854265
+            },
+            "right": {
+              "leaf": 0.2894357775201747
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.18802829652268233
+            },
+            "right": {
+              "leaf": 0.37508554273125155
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "strategy_match",
+          "threshold": -0.6940263180517661,
+          "left": {
+            "feature": "rank_log",
+            "threshold": -0.9067783924818534,
+            "left": {
+              "leaf": 0.2197149002606636
+            },
+            "right": {
+              "leaf": 0.027449297260035973
+            }
+          },
+          "right": {
+            "feature": "rank_log",
+            "threshold": -0.948454028499868,
+            "left": {
+              "leaf": 0.32768725972207713
+            },
+            "right": {
+              "leaf": 0.2502146400375674
+            }
+          }
+        },
+        "right": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "card_type_in_cmdr_oracle",
+            "threshold": -0.19759964457125082,
+            "left": {
+              "leaf": -0.14875987655712283
+            },
+            "right": {
+              "leaf": 0.2761525129396074
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": -1.0377105934391728,
+            "left": {
+              "leaf": 0.2389811368015384
+            },
+            "right": {
+              "leaf": 0.42747983137234646
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": 0.09343687195048683,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": -0.7605694258278557,
+            "left": {
+              "leaf": -0.03705181547163264
+            },
+            "right": {
+              "leaf": 0.1657600793122388
+            }
+          },
+          "right": {
+            "feature": "color_overlap",
+            "threshold": -1.2328978051615906,
+            "left": {
+              "leaf": 0.275303053053866
+            },
+            "right": {
+              "leaf": 0.3276125301612814
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.4407338387672718,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": -0.10410833735795572
+            },
+            "right": {
+              "leaf": 0.23804721566773926
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.18308479839768702
+            },
+            "right": {
+              "leaf": 0.3583391810273266
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": 0.09343687195048683,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": 0.06185072044590612
+            },
+            "right": {
+              "leaf": 0.3489951571464965
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": -1.0377105934391728,
+            "left": {
+              "leaf": 0.2676347724458013
+            },
+            "right": {
+              "leaf": 0.3201328303419526
+            }
+          }
+        },
+        "right": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "spellbook_combos",
+            "threshold": -0.05573713777376116,
+            "left": {
+              "leaf": -0.160657210586012
+            },
+            "right": {
+              "leaf": 0.5534342254282337
+            }
+          },
+          "right": {
+            "feature": "total_tags",
+            "threshold": -0.9809143031618341,
+            "left": {
+              "leaf": 0.31426722602777807
+            },
+            "right": {
+              "leaf": 0.46750274142362575
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "strategy_match",
+          "threshold": -0.6940263180517661,
+          "left": {
+            "feature": "rank_log",
+            "threshold": -0.9067783924818534,
+            "left": {
+              "leaf": 0.20703917008775563
+            },
+            "right": {
+              "leaf": 0.020771378966587477
+            }
+          },
+          "right": {
+            "feature": "rank_log",
+            "threshold": -0.948454028499868,
+            "left": {
+              "leaf": 0.3097984223570887
+            },
+            "right": {
+              "leaf": 0.2351512914979987
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.4268419600946007,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": 0.1840873328396141,
+            "left": {
+              "leaf": -0.11677448440969787
+            },
+            "right": {
+              "leaf": 0.08977378942467906
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.17737618482436082
+            },
+            "right": {
+              "leaf": 0.3420557111397972
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": 0.09343687195048683,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": 0.34940226560642146,
+            "left": {
+              "leaf": 0.012593779006631035
+            },
+            "right": {
+              "leaf": 0.1995610554926176
+            }
+          },
+          "right": {
+            "feature": "color_overlap",
+            "threshold": -1.2328978051615906,
+            "left": {
+              "leaf": 0.25684141768375335
+            },
+            "right": {
+              "leaf": 0.3082257828119295
+            }
+          }
+        },
+        "right": {
+          "feature": "shared_types",
+          "threshold": -0.2973902694871059,
+          "left": {
+            "feature": "spellbook_combos",
+            "threshold": -0.05573713777376116,
+            "left": {
+              "leaf": -0.1634448970625655
+            },
+            "right": {
+              "leaf": 0.5218006370791156
+            }
+          },
+          "right": {
+            "feature": "rank_log",
+            "threshold": 0.6074363828393287,
+            "left": {
+              "leaf": 0.18681640388775894
+            },
+            "right": {
+              "leaf": -0.1399096612590534
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "strategy_match",
+          "threshold": -0.6940263180517661,
+          "left": {
+            "feature": "rank_log",
+            "threshold": -0.9067783924818534,
+            "left": {
+              "leaf": 0.19861072190525808
+            },
+            "right": {
+              "leaf": 0.01745828973453065
+            }
+          },
+          "right": {
+            "feature": "rank_log",
+            "threshold": -0.948454028499868,
+            "left": {
+              "leaf": 0.2978856649540123
+            },
+            "right": {
+              "leaf": 0.22548332972572882
+            }
+          }
+        },
+        "right": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "card_type_in_cmdr_oracle",
+            "threshold": -0.19759964457125082,
+            "left": {
+              "leaf": -0.13891639097963793
+            },
+            "right": {
+              "leaf": 0.26811060737885095
+            }
+          },
+          "right": {
+            "feature": "text_similarity",
+            "threshold": -0.8932186086134692,
+            "left": {
+              "leaf": 0.1713378371317536
+            },
+            "right": {
+              "leaf": 0.38971741331901805
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": 0.09343687195048683,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": 0.053775243494478896
+            },
+            "right": {
+              "leaf": 0.3311349928434255
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": -1.0377105934391728,
+            "left": {
+              "leaf": 0.24487426545062382
+            },
+            "right": {
+              "leaf": 0.29579084423093915
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.4407338387672718,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": -0.09415279549086161
+            },
+            "right": {
+              "leaf": 0.23043602176361208
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.17056002504803913
+            },
+            "right": {
+              "leaf": 0.33003676094835627
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "strategy_match",
+          "threshold": -0.6940263180517661,
+          "left": {
+            "feature": "rank_log",
+            "threshold": -0.9067783924818534,
+            "left": {
+              "leaf": 0.19057763219632615
+            },
+            "right": {
+              "leaf": 0.014259110890728682
+            }
+          },
+          "right": {
+            "feature": "rank_log",
+            "threshold": -0.948454028499868,
+            "left": {
+              "leaf": 0.28672400440640466
+            },
+            "right": {
+              "leaf": 0.21617127332780073
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.4268419600946007,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": 0.1840873328396141,
+            "left": {
+              "leaf": -0.11191653096122688
+            },
+            "right": {
+              "leaf": 0.08651827929964542
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.1676901352727868
+            },
+            "right": {
+              "leaf": 0.32278459342430615
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": 0.09343687195048683,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": -0.7605694258278557,
+            "left": {
+              "leaf": -0.04525974726091032
+            },
+            "right": {
+              "leaf": 0.14551065540311986
+            }
+          },
+          "right": {
+            "feature": "color_overlap",
+            "threshold": -1.2328978051615906,
+            "left": {
+              "leaf": 0.23494819590753785
+            },
+            "right": {
+              "leaf": 0.2853475156130292
+            }
+          }
+        },
+        "right": {
+          "feature": "spellbook_combos",
+          "threshold": -0.05573713777376116,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": -0.15442567244315053
+            },
+            "right": {
+              "leaf": 0.028115708274138757
+            }
+          },
+          "right": {
+            "feature": "rank_log",
+            "threshold": 0.5935445041666576,
+            "left": {
+              "leaf": 0.6004064477691528
+            },
+            "right": {
+              "leaf": 0.09701846375566063
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "strategy_match",
+          "threshold": -0.6940263180517661,
+          "left": {
+            "feature": "rank_log",
+            "threshold": -0.9067783924818534,
+            "left": {
+              "leaf": 0.1830704342378949
+            },
+            "right": {
+              "leaf": 0.011476271224237175
+            }
+          },
+          "right": {
+            "feature": "rank_log",
+            "threshold": -0.948454028499868,
+            "left": {
+              "leaf": 0.2760904563941218
+            },
+            "right": {
+              "leaf": 0.20735234368300348
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.4268419600946007,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": 0.1840873328396141,
+            "left": {
+              "leaf": -0.10914657087447056
+            },
+            "right": {
+              "leaf": 0.0837627003627711
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.16308797126798166
+            },
+            "right": {
+              "leaf": 0.318455065713977
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": 0.09343687195048683,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "oracle_overlap",
+            "threshold": -0.005606465275979697,
+            "left": {
+              "leaf": 0.02021455836371173
+            },
+            "right": {
+              "leaf": 0.2104433864157409
+            }
+          },
+          "right": {
+            "feature": "color_overlap",
+            "threshold": -1.2328978051615906,
+            "left": {
+              "leaf": 0.22549436704201195
+            },
+            "right": {
+              "leaf": 0.27513178444593045
+            }
+          }
+        },
+        "right": {
+          "feature": "shared_types",
+          "threshold": -0.2973902694871059,
+          "left": {
+            "feature": "spellbook_combos",
+            "threshold": -0.05573713777376116,
+            "left": {
+              "leaf": -0.15013001564285325
+            },
+            "right": {
+              "leaf": 0.5050114178114238
+            }
+          },
+          "right": {
+            "feature": "rank_log",
+            "threshold": 0.6074363828393287,
+            "left": {
+              "leaf": 0.18080374268958047
+            },
+            "right": {
+              "leaf": -0.12872832443228796
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "color_overlap",
+          "threshold": -1.2328978051615906,
+          "left": {
+            "feature": "rank_log",
+            "threshold": -1.0179134218632246,
+            "left": {
+              "leaf": 0.17996218529757133
+            },
+            "right": {
+              "leaf": -0.06566902291077265
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": -0.005606465275979697,
+            "left": {
+              "leaf": 0.1841880305247643
+            },
+            "right": {
+              "leaf": 0.2764779691152121
+            }
+          }
+        },
+        "right": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "card_type_in_cmdr_oracle",
+            "threshold": -0.19759964457125082,
+            "left": {
+              "leaf": -0.1284880143727413
+            },
+            "right": {
+              "leaf": 0.2598296801652568
+            }
+          },
+          "right": {
+            "feature": "text_similarity",
+            "threshold": -0.8932186086134692,
+            "left": {
+              "leaf": 0.15447091695029708
+            },
+            "right": {
+              "leaf": 0.3627723665988415
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": 0.09343687195048683,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": 0.04251519636167677
+            },
+            "right": {
+              "leaf": 0.3080986383545105
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": -1.0377105934391728,
+            "left": {
+              "leaf": 0.21570638042060072
+            },
+            "right": {
+              "leaf": 0.2648012287415415
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.3573825667312439,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": 0.34940226560642146,
+            "left": {
+              "leaf": -0.12469910113627602
+            },
+            "right": {
+              "leaf": 0.06386903447275821
+            }
+          },
+          "right": {
+            "feature": "spellbook_combos",
+            "threshold": -0.05573713777376116,
+            "left": {
+              "leaf": -0.153277358131874
+            },
+            "right": {
+              "leaf": 0.3972318313922147
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "color_overlap",
+          "threshold": -1.2328978051615906,
+          "left": {
+            "feature": "rank_log",
+            "threshold": -1.0179134218632246,
+            "left": {
+              "leaf": 0.17309571861820322
+            },
+            "right": {
+              "leaf": -0.06604475924965632
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": -0.005606465275979697,
+            "left": {
+              "leaf": 0.17666935365039838
+            },
+            "right": {
+              "leaf": 0.2666031368281554
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.4268419600946007,
+          "left": {
+            "feature": "text_similarity",
+            "threshold": 0.89691368326172,
+            "left": {
+              "leaf": -0.05788010350546492
+            },
+            "right": {
+              "leaf": 0.2110287715980159
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.15474222028883466
+            },
+            "right": {
+              "leaf": 0.3102100581929636
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": 0.09343687195048683,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": 0.34940226560642146,
+            "left": {
+              "leaf": -0.0019144357925302417
+            },
+            "right": {
+              "leaf": 0.16974738654264324
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": -1.0377105934391728,
+            "left": {
+              "leaf": 0.20797231771475116
+            },
+            "right": {
+              "leaf": 0.2557128290422861
+            }
+          }
+        },
+        "right": {
+          "feature": "shared_types",
+          "threshold": -0.2973902694871059,
+          "left": {
+            "feature": "spellbook_combos",
+            "threshold": -0.05573713777376116,
+            "left": {
+              "leaf": -0.14233348615949198
+            },
+            "right": {
+              "leaf": 0.49498786929425115
+            }
+          },
+          "right": {
+            "feature": "rank_log",
+            "threshold": 0.6074363828393287,
+            "left": {
+              "leaf": 0.17919284416537906
+            },
+            "right": {
+              "leaf": -0.1207564006964252
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "strategy_match",
+          "threshold": -0.6940263180517661,
+          "left": {
+            "feature": "rank_log",
+            "threshold": -0.9067783924818534,
+            "left": {
+              "leaf": 0.16249858987770024
+            },
+            "right": {
+              "leaf": -0.00048111219333610826
+            }
+          },
+          "right": {
+            "feature": "rank_log",
+            "threshold": -0.948454028499868,
+            "left": {
+              "leaf": 0.24975221990162363
+            },
+            "right": {
+              "leaf": 0.1840322217646566
+            }
+          }
+        },
+        "right": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "card_type_in_cmdr_oracle",
+            "threshold": -0.19759964457125082,
+            "left": {
+              "leaf": -0.12211682889097657
+            },
+            "right": {
+              "leaf": 0.25265791613943556
+            }
+          },
+          "right": {
+            "feature": "text_similarity",
+            "threshold": -0.8932186086134692,
+            "left": {
+              "leaf": 0.14607528070818798
+            },
+            "right": {
+              "leaf": 0.34324053529914267
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": 0.09343687195048683,
+        "left": {
+          "feature": "strategy_match",
+          "threshold": -0.6940263180517661,
+          "left": {
+            "feature": "rank_log",
+            "threshold": -0.9067783924818534,
+            "left": {
+              "leaf": 0.1587291566564643
+            },
+            "right": {
+              "leaf": -0.04613218574470098
+            }
+          },
+          "right": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": 0.17608237019900363
+            },
+            "right": {
+              "leaf": 0.3015147301081714
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.3573825667312439,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": 0.34940226560642146,
+            "left": {
+              "leaf": -0.11826609572140782
+            },
+            "right": {
+              "leaf": 0.06570363860735935
+            }
+          },
+          "right": {
+            "feature": "spellbook_combos",
+            "threshold": -0.05573713777376116,
+            "left": {
+              "leaf": -0.14555677276160617
+            },
+            "right": {
+              "leaf": 0.3852414500122425
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": 0.09343687195048683,
+        "left": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": 0.03422993961149455
+            },
+            "right": {
+              "leaf": 0.28816516871802134
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": -1.0377105934391728,
+            "left": {
+              "leaf": 0.19670634688413624
+            },
+            "right": {
+              "leaf": 0.24315214440293878
+            }
+          }
+        },
+        "right": {
+          "feature": "shared_types",
+          "threshold": -0.2973902694871059,
+          "left": {
+            "feature": "spellbook_combos",
+            "threshold": -0.05573713777376116,
+            "left": {
+              "leaf": -0.1368398678811285
+            },
+            "right": {
+              "leaf": 0.48423113948891916
+            }
+          },
+          "right": {
+            "feature": "rank_log",
+            "threshold": 0.6074363828393287,
+            "left": {
+              "leaf": 0.17662332491610394
+            },
+            "right": {
+              "leaf": -0.11559263272931643
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "color_overlap",
+          "threshold": -1.2328978051615906,
+          "left": {
+            "feature": "rank_log",
+            "threshold": -1.0179134218632246,
+            "left": {
+              "leaf": 0.1565118078616622
+            },
+            "right": {
+              "leaf": -0.07034736595689642
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": -0.005606465275979697,
+            "left": {
+              "leaf": 0.1601430499824036
+            },
+            "right": {
+              "leaf": 0.24608928449603149
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.4268419600946007,
+          "left": {
+            "feature": "color_overlap",
+            "threshold": 0.1840873328396141,
+            "left": {
+              "leaf": -0.10118582464270968
+            },
+            "right": {
+              "leaf": 0.07939921408635084
+            }
+          },
+          "right": {
+            "feature": "theme_overlap",
+            "threshold": -0.31084229954221704,
+            "left": {
+              "leaf": -0.14536596228952958
+            },
+            "right": {
+              "leaf": 0.3045020702623008
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": -0.33721136690232656,
+        "left": {
+          "feature": "color_overlap",
+          "threshold": -1.2328978051615906,
+          "left": {
+            "feature": "rank_log",
+            "threshold": -1.0179134218632246,
+            "left": {
+              "leaf": 0.1529496522162142
+            },
+            "right": {
+              "leaf": -0.06868384682722707
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": -0.005606465275979697,
+            "left": {
+              "leaf": 0.15657690620457146
+            },
+            "right": {
+              "leaf": 0.24080878294537356
+            }
+          }
+        },
+        "right": {
+          "feature": "theme_overlap",
+          "threshold": -0.31084229954221704,
+          "left": {
+            "feature": "card_type_in_cmdr_oracle",
+            "threshold": -0.19759964457125082,
+            "left": {
+              "leaf": -0.11622747348333473
+            },
+            "right": {
+              "leaf": 0.24469920262397493
+            }
+          },
+          "right": {
+            "feature": "text_similarity",
+            "threshold": -0.12820480866680717,
+            "left": {
+              "leaf": 0.22912532904044486
+            },
+            "right": {
+              "leaf": 0.34920044370679487
+            }
+          }
+        }
+      },
+      {
+        "feature": "rank_log",
+        "threshold": 0.09343687195048683,
+        "left": {
+          "feature": "strategy_match",
+          "threshold": -0.6940263180517661,
+          "left": {
+            "feature": "rank_log",
+            "threshold": -0.9067783924818534,
+            "left": {
+              "leaf": 0.14547422317273465
+            },
+            "right": {
+              "leaf": -0.047706541785331714
+            }
+          },
+          "right": {
+            "feature": "card_type_in_cmdr_oracle",
+            "threshold": -0.19759964457125082,
+            "left": {
+              "leaf": 0.16825542618187472
+            },
+            "right": {
+              "leaf": 0.309504440556291
+            }
+          }
+        },
+        "right": {
+          "feature": "rank_log",
+          "threshold": 0.3573825667312439,
+          "left": {
+            "feature": "keyword_overlap",
+            "threshold": -0.22832103130203213,
+            "left": {
+              "leaf": -0.05551585816899885
+            },
+            "right": {
+              "leaf": 0.3062248546596409
+            }
+          },
+          "right": {
+            "feature": "shared_types",
+            "threshold": -0.2973902694871059,
+            "left": {
+              "leaf": -0.14249087887178533
+            },
+            "right": {
+              "leaf": -0.04085240571896668
+            }
+          }
+        }
+      }
+    ],
+    "lr": 0.1
+  },
+  "model_type": "gbt+linear"
 }
