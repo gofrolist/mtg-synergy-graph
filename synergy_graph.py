@@ -284,8 +284,25 @@ SEMANTIC_BRIDGES = {
 
     # ── Equipment synergies ──
     ("equipment-synergy", "equip-target"): 0.8,
-    ("creature-pump", "equip-target"): 0.5,    # Pumped creatures are good equip targets
-    ("untap", "equip-target"): 0.4,            # Untap equipped creature for re-use
+    ("equipment-synergy", "equipment-presence"): 0.8,  # Equipment cards want other equipment around
+    ("creature-pump", "equip-target"): 0.5,
+    ("untap", "equip-target"): 0.4,
+    ("haste-grant", "equipment-presence"): 0.5,   # Haste equipment pairs with other equipment
+    ("hexproof-grant", "equipment-presence"): 0.5, # Protection equipment pairs with other equipment
+    ("protection-grant", "equipment-presence"): 0.5,
+    ("ability-copying", "equip-target"): 0.6,     # Copy equipment → needs equip target
+    ("ability-copying", "equipment-presence"): 0.7, # Copy effects want equipment to copy
+
+    # ── Infect/grant synergies ──
+    ("infect-grant", "damage-dealing"): 0.8,      # Infect enchantment on a damage-dealer = poison kills
+    ("poison-counter-placement", "damage-dealing"): 0.6,
+
+    # ── Triggered ability → ETB ──
+    ("triggered-abilities", "creature-etb"): 0.4,  # Triggered abilities often involve ETB
+
+    # ── Mana → spell casting ──
+    ("mana-flexibility", "spell-casting"): 0.4,   # Mana enables casting spells
+    ("mana-acceleration", "spell-casting"): 0.4,
 
     # ── Life gain loops ──
     ("life-gain", "life-gain-events"): 0.9,    # Already have but ensure
