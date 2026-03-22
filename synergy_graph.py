@@ -3153,7 +3153,8 @@ def run():
         if args.strategies == "auto" and commander_oid:
             detected = detect_strategies(commander_oid, db_path)
             active_strategies = {s["name"] for s in detected if s["confidence"] >= 0.3}
-            # Also detect tribal strategies from deck composition
+            # Also detect strategies from deck composition:
+            # 1. Tribal strategies from creature type distribution
             deck_names_set = set(deck.DECKLIST) | {deck.COMMANDER}
             deck_cards_for_types = [c for c in cards if c["name"] in deck_names_set]
             deck_types = _detect_deck_types(deck_cards_for_types, deck_names_set)
@@ -3164,7 +3165,6 @@ def run():
                 for dtype in deck_types:
                     strat = CREATURE_TYPE_STRATEGIES.get(dtype.lower())
                     if strat and strat not in active_strategies:
-                        # Only add if strategy has cards in the DB (avoids "warriors: 0")
                         has_cards = _conn.execute(
                             "SELECT 1 FROM card_strategies WHERE strategy = ? LIMIT 1",
                             (strat,)
@@ -3172,6 +3172,26 @@ def run():
                         if has_cards:
                             active_strategies.add(strat)
                 _conn.close()
+
+            # 2. Strategies shared by 20%+ of non-land deck cards
+            import sqlite3 as _sqlite3
+            _conn = _sqlite3.connect(db_path)
+            deck_oid_set = {c["oracle_id"] for c in cards if c["name"] in deck_names_set}
+            non_land_count = sum(1 for c in cards
+                                 if c["name"] in deck_names_set and "Land" not in c.get("type_line", ""))
+            if non_land_count > 0:
+                from collections import Counter as _Counter
+                strat_counts = _Counter()
+                for oid in deck_oid_set:
+                    for row in _conn.execute(
+                        "SELECT strategy FROM card_strategies WHERE oracle_id = ? AND confidence >= 0.3",
+                        (oid,)
+                    ):
+                        strat_counts[row[0]] += 1
+                for strat, cnt in strat_counts.items():
+                    if cnt / non_land_count >= 0.2 and strat not in active_strategies:
+                        active_strategies.add(strat)
+            _conn.close()
         elif args.strategies != "auto":
             active_strategies = set(args.strategies.split(","))
         if args.exclude_strategies:
