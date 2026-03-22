@@ -711,34 +711,59 @@ def find_synergy_candidates(deck_cards: list[dict], db_path: str = DB_PATH,
             if row[0] not in deck_oids:
                 candidate_oids.add(row[0])
 
-    # Commander-specific bridge expansion (narrow, not deck-wide)
-    if commander:
-        try:
-            import sys
-            sys.path.insert(0, os.path.dirname(__file__))
-            from synergy_graph import SEMANTIC_BRIDGES
-            cmdr_wants = set(commander.get("wants", []))
-            cmdr_provides = set(commander.get("provides", []))
+    # Bridge expansion for commander AND top deck tags
+    try:
+        import sys
+        sys.path.insert(0, os.path.dirname(__file__))
+        from synergy_graph import SEMANTIC_BRIDGES
 
-            # Cards providing something that bridges to commander's wants
-            for (p_tag, w_tag), weight in SEMANTIC_BRIDGES.items():
-                if w_tag in cmdr_wants and weight >= 0.6:  # Higher threshold for bridge
-                    for row in conn.execute(
-                        "SELECT oracle_id FROM provides WHERE tag = ?", (p_tag,)
-                    ):
-                        if row[0] not in deck_oids:
-                            candidate_oids.add(row[0])
+        # Expand from commander's tags (threshold 0.6)
+        bridge_wants = set()
+        bridge_provides = set()
+        if commander:
+            bridge_wants.update(commander.get("wants", []))
+            bridge_provides.update(commander.get("provides", []))
 
-            # Cards wanting something that bridges from commander's provides
-            for (p_tag, w_tag), weight in SEMANTIC_BRIDGES.items():
-                if p_tag in cmdr_provides and weight >= 0.6:
-                    for row in conn.execute(
-                        "SELECT oracle_id FROM wants WHERE tag = ?", (w_tag,)
-                    ):
-                        if row[0] not in deck_oids:
-                            candidate_oids.add(row[0])
-        except ImportError:
-            pass
+        # Also expand from deck's FREQUENT provides/wants (threshold 0.7 — stricter)
+        # Count tag frequency across deck cards
+        from collections import Counter
+        deck_provides_freq = Counter()
+        deck_wants_freq = Counter()
+        for card in deck_cards:
+            for p in card.get("provides", []):
+                deck_provides_freq[p] += 1
+            for w in card.get("wants", []):
+                deck_wants_freq[w] += 1
+
+        # Only bridge-expand tags appearing on 3+ deck cards (strategy-defining tags)
+        for tag, count in deck_provides_freq.items():
+            if count >= 3:
+                bridge_provides.add(tag)
+        for tag, count in deck_wants_freq.items():
+            if count >= 3:
+                bridge_wants.add(tag)
+
+        # Cards providing something that bridges to deck's wants
+        for (p_tag, w_tag), weight in SEMANTIC_BRIDGES.items():
+            min_weight = 0.6 if w_tag in (commander.get("wants", []) if commander else []) else 0.7
+            if w_tag in bridge_wants and weight >= min_weight:
+                for row in conn.execute(
+                    "SELECT oracle_id FROM provides WHERE tag = ?", (p_tag,)
+                ):
+                    if row[0] not in deck_oids:
+                        candidate_oids.add(row[0])
+
+        # Cards wanting something that bridges from deck's provides
+        for (p_tag, w_tag), weight in SEMANTIC_BRIDGES.items():
+            min_weight = 0.6 if p_tag in (commander.get("provides", []) if commander else []) else 0.7
+            if p_tag in bridge_provides and weight >= min_weight:
+                for row in conn.execute(
+                    "SELECT oracle_id FROM wants WHERE tag = ?", (w_tag,)
+                ):
+                    if row[0] not in deck_oids:
+                        candidate_oids.add(row[0])
+    except ImportError:
+        pass
 
     conn.close()
 

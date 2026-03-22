@@ -1337,6 +1337,20 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
             else:
                 info["commander_affinity"] = 0.0
 
+    # Commander affinity multiplier: boost cards that specifically connect
+    # to the commander via tag-level analysis (bypasses graph fan-out caps).
+    if commander:
+        commander_card_data = next((c for c in cards if c["name"] == commander), None)
+        candidate_cards_data = [c for c in cards if c["name"] not in deck_cards]
+        affinities = _compute_commander_affinity(commander_card_data, candidate_cards_data)
+
+        for card_name, info in candidate_scores.items():
+            affinity = affinities.get(card_name, 0.0)
+            if affinity > 0:
+                # Multiplier: 1.0 + affinity (affinity 4 → 5.0x, affinity 10 → 11.0x)
+                info["total"] *= (1.0 + affinity)
+            info["commander_affinity"] = round(affinity, 1)
+
     # Sort by total synergy
     ranked = sorted(candidate_scores.items(), key=lambda x: x[1]["total"], reverse=True)
 
