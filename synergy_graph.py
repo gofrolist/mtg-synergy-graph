@@ -400,6 +400,24 @@ SEMANTIC_BRIDGES = {
     ("card-draw", "life-payment"): 0.4,               # Draw costs life (Necropotence pattern)
     ("life-drain", "creature-etb"): 0.4,              # Drain on ETB (Blood Artist)
 
+    # ── Final push: 3-5 combo bridges ──
+    ("mana-acceleration", "creature-death"): 0.3,     # Mana + death triggers (Ashnod's Altar patterns)
+    ("evasion-grant", "mana-needs"): 0.3,             # Evasion creatures need mana to cast
+    ("combat-enabler", "mana-needs"): 0.3,
+    ("combat-enabler", "creature-etb"): 0.4,          # Combat enablers trigger ETB
+    ("board-pressure", "equip-target"): 0.4,          # Pressure cards benefit from equipment
+    ("board-protection", "creature-etb"): 0.4,        # Protected creatures keep triggering
+    ("board-protection", "creature-type-selection"): 0.4,
+    ("damage-prevention", "spell-casting"): 0.4,
+    ("extra-turn", "artifact-presence"): 0.4,         # Extra turns with artifact combos
+    ("blink", "triggered-abilities"): 0.6,            # Blink retriggers abilities
+    ("evasion-grant", "triggered-abilities"): 0.4,    # Evasion enables combat triggers
+    ("combat-trigger", "triggered-abilities"): 0.7,   # Combat triggers ARE triggered abilities
+    ("graveyard-filling", "card-draw-events"): 0.4,   # Graveyard fill triggers draw effects
+    ("targeted-removal", "life-payment"): 0.3,        # Removal that costs life
+    ("self-mill", "creature-power"): 0.4,             # Mill fuels power-from-graveyard
+    ("sacrifice-payoff", "targeted-spells"): 0.4,     # Sacrifice payoff on targeted spells
+
     # ── Deeper connections (5-8 combos each) ──
     ("cost-reduction", "etb-payoff"): 0.5,           # Cheaper spells = more ETB triggers
     ("extra-turn", "graveyard-filling"): 0.5,        # Extra turns = more mill/discard
