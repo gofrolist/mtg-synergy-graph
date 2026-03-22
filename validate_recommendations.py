@@ -121,6 +121,58 @@ def get_our_recommendations(deck_name, top_n=100):
     # Rank by total score
     ranked = sorted(scores.items(), key=lambda x: x[1]["total"], reverse=True)
 
+    # Also get ML-based recommendations (scores ALL color-legal cards)
+    model_path = os.path.join(os.path.dirname(__file__), "data", "recommender_weights.json")
+    if os.path.exists(model_path):
+        from train_recommender import predict as ml_predict
+        import sqlite3
+        with open(model_path) as f:
+            model = json.load(f)
+
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        # Get ALL legal cards in commander's colors
+        all_cards = []
+        ci_str = ','.join(f'"{c}"' for c in deck.COLOR_IDENTITY)
+        for row in conn.execute(f"""
+            SELECT * FROM cards
+            WHERE legal_commander = 1
+            AND edhrec_rank IS NOT NULL
+            AND edhrec_rank < 10000
+        """):
+            card = dict(row)
+            try:
+                card_ci = set(json.loads(card["color_identity"])) if card["color_identity"] else set()
+            except:
+                card_ci = set()
+            if card_ci <= deck.COLOR_IDENTITY and card["name"] not in deck_set:
+                card["provides"] = [r[0] for r in conn.execute(
+                    "SELECT tag FROM provides WHERE oracle_id = ?", (card["oracle_id"],))]
+                card["wants"] = [r[0] for r in conn.execute(
+                    "SELECT tag FROM wants WHERE oracle_id = ?", (card["oracle_id"],))]
+                try:
+                    card["keywords"] = json.loads(card["keywords"]) if card["keywords"] else []
+                except:
+                    card["keywords"] = []
+                all_cards.append(card)
+        conn.close()
+
+        commander_card_data = next((c for c in cards if c["name"] == deck.COMMANDER), None)
+        if commander_card_data:
+            ml_scores = {}
+            for card in all_cards:
+                ml_scores[card["name"]] = ml_predict(model, commander_card_data, card)
+
+            ml_ranked = sorted(ml_scores.items(), key=lambda x: -x[1])
+            # Merge: use ML ranking but boost cards that also have graph connections
+            graph_names = {name for name, _ in ranked[:200]}
+            final = []
+            for name, ml_score in ml_ranked:
+                boost = 1.3 if name in graph_names else 1.0
+                final.append((name, ml_score * boost))
+            final.sort(key=lambda x: -x[1])
+            return [name for name, _ in final[:top_n]]
+
     return [name for name, info in ranked[:top_n]]
 
 

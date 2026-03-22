@@ -1337,24 +1337,46 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
             else:
                 info["commander_affinity"] = 0.0
 
-    # Commander affinity: compute tag-level + oracle text affinity
-    # and use it as the PRIMARY score signal, with graph as secondary.
-    if commander:
+    # ML-based recommendation scoring: uses a trained model to predict
+    # synergy between commander and each candidate.
+    # Falls back to commander affinity if model not available.
+    model_path = os.path.join(DATA_DIR, "recommender_weights.json")
+    if commander and os.path.exists(model_path):
+        with open(model_path) as _mf:
+            rec_model = json.load(_mf)
+
+        commander_card_data = next((c for c in cards if c["name"] == commander), None)
+        if commander_card_data:
+            from train_recommender import predict as ml_predict
+
+            # Normalize graph scores to 0-1 for blending
+            max_graph = max((info["total"] for info in candidate_scores.values()), default=1.0) or 1.0
+
+            for card_name, info in candidate_scores.items():
+                candidate_data = next((c for c in cards if c["name"] == card_name), None)
+                if candidate_data:
+                    ml_score = ml_predict(rec_model, commander_card_data, candidate_data)
+                else:
+                    ml_score = 0.0
+
+                graph_norm = info["total"] / max_graph
+
+                # Blend: 60% ML model + 40% graph (ML is primary)
+                info["total"] = (ml_score * 0.6 + graph_norm * 0.4) * 100.0
+                info["commander_affinity"] = round(ml_score * 10, 1)
+    elif commander:
+        # Fallback: use tag-level commander affinity
         commander_card_data = next((c for c in cards if c["name"] == commander), None)
         candidate_cards_data = [c for c in cards if c["name"] not in deck_cards]
         affinities = _compute_commander_affinity(commander_card_data, candidate_cards_data)
 
-        # Normalize graph scores to 0-1
         max_graph = max((info["total"] for info in candidate_scores.values()), default=1.0) or 1.0
-        # Normalize affinity to 0-1
         max_aff = max(affinities.values(), default=1.0) or 1.0
 
         for card_name, info in candidate_scores.items():
             affinity = affinities.get(card_name, 0.0)
             graph_norm = info["total"] / max_graph
             aff_norm = affinity / max_aff
-
-            # Score = 60% affinity + 40% graph (affinity is primary)
             info["total"] = (aff_norm * 0.6 + graph_norm * 0.4) * 100.0
             info["commander_affinity"] = round(affinity, 1)
 
