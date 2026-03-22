@@ -142,6 +142,29 @@ def compute_features(commander: dict, candidate: dict) -> dict:
     card_ci = set(json.loads(candidate.get("color_identity", "[]")) if candidate.get("color_identity") else [])
     color_overlap = len(cmdr_ci & card_ci) / max(len(cmdr_ci), 1) if cmdr_ci else 0
 
+    # Feature 17: Card rarity (mythic=4, rare=3, uncommon=2, common=1)
+    rarity_map = {"mythic": 4, "rare": 3, "uncommon": 2, "common": 1}
+    card_rarity = rarity_map.get(candidate.get("rarity", ""), 1)
+
+    # Feature 18: Total Spellbook combos candidate appears in (overall combo versatility)
+    total_spellbook = 0
+    if card_oid and hasattr(compute_features, '_spellbook_cache'):
+        total_spellbook = len(compute_features._spellbook_cache.get(card_oid, set()))
+
+    # Feature 19: Strategy alignment (shared strategies between commander and candidate)
+    strategy_match = 0
+    if hasattr(compute_features, '_strategy_cache'):
+        cmdr_strats = compute_features._strategy_cache.get(cmdr_oid, set())
+        card_strats = compute_features._strategy_cache.get(card_oid, set())
+        strategy_match = len(cmdr_strats & card_strats)
+
+    # Feature 20: EDHREC theme overlap
+    theme_overlap = 0
+    if hasattr(compute_features, '_theme_cache'):
+        cmdr_themes = compute_features._theme_cache.get(commander.get("name", ""), set())
+        card_themes = compute_features._theme_cache.get(candidate.get("name", ""), set())
+        theme_overlap = len(cmdr_themes & card_themes)
+
     # Feature 10: Bidirectional connection strength
     # Cards that both provide-to-wants AND want-from-provides are stronger
     bidirectional = min(provides_to_wants, wants_from_provides)
@@ -191,6 +214,10 @@ def compute_features(commander: dict, candidate: dict) -> dict:
         "spellbook_combos": spellbook_combos,
         "ability_match": ability_match,
         "color_overlap": round(color_overlap, 2),
+        "card_rarity": card_rarity,
+        "total_spellbook": min(total_spellbook, 20),  # Cap at 20
+        "strategy_match": strategy_match,
+        "theme_overlap": theme_overlap,
     }
 
 
@@ -214,7 +241,31 @@ def _init_caches(conn):
         pass
     compute_features._ability_cache = ability_cache
 
-    print(f"  Caches: {len(spellbook_cache)} cards in Spellbook, {len(ability_cache)} cards with abilities")
+    # Strategy cache: oracle_id -> set of strategy names
+    strategy_cache = {}
+    try:
+        for oid, strat in conn.execute("SELECT oracle_id, strategy FROM card_strategies WHERE confidence >= 0.3"):
+            strategy_cache.setdefault(oid, set()).add(strat)
+    except:
+        pass
+    compute_features._strategy_cache = strategy_cache
+
+    # Theme cache: card_name -> set of EDHREC themes
+    theme_cache = {}
+    edhrec_path = os.path.join(DATA_DIR, "edhrec_theme_cards.json")
+    if os.path.exists(edhrec_path):
+        try:
+            with open(edhrec_path) as f:
+                themes = json.load(f)
+            for theme, cards in themes.items():
+                for card in cards:
+                    if card.get("synergy", 0) > 0.05:
+                        theme_cache.setdefault(card["name"], set()).add(theme)
+        except:
+            pass
+    compute_features._theme_cache = theme_cache
+
+    print(f"  Caches: {len(spellbook_cache)} Spellbook, {len(ability_cache)} abilities, {len(strategy_cache)} strategies, {len(theme_cache)} themes")
 
 
 def build_training_data():
@@ -346,7 +397,8 @@ def train_model(training_data=None):
                      "bridge_x_oracle", "provides_x_bridge",
                      "bidirectional", "rare_overlap",
                      "cmdr_type_in_oracle", "card_type_in_cmdr_oracle",
-                     "spellbook_combos", "ability_match", "color_overlap"]
+                     "spellbook_combos", "ability_match", "color_overlap",
+                     "card_rarity", "total_spellbook", "strategy_match", "theme_overlap"]
 
     # Compute feature means and stds for normalization
     means = {f: 0.0 for f in feature_names}
