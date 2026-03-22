@@ -181,6 +181,24 @@ SEMANTIC_BRIDGES = {
     ("counter-placement", "creature-board"): 0.4,
     ("board-wide-counter-placement", "creature-board"): 0.5,
 
+    # ── Poison / Infect / Proliferate bridges ──
+    # Poison counters ARE counters — proliferate ticks them up
+    ("poison-counter-placement", "counter-placement-events"): 0.9,
+    ("infect", "counter-placement-events"): 0.8,
+    # Proliferate provides what poison-counter cards want
+    ("proliferate", "poison-counter-placement"): 0.9,
+    ("proliferate", "poison-counter-presence"): 0.9,
+    ("proliferate", "poison-counter-synergy"): 0.9,
+    ("proliferate", "poison-counter-proliferation"): 1.0,
+    ("proliferate", "poison-counter-accumulation"): 0.9,
+    ("proliferate", "poison-counter-payoff"): 0.8,
+    ("proliferate", "opponent-poison-counters"): 0.9,
+    ("proliferate", "opponent-poisoning"): 0.8,
+    # Poison placement provides what proliferate cards want
+    ("poison-counter-placement", "board-threats"): 0.5,
+    # Infect provides what counter-synergy wants
+    ("infect", "creature-board"): 0.4,
+
     # ── Spellslinger / Drain bridges ──
 
     # Life drain → life gain events (draining opponents = gaining life for payoffs)

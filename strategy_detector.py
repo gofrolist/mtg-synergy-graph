@@ -94,6 +94,9 @@ STRATEGY_RULES = [
     # Go wide
     ({"board-wide-creature-pump", "creature-pump"}, "go-wide", 0.7),
 
+    # Infect / poison
+    ({"infect", "poison-counter-placement"}, "infect", 0.9),
+
     # Payoff patterns — cards that benefit from a strategy's output
     # etb-payoff: cards like Impact Tremors that fire on every creature ETB (tokens spam ETBs)
     ({"etb-payoff"}, "tokens", 0.7),
