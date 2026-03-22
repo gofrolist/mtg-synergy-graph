@@ -110,6 +110,35 @@ def compute_features(commander: dict, candidate: dict) -> dict:
     # Feature 9: Total tag count (card complexity)
     total_tags = len(card_provides) + len(card_wants)
 
+    # Feature 10: Bidirectional connection strength
+    # Cards that both provide-to-wants AND want-from-provides are stronger
+    bidirectional = min(provides_to_wants, wants_from_provides)
+
+    # Feature 11: Oracle text SPECIFIC concept overlap (not generic words)
+    # Only count concepts that are RARE (not "creature" or "damage")
+    rare_concepts = {"mill", "graveyard", "poison", "infect", "proliferate",
+                     "equipment", "equip", "aura", "enchant", "sacrifice",
+                     "exile", "counter", "token", "planeswalker", "land",
+                     "draw", "discard", "untap"}
+    rare_overlap = 0
+    for concept in rare_concepts:
+        if re.search(r'\b' + concept + r's?\b', cmdr_oracle) and \
+           re.search(r'\b' + concept + r's?\b', card_oracle):
+            rare_overlap += 1
+
+    # Feature 12: Commander creature type appears in candidate's oracle text
+    # E.g., Kyler is a Human — does the candidate mention "Human"?
+    cmdr_type_in_oracle = 0
+    for subtype in cmdr_subtypes:
+        if len(subtype) > 3 and re.search(r'\b' + re.escape(subtype) + r's?\b', card_oracle):
+            cmdr_type_in_oracle += 1
+
+    # Feature 13: Candidate creature type matches commander's oracle text types
+    card_type_in_cmdr_oracle = 0
+    for subtype in card_subtypes:
+        if len(subtype) > 3 and re.search(r'\b' + re.escape(subtype) + r's?\b', cmdr_oracle):
+            card_type_in_cmdr_oracle += 1
+
     return {
         "provides_to_wants": provides_to_wants,
         "wants_from_provides": wants_from_provides,
@@ -121,9 +150,12 @@ def compute_features(commander: dict, candidate: dict) -> dict:
         "cmc_diff": cmc_diff,
         "rank_log": round(rank_log, 2),
         "total_tags": total_tags,
-        # Interaction features: combinations of signals are stronger
         "bridge_x_oracle": round(bridge_score * oracle_overlap, 2),
         "provides_x_bridge": round(provides_to_wants * bridge_score, 2),
+        "bidirectional": bidirectional,
+        "rare_overlap": rare_overlap,
+        "cmdr_type_in_oracle": cmdr_type_in_oracle,
+        "card_type_in_cmdr_oracle": card_type_in_cmdr_oracle,
     }
 
 
@@ -250,8 +282,9 @@ def train_model(training_data=None):
     feature_names = ["provides_to_wants", "wants_from_provides", "bridge_score",
                      "oracle_overlap", "keyword_overlap", "shared_types",
                      "type_match", "cmc_diff", "rank_log", "total_tags",
-                     # Interaction features
-                     "bridge_x_oracle", "provides_x_bridge"]
+                     "bridge_x_oracle", "provides_x_bridge",
+                     "bidirectional", "rare_overlap",
+                     "cmdr_type_in_oracle", "card_type_in_cmdr_oracle"]
 
     # Compute feature means and stds for normalization
     means = {f: 0.0 for f in feature_names}
