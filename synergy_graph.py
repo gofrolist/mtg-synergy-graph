@@ -418,6 +418,15 @@ SEMANTIC_BRIDGES = {
     ("self-mill", "creature-power"): 0.4,             # Mill fuels power-from-graveyard
     ("sacrifice-payoff", "targeted-spells"): 0.4,     # Sacrifice payoff on targeted spells
 
+    # ── Equipment/Enchantment/Artifact interaction ──
+    ("board-wipe", "equip-target"): 0.5,              # Wipe spares equipped/enchanted creatures
+    ("board-wipe", "enchantment-presence"): 0.4,      # Wipe + enchantment protection (Winds of Rath)
+    ("stax", "artifact-presence"): 0.6,               # Stax pieces ARE artifacts (Winter Orb)
+    ("mana-flexibility", "artifact-casting"): 0.5,    # Mana sources enable artifact casting (Mox → Sai)
+    ("mana-acceleration", "artifact-casting"): 0.5,
+    ("tutor", "artifact-presence"): 0.5,              # Tutor finds artifacts (Whir → Winter Orb)
+    ("tutor", "enchantment-presence"): 0.4,
+
     # ── Absolute final: 3-4 combo bridges ──
     ("top-of-library", "counter-placement-events"): 0.4,
     ("extra-turn", "artifact-presence"): 0.4,

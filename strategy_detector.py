@@ -59,14 +59,12 @@ STRATEGY_RULES = [
     # Enchantments
     ({"enchantment-synergy", "aura-synergy"}, "enchantress", 0.8),
 
-    # Combat / Voltron
+    # Combat / Voltron — only equipment/aura-specific cards, NOT generic pump
     ({"extra-combat"}, "extra-combats", 1.0),
-    ({"evasion"}, "voltron", 0.5),
-    ({"creature-pump"}, "voltron", 0.6),            # Pump effects power up voltron
-    ({"trample-grant", "evasion-grant"}, "voltron", 0.7),
-    ({"lifelink-grant"}, "voltron", 0.5),
-    ({"combat-trigger"}, "voltron", 0.6),
-    ({"combat-enabler"}, "voltron", 0.5),
+    ({"evasion"}, "voltron", 0.4),
+    # creature-pump removed from voltron — too generic (goblin lords get voltron)
+    ({"trample-grant", "evasion-grant"}, "voltron", 0.5),
+    ({"lifelink-grant"}, "voltron", 0.4),
 
     # Equipment
     ({"equipment-synergy"}, "equipment", 0.9),
@@ -86,9 +84,8 @@ STRATEGY_RULES = [
     ({"card-draw-payoff"}, "wheels", 0.6),           # Draw payoffs benefit from wheels
     ({"tutor"}, "toolbox", 0.7),
 
-    # Storm
-    ({"spell-cost-reduction"}, "storm", 0.7),        # Cost reduction fuels storm
-    ({"card-draw"}, "storm", 0.3),                   # Very low — card draw helps storm but too generic
+    # Storm — only very specific storm enablers
+    ({"storm-count"}, "storm", 1.0),                  # Actual storm keyword cards
 
     # Life
     ({"life-gain"}, "lifegain", 0.9),
@@ -127,13 +124,12 @@ STRATEGY_RULES = [
 
     # Reanimator enablers
     ({"self-mill"}, "reanimator", 0.7),           # Self-mill fuels reanimation
-    ({"graveyard-recursion"}, "blink", 0.5),      # Recursion from graveyard = pseudo-blink
+    # graveyard-recursion→blink removed (recursion is NOT blink — blink is exile+return)
 
     # Treasure: token-generation of artifact tokens
     ({"treasure-generation"}, "artifacts", 0.5),  # Treasures are artifacts
 
-    # Storm enablers: mana acceleration fuels storm (but low confidence - generic)
-    ({"mana-acceleration"}, "storm", 0.3),
+    # Storm: mana-acceleration→storm removed (too generic — every deck has mana rocks)
 ]
 
 
@@ -174,8 +170,7 @@ WANTS_STRATEGY_RULES = [
     ({"equipment-presence"}, "voltron", 0.5),
     ({"aura-presence"}, "voltron", 0.5),
 
-    # Storm: wants to cast many spells
-    ({"spell-casting", "instant-sorcery-casting", "noncreature-spells"}, "storm", 0.5),
+    # Storm removed from spell-casting wants — too generic (32% of cards get storm)
 
     # Wheels: wants card draw events
     ({"card-draw-events"}, "wheels", 0.6),
@@ -184,8 +179,7 @@ WANTS_STRATEGY_RULES = [
     # Lifedrain: wants life loss events
     ({"life-payment"}, "lifedrain", 0.5),
 
-    # Landfall: cards wanting lands
-    ({"land-density"}, "landfall", 0.5),
+    # land-density→landfall removed — too generic (every deck wants lands, not just landfall)
 
     # Proliferate: cards wanting counters
     ({"counter-placement-events"}, "proliferate", 0.6),
@@ -193,15 +187,12 @@ WANTS_STRATEGY_RULES = [
     # Reanimator: cards wanting graveyard
     ({"graveyard-filling"}, "reanimator", 0.6),
 
-    # Blink: cards wanting ETB
-    ({"creature-etb"}, "blink", 0.3),  # Low — creature-etb is generic. Only adds via deck composition threshold.
+    # Blink removed from creature-etb wants — too generic (any creature deck wants ETBs)
 
     # Treasure: cards wanting artifacts or tokens
     ({"token-events"}, "treasure", 0.5),
 
-    # Storm: cards wanting spell casting + mana
-    ({"mana-needs"}, "storm", 0.3),  # Low — too generic. Only triggers via deck composition.
-    ({"life-payment"}, "storm", 0.4),  # Storm often involves paying life
+    # Storm: only storm-specific wants (removed mana-needs and life-payment — too generic)
 ]
 
 
