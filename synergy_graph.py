@@ -181,10 +181,12 @@ SEMANTIC_BRIDGES = {
     ("counter-placement", "creature-board"): 0.4,
     ("board-wide-counter-placement", "creature-board"): 0.5,
 
-    # ── Poison / Infect / Proliferate bridges ──
+    # ── Poison / Infect / Toxic / Proliferate bridges ──
     # Poison counters ARE counters — proliferate ticks them up
     ("poison-counter-placement", "counter-placement-events"): 0.9,
     ("infect", "counter-placement-events"): 0.8,
+    ("toxic-ability", "counter-placement-events"): 0.8,
+    ("toxic-1", "counter-placement-events"): 0.8,
     # Proliferate provides what poison-counter cards want
     ("proliferate", "poison-counter-placement"): 0.9,
     ("proliferate", "poison-counter-presence"): 0.9,

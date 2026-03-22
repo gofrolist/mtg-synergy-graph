@@ -52,6 +52,24 @@ def _split_faces(oracle_text):
     return [(0, oracle_text)]
 
 
+# Keywords that map to specific effect tags
+KEYWORD_EFFECT_TAGS = {
+    "toxic": ["poison-counter-placement"],
+    "infect": ["infect", "poison-counter-placement"],
+    "proliferate": ["proliferate", "counter-placement"],
+    "lifelink": ["life-gain"],
+    "deathtouch": ["spot-removal"],
+    "haste": ["evasion"],
+    "flying": ["evasion"],
+    "trample": ["evasion"],
+    "menace": ["evasion"],
+    "vigilance": ["board-protection"],
+    "hexproof": ["board-protection"],
+    "indestructible": ["board-protection"],
+    "ward": ["board-protection"],
+}
+
+
 def _extract_keywords(card):
     """Phase 1: Extract keyword abilities from the card's keywords field."""
     abilities = []
@@ -59,13 +77,14 @@ def _extract_keywords(card):
     for kw in keywords:
         kw_lower = kw.lower()
         zone = KEYWORD_ZONES.get(kw_lower, "battlefield")
+        effect_tags = KEYWORD_EFFECT_TAGS.get(kw_lower)
         abilities.append({
             "ability_type": "keyword",
             "trigger_condition": None,
             "trigger_tags": None,
             "cost": None,
             "effect": kw_lower,
-            "effect_tags": None,
+            "effect_tags": effect_tags,
             "zone": zone,
             "targets": None,
             "is_mana_ability": False,
@@ -389,11 +408,14 @@ def parse_card(card):
 
     # Phase 3: Tag effects and triggers
     for ab in all_abilities:
-        # Tag effects
+        # Tag effects (merge with any pre-existing tags from keyword extraction)
         effect_tags = _tag_effect(ab.get("effect") or "")
-        # For activated abilities, also tag the cost
         cost_tags = _tag_cost(ab.get("cost") or "")
         effect_tags.extend(cost_tags)
+        # Preserve keyword-derived effect_tags (set in Phase 1)
+        existing = ab.get("effect_tags") or []
+        if existing:
+            effect_tags = list(set(existing + effect_tags))
         ab["effect_tags"] = effect_tags if effect_tags else None
 
         # Tag trigger conditions
