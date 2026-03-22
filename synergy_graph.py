@@ -660,10 +660,13 @@ def build_provides_wants_edges(cards: list[dict]) -> list[dict]:
     n = len(cards)
     MAX_PROVIDERS = max(50, min(500, 2000 * 500 // max(n, 1)))
 
-    # Pre-filter provides_index to stay within memory budget
+    # Pre-filter provides_index to stay within memory budget.
+    # Instead of deleting popular tags, keep a capped sample.
+    # This ensures cards with only common provides tags still get edges.
     for tag in list(provides_index):
         if len(provides_index[tag]) > MAX_PROVIDERS:
-            del provides_index[tag]
+            # Keep first MAX_PROVIDERS (tends to be popular/high-rank cards)
+            provides_index[tag] = provides_index[tag][:MAX_PROVIDERS]
 
     # Accumulate best match and total weight per card pair.
     # Stores (best_weight, best_ptag, best_wtag, total_weight, match_count) compactly.
@@ -1393,13 +1396,18 @@ def _deck_card_scores(graph: dict, deck_cards: set[str]) -> dict:
 
 def _candidate_scores(graph: dict, deck_cards: set[str],
                       commander: str = None, key_cards: set = None) -> dict:
-    """Compute synergy totals for non-deck cards against the decklist.
+    """Compute synergy scores for non-deck cards against the decklist.
 
-    Commander synergy is weighted 5x more than generic deck card synergy.
-    Key cards (top synergy cards in the deck) are weighted 3x.
-    This ensures recommendations specifically synergize with the commander's
-    strategy rather than generically connecting to many ramp/draw spells.
+    Scoring formula rewards DEPTH over BREADTH:
+      score = commander_synergy * 10
+            + key_card_synergy * 5
+            + avg(top_5_partner_scores) * sqrt(partner_count)
+
+    This ensures cards that specifically synergize with the commander
+    (like Mindcrank for Syr Konrad) rank higher than generic cards
+    that weakly connect to many deck cards.
     """
+    import math
     adj = graph["adjacency"]
     scores = defaultdict(lambda: {"total": 0.0, "partners": [], "multi_sig": 0,
                                   "commander_synergy": 0.0, "key_synergy": 0.0})
@@ -1407,6 +1415,7 @@ def _candidate_scores(graph: dict, deck_cards: set[str],
     if key_cards is None:
         key_cards = set()
 
+    # Collect raw edge data
     for card in deck_cards:
         for edge in adj.get(card, []):
             target = edge["target"]
@@ -1414,21 +1423,33 @@ def _candidate_scores(graph: dict, deck_cards: set[str],
                 info = scores[target]
                 base_score = edge["score"]
 
-                # Commander edges are worth 5x — this is the most important signal
                 if card == commander:
-                    weighted = base_score * 5.0
                     info["commander_synergy"] += base_score
-                # Key deck cards (high internal synergy) are worth 3x
                 elif card in key_cards:
-                    weighted = base_score * 3.0
                     info["key_synergy"] += base_score
-                else:
-                    weighted = base_score
 
-                info["total"] += weighted
                 info["partners"].append((card, edge["score"], edge["signals"]))
                 if edge["signals"] >= 2:
                     info["multi_sig"] += 1
+
+    # Compute final scores using depth-over-breadth formula
+    for target, info in scores.items():
+        partner_scores = sorted([s for _, s, _ in info["partners"]], reverse=True)
+        partner_count = len(partner_scores)
+
+        # Top-5 average: quality of best connections
+        top_5 = partner_scores[:5]
+        avg_top5 = sum(top_5) / max(len(top_5), 1)
+
+        # Breadth factor: diminishing returns on partner count
+        breadth = math.sqrt(max(partner_count, 1))
+
+        # Final score: commander synergy dominates, then key cards, then general
+        info["total"] = (
+            info["commander_synergy"] * 10.0   # Commander synergy is king
+            + info["key_synergy"] * 5.0         # Key card synergy matters
+            + avg_top5 * breadth                 # General: quality * sqrt(breadth)
+        )
 
     return dict(scores)
 
