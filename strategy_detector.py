@@ -59,20 +59,36 @@ STRATEGY_RULES = [
     # Enchantments
     ({"enchantment-synergy", "aura-synergy"}, "enchantress", 0.8),
 
-    # Combat
+    # Combat / Voltron
     ({"extra-combat"}, "extra-combats", 1.0),
-    ({"evasion"}, "voltron", 0.6),
-    ({"equipment-synergy"}, "equipment", 0.9),
+    ({"evasion"}, "voltron", 0.5),
+    ({"creature-pump"}, "voltron", 0.6),            # Pump effects power up voltron
+    ({"trample-grant", "evasion-grant"}, "voltron", 0.7),
+    ({"lifelink-grant"}, "voltron", 0.5),
+    ({"combat-trigger"}, "voltron", 0.6),
+    ({"combat-enabler"}, "voltron", 0.5),
 
-    # Control
+    # Equipment
+    ({"equipment-synergy"}, "equipment", 0.9),
+    ({"combat-trigger"}, "equipment", 0.6),
+
+    # Control / Stax
     ({"counterspell"}, "control", 0.7),
     ({"board-control"}, "control", 0.6),
     ({"tap-control"}, "stax", 0.7),
+    ({"stax-tax"}, "stax", 0.9),                    # Tax effects ARE stax
+    ({"resource-denial"}, "stax", 0.8),
+    ({"mana-denial"}, "stax", 0.8),
 
     # Card advantage
-    ({"card-draw"}, "card-draw", 0.5),  # Low confidence — almost everything draws
-    ({"card-draw-payoff"}, "card-draw", 0.7),  # Payoff specifically for drawing cards
+    ({"card-draw"}, "card-draw", 0.5),
+    ({"card-draw-payoff"}, "card-draw", 0.7),
+    ({"card-draw-payoff"}, "wheels", 0.6),           # Draw payoffs benefit from wheels
     ({"tutor"}, "toolbox", 0.7),
+
+    # Storm
+    ({"spell-cost-reduction"}, "storm", 0.7),        # Cost reduction fuels storm
+    ({"card-draw"}, "storm", 0.3),                   # Very low — card draw helps storm but too generic
 
     # Life
     ({"life-gain"}, "lifegain", 0.9),
@@ -130,6 +146,27 @@ WANTS_STRATEGY_RULES = [
     ({"commander-casting"}, "commander-matters", 0.7),
     # opponent-life-loss wants: lifedrain strategy payoffs
     ({"opponent-life-loss"}, "lifedrain", 0.6),
+
+    # Stax: cards wanting to disrupt opponents
+    ({"opponent-spell-casting"}, "stax", 0.6),         # Tax effects care about opponent spells
+    ({"opponent-mana-denial"}, "stax", 0.7),
+
+    # Voltron / Equipment: cards wanting to be equipped or pump
+    ({"equip-target"}, "voltron", 0.5),
+    ({"equip-target"}, "equipment", 0.6),
+    ({"equipment-presence"}, "equipment", 0.7),
+    ({"equipment-presence"}, "voltron", 0.5),
+    ({"aura-presence"}, "voltron", 0.5),
+
+    # Storm: wants to cast many spells
+    ({"spell-casting", "instant-sorcery-casting", "noncreature-spells"}, "storm", 0.5),
+
+    # Wheels: wants card draw events
+    ({"card-draw-events"}, "wheels", 0.6),
+    ({"discard-events"}, "wheels", 0.6),
+
+    # Lifedrain: wants life loss events
+    ({"life-payment"}, "lifedrain", 0.5),
 ]
 
 
