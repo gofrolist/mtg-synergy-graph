@@ -52,21 +52,172 @@ def _split_faces(oracle_text):
     return [(0, oracle_text)]
 
 
-# Keywords that map to specific effect tags
+# Keywords that map to specific effect tags.
+# Based on MTG Comprehensive Rules — what each keyword MECHANICALLY does.
+# This is the primary way the system understands card interactions without LLM.
 KEYWORD_EFFECT_TAGS = {
-    "toxic": ["poison-counter-placement"],
-    "infect": ["infect", "poison-counter-placement"],
-    "proliferate": ["proliferate", "counter-placement"],
-    "lifelink": ["life-gain"],
-    "deathtouch": ["spot-removal"],
-    "haste": ["evasion"],
+    # ── Evasion (creature gets through in combat) ──
     "flying": ["evasion"],
     "trample": ["evasion"],
     "menace": ["evasion"],
-    "vigilance": ["board-protection"],
+    "fear": ["evasion"],
+    "intimidate": ["evasion"],
+    "shadow": ["evasion"],
+    "horsemanship": ["evasion"],
+    "skulk": ["evasion"],
+    "landwalk": ["evasion"],
+    "unblockable": ["evasion"],
+
+    # ── Combat keywords ──
+    "haste": ["haste-grant"],           # Can attack/tap immediately
+    "vigilance": ["vigilance-grant"],    # Doesn't tap to attack
+    "first strike": ["combat-advantage"],
+    "double strike": ["combat-advantage", "combat-damage-events"],
+    "reach": ["combat-advantage"],       # Can block flyers
+    "defender": [],                      # No synergy tags — it's a restriction
+
+    # ── Protection / resilience ──
     "hexproof": ["board-protection"],
+    "shroud": ["board-protection"],
     "indestructible": ["board-protection"],
     "ward": ["board-protection"],
+    "protection": ["board-protection"],
+    "regenerate": ["board-protection"],
+    "totem armor": ["board-protection"],
+    "persist": ["graveyard-recursion", "counter-placement"],  # Returns with -1/-1 counter
+    "undying": ["graveyard-recursion", "counter-placement"],  # Returns with +1/+1 counter
+
+    # ── Life/damage ──
+    "lifelink": ["life-gain"],
+    "deathtouch": ["spot-removal"],
+    "infect": ["infect", "poison-counter-placement"],
+    "toxic": ["poison-counter-placement"],
+    "wither": ["counter-placement"],     # Damage as -1/-1 counters
+    "afflict": ["direct-damage"],        # Damage when blocked
+
+    # ── Counter mechanics ──
+    "proliferate": ["proliferate", "counter-placement"],
+    "modular": ["counter-placement"],    # ETB with +1/+1 counters, moves on death
+    "evolve": ["counter-placement"],     # Gets +1/+1 when bigger creature enters
+    "outlast": ["counter-placement"],    # Tap: put +1/+1 counter
+    "adapt": ["counter-placement"],      # Put +1/+1 counters if none
+    "bolster": ["counter-placement"],    # Put +1/+1 on weakest creature
+    "renown": ["counter-placement"],     # +1/+1 counter on first combat damage
+    "training": ["counter-placement"],   # +1/+1 when attacks with bigger creature
+    "mentor": ["counter-placement"],     # +1/+1 on smaller attacking creature
+    "riot": ["counter-placement"],       # +1/+1 counter or haste
+    "monstrosity": ["counter-placement"],
+
+    # ── Token generation ──
+    "fabricate": ["token-generation", "counter-placement"],  # Tokens OR counters
+    "embalm": ["token-generation"],      # Create token copy from graveyard
+    "eternalize": ["token-generation"],  # Create token copy from graveyard
+    "amass": ["token-generation", "counter-placement"],  # Create/grow Army token
+    "populate": ["token-generation"],    # Copy a creature token
+    "crew": ["token-generation"],        # Not tokens, but vehicle activation (tap creatures)
+    "investigate": ["clue-generation", "card-draw"],  # Create Clue token
+    "food": ["food-generation", "life-gain"],
+    "treasure": ["treasure-generation", "mana-acceleration"],
+    "blood": ["card-filtering", "discard"],  # Blood tokens: discard + draw
+    "clue": ["clue-generation", "card-draw"],
+
+    # ── Card advantage / filtering ──
+    "cycling": ["card-draw", "card-filtering", "discard"],  # Pay, discard this, draw
+    "scry": ["card-filtering"],
+    "surveil": ["card-filtering", "graveyard-fill"],  # Scry but to graveyard
+    "explore": ["card-filtering", "counter-placement"],  # Reveal, +1/+1 or land
+    "connive": ["card-filtering", "counter-placement", "discard"],
+    "mill": ["mill", "graveyard-fill"],
+    "draw": ["card-draw"],
+    "seek": ["card-draw"],              # Digital: random from library
+    "conjure": ["card-draw"],           # Digital: create card
+    "learn": ["card-draw"],             # Lesson from sideboard or rummage
+    "foretell": ["card-filtering"],     # Exile face-down, cast later cheaper
+
+    # ── Graveyard mechanics ──
+    "flashback": ["graveyard-recursion"],
+    "unearth": ["graveyard-recursion"],
+    "escape": ["graveyard-recursion"],
+    "retrace": ["graveyard-recursion"],
+    "jump-start": ["graveyard-recursion", "discard"],
+    "disturb": ["graveyard-recursion"],
+    "encore": ["graveyard-recursion", "token-generation"],
+    "embalm": ["graveyard-recursion", "token-generation"],
+    "eternalize": ["graveyard-recursion", "token-generation"],
+    "madness": ["discard"],             # Cast when discarded
+    "dredge": ["graveyard-fill", "graveyard-recursion"],
+    "delve": ["graveyard-exile-cost"],
+    "delirium": ["graveyard-fill"],     # Cares about card types in graveyard
+    "threshold": ["graveyard-fill"],    # Cares about 7+ cards in graveyard
+    "undergrowth": ["graveyard-fill"],
+
+    # ── Mana / cost ──
+    "convoke": ["cost-reduction"],      # Tap creatures to pay
+    "affinity": ["cost-reduction"],     # Costs less for each artifact/etc
+    "improvise": ["cost-reduction"],    # Tap artifacts to pay
+    "delve": ["cost-reduction"],        # Exile graveyard to pay
+    "suspend": ["cost-reduction"],      # Pay less, wait turns
+    "emerge": ["cost-reduction"],       # Sac creature to reduce cost
+    "evoke": ["cost-reduction"],        # Cheaper but sacrifice
+    "overload": [],                     # Alternate cost, no synergy tag
+    "kicker": [],                       # Extra cost for bonus, too generic
+    "domain": [],                       # Scales with basic land types, too generic
+
+    # ── Tribal / type ──
+    "changeling": ["tribal-enabler"],   # All creature types
+    "partner": [],                      # Commander mechanic
+    "partner with": [],
+
+    # ── Enchantment / artifact interaction ──
+    "enchant": ["aura-synergy"],
+    "equip": ["equipment-synergy"],
+    "reconfigure": ["equipment-synergy"],
+    "living weapon": ["equipment-synergy", "token-generation"],
+
+    # ── Transform / modal ──
+    "transform": ["transform"],
+    "morph": [],                        # Face-down mechanic, no clear synergy tag
+    "manifest": [],
+    "megamorph": ["counter-placement"], # Turns face-up with +1/+1 counter
+    "disguise": [],
+
+    # ── Attack/damage triggers ──
+    "prowess": ["spell-cast-payoff"],   # Gets +1/+1 when you cast noncreature
+    "exalted": ["attack-events"],       # Bonus when attacking alone
+    "myriad": ["token-generation", "attack-events"],  # Create copies attacking
+    "battle cry": ["creature-pump", "attack-events"],
+    "melee": ["attack-events"],
+    "raid": ["attack-events"],          # Bonus if you attacked this turn
+    "ninjutsu": ["evasion"],            # Swap in unblocked attacker
+
+    # ── Miscellaneous ──
+    "cascade": ["card-draw", "cost-reduction"],  # Cast, exile until cheaper spell, cast free
+    "storm": ["storm-count"],           # Copy for each spell cast this turn
+    "flash": ["instant-speed"],         # Can cast at instant speed
+    "devoid": [],                       # Colorless, no synergy
+    "phasing": [],
+    "goad": ["tap-control"],            # Force opponent creature to attack
+    "fight": ["spot-removal"],          # Two creatures deal damage to each other
+    "landfall": ["landfall-trigger"],   # Triggers when land enters
+    "typecycling": ["card-filtering", "discard"],
+    "landcycling": ["card-filtering", "discard", "land-search"],
+    "channel": ["discard"],             # Discard for effect
+    "offering": ["cost-reduction", "sacrifice-outlet"],
+    "dash": ["haste-grant"],            # Cast for dash cost, gains haste
+    "blitz": ["haste-grant", "card-draw"],  # Cast for blitz, haste + draw on death
+    "spectacle": ["cost-reduction"],    # Cheaper if opponent lost life
+    "hideaway": ["card-filtering"],
+    "entwine": [],                      # Pay more for both modes
+    "bestow": ["aura-synergy"],         # Cast as aura or creature
+    "mutate": ["counter-placement"],    # Stacks creatures, triggers
+    "prototype": [],
+    "craft": [],
+    "boast": [],                        # Pay after attacking, too generic
+    "adventure": [],                    # DFC mechanic, no synergy tag
+    "sagas": [],
+
+    # ── Planeswalker ──
+    "compleated": [],                   # Phyrexian mana for loyalty, no synergy tag
 }
 
 
