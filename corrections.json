@@ -59,5 +59,45 @@
     "wrong": null,
     "correct": "untap",
     "example_card": "Umbral Mantle"
+  },
+  {
+    "id": "c008",
+    "scope": "global",
+    "rule": "NEVER use 'creature-board' as a wants tag — it matches 38% of all cards and is too generic to form useful graph edges. Instead use SPECIFIC sub-tags: 'sacrifice-fodder' (wants disposable creatures to sacrifice), 'creature-count-matters' (scales with number of creatures), 'creature-power-matters' (cares about power/toughness), 'equip-target' (needs a creature to attach to), 'combat-attackers' (needs creatures to attack with), 'tap-ability-creatures' (needs creatures that tap for value).",
+    "wrong": "creature-board",
+    "correct": "sacrifice-fodder / creature-count-matters / creature-power-matters / equip-target / combat-attackers / tap-ability-creatures",
+    "example_card": "Skullclamp (wants sacrifice-fodder), Craterhoof (wants creature-count-matters)"
+  },
+  {
+    "id": "c009",
+    "scope": "global",
+    "rule": "Cards with Toxic or Infect MUST include 'poison-counter-placement' in provides. Cards with Proliferate MUST include 'proliferate' in provides. These tags connect poison/infect cards to proliferate synergies.",
+    "wrong": null,
+    "correct": "poison-counter-placement (toxic/infect), proliferate",
+    "example_card": "Venerated Rotpriest (toxic → poison-counter-placement), Atraxa (proliferate)"
+  },
+  {
+    "id": "c010",
+    "scope": "global",
+    "rule": "Cards whose oracle text explicitly references a creature type (e.g., 'Other Humans you control get +1/+1' or 'Whenever a Goblin enters') MUST include 'X-tribal' in provides, where X is the creature type. Being a creature of type X alone does NOT qualify — the oracle text must reference the type.",
+    "wrong": null,
+    "correct": "human-tribal / goblin-tribal / elf-tribal etc.",
+    "example_card": "Kyler (oracle says 'Human' → provides human-tribal)"
+  },
+  {
+    "id": "c011",
+    "scope": "global",
+    "rule": "Cards that tax opponents (make spells cost more, force payment on actions) MUST include 'stax-tax' in provides. Cards that deny resources (tap permanents, prevent untapping, destroy lands) MUST include 'resource-denial' or 'mana-denial' in provides.",
+    "wrong": null,
+    "correct": "stax-tax / resource-denial / mana-denial",
+    "example_card": "Rhystic Study (stax-tax), Winter Orb (resource-denial)"
+  },
+  {
+    "id": "c012",
+    "scope": "global",
+    "rule": "Do NOT use generic 'combat-events' as a wants tag for every creature — it matches 23% of cards. Only use it for cards that specifically trigger on combat damage or have combat-specific abilities. A vanilla creature that attacks does NOT want 'combat-events'.",
+    "wrong": "combat-events (on generic creatures)",
+    "correct": "combat-attackers (if card specifically cares about attacking)",
+    "example_card": "Swords to Plowshares does NOT want combat-events"
   }
 ]
