@@ -1,19 +1,19 @@
 {
   "weights": {
-    "provides_to_wants": 0.3627015029612509,
-    "wants_from_provides": -0.15966660206626979,
-    "bridge_score": 0.8070438544228462,
-    "oracle_overlap": 0.734030332378153,
-    "keyword_overlap": 0.2663075020636573,
-    "shared_types": 0.4050147966633142,
-    "type_match": 0.6806593192000846,
-    "cmc_diff": -2.0430524493441506,
-    "rank_log": -2.191475286018077,
-    "total_tags": -0.09565979860484419,
-    "bridge_x_oracle": -0.06799039999297525,
-    "provides_x_bridge": -0.006592178848947415
+    "provides_to_wants": 0.11184200930138267,
+    "wants_from_provides": 0.26118722080050344,
+    "bridge_score": 0.6352194140404576,
+    "oracle_overlap": 0.7459678880596287,
+    "keyword_overlap": 0.33396888742470376,
+    "shared_types": 0.31142809939750293,
+    "type_match": 0.3691108283271218,
+    "cmc_diff": -1.3733343088736074,
+    "rank_log": -2.2559872775569403,
+    "total_tags": -0.27423472654987857,
+    "bridge_x_oracle": -0.4001091811377591,
+    "provides_x_bridge": 0.001768381185725784
   },
-  "bias": -2.5932670041002153,
+  "bias": -2.58696445126505,
   "means": {
     "provides_to_wants": 0.023697418119728877,
     "wants_from_provides": 0.022714337455373313,

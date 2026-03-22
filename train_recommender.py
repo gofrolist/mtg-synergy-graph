@@ -268,38 +268,66 @@ def train_model(training_data=None):
     for f in feature_names:
         stds[f] = max((stds[f] / max(len(training_data), 1)) ** 0.5, 0.001)
 
-    # Logistic regression via gradient descent
+    # Phase 1: Classification loss (logistic regression)
     weights = {f: 0.0 for f in feature_names}
     bias = 0.0
     lr = 0.1
-    epochs = 100
 
-    for epoch in range(epochs):
+    for epoch in range(50):
         total_loss = 0.0
         for row in training_data:
-            # Normalize features
             x = {f: (row[f] - means[f]) / stds[f] for f in feature_names}
             y = row["label"]
-
-            # Forward pass
             z = sum(weights[f] * x[f] for f in feature_names) + bias
-            z = max(-20, min(20, z))  # Clip for stability
+            z = max(-20, min(20, z))
             pred = 1.0 / (1.0 + math.exp(-z))
-
-            # Loss
             eps = 1e-7
             loss = -(y * math.log(pred + eps) + (1 - y) * math.log(1 - pred + eps))
             total_loss += loss
-
-            # Backward pass
             error = pred - y
             for f in feature_names:
                 weights[f] -= lr * error * x[f]
             bias -= lr * error
+        if (epoch + 1) % 25 == 0:
+            print(f"  Classification epoch {epoch+1}: loss={total_loss/len(training_data):.4f}")
 
-        if (epoch + 1) % 20 == 0:
-            avg_loss = total_loss / len(training_data)
-            print(f"  Epoch {epoch+1}: loss={avg_loss:.4f}")
+    # Phase 2: Fine-tune with pairwise ranking loss (BPR)
+    import random
+    random.seed(42)
+    by_commander = {}
+    for row in training_data:
+        cmdr = row["commander"]
+        by_commander.setdefault(cmdr, {"pos": [], "neg": []})
+        if row["label"] == 1:
+            by_commander[cmdr]["pos"].append(row)
+        else:
+            by_commander[cmdr]["neg"].append(row)
+
+    lr_rank = 0.01  # Lower LR for fine-tuning
+
+    for epoch in range(20):
+        total_loss = 0.0
+        pairs = 0
+        for cmdr, groups in by_commander.items():
+            if not groups["pos"] or not groups["neg"]:
+                continue
+            for pos in groups["pos"]:
+                neg = random.choice(groups["neg"])
+                x_pos = {f: (pos[f] - means[f]) / stds[f] for f in feature_names}
+                x_neg = {f: (neg[f] - means[f]) / stds[f] for f in feature_names}
+                z_pos = sum(weights[f] * x_pos[f] for f in feature_names) + bias
+                z_neg = sum(weights[f] * x_neg[f] for f in feature_names) + bias
+                diff = max(-20, min(20, z_pos - z_neg))
+                sigma = 1.0 / (1.0 + math.exp(-diff))
+                eps = 1e-7
+                loss = -math.log(sigma + eps)
+                total_loss += loss
+                pairs += 1
+                error = sigma - 1.0
+                for f in feature_names:
+                    weights[f] -= lr_rank * error * (x_pos[f] - x_neg[f])
+        if (epoch + 1) % 10 == 0:
+            print(f"  Ranking epoch {epoch+1}: loss={total_loss/max(pairs,1):.4f}")
 
     # Save model
     model = {
@@ -321,10 +349,20 @@ def train_model(training_data=None):
 
 
 def predict(model: dict, commander: dict, candidate: dict) -> float:
-    """Predict synergy score for a commander-candidate pair."""
+    """Predict synergy score for a commander-candidate pair.
+
+    Caps rank_log influence to prevent popular staples from dominating.
+    """
     features = compute_features(commander, candidate)
     x = {f: (features[f] - model["means"][f]) / model["stds"][f]
          for f in model["feature_names"]}
+
+    # Cap rank_log and cmc_diff contribution to prevent dominating
+    # Without this, rank alone determines most recommendations
+    for dampened in ["rank_log", "cmc_diff"]:
+        if dampened in x:
+            x[dampened] = max(-0.5, min(0.5, x[dampened]))
+
     z = sum(model["weights"][f] * x[f] for f in model["feature_names"]) + model["bias"]
     z = max(-20, min(20, z))
     return 1.0 / (1.0 + math.exp(-z))
