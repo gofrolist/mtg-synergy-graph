@@ -105,8 +105,8 @@ def get_our_recommendations(deck_name, top_n=100):
         if c["oracle_id"] not in deck_oids:
             cards.append(c)
 
-    # Build graph
-    graph = build_graph(cards)
+    # Build graph (pass deck_oids so fan-out caps preserve deck card edges)
+    graph = build_graph(cards, deck_oids=deck_oids)
 
     # Get candidate scores (commander-weighted)
     from synergy_graph import _deck_card_scores

@@ -624,7 +624,7 @@ def _compute_idf(cards: list[dict]) -> dict[str, float]:
     return idf
 
 
-def build_provides_wants_edges(cards: list[dict]) -> list[dict]:
+def build_provides_wants_edges(cards: list[dict], deck_oids: set = None) -> list[dict]:
     """Build directed edges: card A provides X, card B wants X.
 
     Uses exact matching on normalized vocabulary plus semantic bridges
@@ -661,11 +661,10 @@ def build_provides_wants_edges(cards: list[dict]) -> list[dict]:
     MAX_PROVIDERS = max(50, min(500, 2000 * 500 // max(n, 1)))
 
     # Pre-filter provides_index to stay within memory budget.
-    # Instead of deleting popular tags, keep a capped sample.
-    # This ensures cards with only common provides tags still get edges.
+    # Keep a capped sample of providers per tag.
+    _deck_oid_set = deck_oids or set()
     for tag in list(provides_index):
         if len(provides_index[tag]) > MAX_PROVIDERS:
-            # Keep first MAX_PROVIDERS (tends to be popular/high-rank cards)
             provides_index[tag] = provides_index[tag][:MAX_PROVIDERS]
 
     # Accumulate best match and total weight per card pair.
@@ -682,8 +681,11 @@ def build_provides_wants_edges(cards: list[dict]) -> list[dict]:
 
     for card in cards:
         wanter_oid = card["oracle_id"]
+        is_deck_card = wanter_oid in _deck_oid_set
         for want_tag in card.get("wants", []):
-            if want_tag in large_want_tags:
+            # Skip large want tags UNLESS the card is a deck card
+            # (deck cards always get their edges, even on common wants)
+            if want_tag in large_want_tags and not is_deck_card:
                 continue
             for provide_tag, base_weight in want_to_provides.get(want_tag, []):
                 providers = provides_index.get(provide_tag)
@@ -980,14 +982,17 @@ def build_shared_tag_edges(cards: list[dict], min_weight: int = 2) -> list[dict]
     return edges
 
 
-def build_graph(cards: list[dict], min_score: float = 0.5) -> dict:
+def build_graph(cards: list[dict], min_score: float = 0.5, deck_oids: set = None) -> dict:
     """Build the complete synergy graph with composite scoring.
 
     Merges all edge types per card pair into a single composite score.
     All edges above min_score are kept — use adjacency + sorting for
     per-card views.
+
+    deck_oids: if provided, ensures deck cards always get edges even
+    when tags are capped for fan-out control.
     """
-    pw_edges = build_provides_wants_edges(cards)
+    pw_edges = build_provides_wants_edges(cards, deck_oids=deck_oids)
     pe_edges = build_peer_edges(cards)
     sw_edges = build_shared_wants_edges(cards)
     emb_edges = build_embedding_edges(cards)
@@ -3612,7 +3617,13 @@ def run():
         if active_strategies:
             print(f"Active strategies: {', '.join(sorted(active_strategies))}")
 
-    graph = build_graph(cards)
+    # Collect deck oracle_ids for fan-out cap preservation
+    _build_deck_oids = None
+    if not args.input:
+        deck_names_for_oids = set(deck.DECKLIST) | {deck.COMMANDER}
+        _build_deck_oids = {c["oracle_id"] for c in cards if c["name"] in deck_names_for_oids}
+
+    graph = build_graph(cards, deck_oids=_build_deck_oids)
     stats = graph["stats"]
     print(f"\nGraph stats:")
     print(f"  raw signal edges:      {stats['total_raw_edges']}")
