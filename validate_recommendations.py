@@ -92,8 +92,9 @@ def get_our_recommendations(deck_name, top_n=100):
     cards = get_cards_by_names(deck_names, db_path)
     deck_set = set(deck.DECKLIST) | {deck.COMMANDER}
 
-    # Get candidates
-    candidates = find_synergy_candidates(cards, db_path)
+    # Get candidates (with commander bridge expansion)
+    commander_card = next((c for c in cards if c["name"] == deck.COMMANDER), None)
+    candidates = find_synergy_candidates(cards, db_path, commander=commander_card)
 
     # Filter by color identity
     from synergy_graph import _filter_candidates
@@ -107,8 +108,15 @@ def get_our_recommendations(deck_name, top_n=100):
     # Build graph
     graph = build_graph(cards)
 
-    # Get candidate scores
-    scores = _candidate_scores(graph, deck_set)
+    # Get candidate scores (commander-weighted)
+    from synergy_graph import _deck_card_scores
+    deck_scores = _deck_card_scores(graph, deck_set)
+    key_cards_ranked = sorted(
+        [(name, info["total"]) for name, info in deck_scores.items() if name != deck.COMMANDER],
+        key=lambda x: -x[1]
+    )
+    key_cards = {name for name, score in key_cards_ranked[:10]}
+    scores = _candidate_scores(graph, deck_set, commander=deck.COMMANDER, key_cards=key_cards)
 
     # Rank by total score
     ranked = sorted(scores.items(), key=lambda x: x[1]["total"], reverse=True)

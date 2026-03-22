@@ -667,12 +667,18 @@ def get_cards_without_scryfall_tags(db_path: str = DB_PATH) -> list[dict]:
     return cards
 
 
-def find_synergy_candidates(deck_cards: list[dict], db_path: str = DB_PATH) -> list[dict]:
+def find_synergy_candidates(deck_cards: list[dict], db_path: str = DB_PATH,
+                            commander: dict = None) -> list[dict]:
     """Find cards in DB that synergize with the given deck cards.
 
     Queries for cards that:
-    1. Provide what deck cards want
-    2. Want what deck cards provide
+    1. Provide what deck cards want (direct match)
+    2. Want what deck cards provide (direct match)
+    3. (Commander-specific) Provide what bridges to commander's wants
+    4. (Commander-specific) Want what bridges from commander's provides
+
+    Bridge expansion only applies to the COMMANDER's tags (not the whole deck),
+    keeping the candidate pool focused.
 
     Returns deduplicated candidate cards (excluding deck cards).
     """
@@ -689,7 +695,7 @@ def find_synergy_candidates(deck_cards: list[dict], db_path: str = DB_PATH) -> l
         deck_wants.update(card.get("wants", []))
         deck_provides.update(card.get("provides", []))
 
-    # Cards that provide what deck wants
+    # Cards that provide what deck wants (direct)
     for tag in deck_wants:
         for row in conn.execute(
             "SELECT oracle_id FROM provides WHERE tag = ?", (tag,)
@@ -697,13 +703,42 @@ def find_synergy_candidates(deck_cards: list[dict], db_path: str = DB_PATH) -> l
             if row[0] not in deck_oids:
                 candidate_oids.add(row[0])
 
-    # Cards that want what deck provides
+    # Cards that want what deck provides (direct)
     for tag in deck_provides:
         for row in conn.execute(
             "SELECT oracle_id FROM wants WHERE tag = ?", (tag,)
         ):
             if row[0] not in deck_oids:
                 candidate_oids.add(row[0])
+
+    # Commander-specific bridge expansion (narrow, not deck-wide)
+    if commander:
+        try:
+            import sys
+            sys.path.insert(0, os.path.dirname(__file__))
+            from synergy_graph import SEMANTIC_BRIDGES
+            cmdr_wants = set(commander.get("wants", []))
+            cmdr_provides = set(commander.get("provides", []))
+
+            # Cards providing something that bridges to commander's wants
+            for (p_tag, w_tag), weight in SEMANTIC_BRIDGES.items():
+                if w_tag in cmdr_wants and weight >= 0.6:  # Higher threshold for bridge
+                    for row in conn.execute(
+                        "SELECT oracle_id FROM provides WHERE tag = ?", (p_tag,)
+                    ):
+                        if row[0] not in deck_oids:
+                            candidate_oids.add(row[0])
+
+            # Cards wanting something that bridges from commander's provides
+            for (p_tag, w_tag), weight in SEMANTIC_BRIDGES.items():
+                if p_tag in cmdr_provides and weight >= 0.6:
+                    for row in conn.execute(
+                        "SELECT oracle_id FROM wants WHERE tag = ?", (w_tag,)
+                    ):
+                        if row[0] not in deck_oids:
+                            candidate_oids.add(row[0])
+        except ImportError:
+            pass
 
     conn.close()
 

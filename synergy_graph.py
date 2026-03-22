@@ -1208,14 +1208,23 @@ def show_deck_synergies(graph: dict, deck_cards: set[str], commander: str,
 def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                     deck_types: set[str] = None, top_n: int = 20,
                     active_strategies: set = None, db_path: str = None,
-                    color_identity: set = None):
+                    color_identity: set = None, commander: str = None):
     """Rank non-deck cards by total synergy with the current decklist.
 
-    If deck_types is provided (e.g. {'Human'}), cards matching those types
-    get a synergy boost. If active_strategies is provided, cards matching
-    strategies get a relevance multiplier. Combo completions get x2.0.
+    Commander synergy is weighted 5x, key card synergy 3x.
+    If deck_types is provided, cards matching those types get a synergy boost.
+    If active_strategies is provided, cards matching strategies get a relevance multiplier.
+    Combo completions get x2.0.
     """
-    candidate_scores = _candidate_scores(graph, deck_cards)
+    # Identify key cards: top 10 highest-synergy cards in the deck (excluding commander)
+    deck_scores = _deck_card_scores(graph, deck_cards)
+    key_cards_ranked = sorted(
+        [(name, info["total"]) for name, info in deck_scores.items() if name != commander],
+        key=lambda x: -x[1]
+    )
+    key_cards = {name for name, score in key_cards_ranked[:10]}
+
+    candidate_scores = _candidate_scores(graph, deck_cards, commander=commander, key_cards=key_cards)
 
     # Build card metadata lookup from cards list
     card_meta = {}
@@ -1382,17 +1391,41 @@ def _deck_card_scores(graph: dict, deck_cards: set[str]) -> dict:
     }
 
 
-def _candidate_scores(graph: dict, deck_cards: set[str]) -> dict:
-    """Compute synergy totals for non-deck cards against the decklist."""
+def _candidate_scores(graph: dict, deck_cards: set[str],
+                      commander: str = None, key_cards: set = None) -> dict:
+    """Compute synergy totals for non-deck cards against the decklist.
+
+    Commander synergy is weighted 5x more than generic deck card synergy.
+    Key cards (top synergy cards in the deck) are weighted 3x.
+    This ensures recommendations specifically synergize with the commander's
+    strategy rather than generically connecting to many ramp/draw spells.
+    """
     adj = graph["adjacency"]
-    scores = defaultdict(lambda: {"total": 0.0, "partners": [], "multi_sig": 0})
+    scores = defaultdict(lambda: {"total": 0.0, "partners": [], "multi_sig": 0,
+                                  "commander_synergy": 0.0, "key_synergy": 0.0})
+
+    if key_cards is None:
+        key_cards = set()
 
     for card in deck_cards:
         for edge in adj.get(card, []):
             target = edge["target"]
             if target not in deck_cards:
                 info = scores[target]
-                info["total"] += edge["score"]
+                base_score = edge["score"]
+
+                # Commander edges are worth 5x — this is the most important signal
+                if card == commander:
+                    weighted = base_score * 5.0
+                    info["commander_synergy"] += base_score
+                # Key deck cards (high internal synergy) are worth 3x
+                elif card in key_cards:
+                    weighted = base_score * 3.0
+                    info["key_synergy"] += base_score
+                else:
+                    weighted = base_score
+
+                info["total"] += weighted
                 info["partners"].append((card, edge["score"], edge["signals"]))
                 if edge["signals"] >= 2:
                     info["multi_sig"] += 1
@@ -3424,8 +3457,9 @@ def run():
         print(f"Loaded {len(cards)} deck cards from DB")
 
         if args.recommend:
-            # Find synergy candidates from DB (targeted, not full 10k)
-            candidates = find_synergy_candidates(cards, DB_PATH)
+            # Find synergy candidates from DB (targeted + commander bridge expansion)
+            commander_card = next((c for c in cards if c["name"] == deck.COMMANDER), None)
+            candidates = find_synergy_candidates(cards, DB_PATH, commander=commander_card)
             print(f"Found {len(candidates)} tag-based candidates from DB")
             deck_oids = {c["oracle_id"] for c in cards}
 
@@ -3568,7 +3602,7 @@ def run():
             deck_types = _detect_deck_types(cards, deck_set)
             recommend_cards(graph, deck_set, cards, deck_types, args.top,
                             active_strategies=active_strategies, db_path=db_path,
-                            color_identity=deck.COLOR_IDENTITY)
+                            color_identity=deck.COLOR_IDENTITY, commander=deck.COMMANDER)
     elif args.validate:
         validate_against_curated(graph, deck.SYNERGY_PAIRS)
     elif args.export:
