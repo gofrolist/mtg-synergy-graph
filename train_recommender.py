@@ -146,6 +146,9 @@ def compute_features(commander: dict, candidate: dict) -> dict:
     rarity_map = {"mythic": 4, "rare": 3, "uncommon": 2, "common": 1}
     card_rarity = rarity_map.get(candidate.get("rarity", ""), 1)
 
+    # Feature 21: EDHREC saltiness (how powerful/disruptive the card is)
+    card_saltiness = candidate.get("edhrec_saltiness") or 0.0
+
     # Feature 18: Total Spellbook combos candidate appears in (overall combo versatility)
     total_spellbook = 0
     if card_oid and hasattr(compute_features, '_spellbook_cache'):
@@ -218,6 +221,7 @@ def compute_features(commander: dict, candidate: dict) -> dict:
         "total_spellbook": min(total_spellbook, 20),  # Cap at 20
         "strategy_match": strategy_match,
         "theme_overlap": theme_overlap,
+        "card_saltiness": round(card_saltiness, 2),
     }
 
 
@@ -398,7 +402,8 @@ def train_model(training_data=None):
                      "bidirectional", "rare_overlap",
                      "cmdr_type_in_oracle", "card_type_in_cmdr_oracle",
                      "spellbook_combos", "ability_match", "color_overlap",
-                     "card_rarity", "total_spellbook", "strategy_match", "theme_overlap"]
+                     "card_rarity", "total_spellbook", "strategy_match", "theme_overlap",
+                     "card_saltiness"]
 
     # Compute feature means and stds for normalization
     means = {f: 0.0 for f in feature_names}

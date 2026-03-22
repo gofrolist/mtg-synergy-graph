@@ -1,30 +1,31 @@
 {
   "weights": {
-    "provides_to_wants": 0.09460408444899845,
-    "wants_from_provides": 0.21925218233962243,
-    "bridge_score": 0.451696826032012,
-    "oracle_overlap": 0.42007643569571673,
-    "keyword_overlap": 0.29617338040604535,
-    "shared_types": 0.30177532016665964,
-    "type_match": 0.16982917250469814,
-    "cmc_diff": -1.7488285301008086,
-    "rank_log": -2.0469747600769463,
-    "total_tags": -0.29940208304724963,
-    "bridge_x_oracle": -0.38769602355707056,
-    "provides_x_bridge": -0.1778869890442685,
-    "bidirectional": 0.07924246190234469,
-    "rare_overlap": 0.09311169751778006,
-    "cmdr_type_in_oracle": 0.3272048207202679,
-    "card_type_in_cmdr_oracle": 0.30802331541544753,
-    "spellbook_combos": 0.49006991124745425,
-    "ability_match": -0.00996732055081984,
-    "color_overlap": 0.6582866280728791,
-    "card_rarity": 0.16105799892999187,
-    "total_spellbook": 0.10456913282841962,
-    "strategy_match": 0.5083739915493062,
-    "theme_overlap": 1.9738557762971969
+    "provides_to_wants": 0.09395108127442998,
+    "wants_from_provides": 0.22228687343504577,
+    "bridge_score": 0.4508198515307075,
+    "oracle_overlap": 0.4132833510488916,
+    "keyword_overlap": 0.2850168080234062,
+    "shared_types": 0.30150037166580773,
+    "type_match": 0.1706209331333983,
+    "cmc_diff": -0.9393849773917317,
+    "rank_log": -2.054212548038206,
+    "total_tags": -0.2938188668827914,
+    "bridge_x_oracle": -0.39254129143255745,
+    "provides_x_bridge": -0.17703191864271894,
+    "bidirectional": 0.08187444354161146,
+    "rare_overlap": 0.09103086584142814,
+    "cmdr_type_in_oracle": 0.32960127018070495,
+    "card_type_in_cmdr_oracle": 0.3104847074466786,
+    "spellbook_combos": 0.4896728316940652,
+    "ability_match": -0.006821840198460483,
+    "color_overlap": 0.6496280304117856,
+    "card_rarity": 0.1709343211896162,
+    "total_spellbook": 0.12086310424555267,
+    "strategy_match": 0.5038816540446477,
+    "theme_overlap": 1.9681606928696642,
+    "card_saltiness": -0.08692227603427434
   },
-  "bias": -2.03142067580411,
+  "bias": -2.007816730592716,
   "means": {
     "provides_to_wants": 0.03140632252075705,
     "wants_from_provides": 0.035342856651711274,
@@ -48,7 +49,8 @@
     "card_rarity": 2.2084644078868205,
     "total_spellbook": 3.6539803688996613,
     "strategy_match": 0.5874890413078232,
-    "theme_overlap": 0.2841868220652193
+    "theme_overlap": 0.2841868220652193,
+    "card_saltiness": 0.30366527426813644
   },
   "stds": {
     "provides_to_wants": 0.17753910039895734,
@@ -73,7 +75,8 @@
     "card_rarity": 0.9590748279265199,
     "total_spellbook": 7.0826058410686965,
     "strategy_match": 0.8464938951551453,
-    "theme_overlap": 0.9142475862639874
+    "theme_overlap": 0.9142475862639874,
+    "card_saltiness": 0.33104498301344426
   },
   "feature_names": [
     "provides_to_wants",
@@ -98,6 +101,7 @@
     "card_rarity",
     "total_spellbook",
     "strategy_match",
-    "theme_overlap"
+    "theme_overlap",
+    "card_saltiness"
   ]
 }
