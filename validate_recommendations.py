@@ -124,13 +124,18 @@ def get_our_recommendations(deck_name, top_n=100):
     # Also get ML-based recommendations (scores ALL color-legal cards)
     model_path = os.path.join(os.path.dirname(__file__), "data", "recommender_weights.json")
     if os.path.exists(model_path):
-        from train_recommender import predict as ml_predict
+        from train_recommender import predict as ml_predict, _init_caches, compute_features
         import sqlite3
         with open(model_path) as f:
             model = json.load(f)
 
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
+
+        # Initialize Spellbook and ability caches for feature computation
+        if not hasattr(compute_features, '_spellbook_cache'):
+            _init_caches(conn)
+
         # Get ALL legal cards in commander's colors
         all_cards = []
         ci_str = ','.join(f'"{c}"' for c in deck.COLOR_IDENTITY)

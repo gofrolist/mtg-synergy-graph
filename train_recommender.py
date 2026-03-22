@@ -110,6 +110,38 @@ def compute_features(commander: dict, candidate: dict) -> dict:
     # Feature 9: Total tag count (card complexity)
     total_tags = len(card_provides) + len(card_wants)
 
+    # Feature 14: Spellbook combo potential
+    # How many Spellbook combos include BOTH the commander and this candidate?
+    spellbook_combos = 0
+    cmdr_oid = commander.get("oracle_id", "")
+    card_oid = candidate.get("oracle_id", "")
+    if cmdr_oid and card_oid and hasattr(compute_features, '_spellbook_cache'):
+        cmdr_combos = compute_features._spellbook_cache.get(cmdr_oid, set())
+        card_combos = compute_features._spellbook_cache.get(card_oid, set())
+        spellbook_combos = len(cmdr_combos & card_combos)
+
+    # Feature 15: Ability trigger-effect match
+    # Does candidate's effect match commander's trigger, or vice versa?
+    ability_match = 0
+    cmdr_triggers = set()
+    cmdr_effects = set()
+    card_triggers = set()
+    card_effects = set()
+    if hasattr(compute_features, '_ability_cache'):
+        for tt, et in compute_features._ability_cache.get(cmdr_oid, []):
+            if tt: cmdr_triggers.update(json.loads(tt) if isinstance(tt, str) else tt)
+            if et: cmdr_effects.update(json.loads(et) if isinstance(et, str) else et)
+        for tt, et in compute_features._ability_cache.get(card_oid, []):
+            if tt: card_triggers.update(json.loads(tt) if isinstance(tt, str) else tt)
+            if et: card_effects.update(json.loads(et) if isinstance(et, str) else et)
+    # Commander effect triggers candidate, or candidate effect triggers commander
+    ability_match = len(cmdr_effects & card_triggers) + len(card_effects & cmdr_triggers)
+
+    # Feature 16: Color identity match score
+    cmdr_ci = set(json.loads(commander.get("color_identity", "[]")) if commander.get("color_identity") else [])
+    card_ci = set(json.loads(candidate.get("color_identity", "[]")) if candidate.get("color_identity") else [])
+    color_overlap = len(cmdr_ci & card_ci) / max(len(cmdr_ci), 1) if cmdr_ci else 0
+
     # Feature 10: Bidirectional connection strength
     # Cards that both provide-to-wants AND want-from-provides are stronger
     bidirectional = min(provides_to_wants, wants_from_provides)
@@ -156,13 +188,42 @@ def compute_features(commander: dict, candidate: dict) -> dict:
         "rare_overlap": rare_overlap,
         "cmdr_type_in_oracle": cmdr_type_in_oracle,
         "card_type_in_cmdr_oracle": card_type_in_cmdr_oracle,
+        "spellbook_combos": spellbook_combos,
+        "ability_match": ability_match,
+        "color_overlap": round(color_overlap, 2),
     }
+
+
+def _init_caches(conn):
+    """Initialize Spellbook and ability caches for feature computation."""
+    # Spellbook cache: oracle_id -> set of combo_ids
+    spellbook_cache = {}
+    try:
+        for combo_id, oid in conn.execute("SELECT combo_id, oracle_id FROM spellbook_combo_cards"):
+            spellbook_cache.setdefault(oid, set()).add(combo_id)
+    except:
+        pass
+    compute_features._spellbook_cache = spellbook_cache
+
+    # Ability cache: oracle_id -> [(trigger_tags, effect_tags)]
+    ability_cache = {}
+    try:
+        for oid, tt, et in conn.execute("SELECT oracle_id, trigger_tags, effect_tags FROM abilities"):
+            ability_cache.setdefault(oid, []).append((tt, et))
+    except:
+        pass
+    compute_features._ability_cache = ability_cache
+
+    print(f"  Caches: {len(spellbook_cache)} cards in Spellbook, {len(ability_cache)} cards with abilities")
 
 
 def build_training_data():
     """Build training data from scraped EDHREC commander data."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+
+    # Initialize caches for Spellbook and ability features
+    _init_caches(conn)
 
     # Load all card data
     cards_by_name = {}
@@ -284,7 +345,8 @@ def train_model(training_data=None):
                      "type_match", "cmc_diff", "rank_log", "total_tags",
                      "bridge_x_oracle", "provides_x_bridge",
                      "bidirectional", "rare_overlap",
-                     "cmdr_type_in_oracle", "card_type_in_cmdr_oracle"]
+                     "cmdr_type_in_oracle", "card_type_in_cmdr_oracle",
+                     "spellbook_combos", "ability_match", "color_overlap"]
 
     # Compute feature means and stds for normalization
     means = {f: 0.0 for f in feature_names}
