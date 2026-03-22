@@ -336,8 +336,12 @@ SEMANTIC_BRIDGES = {
 
     # ── Redundancy synergies (cards doing same thing reinforce each other) ──
     ("etb-payoff", "creature-etb-payoff"): 0.7,     # Two ETB payoffs = twice the damage
+    ("damage-dealing", "creature-etb-payoff"): 0.7,  # Damage dealers that trigger on ETB (Purphoros + Impact Tremors)
+    ("life-drain", "creature-etb-payoff"): 0.6,      # Drain on ETB (Blood Artist pattern)
+    ("creature-pump", "creature-etb-payoff"): 0.5,   # Pump + ETB payoff = growing board
     ("evasion-grant", "combat-events"): 0.6,         # Evasion enables combat (Blighted Agent + Inkmoth)
     ("infect", "combat-events"): 0.6,                # Infect creatures want combat
+    ("indestructible-grant", "creature-etb-payoff"): 0.4, # Indestructible payoff stays on board
 
     # ── Tax / stax synergy ──
     ("stax-tax", "opponent-spell-casting"): 0.8,     # Tax effects compound (Rhystic + Quandary)
@@ -374,7 +378,44 @@ SEMANTIC_BRIDGES = {
     ("graveyard-recursion", "mana-needs"): 0.4,  # Recurring cheap cards = mana efficiency
 
     # ── Life gain → artifact presence (artifact-based lifegain combos) ──
-    ("life-gain", "artifact-presence"): 0.3,  # Low — indirect connection
+    ("life-gain", "artifact-presence"): 0.3,
+
+    # ── Slow/game-ending → counter/death (combos with endgame pieces) ──
+    ("slow-triggered-abilities", "counter-placement-events"): 0.5,
+    ("slow-triggered-abilities", "creature-death"): 0.5,
+    ("game-ending", "counter-placement-events"): 0.5,
+    ("game-ending", "creature-death"): 0.5,
+
+    # ── More interaction bridges ──
+    ("targeted-removal", "life-gain-events"): 0.4,   # Removal triggers life-gain (Swords to Plowshares)
+    ("targeted-removal", "spell-casting"): 0.4,       # Removal IS a spell
+    ("board-wipe", "creature-death"): 0.7,            # Wipes cause mass death
+    ("ability-copying", "creature-death"): 0.4,       # Copy death triggers
+    ("ability-copying", "planeswalker-presence"): 0.5, # Copy planeswalker abilities
+    ("spell-copying", "artifact-presence"): 0.4,
+    ("graveyard-hate", "spell-casting"): 0.4,         # Graveyard hate as spell interaction
+    ("spell-casting", "opponent-spell-casting"): 0.4,  # Casting triggers opponent-casting effects
+    ("card-draw-payoff", "opponent-spell-casting"): 0.4,
+    ("stax", "card-draw-events"): 0.4,                # Stax + draw = maintaining lock
+    ("card-draw", "life-payment"): 0.4,               # Draw costs life (Necropotence pattern)
+    ("life-drain", "creature-etb"): 0.4,              # Drain on ETB (Blood Artist)
+
+    # ── Deeper connections (5-8 combos each) ──
+    ("cost-reduction", "etb-payoff"): 0.5,           # Cheaper spells = more ETB triggers
+    ("extra-turn", "graveyard-filling"): 0.5,        # Extra turns = more mill/discard
+    ("extra-turn", "enchantment-presence"): 0.4,     # Extra turns with enchantment synergy (Omniscience)
+    ("graveyard-recursion", "low-life"): 0.5,        # Recursion from graveyard when at low life
+    ("land-animation", "creature-death"): 0.6,       # Animated lands die = death trigger
+    ("board-pressure", "creature-death"): 0.4,       # Pressure causes blocks/deaths
+    ("damage-prevention", "creature-death"): 0.5,    # Prevention + sacrifice = safe deaths
+    ("damage-prevention", "counter-placement-events"): 0.4,
+    ("tutor", "spell-casting"): 0.4,                 # Tutoring for spells to cast
+    ("tutor", "top-of-library"): 0.6,                # Tutor to top = topdeck synergy
+    ("bounce-utility", "spell-casting"): 0.6,        # Bounce + recast = more spell casts
+    ("bounce-utility", "creature-etb"): 0.7,         # Bounce + recast = ETB again
+    ("creature-type-flexibility", "tapped-creatures"): 0.5, # Changeling taps for tribal abilities
+    ("stax", "sacrifice-events"): 0.5,               # Stax pieces get sacrificed
+    ("damage-dealing", "counter-placement-events"): 0.4,
 
     # ── Last batch: diminishing returns but still safe ──
     ("board-wipe", "creature-count-matters"): 0.5,  # Wipe resets counts, enables rebuild
