@@ -633,6 +633,8 @@ def predict(model: dict, commander: dict, candidate: dict) -> float:
         if dampened in x:
             x[dampened] = max(-0.5, min(0.5, x[dampened]))
 
+    # No commander-specific boosting — let the model features speak for themselves
+
     # Linear model score
     z_linear = sum(model["weights"][f] * x[f] for f in model["feature_names"]) + model["bias"]
     z_linear = max(-20, min(20, z_linear))
