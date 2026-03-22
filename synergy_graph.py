@@ -1314,6 +1314,24 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
             info["total"] *= 0.3  # Unranked cards are heavily penalized
             info["popularity"] = 0.3
 
+    # Apply commander affinity — bypass the graph's fan-out caps
+    # by computing tag-level affinity directly
+    if commander:
+        commander_card_data = next((c for c in cards if c["name"] == commander), None)
+        candidate_cards_data = [c for c in cards if c["name"] not in deck_cards]
+        affinities = _compute_commander_affinity(commander_card_data, candidate_cards_data)
+
+        for card_name, info in candidate_scores.items():
+            affinity = affinities.get(card_name, 0.0)
+            if affinity > 0:
+                # Affinity multiplier: 1.0 base + 0.5 per affinity point
+                # A card with affinity 4 (strong commander synergy) gets 3.0x
+                multiplier = 1.0 + 0.5 * affinity
+                info["total"] *= multiplier
+                info["commander_affinity"] = round(affinity, 1)
+            else:
+                info["commander_affinity"] = 0.0
+
     # Sort by total synergy
     ranked = sorted(candidate_scores.items(), key=lambda x: x[1]["total"], reverse=True)
 
@@ -1357,11 +1375,12 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
         strat_rel = info.get("strategy_rel")
         strat_str = f" [strat×{strat_rel:.1f}]" if strat_rel and strat_rel != 1.0 else ""
         high_cmc = " [high CMC]" if info.get("high_cmc") else ""
+        affinity = info.get("commander_affinity", 0)
+        affinity_str = f" [cmdr:{affinity:.0f}]" if affinity > 0 else ""
         pct = info["pct"]
-        # Visual bar: filled blocks proportional to percentage
-        bar_len = round(pct / 5)  # 20 chars max at 100%
+        bar_len = round(pct / 5)
         bar = "█" * bar_len + "░" * (20 - bar_len)
-        print(f"\n  {pct:5.1f}% {bar} {card}{tribal}{combo}{strat_str}{high_cmc}")
+        print(f"\n  {pct:5.1f}% {bar} {card}{tribal}{combo}{strat_str}{affinity_str}{high_cmc}")
         print(f"    {type_line} | CMC {cmc} | {len(partners)} partners{multi}")
         for partner, score, sigs in partners[:5]:
             sig = f"{sigs}sig" if sigs > 1 else "1sig"
@@ -1394,20 +1413,65 @@ def _deck_card_scores(graph: dict, deck_cards: set[str]) -> dict:
     }
 
 
+def _compute_commander_affinity(commander_card: dict, candidate_cards: list[dict],
+                                db_path: str = None) -> dict:
+    """Compute commander-specific affinity for each candidate.
+
+    For each candidate, measures how specifically it synergizes with
+    the commander vs how it connects to an average card.
+
+    Returns {candidate_name: affinity_score}.
+    Affinity > 1.0 = specifically good for this commander.
+    Affinity < 1.0 = generic card, nothing special for this commander.
+    """
+    if not commander_card:
+        return {}
+
+    cmdr_provides = set(commander_card.get("provides", []))
+    cmdr_wants = set(commander_card.get("wants", []))
+
+    # Load bridges
+    bridge_provides = {}  # want_tag -> [(provide_tag, weight)]
+    for (p_tag, w_tag), weight in SEMANTIC_BRIDGES.items():
+        bridge_provides.setdefault(w_tag, []).append((p_tag, weight))
+
+    affinities = {}
+    for card in candidate_cards:
+        name = card["name"]
+        card_provides = set(card.get("provides", []))
+        card_wants = set(card.get("wants", []))
+
+        # Score: how well does this card connect to the commander?
+        cmdr_score = 0.0
+
+        # Direct: card provides what commander wants
+        for tag in card_provides & cmdr_wants:
+            cmdr_score += 2.0
+
+        # Direct: card wants what commander provides
+        for tag in card_wants & cmdr_provides:
+            cmdr_score += 2.0
+
+        # Bridge: card provides something that bridges to commander's wants
+        for want in cmdr_wants:
+            for p_tag, weight in bridge_provides.get(want, []):
+                if p_tag in card_provides:
+                    cmdr_score += weight * 1.5
+
+        # Bridge: commander provides something that bridges to card's wants
+        for want in card_wants:
+            for p_tag, weight in bridge_provides.get(want, []):
+                if p_tag in cmdr_provides:
+                    cmdr_score += weight * 1.5
+
+        affinities[name] = cmdr_score
+
+    return affinities
+
+
 def _candidate_scores(graph: dict, deck_cards: set[str],
                       commander: str = None, key_cards: set = None) -> dict:
-    """Compute synergy scores for non-deck cards against the decklist.
-
-    Scoring formula rewards DEPTH over BREADTH:
-      score = commander_synergy * 10
-            + key_card_synergy * 5
-            + avg(top_5_partner_scores) * sqrt(partner_count)
-
-    This ensures cards that specifically synergize with the commander
-    (like Mindcrank for Syr Konrad) rank higher than generic cards
-    that weakly connect to many deck cards.
-    """
-    import math
+    """Compute synergy totals for non-deck cards against the decklist."""
     adj = graph["adjacency"]
     scores = defaultdict(lambda: {"total": 0.0, "partners": [], "multi_sig": 0,
                                   "commander_synergy": 0.0, "key_synergy": 0.0})
@@ -1415,7 +1479,6 @@ def _candidate_scores(graph: dict, deck_cards: set[str],
     if key_cards is None:
         key_cards = set()
 
-    # Collect raw edge data
     for card in deck_cards:
         for edge in adj.get(card, []):
             target = edge["target"]
@@ -1428,28 +1491,10 @@ def _candidate_scores(graph: dict, deck_cards: set[str],
                 elif card in key_cards:
                     info["key_synergy"] += base_score
 
+                info["total"] += base_score
                 info["partners"].append((card, edge["score"], edge["signals"]))
                 if edge["signals"] >= 2:
                     info["multi_sig"] += 1
-
-    # Compute final scores using depth-over-breadth formula
-    for target, info in scores.items():
-        partner_scores = sorted([s for _, s, _ in info["partners"]], reverse=True)
-        partner_count = len(partner_scores)
-
-        # Top-5 average: quality of best connections
-        top_5 = partner_scores[:5]
-        avg_top5 = sum(top_5) / max(len(top_5), 1)
-
-        # Breadth factor: diminishing returns on partner count
-        breadth = math.sqrt(max(partner_count, 1))
-
-        # Final score: commander synergy dominates, then key cards, then general
-        info["total"] = (
-            info["commander_synergy"] * 10.0   # Commander synergy is king
-            + info["key_synergy"] * 5.0         # Key card synergy matters
-            + avg_top5 * breadth                 # General: quality * sqrt(breadth)
-        )
 
     return dict(scores)
 
