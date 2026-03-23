@@ -65,13 +65,25 @@ def load_structural_features():
     except Exception:
         pass
 
+    # Load Spellbook combo partners for structural feature f[11]
+    combo_partners = {}
+    try:
+        for row in conn.execute("SELECT card_oracle_ids FROM spellbook_combos").fetchall():
+            oids = json.loads(row[0])
+            for oid in oids:
+                partners = set(oids) - {oid}
+                combo_partners.setdefault(oid, set()).update(partners)
+    except Exception:
+        pass
+    mech_scores["_combos"] = combo_partners
+
     conn.close()
     return provides, wants, strats, types, oracles, ranks, mech_scores
 
 
 def compute_struct_features(cmdr_oid, card_oid, provides, wants, strats, types, oracles, ranks, mech_data):
     """Compute structural features for a commander-card pair."""
-    f = np.zeros(10, dtype=np.float32)
+    f = np.zeros(12, dtype=np.float32)
 
     cp = provides.get(cmdr_oid, set())
     cw = wants.get(cmdr_oid, set())
@@ -116,6 +128,14 @@ def compute_struct_features(cmdr_oid, card_oid, provides, wants, strats, types, 
     # Card is creature
     f[9] = 1.0 if "creature" in dt else 0.0
 
+    # Commander EDHREC rank
+    f[10] = np.log10(max(ranks.get(cmdr_oid, 50000), 1))
+
+    # Spellbook combo membership
+    if "_combos" in mech_data:
+        cmdr_combos = mech_data["_combos"].get(cmdr_oid, set())
+        f[11] = 1.0 if card_oid in cmdr_combos else 0.0
+
     return f
 
 
@@ -123,8 +143,8 @@ def compute_struct_features(cmdr_oid, card_oid, provides, wants, strats, types, 
 # Architecture:
 #   Commander embedding (768) → projection (768→128)
 #   Card embedding (768) → projection (768→128)
-#   Interaction: element-wise product (128) + structural features (10)
-#   MLP: 138 → 64 → 32 → 1
+#   Interaction: element-wise product (128) + structural features (12)
+#   MLP: 140 → 64 → 32 → 1
 #   Output: synergy score 1-10
 
 def relu(x):
@@ -140,8 +160,8 @@ def init_model():
         "b_cmdr": np.zeros(128, dtype=np.float32),
         "W_card": np.random.randn(768, 128).astype(np.float32) * scale(768, 128),
         "b_card": np.zeros(128, dtype=np.float32),
-        # MLP head (128 interaction + 10 structural = 138)
-        "W1": np.random.randn(138, 64).astype(np.float32) * scale(138, 64),
+        # MLP head (128 interaction + 12 structural = 140)
+        "W1": np.random.randn(140, 64).astype(np.float32) * scale(140, 64),
         "b1": np.zeros(64, dtype=np.float32),
         "W2": np.random.randn(64, 32).astype(np.float32) * scale(64, 32),
         "b2": np.zeros(32, dtype=np.float32),
@@ -160,7 +180,7 @@ def forward(model, cmdr_emb, card_emb, struct_feat):
     interaction = cmdr_proj * card_proj  # (N, 128)
 
     # Concatenate with structural features
-    combined = np.concatenate([interaction, struct_feat], axis=1)  # (N, 138)
+    combined = np.concatenate([interaction, struct_feat], axis=1)  # (N, 140)
 
     # MLP
     h1 = relu(combined @ model["W1"] + model["b1"])  # (N, 64)
@@ -185,8 +205,35 @@ def train():
         "SELECT commander_oid, card_oid, score FROM synergy_scores "
         "WHERE model NOT LIKE 'auto%' AND model NOT LIKE 'spellbook%' AND model NOT LIKE 'manual%'"
     ).fetchall()
+
+    # Normalize scores by provider to fix gemma3 scoring bias
+    provider_means = {}
+    for row in conn.execute(
+        "SELECT model, AVG(score) FROM synergy_scores "
+        "WHERE model NOT LIKE 'auto%' AND model NOT LIKE 'spellbook%' AND model NOT LIKE 'manual%' "
+        "GROUP BY model"
+    ).fetchall():
+        provider_means[row[0]] = row[1]
+
+    pair_providers = {}
+    for row in conn.execute(
+        "SELECT commander_oid, card_oid, model FROM synergy_scores "
+        "WHERE model NOT LIKE 'auto%' AND model NOT LIKE 'spellbook%' AND model NOT LIKE 'manual%'"
+    ).fetchall():
+        pair_providers[(row[0], row[1])] = row[2]
+
+    target_mean = provider_means.get("gpt-5.4-mini", 4.5)
+    normalized_pairs = []
+    for cmdr_oid, card_oid, score in pairs:
+        provider = pair_providers.get((cmdr_oid, card_oid), "")
+        provider_mean = provider_means.get(provider, target_mean)
+        adjusted = score - (provider_mean - target_mean)
+        adjusted = max(1.0, min(10.0, adjusted))
+        normalized_pairs.append((cmdr_oid, card_oid, adjusted))
+    pairs = normalized_pairs
     conn.close()
 
+    print(f"Provider normalization: target_mean={target_mean:.2f}")
     print(f"Training pairs: {len(pairs)}")
 
     # Build arrays
@@ -254,14 +301,21 @@ def train():
             pred, cache = forward(model, X_cmdr[batch], X_card[batch], X_struct[batch])
             pred_clipped = np.clip(pred, 1, 10)
 
-            error = pred_clipped - y[batch]
-            loss = np.mean(error ** 2)
+            # Focal-style weighting: upweight rare high/low synergy scores
+            sample_weights = np.ones(len(batch), dtype=np.float32)
+            batch_labels = y[batch]
+            sample_weights[batch_labels >= 8] = 3.0
+            sample_weights[batch_labels >= 9] = 5.0
+            sample_weights[batch_labels <= 2] = 2.0
+
+            error = pred_clipped - batch_labels
+            loss = np.mean(sample_weights * error ** 2)
             epoch_loss += loss
             n_batches += 1
 
             # Backward
             N = len(batch)
-            grad_out = 2 * error / N
+            grad_out = 2 * sample_weights * error / N
             mask = (pred >= 1) & (pred <= 10)
             grad_out = grad_out * mask.astype(np.float32)
 

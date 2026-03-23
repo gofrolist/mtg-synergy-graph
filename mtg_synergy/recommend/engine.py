@@ -382,6 +382,10 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                         compute_strategy_relevance._tower_emb = _load_emb()
                         compute_strategy_relevance._tower_sf = _load_sf()
 
+                        if compute_strategy_relevance._tower_model["W1"].shape[0] != 140:
+                            print("  Warning: Tower model outdated, skipping. Retrain: python3 train_tower_model.py")
+                            raise ValueError("Tower model dimension mismatch")
+
                     tm = compute_strategy_relevance._tower_model
                     t_means = compute_strategy_relevance._tower_means
                     t_stds = compute_strategy_relevance._tower_stds
