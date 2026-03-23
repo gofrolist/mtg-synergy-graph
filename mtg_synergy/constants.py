@@ -512,6 +512,32 @@ SEMANTIC_BRIDGES = {
 
     # Stax tax ↔ card draw events (Rhystic Study pattern)
     ("stax-tax", "card-draw-events"): 0.6,
+
+    # Damage dealing ↔ token events (Impact Tremors + Krenko pattern)
+    ("damage-dealing", "token-events"): 0.7,
+    ("direct-damage", "token-events"): 0.6,
+    ("group-damage", "token-events"): 0.6,
+
+    # Token generation → sacrifice enablement
+    ("token-generation", "sacrifice-outlet"): 0.6,
+
+    # Sacrifice → graveyard filling + creature death
+    ("sacrifice-outlet", "graveyard-filling"): 0.7,
+    ("sacrifice-outlet", "creature-death"): 0.9,
+
+    # Mana/untap → tap-combo (for commanders with tap abilities)
+    ("untap", "tap-combo"): 0.9,
+    ("mana-acceleration", "tap-combo"): 0.5,
+
+    # Combat enabler → board-wide effects
+    ("combat-enabler", "wide-board"): 0.6,
+    ("haste-grant", "wide-board"): 0.5,
+
+    # Board pump → attack events
+    ("board-wide-pump", "attack-events"): 0.7,
+
+    # Mill → graveyard filling
+    ("mill", "graveyard-filling"): 0.8,
 }
 
 
