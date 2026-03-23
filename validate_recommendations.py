@@ -84,7 +84,9 @@ def get_our_recommendations(deck_name, top_n=100):
     sys.path.insert(0, os.path.dirname(__file__))
     from decks import load_deck
     from tag_db import get_cards_by_names, find_synergy_candidates, DB_PATH as db_path
-    from synergy_graph import build_graph, _candidate_scores, _detect_deck_types
+    from mtg_synergy.graph import build_graph
+    from mtg_synergy.recommend.engine import _candidate_scores
+    from mtg_synergy.analysis.strategy import _detect_deck_types
 
     deck = load_deck(deck_name)
     deck_names = deck.DECKLIST + [deck.COMMANDER]
@@ -97,7 +99,7 @@ def get_our_recommendations(deck_name, top_n=100):
     candidates = find_synergy_candidates(cards, db_path, commander=commander_card)
 
     # Filter by color identity
-    from synergy_graph import _filter_candidates
+    from mtg_synergy.analysis.strategy import _filter_candidates
     candidates = _filter_candidates(candidates, deck.COLOR_IDENTITY, db_path)
 
     deck_oids = {c["oracle_id"] for c in cards}
@@ -109,7 +111,7 @@ def get_our_recommendations(deck_name, top_n=100):
     graph = build_graph(cards, deck_oids=deck_oids)
 
     # Get candidate scores (commander-weighted)
-    from synergy_graph import _deck_card_scores
+    from mtg_synergy.recommend.engine import _deck_card_scores
     deck_scores = _deck_card_scores(graph, deck_set)
     key_cards_ranked = sorted(
         [(name, info["total"]) for name, info in deck_scores.items() if name != deck.COMMANDER],
@@ -199,8 +201,13 @@ def validate_deck(deck_name, edhrec_slug):
     deck = load_deck(deck_name)
     deck_set = set(deck.DECKLIST) | {deck.COMMANDER}
 
+    # Exclude basic lands and cards in deck
+    _basics = {"Plains", "Island", "Swamp", "Mountain", "Forest",
+               "Snow-Covered Plains", "Snow-Covered Island", "Snow-Covered Swamp",
+               "Snow-Covered Mountain", "Snow-Covered Forest", "Wastes"}
     edhrec_high = [c for c in edhrec_cards
-                   if c["synergy"] > 0.10 and c["name"] not in deck_set]
+                   if c["synergy"] > 0.10 and c["name"] not in deck_set
+                   and c["name"] not in _basics]
     edhrec_high.sort(key=lambda x: -x["synergy"])
     edhrec_top_names = [c["name"] for c in edhrec_high[:30]]
 

@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS provides (
     PRIMARY KEY (oracle_id, tag)
 );
 CREATE INDEX IF NOT EXISTS idx_provides_tag ON provides(tag);
+CREATE INDEX IF NOT EXISTS idx_provides_oracle_id ON provides(oracle_id);
 
 CREATE TABLE IF NOT EXISTS wants (
     oracle_id TEXT NOT NULL REFERENCES cards(oracle_id),
@@ -54,6 +55,7 @@ CREATE TABLE IF NOT EXISTS wants (
     PRIMARY KEY (oracle_id, tag)
 );
 CREATE INDEX IF NOT EXISTS idx_wants_tag ON wants(tag);
+CREATE INDEX IF NOT EXISTS idx_wants_oracle_id ON wants(oracle_id);
 
 CREATE TABLE IF NOT EXISTS scryfall_tags (
     oracle_id TEXT NOT NULL,
@@ -507,36 +509,6 @@ def get_all_cards(db_path: str = DB_PATH) -> list[dict]:
     return cards
 
 
-def count_cards_providing(tag: str, db_path: str = DB_PATH) -> int:
-    conn = get_connection(db_path)
-    result = conn.execute(
-        "SELECT COUNT(*) FROM provides WHERE tag = ?", (tag,)
-    ).fetchone()[0]
-    conn.close()
-    return result
-
-
-def count_cards_wanting(tag: str, db_path: str = DB_PATH) -> int:
-    conn = get_connection(db_path)
-    result = conn.execute(
-        "SELECT COUNT(*) FROM wants WHERE tag = ?", (tag,)
-    ).fetchone()[0]
-    conn.close()
-    return result
-
-
-def get_tag_counts(db_path: str = DB_PATH) -> dict[str, int]:
-    """Get combined frequency counts for all tags (provides + wants)."""
-    conn = get_connection(db_path)
-    counts = {}
-    for row in conn.execute("SELECT tag, COUNT(*) FROM provides GROUP BY tag"):
-        counts[row[0]] = counts.get(row[0], 0) + row[1]
-    for row in conn.execute("SELECT tag, COUNT(*) FROM wants GROUP BY tag"):
-        counts[row[0]] = counts.get(row[0], 0) + row[1]
-    conn.close()
-    return counts
-
-
 def get_db_stats(db_path: str = DB_PATH) -> dict:
     conn = get_connection(db_path)
     stats = {}
@@ -624,16 +596,6 @@ def import_scryfall_file(path: str, db_path: str = DB_PATH):
     print(f"Imported scryfall tags for {count} cards")
 
 
-def get_scryfall_tags(oracle_id: str, db_path: str = DB_PATH) -> list[dict]:
-    """Get scryfall tags for a card. Returns [{tag, weight}, ...]."""
-    conn = get_connection(db_path)
-    rows = conn.execute(
-        "SELECT tag, weight FROM scryfall_tags WHERE oracle_id = ? ORDER BY weight DESC",
-        (oracle_id,),
-    ).fetchall()
-    conn.close()
-    return [{"tag": r[0], "weight": r[1]} for r in rows]
-
 
 def get_cards_with_scryfall_tag(tag: str, db_path: str = DB_PATH) -> list[str]:
     """Get oracle_ids of cards that have a specific scryfall tag."""
@@ -715,7 +677,7 @@ def find_synergy_candidates(deck_cards: list[dict], db_path: str = DB_PATH,
     try:
         import sys
         sys.path.insert(0, os.path.dirname(__file__))
-        from synergy_graph import SEMANTIC_BRIDGES
+        from mtg_synergy.constants import SEMANTIC_BRIDGES
 
         # Expand from commander's tags (threshold 0.6)
         bridge_wants = set()

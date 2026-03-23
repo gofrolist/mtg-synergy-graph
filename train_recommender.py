@@ -26,7 +26,7 @@ TRAINING_PATH = os.path.join(DATA_DIR, "recommender_training.json")
 MODEL_PATH = os.path.join(DATA_DIR, "recommender_weights.json")
 
 sys.path.insert(0, os.path.dirname(__file__))
-from synergy_graph import SEMANTIC_BRIDGES
+from mtg_synergy.constants import SEMANTIC_BRIDGES
 
 
 def compute_features(commander: dict, candidate: dict) -> dict:
@@ -149,6 +149,56 @@ def compute_features(commander: dict, candidate: dict) -> dict:
     # Feature 21: EDHREC saltiness (how powerful/disruptive the card is)
     card_saltiness = candidate.get("edhrec_saltiness") or 0.0
 
+    # Feature 23: EDHREC co-occurrence strength
+    # How many commanders do both cards appear in?
+    edhrec_cooccur_score = 0
+    cmdr_name = commander.get("name", "")
+    card_name = candidate.get("name", "")
+    if hasattr(compute_features, '_edhrec_cooccur'):
+        cmdr_peers = compute_features._edhrec_cooccur.get(cmdr_name, set())
+        if card_name in cmdr_peers:
+            edhrec_cooccur_score += 5  # Strong signal: appears with commander
+        card_peers = compute_features._edhrec_cooccur.get(card_name, set())
+        # Count shared peers (cards that both appear with)
+        if cmdr_peers and card_peers:
+            edhrec_cooccur_score += min(len(cmdr_peers & card_peers), 50)
+
+    # Feature 24: EDHREC direct synergy score for this commander
+    edhrec_direct_synergy = 0.0
+    if hasattr(compute_features, '_edhrec_synergy'):
+        # Try to find this candidate's synergy score for this commander
+        cmdr_slug = re.sub(r'[^a-z0-9 -]', '', cmdr_name.lower())
+        cmdr_slug = re.sub(r'\s+', '-', cmdr_slug.strip())
+        edhrec_direct_synergy = compute_features._edhrec_synergy.get(
+            (cmdr_slug, card_name), 0.0)
+
+    # Feature 25: Card2Vec similarity
+    card2vec_sim = 0.0
+    if hasattr(compute_features, '_card2vec_cache'):
+        cmdr_vec = compute_features._card2vec_cache.get(cmdr_name)
+        card_vec = compute_features._card2vec_cache.get(card_name)
+        if cmdr_vec is not None and card_vec is not None:
+            card2vec_sim = float(cmdr_vec @ card_vec)  # cosine sim (L2 normalized)
+
+    # Feature 26: Spellbook feature overlap
+    # Do the commander and candidate participate in combos with similar outcomes?
+    spellbook_feature_match = 0
+    if hasattr(compute_features, '_spellbook_features'):
+        cmdr_feats = compute_features._spellbook_features.get(cmdr_oid, set())
+        card_feats = compute_features._spellbook_features.get(card_oid, set())
+        spellbook_feature_match = len(cmdr_feats & card_feats)
+
+    # Feature 27: Precon co-occurrence
+    # Were these cards in the same official precon? (WotC-intended synergy)
+    precon_cooccur_score = 0
+    if hasattr(compute_features, '_precon_cooccur'):
+        cmdr_precon = compute_features._precon_cooccur.get(cmdr_name, set())
+        if card_name in cmdr_precon:
+            precon_cooccur_score = 3  # Strong: WotC put them together
+        card_precon = compute_features._precon_cooccur.get(card_name, set())
+        if cmdr_precon and card_precon:
+            precon_cooccur_score += min(len(cmdr_precon & card_precon), 20)
+
     # Feature 22: Oracle text similarity (Jaccard on words, excluding stop words)
     _stops = {'a', 'an', 'the', 'of', 'to', 'and', 'or', 'in', 'on', 'at', 'is',
               'it', 'that', 'this', 'for', 'you', 'your', 'its', 'may', 'if', 'with',
@@ -235,6 +285,11 @@ def compute_features(commander: dict, candidate: dict) -> dict:
         "theme_overlap": theme_overlap,
         "card_saltiness": round(card_saltiness, 2),
         "text_similarity": round(text_similarity, 3),
+        "edhrec_cooccur": min(edhrec_cooccur_score, 55),
+        "edhrec_direct_synergy": round(edhrec_direct_synergy, 3),
+        "card2vec_sim": round(card2vec_sim, 4),
+        "spellbook_feature_match": min(spellbook_feature_match, 15),
+        "precon_cooccur": min(precon_cooccur_score, 23),
     }
 
 
@@ -283,6 +338,86 @@ def _init_caches(conn):
     compute_features._theme_cache = theme_cache
 
     print(f"  Caches: {len(spellbook_cache)} Spellbook, {len(ability_cache)} abilities, {len(strategy_cache)} strategies, {len(theme_cache)} themes")
+
+    # EDHREC co-occurrence cache: card_name -> set of other card_names it co-occurs with
+    edhrec_cooccur = {}
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "edhrec_decklists" in tables:
+            commanders = {}
+            for slug, card in conn.execute("SELECT commander_slug, card_name FROM edhrec_decklists"):
+                commanders.setdefault(slug, set()).add(card)
+            for slug, cards in commanders.items():
+                for card in cards:
+                    if card not in edhrec_cooccur:
+                        edhrec_cooccur[card] = set()
+                    edhrec_cooccur[card].update(cards - {card})
+    except Exception:
+        pass
+    compute_features._edhrec_cooccur = edhrec_cooccur
+
+    # EDHREC synergy cache: (commander_slug, card_name) -> synergy score
+    edhrec_synergy = {}
+    try:
+        if "edhrec_card_synergy" in tables:
+            for slug, card, syn in conn.execute(
+                    "SELECT commander_slug, card_name, synergy FROM edhrec_card_synergy"):
+                edhrec_synergy[(slug, card)] = syn
+    except Exception:
+        pass
+    compute_features._edhrec_synergy = edhrec_synergy
+
+    # Card2Vec embedding cache: card_name -> numpy array
+    import numpy as np
+    card2vec_cache = {}
+    try:
+        if "card2vec" in tables:
+            for name, blob in conn.execute("SELECT card_name, embedding FROM card2vec"):
+                card2vec_cache[name] = np.frombuffer(blob, dtype=np.float32)
+    except Exception:
+        pass
+    compute_features._card2vec_cache = card2vec_cache
+
+    # Spellbook feature cache: oracle_id -> set of feature names
+    spellbook_features = {}
+    try:
+        if "spellbook_combo_features" in tables and "spellbook_features" in tables:
+            # Build feature id -> name map
+            feat_names = {}
+            for fid, fname in conn.execute("SELECT id, name FROM spellbook_features"):
+                feat_names[fid] = fname
+            # Map combo_id -> set of feature names
+            combo_features = {}
+            for combo_id, fid in conn.execute("SELECT combo_id, feature_id FROM spellbook_combo_features"):
+                combo_features.setdefault(combo_id, set()).add(feat_names.get(fid, ""))
+            # Map oracle_id -> set of feature names via combo membership
+            for oid, combos in spellbook_cache.items():
+                for combo_id in combos:
+                    if combo_id in combo_features:
+                        spellbook_features.setdefault(oid, set()).update(combo_features[combo_id])
+    except Exception:
+        pass
+    compute_features._spellbook_features = spellbook_features
+
+    # Precon co-occurrence cache: card_name -> set of other card_names
+    precon_cooccur = {}
+    try:
+        if "precon_decks" in tables and "precon_cards" in tables:
+            decks = {}
+            for deck_id, card in conn.execute("SELECT deck_id, card_name FROM precon_cards"):
+                decks.setdefault(deck_id, set()).add(card)
+            for deck_id, cards in decks.items():
+                for card in cards:
+                    if card not in precon_cooccur:
+                        precon_cooccur[card] = set()
+                    precon_cooccur[card].update(cards - {card})
+    except Exception:
+        pass
+    compute_features._precon_cooccur = precon_cooccur
+
+    print(f"  New caches: {len(edhrec_cooccur)} EDHREC co-occur, {len(edhrec_synergy)} EDHREC synergy, "
+          f"{len(card2vec_cache)} Card2Vec, {len(spellbook_features)} Spellbook features, "
+          f"{len(precon_cooccur)} precon co-occur")
 
 
 def build_training_data():
@@ -416,7 +551,9 @@ def train_model(training_data=None):
                      "cmdr_type_in_oracle", "card_type_in_cmdr_oracle",
                      "spellbook_combos", "ability_match", "color_overlap",
                      "card_rarity", "total_spellbook", "strategy_match", "theme_overlap",
-                     "card_saltiness", "text_similarity"]
+                     "card_saltiness", "text_similarity",
+                     "edhrec_cooccur", "edhrec_direct_synergy", "card2vec_sim",
+                     "spellbook_feature_match", "precon_cooccur"]
 
     # Compute feature means and stds for normalization
     means = {f: 0.0 for f in feature_names}
