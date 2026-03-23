@@ -139,7 +139,7 @@ def build_system_prompt(commander: dict) -> str:
 
     return f"""You are an expert Magic: The Gathering EDH/Commander deckbuilder.
 
-Your task: rate how synergistic each card is with the given commander on a scale of 1-10.
+Your task: rate how synergistic each card is with the given commander on a scale of 1.0-10.0. Use decimal precision (e.g., 7.5, 3.2) to differentiate between similar cards.
 
 Commander: {commander["name"]}
 Type: {commander["type_line"]}
@@ -149,12 +149,12 @@ Keywords: {', '.join(commander["keywords"]) if commander["keywords"] else 'none'
 {strategy_text}
 
 Scoring guide:
-- 10: Essential combo piece or perfect synergy. The card is built for this commander.
-- 8-9: Strong synergy. Directly enables or benefits from the commander's abilities.
-- 6-7: Good synergy. Fits the deck's strategy and works well with the commander.
-- 4-5: Moderate. Generically useful but not specifically synergistic with this commander.
-- 2-3: Weak. Technically legal but doesn't advance the commander's game plan.
-- 1: No synergy or anti-synergy. Actively bad in this deck.
+- 9.5-10.0: Essential combo piece or perfect synergy. The card is built for this commander.
+- 8.0-9.4: Strong synergy. Directly enables or benefits from the commander's abilities.
+- 6.0-7.9: Good synergy. Fits the deck's strategy and works well with the commander.
+- 4.0-5.9: Moderate. Generically useful but not specifically synergistic with this commander.
+- 2.0-3.9: Weak. Technically legal but doesn't advance the commander's game plan.
+- 1.0-1.9: No synergy or anti-synergy. Actively bad in this deck.
 
 Consider:
 - Does the card directly interact with the commander's abilities?
@@ -170,7 +170,9 @@ Consider:
 A card that's generically good (Sol Ring, Swords to Plowshares) but not specifically synergistic should score 4-5, not higher.
 A card that's mediocre in general but amazing with THIS commander should score 8+.
 
-Return a JSON array with objects: {{"name": "Card Name", "score": N, "reason": "brief explanation"}}
+Use the FULL range of decimal scores. Avoid rounding to integers. Two cards that are both 'good synergy' might be 6.2 vs 7.8 — capture that difference.
+
+Return a JSON array with objects: {{"name": "Card Name", "score": N.N, "reason": "brief explanation"}}
 Return ONLY the JSON array, no other text."""
 
 
@@ -339,7 +341,7 @@ def parse_response(raw: str, expected_count: int) -> list[dict] | None:
         score = entry.get("score", 0)
         reason = entry.get("reason", "")
         if isinstance(score, (int, float)) and 1 <= score <= 10:
-            valid.append({"name": name, "score": int(round(score)), "reason": reason})
+            valid.append({"name": name, "score": round(float(score), 1), "reason": reason})
         else:
             print(f"  [WARN] Invalid score for {name}: {score}")
 
