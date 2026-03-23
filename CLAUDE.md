@@ -106,7 +106,7 @@ python3 compare_edhrec.py --deck krenko --fast  # Single deck (cached)
 python3 compare_edhrec.py --fast --quiet        # Summary only (0.07s)
 
 # Tests
-python3 -m pytest tests/ -v                    # Run all 63 tests
+python3 -m pytest tests/ -v                    # Run all 71 tests
 ```
 
 ## Architecture
@@ -245,9 +245,32 @@ Suggests card swaps with multi-layer protection:
 
 ## Key Files
 
+### `mtg_synergy/` package (core logic)
+
+| Module | Purpose |
+|---|---|
+| `mtg_synergy/config.py` | Centralized paths, thresholds, and DB settings |
+| `mtg_synergy/constants.py` | SEMANTIC_BRIDGES, TRIGGER_EFFECT_BRIDGES, STAPLE_ROLES |
+| `mtg_synergy/db.py` | Centralized DB connection factory |
+| `mtg_synergy/cli.py` | CLI dispatcher (argparse + command routing) |
+| `mtg_synergy/graph/builder.py` | `build_graph()` — composite edge graph |
+| `mtg_synergy/graph/edges.py` | Edge computation: provides→wants, peer, shared-wants, embedding |
+| `mtg_synergy/graph/idf.py` | IDF tag weighting |
+| `mtg_synergy/recommend/engine.py` | `recommend_cards()` — 4-layer scoring pipeline |
+| `mtg_synergy/recommend/swaps.py` | `suggest_swaps()` — multi-layer card swap suggestions |
+| `mtg_synergy/recommend/affinity.py` | Commander affinity scoring |
+| `mtg_synergy/combos/detector.py` | `find_combos()`, `find_combos_tiered()`, `find_partial_combos()` |
+| `mtg_synergy/combos/anti_synergy.py` | Anti-synergy detection |
+| `mtg_synergy/combos/display.py` | Combo output formatting and validation |
+| `mtg_synergy/analysis/deck.py` | Deck synergy display and analysis |
+| `mtg_synergy/analysis/strategy.py` | Strategy detection, candidate filtering, commander builds |
+| `mtg_synergy/analysis/visualization.py` | Interactive HTML/D3 visualization |
+
+### Root-level scripts (pipelines + entry points)
+
 | File | Purpose |
 |---|---|
-| `synergy_graph.py` | Main entry point: --recommend, --swaps, --combos, --deck-view |
+| `synergy_graph.py` | Thin wrapper — re-exports from `mtg_synergy/`, CLI entry point |
 | `score_synergies.py` | LLM synergy scoring (OpenAI + Ollama + Batch API) |
 | `extract_mechanics.py` | Structured mechanics extraction from oracle text |
 | `mechanics_matcher.py` | Filter-aware event chain matching engine |
@@ -258,7 +281,6 @@ Suggests card swaps with multi-layer protection:
 | `strategy_detector.py` | Rule-based strategy detection |
 | `tag_db.py` | SQLite DB management |
 | `fetch_spellbook.py` | Commander Spellbook API fetcher |
-| `train_synergy_model.py` | GBT synergy model (legacy, replaced by tower model) |
 
 ## Key Conventions
 
