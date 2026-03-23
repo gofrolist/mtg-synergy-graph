@@ -4,101 +4,109 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MTG Synergy Graph — a tool for analyzing Magic: The Gathering EDH/Commander deck synergies. Supports multiple decks via `decks/` config modules (currently: Kyler GW Humans/counters, Krenko mono-R Goblins/combo, Y'Shtola WUB spellslinger/drain). The system uses a unified SQLite tag database built from OpenAI-tagged cards, enriched with parsed abilities, Commander Spellbook ground-truth combos, and strategy detection.
+MTG Synergy Graph — a tool for analyzing Magic: The Gathering EDH/Commander deck synergies. The system uses multiple signal layers to find card synergies: LLM scoring, a trained two-tower neural model, structured game mechanics extraction, and a tag-based provides/wants graph.
 
-1. **OpenAI tagger** — uses gpt-4.1-mini to produce structured JSON tags (role, provides, wants) for 34k cards
-2. **SQLite tag database** — `data/tags.db` stores tagged cards with provides/wants/abilities/strategies
-3. **Ability parser** — deterministic oracle text parser extracts structured abilities (triggered, activated, static, replacement, keyword, mana) with effect/trigger tagging
-4. **Commander Spellbook** — 82k combos cached locally for ground-truth infinite combo validation
-5. **Strategy detector** — rule-based + oracle text + EDHREC mapping assigns strategies to cards
-6. **Synergy graph** — builds edges from provides→wants relationships, 3-tier combo detection (confirmed/likely/synergy), strategy-weighted recommendations
+### Signal Architecture (recommendation pipeline)
+
+```
+For any commander, recommendations use 4 signal layers:
+
+1. LLM SCORES (best quality, cached in synergy_scores table)
+   - Pre-scored via score_synergies.py (OpenAI gpt-5.4-mini or local gemma3:12b)
+   - 33 commanders scored, ~99k pairs
+   - Integer 1-10 scale, PRIMARY ranking signal when available
+   - Tiebreaker: tower model prediction + EDHREC rank
+
+2. TOWER MODEL (instant, any commander, trained on LLM scores)
+   - Two-tower neural net: commander_embedding × card_embedding → synergy
+   - Trained on 99k LLM-scored pairs, corr=0.75 with LLM scores
+   - Scores ALL cards for any commander in <100ms
+   - Used as Tier 2 for unseen commanders + tiebreaker within same LLM score
+
+3. MECHANICS ENGINE (filter-aware event chain matching)
+   - 7105 cards with structured mechanics extracted via LLM
+   - 6 matching modes: event chain, card-IS-event, shared trigger,
+     modifier, enabler, self-sacrifice
+   - max(graph, mechanics) scoring prevents mechanics cards from being buried
+
+4. TAG GRAPH (provides/wants edges, baseline signal)
+   - 34k cards tagged with role/provides/wants
+   - Composite edges: provides→wants + peer-enabler + shared-wants + embedding
+   - Commander 5x edge weight, keyword-only creature penalty
+   - Strategy multiplier, tribal boost, combo completion bonus
+```
+
+### Current Performance
+
+Average EDHREC alignment: **13.4/30** (up from 2.8/30 baseline, 4.8x improvement)
+
+| Commander | Score | Signal source |
+|---|---|---|
+| Sram (equipment/aura) | 24/30 | LLM + mechanics |
+| Syr Konrad (graveyard) | 20/30 | LLM + mechanics |
+| Edgar (vampire tribal) | 17/30 | LLM + tribal tags |
+| Krenko (goblin tribal) | 15/30 | LLM + tribal tags |
+| Urza (artifacts) | 15/30 | LLM + mechanics |
+| Tatyova (landfall) | 15/30 | LLM + tower model |
+| Sauron (amass/ring) | 13/30 | LLM (gemma3 local) |
+| Pantlaza (dinosaur) | 12/30 | LLM + type matching |
+| Kyler (human tribal) | 11/30 | LLM + tribal tags |
+| Niv-Mizzet (draw/damage) | 10/30 | LLM + event chains |
 
 ## Common Commands
 
 ```bash
-# Download Scryfall bulk data (required first step, ~150MB)
-python3 download_cards.py
-
-# Extract top N cards by EDHREC rank for tagging
-python3 top_cards_filter.py --top 20000
-
-# Batch-tag cards via OpenAI API (role/provides/wants)
-python3 batch_tagger.py --candidates data/remaining_candidates.json --provider openai --model gpt-4.1-mini --dry-run
+# === EXISTING PIPELINE ===
+python3 download_cards.py                  # Refresh Scryfall data (~150MB)
 python3 batch_tagger.py --candidates data/remaining_candidates.json --provider openai --model gpt-4.1-mini
-python3 batch_tagger.py --deck kyler --provider ollama --model mtg-tagger    # local fine-tuned model
+python3 tag_db.py import data/all_tags_gpt41mini.json
+python3 tag_db.py backfill && python3 tag_db.py fix-tribal && python3 tag_db.py rebuild-registry
+python3 ability_parser.py                  # Parse oracle text into abilities
+python3 fetch_spellbook.py                 # Fetch 82k combos
+python3 strategy_detector.py --populate    # Assign strategies
 
-# Import tags into SQLite DB (the single source of truth for card tags)
-python3 tag_db.py import data/all_tags_gpt41mini.json    # import/update from tags JSON
-python3 tag_db.py backfill                                 # backfill Scryfall metadata (oracle text, type line)
-python3 tag_db.py stats                                    # show DB stats
-python3 tag_db.py query --provides token-generation        # find cards providing a tag
-python3 tag_db.py query --wants creature-etb               # find cards wanting a tag
-python3 tag_db.py fix-tribal                               # remove false positive tribal wants tags
-python3 tag_db.py fix-tribal --dry-run                     # preview tribal fixes
-python3 tag_db.py rebuild-registry                         # rebuild tag vocabulary from all DB cards
+# === NEW: Synergy scoring pipeline ===
+# Score a commander with OpenAI (best quality, ~$0.50/commander, ~2 min)
+python3 score_synergies.py --commander "Krenko, Mob Boss"
+python3 score_synergies.py --commander "Krenko, Mob Boss" --batch-api  # 50% cheaper
 
-# Parse oracle text into structured abilities
-python3 ability_parser.py                                  # parse all cards in DB
-python3 ability_parser.py --card "Kyler, Sigardian Emissary"  # inspect single card
+# Score a commander locally with Ollama (free, ~90 min)
+python3 score_synergies.py --commander "Krenko, Mob Boss" --provider ollama --model gemma3:12b
 
-# Fetch Commander Spellbook combos (one-time, ~8 min)
-python3 fetch_spellbook.py                                 # fetch all ~82k combos
-python3 fetch_spellbook.py --import-only                   # import from cached file
-python3 fetch_spellbook.py --stats                         # show combo statistics
+# Score all deck commanders
+python3 score_synergies.py --all-decks
+python3 score_synergies.py --all-decks --batch-api
 
-# Strategy detection
-python3 strategy_detector.py --commander "Kyler, Sigardian Emissary"  # detect strategies for a commander
-python3 strategy_detector.py --populate                    # populate strategies for all cards
-python3 strategy_detector.py --stats                       # show strategy distribution
+# Score new set cards against all known commanders
+python3 score_synergies.py --new-cards data/new_set.json
 
-# Build synergy graph (reads from DB by default)
-python3 synergy_graph.py --deck kyler                          # build + print top synergies
-python3 synergy_graph.py --deck kyler --card "Hardened Scales"  # show synergies for one card
-python3 synergy_graph.py --deck kyler --validate                # compare vs hand-curated pairs
-python3 synergy_graph.py --deck krenko --deck-view              # synergy network + strategy analysis
-python3 synergy_graph.py --deck krenko --recommend              # strategy-weighted recommendations
-python3 synergy_graph.py --deck krenko --combos                 # 3-tier combo detection (Spellbook-validated)
-python3 synergy_graph.py --deck krenko --deck-view --recommend  # both at once
-python3 synergy_graph.py --deck krenko --export                 # export graph as JSON
-python3 synergy_graph.py --deck kyler --visualize               # interactive HTML graph
-python3 synergy_graph.py --deck kyler --swaps                   # suggest card swaps
+# Check scoring progress
+python3 score_synergies.py --stats
 
-# Strategy override
-python3 synergy_graph.py --deck kyler --recommend --strategies humans,counters
-python3 synergy_graph.py --deck kyler --recommend --exclude-strategies blink
+# === NEW: Mechanics extraction ===
+python3 extract_mechanics.py --batch 1000   # Extract next 1000 cards by EDHREC rank
+python3 extract_mechanics.py --card "Krenko, Mob Boss"  # Single card
+python3 extract_mechanics.py --stats        # Check coverage
+python3 extract_mechanics.py --validate     # Test matching quality
 
-# New-set update workflow
-python3 update_cards.py --check                    # dry run: show new/errata'd cards
-python3 update_cards.py --update                   # full pipeline: download, diff, tag, import
+# === NEW: Tower model training ===
+python3 train_tower_model.py               # Train from LLM scores (~45s)
+python3 train_tower_model.py --predict "Any Commander"  # Score all cards (<100ms)
+python3 train_tower_model.py --stats       # Check training data
 
-# Full enrichment pipeline (run after importing new tags)
-python3 tag_db.py fix-tribal
-python3 tag_db.py rebuild-registry
-python3 ability_parser.py
-python3 strategy_detector.py --populate
+# === Recommendations ===
+python3 synergy_graph.py --deck krenko --recommend   # Top 30 recommendations
+python3 synergy_graph.py --deck krenko --swaps       # Card swap suggestions
+python3 synergy_graph.py --deck krenko --combos      # 3-tier combo detection
+python3 synergy_graph.py --deck krenko --deck-view   # Deck analysis
 
-# Prepare training data for local model fine-tuning
-python3 prepare_training.py --stats                # generate train/val split from OpenAI tags
-
-# Benchmark local models against golden set
-python3 benchmark_models.py                        # test all default models on 100 golden cards
-python3 benchmark_models.py --models mtg-tagger qwen3:4b  # specific models
-
-# Automated fine-tuning experiments
-python3 auto_finetune.py --dry-run                 # show experiment plan
-python3 auto_finetune.py                           # run iterative training loop
-python3 auto_finetune.py --eval-only mtg-tagger    # evaluate existing model
-
-# RAG pipeline: download rules, chunk, embed, index
-python3 rules_fetcher.py                           # download + chunk MTG rules
-python3 rules_index.py                             # embed chunks via Ollama
-
-# Card embeddings (768-dim vectors via gte-modernbert-base)
-python3 card_embeddings.py                         # embed all cards in tags.db
-python3 card_embeddings.py --query "Sol Ring"      # find similar cards by embedding
+# === Comparison & validation ===
+python3 compare_edhrec.py --refresh --quiet    # Compare all decks vs EDHREC
+python3 compare_edhrec.py --deck krenko --fast  # Single deck (cached)
+python3 compare_edhrec.py --fast --quiet        # Summary only (0.07s)
 
 # Tests
-python3 -m pytest tests/ -v                        # run all 48 tests
+python3 -m pytest tests/ -v                    # Run all 63 tests
 ```
 
 ## Architecture
@@ -108,110 +116,161 @@ python3 -m pytest tests/ -v                        # run all 48 tests
 ```
 Scryfall API → download_cards.py → data/oracle_cards.json (36k cards)
                                         ↓
-                              top_cards_filter.py → candidates JSON
+                              batch_tagger.py (gpt-4.1-mini)
                                         ↓
-                              batch_tagger.py (gpt-4.1-mini via OpenAI API)
+                              tag_db.py import → data/tags.db
                                         ↓
-                              data/all_tags_gpt41mini.json (34k tagged cards)
+                    tag_db.py backfill → fix-tribal → rebuild-registry
                                         ↓
-                    tag_db.py import → data/tags.db (SQLite, single source of truth)
+                    ability_parser.py → abilities table
                                         ↓
-                    tag_db.py backfill → enriches with Scryfall metadata
+                    fetch_spellbook.py → spellbook_combos table (82k combos)
                                         ↓
-                    tag_db.py fix-tribal → removes false positive tribal tags
+                    strategy_detector.py → card_strategies table
                                         ↓
-                    tag_db.py rebuild-registry → synergy_tag_registry.json v4.0
+                    extract_mechanics.py → card_mechanics table (7105 cards)
                                         ↓
-                    ability_parser.py → abilities table (structured oracle text)
+                    score_synergies.py → synergy_scores table (99k pairs, 33 commanders)
                                         ↓
-                    fetch_spellbook.py → spellbook_combos table (82k ground-truth combos)
-                                        ↓
-                    strategy_detector.py → card_strategies table (28k strategy assignments)
+                    train_tower_model.py → data/tower_model.npz
                                         ↓
                               synergy_graph.py --deck <name>
-                              (provides→wants edges + 3-tier combos + strategies)
-                                        ↓
-                              deck-view / recommend / combos / swaps / visualize
+                              (4-layer scoring: LLM → tower → mechanics → graph)
 ```
+
+### New-set update workflow
+
+```bash
+python3 download_cards.py                               # 1. Refresh Scryfall
+python3 batch_tagger.py --candidates <new>              # 2. Tag new cards
+python3 tag_db.py import <new_tags>                     # 3. Import tags
+python3 tag_db.py backfill && fix-tribal && rebuild-registry  # 4. Enrich
+python3 ability_parser.py                               # 5. Parse abilities
+python3 strategy_detector.py --populate                 # 6. Strategies
+python3 extract_mechanics.py --batch 1000               # 7. Extract mechanics for new cards
+python3 score_synergies.py --new-cards data/new.json    # 8. Score vs known commanders (~$0.10)
+python3 train_tower_model.py                            # 9. Retrain tower model (~45s)
+```
+
+### DB Schema (data/tags.db)
+
+| Table | Rows | Purpose |
+|---|---|---|
+| cards | 33,930 | Card metadata from Scryfall |
+| provides | 105k+ | Card provides tags (incl. auto-tribal from type_line) |
+| wants | 89,356 | Card wants tags |
+| abilities | 76,601 | Parsed oracle text abilities |
+| card_strategies | 88,304 | Strategy assignments |
+| spellbook_combos | 82,103 | Commander Spellbook combos |
+| spellbook_combo_cards | 288,973 | Combo ↔ card junction |
+| card_mechanics | ~17k | Structured game mechanics (LLM-extracted) |
+| synergy_scores | ~180k | Commander × card synergy scores (LLM + auto) |
 
 ### Tag Schema (3-field)
 
 Each card is tagged with:
 - **role**: ramp, draw, removal, protection, enabler, threat, utility, land
-- **provides**: what the card gives to the deck (e.g. `card-draw`, `token-generation`, `sacrifice-outlet`)
-- **wants**: what conditions make the card better (e.g. `creature-death`, `wide-board`, `spell-cast`)
+- **provides**: what the card gives (e.g. `card-draw`, `token-generation`, `goblin-tribal`)
+- **wants**: what conditions benefit it (e.g. `creature-death`, `wide-board`, `spell-cast`)
 
-Provides→wants edges form the synergy graph. 2-card cycles (A provides what B wants AND B provides what A wants) are potential infinite combos.
+Tribal tags (human-tribal, goblin-tribal, etc.) are auto-assigned from creature type_line.
 
-### Ability Schema (parsed from oracle text)
+### Mechanics Schema (card_mechanics table)
 
-Each card's oracle text is parsed into structured abilities:
-- **ability_type**: triggered, activated, static, replacement, keyword, mana
-- **trigger_condition** + **trigger_tags**: what triggers the ability (e.g. "creature enters" → `creature-etb`)
-- **effect** + **effect_tags**: what the ability does (e.g. "create token" → `token-generation`)
-- **cost**: activation cost for activated/mana abilities
-- Used for trigger chain detection in combo analysis
+Each card's abilities are extracted as structured JSON:
+- **mechanic_type**: triggered, activated, static, replacement, keyword
+- **trigger_event**: creature-enters, spell-cast, creature-dies, etc. (27 canonical events)
+- **trigger_filter**: JSON filter (e.g., `{"subtype": "Human", "controller": "you"}`)
+- **effect_action**: create-token, deal-damage, draw-card, etc. (35 canonical actions)
+- **cost**: activation cost for activated abilities
+
+Matching modes in mechanics_matcher.py:
+1. **Event chain**: A produces events → B triggers on those events
+2. **Card-IS-event**: B being cast/entering satisfies A's trigger filter (tribal matching)
+3. **Shared trigger**: A and B both respond to same event type
+4. **Modifier**: A amplifies/doubles what B does
+5. **Enabler**: A's static scope applies to B's creature types
+6. **Self-sacrifice**: Cards with sacrifice-self cost produce creature-dies event
+
+### Synergy Scoring (synergy_scores table)
+
+Pre-computed commander × card synergy scores on 1-10 scale:
+- **Scoring providers**: OpenAI (gpt-5.4-mini), local Ollama (gemma3:12b)
+- **Pre-filtering**: Top 2000 candidates per commander (by tag overlap + mechanics + EDHREC rank)
+- **Auto-scoring**: Cards with zero synergy signals auto-scored as 2
+- **Spellbook boost**: Cards in confirmed combos with commander boosted to 9
+- **Resume-safe**: Every batch committed immediately, re-run picks up where it stopped
+- **Batch API**: `--batch-api` flag for 50% cheaper OpenAI processing
+
+### Tower Model (data/tower_model.npz)
+
+Two-tower neural network trained on LLM synergy scores:
+- **Input**: Commander embedding (768-dim) × Card embedding (768-dim) + 10 structural features
+- **Architecture**: Projection (768→128) → element-wise product → MLP (138→64→32→1)
+- **Training**: 99k pairs from 33 commanders, Adam optimizer, 100 epochs, ~45s
+- **Performance**: correlation=0.75, MAE=1.01 with LLM scores
+- **Inference**: <100ms for ALL cards for any commander
+- **Training data filter**: Excludes auto-scored and spellbook-boosted pairs
+
+### Recommendation Pipeline (synergy_graph.py --recommend)
+
+```
+1. Build graph (provides→wants edges + embeddings + peer-enabler)
+2. Inject LLM≥7 candidates from synergy_scores (bypasses graph candidate pool)
+3. Inject mechanics≥1.5 candidates from card_mechanics
+4. Score candidates: tag graph × tribal × strategy × quality × CMC × popularity × affinity
+5. Apply mechanics boost: max(graph_score, mechanics_as_graph)
+6. Apply LLM/tower scoring: LLM_score × 1000 + tower_score × 10 + rank_tiebreak × 0.1
+7. Unscored cards get tower model prediction or graph-only score
+8. Sort and output top 30
+```
+
+### Swap System (synergy_graph.py --swaps)
+
+Suggests card swaps with multi-layer protection:
+- **Infrastructure protection**: Cards providing removal/protection/ramp/draw → never cut
+- **Tribal protection**: Creatures matching deck's dominant type → never cut
+- **Changeling/Shapeshifter**: Always protected in tribal decks
+- **Commander synergy protection**: Top 20 cards by commander graph edge score → never cut
+- **Mechanics protection**: Cards with mechanics score ≥2.0 with commander → never cut
+- **Combo protection**: Cards in Spellbook combos with commander → never cut
 
 ### Combo Detection (3-tier)
 
 | Tier | Label | Detection |
 |------|-------|-----------|
-| Confirmed Infinite | `infinite-confirmed` | All combo cards in deck match a Commander Spellbook entry |
-| Likely Combo | `combo-likely` | Provides→wants cycle + circular trigger chain (from abilities table) |
-| Synergy | `synergy` | Provides→wants cycle without trigger chain or Spellbook match |
+| Confirmed Infinite | `infinite-confirmed` | All combo cards match a Commander Spellbook entry |
+| Likely Combo | `combo-likely` | Provides→wants cycle + circular trigger chain |
+| Synergy | `synergy` | Provides→wants cycle without trigger chain |
 
-### Strategy Detection
+## Key Files
 
-Strategies are auto-detected from three sources:
-1. **Provides tags** → STRATEGY_RULES (35 rules, confidence 0.5-1.0)
-2. **Wants tags** → WANTS_STRATEGY_RULES (11 rules, confidence 0.5-0.7)
-3. **Oracle text** → creature type references in tribal-relevant context (confidence 0.8)
-4. **Deck composition** → `_detect_deck_types` feeds tribal strategies from creature type distribution
-5. **EDHREC themes** → `data/edhrec_theme_cards.json` synergy scores (confidence = synergy)
-
-User can override with `--strategies humans,counters` or `--exclude-strategies blink`.
-
-### Key Components
-
-- **`data/tags.db`** — SQLite database with tagged cards (cards, provides, wants, abilities, card_strategies, spellbook_combos, spellbook_combo_cards, scryfall_tags)
-- **`data/all_tags_gpt41mini.json`** — all OpenAI-tagged cards (canonical source, gitignored)
-- **`data/commander_spellbook.json`** — cached Commander Spellbook combos (82k, gitignored)
-- **`golden_cards.json`** — 500 cards with verified expected tags. Used for evaluation only, excluded from training.
-- **`synergy_tag_registry.json`** — canonical vocabulary v4.0: rebuilt from all DB cards (min 3 occurrences)
-- **`ability_parser.py`** — 3-phase oracle text parser: keyword extraction → pattern matching → effect/trigger tagging. 88% of cards get high-confidence parses.
-- **`strategy_detector.py`** — rule-based strategy detection with STRATEGY_RULES, WANTS_STRATEGY_RULES, oracle text tribal scanning, and EDHREC enrichment
-- **`fetch_spellbook.py`** — Commander Spellbook API fetcher with pagination, caching, and DB import
-- **`synergy_graph.py`** — builds composite-scored edges from 4 signal types: provides→wants (with semantic bridges + IDF weighting), peer-enabler (shared provides), shared-wants, embedding similarity. Features: `--deck-view` (with strategy analysis), `--recommend` (strategy-weighted + combo completion bonus + mana cost penalty), `--combos` (3-tier Spellbook-validated), `--swaps`, `--visualize`
-- **`benchmark_models.py`** — benchmarks Ollama models on golden set. Scores: provides recall, wants recall, role accuracy.
-- **`auto_finetune.py`** — iterative fine-tuning loop: train → export GGUF → Ollama → eval → save.
-
-### Adding New Cards (new set release)
-
-1. `python3 download_cards.py` — refresh Scryfall data
-2. Prepare candidates for new cards only
-3. `python3 batch_tagger.py --candidates <new> --provider openai --model gpt-4.1-mini` (~$0.01-0.05/set)
-4. `python3 tag_db.py import <new_tags>` — merge into DB
-5. `python3 tag_db.py backfill` — enrich with Scryfall metadata
-6. `python3 tag_db.py fix-tribal` — clean tribal tags
-7. `python3 ability_parser.py` — parse abilities for new cards
-8. `python3 strategy_detector.py --populate` — update strategies
-9. All decks automatically benefit
-
-### RAG Pipeline (rules_fetcher → rules_index → rules_retriever)
-
-- `rules_fetcher.py`: Downloads MTG Comprehensive Rules + Scryfall rulings (~1600 chunks)
-- `rules_index.py`: Embeds chunks via Ollama nomic-embed-text (768-dim)
-- `rules_retriever.py`: Semantic search, keyword→section lookup, card-specific rulings
-- Currently unused by tagging pipeline (gpt-4.1-mini knows MTG rules). Reserved for edge cases.
+| File | Purpose |
+|---|---|
+| `synergy_graph.py` | Main entry point: --recommend, --swaps, --combos, --deck-view |
+| `score_synergies.py` | LLM synergy scoring (OpenAI + Ollama + Batch API) |
+| `extract_mechanics.py` | Structured mechanics extraction from oracle text |
+| `mechanics_matcher.py` | Filter-aware event chain matching engine |
+| `train_tower_model.py` | Two-tower neural synergy model training |
+| `compare_edhrec.py` | Fast EDHREC comparison tool (parallel, cached) |
+| `batch_tagger.py` | Card tagging (provides/wants/role) via LLM |
+| `ability_parser.py` | Deterministic oracle text parser |
+| `strategy_detector.py` | Rule-based strategy detection |
+| `tag_db.py` | SQLite DB management |
+| `fetch_spellbook.py` | Commander Spellbook API fetcher |
+| `train_synergy_model.py` | GBT synergy model (legacy, replaced by tower model) |
 
 ## Key Conventions
 
-- Cards are keyed by `oracle_id` (Scryfall UUID) for dedup across reprints
+- Cards keyed by `oracle_id` (Scryfall UUID) for dedup across reprints
 - `data/oracle_cards.json` is gitignored (~150MB); must run `download_cards.py` first
 - API calls use `urllib.request` (no `requests` dependency)
 - Tags use kebab-case (e.g., `mana-acceleration`, `creature-death`)
-- Deck configs live in `decks/` (commander, EDHREC slug, color identity, decklist, synergy pairs)
-- Fine-tuning uses `.venv` with unsloth + torch (not system Python)
-- `synergy_graph.py` reads from SQLite DB by default; use `--input <file>` to override with JSON
-- Best local model: `mtg-tagger` (Qwen3-4B fine-tuned, 65.3% composite on golden set)
-- Tests: 48 tests in `tests/` covering parser, strategy detector, combo detection, anti-synergy, schema, tribal cleanup, registry rebuild, integration
+- Tribal tags auto-assigned from type_line (e.g., Human creature → provides `human-tribal`)
+- Deck configs live in `decks/` (15 decks: kyler, krenko, yshtola, atraxa, edgar, kaalia, niv_mizzet, pantlaza, sram, syr_konrad, tatyova, ur_dragon, urza, sauron)
+- LLM scoring uses gpt-5.4-mini (requires `max_completion_tokens` not `max_tokens`)
+- Local scoring uses gemma3:12b via Ollama (best quality/speed local model)
+- Qwen3 models need `think: false` in Ollama payload to disable thinking
+- Fine-tuning uses `.venv` with unsloth + torch (Python 3.12, not system Python 3.14)
+- Tests: 63 tests in `tests/`
+- Spellbook combo boosts must check color identity (fixed: 364 wrong-color boosts deleted)
