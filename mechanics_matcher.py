@@ -215,6 +215,14 @@ def card_produces_events(mechanics: list[dict]) -> list[dict]:
             if action == "create-token":
                 output["card_type"] = "creature"
                 output["is_token"] = True
+            if isinstance(token, dict) and token.get("keywords"):
+                kw = token["keywords"]
+                output["has_keyword"] = kw if isinstance(kw, list) else [kw]
+
+        if action == "grant-keyword" and isinstance(detail, dict):
+            kw = detail.get("keyword") or detail.get("keywords")
+            if kw:
+                output["has_keyword"] = [kw] if isinstance(kw, str) else kw
 
         for event in produced_events:
             events.append({"event": event, "output": output})
