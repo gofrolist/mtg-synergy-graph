@@ -105,7 +105,35 @@ def filter_matches(trigger_filter: dict | None, producer_output: dict) -> bool:
                 required_kw = {str(required_val).lower()}
             if not producer_kw_set & required_kw:
                 return False
-        # Ignore unknown filter keys (amount, etc.)
+        elif key == "is_equipped":
+            if required_val and not producer_output.get("is_equipped"):
+                return False
+        elif key == "counter_type":
+            prod_ct = str(producer_output.get("counter_type", "")).lower()
+            if str(required_val).lower() != prod_ct:
+                return False
+        elif key == "power":
+            prod_power = producer_output.get("power")
+            if prod_power is None:
+                return False
+            try:
+                if isinstance(required_val, str) and required_val.startswith(">="):
+                    if int(prod_power) < int(required_val[2:]):
+                        return False
+                elif isinstance(required_val, str) and required_val.startswith("<="):
+                    if int(prod_power) > int(required_val[2:]):
+                        return False
+                else:
+                    if int(prod_power) != int(required_val):
+                        return False
+            except (ValueError, TypeError):
+                return False  # Non-numeric power (e.g., *) — can't verify
+        elif key == "tapped":
+            if required_val and not producer_output.get("tapped"):
+                return False
+        elif key == "condition":
+            pass  # Complex conditions still ignored (would need game-state simulation)
+        # Ignore remaining unknown filter keys (amount, name, source, etc.)
 
     return True
 

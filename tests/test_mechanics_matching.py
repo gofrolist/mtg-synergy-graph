@@ -32,3 +32,40 @@ def test_filter_matches_keyword_missing():
     trigger_filter = {"has_keyword": "flying"}
     producer_output = {"controller": "you"}
     assert filter_matches(trigger_filter, producer_output) is False
+
+
+def test_filter_is_equipped_passes_when_set():
+    trigger_filter = {"is_equipped": True}
+    producer_output = {"controller": "you", "is_equipped": True}
+    assert filter_matches(trigger_filter, producer_output) is True
+
+def test_filter_is_equipped_fails_when_not_set():
+    trigger_filter = {"is_equipped": True}
+    producer_output = {"controller": "you"}
+    assert filter_matches(trigger_filter, producer_output) is False
+
+def test_filter_counter_type_matches():
+    trigger_filter = {"counter_type": "+1/+1"}
+    producer_output = {"controller": "you", "counter_type": "+1/+1"}
+    assert filter_matches(trigger_filter, producer_output) is True
+
+def test_filter_counter_type_mismatches():
+    trigger_filter = {"counter_type": "+1/+1"}
+    producer_output = {"controller": "you", "counter_type": "charge"}
+    assert filter_matches(trigger_filter, producer_output) is False
+
+def test_filter_power_threshold():
+    trigger_filter = {"power": ">=3"}
+    producer_output = {"controller": "you", "power": 4}
+    assert filter_matches(trigger_filter, producer_output) is True
+
+def test_filter_power_below_threshold():
+    trigger_filter = {"power": ">=3"}
+    producer_output = {"controller": "you", "power": 2}
+    assert filter_matches(trigger_filter, producer_output) is False
+
+def test_filter_power_star_rejects():
+    """Non-numeric power like * should reject the filter."""
+    trigger_filter = {"power": ">=3"}
+    producer_output = {"controller": "you", "power": "*"}
+    assert filter_matches(trigger_filter, producer_output) is False
