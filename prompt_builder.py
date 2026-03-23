@@ -74,21 +74,16 @@ def _build_system_prompt() -> str:
 SYSTEM_PROMPT = _build_system_prompt()
 
 
-_corrections_cache = None
 _golden_cache = None
 
 
 def load_corrections() -> list[dict]:
-    global _corrections_cache
-    if _corrections_cache is not None:
-        return _corrections_cache
+    """Load corrections — not cached since corrections.json may be updated during review loops."""
     path = BASE_DIR / "corrections.json"
     if not path.exists():
-        _corrections_cache = []
-        return _corrections_cache
+        return []
     with open(path) as f:
-        _corrections_cache = json.load(f)
-    return _corrections_cache
+        return json.load(f)
 
 
 def load_golden_examples(n: int = 3) -> list[dict]:

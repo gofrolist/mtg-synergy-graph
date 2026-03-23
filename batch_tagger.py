@@ -25,7 +25,7 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 CANDIDATES_FILE = None  # set by --deck
 OUTPUT_FILE = None  # set by --deck or --output
 
-MAX_TOKENS = 1024  # Actual output ~150 tokens for 5-10 cards
+MAX_TOKENS = 2048  # 10 cards × ~100 tokens/card output + safety margin
 MAX_REVIEW_ITERATIONS = 2
 
 
@@ -96,8 +96,14 @@ def call_openai(system: str, user: str, api_key: str, model: str) -> str | None:
             retry_after = e.headers.get("Retry-After")
             wait = float(retry_after) if retry_after else 10
             print(f"  [RATE LIMITED] Waiting {wait}s...")
-            import time; time.sleep(wait)
-            return call_openai(system, user, api_key, model)  # Retry once
+            time.sleep(wait)
+            # Single retry — no recursion to avoid infinite loops
+            try:
+                with urllib.request.urlopen(req) as resp2:
+                    data2 = json.loads(resp2.read())
+                    return data2["choices"][0]["message"]["content"].strip()
+            except Exception:
+                return None
         body = e.read().decode()
         print(f"  [API ERROR] {e.code}: {body[:200]}")
         return None

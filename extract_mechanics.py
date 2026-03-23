@@ -26,7 +26,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "tags.db")
-CARDS_PER_BATCH = 25  # Cards per API call
+CARDS_PER_BATCH = 15  # Cards per API call (~2.2k output tokens, safe within 4096 limit)
 MAX_WORKERS = 5
 
 # ── Canonical vocabulary ────────────────────────────────────────────────────

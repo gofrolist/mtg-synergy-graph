@@ -37,7 +37,7 @@ import urllib.request
 from pathlib import Path
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "tags.db")
-BATCH_SIZE = 200  # Cards per API call (~8k tokens input, well within 1M context)
+BATCH_SIZE = 150  # Cards per API call (~3k input + ~3k output tokens, safe within 4096 max_completion)
 
 
 # ── Schema ──────────────────────────────────────────────────────────────────
@@ -969,7 +969,7 @@ def main():
 
     elif args.all_decks:
         # Default to Batch API for bulk scoring (50% cheaper, acceptable latency)
-        use_batch = args.batch_api if args.batch_api else (args.provider == "openai" and not args.no_batch)
+        use_batch = args.batch_api or (args.provider == "openai" and not args.no_batch)
         if use_batch and not args.batch_api:
             print("Using Batch API for --all-decks (50% cheaper). Add --no-batch to disable.")
         from decks import list_decks, load_deck
