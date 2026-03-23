@@ -22,6 +22,11 @@ import json
 import os
 from collections import defaultdict
 
+from mtg_synergy.constants import (
+    SEMANTIC_BRIDGES, TRIGGER_EFFECT_BRIDGES, STAPLE_ROLES,
+    _provides_satisfies_want,
+)
+
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 
@@ -33,575 +38,6 @@ def load_merged(path: str) -> list[dict]:
     # Normalize provides/wants vocabulary + infer missing wants
     normalize_cards(cards)
     return cards
-
-
-def _provides_satisfies_want(provide_tag: str, want_tag: str) -> float:
-    """Check if a provides tag satisfies a wants tag. Returns weight 0.0-1.0.
-
-    With normalized vocabulary, uses exact match + semantic bridges.
-    Semantic bridges connect provides concepts to wants concepts that
-    the vocabulary normalization can't capture (different word roots).
-    """
-    # Exact match (most common after normalization)
-    if provide_tag == want_tag:
-        return 1.0
-
-    # Semantic bridges: provides → wants connections with different names
-    # Each entry: (provides_tag, wants_tag) → weight
-    pair = (provide_tag, want_tag)
-    return SEMANTIC_BRIDGES.get(pair, 0.0)
-
-
-# Semantic bridges between provides and wants with different names.
-# These capture relationships that can't be found by string matching.
-SEMANTIC_BRIDGES = {
-    # Counter placement provides what counter-placement-events wants
-    ("counter-placement", "counter-placement-events"): 1.0,
-    ("board-wide-counter-placement", "counter-placement-events"): 1.0,
-    ("counter-distribution", "counter-placement-events"): 1.0,
-    ("proliferate", "counter-placement-events"): 0.8,
-    ("counter-amplification", "counter-amplification"): 1.0,
-
-    # Token generation → creature ETB (tokens entering = creatures entering)
-    ("token-generation", "creature-etb"): 0.8,
-    ("token-doubling", "creature-etb"): 0.6,
-
-    # Creature pump ↔ creature power
-    ("creature-pump", "creature-power"): 0.8,
-    ("board-wide-counter-placement", "creature-power"): 0.7,
-    ("counter-placement", "creature-power"): 0.6,
-
-    # Evasion/trample → combat & attack synergy
-    ("trample-grant", "attack-events"): 0.5,
-    ("evasion-grant", "attack-events"): 0.5,
-    ("haste-grant", "attack-events"): 0.6,
-    ("combat-enabler", "attack-events"): 0.7,
-    ("combat-enabler", "combat-events"): 0.7,
-    ("combat-trigger", "combat-events"): 0.8,
-    ("combat-trigger", "attack-events"): 0.7,
-
-    # Tribal connections
-    ("human-tribal", "creature-type-selection"): 0.7,
-    ("tribal-enabler", "creature-type-selection"): 0.8,
-    ("creature-type-flexibility", "creature-type-selection"): 0.9,
-
-    # Token generation → creature board & token events
-    ("token-generation", "creature-board"): 0.6,
-    ("token-generation", "token-events"): 0.8,
-    ("token-doubling", "token-events"): 0.8,
-
-    # Card draw → card draw events
-    ("card-draw", "card-draw-events"): 0.8,
-    ("top-of-library", "card-draw-events"): 0.5,
-
-    # Removal ↔ targeted spells
-    ("targeted-removal", "targeted-spells"): 0.6,
-    ("artifact-enchantment-removal", "artifact-presence"): 0.4,
-
-    # Protection synergies
-    ("hexproof-grant", "creature-targeting"): 0.4,
-    ("indestructible-grant", "creature-death"): 0.5,
-    ("reactive-protection", "creature-targeting"): 0.4,
-    ("board-protection", "creature-board"): 0.5,
-
-    # Sacrifice payoff → sacrifice events
-    ("sacrifice-payoff", "sacrifice-events"): 0.8,
-
-    # Graveyard connections
-    ("graveyard-recursion", "graveyard-filling"): 0.7,
-    ("graveyard-hate", "graveyard-filling"): 0.4,
-
-    # Mana acceleration → mana needs
-    ("mana-acceleration", "mana-needs"): 0.8,
-    ("mana-flexibility", "mana-needs"): 0.7,
-    ("cost-reduction", "mana-needs"): 0.6,
-    ("land-search", "land-density"): 0.9,
-
-    # ETB payoff connections
-    ("etb-payoff", "creature-etb"): 0.8,
-
-    # Life gain
-    ("life-gain", "life-gain-events"): 0.9,
-    ("life-drain", "life-payment"): 0.5,
-
-    # Trigger doubling wants triggered abilities
-    ("trigger-doubling", "triggered-abilities"): 0.7,
-
-    # Counter mover → counter placement events (moving = placing on new target)
-    ("counter-mover", "counter-placement-events"): 0.7,
-
-    # Graveyard recursion benefits from creature death
-    ("graveyard-recursion", "creature-death"): 0.6,
-
-    # Counter amplification provides counter-placement-events (amplified placement = placement)
-    ("counter-amplification", "counter-placement-events"): 0.8,
-
-    # Token generation → sacrifice events (tokens are fodder for sac outlets)
-    ("token-generation", "sacrifice-events"): 0.8,
-    ("token-generation", "creature-death"): 0.6,
-
-    # Sacrifice payoff wants creature death / sacrifice events
-    ("sacrifice-payoff", "creature-death"): 0.8,
-    ("sacrifice-payoff", "sacrifice-events"): 0.9,
-    ("sacrifice-payoff", "creature-etb"): 0.4,
-
-    # Untap provides what tap-ability commanders need
-    ("untap", "triggered-abilities"): 0.7,
-
-    # Haste enables tap abilities
-    ("haste-grant", "triggered-abilities"): 0.5,
-
-    # Goblin tribal connections
-    ("goblin-tribal", "goblin-tribal"): 1.0,
-    ("token-generation", "goblin-tribal"): 0.5,
-    ("cost-reduction", "goblin-tribal"): 0.5,
-    ("tutor", "goblin-tribal"): 0.6,
-
-    # ETB payoff wants creature ETB
-    ("etb-payoff", "creature-board"): 0.5,
-    ("etb-payoff", "token-events"): 0.6,
-
-    # Damage dealing provides what creature board/tokens want
-    ("damage-dealing", "creature-etb"): 0.4,
-
-    # Sacrifice payoff → mana needs (sac outlets produce mana)
-    ("sacrifice-payoff", "mana-needs"): 0.5,
-
-    # Creature pump → attack events (pumped creatures want to attack)
-    ("creature-pump", "attack-events"): 0.5,
-
-    # Counter-related provides → counter-placement-events
-    # (evasion/pump payoffs that care about counters)
-    ("evasion-grant", "counter-placement-events"): 0.5,
-
-    # Artifact/enchantment removal benefits from creature ETB (Aura Shards pattern)
-    ("artifact-enchantment-removal", "creature-etb"): 0.4,
-
-    # Counter placement → creature-board (placing counters means having creatures)
-    ("counter-placement", "creature-board"): 0.4,
-    ("board-wide-counter-placement", "creature-board"): 0.5,
-
-    # ── Poison / Infect / Toxic / Proliferate bridges ──
-    # Poison counters ARE counters — proliferate ticks them up
-    ("poison-counter-placement", "counter-placement-events"): 0.9,
-    ("infect", "counter-placement-events"): 0.8,
-    ("toxic-ability", "counter-placement-events"): 0.8,
-    ("toxic-1", "counter-placement-events"): 0.8,
-    # Proliferate provides what poison-counter cards want
-    ("proliferate", "poison-counter-placement"): 0.9,
-    ("proliferate", "poison-counter-presence"): 0.9,
-    ("proliferate", "poison-counter-synergy"): 0.9,
-    ("proliferate", "poison-counter-proliferation"): 1.0,
-    ("proliferate", "poison-counter-accumulation"): 0.9,
-    ("proliferate", "poison-counter-payoff"): 0.8,
-    ("proliferate", "opponent-poison-counters"): 0.9,
-    ("proliferate", "opponent-poisoning"): 0.8,
-    # Poison placement provides what proliferate cards want
-    ("poison-counter-placement", "board-threats"): 0.5,
-    # Infect provides what counter-synergy wants
-    ("infect", "creature-board"): 0.4,
-
-    # ── Untap / Mana loop bridges ──
-    # Untap effects enable cards that tap for value (mana, abilities)
-    ("untap", "tapped-creatures"): 0.8,
-    ("untap", "mana-needs"): 0.6,
-    ("untap", "spell-casting"): 0.5,
-    # Mana acceleration enables tap-based combos
-    ("mana-acceleration", "tapped-creatures"): 0.6,
-    # Haste enables tap abilities immediately (Krenko + haste = combo)
-    ("haste-grant", "tapped-creatures"): 0.7,
-    # Spell copying enables spell-based combos
-    ("spell-copying", "spell-casting"): 0.8,
-    ("spell-copying", "instant-sorcery-casting"): 0.8,
-
-    # ── Refined creature-board sub-tag bridges ──
-    # These are SPECIFIC versions of creature-board, enabling precise connections
-
-    # Sacrifice fodder: token generation provides disposable creatures
-    ("token-generation", "sacrifice-fodder"): 0.9,
-    ("graveyard-recursion", "sacrifice-fodder"): 0.7,
-    ("creature-pump", "sacrifice-fodder"): 0.3,  # Low — pumped creatures aren't great sac targets
-
-    # Death payoff: sacrifice outlets and removal cause deaths
-    ("sacrifice-outlet", "creature-death-payoff"): 0.9,
-    ("token-generation", "creature-death-payoff"): 0.7,  # Tokens to sacrifice
-    ("spot-removal", "creature-death-payoff"): 0.4,
-
-    # ETB payoff: anything that puts creatures onto the battlefield
-    ("token-generation", "creature-etb-payoff"): 0.9,
-    ("graveyard-recursion", "creature-etb-payoff"): 0.8,
-    ("blink", "creature-etb-payoff"): 0.9,
-
-    # Equipment target: token generation provides bodies to equip
-    ("token-generation", "equip-target"): 0.6,
-    ("haste-grant", "equip-target"): 0.5,
-
-    # Power matters: counter placement and creature pump increase power
-    ("counter-placement", "creature-power-matters"): 0.8,
-    ("creature-pump", "creature-power-matters"): 0.9,
-    ("board-wide-counter-placement", "creature-power-matters"): 0.8,
-
-    # Creature count matters: token generation creates many creatures
-    ("token-generation", "creature-count-matters"): 0.9,
-    ("graveyard-recursion", "creature-count-matters"): 0.6,
-
-    # Tap ability creatures: untap effects let them tap again
-    ("untap", "tap-ability-creatures"): 0.9,
-    ("haste-grant", "tap-ability-creatures"): 0.8,  # Haste lets them tap immediately
-    ("vigilance-grant", "tap-ability-creatures"): 0.6,
-
-    # Combat attackers: haste/evasion/pump help attackers
-    ("haste-grant", "combat-attackers"): 0.8,
-    ("evasion-grant", "combat-attackers"): 0.7,
-    ("creature-pump", "combat-attackers"): 0.7,
-    ("token-generation", "combat-attackers"): 0.6,  # More bodies to attack with
-
-    # Creature type matters: changeling fits all types
-    ("tribal-enabler", "creature-type-matters"): 0.8,
-    ("creature-type-flexibility", "creature-type-matters"): 0.9,
-
-    # Copy target: graveyard recursion provides targets
-    ("graveyard-recursion", "creature-copy-target"): 0.6,
-    ("token-generation", "creature-copy-target"): 0.5,
-
-    # General creature-board bridges (kept but lower weight since generic)
-    ("token-generation", "creature-board"): 0.5,
-    ("graveyard-recursion", "creature-board"): 0.4,
-    ("board-protection", "creature-board"): 0.4,
-    ("combat-enabler", "combat-events"): 0.7,
-
-    # ── Bidirectional combat/mana loops ──
-    ("untap", "combat-events"): 0.5,           # Untap after combat enables re-use
-    ("combat-enabler", "combat-attackers"): 0.8,
-    ("creature-pump", "combat-attackers"): 0.7,  # Already have this, reinforce
-
-    # ── Counter/ETB cycles ──
-    ("counter-placement", "counter-placement-events"): 1.0,  # Already have, ensure both directions
-    ("creature-etb-payoff", "token-generation"): 0.7,  # ETB payoff benefits from tokens entering
-
-    # ── Graveyard filling ↔ recursion ──
-    ("graveyard-filling", "graveyard-recursion"): 0.7,  # Fill enables recursion (NOT same as recursion→filling)
-
-    # ── Equipment synergies ──
-    ("equipment-synergy", "equip-target"): 0.8,
-    ("equipment-synergy", "equipment-presence"): 0.8,  # Equipment cards want other equipment around
-    ("creature-pump", "equip-target"): 0.5,
-    ("untap", "equip-target"): 0.4,
-    ("haste-grant", "equipment-presence"): 0.5,   # Haste equipment pairs with other equipment
-    ("hexproof-grant", "equipment-presence"): 0.5, # Protection equipment pairs with other equipment
-    ("protection-grant", "equipment-presence"): 0.5,
-    ("ability-copying", "equip-target"): 0.6,     # Copy equipment → needs equip target
-    ("ability-copying", "equipment-presence"): 0.7, # Copy effects want equipment to copy
-
-    # ── Infect/grant synergies ──
-    ("infect-grant", "damage-dealing"): 0.8,      # Infect enchantment on a damage-dealer = poison kills
-    ("poison-counter-placement", "damage-dealing"): 0.6,
-
-    # ── Triggered ability → ETB ──
-    ("triggered-abilities", "creature-etb"): 0.4,  # Triggered abilities often involve ETB
-
-    # ── Mana → spell casting ──
-    ("mana-flexibility", "spell-casting"): 0.4,   # Mana enables casting spells
-    ("mana-acceleration", "spell-casting"): 0.4,
-
-    # ── Life gain loops ──
-    ("life-gain", "life-gain-events"): 0.9,    # Already have but ensure
-    ("life-drain", "life-gain"): 0.8,          # Draining opponents = gaining life (Exquisite Blood)
-
-    # ── Spell synergies ──
-    ("spell-cost-reduction", "spell-casting"): 0.7,
-    ("card-draw", "spell-casting"): 0.5,       # Drawing gives more spells to cast
-
-    # ── Mana/untap → specific needs ──
-    ("mana-acceleration", "creature-etb"): 0.4,     # Mana enables casting creatures (ETB)
-    ("mana-acceleration", "counter-placement-events"): 0.4,  # Mana enables counter-placing cards
-    ("mana-acceleration", "equip-target"): 0.4,      # Mana to cast+equip
-    ("mana-acceleration", "spell-casting"): 0.5,     # Mana enables spells
-    ("mana-acceleration", "tap-ability-creatures"): 0.5,  # Mana rocks that tap = combo with untappers
-    ("untap", "counter-placement-events"): 0.5,      # Untap counter-placing permanents
-    ("untap", "creature-etb"): 0.4,                  # Untap bounce/blink sources
-    ("mana-flexibility", "equip-target"): 0.4,
-
-    # ── Counter → sacrifice/mana (Persist/Undying loops) ──
-    ("counter-placement", "sacrifice-events"): 0.6,   # Counters reset persist/undying
-    ("counter-placement", "mana-needs"): 0.4,         # Counter-based mana (Devoted Druid)
-
-    # ── Creature type → ETB (Changeling/type matters) ──
-    ("creature-type-flexibility", "creature-etb"): 0.5,
-    ("tribal-enabler", "creature-etb"): 0.4,
-
-    # ── Land synergies (land-density = wants many lands) ──
-    ("land-search", "land-density"): 0.9,        # Tutoring lands
-    ("land-animation", "land-density"): 0.7,     # Animated lands care about land count
-    ("mana-acceleration", "land-density"): 0.3,  # Low — mana rocks aren't lands
-
-    # ── Artifact synergies (artifact-presence = wants artifacts on board) ──
-    ("artifact-enabler", "artifact-presence"): 0.8,
-    ("treasure-generation", "artifact-presence"): 0.7,  # Treasures are artifacts
-    ("mana-acceleration", "artifact-presence"): 0.5,    # Mana rocks are artifacts
-    ("equipment-synergy", "artifact-presence"): 0.6,    # Equipment are artifacts
-
-    # ── Protection / prevention → life gain events ──
-    ("board-protection", "life-gain-events"): 0.3,  # Low — indirect connection
-    ("damage-prevention", "life-gain-events"): 0.5,  # Preventing damage ≈ gaining life
-
-    # ── Combat enabler → equip target ──
-    ("combat-enabler", "equip-target"): 0.5,  # Combat enablers work well equipped
-
-    # ── Targeting synergies ──
-    ("targeting-bonus", "creature-targeting"): 0.8,
-
-    # ── Redundancy synergies (cards doing same thing reinforce each other) ──
-    ("etb-payoff", "creature-etb-payoff"): 0.7,     # Two ETB payoffs = twice the damage
-    ("damage-dealing", "creature-etb-payoff"): 0.7,  # Damage dealers that trigger on ETB (Purphoros + Impact Tremors)
-    ("life-drain", "creature-etb-payoff"): 0.6,      # Drain on ETB (Blood Artist pattern)
-    ("creature-pump", "creature-etb-payoff"): 0.5,   # Pump + ETB payoff = growing board
-    ("evasion-grant", "combat-events"): 0.6,         # Evasion enables combat (Blighted Agent + Inkmoth)
-    ("infect", "combat-events"): 0.6,                # Infect creatures want combat
-    ("indestructible-grant", "creature-etb-payoff"): 0.4, # Indestructible payoff stays on board
-
-    # ── Tax / stax synergy ──
-    ("stax-tax", "opponent-spell-casting"): 0.8,     # Tax effects compound (Rhystic + Quandary)
-    ("reactive-protection", "opponent-spell-casting"): 0.6,  # Protection against opponent spells
-    ("reactive-protection", "mana-needs"): 0.4,      # Protection enables safe big plays
-    ("board-protection", "spell-casting"): 0.4,      # Protection enables safe big spells
-    ("life-drain", "opponent-spell-casting"): 0.5,   # Drain punishes opponent casting
-
-    # ── Wheel / draw triggers ──
-    ("card-discard", "opponent-spell-casting"): 0.5,  # Wheel effects disrupt opponents
-    ("card-draw", "opponent-spell-casting"): 0.3,     # Drawing more = having answers
-    ("wheel", "card-draw-events"): 0.8,
-
-    # ── Mill synergies ──
-    ("self-mill", "mill-triggers"): 0.9,         # Mill triggers from mill effects
-    ("card-discard", "graveyard-filling"): 0.7,  # Discarding fills graveyard
-    ("card-mill", "graveyard-filling"): 0.9,     # Milling fills graveyard
-    ("counter-amplification", "mill-triggers"): 0.7,  # Doubling mill (Bruvac)
-
-    # ── Planeswalker synergies ──
-    ("planeswalker-activation", "planeswalker-presence"): 0.9,
-    ("untap", "planeswalker-presence"): 0.4,     # Untap can reset chain veil etc
-    ("proliferate", "planeswalker-presence"): 0.8,  # Proliferate adds loyalty
-
-    # ── Blink/bounce → spell cast ──
-    ("blink", "spell-casting"): 0.5,             # Blinking is re-casting
-    ("cost-reduction", "creature-etb-payoff"): 0.6,  # Cheaper creatures = more ETBs
-
-    # ── Board wipe → death payoff ──
-    ("board-wipe", "creature-death-payoff"): 0.7,  # Wipes cause mass death
-    ("board-wipe", "sacrifice-events"): 0.5,
-
-    # ── Graveyard recursion → mana ──
-    ("graveyard-recursion", "mana-needs"): 0.4,  # Recurring cheap cards = mana efficiency
-
-    # ── Life gain → artifact presence (artifact-based lifegain combos) ──
-    ("life-gain", "artifact-presence"): 0.3,
-
-    # ── Slow/game-ending → counter/death (combos with endgame pieces) ──
-    ("slow-triggered-abilities", "counter-placement-events"): 0.5,
-    ("slow-triggered-abilities", "creature-death"): 0.5,
-    ("game-ending", "counter-placement-events"): 0.5,
-    ("game-ending", "creature-death"): 0.5,
-
-    # ── More interaction bridges ──
-    ("targeted-removal", "life-gain-events"): 0.4,   # Removal triggers life-gain (Swords to Plowshares)
-    ("targeted-removal", "spell-casting"): 0.4,       # Removal IS a spell
-    ("board-wipe", "creature-death"): 0.7,            # Wipes cause mass death
-    ("ability-copying", "creature-death"): 0.4,       # Copy death triggers
-    ("ability-copying", "planeswalker-presence"): 0.5, # Copy planeswalker abilities
-    ("spell-copying", "artifact-presence"): 0.4,
-    ("graveyard-hate", "spell-casting"): 0.4,         # Graveyard hate as spell interaction
-    ("spell-casting", "opponent-spell-casting"): 0.4,  # Casting triggers opponent-casting effects
-    ("card-draw-payoff", "opponent-spell-casting"): 0.4,
-    ("stax", "card-draw-events"): 0.4,                # Stax + draw = maintaining lock
-    ("card-draw", "life-payment"): 0.4,               # Draw costs life (Necropotence pattern)
-    ("life-drain", "creature-etb"): 0.4,              # Drain on ETB (Blood Artist)
-
-    # ── Final push: 3-5 combo bridges ──
-    ("mana-acceleration", "creature-death"): 0.3,     # Mana + death triggers (Ashnod's Altar patterns)
-    ("evasion-grant", "mana-needs"): 0.3,             # Evasion creatures need mana to cast
-    ("combat-enabler", "mana-needs"): 0.3,
-    ("combat-enabler", "creature-etb"): 0.4,          # Combat enablers trigger ETB
-    ("board-pressure", "equip-target"): 0.4,          # Pressure cards benefit from equipment
-    ("board-protection", "creature-etb"): 0.4,        # Protected creatures keep triggering
-    ("board-protection", "creature-type-selection"): 0.4,
-    ("damage-prevention", "spell-casting"): 0.4,
-    ("extra-turn", "artifact-presence"): 0.4,         # Extra turns with artifact combos
-    ("blink", "triggered-abilities"): 0.6,            # Blink retriggers abilities
-    ("evasion-grant", "triggered-abilities"): 0.4,    # Evasion enables combat triggers
-    ("combat-trigger", "triggered-abilities"): 0.7,   # Combat triggers ARE triggered abilities
-    ("graveyard-filling", "card-draw-events"): 0.4,   # Graveyard fill triggers draw effects
-    ("targeted-removal", "life-payment"): 0.3,        # Removal that costs life
-    ("self-mill", "creature-power"): 0.4,             # Mill fuels power-from-graveyard
-    ("sacrifice-payoff", "targeted-spells"): 0.4,     # Sacrifice payoff on targeted spells
-
-    # ── Equipment/Enchantment/Artifact interaction ──
-    ("board-wipe", "equip-target"): 0.5,              # Wipe spares equipped/enchanted creatures
-    ("board-wipe", "enchantment-presence"): 0.4,      # Wipe + enchantment protection (Winds of Rath)
-    ("stax", "artifact-presence"): 0.6,               # Stax pieces ARE artifacts (Winter Orb)
-    ("mana-flexibility", "artifact-casting"): 0.5,    # Mana sources enable artifact casting (Mox → Sai)
-    ("mana-acceleration", "artifact-casting"): 0.5,
-    ("tutor", "artifact-presence"): 0.5,              # Tutor finds artifacts (Whir → Winter Orb)
-    ("tutor", "enchantment-presence"): 0.4,
-
-    # ── Absolute final: 3-4 combo bridges ──
-    ("top-of-library", "counter-placement-events"): 0.4,
-    ("extra-turn", "artifact-presence"): 0.4,
-    ("mana-flexibility", "tap-ability-creatures"): 0.5,
-    ("creature-type-flexibility", "enchantment-presence"): 0.4,
-    ("board-pressure", "creature-count-matters"): 0.4,
-    ("passive-permanent", "legendary-presence"): 0.5,
-    ("mana-acceleration", "creature-type-selection"): 0.3,
-    ("targeted-removal", "mana-needs"): 0.3,
-    ("mana-acceleration", "creature-targeting"): 0.3,
-    ("untap", "permanent-color-diversity"): 0.3,
-
-    # ── Deeper connections (5-8 combos each) ──
-    ("cost-reduction", "etb-payoff"): 0.5,           # Cheaper spells = more ETB triggers
-    ("extra-turn", "graveyard-filling"): 0.5,        # Extra turns = more mill/discard
-    ("extra-turn", "enchantment-presence"): 0.4,     # Extra turns with enchantment synergy (Omniscience)
-    ("graveyard-recursion", "low-life"): 0.5,        # Recursion from graveyard when at low life
-    ("land-animation", "creature-death"): 0.6,       # Animated lands die = death trigger
-    ("board-pressure", "creature-death"): 0.4,       # Pressure causes blocks/deaths
-    ("damage-prevention", "creature-death"): 0.5,    # Prevention + sacrifice = safe deaths
-    ("damage-prevention", "counter-placement-events"): 0.4,
-    ("tutor", "spell-casting"): 0.4,                 # Tutoring for spells to cast
-    ("tutor", "top-of-library"): 0.6,                # Tutor to top = topdeck synergy
-    ("bounce-utility", "spell-casting"): 0.6,        # Bounce + recast = more spell casts
-    ("bounce-utility", "creature-etb"): 0.7,         # Bounce + recast = ETB again
-    ("creature-type-flexibility", "tapped-creatures"): 0.5, # Changeling taps for tribal abilities
-    ("stax", "sacrifice-events"): 0.5,               # Stax pieces get sacrificed
-    ("damage-dealing", "counter-placement-events"): 0.4,
-
-    # ── Last batch: diminishing returns but still safe ──
-    ("board-wipe", "creature-count-matters"): 0.5,  # Wipe resets counts, enables rebuild
-    ("board-wipe", "graveyard-filling"): 0.6,        # Wipe fills graveyard
-    ("board-wipe", "creature-etb"): 0.4,             # Wipe + recursion = re-ETB
-    ("ability-copying", "artifact-presence"): 0.5,    # Copy artifact abilities
-    ("ability-copying", "mana-needs"): 0.4,
-    ("targeted-removal", "artifact-presence"): 0.4,   # Artifact removal = interaction
-    ("targeted-removal", "enchantment-presence"): 0.4,
-    ("cost-reduction", "creature-etb-payoff"): 0.6,   # Already added above but reinforce
-    ("damage-dealing", "sacrifice-events"): 0.5,      # Damage + sacrifice patterns
-    ("mana-flexibility", "permanent-recursion"): 0.4,  # Mana to fuel recursion
-    ("mana-flexibility", "life-gain-events"): 0.3,
-    ("evasion-grant", "life-gain-events"): 0.4,  # Evasion + lifelink = life gain
-
-    # ── Extra turn / combat bridges ──
-    ("extra-turn", "spell-casting"): 0.6,       # Extra turns let you cast more spells
-    ("extra-turn", "combat-events"): 0.7,        # Extra turns = extra combat steps
-    ("extra-turn", "card-draw-events"): 0.6,     # Extra turns = extra draw steps
-    ("extra-turn", "creature-etb"): 0.5,         # Extra turns = more creatures played
-
-    # ── Damage bridges ──
-    ("damage-dealing", "combat-events"): 0.6,    # Damage dealers benefit from combat
-    ("damage-dealing", "life-gain-events"): 0.7, # Damage to opponents = life loss events
-    ("damage-dealing", "board-threats"): 0.5,    # Damage dealers ARE threats
-    ("damage-dealing", "opponent-threats"): 0.5,
-
-    # ── Graveyard / recursion bridges ──
-    ("graveyard-recursion", "creature-etb"): 0.7,  # Recurring creatures trigger ETB
-    ("self-mill", "graveyard-filling"): 0.9,     # Self-mill IS graveyard filling
-    ("self-mill", "graveyard-events"): 0.8,
-
-    # ── Copy / clone bridges ──
-    ("ability-copying", "card-draw-events"): 0.6,  # Copy draw abilities = more draws
-    ("ability-copying", "creature-etb"): 0.6,      # Copy ETB abilities
-    ("spell-copying", "creature-etb"): 0.5,        # Copy creature spells = more ETBs
-    ("flash-grant", "creature-etb"): 0.5,          # Flash enables surprise ETBs
-    ("token-generation", "spell-casting"): 0.4,    # Token makers that trigger on cast
-
-    # ── Spellslinger / Drain bridges ──
-
-    # Life drain → life gain events (draining opponents = gaining life for payoffs)
-    ("life-drain", "life-gain-events"): 0.9,
-    ("life-gain", "life-gain-events"): 0.9,
-    ("life-drain", "life-payment"): 0.5,
-
-    # Card discard → discard events (Windfall → Bloodchief Ascension)
-    ("card-discard", "discard-events"): 0.9,
-
-    # Flash grant → spell casting (flash enables casting on every turn)
-    ("flash-grant", "spell-casting"): 0.8,
-
-    # Stax/tax → opponent spell casting (taxing opponents when they cast)
-    ("stax-tax", "opponent-spell-casting"): 0.8,
-    ("stax", "opponent-spell-casting"): 0.7,
-
-    # Card draw payoff → card draw events
-    ("card-draw-payoff", "card-draw-events"): 0.9,
-    ("card-draw", "card-draw-events"): 0.8,
-
-    # Graveyard casting → spell casting (casting from GY = casting spells)
-    ("graveyard-casting", "spell-casting"): 0.7,
-
-    # Blink → creature ETB (blinking = re-entering)
-    ("blink", "creature-etb"): 0.8,
-
-    # Board protection ↔ board threats
-    ("board-protection", "board-threats"): 0.5,
-
-    # Tutor → opponent search (Opposition Agent pattern — both care about searches)
-    ("tutor", "opponent-spell-casting"): 0.3,
-
-    # Cost reduction → spell casting (cheaper spells = more spells cast)
-    ("cost-reduction", "spell-casting"): 0.6,
-    ("cost-reduction", "opponent-spell-casting"): 0.3,
-
-    # Card discard → card draw events (discard wheels trigger draw payoffs)
-    ("card-discard", "card-draw-events"): 0.5,
-
-    # Reactive protection → spell casting (protects key spells)
-    ("reactive-protection", "spell-casting"): 0.3,
-
-    # Life gain ↔ life gain events (same concept, different field)
-    ("life-drain", "spell-casting"): 0.3,
-
-    # Stax tax ↔ card draw events (Rhystic Study pattern)
-    ("stax-tax", "card-draw-events"): 0.6,
-}
-
-# Maps effect tags to the trigger tags they would cause in-game.
-# Used by find_combos_tiered to expand effect_tags before intersection,
-# so that e.g. token-generation (effect) can match creature-etb (trigger).
-TRIGGER_EFFECT_BRIDGES = {
-    # Creating tokens/creatures triggers ETB
-    "token-generation": {"creature-etb"},
-    "graveyard-recursion": {"creature-etb"},
-    "copy-effect": {"creature-etb"},
-
-    # Removal/sacrifice causes death triggers
-    "spot-removal": {"creature-death"},
-    "sacrifice-outlet": {"creature-death"},
-    "exile-removal": {"leaves-battlefield"},
-
-    # Damage triggers life-loss which can trigger life-gain (Exquisite Blood pattern)
-    "life-drain": {"life-gain"},   # Sanguine Bond: drain → opponent loses life → you gain
-    "life-gain": {"life-drain"},   # Exquisite Blood: gain → opponent loses life
-
-    # Direct damage can trigger damage events
-    "direct-damage": {"combat-damage-events"},
-    "group-damage": {"combat-damage-events"},
-
-    # Card draw triggers draw events
-    "card-draw": {"draw-events"},
-
-    # Counter placement triggers counter events
-    "counter-placement": {"counter-placement-events"},
-
-    # Mana can enable untap loops
-    "mana-acceleration": {"untap"},
-    "untap": {"tap-cost"},
-
-    # Discard triggers discard events
-    "discard": {"discard-events"},
-
-    # Mill triggers graveyard events
-    "mill": {"graveyard-events"},
-
-    # Creature pump with wide board triggers attack events
-    "creature-pump": {"attack-events"},
-}
 
 
 def _compute_idf(cards: list[dict]) -> dict[str, float]:
@@ -946,64 +382,6 @@ def build_embedding_edges(cards: list[dict], min_similarity: float = 0.75,
     return edges
 
 
-def build_shared_tag_edges(cards: list[dict], min_weight: int = 2) -> list[dict]:
-    """Build undirected edges between cards sharing synergy_tags.
-
-    Uses LLM-generated synergy_tags only (not Scryfall community tags,
-    which are kept separate as a validation signal). Currently dormant
-    until the synergy_tags table is populated with our own tag vocabulary.
-
-    Only considers functional tags (not meta tags like 'activated ability').
-    Weight = number of shared tags.
-    """
-    # Tags that are too generic to be useful for synergy
-    GENERIC_TAGS = {
-        "activated ability", "triggered ability", "alliteration",
-        "single english word name", "single target instant/sorcery",
-        "intervening if clause", "virtual french vanilla", "noncreature typal",
-        "multiple targets", "self-replacement effect",
-    }
-
-    # Build tag -> cards index
-    tag_cards = defaultdict(list)
-    for card in cards:
-        name = card["name"]
-        oid = card["oracle_id"]
-        for tag in card.get("synergy_tags", []):
-            if tag not in GENERIC_TAGS:
-                tag_cards[tag].append((name, oid))
-
-    # Build edges from shared tags
-    pair_tags = defaultdict(list)  # (oid1, oid2) -> [shared_tags]
-
-    max_members = max(50, len(cards) // 100)
-    for tag, members in tag_cards.items():
-        if len(members) > max_members:
-            continue  # skip overly common tags
-        for i, (name_a, oid_a) in enumerate(members):
-            for name_b, oid_b in members[i+1:]:
-                key = tuple(sorted([oid_a, oid_b]))
-                pair_tags[key].append(tag)
-
-    edges = []
-    card_names = {c["oracle_id"]: c["name"] for c in cards}
-
-    for (oid_a, oid_b), shared in pair_tags.items():
-        if len(shared) < min_weight:
-            continue
-        edges.append({
-            "source": card_names[oid_a],
-            "source_id": oid_a,
-            "target": card_names[oid_b],
-            "target_id": oid_b,
-            "type": "shared-tag",
-            "reason": f"shared tags: {', '.join(shared[:5])}{'...' if len(shared) > 5 else ''}",
-            "weight": len(shared),
-        })
-
-    return edges
-
-
 def build_graph(cards: list[dict], min_score: float = 0.5, deck_oids: set = None) -> dict:
     """Build the complete synergy graph with composite scoring.
 
@@ -1275,36 +653,43 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                 # Find high-scored cards not in candidate pool.
                 # Query DB directly — these cards may have zero graph edges
                 # and won't be in the 'cards' list at all.
-                injected = 0
-                for oid, score in _ic.execute(
+                high_score_rows = _ic.execute(
                     "SELECT card_oid, score FROM synergy_scores "
                     "WHERE commander_oid = ? AND score >= 7",
                     (_cmdr_oid,)
-                ):
-                    name_row = _ic.execute(
-                        "SELECT name FROM cards WHERE oracle_id = ?", (oid,)
-                    ).fetchone()
-                    if not name_row:
+                ).fetchall()
+
+                # Batch-load card metadata for all high-scored oids
+                high_oids = [r[0] for r in high_score_rows]
+                _llm_card_data = {}
+                _chunk_sz = 500
+                for _ci in range(0, len(high_oids), _chunk_sz):
+                    _chunk = high_oids[_ci:_ci + _chunk_sz]
+                    _ph = ",".join("?" * len(_chunk))
+                    for _r in _ic.execute(
+                        f"SELECT oracle_id, name, type_line, mana_cost, cmc, edhrec_rank "
+                        f"FROM cards WHERE oracle_id IN ({_ph})", _chunk
+                    ).fetchall():
+                        _llm_card_data[_r[0]] = _r[1:]
+
+                injected = 0
+                for oid, score in high_score_rows:
+                    row_data = _llm_card_data.get(oid)
+                    if not row_data:
                         continue
-                    name = name_row[0]
+                    name = row_data[0]
                     if name not in deck_cards and name not in candidate_scores:
                         candidate_scores[name] = {
                             "total": 0.1,
                             "partners": [], "multi_sig": 0,
                             "commander_synergy": 0.0, "key_synergy": 0.0,
                         }
-                        # Also add to cards list so metadata is available
-                        card_row = _ic.execute(
-                            "SELECT oracle_id, name, type_line, mana_cost, cmc, edhrec_rank "
-                            "FROM cards WHERE oracle_id = ?", (oid,)
-                        ).fetchone()
-                        if card_row:
-                            cards.append({
-                                "oracle_id": card_row[0], "name": card_row[1],
-                                "type_line": card_row[2] or "", "mana_cost": card_row[3] or "",
-                                "cmc": card_row[4] or 0, "edhrec_rank": card_row[5],
-                            })
-                            injected += 1
+                        cards.append({
+                            "oracle_id": oid, "name": name,
+                            "type_line": row_data[1] or "", "mana_cost": row_data[2] or "",
+                            "cmc": row_data[3] or 0, "edhrec_rank": row_data[4],
+                        })
+                        injected += 1
                 if injected:
                     print(f"  LLM injection: {injected} high-scoring cards added to candidate pool")
             _ic.close()
@@ -1348,20 +733,26 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
     ability_counts = {}  # oid → count of non-keyword abilities
     if db_path:
         import sqlite3
-        _qconn = sqlite3.connect(db_path)
-        # Batch strategy query
-        if active_strategies:
+        try:
+            _qconn = sqlite3.connect(db_path)
+            _qconn.execute("SELECT 1")  # verify connection
+        except Exception as e:
+            print(f"  Warning: Strategy/ability loading skipped ({e})")
+            _qconn = None
+        if _qconn:
+            # Batch strategy query
+            if active_strategies:
+                for row in _qconn.execute(
+                    "SELECT oracle_id, strategy FROM card_strategies WHERE confidence >= 0.3"
+                ).fetchall():
+                    strategy_map.setdefault(row[0], set()).add(row[1])
+            # Batch ability count query
             for row in _qconn.execute(
-                "SELECT oracle_id, strategy FROM card_strategies WHERE confidence >= 0.3"
+                "SELECT oracle_id, COUNT(*) FROM abilities "
+                "WHERE ability_type NOT IN ('keyword') GROUP BY oracle_id"
             ).fetchall():
-                strategy_map.setdefault(row[0], set()).add(row[1])
-        # Batch ability count query
-        for row in _qconn.execute(
-            "SELECT oracle_id, COUNT(*) FROM abilities "
-            "WHERE ability_type NOT IN ('keyword') GROUP BY oracle_id"
-        ).fetchall():
-            ability_counts[row[0]] = row[1]
-        _qconn.close()
+                ability_counts[row[0]] = row[1]
+            _qconn.close()
 
     # Commander affinity: compute once via O(1) dict lookup
     affinities = {}
@@ -1445,6 +836,11 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
         else:
             info["commander_affinity"] = 0.0
 
+    # Compute max_graph before mechanics/synergy scoring — needed for normalization
+    max_graph = max((i["total"] for i in candidate_scores.values()), default=1.0)
+    if max_graph <= 0:
+        max_graph = 1.0
+
     # Mechanics-based matching: uses structured game event data
     # extracted by extract_mechanics.py to find filter-aware synergies.
     # Two roles: (1) boost existing candidates, (2) inject new candidates
@@ -1458,12 +854,19 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
 
                 # Score ALL cards with mechanics (not just current candidates)
                 all_oids_with_mechs = list(all_mechanics.keys())
-                card_type_lookup = {}
                 import sqlite3 as _sql3
                 _mc = _sql3.connect(db_path)
-                for oid in all_oids_with_mechs:
-                    row = _mc.execute("SELECT type_line FROM cards WHERE oracle_id = ?", (oid,)).fetchone()
-                    card_type_lookup[oid] = row[0] if row else ""
+                # Batch load type_lines in chunks instead of N+1 queries
+                card_type_lookup = {}
+                _chunk_size = 500
+                for _ci in range(0, len(all_oids_with_mechs), _chunk_size):
+                    _chunk = all_oids_with_mechs[_ci:_ci + _chunk_size]
+                    _placeholders = ",".join("?" * len(_chunk))
+                    for _r in _mc.execute(
+                        f"SELECT oracle_id, type_line FROM cards WHERE oracle_id IN ({_placeholders})",
+                        _chunk
+                    ).fetchall():
+                        card_type_lookup[_r[0]] = _r[1] or ""
                 card_type_lookup[commander_oid] = card_meta.get(commander, {}).get("type_line", "")
 
                 # Pass deck card oids for two-step chain detection
@@ -1477,19 +880,31 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                     mech_count = 0
                     mech_injected = 0
 
+                    # Batch-load card metadata for high-scoring mechanics cards
+                    high_mech_oids = [oid for oid, ms in mech_scores.items() if ms >= 1.5]
+                    _mech_card_data = {}  # oid → (name, type_line, mana_cost, cmc, edhrec_rank, color_identity)
+                    for _ci in range(0, len(high_mech_oids), _chunk_size):
+                        _chunk = high_mech_oids[_ci:_ci + _chunk_size]
+                        _placeholders = ",".join("?" * len(_chunk))
+                        for _r in _mc.execute(
+                            f"SELECT oracle_id, name, type_line, mana_cost, cmc, edhrec_rank, color_identity "
+                            f"FROM cards WHERE oracle_id IN ({_placeholders})",
+                            _chunk
+                        ).fetchall():
+                            _mech_card_data[_r[0]] = _r[1:]
+
                     # Inject high-mechanics cards not in candidate pool
                     for oid, ms in mech_scores.items():
                         if ms < 1.5:
                             continue
-                        name_row = _mc.execute("SELECT name, type_line, mana_cost, cmc, edhrec_rank FROM cards WHERE oracle_id = ?", (oid,)).fetchone()
-                        if not name_row:
+                        row_data = _mech_card_data.get(oid)
+                        if not row_data:
                             continue
-                        name = name_row[0]
+                        name, type_line, mana_cost, cmc, edhrec_rank, ci_json = row_data
                         if name in deck_cards or name in candidate_scores:
                             continue
                         # Check color identity
-                        ci_row = _mc.execute("SELECT color_identity FROM cards WHERE oracle_id = ?", (oid,)).fetchone()
-                        card_ci = set(json.loads(ci_row[0] or "[]")) if ci_row else set()
+                        card_ci = set(json.loads(ci_json or "[]"))
                         if not card_ci.issubset(color_identity or set()):
                             continue
                         candidate_scores[name] = {
@@ -1498,19 +913,19 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                         }
                         cards.append({
                             "oracle_id": oid, "name": name,
-                            "type_line": name_row[1] or "", "mana_cost": name_row[2] or "",
-                            "cmc": name_row[3] or 0, "edhrec_rank": name_row[4],
+                            "type_line": type_line or "", "mana_cost": mana_cost or "",
+                            "cmc": cmc or 0, "edhrec_rank": edhrec_rank,
                         })
                         card_meta[name] = {
-                            "type_line": name_row[1] or "", "cmc": name_row[3] or 0,
-                            "mana_cost": name_row[2] or "",
-                            "oracle_id": oid, "edhrec_rank": name_row[4],
+                            "type_line": type_line or "", "cmc": cmc or 0,
+                            "mana_cost": mana_cost or "",
+                            "oracle_id": oid, "edhrec_rank": edhrec_rank,
                         }
                         card_oid_lookup[name] = oid
                         mech_injected += 1
 
                     # Boost using max(graph, mechanics) with relative normalization.
-                    max_graph = max((i["total"] for i in candidate_scores.values()), default=1.0) or 1.0
+                    # (max_graph computed before mechanics block)
 
                     for card_name, info in candidate_scores.items():
                         oid = card_oid_lookup.get(card_name, "")
@@ -1532,7 +947,7 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
 
     # Synergy scoring: 3-tier fallback
     # 1. LLM scores (pre-computed via score_synergies.py) — best quality
-    # 2. Trained model (via train_synergy_model.py) — generalizes to any commander
+    # 2. Tower model (via train_tower_model.py) — generalizes to any commander
     # 3. Graph-only scoring (current multipliers) — always available
     if commander and db_path:
         commander_oid = card_oid_lookup.get(commander, "")
@@ -1753,7 +1168,6 @@ def _compute_commander_affinity(commander_card: dict, candidate_cards: list[dict
     cmdr_provides = set(commander_card.get("provides", []))
     cmdr_wants = set(commander_card.get("wants", []))
     cmdr_oracle = (commander_card.get("oracle_text") or "").lower()
-    cmdr_type_line = (commander_card.get("type_line") or "").lower()
     cmdr_keywords = {k.lower() for k in (commander_card.get("keywords") or [])}
 
     # Extract key concepts from commander's oracle text
@@ -2472,7 +1886,6 @@ def show_combos(combos: dict, commander: str, top_n: int = 15):
         for i, pair in enumerate(pairs[:top_n], 1):
             star = " ★ commander" if pair["commander"] else ""
             label = pair.get("label", "synergy").upper()
-            cp = pair.get("combo_potential", 0)
             a, b = pair["cards"]
             print(f"\n  #{i} [{label}] score: {pair['score']}{star}")
             print(f"     {a} + {b}")
@@ -3563,38 +2976,51 @@ def find_combos_tiered(deck_oids, db_path=None):
                 for j in range(i + 1, len(oid_list)):
                     confirmed_pairs.add(frozenset([oid_list[i], oid_list[j]]))
 
-    # --- Load provides/wants for deck cards ---
+    # --- Load provides/wants for deck cards (batch) ---
     deck_list = list(deck_oids)
     provides_by_card = {}
     wants_by_card = {}
-    for oid in deck_list:
-        for tag, in conn.execute("SELECT tag FROM provides WHERE oracle_id = ?", (oid,)):
-            provides_by_card.setdefault(oid, set()).add(tag)
-        for tag, in conn.execute("SELECT tag FROM wants WHERE oracle_id = ?", (oid,)):
-            wants_by_card.setdefault(oid, set()).add(tag)
+    _chunk_size = 500
+    for _ci in range(0, len(deck_list), _chunk_size):
+        _chunk = deck_list[_ci:_ci + _chunk_size]
+        _ph = ",".join("?" * len(_chunk))
+        for row in conn.execute(
+            f"SELECT oracle_id, tag FROM provides WHERE oracle_id IN ({_ph})", _chunk
+        ).fetchall():
+            provides_by_card.setdefault(row[0], set()).add(row[1])
+        for row in conn.execute(
+            f"SELECT oracle_id, tag FROM wants WHERE oracle_id IN ({_ph})", _chunk
+        ).fetchall():
+            wants_by_card.setdefault(row[0], set()).add(row[1])
 
-    # --- Load abilities for deck cards ---
+    # --- Load abilities for deck cards (batch) ---
     abilities_by_card = {}
-    for oid in deck_list:
-        rows = conn.execute("""
-            SELECT ability_type, trigger_tags, effect_tags
-            FROM abilities WHERE oracle_id = ?
-        """, (oid,)).fetchall()
-        trigger_tags = set()
-        effect_tags = set()
-        for row in rows:
-            if row["trigger_tags"]:
-                trigger_tags.update(json.loads(row["trigger_tags"]))
-            if row["effect_tags"]:
-                effect_tags.update(json.loads(row["effect_tags"]))
-        if trigger_tags or effect_tags:
-            abilities_by_card[oid] = {"trigger_tags": trigger_tags, "effect_tags": effect_tags}
+    for _ci in range(0, len(deck_list), _chunk_size):
+        _chunk = deck_list[_ci:_ci + _chunk_size]
+        _ph = ",".join("?" * len(_chunk))
+        for row in conn.execute(
+            f"SELECT oracle_id, trigger_tags, effect_tags FROM abilities WHERE oracle_id IN ({_ph})",
+            _chunk
+        ).fetchall():
+            oid = row[0]
+            ab = abilities_by_card.get(oid, {"trigger_tags": set(), "effect_tags": set()})
+            if row[1]:
+                ab["trigger_tags"].update(json.loads(row[1]))
+            if row[2]:
+                ab["effect_tags"].update(json.loads(row[2]))
+            abilities_by_card[oid] = ab
+    # Remove empty entries
+    abilities_by_card = {k: v for k, v in abilities_by_card.items()
+                         if v["trigger_tags"] or v["effect_tags"]}
 
     conn_names = {}
-    for oid in deck_list:
-        row = conn.execute("SELECT name FROM cards WHERE oracle_id = ?", (oid,)).fetchone()
-        if row:
-            conn_names[oid] = row["name"]
+    for _ci in range(0, len(deck_list), _chunk_size):
+        _chunk = deck_list[_ci:_ci + _chunk_size]
+        _ph = ",".join("?" * len(_chunk))
+        for row in conn.execute(
+            f"SELECT oracle_id, name FROM cards WHERE oracle_id IN ({_ph})", _chunk
+        ).fetchall():
+            conn_names[row[0]] = row[1]
 
     conn.close()
 
@@ -3741,8 +3167,6 @@ def find_partial_combos(deck_oids, db_path=None, color_identity=None):
     return partials
 
 
-STAPLE_ROLES = {"ramp", "draw", "removal", "protection", "land"}
-
 
 def find_anti_synergy(deck_oids, active_strategies, db_path=None, graph=None, deck_cards_set=None):
     """Find deck cards with zero strategy overlap that aren't staples.
@@ -3838,36 +3262,6 @@ def show_combos_tiered(deck_oids, commander_name=None, db_path=None, color_ident
         print(f"\n  Synergy pairs: {len(synergy)} (use --verbose to list)")
 
     print(f"\n  Total: {len(confirmed)} confirmed, {len(likely)} likely, {len(synergy)} synergy")
-
-
-def show_recommendations_enhanced(candidates, active_strategies, partial_combos, deck_name):
-    """Enhanced recommendation output with strategy annotations."""
-    print(f"\n{'='*60}")
-    print(f"RECOMMENDATIONS for {deck_name} (strategies: {', '.join(sorted(active_strategies)) or 'none'})")
-    print(f"{'='*60}")
-
-    # Combo completions
-    combo_cards = set()
-    for pc in partial_combos:
-        for name in pc["missing_cards"]:
-            combo_cards.add(name)
-
-    completions = [c for c in candidates if c["name"] in combo_cards]
-    if completions:
-        print(f"\nCOMBO COMPLETIONS (1 card away from confirmed infinite):")
-        for c in completions[:5]:
-            matching = [pc for pc in partial_combos if c["name"] in pc["missing_cards"]]
-            for pc in matching:
-                print(f"  {' + '.join(pc['present_cards'])} + [{c['name']}] -> {pc['result']}")
-
-    # Best fit
-    best = [c for c in candidates if c["name"] not in combo_cards]
-    print(f"\nBEST FIT:")
-    for i, c in enumerate(best[:15], 1):
-        strats = c.get("strategies", [])
-        strat_str = f" [{', '.join(strats)}]" if strats else ""
-        tribal = " [tribal]" if c.get("tribal") else ""
-        print(f"  {i}. {c['name']}{strat_str}{tribal} score: {c['score']:.1f}")
 
 
 def show_deck_analysis(deck_cards, deck_oids, active_strategies, commander_name, db_path=None, graph=None, deck_set=None):
