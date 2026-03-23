@@ -28,14 +28,16 @@ import argparse
 import json
 import os
 import re
+import socket
 import sqlite3
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "tags.db")
-BATCH_SIZE = 100  # Cards per API call (gpt-4.1-mini has 1M context, we use ~15k per batch)
+BATCH_SIZE = 200  # Cards per API call (~8k tokens input, well within 1M context)
 
 
 # ── Schema ──────────────────────────────────────────────────────────────────
@@ -204,7 +206,7 @@ def call_api(system: str, user: str, api_key: str,
                 token_param = "max_completion_tokens" if "gpt-5" in model else "max_tokens"
                 payload = {
                     "model": model,
-                    token_param: 16384,
+                    token_param: 4096,
                     "temperature": 0.2,
                     "messages": [
                         {"role": "system", "content": system},
@@ -284,11 +286,15 @@ def call_api(system: str, user: str, api_key: str,
                 body = e.read().decode()[:200]
                 print(f"  [API ERROR {e.code}] {body}")
                 return None
-        except Exception as e:
+        except (urllib.error.URLError, socket.timeout, ConnectionError, TimeoutError, OSError) as e:
             if attempt < max_attempts - 1:
                 time.sleep(2 ** attempt)
             else:
                 print(f"  [API ERROR] {e}")
+        except Exception as e:
+            # Non-retryable error — fail immediately
+            print(f"  [API ERROR] {type(e).__name__}: {e}")
+            return None
 
     return None
 
@@ -360,7 +366,7 @@ def _score_via_batch_api(commander: dict, batches: list, system_prompt: str,
             "url": "/v1/chat/completions",
             "body": {
                 "model": model,
-                token_param: 16384,
+                token_param: 4096,
                 "temperature": 0.2,
                 "messages": [
                     {"role": "system", "content": system_prompt},
@@ -920,6 +926,8 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Show cost estimate without scoring")
     parser.add_argument("--batch-api", action="store_true",
                         help="Use OpenAI Batch API (50%% cheaper, async processing)")
+    parser.add_argument("--no-batch", action="store_true",
+                        help="Disable auto Batch API for --all-decks")
     parser.add_argument("--stats", action="store_true", help="Show scoring statistics")
     args = parser.parse_args()
 
@@ -960,13 +968,17 @@ def main():
                             use_batch_api=args.batch_api)
 
     elif args.all_decks:
+        # Default to Batch API for bulk scoring (50% cheaper, acceptable latency)
+        use_batch = args.batch_api if args.batch_api else (args.provider == "openai" and not args.no_batch)
+        if use_batch and not args.batch_api:
+            print("Using Batch API for --all-decks (50% cheaper). Add --no-batch to disable.")
         from decks import list_decks, load_deck
         for deck_name in list_decks():
             deck = load_deck(deck_name)
             print(f"\n{'='*60}")
             score_commander(deck.COMMANDER, args.provider, args.model,
                             api_key, args.dry_run,
-                            use_batch_api=args.batch_api)
+                            use_batch_api=use_batch)
 
     elif args.commander:
         score_commander(args.commander, args.provider, args.model,

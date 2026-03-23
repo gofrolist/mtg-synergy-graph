@@ -26,7 +26,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "tags.db")
-CARDS_PER_BATCH = 10  # Cards per API call (small for reliability)
+CARDS_PER_BATCH = 25  # Cards per API call
 MAX_WORKERS = 5
 
 # ── Canonical vocabulary ────────────────────────────────────────────────────
@@ -183,7 +183,7 @@ def call_api(system: str, user: str, api_key: str, model: str) -> str | None:
             token_param = "max_completion_tokens" if "gpt-5" in model else "max_tokens"
             payload = json.dumps({
                 "model": model,
-                token_param: 8192,
+                token_param: 4096,
                 "temperature": 0.1,
                 "messages": [
                     {"role": "system", "content": system},

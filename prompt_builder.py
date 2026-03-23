@@ -74,30 +74,42 @@ def _build_system_prompt() -> str:
 SYSTEM_PROMPT = _build_system_prompt()
 
 
+_corrections_cache = None
+_golden_cache = None
+
+
 def load_corrections() -> list[dict]:
+    global _corrections_cache
+    if _corrections_cache is not None:
+        return _corrections_cache
     path = BASE_DIR / "corrections.json"
     if not path.exists():
-        return []
+        _corrections_cache = []
+        return _corrections_cache
     with open(path) as f:
-        return json.load(f)
+        _corrections_cache = json.load(f)
+    return _corrections_cache
 
 
 def load_golden_examples(n: int = 3) -> list[dict]:
-    """Load n cards from golden dataset as few-shot examples."""
+    """Load n cards from golden dataset as few-shot examples. Cached after first call."""
+    global _golden_cache
+    if _golden_cache is not None:
+        return _golden_cache[:n]
     path = BASE_DIR / "golden_cards.json"
     if not path.exists():
-        return []
+        _golden_cache = []
+        return _golden_cache
     with open(path) as f:
         data = json.load(f)
-    # Return cards that have the richest expected tags (most must_include items)
     cards = data.get("cards", [])
-    ranked = sorted(
+    _golden_cache = sorted(
         cards,
         key=lambda c: len(c["expected"].get("provides_must_include", []))
                      + len(c["expected"].get("wants_must_include", [])),
         reverse=True,
     )
-    return ranked[:n]
+    return _golden_cache[:n]
 
 
 def build_corrections_block(corrections: list[dict]) -> str:

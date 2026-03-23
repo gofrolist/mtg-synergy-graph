@@ -25,7 +25,7 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 CANDIDATES_FILE = None  # set by --deck
 OUTPUT_FILE = None  # set by --deck or --output
 
-MAX_TOKENS = 4096
+MAX_TOKENS = 1024  # Actual output ~150 tokens for 5-10 cards
 MAX_REVIEW_ITERATIONS = 2
 
 
@@ -92,6 +92,12 @@ def call_openai(system: str, user: str, api_key: str, model: str) -> str | None:
             data = json.loads(resp.read())
             return data["choices"][0]["message"]["content"].strip()
     except urllib.error.HTTPError as e:
+        if e.code == 429:
+            retry_after = e.headers.get("Retry-After")
+            wait = float(retry_after) if retry_after else 10
+            print(f"  [RATE LIMITED] Waiting {wait}s...")
+            import time; time.sleep(wait)
+            return call_openai(system, user, api_key, model)  # Retry once
         body = e.read().decode()
         print(f"  [API ERROR] {e.code}: {body[:200]}")
         return None
@@ -240,7 +246,7 @@ def run():
     parser = argparse.ArgumentParser(description="Batch card tagger")
     parser.add_argument("--deck", choices=list_decks(), help="Deck config to use")
     parser.add_argument("--candidates", type=str, help="Custom candidates JSON file (alternative to --deck)")
-    parser.add_argument("--batch-size", type=int, default=5, help="Cards per API call")
+    parser.add_argument("--batch-size", type=int, default=10, help="Cards per API call")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be sent without calling API")
     parser.add_argument("--provider", choices=["openai", "anthropic", "ollama"], help="API provider (auto-detected from env if not set)")
     parser.add_argument("--model", type=str, help="Model name override")
