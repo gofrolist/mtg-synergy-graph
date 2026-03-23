@@ -120,28 +120,38 @@ def show_deck_analysis(deck_cards, deck_oids, active_strategies, commander_name,
         db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "tags.db")
     conn = sqlite3.connect(db_path)
 
-    # Count cards per strategy
+    # Count cards per strategy (batch query instead of N+1)
     strat_counts = {}
-    for oid in deck_oids:
+    deck_list = list(deck_oids)
+    _chunk_size = 500
+    for _ci in range(0, len(deck_list), _chunk_size):
+        _chunk = deck_list[_ci:_ci + _chunk_size]
+        _ph = ",".join("?" * len(_chunk))
         for row in conn.execute(
-            "SELECT strategy FROM card_strategies WHERE oracle_id = ? AND confidence >= 0.3", (oid,)
-        ):
-            strat_counts[row[0]] = strat_counts.get(row[0], 0) + 1
+            f"SELECT strategy, COUNT(*) FROM card_strategies "
+            f"WHERE oracle_id IN ({_ph}) AND confidence >= 0.3 GROUP BY strategy",
+            _chunk
+        ).fetchall():
+            strat_counts[row[0]] = strat_counts.get(row[0], 0) + row[1]
 
     # Count non-land cards
     non_land = sum(1 for c in deck_cards if "Land" not in (c.get("type_line") or ""))
 
-    # Count strategy-aligned cards
+    # Count strategy-aligned cards (batch query)
     aligned = 0
     if active_strategies:
-        placeholders = ','.join('?' * len(active_strategies))
-        for oid in deck_oids:
-            rows = conn.execute(
-                f"SELECT 1 FROM card_strategies WHERE oracle_id = ? AND confidence >= 0.3 AND strategy IN ({placeholders})",
-                (oid, *active_strategies)
-            ).fetchall()
-            if rows:
-                aligned += 1
+        strat_ph = ','.join('?' * len(active_strategies))
+        aligned_oids = set()
+        for _ci in range(0, len(deck_list), _chunk_size):
+            _chunk = deck_list[_ci:_ci + _chunk_size]
+            _oid_ph = ",".join("?" * len(_chunk))
+            for row in conn.execute(
+                f"SELECT DISTINCT oracle_id FROM card_strategies "
+                f"WHERE oracle_id IN ({_oid_ph}) AND confidence >= 0.3 AND strategy IN ({strat_ph})",
+                _chunk + list(active_strategies)
+            ).fetchall():
+                aligned_oids.add(row[0])
+        aligned = len(aligned_oids)
 
     combos = find_combos_tiered(deck_oids, db_path)
     anti = find_anti_synergy(deck_oids, active_strategies, db_path, graph=graph, deck_cards_set=deck_set)

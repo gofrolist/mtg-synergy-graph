@@ -26,7 +26,7 @@ MODEL_PATH = os.path.join(DATA_DIR, "tower_model.npz")
 
 def load_embeddings():
     """Load pre-computed card embeddings."""
-    emb = np.load(os.path.join(DATA_DIR, "embeddings.npy"))
+    emb = np.load(os.path.join(DATA_DIR, "embeddings.npy"), mmap_mode='c')  # copy-on-write: avoids full read unless modified
     oid_list = json.load(open(os.path.join(DATA_DIR, "embeddings_index.json")))["oracle_ids"]
     oid_to_idx = {oid: i for i, oid in enumerate(oid_list)}
     # L2 normalize

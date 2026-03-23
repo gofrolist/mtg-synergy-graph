@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS card_strategies (
     FOREIGN KEY (oracle_id) REFERENCES cards(oracle_id)
 );
 CREATE INDEX IF NOT EXISTS idx_strategies_strategy ON card_strategies(strategy);
+CREATE INDEX IF NOT EXISTS idx_strategies_oracle ON card_strategies(oracle_id, confidence DESC);
 
 CREATE TABLE IF NOT EXISTS spellbook_combos (
     combo_id TEXT PRIMARY KEY,

@@ -30,9 +30,18 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
 
     candidate_scores = _candidate_scores(graph, deck_cards, commander=commander, key_cards=key_cards)
 
+    # Open a single DB connection for all queries in this function
+    _shared_conn = None
+    if commander and db_path:
+        import sqlite3 as _sql_shared
+        try:
+            _shared_conn = _sql_shared.connect(db_path)
+        except Exception:
+            _shared_conn = None
+
     # Inject LLM-scored cards that aren't in the graph candidate pool.
     # High LLM scores (>=7) should be recommended even without graph edges.
-    if commander and db_path:
+    if commander and db_path and _shared_conn:
         commander_oid_lookup = {}
         for c in cards:
             if c["name"] == commander:
@@ -40,8 +49,7 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                 break
         _cmdr_oid = commander_oid_lookup.get(commander, "")
         if _cmdr_oid:
-            import sqlite3 as _sql2
-            _ic = _sql2.connect(db_path)
+            _ic = _shared_conn
             _has = _ic.execute(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='synergy_scores'"
             ).fetchone()[0]
@@ -88,7 +96,6 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                         injected += 1
                 if injected:
                     print(f"  LLM injection: {injected} high-scoring cards added to candidate pool")
-            _ic.close()
 
     # Build card metadata lookup (name->dict) and oid lookup (name->oid)
     card_meta = {}
@@ -127,28 +134,22 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
     # Batch-load strategy data and ability counts from DB (1-2 queries instead of N)
     strategy_map = {}  # oid -> set of strategies
     ability_counts = {}  # oid -> count of non-keyword abilities
-    if db_path:
-        import sqlite3
+    if _shared_conn:
         try:
-            _qconn = sqlite3.connect(db_path)
-            _qconn.execute("SELECT 1")  # verify connection
-        except Exception as e:
-            print(f"  Warning: Strategy/ability loading skipped ({e})")
-            _qconn = None
-        if _qconn:
             # Batch strategy query
             if active_strategies:
-                for row in _qconn.execute(
+                for row in _shared_conn.execute(
                     "SELECT oracle_id, strategy FROM card_strategies WHERE confidence >= 0.3"
                 ).fetchall():
                     strategy_map.setdefault(row[0], set()).add(row[1])
             # Batch ability count query
-            for row in _qconn.execute(
+            for row in _shared_conn.execute(
                 "SELECT oracle_id, COUNT(*) FROM abilities "
                 "WHERE ability_type NOT IN ('keyword') GROUP BY oracle_id"
             ).fetchall():
                 ability_counts[row[0]] = row[1]
-            _qconn.close()
+        except Exception as e:
+            print(f"  Warning: Strategy/ability loading skipped ({e})")
 
     # Commander affinity: compute once via O(1) dict lookup
     affinities = {}
@@ -249,8 +250,7 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
 
                 # Score ALL cards with mechanics (not just current candidates)
                 all_oids_with_mechs = list(all_mechanics.keys())
-                import sqlite3 as _sql3
-                _mc = _sql3.connect(db_path)
+                _mc = _shared_conn
                 # Batch load type_lines in chunks instead of N+1 queries
                 card_type_lookup = {}
                 _chunk_size = 500
@@ -334,7 +334,6 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                     if mech_count or mech_injected:
                         print(f"  Mechanics matching: {mech_count} boosted, "
                               f"{mech_injected} injected ({len(all_mechanics)} in DB)")
-                _mc.close()
         except ImportError:
             pass
         except Exception as e:
@@ -344,24 +343,20 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
     # 1. LLM scores (pre-computed via score_synergies.py) — best quality
     # 2. Tower model (via train_tower_model.py) — generalizes to any commander
     # 3. Graph-only scoring (current multipliers) — always available
-    if commander and db_path:
+    if commander and db_path and _shared_conn:
         commander_oid = card_oid_lookup.get(commander, "")
         if commander_oid:
-            import sqlite3 as _sql
-            _sconn = _sql.connect(db_path)
-
             # Tier 1: Direct LLM scores for this commander
             llm_scores = {}
-            has_table = _sconn.execute(
+            has_table = _shared_conn.execute(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='synergy_scores'"
             ).fetchone()[0]
             if has_table:
-                for row in _sconn.execute(
+                for row in _shared_conn.execute(
                     "SELECT card_oid, score FROM synergy_scores WHERE commander_oid = ?",
                     (commander_oid,)
                 ).fetchall():
                     llm_scores[row[0]] = row[1]
-            _sconn.close()
 
             # Tier 2: Two-tower model (instant, for cards without LLM scores)
             model_scores = {}
@@ -465,6 +460,10 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                     parts.append(f"{model_count} model-scored")
                 if parts:
                     print(f"  Synergy scoring: {', '.join(parts)} [LLM-primary]")
+
+    # Close shared DB connection
+    if _shared_conn:
+        _shared_conn.close()
 
     # Sort by total synergy
     ranked = sorted(candidate_scores.items(), key=lambda x: x[1]["total"], reverse=True)

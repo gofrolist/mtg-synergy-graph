@@ -167,7 +167,7 @@ def load_embeddings() -> tuple[np.ndarray, list[str]]:
         print(f"No embeddings found. Run: python3 card_embeddings.py", file=sys.stderr)
         sys.exit(1)
 
-    embeddings = np.load(EMBEDDINGS_PATH)
+    embeddings = np.load(EMBEDDINGS_PATH, mmap_mode='r')
     with open(INDEX_PATH) as f:
         index = json.load(f)
 
@@ -220,23 +220,6 @@ def find_similar(query_name: str, top_n: int = 20, color_filter: list[str] = Non
         print(f"  {sim:.3f}  {card.get('name', oracle_ids[idx])}")
         if card.get("type_line"):
             print(f"         {card['type_line']}")
-
-
-def get_embedding_similarity(oid_a: str, oid_b: str,
-                             embeddings: np.ndarray = None,
-                             oracle_ids: list[str] = None) -> float:
-    """Get cosine similarity between two cards by oracle_id."""
-    if embeddings is None or oracle_ids is None:
-        embeddings, oracle_ids = load_embeddings()
-
-    oid_to_idx = {oid: i for i, oid in enumerate(oracle_ids)}
-    idx_a = oid_to_idx.get(oid_a)
-    idx_b = oid_to_idx.get(oid_b)
-
-    if idx_a is None or idx_b is None:
-        return 0.0
-
-    return float(embeddings[idx_a] @ embeddings[idx_b])
 
 
 UMAP_PATH = os.path.join(DATA_DIR, "embeddings_2d.json")

@@ -94,7 +94,17 @@ def filter_matches(trigger_filter: dict | None, producer_output: dict) -> bool:
             if str(required_val).lower() != str(producer_type).lower():
                 return False
         elif key == "has_keyword":
-            pass  # Skip for now
+            producer_kw = producer_output.get("has_keyword") or producer_output.get("keywords") or ""
+            if isinstance(producer_kw, list):
+                producer_kw_set = {k.lower() for k in producer_kw}
+            else:
+                producer_kw_set = {k.strip().lower() for k in str(producer_kw).split(",") if k.strip()}
+            if isinstance(required_val, list):
+                required_kw = {k.lower() for k in required_val}
+            else:
+                required_kw = {str(required_val).lower()}
+            if not producer_kw_set & required_kw:
+                return False
         # Ignore unknown filter keys (amount, etc.)
 
     return True
@@ -138,8 +148,14 @@ def filters_compatible(filter_a: dict | None, filter_b: dict | None) -> bool:
     return True
 
 
+_mechanics_cache = {}  # db_path -> mechanics dict
+
+
 def load_mechanics(db_path: str) -> dict:
-    """Load all extracted mechanics from DB."""
+    """Load all extracted mechanics from DB. Cached after first call per path."""
+    if db_path in _mechanics_cache:
+        return _mechanics_cache[db_path]
+
     conn = sqlite3.connect(db_path)
     mechanics = defaultdict(list)
     for row in conn.execute(
@@ -161,7 +177,9 @@ def load_mechanics(db_path: str) -> dict:
         }
         mechanics[oid].append(m)
     conn.close()
-    return dict(mechanics)
+    result = dict(mechanics)
+    _mechanics_cache[db_path] = result
+    return result
 
 
 def card_produces_events(mechanics: list[dict]) -> list[dict]:
@@ -574,53 +592,47 @@ def compute_deck_synergies(commander_oid: str, candidate_oids: list[str],
         for r in card_responds_to(cmdr_mechs):
             cmdr_responds.add(r["event"])
 
-        # For each deck card, what events does it produce?
-        deck_produces = {}  # event → list of deck oids
+        # Pre-compute: for each deck card, what events does it respond to
+        # and does it produce events the commander wants?
+        # deck_responds_to_event: event → list of deck_oids that respond AND produce cmdr events
+        deck_bridges = {}  # event → set of deck_oids that bridge candidate→commander
         for deck_oid in deck_oids:
             deck_mechs = all_mechanics.get(deck_oid, [])
             if not deck_mechs:
                 continue
-            for ev in card_produces_events(deck_mechs):
-                if ev["event"] in cmdr_responds:
-                    deck_produces.setdefault(ev["event"], []).append(deck_oid)
-
-        # For each candidate: does it enable deck cards to produce
-        # events the commander responds to?
-        for oid in candidate_oids:
-            card_mechs = all_mechanics.get(oid, [])
-            if not card_mechs:
+            # Check if this deck card produces any event the commander responds to
+            deck_events = card_produces_events(deck_mechs)
+            produces_cmdr_event = any(dev["event"] in cmdr_responds for dev in deck_events)
+            if not produces_cmdr_event:
                 continue
-            card_type = card_types.get(oid, "")
+            # Record which events this deck card responds to (with filters)
+            for deck_resp in card_responds_to(deck_mechs):
+                deck_bridges.setdefault(deck_resp["event"], []).append(
+                    {"oid": deck_oid, "filter": deck_resp["filter"]}
+                )
 
-            # What events does this candidate produce?
-            candidate_events = card_produces_events(card_mechs)
-            bonus = 0.0
+        # For each candidate: does it produce events that bridge through deck cards?
+        if deck_bridges:
+            for oid in candidate_oids:
+                card_mechs = all_mechanics.get(oid, [])
+                if not card_mechs:
+                    continue
 
-            for cev in candidate_events:
-                # Does any deck card respond to this event AND produce
-                # something the commander responds to?
-                for deck_oid in deck_oids:
-                    deck_mechs = all_mechanics.get(deck_oid, [])
-                    if not deck_mechs:
+                candidate_events = card_produces_events(card_mechs)
+                bonus = 0.0
+
+                for cev in candidate_events:
+                    bridges = deck_bridges.get(cev["event"])
+                    if not bridges:
                         continue
-                    for deck_resp in card_responds_to(deck_mechs):
-                        if deck_resp["event"] == cev["event"]:
-                            if filter_matches(deck_resp["filter"], cev["output"]):
-                                # Deck card triggers on candidate's event.
-                                # Does deck card then produce something commander wants?
-                                deck_events = card_produces_events(deck_mechs)
-                                for dev in deck_events:
-                                    if dev["event"] in cmdr_responds:
-                                        bonus = max(bonus, 1.0)  # Two-step chain found
-                                        break
-                        if bonus > 0:
+                    for bridge in bridges:
+                        if filter_matches(bridge["filter"], cev["output"]):
+                            bonus = 1.0  # Two-step chain found
                             break
                     if bonus > 0:
                         break
-                if bonus > 0:
-                    break
 
-            if bonus > 0:
-                scores[oid] = scores.get(oid, 0) + bonus
+                if bonus > 0:
+                    scores[oid] = scores.get(oid, 0) + bonus
 
     return scores
