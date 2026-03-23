@@ -106,7 +106,7 @@ python3 compare_edhrec.py --deck krenko --fast  # Single deck (cached)
 python3 compare_edhrec.py --fast --quiet        # Summary only (0.07s)
 
 # Tests
-python3 -m pytest tests/ -v                    # Run all 71 tests
+python3 -m pytest tests/ -v                    # Run all 89 tests
 ```
 
 ## Architecture
