@@ -654,6 +654,9 @@ def build_provides_wants_edges(cards: list[dict], deck_oids: set = None) -> list
     # Compute IDF multipliers
     idf = _compute_idf(cards)
 
+    # Sort cards deterministically to ensure reproducible index ordering
+    cards = sorted(cards, key=lambda c: c["oracle_id"])
+
     # Build provides inverted index: tag -> [(card_name, oracle_id)]
     provides_index = defaultdict(list)
     for card in cards:
@@ -679,9 +682,11 @@ def build_provides_wants_edges(cards: list[dict], deck_oids: set = None) -> list
 
     # Pre-filter provides_index to stay within memory budget.
     # Keep a capped sample of providers per tag.
+    # Sort deterministically: deck cards first (always kept), then by oracle_id.
     _deck_oid_set = deck_oids or set()
     for tag in list(provides_index):
         if len(provides_index[tag]) > MAX_PROVIDERS:
+            provides_index[tag].sort(key=lambda x: (0 if x[1] in _deck_oid_set else 1, x[1]))
             provides_index[tag] = provides_index[tag][:MAX_PROVIDERS]
 
     # Accumulate best match and total weight per card pair.
@@ -1251,18 +1256,74 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
 
     candidate_scores = _candidate_scores(graph, deck_cards, commander=commander, key_cards=key_cards)
 
-    # Build card metadata lookup from cards list
+    # Inject LLM-scored cards that aren't in the graph candidate pool.
+    # High LLM scores (≥7) should be recommended even without graph edges.
+    if commander and db_path:
+        commander_oid_lookup = {}
+        for c in cards:
+            if c["name"] == commander:
+                commander_oid_lookup[commander] = c.get("oracle_id", "")
+                break
+        _cmdr_oid = commander_oid_lookup.get(commander, "")
+        if _cmdr_oid:
+            import sqlite3 as _sql2
+            _ic = _sql2.connect(db_path)
+            _has = _ic.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='synergy_scores'"
+            ).fetchone()[0]
+            if _has:
+                # Find high-scored cards not in candidate pool.
+                # Query DB directly — these cards may have zero graph edges
+                # and won't be in the 'cards' list at all.
+                injected = 0
+                for oid, score in _ic.execute(
+                    "SELECT card_oid, score FROM synergy_scores "
+                    "WHERE commander_oid = ? AND score >= 7",
+                    (_cmdr_oid,)
+                ):
+                    name_row = _ic.execute(
+                        "SELECT name FROM cards WHERE oracle_id = ?", (oid,)
+                    ).fetchone()
+                    if not name_row:
+                        continue
+                    name = name_row[0]
+                    if name not in deck_cards and name not in candidate_scores:
+                        candidate_scores[name] = {
+                            "total": 0.1,
+                            "partners": [], "multi_sig": 0,
+                            "commander_synergy": 0.0, "key_synergy": 0.0,
+                        }
+                        # Also add to cards list so metadata is available
+                        card_row = _ic.execute(
+                            "SELECT oracle_id, name, type_line, mana_cost, cmc, edhrec_rank "
+                            "FROM cards WHERE oracle_id = ?", (oid,)
+                        ).fetchone()
+                        if card_row:
+                            cards.append({
+                                "oracle_id": card_row[0], "name": card_row[1],
+                                "type_line": card_row[2] or "", "mana_cost": card_row[3] or "",
+                                "cmc": card_row[4] or 0, "edhrec_rank": card_row[5],
+                            })
+                            injected += 1
+                if injected:
+                    print(f"  LLM injection: {injected} high-scoring cards added to candidate pool")
+            _ic.close()
+
+    # Build card metadata lookup (name→dict) and oid lookup (name→oid)
     card_meta = {}
     card_oid_lookup = {}
+    cards_by_name = {}
     for c in cards:
-        card_meta[c["name"]] = {
+        name = c["name"]
+        card_meta[name] = {
             "type_line": c.get("type_line", ""),
             "cmc": c.get("cmc", 0),
             "mana_cost": c.get("mana_cost", ""),
             "oracle_id": c.get("oracle_id", ""),
             "edhrec_rank": c.get("edhrec_rank"),
         }
-        card_oid_lookup[c["name"]] = c.get("oracle_id", "")
+        card_oid_lookup[name] = c.get("oracle_id", "")
+        cards_by_name[name] = c
 
     # Calculate deck average CMC (excluding lands)
     deck_cmc_values = [card_meta[n]["cmc"] for n in deck_cards
@@ -1279,123 +1340,320 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
             for oid in pc.get("missing_oids", []):
                 partial_missing_oids.add(oid)
 
-    # Apply tribal boost if deck has dominant creature types
-    if deck_types:
-        for card_name, info in candidate_scores.items():
-            meta = card_meta.get(card_name, {})
-            type_line = meta.get("type_line", "")
-            if any(t.lower() in type_line.lower() for t in deck_types):
+    # Pre-compute lowercased tribal types for fast matching
+    deck_types_lower = {t.lower() for t in deck_types} if deck_types else set()
+
+    # Batch-load strategy data and ability counts from DB (1-2 queries instead of N)
+    strategy_map = {}  # oid → set of strategies
+    ability_counts = {}  # oid → count of non-keyword abilities
+    if db_path:
+        import sqlite3
+        _qconn = sqlite3.connect(db_path)
+        # Batch strategy query
+        if active_strategies:
+            for row in _qconn.execute(
+                "SELECT oracle_id, strategy FROM card_strategies WHERE confidence >= 0.3"
+            ).fetchall():
+                strategy_map.setdefault(row[0], set()).add(row[1])
+        # Batch ability count query
+        for row in _qconn.execute(
+            "SELECT oracle_id, COUNT(*) FROM abilities "
+            "WHERE ability_type NOT IN ('keyword') GROUP BY oracle_id"
+        ).fetchall():
+            ability_counts[row[0]] = row[1]
+        _qconn.close()
+
+    # Commander affinity: compute once via O(1) dict lookup
+    affinities = {}
+    if commander:
+        commander_card_data = cards_by_name.get(commander)
+        candidate_cards_data = [c for c in cards if c["name"] not in deck_cards]
+        affinities = _compute_commander_affinity(commander_card_data, candidate_cards_data)
+
+    # === Single consolidated loop over all candidates ===
+    # Applies: tribal, strategy, combo, CMC penalty, quality, popularity, affinity
+    import math
+    cmc_threshold = deck_avg_cmc + 3
+    for card_name, info in candidate_scores.items():
+        meta = card_meta.get(card_name, {})
+        oid = card_oid_lookup.get(card_name, "")
+        type_line = meta.get("type_line", "")
+        type_line_lower = type_line.lower()
+
+        # Tribal boost
+        if deck_types_lower:
+            if any(t in type_line_lower for t in deck_types_lower):
                 info["tribal_match"] = True
-                info["total"] *= 1.3  # 30% boost for tribal match
+                info["total"] *= 1.3
             else:
                 info["tribal_match"] = False
+        else:
+            info["tribal_match"] = False
 
-    # Apply strategy relevance multiplier
-    if active_strategies and db_path:
-        for card_name, info in candidate_scores.items():
-            oid = card_oid_lookup.get(card_name, "")
-            if oid:
-                rel = compute_strategy_relevance(oid, active_strategies, db_path)
-                info["total"] *= rel
-                info["strategy_rel"] = rel
+        # Strategy relevance
+        if active_strategies and oid:
+            card_strats = strategy_map.get(oid, set())
+            overlap = card_strats & active_strategies
+            rel = 0.5 if not overlap else 1.0 + 0.2 * len(overlap)
+            info["total"] *= rel
+            info["strategy_rel"] = rel
 
-    # Apply combo completion multiplier
-    for card_name, info in candidate_scores.items():
-        oid = card_oid_lookup.get(card_name, "")
+        # Combo completion
         if oid in partial_missing_oids:
             info["total"] *= 2.0
             info["combo_completion"] = True
         else:
             info["combo_completion"] = False
 
-    # Apply mana cost penalty for high-CMC cards
-    for card_name, info in candidate_scores.items():
-        meta = card_meta.get(card_name, {})
+        # Mana cost penalty
         cmc = meta.get("cmc", 0) or 0
-        if cmc > deck_avg_cmc + 3:
-            penalty = max(0.3, 1.0 - 0.15 * (cmc - deck_avg_cmc - 3))
+        if cmc > cmc_threshold:
+            penalty = max(0.3, 1.0 - 0.15 * (cmc - cmc_threshold))
             info["total"] *= penalty
             info["high_cmc"] = True
         else:
             info["high_cmc"] = False
 
-    # Apply EDHREC popularity weighting
-    # Cards with better EDHREC rank (lower = more popular) get a boost.
-    # This prevents obscure cards from outranking proven EDH staples.
-    # Scale: rank 1 = 2.0x, rank 1000 = 1.5x, rank 5000 = 1.0x, rank 20000 = 0.5x, unranked = 0.3x
-    import math
-    for card_name, info in candidate_scores.items():
-        meta = card_meta.get(card_name, {})
+        # Card quality filter: keyword-only creatures
+        if "Creature" in type_line:
+            non_kw = ability_counts.get(oid, 0)
+            if non_kw == 0:
+                info["total"] *= 0.15
+                info["keyword_only"] = True
+            else:
+                if non_kw == 1:
+                    info["total"] *= 0.7
+                info["keyword_only"] = False
+        else:
+            info["keyword_only"] = False
+
+        # EDHREC popularity weighting
         rank = meta.get("edhrec_rank")
         if rank and rank > 0:
-            # Log scale: rank 1→2.0, rank 100→1.7, rank 1000→1.4, rank 5000→1.0, rank 20000→0.5
             popularity = max(0.3, 2.0 - 0.25 * math.log10(max(rank, 1)))
             info["total"] *= popularity
             info["popularity"] = round(popularity, 2)
         else:
-            info["total"] *= 0.3  # Unranked cards are heavily penalized
+            info["total"] *= 0.3
             info["popularity"] = 0.3
 
-    # Apply commander affinity — bypass the graph's fan-out caps
-    # by computing tag-level affinity directly
-    if commander:
-        commander_card_data = next((c for c in cards if c["name"] == commander), None)
-        candidate_cards_data = [c for c in cards if c["name"] not in deck_cards]
-        affinities = _compute_commander_affinity(commander_card_data, candidate_cards_data)
-
-        for card_name, info in candidate_scores.items():
-            affinity = affinities.get(card_name, 0.0)
-            if affinity > 0:
-                # Affinity multiplier: 1.0 base + 0.5 per affinity point
-                # A card with affinity 4 (strong commander synergy) gets 3.0x
-                multiplier = 1.0 + 0.5 * affinity
-                info["total"] *= multiplier
-                info["commander_affinity"] = round(affinity, 1)
-            else:
-                info["commander_affinity"] = 0.0
-
-    # ML-based recommendation scoring: uses a trained model to predict
-    # synergy between commander and each candidate.
-    # Falls back to commander affinity if model not available.
-    model_path = os.path.join(DATA_DIR, "recommender_weights.json")
-    if commander and os.path.exists(model_path):
-        with open(model_path) as _mf:
-            rec_model = json.load(_mf)
-
-        commander_card_data = next((c for c in cards if c["name"] == commander), None)
-        if commander_card_data:
-            from train_recommender import predict as ml_predict
-
-            # Normalize graph scores to 0-1 for blending
-            max_graph = max((info["total"] for info in candidate_scores.values()), default=1.0) or 1.0
-
-            for card_name, info in candidate_scores.items():
-                candidate_data = next((c for c in cards if c["name"] == card_name), None)
-                if candidate_data:
-                    ml_score = ml_predict(rec_model, commander_card_data, candidate_data)
-                else:
-                    ml_score = 0.0
-
-                graph_norm = info["total"] / max_graph
-
-                # Blend: 60% ML model + 40% graph (ML is primary)
-                info["total"] = (ml_score * 0.6 + graph_norm * 0.4) * 100.0
-                info["commander_affinity"] = round(ml_score * 10, 1)
-    elif commander:
-        # Fallback: use tag-level commander affinity
-        commander_card_data = next((c for c in cards if c["name"] == commander), None)
-        candidate_cards_data = [c for c in cards if c["name"] not in deck_cards]
-        affinities = _compute_commander_affinity(commander_card_data, candidate_cards_data)
-
-        max_graph = max((info["total"] for info in candidate_scores.values()), default=1.0) or 1.0
-        max_aff = max(affinities.values(), default=1.0) or 1.0
-
-        for card_name, info in candidate_scores.items():
-            affinity = affinities.get(card_name, 0.0)
-            graph_norm = info["total"] / max_graph
-            aff_norm = affinity / max_aff
-            info["total"] = (aff_norm * 0.6 + graph_norm * 0.4) * 100.0
+        # Commander affinity
+        affinity = affinities.get(card_name, 0.0)
+        if affinity > 0:
+            info["total"] *= 1.0 + 0.5 * affinity
             info["commander_affinity"] = round(affinity, 1)
+        else:
+            info["commander_affinity"] = 0.0
+
+    # Mechanics-based matching: uses structured game event data
+    # extracted by extract_mechanics.py to find filter-aware synergies.
+    # Two roles: (1) boost existing candidates, (2) inject new candidates
+    # that have strong mechanics match but no graph edges.
+    if commander and db_path:
+        try:
+            from mechanics_matcher import load_mechanics, compute_deck_synergies
+            all_mechanics = load_mechanics(db_path)
+            if all_mechanics:
+                commander_oid = card_oid_lookup.get(commander, "")
+
+                # Score ALL cards with mechanics (not just current candidates)
+                all_oids_with_mechs = list(all_mechanics.keys())
+                card_type_lookup = {}
+                import sqlite3 as _sql3
+                _mc = _sql3.connect(db_path)
+                for oid in all_oids_with_mechs:
+                    row = _mc.execute("SELECT type_line FROM cards WHERE oracle_id = ?", (oid,)).fetchone()
+                    card_type_lookup[oid] = row[0] if row else ""
+                card_type_lookup[commander_oid] = card_meta.get(commander, {}).get("type_line", "")
+
+                # Pass deck card oids for two-step chain detection
+                deck_card_oids = {card_oid_lookup.get(cn, "") for cn in deck_cards if card_oid_lookup.get(cn)}
+                mech_scores = compute_deck_synergies(commander_oid, all_oids_with_mechs,
+                                                     all_mechanics, card_type_lookup,
+                                                     deck_oids=deck_card_oids)
+
+                if mech_scores:
+                    max_mech = max(mech_scores.values()) if mech_scores else 1.0
+                    mech_count = 0
+                    mech_injected = 0
+
+                    # Inject high-mechanics cards not in candidate pool
+                    for oid, ms in mech_scores.items():
+                        if ms < 1.5:
+                            continue
+                        name_row = _mc.execute("SELECT name, type_line, mana_cost, cmc, edhrec_rank FROM cards WHERE oracle_id = ?", (oid,)).fetchone()
+                        if not name_row:
+                            continue
+                        name = name_row[0]
+                        if name in deck_cards or name in candidate_scores:
+                            continue
+                        # Check color identity
+                        ci_row = _mc.execute("SELECT color_identity FROM cards WHERE oracle_id = ?", (oid,)).fetchone()
+                        card_ci = set(json.loads(ci_row[0] or "[]")) if ci_row else set()
+                        if not card_ci.issubset(color_identity or set()):
+                            continue
+                        candidate_scores[name] = {
+                            "total": 0.1, "partners": [], "multi_sig": 0,
+                            "commander_synergy": 0.0, "key_synergy": 0.0,
+                        }
+                        cards.append({
+                            "oracle_id": oid, "name": name,
+                            "type_line": name_row[1] or "", "mana_cost": name_row[2] or "",
+                            "cmc": name_row[3] or 0, "edhrec_rank": name_row[4],
+                        })
+                        card_meta[name] = {
+                            "type_line": name_row[1] or "", "cmc": name_row[3] or 0,
+                            "mana_cost": name_row[2] or "",
+                            "oracle_id": oid, "edhrec_rank": name_row[4],
+                        }
+                        card_oid_lookup[name] = oid
+                        mech_injected += 1
+
+                    # Boost using max(graph, mechanics) with relative normalization.
+                    max_graph = max((i["total"] for i in candidate_scores.values()), default=1.0) or 1.0
+
+                    for card_name, info in candidate_scores.items():
+                        oid = card_oid_lookup.get(card_name, "")
+                        ms = mech_scores.get(oid, 0)
+                        if ms > 0:
+                            mech_as_graph = (ms / max_mech) * max_graph
+                            info["total"] = max(info["total"], mech_as_graph)
+                            info["mechanics_score"] = round(ms, 1)
+                            mech_count += 1
+
+                    if mech_count or mech_injected:
+                        print(f"  Mechanics matching: {mech_count} boosted, "
+                              f"{mech_injected} injected ({len(all_mechanics)} in DB)")
+                _mc.close()
+        except ImportError:
+            pass
+        except Exception as e:
+            pass
+
+    # Synergy scoring: 3-tier fallback
+    # 1. LLM scores (pre-computed via score_synergies.py) — best quality
+    # 2. Trained model (via train_synergy_model.py) — generalizes to any commander
+    # 3. Graph-only scoring (current multipliers) — always available
+    if commander and db_path:
+        commander_oid = card_oid_lookup.get(commander, "")
+        if commander_oid:
+            import sqlite3 as _sql
+            _sconn = _sql.connect(db_path)
+
+            # Tier 1: Direct LLM scores for this commander
+            llm_scores = {}
+            has_table = _sconn.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='synergy_scores'"
+            ).fetchone()[0]
+            if has_table:
+                for row in _sconn.execute(
+                    "SELECT card_oid, score FROM synergy_scores WHERE commander_oid = ?",
+                    (commander_oid,)
+                ).fetchall():
+                    llm_scores[row[0]] = row[1]
+            _sconn.close()
+
+            # Tier 2: Two-tower model (instant, for cards without LLM scores)
+            model_scores = {}
+            tower_model_path = os.path.join(DATA_DIR, "tower_model.npz")
+            if os.path.exists(tower_model_path):
+                try:
+                    import numpy as _np
+                    from train_tower_model import (load_embeddings as _load_emb,
+                                                    load_structural_features as _load_sf,
+                                                    compute_struct_features as _compute_sf,
+                                                    forward as _forward)
+
+                    if not hasattr(compute_strategy_relevance, '_tower_model'):
+                        _td = _np.load(tower_model_path)
+                        compute_strategy_relevance._tower_model = {
+                            k: _td[k] for k in _td.files
+                            if k not in ("struct_means", "struct_stds")
+                        }
+                        compute_strategy_relevance._tower_means = _td["struct_means"]
+                        compute_strategy_relevance._tower_stds = _td["struct_stds"]
+                        compute_strategy_relevance._tower_emb = _load_emb()
+                        compute_strategy_relevance._tower_sf = _load_sf()
+
+                    tm = compute_strategy_relevance._tower_model
+                    t_means = compute_strategy_relevance._tower_means
+                    t_stds = compute_strategy_relevance._tower_stds
+                    normed_emb, oid_list, oid_to_idx = compute_strategy_relevance._tower_emb
+                    sf_data = compute_strategy_relevance._tower_sf
+
+                    cmdr_emb_idx = oid_to_idx.get(commander_oid)
+                    if cmdr_emb_idx is not None:
+                        # Batch score all unscored candidates
+                        batch_embs = []
+                        batch_structs = []
+                        batch_names = []
+                        for card_name in candidate_scores:
+                            oid = card_oid_lookup.get(card_name, "")
+                            if oid in llm_scores:
+                                continue
+                            card_emb_idx = oid_to_idx.get(oid)
+                            if card_emb_idx is None:
+                                continue
+                            batch_embs.append(normed_emb[card_emb_idx])
+                            sf = _compute_sf(commander_oid, oid, *sf_data)
+                            batch_structs.append((sf - t_means) / t_stds)
+                            batch_names.append(card_name)
+
+                        if batch_embs:
+                            X_card = _np.array(batch_embs, dtype=_np.float32)
+                            X_struct = _np.array(batch_structs, dtype=_np.float32)
+                            X_cmdr = _np.tile(normed_emb[cmdr_emb_idx], (len(X_card), 1))
+                            scores_arr, _ = _forward(tm, X_cmdr, X_card, X_struct)
+                            scores_arr = _np.clip(scores_arr, 1, 10)
+                            for name, score in zip(batch_names, scores_arr):
+                                model_scores[name] = float(score)
+
+                except Exception:
+                    pass
+
+            # Apply LLM/model scores.
+            # LLM score is the PRIMARY ranking signal.
+            # Tiebreaker: EDHREC rank (card popularity/quality) instead of graph.
+            # This avoids generic cards with high graph edges outranking
+            # specific synergy cards that are well-known staples.
+            if llm_scores or model_scores:
+                llm_count = 0
+                model_count = 0
+
+                for card_name, info in candidate_scores.items():
+                    oid = card_oid_lookup.get(card_name, "")
+                    llm = llm_scores.get(oid)
+                    ms = model_scores.get(card_name) if llm is None else None
+
+                    if llm is not None or ms is not None:
+                        score_val = llm if llm is not None else ms
+                        # Tiebreakers (all within same LLM score tier):
+                        # 1. Tower model prediction (continuous, captures synergy nuance)
+                        # 2. EDHREC rank (card quality/popularity)
+                        meta = card_meta.get(card_name, {})
+                        rank = meta.get("edhrec_rank") or 50000
+                        import math
+                        rank_tiebreak = max(0, 10.0 - 2.0 * math.log10(max(rank, 1)))
+                        tower_score = model_scores.get(card_name, 5.0) if card_name in model_scores else 5.0
+                        # LLM primary (×1000), tower sub-tiebreak (×10), rank micro-tiebreak (×0.1)
+                        info["total"] = score_val * 1000.0 + tower_score * 10.0 + rank_tiebreak * 0.1
+                        info["llm_score"] = score_val if llm is not None else round(ms, 1)
+                        if llm is not None:
+                            llm_count += 1
+                        else:
+                            model_count += 1
+                    else:
+                        # Unscored cards: treat as LLM score 2 (low) + graph tiebreaker
+                        graph_norm = info["total"] / max_graph
+                        info["total"] = 2 * 1000.0 + graph_norm * 10.0
+
+                parts = []
+                if llm_count:
+                    parts.append(f"{llm_count} LLM-scored")
+                if model_count:
+                    parts.append(f"{model_count} model-scored")
+                if parts:
+                    print(f"  Synergy scoring: {', '.join(parts)} [LLM-primary]")
 
     # Sort by total synergy
     ranked = sorted(candidate_scores.items(), key=lambda x: x[1]["total"], reverse=True)
@@ -1499,70 +1757,83 @@ def _compute_commander_affinity(commander_card: dict, candidate_cards: list[dict
     cmdr_keywords = {k.lower() for k in (commander_card.get("keywords") or [])}
 
     # Extract key concepts from commander's oracle text
-    # These are words that define what the commander cares about
     import re
     cmdr_concepts = set()
 
-    # Creature types mentioned in oracle text
-    for ctype in ["human", "goblin", "elf", "zombie", "vampire", "dragon", "angel",
-                  "demon", "sliver", "artifact", "enchantment", "equipment", "aura",
-                  "instant", "sorcery", "planeswalker", "land", "token", "counter",
-                  "poison", "infect"]:
-        if re.search(r'\b' + ctype + r's?\b', cmdr_oracle):
-            cmdr_concepts.add(ctype)
+    _CONCEPT_WORDS = [
+        "human", "goblin", "elf", "zombie", "vampire", "dragon", "angel",
+        "demon", "sliver", "artifact", "enchantment", "equipment", "aura",
+        "instant", "sorcery", "planeswalker", "land", "token", "counter",
+        "poison", "infect", "mill", "draw", "discard", "sacrifice", "exile",
+        "return", "graveyard", "library", "damage", "life", "mana", "untap",
+        "tap", "equip", "enchant", "proliferate", "toxic", "attack", "combat",
+        "enters", "dies", "cast",
+    ]
 
-    # Key mechanic words from oracle text
-    for mechanic in ["mill", "draw", "discard", "sacrifice", "exile", "return",
-                     "graveyard", "library", "counter", "damage", "life", "mana",
-                     "untap", "tap", "equip", "enchant", "proliferate", "toxic",
-                     "attack", "combat", "enters", "dies", "cast"]:
-        if mechanic in cmdr_oracle:
-            cmdr_concepts.add(mechanic)
+    # Pre-compile concept regexes once
+    _concept_regexes = {w: re.compile(r'\b' + w + r's?\b') for w in _CONCEPT_WORDS}
+    _reminder_re = re.compile(r'\([^)]*\)')
 
-    # Load bridges
+    for word, rx in _concept_regexes.items():
+        if rx.search(cmdr_oracle):
+            cmdr_concepts.add(word)
+
+    # Pre-compile concept patterns for candidate matching
+    cmdr_concept_rxs = [(c, _concept_regexes[c]) for c in cmdr_concepts]
+
+    # Load bridges (cached at module level would be better, but this is called rarely)
     bridge_provides = {}
     for (p_tag, w_tag), weight in SEMANTIC_BRIDGES.items():
         bridge_provides.setdefault(w_tag, []).append((p_tag, weight))
+
+    # Pre-compute bridge lookups for commander wants/provides
+    cmdr_want_bridges = {}
+    for want in cmdr_wants:
+        cmdr_want_bridges[want] = bridge_provides.get(want, [])
+    cmdr_provide_bridge_targets = {}
+    for (p_tag, w_tag), weight in SEMANTIC_BRIDGES.items():
+        if p_tag in cmdr_provides:
+            cmdr_provide_bridge_targets.setdefault(w_tag, []).append((p_tag, weight))
 
     affinities = {}
     for card in candidate_cards:
         name = card["name"]
         card_provides = set(card.get("provides", []))
         card_wants = set(card.get("wants", []))
-        card_oracle = (card.get("oracle_text") or "").lower()
-        card_keywords = {k.lower() for k in (card.get("keywords") or [])}
 
         score = 0.0
 
         # Signal 1: Tag connections (direct + bridges)
-        for tag in card_provides & cmdr_wants:
-            score += 2.0
-        for tag in card_wants & cmdr_provides:
-            score += 2.0
-        for want in cmdr_wants:
-            for p_tag, weight in bridge_provides.get(want, []):
-                if p_tag in card_provides:
-                    score += weight * 1.5
+        score += 3.0 * len(card_provides & cmdr_wants)
+        score += 3.0 * len(card_wants & cmdr_provides)
+        # Best bridge per commander want
+        for want, bridges in cmdr_want_bridges.items():
+            best = 0.0
+            for p_tag, weight in bridges:
+                if p_tag in card_provides and weight > best:
+                    best = weight
+            score += best * 1.5
+        # Best bridge per card want matching commander provides
         for want in card_wants:
-            for p_tag, weight in bridge_provides.get(want, []):
-                if p_tag in cmdr_provides:
-                    score += weight * 1.5
+            bridges = cmdr_provide_bridge_targets.get(want, [])
+            if bridges:
+                best = max(w for _, w in bridges)
+                score += best * 1.5
 
-        # Signal 2: Oracle text concept overlap
-        # Candidate mentioning same key concepts as commander = high affinity
-        if cmdr_concepts and card_oracle:
-            concept_matches = 0
-            for concept in cmdr_concepts:
-                if re.search(r'\b' + concept + r's?\b', card_oracle):
-                    concept_matches += 1
-            if concept_matches > 0:
-                # Scale: 1 match = +1, 3 matches = +4, 5 matches = +8
-                score += concept_matches ** 1.5
+        # Signal 2: Oracle text concept overlap (strip reminder text)
+        if cmdr_concept_rxs:
+            card_oracle = (card.get("oracle_text") or "").lower()
+            card_oracle_stripped = _reminder_re.sub('', card_oracle)
+            if card_oracle_stripped:
+                concept_matches = sum(1 for _, rx in cmdr_concept_rxs if rx.search(card_oracle_stripped))
+                if concept_matches > 0:
+                    score += concept_matches ** 1.5
 
         # Signal 3: Keyword synergy
-        shared_kw = card_keywords & cmdr_keywords
-        if shared_kw:
-            score += len(shared_kw) * 0.5
+        card_keywords = {k.lower() for k in (card.get("keywords") or [])}
+        n_shared = len(card_keywords & cmdr_keywords)
+        if n_shared:
+            score += n_shared * 0.5
 
         affinities[name] = score
 
@@ -1588,10 +1859,13 @@ def _candidate_scores(graph: dict, deck_cards: set[str],
 
                 if card == commander:
                     info["commander_synergy"] += base_score
+                    info["total"] += base_score * 5.0  # Commander synergy weighted 5x
                 elif card in key_cards:
                     info["key_synergy"] += base_score
+                    info["total"] += base_score * 2.0  # Key card synergy weighted 2x
+                else:
+                    info["total"] += base_score
 
-                info["total"] += base_score
                 info["partners"].append((card, edge["score"], edge["signals"]))
                 if edge["signals"] >= 2:
                     info["multi_sig"] += 1
@@ -1599,45 +1873,70 @@ def _candidate_scores(graph: dict, deck_cards: set[str],
     return dict(scores)
 
 
-def _classify_card_slot(name: str, cards: list[dict]) -> str:
+def _classify_card_slot(name: str, cards: list[dict],
+                        deck_types: set = None) -> str:
     """Classify a card as 'land', 'staple', or 'spell' for swap bucketing.
 
     Lands swap with lands, staples are protected, spells swap with spells.
-    Uses merged tag data + Scryfall type_line fallback.
+    Protected from cuts: removal, protection, ramp, card draw, commander's tribe.
     """
     from card_db import CARD_DB, NAME_INDEX
 
-    # Infrastructure roles serve structural purposes (interaction, mana, card flow)
-    # and shouldn't be swapped for synergy pieces
     INFRASTRUCTURE_ROLES = {"removal", "ramp", "protection", "draw", "tutor"}
 
-    # Provides tags that indicate synergy value beyond infrastructure role.
-    # Cards with these are synergy pieces even if their role is "protection" etc.
+    # Provides tags that indicate infrastructure function (should be protected)
+    INFRASTRUCTURE_PROVIDES = {
+        "targeted-removal", "board-wide-removal", "board-protection",
+        "reactive-protection", "mana-acceleration", "card-draw",
+        "graveyard-recursion", "indestructible-grant",
+    }
+
+    # Provides tags that indicate synergy value (okay to keep as "spell")
     SYNERGY_PROVIDES = {
         "token-generation", "counter-placement", "board-wide-counter-placement",
         "counter-amplification", "trigger-doubling", "creature-pump",
         "card-draw-payoff", "etb-payoff", "sacrifice-payoff", "goblin-tribal",
-        "life-gain", "life-drain", "combat-trigger",
+        "combat-trigger",
     }
 
-    # Check merged card data
+    card_data = None
     for card in cards:
-        if card["name"] != name:
-            continue
-        role = card.get("role", "")
-        categories = set(card.get("categories", []))
-        if role == "land" or "staple-land" in categories:
-            return "land"
-        if role in INFRASTRUCTURE_ROLES:
-            # Check if the card also has synergy-relevant provides tags —
-            # if so, it's a synergy piece that happens to have an infra role
-            provides = set(card.get("provides", []))
-            if provides & SYNERGY_PROVIDES:
-                break  # fall through to "spell"
-            return "staple"
-        break
+        if card["name"] == name:
+            card_data = card
+            break
 
-    # Fallback: check Scryfall type_line for land detection
+    if card_data:
+        role = card_data.get("role", "")
+        type_line = card_data.get("type_line", "")
+        provides = set(card_data.get("provides", []))
+
+        # Land detection
+        if role == "land" or "Land" in type_line:
+            return "land"
+
+        # Role-based protection
+        if role in INFRASTRUCTURE_ROLES:
+            if provides & SYNERGY_PROVIDES:
+                pass  # Has synergy value, classify as spell
+            else:
+                return "staple"
+
+        # Provides-based protection: cards providing removal/protection/ramp
+        if provides & INFRASTRUCTURE_PROVIDES:
+            if not (provides & SYNERGY_PROVIDES):
+                return "staple"
+
+        # Tribal protection: creatures matching the deck's tribal type
+        # A Human in a Human deck shouldn't be cut for a non-Human
+        # Changelings/Shapeshifters count as all types
+        if deck_types and type_line:
+            if "Shapeshifter" in type_line or "Changeling" in type_line:
+                return "staple"
+            for dt in deck_types:
+                if dt in type_line:
+                    return "staple"
+
+    # Fallback: Scryfall type_line
     oid = NAME_INDEX.get(name.lower())
     if oid and oid in CARD_DB:
         type_line = CARD_DB[oid].get("type_line", "")
@@ -1649,7 +1948,8 @@ def _classify_card_slot(name: str, cards: list[dict]) -> str:
 
 def suggest_swaps(graph: dict, deck_cards: set[str], commander: str,
                   cards: list[dict], top_n: int = 15,
-                  active_strategies: set = None, db_path: str = None) -> list[dict]:
+                  active_strategies: set = None, db_path: str = None,
+                  deck_types: set = None) -> list[dict]:
     """Suggest swaps: pair weak deck cards with strong non-deck candidates.
 
     Lands swap with lands, spells swap with spells. Commander and staple
@@ -1708,16 +2008,76 @@ def suggest_swaps(graph: dict, deck_cards: set[str], commander: str,
                 anti_synergy_cards.add(card_name)
         _conn.close()
 
-    # Classify every deck card and candidate by slot type
-    deck_slots = {name: _classify_card_slot(name, cards) for name in deck_cards}
-    cand_slots = {name: _classify_card_slot(name, cards) for name in cand_scores}
+    # Protect cards with high commander synergy from cuts.
+    # Cards that strongly synergize with the commander are key pieces.
+    commander_protected = set()
+    cmdr_adj = graph["adjacency"].get(commander, [])
+    if cmdr_adj:
+        cmdr_edge_scores = {e["target"]: e["score"] for e in cmdr_adj if e["target"] in deck_cards}
+        if cmdr_edge_scores:
+            # Protect top 20 commander-synergy cards (generous — these are key pieces)
+            n_protect = min(20, len(cmdr_edge_scores))
+            threshold = sorted(cmdr_edge_scores.values(), reverse=True)[n_protect - 1]
+            commander_protected = {name for name, score in cmdr_edge_scores.items() if score >= threshold}
 
-    # Split into buckets: lands vs spells (staples excluded from cuts)
+    # Protect cards with high mechanics synergy with the commander.
+    try:
+        from mechanics_matcher import load_mechanics, compute_synergy
+        _all_mechs = load_mechanics(db_path) if db_path else {}
+        cmdr_oid_swap = card_oid_lookup.get(commander, "")
+        cmdr_mechs_swap = _all_mechs.get(cmdr_oid_swap, [])
+        cmdr_type_swap = card_meta.get(commander, {}).get("type_line", "")
+        if cmdr_mechs_swap:
+            for card_name in deck_cards:
+                if card_name == commander:
+                    continue
+                card_oid_s = card_oid_lookup.get(card_name, "")
+                card_mechs_s = _all_mechs.get(card_oid_s, [])
+                if card_mechs_s:
+                    ms = compute_synergy(cmdr_mechs_swap, card_mechs_s,
+                                         cmdr_type_swap, card_meta.get(card_name, {}).get("type_line", ""))
+                    if ms >= 2.0:  # Strong mechanics match = protected
+                        commander_protected.add(card_name)
+    except Exception:
+        pass
+
+    # Protect cards in known Spellbook combos with the commander.
+    combo_protected = set()
+    if db_path:
+        import sqlite3 as _sq2
+        _cc = _sq2.connect(db_path)
+        cmdr_oid = card_oid_lookup.get(commander, "")
+        if cmdr_oid:
+            # Find combos including the commander
+            combo_ids = [r[0] for r in _cc.execute(
+                "SELECT combo_id FROM spellbook_combo_cards WHERE oracle_id = ?", (cmdr_oid,))]
+            for cid in combo_ids:
+                combo_card_oids = {r[0] for r in _cc.execute(
+                    "SELECT oracle_id FROM spellbook_combo_cards WHERE combo_id = ?", (cid,))}
+                # If all combo cards are in our deck, protect them all
+                combo_names = set()
+                for coid in combo_card_oids:
+                    name_row = _cc.execute("SELECT name FROM cards WHERE oracle_id = ?", (coid,)).fetchone()
+                    if name_row:
+                        combo_names.add(name_row[0])
+                if combo_names.issubset(deck_cards):
+                    combo_protected.update(combo_names - {commander})
+        _cc.close()
+
+    # Classify every deck card and candidate by slot type
+    deck_slots = {name: _classify_card_slot(name, cards, deck_types=deck_types) for name in deck_cards}
+    cand_slots = {name: _classify_card_slot(name, cards, deck_types=deck_types) for name in cand_scores}
+
+    # Split into buckets: lands vs spells (protected cards excluded from cuts)
     cuttable = {"land": [], "spell": []}
     for card, info in deck_scores.items():
         slot = deck_slots.get(card, "spell")
         if card == commander or slot == "staple":
             continue
+        if card in commander_protected:
+            continue  # High commander synergy — don't cut
+        if card in combo_protected:
+            continue  # Part of a known combo — don't cut
         info["anti_synergy"] = card in anti_synergy_cards
         cuttable[slot].append((card, info))
 
@@ -3622,7 +3982,7 @@ def run():
         cards = get_cards_by_names(deck_names, DB_PATH)
         print(f"Loaded {len(cards)} deck cards from DB")
 
-        if args.recommend:
+        if args.recommend or args.swaps:
             # Find synergy candidates from DB (targeted + commander bridge expansion)
             commander_card = next((c for c in cards if c["name"] == deck.COMMANDER), None)
             candidates = find_synergy_candidates(cards, DB_PATH, commander=commander_card)
@@ -3766,8 +4126,10 @@ def run():
                 combos = find_combos(graph, cards, deck_set, deck.COMMANDER, args.top)
                 show_combos(combos, deck.COMMANDER, args.top)
         if args.swaps:
+            swap_deck_types = _detect_deck_types(cards, deck_set)
             swaps = suggest_swaps(graph, deck_set, deck.COMMANDER, cards, args.top,
-                                  active_strategies=active_strategies, db_path=db_path)
+                                  active_strategies=active_strategies, db_path=db_path,
+                                  deck_types=swap_deck_types)
             show_swaps(swaps, args.top)
         if args.recommend:
             # Auto-detect dominant creature types for tribal boost
