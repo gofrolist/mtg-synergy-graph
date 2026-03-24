@@ -147,3 +147,27 @@ def test_sorcery_speed_restriction():
 def test_empty_oracle_text():
     abilities = parse_card(oracle_text="", type_line="Land", mana_cost="")
     assert abilities == []
+
+
+def test_save_and_load_parsed_abilities(tmp_db):
+    """Parsed abilities round-trip through SQLite."""
+    from mtg_synergy.parse import parse_card, save_parsed, load_parsed, ensure_parse_schema
+    import sqlite3
+
+    conn = sqlite3.connect(tmp_db)
+    ensure_parse_schema(conn)
+
+    abilities = parse_card(
+        oracle_text="Whenever a creature enters the battlefield under your control, draw a card.",
+        type_line="Enchantment",
+        mana_cost="{2}{U}",
+    )
+
+    save_parsed(conn, "test-oracle-id", abilities)
+    loaded = load_parsed(conn, "test-oracle-id")
+
+    assert len(loaded) == len(abilities)
+    assert loaded[0].kind == "triggered"
+    assert loaded[0].trigger.event == "enters_the_battlefield"
+    assert loaded[0].effects[0].verb == "draw"
+    conn.close()

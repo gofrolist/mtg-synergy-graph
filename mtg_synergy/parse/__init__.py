@@ -61,6 +61,45 @@ def parse_card(oracle_text: str, type_line: str = "", mana_cost: str = "") -> li
     return abilities
 
 
+def ensure_parse_schema(conn):
+    """Create parsed_abilities table if not exists."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS parsed_abilities (
+            oracle_id      TEXT NOT NULL,
+            ability_index  INTEGER NOT NULL,
+            kind           TEXT NOT NULL,
+            ast_json       TEXT NOT NULL,
+            cost_json      TEXT NOT NULL DEFAULT '{}',
+            production_json TEXT NOT NULL DEFAULT '{}',
+            PRIMARY KEY (oracle_id, ability_index)
+        )
+    """)
+    conn.commit()
+
+
+def save_parsed(conn, oracle_id: str, abilities: list):
+    """Save parsed abilities to DB. Replaces existing entries for this oracle_id."""
+    import json as _json
+    conn.execute("DELETE FROM parsed_abilities WHERE oracle_id = ?", (oracle_id,))
+    for i, ability in enumerate(abilities):
+        d = ability.to_dict()
+        conn.execute(
+            "INSERT INTO parsed_abilities (oracle_id, ability_index, kind, ast_json) VALUES (?, ?, ?, ?)",
+            (oracle_id, i, ability.kind, _json.dumps(d)),
+        )
+    conn.commit()
+
+
+def load_parsed(conn, oracle_id: str) -> list:
+    """Load parsed abilities from DB."""
+    import json as _json
+    rows = conn.execute(
+        "SELECT ast_json FROM parsed_abilities WHERE oracle_id = ? ORDER BY ability_index",
+        (oracle_id,),
+    ).fetchall()
+    return [Ability.from_dict(_json.loads(row[0])) for row in rows]
+
+
 def _parse_restrictions(text: str) -> Restrictions | None:
     if not text:
         return None
