@@ -144,7 +144,8 @@ def compute_struct_features(cmdr_oid, card_oid, provides, wants, strats, types, 
 #   Commander embedding (768) → projection (768→128)
 #   Card embedding (768) → projection (768→128)
 #   Interaction: element-wise product (128) + structural features (12)
-#   MLP: 140 → 64 → 32 → 1
+#   MLP: 140 → 128 → 64 → 32 → 1
+#   Dropout: 0.1 (inverted, training only)
 #   Output: synergy score 1-10
 
 def relu(x):
@@ -161,16 +162,18 @@ def init_model():
         "W_card": np.random.randn(768, 128).astype(np.float32) * scale(768, 128),
         "b_card": np.zeros(128, dtype=np.float32),
         # MLP head (128 interaction + 12 structural = 140)
-        "W1": np.random.randn(140, 64).astype(np.float32) * scale(140, 64),
-        "b1": np.zeros(64, dtype=np.float32),
-        "W2": np.random.randn(64, 32).astype(np.float32) * scale(64, 32),
-        "b2": np.zeros(32, dtype=np.float32),
-        "W3": np.random.randn(32, 1).astype(np.float32) * scale(32, 1),
-        "b3": np.float32(5.0),  # Initialize to mean score
+        "W1": np.random.randn(140, 128).astype(np.float32) * scale(140, 128),
+        "b1": np.zeros(128, dtype=np.float32),
+        "W2": np.random.randn(128, 64).astype(np.float32) * scale(128, 64),
+        "b2": np.zeros(64, dtype=np.float32),
+        "W3": np.random.randn(64, 32).astype(np.float32) * scale(64, 32),
+        "b3": np.zeros(32, dtype=np.float32),
+        "W4": np.random.randn(32, 1).astype(np.float32) * scale(32, 1),
+        "b4": np.float32(5.0),  # Initialize to mean score
     }
 
 
-def forward(model, cmdr_emb, card_emb, struct_feat):
+def forward(model, cmdr_emb, card_emb, struct_feat, dropout_rate=0.0, training=False):
     """Forward pass. All inputs are batched (N, dim)."""
     # Project
     cmdr_proj = relu(cmdr_emb @ model["W_cmdr"] + model["b_cmdr"])  # (N, 128)
@@ -182,14 +185,24 @@ def forward(model, cmdr_emb, card_emb, struct_feat):
     # Concatenate with structural features
     combined = np.concatenate([interaction, struct_feat], axis=1)  # (N, 140)
 
-    # MLP
-    h1 = relu(combined @ model["W1"] + model["b1"])  # (N, 64)
-    h2 = relu(h1 @ model["W2"] + model["b2"])        # (N, 32)
-    out = (h2 @ model["W3"]).squeeze(-1) + model["b3"]  # (N,)
+    # MLP with optional dropout
+    h1 = relu(combined @ model["W1"] + model["b1"])  # (N, 128)
+    mask1 = None
+    if training and dropout_rate > 0:
+        mask1 = (np.random.rand(*h1.shape) > dropout_rate).astype(np.float32) / (1 - dropout_rate)
+        h1 = h1 * mask1
+    h2 = relu(h1 @ model["W2"] + model["b2"])        # (N, 64)
+    mask2 = None
+    if training and dropout_rate > 0:
+        mask2 = (np.random.rand(*h2.shape) > dropout_rate).astype(np.float32) / (1 - dropout_rate)
+        h2 = h2 * mask2
+    h3 = relu(h2 @ model["W3"] + model["b3"])        # (N, 32)
+    out = (h3 @ model["W4"]).squeeze(-1) + model["b4"]  # (N,)
 
     return out, {"cmdr_proj": cmdr_proj, "card_proj": card_proj,
                  "interaction": interaction, "combined": combined,
-                 "h1": h1, "h2": h2}
+                 "h1": h1, "h2": h2, "h3": h3,
+                 "mask1": mask1, "mask2": mask2}
 
 
 def train():
@@ -281,9 +294,11 @@ def train():
 
     lr = 0.001
     batch_size = 512
-    epochs = 100
+    epochs = 150
+    dropout_rate = 0.1
     best_corr = 0
     best_model = None
+    best_epoch = 0
 
     print(f"Training for {epochs} epochs...")
     t0 = time.time()
@@ -298,7 +313,8 @@ def train():
             batch = train_idx[perm[i:i + batch_size]]
 
             # Forward
-            pred, cache = forward(model, X_cmdr[batch], X_card[batch], X_struct[batch])
+            pred, cache = forward(model, X_cmdr[batch], X_card[batch], X_struct[batch],
+                                  dropout_rate=dropout_rate, training=True)
             pred_clipped = np.clip(pred, 1, 10)
 
             # Focal-style weighting: upweight rare high/low synergy scores
@@ -316,21 +332,31 @@ def train():
             # Backward
             N = len(batch)
             grad_out = 2 * sample_weights * error / N
-            mask = (pred >= 1) & (pred <= 10)
-            grad_out = grad_out * mask.astype(np.float32)
+            clip_mask = (pred >= 1) & (pred <= 10)
+            grad_out = grad_out * clip_mask.astype(np.float32)
 
-            # W3, b3
-            dW3 = cache["h2"].T @ grad_out[:, None]
-            db3 = np.float32(grad_out.sum())
+            # W4, b4
+            dW4 = cache["h3"].T @ grad_out[:, None]
+            db4 = np.float32(grad_out.sum())
 
-            # h2 → W2, b2
-            dh2 = grad_out[:, None] * model["W3"].T
+            # h3 → W3, b3
+            dh3 = grad_out[:, None] * model["W4"].T
+            dz3 = dh3 * (cache["h3"] > 0).astype(np.float32)
+            dW3 = cache["h2"].T @ dz3
+            db3 = dz3.sum(axis=0)
+
+            # h2 → W2, b2 (with dropout mask)
+            dh2 = dz3 @ model["W3"].T
+            if cache["mask2"] is not None:
+                dh2 = dh2 * cache["mask2"]
             dz2 = dh2 * (cache["h2"] > 0).astype(np.float32)
             dW2 = cache["h1"].T @ dz2
             db2 = dz2.sum(axis=0)
 
-            # h1 → W1, b1
+            # h1 → W1, b1 (with dropout mask)
             dh1 = dz2 @ model["W2"].T
+            if cache["mask1"] is not None:
+                dh1 = dh1 * cache["mask1"]
             dz1 = dh1 * (cache["h1"] > 0).astype(np.float32)
             dW1 = cache["combined"].T @ dz1
             db1 = dz1.sum(axis=0)
@@ -360,6 +386,7 @@ def train():
                 "W1": dW1, "b1": db1,
                 "W2": dW2, "b2": db2,
                 "W3": dW3, "b3": db3,
+                "W4": dW4, "b4": db4,
             }
             t_step = epoch * (len(train_idx) // batch_size) + i // batch_size + 1
             for key in model:
@@ -383,6 +410,11 @@ def train():
             if test_corr > best_corr:
                 best_corr = test_corr
                 best_model = {k: v.copy() for k, v in model.items()}
+                best_epoch = epoch
+            elif epoch - best_epoch >= 20 and lr > 0.0001:
+                lr *= 0.5
+                best_epoch = epoch  # Reset patience after LR reduction
+                print(f"    LR reduced to {lr}")
 
             print(f"  Epoch {epoch+1:>3}: loss={epoch_loss/n_batches:.3f} "
                   f"corr={test_corr:.3f} MAE={test_mae:.2f} sep={sep:.1f}")
