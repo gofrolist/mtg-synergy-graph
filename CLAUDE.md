@@ -64,6 +64,7 @@ python3 tag_db.py backfill && python3 tag_db.py fix-tribal && python3 tag_db.py 
 python3 ability_parser.py                  # Parse oracle text into abilities
 python3 fetch_spellbook.py                 # Fetch 82k combos
 python3 strategy_detector.py --populate    # Assign strategies
+python3 reclassify_tags.py                 # Re-map generic tags → sub-tags (run after tag import)
 
 # === NEW: Synergy scoring pipeline ===
 # Score a commander with OpenAI (best quality, ~$0.50/commander, ~2 min)
@@ -175,6 +176,19 @@ Each card is tagged with:
 
 Tribal tags (human-tribal, goblin-tribal, etc.) are auto-assigned from creature type_line.
 
+**Sub-tag vocabulary (6→20 split):** Six generic parent tags were replaced with 20 specific sub-tags via `reclassify_tags.py`. Parent tags no longer exist in the DB; sub-tags are canonical:
+
+| Old tag | Sub-tags |
+|---|---|
+| `creature-pump` | `pump-lord`, `anthem`, `pump-combat`, `pump-self` |
+| `creature-board` | `board-tokens`, `board-tribal`, `board-go-wide`, `board-generic` |
+| `creature-etb` | `etb-value`, `etb-search`, `etb-enter-trigger` |
+| `combat-events` | `combat-attack-trigger`, `combat-damage-trigger`, `combat-block-trigger` |
+| `token-generation` | `token-creature`, `token-noncreat` |
+| `evasion-grant` | `evasion-flying`, `evasion-trample`, `evasion-unblockable` |
+
+`board-generic` is excluded from tag-overlap tiebreaker calculations (too broad to be a meaningful signal).
+
 ### Mechanics Schema (card_mechanics table)
 
 Each card's abilities are extracted as structured JSON:
@@ -220,7 +234,8 @@ Two-tower neural network trained on LLM synergy scores:
 3. Inject mechanics≥1.5 candidates from card_mechanics
 4. Score candidates: tag graph × tribal × strategy × quality × CMC × popularity × affinity
 5. Apply mechanics boost: max(graph_score, mechanics_as_graph)
-6. Apply LLM/tower scoring: LLM_score × 1000 + tower_score × 10 + rank_tiebreak × 0.1
+6. Apply LLM/tower scoring: LLM_score × 1000 + overlap × 20 + tower_score × 10 + rank_tiebreak × 0.1
+   (overlap = count of shared sub-tags between card and commander pool; board-generic excluded)
 7. Unscored cards get tower model prediction or graph-only score
 8. Sort and output top 30
 ```
@@ -281,6 +296,7 @@ Suggests card swaps with multi-layer protection:
 | `strategy_detector.py` | Rule-based strategy detection |
 | `tag_db.py` | SQLite DB management |
 | `fetch_spellbook.py` | Commander Spellbook API fetcher |
+| `reclassify_tags.py` | Re-map generic provides/wants tags to specific sub-tags (~41k rows) |
 
 ## Key Conventions
 
@@ -296,3 +312,4 @@ Suggests card swaps with multi-layer protection:
 - Fine-tuning uses `.venv` with unsloth + torch (Python 3.12, not system Python 3.14)
 - Tests: 63 tests in `tests/`
 - Spellbook combo boosts must check color identity (fixed: 364 wrong-color boosts deleted)
+- Generic parent tags (`creature-pump`, `creature-board`, `creature-etb`, `combat-events`, `token-generation`, `evasion-grant`) no longer exist; sub-tags are the canonical vocabulary
