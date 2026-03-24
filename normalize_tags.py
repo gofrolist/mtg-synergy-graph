@@ -74,16 +74,26 @@ def normalize_wants(tags: list[str]) -> list[str]:
     return result
 
 
-def infer_wants(card: dict) -> list[str]:
-    """Infer missing wants from card properties.
+def infer_wants(provides: set, wants: set, card: dict | None = None) -> list[str]:
+    """Infer missing wants from card provides/wants sets and optional card properties.
+
+    Accepts provides and wants as sets directly (for testability), plus an
+    optional card dict for trigger/notes-based inference.
 
     Cards with triggered abilities benefit from trigger-doubling.
-    Cards that trigger on creature ETB should want creature-etb.
+    Cards that trigger on creature ETB should want etb-value or etb-tribal.
     Cards that trigger on creature death should want creature-death.
     """
     inferred = []
-    provides = set(card.get("provides", []))
-    wants = set(card.get("wants", []))
+
+    # Support legacy call style: infer_wants(card_dict) → extract sets from dict
+    if isinstance(provides, dict) and wants is None:
+        card = provides
+        provides = set(card.get("provides", []))
+        wants = set(card.get("wants", []))
+    elif card is None:
+        card = {}
+
     synergy_tags = set(card.get("synergy_tags", []))
     triggers = card.get("triggers", [])
     notes = card.get("notes", "").lower()
@@ -104,16 +114,26 @@ def infer_wants(card: dict) -> list[str]:
     if has_repeatable_triggers and "trigger-doubling" not in wants and "trigger-doubling" not in provides:
         inferred.append("trigger-doubling")
 
-    # Cards that care about creatures entering (ETB payoffs)
+    # Creature token producers trigger ETB effects (generic ETB value)
+    if "tokens-creature" in provides and "etb-value" not in wants:
+        inferred.append("etb-value")
+
+    # Tribal token producers trigger tribal ETB effects
+    if "tokens-tribal" in provides and "etb-tribal" not in wants:
+        inferred.append("etb-tribal")
+
+    # ETB payoff cards benefit from more ETB events (generic)
+    if "etb-payoff" in provides and "etb-value" not in wants:
+        inferred.append("etb-value")
+
+    # Remaining ETB signals from triggers/notes (use etb-value, not old creature-etb)
     etb_signals = [
-        "etb-payoff" in provides,
-        "token-generation" in provides,
         any("etb" in str(t.get("condition", "")).lower() for t in triggers),
         any("enters" in str(t.get("condition", "")).lower() for t in triggers),
         "creature enters" in notes or "enters the battlefield" in notes,
     ]
-    if any(etb_signals) and "creature-etb" not in wants:
-        inferred.append("creature-etb")
+    if any(etb_signals) and "etb-value" not in wants and "etb-tribal" not in wants:
+        inferred.append("etb-value")
 
     # Cards that care about creatures dying (death payoffs)
     death_signals = [
@@ -126,14 +146,17 @@ def infer_wants(card: dict) -> list[str]:
     if any(death_signals) and "creature-death" not in wants:
         inferred.append("creature-death")
 
-    # Cards that pump creatures want creature-board presence
-    pump_signals = [
-        "creature-pump" in provides,
-        "board-wide-counter-placement" in provides,
-        "counter-distribution" in provides,
-    ]
-    if any(pump_signals) and "creature-board" not in wants:
-        inferred.append("creature-board")
+    # Tribal lords (pump-lord) want a tribal board presence
+    if "pump-lord" in provides and "board-tribal" not in wants:
+        inferred.append("board-tribal")
+
+    # Anthem effects (pump-anthem) want a wide board
+    if "pump-anthem" in provides and "board-go-wide" not in wants:
+        inferred.append("board-go-wide")
+
+    # Counter distribution across the board wants a wide board
+    if "board-wide-counter-placement" in provides and "board-go-wide" not in wants:
+        inferred.append("board-go-wide")
 
     # Cards that grow from counters or care about counters want counter-placement-events
     counter_signals = [
@@ -154,8 +177,10 @@ def normalize_cards(cards: list[dict]) -> list[dict]:
         card["provides"] = normalize_provides(card.get("provides", []))
         card["wants"] = normalize_wants(card.get("wants", []))
         # Infer missing wants from card properties
-        inferred = infer_wants(card)
-        existing = set(card["wants"])
+        provides_set = set(card["provides"])
+        wants_set = set(card["wants"])
+        inferred = infer_wants(provides_set, wants_set, card)
+        existing = wants_set
         for tag in inferred:
             if tag not in existing:
                 card["wants"].append(tag)
