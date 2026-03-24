@@ -211,6 +211,7 @@ def call_api(system: str, user: str, api_key: str,
                     "model": model,
                     token_param: 16384,  # gpt-5.x uses reasoning tokens from this budget
                     "temperature": 0.2,
+                    "response_format": {"type": "json_object"},
                     "messages": [
                         {"role": "system", "content": system},
                         {"role": "user", "content": user},
@@ -330,7 +331,13 @@ def parse_response(raw: str, expected_count: int) -> list[dict] | None:
             return None
 
     if isinstance(result, dict):
-        result = [result]
+        # response_format=json_object may wrap array in {"cards": [...]} or {"results": [...]}
+        for key in ("cards", "results", "data", "scores"):
+            if key in result and isinstance(result[key], list):
+                result = result[key]
+                break
+        else:
+            result = [result]
 
     if len(result) != expected_count:
         print(f"  [WARN] Expected {expected_count} cards, got {len(result)}")
@@ -371,6 +378,7 @@ def _score_via_batch_api(commander: dict, batches: list, system_prompt: str,
                 "model": model,
                 token_param: 16384,  # gpt-5.x uses reasoning tokens from this budget
                 "temperature": 0.2,
+                "response_format": {"type": "json_object"},
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
