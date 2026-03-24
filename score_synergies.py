@@ -37,7 +37,8 @@ import urllib.request
 from pathlib import Path
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "tags.db")
-BATCH_SIZE = 150  # Cards per API call (~3k input + ~3k output tokens, safe within 4096 max_completion)
+BATCH_SIZE = 100  # Cards per API call. Float scoring produces ~30 tokens/card output,
+                   # 100 × 30 = 3000 tokens safely within 4096 max_completion_tokens.
 
 
 # ── Schema ──────────────────────────────────────────────────────────────────
