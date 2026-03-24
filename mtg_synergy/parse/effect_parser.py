@@ -117,6 +117,7 @@ def _parse_single_effect(text: str) -> Optional[Effect]:
         _try_gain_life,
         _try_lose_life,
         _try_sacrifice,
+        _try_discard,
         _try_search,
         _try_mill,
         _try_add_mana,
@@ -418,6 +419,14 @@ def _try_sacrifice(text: str) -> Optional[Effect]:
     elif "you" in pre:
         target = ObjectFilter(controller="you")
     return Effect(verb="sacrifice", target=target)
+
+
+def _try_discard(text: str) -> Optional[Effect]:
+    m = re.match(r'[Dd]iscard\s+(.+)', text, re.IGNORECASE)
+    if not m:
+        return None
+    amount = _parse_amount_prefix(m.group(1))
+    return Effect(verb="discard", amount=amount)
 
 
 def _try_search(text: str) -> Optional[Effect]:
