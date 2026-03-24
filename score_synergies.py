@@ -209,7 +209,7 @@ def call_api(system: str, user: str, api_key: str,
                 token_param = "max_completion_tokens" if "gpt-5" in model else "max_tokens"
                 payload = {
                     "model": model,
-                    token_param: 4096,
+                    token_param: 16384,  # gpt-5.x uses reasoning tokens from this budget
                     "temperature": 0.2,
                     "messages": [
                         {"role": "system", "content": system},
