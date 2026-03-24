@@ -48,3 +48,18 @@ unsloth_compiled_cache/
 # Commander Spellbook cache files
 data/commander_spellbook.json
 data/spellbook_unresolved.txt
+
+# Large generated/cached data
+data/card2vec_embeddings.npy
+data/card2vec_index.json
+data/tower_model.npz
+data/recommender_training.json
+data/recommender_weights.json
+data/edhrec_commanders/
+data/recommend_cache/
+data/retag_*.json
+data/spellbook_features.json
+data/spellbook_templates.json
+data/mtgjson_precons.json
+data/batch_*.jsonl
+data/*.backup*
