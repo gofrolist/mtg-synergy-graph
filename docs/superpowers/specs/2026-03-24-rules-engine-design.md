@@ -54,7 +54,16 @@ Raw oracle text
 class Trigger:
     event: str              # "enters_the_battlefield", "dies", "deals_damage", ...
     subject: ObjectFilter   # WHO/WHAT triggers it
-    condition: str | None   # "if you control 3+ creatures", parsed but not structured
+    condition: Condition | None   # structured when possible, raw string fallback
+
+@dataclass
+class Condition:
+    kind: str               # "count_threshold", "zone_check", "this_turn", "life_threshold", "raw"
+    what: str | None        # "creatures you control", "life total"
+    comparator: str | None  # ">=", "<=", "=="
+    value: int | None       # 3
+    raw: str | None         # unparsed fallback for complex conditions
+    restrictiveness: str    # "none", "mild", "severe" — used by chain finder to penalize/skip
 
 @dataclass
 class ObjectFilter:
@@ -108,13 +117,21 @@ class TokenDef:
 
 @dataclass
 class Ability:
-    kind: str               # "triggered", "activated", "static", "replacement", "keyword"
+    kind: str               # "triggered", "activated", "static", "replacement", "keyword", "trigger_modifier"
     trigger: Trigger | None
     cost: Cost | None
     effects: list[Effect]
     replacement_of: Effect | None   # what it replaces (for replacement effects)
     scope: ObjectFilter | None      # who it applies to (for static abilities)
     scaling: ScalesWith | None
+    restrictions: Restrictions | None
+
+@dataclass
+class Restrictions:
+    once_per_turn: bool     # "activate only once each turn"
+    sorcery_speed: bool     # "activate only as a sorcery"
+    once_per_game: bool     # "use this ability only once"
+    your_turn_only: bool    # "only during your turn"
 ```
 
 ### Pass 1-2: Split and Classify
@@ -247,10 +264,27 @@ class ReplacementRule:
 Examples:
 - **Hardened Scales**: replaces `put_counter` on creatures you control → quantity + 1
 - **Doubling Season**: replaces `put_counter` (yours) → quantity × 2; replaces `create` tokens (yours) → quantity × 2
-- **Panharmonicon**: replaces `enters_the_battlefield` trigger → fires twice
 - **Rest in Peace**: replaces `enters_graveyard` → `enters_exile` instead
 
-For graph building, replacement effects are stored as **amplifies** edges, not resolved in real-time.
+For graph building, replacement effects are stored as **amplifies** edges, not resolved in real-time. When multiple amplifiers apply to the same effect (e.g., Hardened Scales + Doubling Season on a counter placement), edges are independent and additive for scoring. The chain finder does NOT compute exact stacked replacement math — it flags that multiple amplifiers exist and reflects this in edge count.
+
+### Trigger Modifiers (distinct from replacement effects)
+
+Cards like Panharmonicon, Yarok, Teysa Karlov double triggers rather than replacing events. These are NOT replacement effects — they say "ability triggers an additional time" rather than "if X would happen, instead Y." The parser classifies these as `kind="trigger_modifier"`:
+
+```python
+# Panharmonicon: "If a permanent entering the battlefield causes a triggered
+# ability of a permanent you control to trigger, that ability triggers
+# an additional time."
+Ability(
+    kind="trigger_modifier",
+    scope=ObjectFilter(controller="you"),
+    trigger=Trigger(event="enters_the_battlefield"),
+    effects=[Effect(verb="double_trigger")]
+)
+```
+
+In the graph, trigger modifiers create `amplifies` edges to all cards that trigger on the modified event.
 
 ### Resource Tracking
 
@@ -258,9 +292,14 @@ Every ability's cost and production are resolved into:
 
 ```python
 @dataclass
+class ManaAmount:
+    total: int              # total mana value
+    colors: dict            # {"G": 1, "generic": 4} or {"any": 1} for "one mana of any color"
+    is_any_color: bool      # True for "add one mana of any color" (Phyrexian Altar, etc.)
+
+@dataclass
 class ResourceCost:
-    mana: int               # total mana value
-    colored_mana: dict      # {"G": 1} for Hardened Scales
+    mana: ManaAmount        # structured mana cost
     tap: bool
     sacrifice: ObjectFilter | None
     pay_life: int
@@ -270,11 +309,28 @@ class ResourceCost:
 
 @dataclass
 class ResourceProduction:
-    mana: int | Amount
+    mana: ManaAmount | Amount   # Amount when variable ("add X mana")
     tokens: Amount
     cards: Amount
     life: Amount
     untaps: Amount
+```
+
+### Variable Quantity Resolution in Loops
+
+Many productions are `Amount(value="X", scales_with=...)` — not fixed integers. The loop detector uses **symbolic comparison**, not exact arithmetic:
+
+- If production amount is variable and cost is fixed: check if `scales_with` guarantees growth. E.g., Krenko produces "X tokens where X = Goblins you control" and the loop adds Goblins each iteration → **exponential growth**, marked infinite.
+- If production ≥ cost symbolically (e.g., "produces N creatures, costs 1 creature, N ≥ 2 given any board state with 2+ Goblins"): mark as **"infinite given sufficient board state"** with a `min_board_requirement` field.
+- If production is truly unknown or conditional: mark as **"potential loop, unverified"** — flagged for manual review but not reported as confirmed infinite.
+
+```python
+@dataclass
+class LoopAnalysis:
+    is_infinite: str        # "confirmed", "conditional", "potential"
+    min_board_requirement: str | None   # "2+ Goblins on battlefield"
+    resource_deltas: dict   # per-resource net change per cycle
+    growth_pattern: str     # "exponential", "linear", "fixed"
 ```
 
 ### Trigger Matching
@@ -416,14 +472,13 @@ DFS from commander through `triggers`/`feeds` edges, up to depth 5. A chain is v
 
 ### Algorithm 2: Loop Detection
 
-DFS with back-edge detection. When a cycle is found, compute resource flow around the loop:
+DFS with back-edge detection. When a cycle is found, compute resource flow using `LoopAnalysis`:
 
-```
-For each step in cycle:
-    total_resources += step.production - step.cost
-
-If total_resources >= 0 for all resource types → infinite loop
-```
+- Fixed quantities: simple arithmetic (production - cost per cycle)
+- Variable quantities: symbolic comparison (see "Variable Quantity Resolution" above)
+- Abilities with `restrictions.once_per_turn=True`: immediately disqualify from infinite loops (can only fire once per turn, so the cycle cannot repeat unboundedly)
+- Abilities with `restrictions.sorcery_speed=True`: flag the loop as requiring main phase + empty stack
+- Conditions with `restrictiveness="severe"`: penalize loop confidence or mark as "potential"
 
 **Example — Krenko + Phyrexian Altar + Thornbite Staff:**
 
@@ -482,12 +537,14 @@ Cross-reference discovered loops against the 82k Commander Spellbook combos. Com
 
 ```
 score = LLM × 1000
-      + causal × 500          ← NEW
+      + causal × CAUSAL_WEIGHT   ← NEW (start at 50, tune upward after validation)
       + EDHREC_syn × 200
       + overlap × 20
       + tower × 10
       + rank × 0.1
 ```
+
+**Weight tuning protocol:** Start `CAUSAL_WEIGHT` at 50 (below EDHREC at 200). Run `compare_edhrec.py` across all 14 decks. Only promote the weight after confirming the causal signal does not regress the 14.9/30 EDHREC average. Target: increase to 200-500 only when the signal demonstrably improves alignment.
 
 Where `causal` combines:
 - Direct edges to/from commander (weighted by edge type: triggers=2.0, amplifies=1.8, feeds=1.5, enables=1.0)
@@ -551,10 +608,18 @@ python3 synergy_graph.py --deck krenko --recommend
 ### Migration Path
 
 1. Build `parse/` and `causal/` as new packages — zero changes to existing code
-2. Add `causal_score()` to `engine.py` behind `--use-causal` flag
-3. Run `compare_edhrec.py` with/without causal to measure improvement
-4. Once validated, make causal the default
-5. Delete `extract_mechanics.py`, `mechanics_matcher.py`, `card_mechanics` table
+2. **Parse coverage gate:** Run parser on top 5000 cards, measure coverage. Must reach ≥85% abilities parsed correctly before proceeding. If not, iterate parser until threshold met.
+3. **Transition period:** Keep LLM mechanics (`card_mechanics` table) for cards the deterministic parser cannot handle. Add `source` column ("deterministic" vs "llm") to distinguish. The causal graph uses deterministic data where available, falls back to LLM mechanics otherwise.
+4. Add `causal_score()` to `engine.py` behind `--use-causal` flag
+5. Run `compare_edhrec.py` with/without causal to measure improvement. Minimum bar: do not regress 14.9/30 average across 14 decks.
+6. Once validated AND deterministic coverage exceeds 95% of top 5000: make causal the default, delete LLM mechanics data
+
+### Known Limitations (explicitly out of scope)
+
+- **Split-second, "can't be countered"**: Not modeled. Relevant for competitive play but not for synergy/combo discovery.
+- **Stack interaction order (APNAP)**: Not simulated. The engine finds causal chains but does not verify optimal stack ordering.
+- **Layer system (timestamps, dependencies)**: Static ability interactions in the layer system are too complex for deterministic modeling. The engine treats static abilities as always-on within their scope.
+- **DFS depth limit of 5**: Some combos involve 5+ non-commander cards. Depth 5 from the commander covers up to 4-card combos where the commander participates, or 5-card combos where the commander is the root. Combos where the commander is not directly involved need all pieces within depth 5 of each other. Known limitation, acceptable as starting point.
 
 ---
 
@@ -565,8 +630,9 @@ python3 synergy_graph.py --deck krenko --recommend
 **Parser (`tests/test_oracle_parser.py`):** ~50 cards covering all ability types:
 - Triggered (Purphoros, Blood Artist, Rhystic Study, Syr Konrad)
 - Activated (Krenko, Phyrexian Altar, Birthing Pod, Necropotence)
-- Static (Hardened Scales, Doubling Season, Panharmonicon)
-- Replacement (Doubling Season, Anointed Procession, Rest in Peace)
+- Static (Hardened Scales, Doubling Season)
+- Replacement (Anointed Procession, Rest in Peace)
+- Trigger modifier (Panharmonicon, Yarok, Teysa Karlov)
 - Keywords with reminder text (discover, connive, amass)
 - Planeswalker (Jared Carthalion, Nissa)
 - Saga (Urza's Saga, The Eldest Reborn)
@@ -574,12 +640,16 @@ python3 synergy_graph.py --deck krenko --recommend
 - DFC (Delver of Secrets, Fable of the Mirror-Breaker)
 - Complex costs (K'rrik, Bolas's Citadel)
 - Scaling (Krenko=exponential, Purphoros=linear, Cathar's Crusade=linear)
+- Restrictions (once_per_turn, sorcery_speed abilities)
+- Conditions (count thresholds, "this turn" qualifiers)
 
 **Rules engine (`tests/test_rules_engine.py`):**
 - Verb resolvers produce correct StateChanges
 - Trigger matching with exact/broad/no-match filters
 - Zone-aware matching (dies vs exiled vs bounced)
 - Replacement effect interaction
+- Trigger modifiers (Panharmonicon creates amplifies edges, not trigger edges)
+- Mana color tracking (any-color vs colorless vs specific colors)
 
 **Graph builder (`tests/test_graph_builder.py`):**
 - Known synergistic pairs produce correct edge types
@@ -587,8 +657,11 @@ python3 synergy_graph.py --deck krenko --recommend
 
 **Chain finder (`tests/test_chain_finder.py`):**
 - Known combos are rediscovered (Krenko + Altar + Staff, Prossh + Food Chain, Niv-Mizzet + Curiosity)
-- Resource flow computed correctly
+- Resource flow computed correctly (fixed and variable quantities)
 - False combos (resource-negative cycles) rejected
+- "Once per turn" abilities do NOT form infinite loops
+- Conditional triggers with `restrictiveness="severe"` flagged as "potential" not "confirmed"
+- Mana color requirements validated (colored cost needs matching colored production)
 
 ### Integration Tests
 
