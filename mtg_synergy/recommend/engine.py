@@ -348,15 +348,18 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
         if commander_oid:
             # Tier 1: Direct LLM scores for this commander
             llm_scores = {}
+            llm_reasons = {}  # oid -> reasoning string
             has_table = _shared_conn.execute(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='synergy_scores'"
             ).fetchone()[0]
             if has_table:
                 for row in _shared_conn.execute(
-                    "SELECT card_oid, score FROM synergy_scores WHERE commander_oid = ?",
+                    "SELECT card_oid, score, reasoning FROM synergy_scores WHERE commander_oid = ?",
                     (commander_oid,)
                 ).fetchall():
                     llm_scores[row[0]] = row[1]
+                    if row[2]:
+                        llm_reasons[row[0]] = row[2]
 
             # Tier 2: Two-tower model (instant, for cards without LLM scores)
             model_scores = {}
@@ -489,6 +492,9 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                             info["cmdr_overlap"] = overlap
                         info["llm_score"] = score_val if llm is not None else round(ms, 1)
                         if llm is not None:
+                            reason = llm_reasons.get(oid)
+                            if reason:
+                                info["llm_reason"] = reason
                             llm_count += 1
                         else:
                             model_count += 1
@@ -557,7 +563,14 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
         pct = info["pct"]
         bar_len = round(pct / 5)
         bar = "█" * bar_len + "░" * (20 - bar_len)
-        print(f"\n  {pct:5.1f}% {bar} {card}{tribal}{combo}{strat_str}{affinity_str}{high_cmc}")
+        llm_score_str = f" LLM={info['llm_score']}" if info.get("llm_score") else ""
+        print(f"\n  {pct:5.1f}% {bar} {card}{tribal}{combo}{strat_str}{affinity_str}{llm_score_str}{high_cmc}")
+        reason = info.get("llm_reason")
+        if reason:
+            # Truncate long reasons
+            if len(reason) > 90:
+                reason = reason[:87] + "..."
+            print(f"    💡 {reason}")
         print(f"    {type_line} | CMC {cmc} | {len(partners)} partners{multi}")
         for partner, score, sigs in partners[:5]:
             sig = f"{sigs}sig" if sigs > 1 else "1sig"
