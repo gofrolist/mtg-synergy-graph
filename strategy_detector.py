@@ -20,7 +20,7 @@ EDHREC_PATH = os.path.join(DATA_DIR, "edhrec_theme_cards.json")
 # A card with any of these provides tags maps to the strategy.
 STRATEGY_RULES = [
     # Token strategies
-    ({"token-generation"}, "tokens", 1.0),
+    ({"tokens-creature", "tokens-tribal"}, "tokens", 1.0),
     ({"treasure-generation"}, "treasure", 1.0),
     ({"food-generation"}, "food", 0.8),
     ({"clue-generation"}, "clues", 0.8),
@@ -63,7 +63,7 @@ STRATEGY_RULES = [
     ({"extra-combat"}, "extra-combats", 1.0),
     ({"evasion"}, "voltron", 0.4),
     # creature-pump removed from voltron — too generic (goblin lords get voltron)
-    ({"trample-grant", "evasion-grant"}, "voltron", 0.5),
+    ({"trample-grant", "evasion-flying", "evasion-unblockable", "evasion-menace"}, "voltron", 0.5),
     ({"lifelink-grant"}, "voltron", 0.4),
 
     # Equipment
@@ -105,7 +105,7 @@ STRATEGY_RULES = [
     ({"wheel"}, "wheels", 1.0),
 
     # Go wide
-    ({"board-wide-creature-pump", "creature-pump"}, "go-wide", 0.7),
+    ({"board-wide-creature-pump", "pump-anthem", "pump-lord"}, "go-wide", 0.7),
 
     # Infect / poison
     ({"infect", "poison-counter-placement", "toxic-ability", "toxic-1", "toxic-deal"}, "infect", 0.9),
@@ -181,8 +181,8 @@ WANTS_STRATEGY_RULES = [
 
     # land-density→landfall removed — too generic (every deck wants lands, not just landfall)
 
-    # Proliferate: cards wanting counters
-    ({"counter-placement-events"}, "proliferate", 0.6),
+    # counter-placement-events → +1/+1-counters (NOT proliferate — wanting counters ≠ proliferating)
+    ({"counter-placement-events"}, "+1/+1-counters", 0.6),
 
     # Reanimator: cards wanting graveyard
     ({"graveyard-filling"}, "reanimator", 0.6),
@@ -293,7 +293,9 @@ def detect_strategies(oracle_id, db_path=None):
 # Only includes tags that are SPECIFIC to a strategy (not generic creature tags).
 ABILITY_STRATEGY_MAP = {
     # Effect tags → strategies
-    "token-generation": ("tokens", 0.9),
+    "tokens-creature": ("tokens", 0.9),
+    "tokens-tribal": ("tokens", 0.9),
+    "tokens-artifact": ("tokens", 0.6),
     "counter-placement": ("+1/+1-counters", 0.8),
     "life-gain": ("lifegain", 0.7),
     "life-drain": ("lifedrain", 0.7),

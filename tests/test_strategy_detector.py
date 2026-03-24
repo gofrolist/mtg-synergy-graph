@@ -15,7 +15,7 @@ def test_detect_commander_strategies(tmp_db):
                     'Whenever a Human enters the battlefield under your control, put a +1/+1 counter on Kyler.')""")
     conn.execute("INSERT INTO provides (oracle_id, tag) VALUES ('kyler', 'human-tribal')")
     conn.execute("INSERT INTO provides (oracle_id, tag) VALUES ('kyler', 'counter-placement')")
-    conn.execute("INSERT INTO wants (oracle_id, tag) VALUES ('kyler', 'creature-etb')")
+    conn.execute("INSERT INTO wants (oracle_id, tag) VALUES ('kyler', 'etb-value')")
     conn.commit()
     conn.close()
 
@@ -44,7 +44,7 @@ def test_populate_card_strategies(tmp_db):
     """Populate strategies for all cards in DB."""
     conn = sqlite3.connect(tmp_db)
     conn.execute("INSERT INTO cards (oracle_id, name) VALUES ('c1', 'Token Maker')")
-    conn.execute("INSERT INTO provides (oracle_id, tag) VALUES ('c1', 'token-generation')")
+    conn.execute("INSERT INTO provides (oracle_id, tag) VALUES ('c1', 'tokens-creature')")
     conn.execute("INSERT INTO cards (oracle_id, name) VALUES ('c2', 'Counter Placer')")
     conn.execute("INSERT INTO provides (oracle_id, tag) VALUES ('c2', 'counter-placement')")
     conn.commit()
