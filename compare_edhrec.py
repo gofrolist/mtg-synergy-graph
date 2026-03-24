@@ -110,7 +110,11 @@ def get_our_recommendations(deck_name: str, use_cache: bool = False) -> list[str
 
 
 def normalize(name: str) -> str:
-    return name.lower().strip()
+    """Normalize card name for comparison. Handles DFC cards (Front // Back → front)."""
+    name = name.lower().strip()
+    if " // " in name:
+        name = name.split(" // ")[0].strip()
+    return name
 
 
 def compare_deck(deck_name: str, use_cache: bool = False, verbose: bool = True) -> dict:
