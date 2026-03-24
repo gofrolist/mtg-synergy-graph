@@ -8,6 +8,9 @@ from mtg_synergy.config import DATA_DIR, RECOMMENDATION_WEIGHTS, MECHANICS
 from mtg_synergy.recommend.affinity import _compute_commander_affinity
 from mtg_synergy.combos.detector import find_partial_combos
 
+# Tags excluded from overlap tiebreaker (too common to be discriminative)
+OVERLAP_EXCLUDE = {"board-generic"}
+
 
 def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                     deck_types: set[str] = None, top_n: int = 20,
@@ -435,6 +438,9 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                     "SELECT tag FROM provides WHERE oracle_id = ?", (commander_oid,)))
                 cmdr_wants = set(r[0] for r in _shared_conn.execute(
                     "SELECT tag FROM wants WHERE oracle_id = ?", (commander_oid,)))
+                # Filter excluded tags once before the per-card loop (efficiency)
+                filtered_cmdr_provides = cmdr_provides - OVERLAP_EXCLUDE
+                filtered_cmdr_wants = cmdr_wants - OVERLAP_EXCLUDE
                 # Batch-load candidate tags
                 _all_cand_oids = [card_oid_lookup.get(cn, "") for cn in candidate_scores if card_oid_lookup.get(cn)]
                 _cand_provides = {}  # oid -> set of tags
@@ -456,7 +462,10 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                     cp = _cand_provides.get(oid, set())
                     cw = _cand_wants.get(oid, set())
                     # Card provides what commander wants + card wants what commander provides
-                    cmdr_tag_overlap[card_name] = len(cp & cmdr_wants) + len(cw & cmdr_provides)
+                    # (excluding generic tags that are too common to be discriminative)
+                    filtered_cp = cp - OVERLAP_EXCLUDE
+                    filtered_cw = cw - OVERLAP_EXCLUDE
+                    cmdr_tag_overlap[card_name] = len(filtered_cp & filtered_cmdr_wants) + len(filtered_cw & filtered_cmdr_provides)
 
             # Apply LLM/model scores.
             # LLM score is the PRIMARY ranking signal.
@@ -483,11 +492,8 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                         rank_tiebreak = max(0, 10.0 - 2.0 * math.log10(max(rank, 1)))
                         tower_score = model_scores.get(card_name, 5.0) if card_name in model_scores else 5.0
                         overlap = cmdr_tag_overlap.get(card_name, 0)
-                        # LLM primary (×1000), tower (×10), rank (×0.1)
-                        # Note: commander tag overlap computed above but not weighted in —
-                        # experiments showed it helps tribal decks but hurts others.
-                        # Stored in info for display: info["cmdr_overlap"]
-                        info["total"] = score_val * 1000.0 + tower_score * 10.0 + rank_tiebreak * 0.1
+                        # LLM primary (×1000), commander tag overlap (×20), tower (×10), rank (×0.1)
+                        info["total"] = score_val * 1000.0 + overlap * 20.0 + tower_score * 10.0 + rank_tiebreak * 0.1
                         if overlap > 0:
                             info["cmdr_overlap"] = overlap
                         info["llm_score"] = score_val if llm is not None else round(ms, 1)
