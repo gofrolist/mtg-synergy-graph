@@ -460,6 +460,8 @@ def main():
                         help="Show what would be processed without calling API")
     parser.add_argument("--test", type=int, default=0,
                         help="Test with N cards using regular API (not batch)")
+    parser.add_argument("--limit", type=int, default=0,
+                        help="Process only first N cards (by EDHREC rank)")
     parser.add_argument("--model", default="gpt-5.4-mini")
     parser.add_argument("--batch-size", type=int, default=50,
                         help="Cards per API request (default: 50)")
@@ -474,6 +476,9 @@ def main():
     mode = "mechanics-only" if args.mechanics_only else "combined"
     cards = get_target_cards(conn, mode, args.max_rank)
     conn.close()
+
+    if args.limit > 0:
+        cards = cards[:args.limit]
 
     # Cost estimate
     batches = (len(cards) + args.batch_size - 1) // args.batch_size
