@@ -7,6 +7,10 @@ from mtg_synergy.graph.idf import compute_idf
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
 
+# Wants tags that are always broadly inferred (not meaningful for peer detection).
+# Uses board-generic instead of removed parent tag creature-board.
+SKIP_WANTS = {"board-generic", "mana-needs"}
+
 
 def build_provides_wants_edges(cards: list[dict], deck_oids: set = None) -> list[dict]:
     """Build directed edges: card A provides X, card B wants X.
@@ -171,13 +175,12 @@ def build_shared_wants_edges(cards: list[dict], min_shared: int = 2) -> list[dic
 
     Cards wanting the same conditions naturally synergize — they benefit from
     the same board state and each card's presence makes the other better.
-    E.g., Aura Shards and Kyler both want creature-etb events.
+    E.g., Aura Shards and Kyler both want creature-enters events.
 
     Uses IDF-like weighting: common wants (shared by many cards) contribute
     less than rare wants. Only creates edges when total weight >= min_shared.
     """
-    # Skip wants that are always inferred (not meaningful for peer detection)
-    SKIP_WANTS = {"creature-board", "mana-needs"}
+    # Skip wants that are always broadly inferred (not meaningful for peer detection)
 
     wants_index = defaultdict(list)  # tag -> [(name, oid)]
     for card in cards:

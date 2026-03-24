@@ -5,6 +5,20 @@ import sqlite3
 from mtg_synergy.recommend.engine import _deck_card_scores, _candidate_scores
 from mtg_synergy.combos.detector import compute_strategy_relevance
 
+# Provides tags that indicate synergy value (okay to keep as "spell").
+# Uses sub-tags instead of parent tags (token-generation, creature-pump removed).
+SYNERGY_PROVIDES = {
+    "tokens-creature", "tokens-artifact", "tokens-tribal",
+    "pump-lord", "pump-anthem", "pump-combat", "pump-self",
+    "counter-placement", "board-wide-counter-placement",
+    "counter-amplification", "trigger-doubling",
+    "card-draw-payoff", "etb-payoff", "sacrifice-payoff", "goblin-tribal",
+    "combat-trigger",
+}
+
+# Alias used inside _classify_card_slot to keep the function readable
+_SYNERGY_PROVIDES = SYNERGY_PROVIDES
+
 
 def _classify_card_slot(name: str, cards: list[dict],
                         deck_types: set = None) -> str:
@@ -25,12 +39,7 @@ def _classify_card_slot(name: str, cards: list[dict],
     }
 
     # Provides tags that indicate synergy value (okay to keep as "spell")
-    SYNERGY_PROVIDES = {
-        "token-generation", "counter-placement", "board-wide-counter-placement",
-        "counter-amplification", "trigger-doubling", "creature-pump",
-        "card-draw-payoff", "etb-payoff", "sacrifice-payoff", "goblin-tribal",
-        "combat-trigger",
-    }
+    SYNERGY_PROVIDES = _SYNERGY_PROVIDES
 
     card_data = None
     for card in cards:
