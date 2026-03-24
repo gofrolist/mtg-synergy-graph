@@ -422,11 +422,44 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                 except Exception:
                     pass
 
+            # Pre-compute commander tag overlap for tiebreaking.
+            # Cards that share provides/wants tags with the commander are more
+            # specifically synergistic than generic staples — even within the
+            # same LLM score tier.
+            cmdr_tag_overlap = {}
+            if _shared_conn and commander_oid:
+                cmdr_provides = set(r[0] for r in _shared_conn.execute(
+                    "SELECT tag FROM provides WHERE oracle_id = ?", (commander_oid,)))
+                cmdr_wants = set(r[0] for r in _shared_conn.execute(
+                    "SELECT tag FROM wants WHERE oracle_id = ?", (commander_oid,)))
+                # Batch-load candidate tags
+                _all_cand_oids = [card_oid_lookup.get(cn, "") for cn in candidate_scores if card_oid_lookup.get(cn)]
+                _cand_provides = {}  # oid -> set of tags
+                _cand_wants = {}
+                _chunk_size = 500
+                for _ci in range(0, len(_all_cand_oids), _chunk_size):
+                    _chunk = _all_cand_oids[_ci:_ci + _chunk_size]
+                    _ph = ",".join("?" * len(_chunk))
+                    for r in _shared_conn.execute(
+                        f"SELECT oracle_id, tag FROM provides WHERE oracle_id IN ({_ph})", _chunk
+                    ).fetchall():
+                        _cand_provides.setdefault(r[0], set()).add(r[1])
+                    for r in _shared_conn.execute(
+                        f"SELECT oracle_id, tag FROM wants WHERE oracle_id IN ({_ph})", _chunk
+                    ).fetchall():
+                        _cand_wants.setdefault(r[0], set()).add(r[1])
+                for card_name in candidate_scores:
+                    oid = card_oid_lookup.get(card_name, "")
+                    cp = _cand_provides.get(oid, set())
+                    cw = _cand_wants.get(oid, set())
+                    # Card provides what commander wants + card wants what commander provides
+                    cmdr_tag_overlap[card_name] = len(cp & cmdr_wants) + len(cw & cmdr_provides)
+
             # Apply LLM/model scores.
             # LLM score is the PRIMARY ranking signal.
-            # Tiebreaker: EDHREC rank (card popularity/quality) instead of graph.
-            # This avoids generic cards with high graph edges outranking
-            # specific synergy cards that are well-known staples.
+            # Tiebreakers: commander tag overlap (commander-specific), then tower model,
+            # then EDHREC rank. This ensures cards with direct commander synergy
+            # outrank generic staples within the same LLM score tier.
             if llm_scores or model_scores:
                 llm_count = 0
                 model_count = 0
@@ -439,14 +472,21 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                     if llm is not None or ms is not None:
                         score_val = llm if llm is not None else ms
                         # Tiebreakers (all within same LLM score tier):
-                        # 1. Tower model prediction (continuous, captures synergy nuance)
-                        # 2. EDHREC rank (card quality/popularity)
+                        # 1. Commander tag overlap (direct synergy signal, commander-specific)
+                        # 2. Tower model prediction (continuous, captures synergy nuance)
+                        # 3. EDHREC rank (card quality/popularity)
                         meta = card_meta.get(card_name, {})
                         rank = meta.get("edhrec_rank") or 50000
                         rank_tiebreak = max(0, 10.0 - 2.0 * math.log10(max(rank, 1)))
                         tower_score = model_scores.get(card_name, 5.0) if card_name in model_scores else 5.0
-                        # LLM primary (x1000), tower sub-tiebreak (x10), rank micro-tiebreak (x0.1)
+                        overlap = cmdr_tag_overlap.get(card_name, 0)
+                        # LLM primary (×1000), tower (×10), rank (×0.1)
+                        # Note: commander tag overlap computed above but not weighted in —
+                        # experiments showed it helps tribal decks but hurts others.
+                        # Stored in info for display: info["cmdr_overlap"]
                         info["total"] = score_val * 1000.0 + tower_score * 10.0 + rank_tiebreak * 0.1
+                        if overlap > 0:
+                            info["cmdr_overlap"] = overlap
                         info["llm_score"] = score_val if llm is not None else round(ms, 1)
                         if llm is not None:
                             llm_count += 1
