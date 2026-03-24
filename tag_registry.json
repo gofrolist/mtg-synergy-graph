@@ -50,6 +50,142 @@
       "amplifies": [],
       "requires": []
     },
+    "artifact-presence": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "artifact-availability",
+        "artifact-cards-in-library",
+        "artifact-control",
+        "artifact-count",
+        "artifact-creature-support",
+        "artifact-creatures",
+        "artifact-death",
+        "artifact-enchantment-board",
+        "artifact-enchantment-control",
+        "artifact-enchantment-deck-concentration",
+        "artifact-enchantment-targets",
+        "artifact-enters-exits",
+        "artifact-graveyard",
+        "artifact-placement-events",
+        "artifact-synergy",
+        "artifact-targeting",
+        "artifact-targets",
+        "artifact-token-generation",
+        "artifacts-and-enchantments",
+        "imprinted-card"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "attack-events": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "attack-trigger",
+        "attack-trigger-events",
+        "attack-with-higher-power",
+        "attacking-creatures",
+        "attacking-creatures-with-lesser-power",
+        "attacking-with-creatures",
+        "combat-creatures",
+        "creature-attack-event",
+        "creature-attack-events",
+        "creature-attack-triggers",
+        "creature-attackers",
+        "creature-attacks",
+        "creature-hasters",
+        "haste-activation",
+        "haste-needing-creatures",
+        "modified-creature-attacks",
+        "multi-creature-attack",
+        "non-Gnome-attacks",
+        "single-attack-event",
+        "solo-attack-events",
+        "token-combat-damage"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "blink": {
+      "kind": "provides",
+      "definition": "Exiles and returns permanents (blink/flicker effects).",
+      "aliases": [
+        "flicker",
+        "blink-effect",
+        "exile-return",
+        "permanent-blink"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "board-generic": {
+      "kind": "wants",
+      "definition": "Needs creatures on board but not count/type dependent",
+      "aliases": [
+        "creature-presence",
+        "creature-heavy decks",
+        "creature-heavy-decks",
+        "creature-heavy strategies",
+        "creature-heavy-board",
+        "creature-control",
+        "creatures",
+        "creature-synergies",
+        "creature-synergy",
+        "creature-based strategies",
+        "creature-based-strategies",
+        "board-control",
+        "board states with valuable permanents",
+        "board-wipe-environments",
+        "colorless-creature-presence",
+        "colorless-permanent-presence",
+        "convoked-creatures",
+        "creature-deck-concentration",
+        "creature-library-density",
+        "guardian-creature",
+        "heavy-creature-meta",
+        "mass removal evasion",
+        "mounts-and-vehicles",
+        "non-human-creatures",
+        "non-human-threats",
+        "non-token-creature-battlefield",
+        "nonland-permanent-control",
+        "nonlegendary-creatures",
+        "opponents with many creatures",
+        "political-decks",
+        "reactionary-playstyles",
+        "red-creature-control",
+        "teammates/pairs-synergy",
+        "threatened-board",
+        "toolbox-decks",
+        "wide-creature-base",
+        "creature-heavy deck"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "board-go-wide": {
+      "kind": "wants",
+      "definition": "Payoff for having many creatures (count matters)",
+      "aliases": [
+        "wide-board",
+        "wide-board strategies",
+        "wide-board-strategies",
+        "creature-swarm",
+        "creature-population",
+        "creature-count",
+        "creature-multiplication",
+        "creature-count-disparity",
+        "creature-dominance"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
     "board-pressure": {
       "kind": "provides",
       "definition": "",
@@ -72,6 +208,37 @@
       "amplifies": [],
       "requires": []
     },
+    "board-threats": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "board-clearing-opportunities",
+        "board-pressure",
+        "threats"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "board-tokens": {
+      "kind": "wants",
+      "definition": "Payoff for having token creatures specifically",
+      "aliases": [],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "board-tribal": {
+      "kind": "wants",
+      "definition": "Payoff for having creatures of a specific type on board",
+      "aliases": [
+        "creature-type-selection",
+        "creature-diversity"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
     "board-wide-counter-placement": {
       "kind": "provides",
       "definition": "",
@@ -84,6 +251,18 @@
       ],
       "inherits": [],
       "amplifies": [],
+      "requires": []
+    },
+    "board-wide-counter-placer": {
+      "kind": "synergy",
+      "definition": "Card puts +1/+1 counters on ALL or EACH creature you control simultaneously. Distinct from single-target-counter-placer. Key synergy target for counter-doublers.",
+      "aliases": [],
+      "inherits": [
+        "counter-placer"
+      ],
+      "amplifies": [
+        "counter-doubler"
+      ],
       "requires": []
     },
     "board-wipe": {
@@ -102,6 +281,18 @@
       ],
       "inherits": [],
       "amplifies": [],
+      "requires": []
+    },
+    "can-become-chosen-type": {
+      "kind": "synergy",
+      "definition": "Card changes its own creature type based on a choice made on ETB ('this creature is the chosen type in addition to its other types'). Critical for tribal decks — means the card itself benefits from and contributes to tribal synergies.",
+      "aliases": [],
+      "inherits": [
+        "tribal-enabler"
+      ],
+      "amplifies": [
+        "triggered-ability-doubler"
+      ],
       "requires": []
     },
     "card-discard": {
@@ -162,6 +353,128 @@
       "amplifies": [],
       "requires": []
     },
+    "card-draw-events": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "card-access-synergy",
+        "card-draw",
+        "card-draw-activation",
+        "card-draw-boost",
+        "card-draw-engine",
+        "card-draw-opportunities",
+        "card-draw-support",
+        "card-draw-synergy",
+        "card-selection",
+        "deck-manipulation",
+        "drawing-second-card",
+        "hand-advantage",
+        "hand-reset",
+        "hand-swap",
+        "library-manipulation",
+        "monarch-status",
+        "scry-events",
+        "top-deck-creature-type",
+        "top-of-library-access"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "card-draw-payoff": {
+      "kind": "provides",
+      "definition": "Card benefits from or triggers when cards are drawn (by any player).",
+      "aliases": [
+        "draw-payoff",
+        "draw-trigger",
+        "opponent-card-draw-payoff"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "colorless-ramp": {
+      "kind": "synergy",
+      "definition": "Produces colorless mana ({C}). Useful in any deck regardless of color identity.",
+      "aliases": [],
+      "inherits": [
+        "ramp"
+      ],
+      "amplifies": [],
+      "requires": []
+    },
+    "combat-attack": {
+      "kind": "wants",
+      "definition": "Triggers on attacking or beginning of combat",
+      "aliases": [
+        "combat-attacks",
+        "combat-initiation",
+        "combat-start",
+        "combat-start-events",
+        "combat-start-trigger",
+        "combat-phase",
+        "combat-phase-activation",
+        "combat-phase-exploiters",
+        "combat-readiness",
+        "combat-activation",
+        "combat-advantage",
+        "combat-focused-decks",
+        "combat synergies",
+        "combat-antagonists",
+        "combat-trigger",
+        "combat-trigger-events",
+        "creature-combat"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "combat-block": {
+      "kind": "wants",
+      "definition": "Triggers on blocking or cares about being blocked",
+      "aliases": [
+        "blocking-creatures",
+        "creature-block-events",
+        "creature-blocking",
+        "creature-blocks",
+        "combat-protection",
+        "combat-control",
+        "first-strike",
+        "regeneration-need",
+        "regeneration-utility"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "combat-damage": {
+      "kind": "wants",
+      "definition": "Triggers on dealing combat damage",
+      "aliases": [
+        "combat-damage-deal",
+        "combat-damage-dealt",
+        "combat-damage-events",
+        "combat-damage-occurrence",
+        "combat-damage-sources",
+        "creature-combat-damage",
+        "creature-damage",
+        "creature-damage-events",
+        "damage-dealing",
+        "damage-dealing-events",
+        "damage-dealing-trigger",
+        "damage-dealt",
+        "damage-dealt-events",
+        "damage-events",
+        "direct-damage-targets",
+        "excess-damage",
+        "excess-damage-events",
+        "opponent-damage",
+        "opponent-life-loss"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
     "combat-enabler": {
       "kind": "provides",
       "definition": "⚠ AUTO-DISCOVERED — add definition manually",
@@ -215,6 +528,24 @@
       "amplifies": [],
       "requires": []
     },
+    "commander-presence": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "commander-board",
+        "commander-casts",
+        "commander-control",
+        "commander-creatures",
+        "commander-deck",
+        "commander-focused strategies",
+        "commander-in-play",
+        "commander-zone",
+        "partner-placement"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
     "cost-reduction": {
       "kind": "provides",
       "definition": "",
@@ -252,12 +583,46 @@
       "amplifies": [],
       "requires": []
     },
+    "counter-amplifier": {
+      "kind": "synergy",
+      "definition": "General tag for cards that make counter placement produce more counters. Superset of counter-doubler.",
+      "aliases": [],
+      "inherits": [],
+      "amplifies": [
+        "counter-placement-events"
+      ],
+      "requires": []
+    },
+    "counter-consolidator": {
+      "kind": "synergy",
+      "definition": "Card moves ALL counters from one permanent to another (not partial). Creates high-value single threat from distributed counters.",
+      "aliases": [],
+      "inherits": [
+        "counter-mover"
+      ],
+      "amplifies": [],
+      "requires": [
+        "counter-placement-events"
+      ]
+    },
     "counter-distribution": {
       "kind": "provides",
       "definition": "Card distributes counters across multiple creatures simultaneously (board-wide placement, not single target).",
       "aliases": [],
       "inherits": [],
       "amplifies": [],
+      "requires": []
+    },
+    "counter-doubler": {
+      "kind": "synergy",
+      "definition": "Card applies a replacement effect that increases the number of +1/+1 counters placed (e.g. 'that many plus one', 'twice that many'). Always passive-permanent.",
+      "aliases": [],
+      "inherits": [
+        "counter-amplifier"
+      ],
+      "amplifies": [
+        "counter-placement-events"
+      ],
       "requires": []
     },
     "counter-mover": {
@@ -340,66 +705,120 @@
       "amplifies": [],
       "requires": []
     },
-    "creature-pump": {
-      "kind": "provides",
+    "counter-placement-events": {
+      "kind": "wants",
+      "definition": "Abstract: represents the event of counters being placed — used in requires/amplifies",
+      "aliases": [
+        "+1/+1 counter synergies",
+        "+1/+1 counter synergy",
+        "age-counter-accumulation",
+        "cards that grant +1/+1 counters",
+        "charge-placement-events",
+        "counter strategies",
+        "counter-distribution",
+        "counter-heavy-decks",
+        "counter-ownership",
+        "counter-payoff",
+        "counter-placement",
+        "counter-placement-targets",
+        "counter-removal",
+        "counter-strategies",
+        "counter-synergy",
+        "counter-targeting",
+        "counters on creatures",
+        "creature-base-with-counters",
+        "creature-counter-placement",
+        "creature-counters",
+        "creature-with-counters",
+        "creature-without-counters",
+        "creatures-with-counters",
+        "flying-counter-placement",
+        "lore-counter-placement",
+        "monstrosity-support",
+        "outlast-activation",
+        "renown-trigger",
+        "study-counter-placement",
+        "support-placement-events",
+        "unleash-activation"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "counter-placer": {
+      "kind": "synergy",
+      "definition": "Abstract parent: any card that places counters (board-wide or targeted)",
+      "aliases": [],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "creature-death": {
+      "kind": "wants",
       "definition": "",
       "aliases": [
-        "ability-granting",
-        "ally-triggered-pump",
-        "anthem-effect-for-humans",
-        "attacking-creatures-buff",
-        "board-wide-buff",
-        "colorless-creature-strengthening",
-        "combat-power-boost",
-        "combat-pump",
-        "combat-strength",
-        "combat-strength-amplification",
-        "combat-strength-boost",
-        "creature-boost",
-        "creature-buff",
-        "creature-improvement",
+        "creature-death-events",
+        "creature-death-trigger",
+        "creature-leaves",
+        "creature-leaves-battlefield",
+        "permanent-leaving-the-battlefield"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "creature-power": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "CMC 1 or less creatures",
+        "big-creature-strategies",
+        "creature-power-2-or-less",
         "creature-power-boost",
-        "creature-power-increase",
-        "creature-power-toughness-boost",
-        "creature-support",
-        "creature-type-boost",
-        "creature-type-buff",
-        "discard-triggered-pump",
-        "disguise",
-        "equipment-consolidation",
-        "equipment-reconfigure",
-        "heroic-trigger",
-        "human-pump",
-        "keyword-distribution",
-        "manifestation",
-        "power scaling",
-        "power-amplification",
-        "power-boost",
-        "power-increment",
-        "power-scaling",
-        "power-toughness-boost",
-        "power-toughness-increase",
-        "power-toughness-increment",
-        "power-toughness-mimic",
-        "power-toughness-modifier",
-        "power-toughness-scaling",
-        "prowess-trigger",
-        "pump",
-        "pump-effect",
-        "pump-spell",
-        "self-buff",
-        "self-growth",
-        "self-pump",
-        "surrak and goreclaw",
-        "tapped-creature-count",
-        "tapped-creatures-buff",
-        "team boost",
-        "temporary-power-boost",
-        "temporary-power-increase",
-        "temporary-pump",
-        "tribal-boost",
-        "untapped-creatures-buff",
-        "vampire-pump"
+        "creature-power-comparison",
+        "creature-power-diversity",
+        "creature-power-maximization",
+        "creature-varied-power",
+        "creature-with-mana-value-1-or-less",
+        "creature-with-toughness-2-or-less",
+        "creatures with toughness 2 or less",
+        "creatures-with-power-4-or-greater",
+        "high power creatures",
+        "high-power creatures",
+        "high-power-creature-presence",
+        "high-power-creatures",
+        "low-cost-creatures",
+        "low-mana creatures",
+        "low-mana-value-creatures",
+        "low-power-creature-placement",
+        "low-power-creatures",
+        "low-toughness-creatures",
+        "power-3-or-greater creatures",
+        "power-4-creature-entries",
+        "power-4-creatures",
+        "power-comparison"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "creature-targeting": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "creature-target",
+        "creature-targets",
+        "exile-targets",
+        "heroic-targets",
+        "nonland-permanent-targets",
+        "permanent-targets",
+        "protection from targeted removal",
+        "self-targeting-spells",
+        "target-creature",
+        "target-creatures",
+        "target-permanent",
+        "targeted-removal-threats",
+        "targeting-self"
       ],
       "inherits": [],
       "amplifies": [],
@@ -414,6 +833,71 @@
         "creature-type-filtering",
         "flexible-type-identity",
         "transform-ability"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "creature-type-selection": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "angel-tribal",
+        "card-type-sharing",
+        "chimera-creature",
+        "chimera-creatures",
+        "cleric-creature-board",
+        "color-choice",
+        "color-selection",
+        "creature-specialization",
+        "creature-type-casting",
+        "creature-type-choice",
+        "creature-type-control",
+        "creature-type-diversity",
+        "creature-type-dominance",
+        "creature-type-draw",
+        "creature-type-fixing",
+        "creature-type-focus",
+        "creature-type-matching",
+        "creature-type-placement",
+        "creature-type-presence",
+        "creature-type-sharing",
+        "creature-type-trigger-events",
+        "creatures-of-chosen-type",
+        "demon-tribal",
+        "dragon-card-reveal",
+        "dragon-creature-board",
+        "dragon-creature-presence",
+        "frogs-rabbits-raccoons-squirrels",
+        "full-party",
+        "insect-attacks",
+        "menace-creatures",
+        "merfolk-creatures",
+        "ninja-rogue-combat-damage",
+        "other-spiders",
+        "phyrexian-creature-board",
+        "pirate-attacks",
+        "pirate-creatures",
+        "roaming throne",
+        "samurai-attack",
+        "shadow-creatures",
+        "shaman-creatures",
+        "shaman-or-wizard-trigger",
+        "soldier-creature-presence",
+        "soldier-creatures",
+        "spider-tribal",
+        "thrull-creatures",
+        "tribal decks",
+        "tribal strategies",
+        "tribal-creatures",
+        "tribal-deck-building",
+        "tribal-synergy",
+        "tyranid-creatures",
+        "vampire-attack",
+        "vampire-casting",
+        "zombie-combat-damage",
+        "zombie-creatures",
+        "zombie-graveyard"
       ],
       "inherits": [],
       "amplifies": [],
@@ -486,6 +970,84 @@
       "amplifies": [],
       "requires": []
     },
+    "discard-events": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "card-discard",
+        "card-discard-events",
+        "discard-availability",
+        "hand-sacrifice",
+        "nonland-discard"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "enchantment-presence": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "enchantment-control",
+        "enchantment-enters",
+        "enchantment-entry",
+        "enchantment-graveyard-placement",
+        "enchantment-placement",
+        "enchantment-placement-events",
+        "enchantment-targeting",
+        "enchantment-targets"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "end-step-events": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "end-step-trigger"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "equipment-presence": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "equipment-attachment",
+        "equipment-placement",
+        "equipment-synergy",
+        "equipment-targets",
+        "equipped-creature",
+        "equipped-creature-attacks",
+        "equipped-creature-combat-damage",
+        "equipped-creature-death",
+        "permanents-attached"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "etb-counter": {
+      "kind": "synergy",
+      "definition": "Card gains a +1/+1 counter when a creature enters the battlefield (its own ETB or others'). Scales with creature density.",
+      "aliases": [],
+      "inherits": [
+        "counter-payoff",
+        "etb-trigger"
+      ],
+      "amplifies": [],
+      "requires": []
+    },
+    "etb-counter-burst": {
+      "kind": "synergy",
+      "definition": "⚠ AUTO-DISCOVERED — add definition manually",
+      "aliases": [],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
     "etb-payoff": {
       "kind": "provides",
       "definition": "",
@@ -510,29 +1072,132 @@
       "amplifies": [],
       "requires": []
     },
-    "evasion-grant": {
-      "kind": "provides",
-      "definition": "",
+    "etb-tokens": {
+      "kind": "wants",
+      "definition": "Triggers on creature entry to make tokens or deal damage",
       "aliases": [
-        "blockage-prevention",
-        "creature-block-prevention",
-        "evasion-for-countered-creatures",
-        "fear",
+        "nonland-permanent-entry",
+        "creature-placement-events",
+        "land-or-bird-enters"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "etb-tribal": {
+      "kind": "wants",
+      "definition": "Triggers on specific creature type entering",
+      "aliases": [
+        "ally-enters",
+        "ally-entry-events",
+        "artifact-creature-entry",
+        "board-wide-human-placement",
+        "human-enter-events",
+        "family-creature-placement",
+        "green-creature-entries"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "etb-trigger": {
+      "kind": "synergy",
+      "definition": "Abstract parent: any card with an enters-the-battlefield trigger",
+      "aliases": [],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "etb-value": {
+      "kind": "wants",
+      "definition": "Triggers on any creature entering for value (draw, removal, ramp)",
+      "aliases": [
+        "creature-enters",
+        "creature-enters-battlefield",
+        "creature-enters-board",
+        "creature-etb-events",
+        "creature-etb-trigger",
+        "creature-etb-triggers",
+        "enter-the-battlefield-trigger",
+        "creature-entries",
+        "creature-entry",
+        "creature-entry-events",
+        "creature-entry-trigger",
+        "creature-placement",
+        "nontoken-creature-enter",
+        "nontoken-creature-entry",
+        "offspring-placement"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "evasion-flying": {
+      "kind": "provides",
+      "definition": "Grants or has flying",
+      "aliases": [
         "flying",
         "flying option",
         "flying-granter",
+        "temporary-flying"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "evasion-granter": {
+      "kind": "synergy",
+      "definition": "Card makes creatures harder or impossible to block. In counter strategies, unblockable = winning with big creatures.",
+      "aliases": [],
+      "inherits": [
+        "combat-enabler"
+      ],
+      "amplifies": [
+        "counter-payoff"
+      ],
+      "requires": []
+    },
+    "evasion-menace": {
+      "kind": "provides",
+      "definition": "Grants menace, fear, intimidate, or similar partial evasion",
+      "aliases": [
         "menace",
         "menace-granter",
+        "fear",
         "mountainwalk-grant",
-        "power-based evasion",
-        "temporary-flying",
+        "evasion-for-countered-creatures"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "evasion-unblockable": {
+      "kind": "provides",
+      "definition": "Makes creatures unblockable",
+      "aliases": [
         "unblockable",
-        "unblockable by weaker creatures",
-        "unblockable-against-1-power",
         "unblockable-attack",
         "unblockable-creature",
         "unblockable-granter",
+        "blockage-prevention",
+        "creature-block-prevention",
+        "power-based evasion",
+        "unblockable by weaker creatures",
+        "unblockable-against-1-power",
         "unblockable-instants-sorceries"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "flash-grant": {
+      "kind": "provides",
+      "definition": "Gives flash or instant-speed casting to other spells/permanents.",
+      "aliases": [
+        "flash-instant-speed",
+        "flash-enabler",
+        "flash-granting",
+        "instant-speed-casting"
       ],
       "inherits": [],
       "amplifies": [],
@@ -562,6 +1227,47 @@
         "high-power-goblin-attacks",
         "library-goblin-density",
         "top-of-library-goblin"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "graveyard-casting": {
+      "kind": "provides",
+      "definition": "Casts spells from graveyard or gives flashback.",
+      "aliases": [
+        "flashback",
+        "cast-from-graveyard",
+        "graveyard-spell-casting",
+        "spell-recursion"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "graveyard-filling": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "creature-card-graveyard",
+        "creature-graveyard",
+        "creature-return",
+        "delirium",
+        "flashback",
+        "graveyard-access",
+        "graveyard-creatures",
+        "graveyard-exile",
+        "graveyard-instant-sorcery",
+        "graveyard-manipulation",
+        "graveyard-placement-events",
+        "graveyard-presence",
+        "graveyard-synergies",
+        "graveyard-targeting",
+        "graveyard-targets",
+        "graveyard-usage",
+        "graveyard-utility",
+        "graveyard-utilization",
+        "library-graveyard-access"
       ],
       "inherits": [],
       "amplifies": [],
@@ -640,6 +1346,19 @@
       "amplifies": [],
       "requires": []
     },
+    "human-etb-payoff": {
+      "kind": "synergy",
+      "definition": "Card triggers or gains value specifically when a Human enters the battlefield. More specific than etb-trigger — only fires on Human ETBs.",
+      "aliases": [],
+      "inherits": [
+        "etb-trigger",
+        "tribal-payoff"
+      ],
+      "amplifies": [],
+      "requires": [
+        "human-tribal"
+      ]
+    },
     "human-tribal": {
       "kind": "both",
       "definition": "Card is a Human, produces Humans, or provides Human-specific synergy. Also: card wants Humans around to be effective.",
@@ -676,11 +1395,73 @@
       "amplifies": [],
       "requires": []
     },
+    "instant-speed": {
+      "kind": "synergy",
+      "definition": "⚠ AUTO-DISCOVERED — add definition manually",
+      "aliases": [],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "land": {
+      "kind": "synergy",
+      "definition": "Abstract parent: land cards",
+      "aliases": [],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
     "land-animation": {
       "kind": "provides",
       "definition": "",
       "aliases": [
         "land-creature-transformation"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "land-density": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "basic-forest-or-plains",
+        "basic-land-control",
+        "basic-land-density",
+        "basic-land-library",
+        "basic-land-search",
+        "basic-land-types",
+        "basic-lands",
+        "basic-mountain",
+        "fetchable-land",
+        "forest-control",
+        "forest-dual-lands",
+        "land-activation",
+        "land-combo",
+        "land-control",
+        "land-count",
+        "land-creature-presence",
+        "land-dominance",
+        "land-entries",
+        "land-mass",
+        "land-placement-events",
+        "land-reveal",
+        "land-search",
+        "land-tap-events",
+        "land-target",
+        "land-trigger-events",
+        "land-type-presence",
+        "landfall",
+        "landfall triggers",
+        "landfall-synergies",
+        "landfall-triggers",
+        "more lands in deck",
+        "mountain-accumulation",
+        "mountain-control",
+        "opponent-land-count",
+        "opponent-land-types",
+        "plains-control",
+        "shock-lands"
       ],
       "inherits": [],
       "amplifies": [],
@@ -701,6 +1482,19 @@
         "land-reanimation",
         "land-retrieval",
         "land-thinning"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "legendary-presence": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "legendary-creature-control",
+        "legendary-creature-placement",
+        "legendary-creatures",
+        "legendary-permanents"
       ],
       "inherits": [],
       "amplifies": [],
@@ -730,6 +1524,31 @@
         "life-gain-trigger",
         "life-payment-reduction",
         "life-total-stabilization"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "life-gain-events": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "life-gain-needs",
+        "life-loss-events"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "life-payment": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "life-disparity",
+        "life-disparity-check",
+        "life-pay",
+        "low-life-conditions",
+        "low-life-trigger"
       ],
       "inherits": [],
       "amplifies": [],
@@ -815,6 +1634,42 @@
       "amplifies": [],
       "requires": []
     },
+    "mana-needs": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "blue-mana-spending",
+        "color-devotion",
+        "color-fixing",
+        "colorful-mana-spending",
+        "commander-color-identity",
+        "green-mana-sources",
+        "high-white-devotion",
+        "mana-acceleration",
+        "mana-fixing",
+        "mana-investment",
+        "mana-overflow",
+        "mana-payment",
+        "mana-sink-ability",
+        "multicolor decks",
+        "multicolor-decks",
+        "red-devotion",
+        "red-mana",
+        "unspent-mana",
+        "white-mana-spending"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "mana-rock": {
+      "kind": "synergy",
+      "definition": "Abstract parent: artifact that produces mana",
+      "aliases": [],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
     "mana-sink": {
       "kind": "provides",
       "definition": "Card provides a way to spend excess mana usefully in the late game. Important for decks that generate a lot of mana.",
@@ -823,6 +1678,55 @@
       "amplifies": [
         "ramp"
       ],
+      "requires": []
+    },
+    "opponent-spell-casting": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "enemy free-casting",
+        "interactive opponents",
+        "noncreature-spell-heavy-opponents",
+        "opponent-casting-spells-without-mana",
+        "protection against control decks"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "opponent-threats": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "hand-size-disparity",
+        "multiplayer",
+        "multiplayer-deck",
+        "opponent-artifact",
+        "opponent-artifact-casting",
+        "opponent-attack-events",
+        "opponent-card-count",
+        "opponent-card-draw",
+        "opponent-card-reveal",
+        "opponent-count",
+        "opponent-creature",
+        "opponent-creature-board",
+        "opponent-creature-count",
+        "opponent-creature-death",
+        "opponent-creature-threats",
+        "opponent-disagreement",
+        "opponent-discard",
+        "opponent-hand-dependence",
+        "opponent-library-search",
+        "opponent-life-check",
+        "opponent-permanent-targets",
+        "opponent-plays-artifacts-or-enchantments",
+        "opponent-sacrifice",
+        "opponent-spying",
+        "opponent-tapped-creatures",
+        "zombie-opponent"
+      ],
+      "inherits": [],
+      "amplifies": [],
       "requires": []
     },
     "partner": {
@@ -836,12 +1740,137 @@
       "amplifies": [],
       "requires": []
     },
+    "passive-permanent": {
+      "kind": "synergy",
+      "definition": "Card has an always-on effect requiring no activation — it just sits on the battlefield and modifies game rules. High priority: these are the most consistent effects.",
+      "aliases": [],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "planeswalker-presence": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "planeswalker-control",
+        "planeswalker-death-events",
+        "planeswalker-targeting"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
     "proliferate": {
       "kind": "provides",
       "definition": "",
       "aliases": [
         "proliferate-effect"
       ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "protection": {
+      "kind": "synergy",
+      "definition": "Abstract parent: any card that protects permanents",
+      "aliases": [],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "pump-anthem": {
+      "kind": "provides",
+      "definition": "Permanently buffs all/most creatures regardless of type",
+      "aliases": [
+        "board-wide-buff",
+        "team boost",
+        "power-amplification",
+        "power-boost",
+        "creature-boost",
+        "creature-buff",
+        "creature-improvement",
+        "power-toughness-boost",
+        "power-toughness-increase",
+        "creature-support",
+        "creature-power-boost",
+        "creature-power-increase",
+        "creature-power-toughness-boost",
+        "power-toughness-modifier"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "pump-combat": {
+      "kind": "provides",
+      "definition": "Temporary combat buffs, voltron equipment/auras",
+      "aliases": [
+        "combat-pump",
+        "combat-power-boost",
+        "combat-strength",
+        "combat-strength-amplification",
+        "combat-strength-boost",
+        "pump",
+        "pump-effect",
+        "pump-spell",
+        "temporary-power-boost",
+        "temporary-power-increase",
+        "temporary-pump",
+        "power-toughness-increment",
+        "power-toughness-mimic",
+        "equipment-consolidation",
+        "equipment-reconfigure",
+        "tapped-creature-count",
+        "tapped-creatures-buff",
+        "untapped-creatures-buff"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "pump-lord": {
+      "kind": "provides",
+      "definition": "Permanently buffs creatures of a specific type",
+      "aliases": [
+        "tribal-boost",
+        "creature-type-boost",
+        "creature-type-buff",
+        "human-pump",
+        "vampire-pump",
+        "ally-triggered-pump",
+        "anthem-effect-for-humans",
+        "discard-triggered-pump"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "pump-self": {
+      "kind": "provides",
+      "definition": "Card grows itself via counters or scaling",
+      "aliases": [
+        "self-buff",
+        "self-growth",
+        "self-pump",
+        "power-scaling",
+        "power scaling",
+        "power-increment",
+        "power-toughness-scaling",
+        "prowess-trigger",
+        "heroic-trigger",
+        "surrak and goreclaw",
+        "ability-granting",
+        "disguise",
+        "manifestation"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "ramp": {
+      "kind": "synergy",
+      "definition": "Abstract parent: any card that accelerates mana",
+      "aliases": [],
       "inherits": [],
       "amplifies": [],
       "requires": []
@@ -910,6 +1939,66 @@
       "amplifies": [],
       "requires": []
     },
+    "repeatable-ability": {
+      "kind": "synergy",
+      "definition": "⚠ AUTO-DISCOVERED — add definition manually",
+      "aliases": [],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "replacement-effect": {
+      "kind": "synergy",
+      "definition": "Card uses a replacement effect (modifies how something happens, not a triggered ability). Key distinction from triggered abilities — applies to the event itself.",
+      "aliases": [],
+      "inherits": [
+        "passive-permanent"
+      ],
+      "amplifies": [],
+      "requires": []
+    },
+    "sacrifice-events": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "artifact-sacrifice",
+        "clue-sacrifice",
+        "creature-sacrifice",
+        "creature-sacrifice synergies",
+        "creature-sacrifice-activation",
+        "creature-sacrifice-events",
+        "creature-token-sacrifice",
+        "cumulative-upkeep-failure",
+        "enchantment-sacrifice",
+        "food-sacrifice",
+        "human-sacrifice-events",
+        "land-sacrifice",
+        "land-sacrifice-synergies",
+        "permanent-sacrifice-events",
+        "sacrifice",
+        "sacrifice fodder",
+        "sacrifice synergies",
+        "sacrifice-ability",
+        "sacrifice-ability-activation",
+        "sacrifice-ability-support",
+        "sacrifice-activation",
+        "sacrifice-availability",
+        "sacrifice-creature",
+        "sacrifice-event",
+        "sacrifice-mechanics",
+        "sacrifice-trigger",
+        "sacrifice-utility",
+        "sacrificed-creatures",
+        "sacrificed-creatures-or-artifacts",
+        "sacrificial-benefits",
+        "suspected-creature-sacrifice",
+        "white-creature-sacrifice",
+        "white-creature-sacrifices"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
     "sacrifice-payoff": {
       "kind": "provides",
       "definition": "",
@@ -948,6 +2037,17 @@
       "amplifies": [],
       "requires": []
     },
+    "scales-with-board": {
+      "kind": "synergy",
+      "definition": "Card's power or effect increases with the number of creatures on your side. High synergy with wide board strategies.",
+      "aliases": [],
+      "inherits": [],
+      "amplifies": [
+        "human-tribal",
+        "token-generator"
+      ],
+      "requires": []
+    },
     "self-mill": {
       "kind": "provides",
       "definition": "",
@@ -957,6 +2057,64 @@
         "mill",
         "mill-trigger",
         "opponent-graveyard-mill"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "single-target-counter-placer": {
+      "kind": "synergy",
+      "definition": "Card puts a counter on one specific target creature. Less powerful than board-wide-counter-placer in wide board strategies.",
+      "aliases": [],
+      "inherits": [
+        "counter-placer"
+      ],
+      "amplifies": [],
+      "requires": []
+    },
+    "spell-casting": {
+      "kind": "both",
+      "definition": "Card casts spells frequently or enables spell casting. Also: card benefits when spells are cast.",
+      "aliases": [
+        "artifact-instant-sorcery-casting",
+        "assistance-payments",
+        "aura-casting",
+        "casting-copies-instants-sorceries",
+        "convoke-ability",
+        "creature-cast-events",
+        "creature-casting",
+        "creature-casting-events",
+        "creature-spells",
+        "enchantment-cast-events",
+        "enchantment-casting",
+        "exiled-permanent-mana-value",
+        "face-down-spells",
+        "face-up-mechanics",
+        "face-up-megamorph",
+        "flash-instant-speed",
+        "green-permanent-casting",
+        "green-spell-casting",
+        "high-mana-spells",
+        "instant-casting",
+        "instant-sorcery-spells",
+        "lesson-spell-casting",
+        "low-mana-cost-spells",
+        "main-phase-casting",
+        "modal-spells",
+        "multikicker-investment",
+        "noncreature-spell-cast",
+        "noncreature-spell-casting",
+        "noncreature-spell-casts",
+        "permanent-spells",
+        "planeswalker-casting",
+        "red-creature-casting",
+        "red-spell-casting",
+        "second-spell-cast",
+        "sorcery-casting",
+        "spell-cast-count",
+        "spell-casting-events",
+        "spell-copy-events",
+        "spree-cost-selection"
       ],
       "inherits": [],
       "amplifies": [],
@@ -978,6 +2136,27 @@
       "amplifies": [],
       "requires": []
     },
+    "staple-mana-rock": {
+      "kind": "synergy",
+      "definition": "Artifact that produces mana and is universally played in EDH regardless of commander. Sol Ring is the archetype. High necessity_score by definition.",
+      "aliases": [],
+      "inherits": [
+        "mana-rock",
+        "colorless-ramp"
+      ],
+      "amplifies": [],
+      "requires": []
+    },
+    "staple-protection": {
+      "kind": "synergy",
+      "definition": "Universally strong protection card that belongs in most EDH decks of its colors. Implies high necessity_score regardless of synergy with commander.",
+      "aliases": [],
+      "inherits": [
+        "protection"
+      ],
+      "amplifies": [],
+      "requires": []
+    },
     "stax": {
       "kind": "provides",
       "definition": "",
@@ -992,6 +2171,38 @@
         "opponent-library-interference",
         "single-turn stax effect",
         "spell-casting-restriction"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "stax-tax": {
+      "kind": "provides",
+      "definition": "Taxes opponents for casting spells or taking actions (Rhystic Study, Painful Quandary pattern).",
+      "aliases": [
+        "opponent-tax",
+        "spell-tax",
+        "cast-tax",
+        "mana-tax"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "tapped-creatures": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "creature-tap-events",
+        "exhaust-activation",
+        "sorcery-speed-activation",
+        "tap-untap-synergies",
+        "tapped-creature",
+        "tapped-creature-synergy",
+        "untap-permanents",
+        "untapped-allies",
+        "untapped-creatures",
+        "untapped-humans"
       ],
       "inherits": [],
       "amplifies": [],
@@ -1035,6 +2246,28 @@
       "amplifies": [],
       "requires": []
     },
+    "targeted-spells": {
+      "kind": "wants",
+      "definition": "",
+      "aliases": [
+        "creature-destroy-need",
+        "permanent-destruction",
+        "single-target-spells",
+        "spell-targeting",
+        "spell-targets",
+        "target-availability",
+        "target-identification",
+        "target-player-selection",
+        "targeted-attacks",
+        "targeted-removal",
+        "targeted-spell-casting",
+        "targeted-spell-events",
+        "targeting-capability"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
     "targeting-bonus": {
       "kind": "provides",
       "definition": "",
@@ -1057,63 +2290,115 @@
       "amplifies": [],
       "requires": []
     },
-    "token-generation": {
-      "kind": "provides",
+    "token-events": {
+      "kind": "wants",
       "definition": "",
       "aliases": [
-        "active board state development",
         "army-creation",
-        "artifact-token-creation",
-        "artifact-token-generation",
-        "board presence",
-        "camarid-token-production",
-        "clue-token-production",
-        "combat-damage-token-generation",
         "creature tokens",
-        "creature-conjuration",
-        "creature-copy",
-        "creature-generation",
-        "creature-token",
-        "creature-token-creation",
         "creature-token-generation",
-        "deathtouch-token",
-        "devotion-based-token-generation",
-        "dragon-token-creation",
-        "dragon-token-generation",
-        "enchantment-token-generation",
-        "extra-attackers",
+        "creature-token-utilization",
+        "food-token-accumulation",
         "food-token-creation",
-        "food-token-generation",
-        "game-ending-token",
-        "giant-token-creation",
-        "goblin-permanent-placement",
-        "goblin-placement",
-        "goblin-summoning",
-        "goblin-token",
-        "goblin-token-generation",
-        "human-token-creation",
-        "mass human-token creation",
-        "mass-token-generation",
-        "mutagen-token-creation",
-        "mutagen-token-generation",
-        "myriad-token-generation",
-        "role-token-creation",
-        "role-token-placement",
-        "saproling-token-generation",
-        "self-copying",
-        "spirit-trigger",
-        "survivor-token-generation",
-        "token-copying",
+        "mutagen-token-activation",
+        "token-activation",
+        "token-boost",
         "token-creation",
-        "token-generator",
-        "token-recycling",
-        "token-swarm",
+        "token-creation-events",
+        "token-creatures",
+        "token-generation",
+        "token-leaving",
+        "token-synergy",
+        "token-utility",
+        "token-utilization"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "token-generator": {
+      "kind": "synergy",
+      "definition": "Abstract parent: any card that creates tokens",
+      "aliases": [],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "tokens-artifact": {
+      "kind": "provides",
+      "definition": "Creates treasure, clue, food, or other artifact tokens",
+      "aliases": [
         "treasure-token-creation",
         "treasure-token-generation",
         "treasure-token-generator",
+        "clue-token-production",
+        "food-token-creation",
+        "food-token-generation",
+        "artifact-token-creation",
+        "artifact-token-generation",
+        "enchantment-token-generation",
+        "mutagen-token-creation",
+        "mutagen-token-generation"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "tokens-creature": {
+      "kind": "provides",
+      "definition": "Creates creature tokens",
+      "aliases": [
+        "creature-token-creation",
+        "creature-token-generation",
+        "creature-token",
+        "creature-conjuration",
+        "creature-generation",
+        "creature-copy",
+        "mass-token-generation",
+        "token-swarm",
+        "extra-attackers",
+        "self-copying",
+        "token-copying",
+        "token-recycling",
+        "token-creation",
+        "token-generator",
+        "game-ending-token",
+        "active board state development",
+        "board presence",
+        "creature tokens",
+        "deathtouch-token",
+        "devotion-based-token-generation",
+        "combat-damage-token-generation",
+        "myriad-token-generation",
+        "role-token-creation",
+        "role-token-placement"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "tokens-tribal": {
+      "kind": "provides",
+      "definition": "Creates tokens of a specific creature type",
+      "aliases": [
+        "goblin-token",
+        "goblin-token-generation",
+        "goblin-summoning",
+        "goblin-permanent-placement",
+        "goblin-placement",
+        "zombie-token-creation",
         "vampire-token-generation",
+        "dragon-token-creation",
+        "dragon-token-generation",
+        "giant-token-creation",
+        "human-token-creation",
+        "mass human-token creation",
+        "saproling-token-generation",
+        "spirit-trigger",
         "wizard-token-creation",
-        "zombie-token-creation"
+        "survivor-token-generation",
+        "camarid-token-production",
+        "army-creation"
       ],
       "inherits": [],
       "amplifies": [],
@@ -1170,6 +2455,30 @@
       "amplifies": [],
       "requires": []
     },
+    "tribal-lord": {
+      "kind": "synergy",
+      "definition": "⚠ AUTO-DISCOVERED — add definition manually",
+      "aliases": [],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "tribal-payoff": {
+      "kind": "synergy",
+      "definition": "Abstract parent: any card that gains value from tribal members",
+      "aliases": [],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "tribal-synergy": {
+      "kind": "synergy",
+      "definition": "Abstract parent: any tribal-related tag",
+      "aliases": [],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
     "trigger-doubling": {
       "kind": "provides",
       "definition": "",
@@ -1179,6 +2488,54 @@
       ],
       "inherits": [],
       "amplifies": [],
+      "requires": []
+    },
+    "triggered-abilities": {
+      "kind": "both",
+      "definition": "Card has triggered abilities (provides) or benefits from triggered abilities being present (wants).",
+      "aliases": [
+        "ability-activation",
+        "ability-selection",
+        "ability-trigger-events",
+        "activated-abilities",
+        "activated-ability-creatures",
+        "activated-triggered-abilities",
+        "chaos-ensues",
+        "chaos-ensues-events",
+        "charisma-check",
+        "colorless-triggered-abilities",
+        "commander-activation",
+        "creature-abilities",
+        "creature-with-powerhouse-abilities",
+        "day-night-cycle",
+        "elemental-trigger-events",
+        "multitasking-ability",
+        "non-mana-abilities",
+        "partner-activation",
+        "player-upkeep-events",
+        "room-abilities",
+        "room-unlocking",
+        "trigger-placement-events",
+        "triggered-ability-events",
+        "triggered-ability-heavy-commanders",
+        "upkeep-trigger",
+        "ward-trigger-events"
+      ],
+      "inherits": [],
+      "amplifies": [],
+      "requires": []
+    },
+    "triggered-ability-doubler": {
+      "kind": "synergy",
+      "definition": "Card causes triggered abilities of a specific permanent type to trigger an additional time. Distinct from replacement effects — fires after the trigger, not instead of it.",
+      "aliases": [],
+      "inherits": [
+        "passive-permanent"
+      ],
+      "amplifies": [
+        "human-etb-payoff",
+        "counter-distribution"
+      ],
       "requires": []
     },
     "tutor": {
@@ -1244,6 +2601,16 @@
       "amplifies": [],
       "requires": []
     },
+    "utility-land": {
+      "kind": "synergy",
+      "definition": "Non-basic land that provides an activated ability beyond just producing mana. Usually comes into play tapped or has conditions.",
+      "aliases": [],
+      "inherits": [
+        "land"
+      ],
+      "amplifies": [],
+      "requires": []
+    },
     "vigilance-grant": {
       "kind": "provides",
       "definition": "",
@@ -1270,1020 +2637,6 @@
       "amplifies": [],
       "requires": []
     },
-    "artifact-presence": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "artifact-availability",
-        "artifact-cards-in-library",
-        "artifact-control",
-        "artifact-count",
-        "artifact-creature-support",
-        "artifact-creatures",
-        "artifact-death",
-        "artifact-enchantment-board",
-        "artifact-enchantment-control",
-        "artifact-enchantment-deck-concentration",
-        "artifact-enchantment-targets",
-        "artifact-enters-exits",
-        "artifact-graveyard",
-        "artifact-placement-events",
-        "artifact-synergy",
-        "artifact-targeting",
-        "artifact-targets",
-        "artifact-token-generation",
-        "artifacts-and-enchantments",
-        "imprinted-card"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "attack-events": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "attack-trigger",
-        "attack-trigger-events",
-        "attack-with-higher-power",
-        "attacking-creatures",
-        "attacking-creatures-with-lesser-power",
-        "attacking-with-creatures",
-        "combat-creatures",
-        "creature-attack-event",
-        "creature-attack-events",
-        "creature-attack-triggers",
-        "creature-attackers",
-        "creature-attacks",
-        "creature-hasters",
-        "haste-activation",
-        "haste-needing-creatures",
-        "modified-creature-attacks",
-        "multi-creature-attack",
-        "non-Gnome-attacks",
-        "single-attack-event",
-        "solo-attack-events",
-        "token-combat-damage"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "board-threats": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "board-clearing-opportunities",
-        "board-pressure",
-        "threats"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "card-draw-events": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "card-access-synergy",
-        "card-draw",
-        "card-draw-activation",
-        "card-draw-boost",
-        "card-draw-engine",
-        "card-draw-opportunities",
-        "card-draw-support",
-        "card-draw-synergy",
-        "card-selection",
-        "deck-manipulation",
-        "drawing-second-card",
-        "hand-advantage",
-        "hand-reset",
-        "hand-swap",
-        "library-manipulation",
-        "monarch-status",
-        "scry-events",
-        "top-deck-creature-type",
-        "top-of-library-access"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "combat-events": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "blocking-creatures",
-        "combat synergies",
-        "combat-activation",
-        "combat-advantage",
-        "combat-antagonists",
-        "combat-attacks",
-        "combat-control",
-        "combat-damage",
-        "combat-damage-deal",
-        "combat-damage-dealt",
-        "combat-damage-events",
-        "combat-damage-occurrence",
-        "combat-damage-sources",
-        "combat-focused-decks",
-        "combat-initiation",
-        "combat-phase",
-        "combat-phase-activation",
-        "combat-phase-exploiters",
-        "combat-protection",
-        "combat-readiness",
-        "combat-start",
-        "combat-start-events",
-        "combat-start-trigger",
-        "combat-trigger",
-        "combat-trigger-events",
-        "creature-block-events",
-        "creature-blocking",
-        "creature-blocks",
-        "creature-combat",
-        "creature-combat-damage",
-        "creature-damage",
-        "creature-damage-events",
-        "damage-dealing",
-        "damage-dealing-events",
-        "damage-dealing-sources",
-        "damage-dealing-trigger",
-        "damage-dealt",
-        "damage-dealt-events",
-        "damage-events",
-        "direct-damage-targets",
-        "excess-damage",
-        "excess-damage-events",
-        "first-strike",
-        "opponent-damage",
-        "opponent-life-loss",
-        "regeneration-need",
-        "regeneration-utility"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "commander-presence": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "commander-board",
-        "commander-casts",
-        "commander-control",
-        "commander-creatures",
-        "commander-deck",
-        "commander-focused strategies",
-        "commander-in-play",
-        "commander-zone",
-        "partner-placement"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "counter-placement-events": {
-      "kind": "wants",
-      "definition": "Abstract: represents the event of counters being placed — used in requires/amplifies",
-      "aliases": [
-        "+1/+1 counter synergies",
-        "+1/+1 counter synergy",
-        "age-counter-accumulation",
-        "cards that grant +1/+1 counters",
-        "charge-placement-events",
-        "counter strategies",
-        "counter-distribution",
-        "counter-heavy-decks",
-        "counter-ownership",
-        "counter-payoff",
-        "counter-placement",
-        "counter-placement-targets",
-        "counter-removal",
-        "counter-strategies",
-        "counter-synergy",
-        "counter-targeting",
-        "counters on creatures",
-        "creature-base-with-counters",
-        "creature-counter-placement",
-        "creature-counters",
-        "creature-with-counters",
-        "creature-without-counters",
-        "creatures-with-counters",
-        "flying-counter-placement",
-        "lore-counter-placement",
-        "monstrosity-support",
-        "outlast-activation",
-        "renown-trigger",
-        "study-counter-placement",
-        "support-placement-events",
-        "unleash-activation"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "creature-board": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "board states with valuable permanents",
-        "board-control",
-        "board-wipe-environments",
-        "colorless-creature-presence",
-        "colorless-permanent-presence",
-        "convoked-creatures",
-        "creature-based strategies",
-        "creature-based-strategies",
-        "creature-control",
-        "creature-count",
-        "creature-count-disparity",
-        "creature-deck-concentration",
-        "creature-diversity",
-        "creature-dominance",
-        "creature-heavy deck",
-        "creature-heavy decks",
-        "creature-heavy strategies",
-        "creature-heavy-board",
-        "creature-heavy-decks",
-        "creature-library-density",
-        "creature-multiplication",
-        "creature-population",
-        "creature-presence",
-        "creature-swarm",
-        "creature-synergies",
-        "creature-synergy",
-        "creatures",
-        "guardian-creature",
-        "heavy-creature-meta",
-        "mass removal evasion",
-        "mounts-and-vehicles",
-        "non-human-creatures",
-        "non-human-threats",
-        "non-token-creature-battlefield",
-        "nonland-permanent-control",
-        "nonlegendary-creatures",
-        "opponents with many creatures",
-        "political-decks",
-        "reactionary-playstyles",
-        "red-creature-control",
-        "teammates/pairs-synergy",
-        "threatened-board",
-        "toolbox-decks",
-        "wide-board",
-        "wide-board strategies",
-        "wide-board-strategies",
-        "wide-creature-base"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "creature-death": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "creature-death-events",
-        "creature-death-trigger",
-        "creature-leaves",
-        "creature-leaves-battlefield",
-        "permanent-leaving-the-battlefield"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "creature-etb": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "ally-enters",
-        "ally-entry-events",
-        "artifact-creature-entry",
-        "board-wide-human-placement",
-        "creature-ETB-heavy decks",
-        "creature-enters",
-        "creature-enters-battlefield",
-        "creature-enters-board",
-        "creature-entries",
-        "creature-entry",
-        "creature-entry-events",
-        "creature-entry-trigger",
-        "creature-etb-events",
-        "creature-etb-trigger",
-        "creature-etb-triggers",
-        "creature-placement",
-        "creature-placement-events",
-        "enter-the-battlefield-trigger",
-        "family-creature-placement",
-        "green-creature-entries",
-        "human-enter-events",
-        "land-or-bird-enters",
-        "nonland-permanent-entry",
-        "nontoken-creature-enter",
-        "nontoken-creature-entry",
-        "offspring-placement"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "creature-power": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "CMC 1 or less creatures",
-        "big-creature-strategies",
-        "creature-power-2-or-less",
-        "creature-power-boost",
-        "creature-power-comparison",
-        "creature-power-diversity",
-        "creature-power-maximization",
-        "creature-varied-power",
-        "creature-with-mana-value-1-or-less",
-        "creature-with-toughness-2-or-less",
-        "creatures with toughness 2 or less",
-        "creatures-with-power-4-or-greater",
-        "high power creatures",
-        "high-power creatures",
-        "high-power-creature-presence",
-        "high-power-creatures",
-        "low-cost-creatures",
-        "low-mana creatures",
-        "low-mana-value-creatures",
-        "low-power-creature-placement",
-        "low-power-creatures",
-        "low-toughness-creatures",
-        "power-3-or-greater creatures",
-        "power-4-creature-entries",
-        "power-4-creatures",
-        "power-comparison"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "creature-targeting": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "creature-target",
-        "creature-targets",
-        "exile-targets",
-        "heroic-targets",
-        "nonland-permanent-targets",
-        "permanent-targets",
-        "protection from targeted removal",
-        "self-targeting-spells",
-        "target-creature",
-        "target-creatures",
-        "target-permanent",
-        "targeted-removal-threats",
-        "targeting-self"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "creature-type-selection": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "angel-tribal",
-        "card-type-sharing",
-        "chimera-creature",
-        "chimera-creatures",
-        "cleric-creature-board",
-        "color-choice",
-        "color-selection",
-        "creature-specialization",
-        "creature-type-casting",
-        "creature-type-choice",
-        "creature-type-control",
-        "creature-type-diversity",
-        "creature-type-dominance",
-        "creature-type-draw",
-        "creature-type-fixing",
-        "creature-type-focus",
-        "creature-type-matching",
-        "creature-type-placement",
-        "creature-type-presence",
-        "creature-type-sharing",
-        "creature-type-trigger-events",
-        "creatures-of-chosen-type",
-        "demon-tribal",
-        "dragon-card-reveal",
-        "dragon-creature-board",
-        "dragon-creature-presence",
-        "frogs-rabbits-raccoons-squirrels",
-        "full-party",
-        "insect-attacks",
-        "menace-creatures",
-        "merfolk-creatures",
-        "ninja-rogue-combat-damage",
-        "other-spiders",
-        "phyrexian-creature-board",
-        "pirate-attacks",
-        "pirate-creatures",
-        "roaming throne",
-        "samurai-attack",
-        "shadow-creatures",
-        "shaman-creatures",
-        "shaman-or-wizard-trigger",
-        "soldier-creature-presence",
-        "soldier-creatures",
-        "spider-tribal",
-        "thrull-creatures",
-        "tribal decks",
-        "tribal strategies",
-        "tribal-creatures",
-        "tribal-deck-building",
-        "tribal-synergy",
-        "tyranid-creatures",
-        "vampire-attack",
-        "vampire-casting",
-        "zombie-combat-damage",
-        "zombie-creatures",
-        "zombie-graveyard"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "discard-events": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "card-discard",
-        "card-discard-events",
-        "discard-availability",
-        "hand-sacrifice",
-        "nonland-discard"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "enchantment-presence": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "enchantment-control",
-        "enchantment-enters",
-        "enchantment-entry",
-        "enchantment-graveyard-placement",
-        "enchantment-placement",
-        "enchantment-placement-events",
-        "enchantment-targeting",
-        "enchantment-targets"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "end-step-events": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "end-step-trigger"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "equipment-presence": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "equipment-attachment",
-        "equipment-placement",
-        "equipment-synergy",
-        "equipment-targets",
-        "equipped-creature",
-        "equipped-creature-attacks",
-        "equipped-creature-combat-damage",
-        "equipped-creature-death",
-        "permanents-attached"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "graveyard-filling": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "creature-card-graveyard",
-        "creature-graveyard",
-        "creature-return",
-        "delirium",
-        "flashback",
-        "graveyard-access",
-        "graveyard-creatures",
-        "graveyard-exile",
-        "graveyard-instant-sorcery",
-        "graveyard-manipulation",
-        "graveyard-placement-events",
-        "graveyard-presence",
-        "graveyard-synergies",
-        "graveyard-targeting",
-        "graveyard-targets",
-        "graveyard-usage",
-        "graveyard-utility",
-        "graveyard-utilization",
-        "library-graveyard-access"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "land-density": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "basic-forest-or-plains",
-        "basic-land-control",
-        "basic-land-density",
-        "basic-land-library",
-        "basic-land-search",
-        "basic-land-types",
-        "basic-lands",
-        "basic-mountain",
-        "fetchable-land",
-        "forest-control",
-        "forest-dual-lands",
-        "land-activation",
-        "land-combo",
-        "land-control",
-        "land-count",
-        "land-creature-presence",
-        "land-dominance",
-        "land-entries",
-        "land-mass",
-        "land-placement-events",
-        "land-reveal",
-        "land-search",
-        "land-tap-events",
-        "land-target",
-        "land-trigger-events",
-        "land-type-presence",
-        "landfall",
-        "landfall triggers",
-        "landfall-synergies",
-        "landfall-triggers",
-        "more lands in deck",
-        "mountain-accumulation",
-        "mountain-control",
-        "opponent-land-count",
-        "opponent-land-types",
-        "plains-control",
-        "shock-lands"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "legendary-presence": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "legendary-creature-control",
-        "legendary-creature-placement",
-        "legendary-creatures",
-        "legendary-permanents"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "life-gain-events": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "life-gain-needs",
-        "life-loss-events"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "life-payment": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "life-disparity",
-        "life-disparity-check",
-        "life-pay",
-        "low-life-conditions",
-        "low-life-trigger"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "mana-needs": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "blue-mana-spending",
-        "color-devotion",
-        "color-fixing",
-        "colorful-mana-spending",
-        "commander-color-identity",
-        "green-mana-sources",
-        "high-white-devotion",
-        "mana-acceleration",
-        "mana-fixing",
-        "mana-investment",
-        "mana-overflow",
-        "mana-payment",
-        "mana-sink-ability",
-        "multicolor decks",
-        "multicolor-decks",
-        "red-devotion",
-        "red-mana",
-        "unspent-mana",
-        "white-mana-spending"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "opponent-spell-casting": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "enemy free-casting",
-        "interactive opponents",
-        "noncreature-spell-heavy-opponents",
-        "opponent-casting-spells-without-mana",
-        "protection against control decks"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "opponent-threats": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "hand-size-disparity",
-        "multiplayer",
-        "multiplayer-deck",
-        "opponent-artifact",
-        "opponent-artifact-casting",
-        "opponent-attack-events",
-        "opponent-card-count",
-        "opponent-card-draw",
-        "opponent-card-reveal",
-        "opponent-count",
-        "opponent-creature",
-        "opponent-creature-board",
-        "opponent-creature-count",
-        "opponent-creature-death",
-        "opponent-creature-threats",
-        "opponent-disagreement",
-        "opponent-discard",
-        "opponent-hand-dependence",
-        "opponent-library-search",
-        "opponent-life-check",
-        "opponent-permanent-targets",
-        "opponent-plays-artifacts-or-enchantments",
-        "opponent-sacrifice",
-        "opponent-spying",
-        "opponent-tapped-creatures",
-        "zombie-opponent"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "planeswalker-presence": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "planeswalker-control",
-        "planeswalker-death-events",
-        "planeswalker-targeting"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "sacrifice-events": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "artifact-sacrifice",
-        "clue-sacrifice",
-        "creature-sacrifice",
-        "creature-sacrifice synergies",
-        "creature-sacrifice-activation",
-        "creature-sacrifice-events",
-        "creature-token-sacrifice",
-        "cumulative-upkeep-failure",
-        "enchantment-sacrifice",
-        "food-sacrifice",
-        "human-sacrifice-events",
-        "land-sacrifice",
-        "land-sacrifice-synergies",
-        "permanent-sacrifice-events",
-        "sacrifice",
-        "sacrifice fodder",
-        "sacrifice synergies",
-        "sacrifice-ability",
-        "sacrifice-ability-activation",
-        "sacrifice-ability-support",
-        "sacrifice-activation",
-        "sacrifice-availability",
-        "sacrifice-creature",
-        "sacrifice-event",
-        "sacrifice-mechanics",
-        "sacrifice-trigger",
-        "sacrifice-utility",
-        "sacrificed-creatures",
-        "sacrificed-creatures-or-artifacts",
-        "sacrificial-benefits",
-        "suspected-creature-sacrifice",
-        "white-creature-sacrifice",
-        "white-creature-sacrifices"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "spell-casting": {
-      "kind": "both",
-      "definition": "Card casts spells frequently or enables spell casting. Also: card benefits when spells are cast.",
-      "aliases": [
-        "artifact-instant-sorcery-casting",
-        "assistance-payments",
-        "aura-casting",
-        "casting-copies-instants-sorceries",
-        "convoke-ability",
-        "creature-cast-events",
-        "creature-casting",
-        "creature-casting-events",
-        "creature-spells",
-        "enchantment-cast-events",
-        "enchantment-casting",
-        "exiled-permanent-mana-value",
-        "face-down-spells",
-        "face-up-mechanics",
-        "face-up-megamorph",
-        "flash-instant-speed",
-        "green-permanent-casting",
-        "green-spell-casting",
-        "high-mana-spells",
-        "instant-casting",
-        "instant-sorcery-spells",
-        "lesson-spell-casting",
-        "low-mana-cost-spells",
-        "main-phase-casting",
-        "modal-spells",
-        "multikicker-investment",
-        "noncreature-spell-cast",
-        "noncreature-spell-casting",
-        "noncreature-spell-casts",
-        "permanent-spells",
-        "planeswalker-casting",
-        "red-creature-casting",
-        "red-spell-casting",
-        "second-spell-cast",
-        "sorcery-casting",
-        "spell-cast-count",
-        "spell-casting-events",
-        "spell-copy-events",
-        "spree-cost-selection"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "tapped-creatures": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "creature-tap-events",
-        "exhaust-activation",
-        "sorcery-speed-activation",
-        "tap-untap-synergies",
-        "tapped-creature",
-        "tapped-creature-synergy",
-        "untap-permanents",
-        "untapped-allies",
-        "untapped-creatures",
-        "untapped-humans"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "targeted-spells": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "creature-destroy-need",
-        "permanent-destruction",
-        "single-target-spells",
-        "spell-targeting",
-        "spell-targets",
-        "target-availability",
-        "target-identification",
-        "target-player-selection",
-        "targeted-attacks",
-        "targeted-removal",
-        "targeted-spell-casting",
-        "targeted-spell-events",
-        "targeting-capability"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "token-events": {
-      "kind": "wants",
-      "definition": "",
-      "aliases": [
-        "army-creation",
-        "creature tokens",
-        "creature-token-generation",
-        "creature-token-utilization",
-        "food-token-accumulation",
-        "food-token-creation",
-        "mutagen-token-activation",
-        "token-activation",
-        "token-boost",
-        "token-creation",
-        "token-creation-events",
-        "token-creatures",
-        "token-generation",
-        "token-leaving",
-        "token-synergy",
-        "token-utility",
-        "token-utilization"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "triggered-abilities": {
-      "kind": "both",
-      "definition": "Card has triggered abilities (provides) or benefits from triggered abilities being present (wants).",
-      "aliases": [
-        "ability-activation",
-        "ability-selection",
-        "ability-trigger-events",
-        "activated-abilities",
-        "activated-ability-creatures",
-        "activated-triggered-abilities",
-        "chaos-ensues",
-        "chaos-ensues-events",
-        "charisma-check",
-        "colorless-triggered-abilities",
-        "commander-activation",
-        "creature-abilities",
-        "creature-with-powerhouse-abilities",
-        "day-night-cycle",
-        "elemental-trigger-events",
-        "multitasking-ability",
-        "non-mana-abilities",
-        "partner-activation",
-        "player-upkeep-events",
-        "room-abilities",
-        "room-unlocking",
-        "trigger-placement-events",
-        "triggered-ability-events",
-        "triggered-ability-heavy-commanders",
-        "upkeep-trigger",
-        "ward-trigger-events"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "counter-doubler": {
-      "kind": "synergy",
-      "definition": "Card applies a replacement effect that increases the number of +1/+1 counters placed (e.g. 'that many plus one', 'twice that many'). Always passive-permanent.",
-      "aliases": [],
-      "inherits": [
-        "counter-amplifier"
-      ],
-      "amplifies": [
-        "counter-placement-events"
-      ],
-      "requires": []
-    },
-    "replacement-effect": {
-      "kind": "synergy",
-      "definition": "Card uses a replacement effect (modifies how something happens, not a triggered ability). Key distinction from triggered abilities — applies to the event itself.",
-      "aliases": [],
-      "inherits": [
-        "passive-permanent"
-      ],
-      "amplifies": [],
-      "requires": []
-    },
-    "counter-amplifier": {
-      "kind": "synergy",
-      "definition": "General tag for cards that make counter placement produce more counters. Superset of counter-doubler.",
-      "aliases": [],
-      "inherits": [],
-      "amplifies": [
-        "counter-placement-events"
-      ],
-      "requires": []
-    },
-    "passive-permanent": {
-      "kind": "synergy",
-      "definition": "Card has an always-on effect requiring no activation — it just sits on the battlefield and modifies game rules. High priority: these are the most consistent effects.",
-      "aliases": [],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "triggered-ability-doubler": {
-      "kind": "synergy",
-      "definition": "Card causes triggered abilities of a specific permanent type to trigger an additional time. Distinct from replacement effects — fires after the trigger, not instead of it.",
-      "aliases": [],
-      "inherits": [
-        "passive-permanent"
-      ],
-      "amplifies": [
-        "human-etb-payoff",
-        "counter-distribution"
-      ],
-      "requires": []
-    },
-    "can-become-chosen-type": {
-      "kind": "synergy",
-      "definition": "Card changes its own creature type based on a choice made on ETB ('this creature is the chosen type in addition to its other types'). Critical for tribal decks — means the card itself benefits from and contributes to tribal synergies.",
-      "aliases": [],
-      "inherits": [
-        "tribal-enabler"
-      ],
-      "amplifies": [
-        "triggered-ability-doubler"
-      ],
-      "requires": []
-    },
-    "human-etb-payoff": {
-      "kind": "synergy",
-      "definition": "Card triggers or gains value specifically when a Human enters the battlefield. More specific than etb-trigger — only fires on Human ETBs.",
-      "aliases": [],
-      "inherits": [
-        "etb-trigger",
-        "tribal-payoff"
-      ],
-      "amplifies": [],
-      "requires": [
-        "human-tribal"
-      ]
-    },
-    "board-wide-counter-placer": {
-      "kind": "synergy",
-      "definition": "Card puts +1/+1 counters on ALL or EACH creature you control simultaneously. Distinct from single-target-counter-placer. Key synergy target for counter-doublers.",
-      "aliases": [],
-      "inherits": [
-        "counter-placer"
-      ],
-      "amplifies": [
-        "counter-doubler"
-      ],
-      "requires": []
-    },
-    "single-target-counter-placer": {
-      "kind": "synergy",
-      "definition": "Card puts a counter on one specific target creature. Less powerful than board-wide-counter-placer in wide board strategies.",
-      "aliases": [],
-      "inherits": [
-        "counter-placer"
-      ],
-      "amplifies": [],
-      "requires": []
-    },
-    "counter-consolidator": {
-      "kind": "synergy",
-      "definition": "Card moves ALL counters from one permanent to another (not partial). Creates high-value single threat from distributed counters.",
-      "aliases": [],
-      "inherits": [
-        "counter-mover"
-      ],
-      "amplifies": [],
-      "requires": [
-        "counter-placement-events"
-      ]
-    },
-    "staple-protection": {
-      "kind": "synergy",
-      "definition": "Universally strong protection card that belongs in most EDH decks of its colors. Implies high necessity_score regardless of synergy with commander.",
-      "aliases": [],
-      "inherits": [
-        "protection"
-      ],
-      "amplifies": [],
-      "requires": []
-    },
     "wrath-counter": {
       "kind": "synergy",
       "definition": "Card specifically counters or negates board wipes (mass removal). One of the most important categories in multiplayer EDH.",
@@ -2291,239 +2644,6 @@
       "inherits": [
         "board-protection"
       ],
-      "amplifies": [],
-      "requires": []
-    },
-    "staple-mana-rock": {
-      "kind": "synergy",
-      "definition": "Artifact that produces mana and is universally played in EDH regardless of commander. Sol Ring is the archetype. High necessity_score by definition.",
-      "aliases": [],
-      "inherits": [
-        "mana-rock",
-        "colorless-ramp"
-      ],
-      "amplifies": [],
-      "requires": []
-    },
-    "colorless-ramp": {
-      "kind": "synergy",
-      "definition": "Produces colorless mana ({C}). Useful in any deck regardless of color identity.",
-      "aliases": [],
-      "inherits": [
-        "ramp"
-      ],
-      "amplifies": [],
-      "requires": []
-    },
-    "utility-land": {
-      "kind": "synergy",
-      "definition": "Non-basic land that provides an activated ability beyond just producing mana. Usually comes into play tapped or has conditions.",
-      "aliases": [],
-      "inherits": [
-        "land"
-      ],
-      "amplifies": [],
-      "requires": []
-    },
-    "evasion-granter": {
-      "kind": "synergy",
-      "definition": "Card makes creatures harder or impossible to block. In counter strategies, unblockable = winning with big creatures.",
-      "aliases": [],
-      "inherits": [
-        "combat-enabler"
-      ],
-      "amplifies": [
-        "counter-payoff"
-      ],
-      "requires": []
-    },
-    "etb-counter": {
-      "kind": "synergy",
-      "definition": "Card gains a +1/+1 counter when a creature enters the battlefield (its own ETB or others'). Scales with creature density.",
-      "aliases": [],
-      "inherits": [
-        "counter-payoff",
-        "etb-trigger"
-      ],
-      "amplifies": [],
-      "requires": []
-    },
-    "scales-with-board": {
-      "kind": "synergy",
-      "definition": "Card's power or effect increases with the number of creatures on your side. High synergy with wide board strategies.",
-      "aliases": [],
-      "inherits": [],
-      "amplifies": [
-        "human-tribal",
-        "token-generator"
-      ],
-      "requires": []
-    },
-    "tribal-lord": {
-      "kind": "synergy",
-      "definition": "⚠ AUTO-DISCOVERED — add definition manually",
-      "aliases": [],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "etb-counter-burst": {
-      "kind": "synergy",
-      "definition": "⚠ AUTO-DISCOVERED — add definition manually",
-      "aliases": [],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "instant-speed": {
-      "kind": "synergy",
-      "definition": "⚠ AUTO-DISCOVERED — add definition manually",
-      "aliases": [],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "repeatable-ability": {
-      "kind": "synergy",
-      "definition": "⚠ AUTO-DISCOVERED — add definition manually",
-      "aliases": [],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "counter-placer": {
-      "kind": "synergy",
-      "definition": "Abstract parent: any card that places counters (board-wide or targeted)",
-      "aliases": [],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "protection": {
-      "kind": "synergy",
-      "definition": "Abstract parent: any card that protects permanents",
-      "aliases": [],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "tribal-synergy": {
-      "kind": "synergy",
-      "definition": "Abstract parent: any tribal-related tag",
-      "aliases": [],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "tribal-payoff": {
-      "kind": "synergy",
-      "definition": "Abstract parent: any card that gains value from tribal members",
-      "aliases": [],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "etb-trigger": {
-      "kind": "synergy",
-      "definition": "Abstract parent: any card with an enters-the-battlefield trigger",
-      "aliases": [],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "mana-rock": {
-      "kind": "synergy",
-      "definition": "Abstract parent: artifact that produces mana",
-      "aliases": [],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "ramp": {
-      "kind": "synergy",
-      "definition": "Abstract parent: any card that accelerates mana",
-      "aliases": [],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "land": {
-      "kind": "synergy",
-      "definition": "Abstract parent: land cards",
-      "aliases": [],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "token-generator": {
-      "kind": "synergy",
-      "definition": "Abstract parent: any card that creates tokens",
-      "aliases": [],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "flash-grant": {
-      "kind": "provides",
-      "definition": "Gives flash or instant-speed casting to other spells/permanents.",
-      "aliases": [
-        "flash-instant-speed",
-        "flash-enabler",
-        "flash-granting",
-        "instant-speed-casting"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "card-draw-payoff": {
-      "kind": "provides",
-      "definition": "Card benefits from or triggers when cards are drawn (by any player).",
-      "aliases": [
-        "draw-payoff",
-        "draw-trigger",
-        "opponent-card-draw-payoff"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "stax-tax": {
-      "kind": "provides",
-      "definition": "Taxes opponents for casting spells or taking actions (Rhystic Study, Painful Quandary pattern).",
-      "aliases": [
-        "opponent-tax",
-        "spell-tax",
-        "cast-tax",
-        "mana-tax"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "blink": {
-      "kind": "provides",
-      "definition": "Exiles and returns permanents (blink/flicker effects).",
-      "aliases": [
-        "flicker",
-        "blink-effect",
-        "exile-return",
-        "permanent-blink"
-      ],
-      "inherits": [],
-      "amplifies": [],
-      "requires": []
-    },
-    "graveyard-casting": {
-      "kind": "provides",
-      "definition": "Casts spells from graveyard or gives flashback.",
-      "aliases": [
-        "flashback",
-        "cast-from-graveyard",
-        "graveyard-spell-casting",
-        "spell-recursion"
-      ],
-      "inherits": [],
       "amplifies": [],
       "requires": []
     }
