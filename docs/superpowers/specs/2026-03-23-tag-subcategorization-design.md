@@ -136,7 +136,7 @@ Replace parent-to-parent bridges with specific sub-tag bridges at higher weights
 
 Key insight: sub-tags allow higher bridge weights because the connection is more precise. A lord pumping tribal creatures → near-certain synergy with tribal board payoffs (0.95), vs the old conservative generic bridge (0.6).
 
-All existing bridges referencing parent tags must be audited and remapped or removed. There are ~25 bridge entries referencing these 6 tags — each must be mapped to its sub-tag equivalent during implementation.
+All existing bridges referencing parent tags must be audited and remapped or removed. There are ~70 bridge entries referencing these 6 tags. Many are on the wants side (e.g., `("blink", "creature-etb")` → `("blink", "etb-value")`) where the provides tag is unrelated to the 6 targets — these are simple 1:1 replacements but must not be missed.
 
 ## TRIGGER_EFFECT_BRIDGES Updates
 
@@ -153,7 +153,7 @@ The following files hardcode parent tag names and must be updated:
 | File | What to update |
 |------|---------------|
 | `normalize_tags.py` (lines 107-136) | Inference rules auto-add parent tags (e.g., `token-generation` → infers `creature-etb`). Must infer sub-tags instead, or remove rules and rely on LLM classification. **Critical — will overwrite reclassification if not fixed.** |
-| `ability_parser.py` (lines 112-116) | Keyword-to-tag mappings produce `token-generation` for fabricate/embalm/eternalize/amass/populate. Must produce the appropriate `tokens-*` sub-tag. |
+| `ability_parser.py` (all `token-generation`, `creature-pump`, `evasion-grant` string literals — 20+ occurrences across keyword mappings, regex patterns, and secondary entries) | Keyword-to-tag mappings produce parent tag names. Must produce the appropriate sub-tags. |
 | `strategy_detector.py` (lines 22-108) | Strategy rules reference `token-generation`, `creature-pump`, `evasion-grant`. Must use sub-tag sets (e.g., `{"tokens-creature", "tokens-artifact", "tokens-tribal"}` for the tokens strategy). |
 | `swaps.py` (line 29-30) | `SYNERGY_PROVIDES` set includes `token-generation`, `creature-pump`. Must include all sub-tag variants. |
 | `prompt_builder.py` | Reads `tag_registry.json` for LLM vocabulary. Will automatically pick up new sub-tags once registry is updated — confirm the prompt instructions are clear enough that the LLM uses sub-tags for new cards. |
