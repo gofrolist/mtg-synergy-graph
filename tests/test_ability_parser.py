@@ -198,7 +198,7 @@ def test_effect_tagging_token_generation():
     abilities = parse_card(card)
     tagged = [a for a in abilities if a.get("effect_tags")]
     assert len(tagged) >= 1
-    assert "token-generation" in tagged[0]["effect_tags"]
+    assert "tokens-creature" in tagged[0]["effect_tags"]
 
 
 def test_effect_tagging_card_draw():
@@ -226,7 +226,7 @@ def test_trigger_tagging_creature_etb():
     triggered = [a for a in abilities if a["ability_type"] == "triggered"]
     assert len(triggered) == 1
     assert triggered[0]["trigger_tags"] is not None
-    assert "creature-etb" in triggered[0]["trigger_tags"]
+    assert "etb-value" in triggered[0]["trigger_tags"]
     assert "counter-placement" in triggered[0]["effect_tags"]
 
 

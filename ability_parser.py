@@ -74,13 +74,13 @@ KEYWORD_EFFECT_TAGS = {
     "first strike": ["combat-advantage"],
     "double strike": ["combat-advantage", "combat-damage-events"],
     "reach": ["combat-advantage"],       # Can block flyers
-    "defender": [],                      # No synergy tags — it's a restriction
+    "defender": ["defender", "wall-synergy"],  # Arcades and similar commanders care about defenders
 
     # ── Protection / resilience ──
     "hexproof": ["board-protection"],
     "shroud": ["board-protection"],
     "indestructible": ["board-protection"],
-    "ward": ["board-protection"],
+    "ward": ["board-protection", "tax-effect"],
     "protection": ["board-protection"],
     "regenerate": ["board-protection"],
     "totem armor": ["board-protection"],
@@ -89,11 +89,11 @@ KEYWORD_EFFECT_TAGS = {
 
     # ── Life/damage ──
     "lifelink": ["life-gain"],
-    "deathtouch": ["spot-removal"],
+    "deathtouch": ["spot-removal", "combat-advantage"],
     "infect": ["infect", "poison-counter-placement"],
     "toxic": ["poison-counter-placement"],
     "wither": ["counter-placement"],     # Damage as -1/-1 counters
-    "afflict": ["direct-damage"],        # Damage when blocked
+    "afflict": ["direct-damage", "attack-events"],  # Damage when blocked
 
     # ── Counter mechanics ──
     "proliferate": ["proliferate", "counter-placement"],
@@ -109,12 +109,12 @@ KEYWORD_EFFECT_TAGS = {
     "monstrosity": ["counter-placement"],
 
     # ── Token generation ──
-    "fabricate": ["token-generation", "counter-placement"],  # Tokens OR counters
-    "embalm": ["token-generation"],      # Create token copy from graveyard
-    "eternalize": ["token-generation"],  # Create token copy from graveyard
-    "amass": ["token-generation", "counter-placement"],  # Create/grow Army token
-    "populate": ["token-generation"],    # Copy a creature token
-    "crew": ["token-generation"],        # Not tokens, but vehicle activation (tap creatures)
+    "fabricate": ["tokens-creature", "counter-placement"],  # Tokens OR counters
+    "embalm": ["tokens-creature"],       # Create token copy from graveyard
+    "eternalize": ["tokens-creature"],   # Create token copy from graveyard
+    "amass": ["tokens-creature", "counter-placement"],  # Create/grow Army token
+    "populate": ["tokens-creature"],     # Copy a creature token
+    "crew": ["tokens-creature"],         # Not tokens, but vehicle activation (tap creatures)
     "investigate": ["clue-generation", "card-draw"],  # Create Clue token
     "food": ["food-generation", "life-gain"],
     "treasure": ["treasure-generation", "mana-acceleration"],
@@ -132,18 +132,18 @@ KEYWORD_EFFECT_TAGS = {
     "seek": ["card-draw"],              # Digital: random from library
     "conjure": ["card-draw"],           # Digital: create card
     "learn": ["card-draw"],             # Lesson from sideboard or rummage
-    "foretell": ["card-filtering"],     # Exile face-down, cast later cheaper
+    "foretell": ["card-filtering", "cost-reduction"],  # Exile face-down, cast later cheaper
 
     # ── Graveyard mechanics ──
     "flashback": ["graveyard-recursion"],
     "unearth": ["graveyard-recursion"],
     "escape": ["graveyard-recursion"],
-    "retrace": ["graveyard-recursion"],
+    "retrace": ["graveyard-recursion", "land-discard"],
     "jump-start": ["graveyard-recursion", "discard"],
     "disturb": ["graveyard-recursion"],
-    "encore": ["graveyard-recursion", "token-generation"],
-    "embalm": ["graveyard-recursion", "token-generation"],
-    "eternalize": ["graveyard-recursion", "token-generation"],
+    "encore": ["graveyard-recursion", "tokens-creature"],
+    "embalm": ["graveyard-recursion", "tokens-creature"],
+    "eternalize": ["graveyard-recursion", "tokens-creature"],
     "madness": ["discard"],             # Cast when discarded
     "dredge": ["graveyard-fill", "graveyard-recursion"],
     "delve": ["graveyard-exile-cost"],
@@ -157,35 +157,35 @@ KEYWORD_EFFECT_TAGS = {
     "improvise": ["cost-reduction"],    # Tap artifacts to pay
     "delve": ["cost-reduction"],        # Exile graveyard to pay
     "suspend": ["cost-reduction"],      # Pay less, wait turns
-    "emerge": ["cost-reduction"],       # Sac creature to reduce cost
+    "emerge": ["cost-reduction", "sacrifice-outlet"],  # Sac creature to reduce cost
     "evoke": ["cost-reduction"],        # Cheaper but sacrifice
-    "overload": [],                     # Alternate cost, no synergy tag
-    "kicker": [],                       # Extra cost for bonus, too generic
-    "domain": [],                       # Scales with basic land types, too generic
+    "overload": ["board-wide-effect"],   # Single-target becomes all targets
+    "kicker": ["modal-spell"],          # Extra cost for bonus effect
+    "domain": ["domain", "land-type-matters"],  # Scales with basic land types
 
     # ── Tribal / type ──
     "changeling": ["tribal-enabler"],   # All creature types
-    "partner": [],                      # Commander mechanic
-    "partner with": [],
+    "partner": ["commander-synergy"],    # Commander mechanic
+    "partner with": ["commander-synergy"],
 
     # ── Enchantment / artifact interaction ──
     "enchant": ["aura-synergy"],
     "equip": ["equipment-synergy"],
     "reconfigure": ["equipment-synergy"],
-    "living weapon": ["equipment-synergy", "token-generation"],
+    "living weapon": ["equipment-synergy", "tokens-creature"],
 
     # ── Transform / modal ──
     "transform": ["transform"],
-    "morph": [],                        # Face-down mechanic, no clear synergy tag
-    "manifest": [],
+    "morph": ["face-down", "morph-synergy"],  # Kadena and similar commanders care about morph
+    "manifest": ["face-down"],         # Similar to morph
     "megamorph": ["counter-placement"], # Turns face-up with +1/+1 counter
-    "disguise": [],
+    "disguise": ["face-down", "morph-synergy"],  # Latest version of morph
 
     # ── Attack/damage triggers ──
-    "prowess": ["spell-cast-payoff"],   # Gets +1/+1 when you cast noncreature
+    "prowess": ["spell-cast-payoff", "pump-self"],  # Gets +1/+1 when you cast noncreature
     "exalted": ["attack-events"],       # Bonus when attacking alone
-    "myriad": ["token-generation", "attack-events"],  # Create copies attacking
-    "battle cry": ["creature-pump", "attack-events"],
+    "myriad": ["tokens-creature", "attack-events"],  # Create copies attacking
+    "battle cry": ["pump-anthem", "attack-events"],
     "melee": ["attack-events"],
     "raid": ["attack-events"],          # Bonus if you attacked this turn
     "ninjutsu": ["evasion"],            # Swap in unblocked attacker
@@ -194,8 +194,8 @@ KEYWORD_EFFECT_TAGS = {
     "cascade": ["card-draw", "cost-reduction"],  # Cast, exile until cheaper spell, cast free
     "storm": ["storm-count"],           # Copy for each spell cast this turn
     "flash": ["instant-speed"],         # Can cast at instant speed
-    "devoid": [],                       # Colorless, no synergy
-    "phasing": [],
+    "devoid": ["colorless-matters"],     # Makes card colorless
+    "phasing": ["board-protection"],   # Phases out to dodge removal
     "goad": ["tap-control"],            # Force opponent creature to attack
     "fight": ["spot-removal"],          # Two creatures deal damage to each other
     "landfall": ["landfall-trigger"],   # Triggers when land enters
@@ -205,19 +205,53 @@ KEYWORD_EFFECT_TAGS = {
     "offering": ["cost-reduction", "sacrifice-outlet"],
     "dash": ["haste-grant"],            # Cast for dash cost, gains haste
     "blitz": ["haste-grant", "card-draw"],  # Cast for blitz, haste + draw on death
-    "spectacle": ["cost-reduction"],    # Cheaper if opponent lost life
+    "spectacle": ["cost-reduction", "damage-payoff"],  # Cheaper if opponent lost life
     "hideaway": ["card-filtering"],
-    "entwine": [],                      # Pay more for both modes
+    "entwine": ["modal-spell"],          # Pay more for both modes
     "bestow": ["aura-synergy"],         # Cast as aura or creature
     "mutate": ["counter-placement"],    # Stacks creatures, triggers
-    "prototype": [],
-    "craft": [],
-    "boast": [],                        # Pay after attacking, too generic
-    "adventure": [],                    # DFC mechanic, no synergy tag
+    "prototype": ["cost-reduction"],     # Alternate cheaper casting
+    "craft": ["artifact-sacrifice"],    # Transform by exiling artifacts
+    "boast": ["attack-events"],         # Activated after attacking
+    "adventure": ["spell-casting", "card-advantage"],  # Two spells in one card
     "sagas": [],
 
     # ── Planeswalker ──
-    "compleated": [],                   # Phyrexian mana for loyalty, no synergy tag
+    "compleated": ["life-payment"],     # Pay life for loyalty
+
+    # ── Additional keywords ──
+    "cumulative upkeep": ["cumulative-cost"],  # Recurring cost that grows
+    "echo": ["sacrifice-trigger"],     # Must pay again or sacrifice
+    "heroic": ["targeting-payoff", "spell-cast-payoff"],  # Triggers when targeted by spell
+    "flanking": ["combat-advantage"],  # Blockers get -1/-1
+    "forecast": ["card-advantage"],    # Reveal from hand for effect
+    "haunt": ["creature-death"],       # Triggers on death
+    "rebound": ["spell-casting", "card-advantage"],  # Cast again next turn free
+    "extort": ["life-drain", "spell-cast-payoff"],  # Drain 1 life when casting
+    "cipher": ["combat-damage-events", "spell-casting"],  # Recast when creature deals damage
+    "tribute": ["counter-placement"],  # Opponent chooses: counters or effect
+    "exploit": ["sacrifice-outlet", "creature-death"],  # Sacrifice creature on ETB
+    "ascend": ["permanent-count-matters"],  # City's blessing at 10 permanents
+    "afterlife": ["tokens-creature", "creature-death"],  # Creates tokens on death
+    "companion": ["commander-synergy"],  # Deck restriction for starting hand access
+    "daybound": ["transform", "day-night"],  # Day/night cycle
+    "nightbound": ["transform", "day-night"],
+    "decayed": ["tokens-creature", "sacrifice-trigger"],  # Zombie tokens that sacrifice
+    "casualty": ["sacrifice-outlet", "spell-copying"],  # Sacrifice creature to copy spell
+    "ravenous": ["counter-placement"],  # X cost, enters with counters
+    "squad": ["tokens-creature"],      # Pay more for token copies
+    "enlist": ["attack-events", "pump-combat"],  # Tap creature to pump attacker
+    "read ahead": ["card-filtering"],  # Choose which saga chapter to start
+    "living metal": ["artifact-creature"],  # Becomes creature on your turn
+    "for mirrodin!": ["equipment-synergy", "tokens-creature"],  # Creates equipped token
+    "backup": ["counter-placement"],   # Put counters and share ability
+    "bargain": ["sacrifice-outlet"],   # Sacrifice artifact/enchantment/token for bonus
+    "celebrate": ["permanent-etb-payoff"],  # Triggers when 2+ nonland permanents entered
+    "offspring": ["tokens-creature"],   # Pay extra to create baby token copy
+    "saddle": ["tap-creatures"],       # Like crew but for mounts
+    "impending": ["cost-reduction", "counter-placement"],  # Cheaper non-creature, gains counters
+    "gift": ["opponent-choice"],       # Opponent gets something, you get bonus
+    "survival": ["tapped-matters", "counter-placement"],  # If tapped, put counter
 }
 
 
@@ -423,7 +457,7 @@ def _parse_paragraph(para):
 # ── Phase 3: Effect text -> tag mappings ──
 
 EFFECT_TAG_PATTERNS = [
-    (re.compile(r'create.*token', re.I), "token-generation"),
+    (re.compile(r'create.*token', re.I), "tokens-creature"),
     (re.compile(r'draw.*card|draws.*card', re.I), "card-draw"),
     (re.compile(r'destroy.*(?:creature|permanent|artifact|enchantment)', re.I), "spot-removal"),
     (re.compile(r'deals?\s+\d+\s+damage|damage to', re.I), "direct-damage"),
@@ -442,7 +476,7 @@ EFFECT_TAG_PATTERNS = [
     (re.compile(r'untap', re.I), "untap"),
     (re.compile(r'copy.*(?:spell|creature|permanent)', re.I), "copy-effect"),
     (re.compile(r'each opponent|all opponents', re.I), "group-damage"),
-    (re.compile(r'get[s]?\s+[+\-]\d+/[+\-]\d+', re.I), "creature-pump"),
+    (re.compile(r'get[s]?\s+[+\-]\d+/[+\-]\d+', re.I), "pump-combat"),
     (re.compile(r'additional combat', re.I), "extra-combat"),
     (re.compile(r'extra turn', re.I), "extra-turn"),
     (re.compile(r'can\'t be blocked|unblockable', re.I), "evasion"),
@@ -458,7 +492,7 @@ EFFECT_TAG_PATTERNS = [
 
 # Trigger condition -> tag mappings
 TRIGGER_TAG_PATTERNS = [
-    (re.compile(r'creature.*enters|enters the battlefield', re.I), "creature-etb"),
+    (re.compile(r'creature.*enters|enters the battlefield', re.I), "etb-value"),
     (re.compile(r'creature.*dies|a creature.*is put into a graveyard', re.I), "creature-death"),
     (re.compile(r'you gain life|whenever you gain', re.I), "life-gain-events"),
     (re.compile(r'you cast.*spell|whenever you cast', re.I), "spell-cast"),
