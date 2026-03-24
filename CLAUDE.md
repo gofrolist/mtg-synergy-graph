@@ -180,12 +180,12 @@ Tribal tags (human-tribal, goblin-tribal, etc.) are auto-assigned from creature 
 
 | Old tag | Sub-tags |
 |---|---|
-| `creature-pump` | `pump-lord`, `anthem`, `pump-combat`, `pump-self` |
+| `creature-pump` | `pump-lord`, `pump-anthem`, `pump-combat`, `pump-self` |
 | `creature-board` | `board-tokens`, `board-tribal`, `board-go-wide`, `board-generic` |
-| `creature-etb` | `etb-value`, `etb-search`, `etb-enter-trigger` |
-| `combat-events` | `combat-attack-trigger`, `combat-damage-trigger`, `combat-block-trigger` |
-| `token-generation` | `token-creature`, `token-noncreat` |
-| `evasion-grant` | `evasion-flying`, `evasion-trample`, `evasion-unblockable` |
+| `creature-etb` | `etb-value`, `etb-tokens`, `etb-tribal` |
+| `combat-events` | `combat-attack`, `combat-damage`, `combat-block` |
+| `token-generation` | `tokens-creature`, `tokens-artifact`, `tokens-tribal` |
+| `evasion-grant` | `evasion-flying`, `evasion-unblockable`, `evasion-menace` |
 
 `board-generic` is excluded from tag-overlap tiebreaker calculations (too broad to be a meaningful signal).
 
@@ -310,6 +310,6 @@ Suggests card swaps with multi-layer protection:
 - Local scoring uses gemma3:12b via Ollama (best quality/speed local model)
 - Qwen3 models need `think: false` in Ollama payload to disable thinking
 - Fine-tuning uses `.venv` with unsloth + torch (Python 3.12, not system Python 3.14)
-- Tests: 63 tests in `tests/`
+- Tests: 120 tests in `tests/`
 - Spellbook combo boosts must check color identity (fixed: 364 wrong-color boosts deleted)
 - Generic parent tags (`creature-pump`, `creature-board`, `creature-etb`, `combat-events`, `token-generation`, `evasion-grant`) no longer exist; sub-tags are the canonical vocabulary
