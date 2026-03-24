@@ -369,7 +369,7 @@ def _score_via_batch_api(commander: dict, batches: list, system_prompt: str,
             "url": "/v1/chat/completions",
             "body": {
                 "model": model,
-                token_param: 4096,
+                token_param: 16384,  # gpt-5.x uses reasoning tokens from this budget
                 "temperature": 0.2,
                 "messages": [
                     {"role": "system", "content": system_prompt},
@@ -446,7 +446,7 @@ def _score_via_batch_api(commander: dict, batches: list, system_prompt: str,
     # 4. Poll for completion
     print("  Waiting for completion...", end="", flush=True)
     while True:
-        time.sleep(10)
+        time.sleep(30)  # Batch API takes minutes, not seconds
         req = urlreq.Request(
             f"https://api.openai.com/v1/batches/{batch_id}",
             headers={"Authorization": f"Bearer {api_key}"},
@@ -490,10 +490,18 @@ def _score_via_batch_api(commander: dict, batches: list, system_prompt: str,
 
         response = result.get("response", {})
         if response.get("status_code") != 200:
+            print(f"  [BATCH] {custom_id} HTTP {response.get('status_code')}")
             total_failed += len(batch)
             continue
 
-        raw = response["body"]["choices"][0]["message"]["content"].strip()
+        choice = response["body"]["choices"][0]
+        raw = choice["message"]["content"].strip()
+        finish_reason = choice.get("finish_reason", "unknown")
+        if not raw or finish_reason == "length":
+            print(f"  [BATCH] {custom_id} truncated (finish_reason={finish_reason}, content={len(raw)} chars)")
+            total_failed += len(batch)
+            continue
+
         parsed = parse_response(raw, len(batch))
         if not parsed:
             total_failed += len(batch)
