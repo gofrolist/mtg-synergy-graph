@@ -8,8 +8,8 @@ Usage:
     python3 tag_db.py import data/top10000_tags.json         # import LLM tags
     python3 tag_db.py import data/kyler_merged.json          # import merged tags
     python3 tag_db.py stats                                   # show DB stats
-    python3 tag_db.py query --provides token-generation       # find providers
-    python3 tag_db.py query --wants creature-etb              # find wanters
+    python3 tag_db.py query --provides tokens-creature        # find providers
+    python3 tag_db.py query --wants etb-value                 # find wanters
 """
 
 import argparse

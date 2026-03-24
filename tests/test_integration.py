@@ -19,13 +19,13 @@ def test_full_pipeline(tmp_db):
     cards = [
         ("cmdr", "Kyler, Sigardian Emissary", "Legendary Creature — Human Cleric",
          "Whenever a Human enters the battlefield under your control, put a +1/+1 counter on Kyler, Sigardian Emissary.\nHuman creatures you control get +1/+1 for each +1/+1 counter on Kyler.",
-         "enabler", ["human-tribal", "counter-placement", "creature-etb"], ["counter-placement"]),
+         "enabler", ["human-tribal", "counter-placement", "etb-value"], ["counter-placement"]),
         ("scales", "Hardened Scales", "Enchantment",
          "If one or more +1/+1 counters would be placed on a creature you control, that many plus one +1/+1 counters are placed on it instead.",
          "enabler", ["counter-amplification"], ["counter-placement-events"]),
         ("crusade", "Cathars' Crusade", "Enchantment",
          "Whenever a creature enters the battlefield under your control, put a +1/+1 counter on each creature you control.",
-         "enabler", ["counter-placement", "counter-placement-events"], ["creature-etb"]),
+         "enabler", ["counter-placement", "counter-placement-events"], ["etb-value"]),
     ]
 
     for oid, name, tl, oracle, role, provs, wants in cards:

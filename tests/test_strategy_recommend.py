@@ -10,7 +10,7 @@ def test_strategy_weighted_scoring(tmp_db):
     conn = sqlite3.connect(tmp_db)
     # Commander: token strategy
     conn.execute("INSERT INTO cards (oracle_id, name) VALUES ('cmdr', 'Token Commander')")
-    conn.execute("INSERT INTO provides (oracle_id, tag) VALUES ('cmdr', 'token-generation')")
+    conn.execute("INSERT INTO provides (oracle_id, tag) VALUES ('cmdr', 'tokens-creature')")
 
     # Candidate A: matches token strategy
     conn.execute("INSERT INTO cards (oracle_id, name) VALUES ('cand-a', 'Token Card')")

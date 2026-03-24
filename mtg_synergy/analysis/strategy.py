@@ -201,7 +201,7 @@ def build_from_commander(commander_name: str, top_n: int = 30):
         cmd_subtypes = {s.strip(",") for s in cmd_type.split(" — ")[1].split()}
 
     # Build expanded wants: what the commander wants + semantic bridges from provides
-    # e.g. commander provides token-generation → also find cards wanting token-events, creature-board
+    # e.g. commander provides tokens-creature → also find cards wanting token-events, board-go-wide
     expanded_wants = set(cmd_wants)
     for p_tag in cmd_provides:
         for (bridge_p, bridge_w), weight in SEMANTIC_BRIDGES.items():

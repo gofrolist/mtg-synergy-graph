@@ -18,7 +18,7 @@ SCHEMA = """{
   "name": "card name",
   "role": "ramp | draw | removal | protection | enabler | threat | utility | land",
   "provides": ["what this card gives to the deck — abstract capabilities, e.g. mana-acceleration, counter-amplification, trigger-doubling"],
-  "wants": ["what other cards or conditions make this card better — abstract tags, e.g. counter-placement-events, creature-etb-triggers"]
+  "wants": ["what other cards or conditions make this card better — abstract tags, e.g. counter-placement-events, etb-value, etb-tribal"]
 }"""
 
 def _load_tag_vocab() -> tuple[list[str], list[str]]:
@@ -56,7 +56,7 @@ Your focus is on: role classification, provides (what the card gives), and wants
 
 Core principles:
 - 'provides' = abstract capabilities this card contributes (e.g. 'mana-acceleration', 'counter-amplification', 'board-protection')
-- 'wants' = abstract conditions/cards that make this card better (e.g. 'counter-placement-events', 'creature-etb-triggers'), NOT specific card names
+- 'wants' = abstract conditions/cards that make this card better (e.g. 'counter-placement-events', 'etb-value', 'etb-tribal'), NOT specific card names
 - 'role' = the card's primary function in a deck — choose the single best fit
 - 'permanent' in triggers = true only if the card stays on battlefield producing ongoing effect
 - Be SPECIFIC in provides/wants — these are graph edges connecting cards

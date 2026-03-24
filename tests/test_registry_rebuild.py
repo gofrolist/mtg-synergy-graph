@@ -11,8 +11,8 @@ def test_rebuild_registry(tmp_db, tmp_path):
     conn = sqlite3.connect(tmp_db)
     for i in range(3):
         conn.execute("INSERT INTO cards (oracle_id, name) VALUES (?, ?)", (f"card-{i}", f"Card {i}"))
-        conn.execute("INSERT INTO provides (oracle_id, tag) VALUES (?, ?)", (f"card-{i}", "token-generation"))
-        conn.execute("INSERT INTO wants (oracle_id, tag) VALUES (?, ?)", (f"card-{i}", "creature-etb"))
+        conn.execute("INSERT INTO provides (oracle_id, tag) VALUES (?, ?)", (f"card-{i}", "tokens-creature"))
+        conn.execute("INSERT INTO wants (oracle_id, tag) VALUES (?, ?)", (f"card-{i}", "etb-value"))
     for i in range(2):
         conn.execute("INSERT INTO provides (oracle_id, tag) VALUES (?, ?)", (f"card-{i}", "rare-tag"))
         conn.execute("INSERT INTO wants (oracle_id, tag) VALUES (?, ?)", (f"card-{i}", "rare-want"))
@@ -25,8 +25,8 @@ def test_rebuild_registry(tmp_db, tmp_path):
     with open(output_path) as f:
         registry = json.load(f)
 
-    assert "token-generation" in registry["provides"]["tags"]
-    assert "creature-etb" in registry["wants"]["tags"]
+    assert "tokens-creature" in registry["provides"]["tags"]
+    assert "etb-value" in registry["wants"]["tags"]
     assert "rare-tag" not in registry["provides"]["tags"]
     assert "rare-want" not in registry["wants"]["tags"]
     assert registry["_meta"]["version"] == "4.0"

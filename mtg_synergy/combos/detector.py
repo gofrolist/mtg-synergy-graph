@@ -412,7 +412,7 @@ def find_combos_tiered(deck_oids, db_path=None):
 
             if ab_a and ab_b:
                 # Expand effect tags with bridge mappings so that e.g.
-                # token-generation (effect) matches creature-etb (trigger).
+                # tokens-creature (effect) matches etb-value (trigger).
                 a_effects_expanded = set(ab_a["effect_tags"])
                 for et in ab_a["effect_tags"]:
                     a_effects_expanded |= TRIGGER_EFFECT_BRIDGES.get(et, set())
