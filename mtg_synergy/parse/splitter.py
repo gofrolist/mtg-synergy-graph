@@ -252,6 +252,34 @@ def _find_activated_colon(text: str) -> int | None:
     return None
 
 
+def _find_trigger_effect_split(text: str) -> int:
+    """Find the comma index that separates trigger clause from effect clause.
+
+    For simple triggers like "Whenever X, do Y", returns the first comma.
+    For multi-clause triggers like "Whenever X, or Y, or Z, EFFECT",
+    returns the last comma before the effect starts.
+
+    Heuristic: scan commas from left. If the text after the comma starts with
+    'or ' (continuation of trigger), skip it. Otherwise, it's the effect split.
+    If all commas are followed by 'or ', use the last comma as fallback.
+    """
+    last_comma = -1
+    i = 0
+    while i < len(text):
+        if text[i] == ",":
+            after = text[i + 1:].lstrip()
+            if after.lower().startswith("or "):
+                # This comma is part of a multi-clause trigger, skip
+                last_comma = i
+                i += 1
+                continue
+            else:
+                return i
+        i += 1
+    # All commas were followed by "or" — use the last one
+    return last_comma
+
+
 def _classify_line(text: str) -> RawAbility:
     """Classify a single line of oracle text into a RawAbility."""
     original = text
@@ -316,12 +344,12 @@ def _classify_line(text: str) -> RawAbility:
 
     # Check for triggered ability
     if _TRIGGERED_RE.match(text):
-        # Split trigger clause from effect at first comma
-        # "When X, do Y" or "Whenever X, do Y"
+        # Split trigger clause from effect at the right comma.
+        # For multi-clause triggers like "Whenever X, or Y, or Z, EFFECT"
+        # we need the last comma before the effect, not the first comma.
         trigger_text = None
         effect_text = None
-        # Find the comma that separates trigger from effect
-        comma_idx = text.find(",")
+        comma_idx = _find_trigger_effect_split(text)
         if comma_idx != -1:
             trigger_text = text[: comma_idx].strip()
             effect_text = text[comma_idx + 1 :].strip()

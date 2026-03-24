@@ -320,8 +320,8 @@ def _extract_scaling(text: str) -> Optional[ScalesWith]:
 # ---- Verb parsers ----
 
 def _try_deal_damage(text: str) -> Optional[Effect]:
-    # "X deals N damage to ..."
-    m = re.match(r'(?:\w+\s+)?deals\s+(\d+|X)\s+damage\s+to\s+(.+)', text, re.IGNORECASE)
+    # "X deals N damage to ..." — subject can be multi-word (e.g. "Syr Konrad, the Grim")
+    m = re.match(r'(?:.*?\s+)?deals\s+(\d+|X)\s+damage\s+to\s+(.+)', text, re.IGNORECASE)
     if not m:
         return None
     raw_amount = m.group(1)
@@ -333,7 +333,7 @@ def _try_deal_damage(text: str) -> Optional[Effect]:
 
 
 def _try_draw(text: str) -> Optional[Effect]:
-    m = re.match(r'[Dd]raw\s+(.+?)(?:\s+cards?|\s*$)', text, re.IGNORECASE)
+    m = re.match(r'(?:you\s+(?:may\s+)?)?[Dd]raw\s+(.+?)(?:\s+cards?|\s+unless\b|\s*$)', text, re.IGNORECASE)
     if not m:
         return None
     amount = _parse_amount_prefix(m.group(1))
@@ -445,6 +445,9 @@ def _try_mill(text: str) -> Optional[Effect]:
 
 def _try_add_mana(text: str) -> Optional[Effect]:
     if re.match(r'[Aa]dd\s+\{', text):
+        return Effect(verb="add_mana")
+    # Word-form mana: "Add one mana of any color"
+    if re.match(r'[Aa]dd\s+(?:one|two|three|\d+)\s+mana', text):
         return Effect(verb="add_mana")
     return None
 
