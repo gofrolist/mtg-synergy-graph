@@ -146,8 +146,11 @@ def _init_field_type_map():
             hint = f.type
             # Resolve string annotations
             if isinstance(hint, str):
-                # Strip Optional wrapper
-                for name, t in _DATACLASS_TYPES.items():
+                # Strip Optional wrapper — match longest name first
+                # to avoid "Amount" matching before "ManaAmount"
+                sorted_types = sorted(_DATACLASS_TYPES.items(),
+                                       key=lambda x: len(x[0]), reverse=True)
+                for name, t in sorted_types:
                     if name in hint:
                         _FIELD_TYPE_MAP[(dc, f.name)] = t
                         break
