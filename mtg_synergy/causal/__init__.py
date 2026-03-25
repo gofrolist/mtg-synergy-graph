@@ -25,8 +25,30 @@ def ensure_causal_schema(conn):
     conn.commit()
 
 
+def _load_oracle_texts(conn, card_ids: set[str]) -> dict[str, str]:
+    """Load oracle_text from cards table for the given oracle_ids."""
+    if not card_ids:
+        return {}
+    oracle_texts = {}
+    # Batch query in chunks to avoid huge IN clauses
+    card_list = list(card_ids)
+    chunk_size = 500
+    for i in range(0, len(card_list), chunk_size):
+        chunk = card_list[i:i + chunk_size]
+        placeholders = ",".join("?" * len(chunk))
+        rows = conn.execute(
+            f"SELECT oracle_id, oracle_text FROM cards WHERE oracle_id IN ({placeholders})",
+            chunk,
+        ).fetchall()
+        for oid, text in rows:
+            if text:
+                oracle_texts[oid] = text
+    return oracle_texts
+
+
 def build_and_store_graph(conn, cards: dict[str, list[Ability]]):
-    edges = build_causal_edges(cards)
+    oracle_texts = _load_oracle_texts(conn, set(cards.keys()))
+    edges = build_causal_edges(cards, oracle_texts=oracle_texts)
     conn.execute("DELETE FROM interaction_edges")
     for e in edges:
         conn.execute(

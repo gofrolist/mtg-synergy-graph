@@ -135,3 +135,101 @@ def test_bidirectional_edges():
     b_to_a = [e for e in edges if e.source == "b" and e.target == "a"]
     assert len(a_to_b) >= 1
     assert len(b_to_a) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Amplifies edges
+# ---------------------------------------------------------------------------
+
+def test_amplifies_counter_replacement():
+    """Hardened Scales amplifies cards that put counters."""
+    cards = dict([
+        _make_card("scales", [Ability(kind="replacement", effects=[])]),
+        _make_card("counter_card", [Ability(kind="triggered",
+            trigger=Trigger(event="enters_the_battlefield",
+                            subject=ObjectFilter(card_type="creature")),
+            effects=[Effect(verb="put_counter", amount=Amount(value=1),
+                            target=ObjectFilter(card_type="creature"))])]),
+    ])
+    edges = build_causal_edges(cards, oracle_texts={"scales": "If one or more +1/+1 counters would be put on a creature you control, that many plus one +1/+1 counters are put on it instead."})
+    amp_edges = [e for e in edges if e.edge_type == "amplifies" and e.source == "scales"]
+    assert len(amp_edges) >= 1
+    assert amp_edges[0].target == "counter_card"
+
+
+def test_amplifies_token_replacement():
+    """Anointed Procession amplifies token creators."""
+    cards = dict([
+        _make_card("procession", [Ability(kind="replacement", effects=[])]),
+        _make_card("token_maker", [Ability(kind="activated",
+            effects=[Effect(verb="create", amount=Amount(value=1),
+                            token=TokenDef("creature", "Goblin", 1, 1, [], "red"))])]),
+    ])
+    edges = build_causal_edges(cards, oracle_texts={"procession": "If an effect would create one or more tokens under your control, it creates twice that many of those tokens instead."})
+    amp_edges = [e for e in edges if e.edge_type == "amplifies"]
+    assert len(amp_edges) >= 1
+
+
+def test_amplifies_trigger_modifier():
+    """Panharmonicon amplifies ETB triggered abilities."""
+    cards = dict([
+        _make_card("panharmonicon", [Ability(kind="trigger_modifier", effects=[])]),
+        _make_card("etb_card", [Ability(kind="triggered",
+            trigger=Trigger(event="enters_the_battlefield",
+                            subject=ObjectFilter(card_type="creature")),
+            effects=[Effect(verb="draw", amount=Amount(value=1))])]),
+    ])
+    edges = build_causal_edges(cards, oracle_texts={"panharmonicon": "If an artifact or creature entering causes a triggered ability of a permanent you control to trigger, that ability triggers an additional time."})
+    amp_edges = [e for e in edges if e.edge_type == "amplifies"]
+    assert len(amp_edges) >= 1
+    assert amp_edges[0].source == "panharmonicon"
+    assert amp_edges[0].target == "etb_card"
+
+
+def test_no_amplifies_wrong_event():
+    """Teysa Karlov (dies modifier) doesn't amplify ETB triggers."""
+    cards = dict([
+        _make_card("teysa", [Ability(kind="trigger_modifier", effects=[])]),
+        _make_card("etb_card", [Ability(kind="triggered",
+            trigger=Trigger(event="enters_the_battlefield",
+                            subject=ObjectFilter(card_type="creature")),
+            effects=[Effect(verb="draw", amount=Amount(value=1))])]),
+    ])
+    edges = build_causal_edges(cards, oracle_texts={"teysa": "If a creature dying causes a triggered ability of a permanent you control to trigger, that ability triggers an additional time."})
+    amp_edges = [e for e in edges if e.edge_type == "amplifies"
+                 and e.source == "teysa" and e.target == "etb_card"]
+    assert len(amp_edges) == 0
+
+
+# ---------------------------------------------------------------------------
+# Enables edges
+# ---------------------------------------------------------------------------
+
+def test_enables_haste_for_tap():
+    """Haste granter enables tap-ability cards."""
+    cards = dict([
+        _make_card("haste_giver", [Ability(kind="static",
+            effects=[Effect(verb="grant_keyword", amount=Amount(value=1),
+                            keyword="haste")])]),
+        _make_card("tap_card", [Ability(kind="activated", cost=Cost(tap=True),
+            effects=[Effect(verb="draw", amount=Amount(value=1))])]),
+    ])
+    edges = build_causal_edges(cards)
+    enable_edges = [e for e in edges if e.edge_type == "enables"
+                    and e.source == "haste_giver" and e.target == "tap_card"]
+    assert len(enable_edges) >= 1
+
+
+def test_no_enables_no_tap():
+    """Haste granter doesn't enable non-tap abilities."""
+    cards = dict([
+        _make_card("haste_giver", [Ability(kind="static",
+            effects=[Effect(verb="grant_keyword", amount=Amount(value=1),
+                            keyword="haste")])]),
+        _make_card("no_tap", [Ability(kind="triggered",
+            trigger=Trigger(event="dies", subject=ObjectFilter(card_type="creature")),
+            effects=[Effect(verb="draw", amount=Amount(value=1))])]),
+    ])
+    edges = build_causal_edges(cards)
+    enable_edges = [e for e in edges if e.edge_type == "enables"]
+    assert len(enable_edges) == 0
