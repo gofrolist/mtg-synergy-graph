@@ -261,8 +261,26 @@ class CausalContext:
         # Also add events the commander produces (the deck cares about these)
         self._deck_relies_on.update(self._cmdr_events_produced)
 
-        # Chain participation bonus (pre-computed offline, not at query time)
-        self._chain_bonus = {}
+        # Build commander forward map: {card_id: strength} for direct cmdr outgoing
+        self._cmdr_forward_map = {}
+        for edge in self._outgoing.get(commander_id, []):
+            mid = edge.target
+            if mid not in self._cmdr_forward_map or edge.strength > self._cmdr_forward_map[mid]:
+                self._cmdr_forward_map[mid] = edge.strength
+
+    def _chain_bonus(self, candidate_id: str) -> float:
+        """Score chain paths: commander → candidate → deck cards.
+
+        Only fires if the candidate is directly linked FROM the commander.
+        """
+        cmdr_link = self._cmdr_forward_map.get(candidate_id, 0)
+        if cmdr_link == 0:
+            return 0.0
+        bonus = 0.0
+        for edge in self._outgoing.get(candidate_id, []):
+            if edge.target in self.deck_oids:
+                bonus += cmdr_link * edge.strength * 0.5
+        return bonus
 
     def causal_score(self, candidate_id: str) -> float:
         """Score a candidate with commander-centric weighting."""
@@ -332,7 +350,7 @@ class CausalContext:
                 anti_synergy = len(overlap) * -3.0
 
         # 5. Chain participation bonus
-        chain_bonus = self._chain_bonus.get(candidate_id, 0.0)
+        chain_bonus = self._chain_bonus(candidate_id)
 
         score = cmdr_score + deck_density + chain_bonus + anti_synergy
         return max(min(score, 10.0), -5.0)  # allow negative for strong anti-synergy
