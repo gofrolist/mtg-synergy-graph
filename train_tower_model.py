@@ -205,49 +205,147 @@ def forward(model, cmdr_emb, card_emb, struct_feat, dropout_rate=0.0, training=F
                  "mask1": mask1, "mask2": mask2}
 
 
-def train():
+def train(edhrec=False, forge_causal=False):
     """Train the two-tower model."""
     print("Loading data...")
     normed_emb, oid_list, oid_to_idx = load_embeddings()
     provides, wants, strats, types, oracles, ranks, mech_data = load_structural_features()
 
     conn = sqlite3.connect(DB_PATH)
-    # Train only on LLM-generated scores, not Spellbook boosts or manual fixes.
-    # Those corrections are applied at runtime, not during training.
-    pairs = conn.execute(
-        "SELECT commander_oid, card_oid, score FROM synergy_scores "
-        "WHERE model NOT LIKE 'auto%' AND model NOT LIKE 'spellbook%' AND model NOT LIKE 'manual%'"
-    ).fetchall()
 
-    # Normalize scores by provider to fix gemma3 scoring bias
-    provider_means = {}
-    for row in conn.execute(
-        "SELECT model, AVG(score) FROM synergy_scores "
-        "WHERE model NOT LIKE 'auto%' AND model NOT LIKE 'spellbook%' AND model NOT LIKE 'manual%' "
-        "GROUP BY model"
-    ).fetchall():
-        provider_means[row[0]] = row[1]
+    if edhrec:
+        # Train on EDHREC synergy data: 132k pairs from 502 commanders
+        # Map: EDHREC synergy (-0.4 to 0.7) → score (1-10)
+        # Formula: score = 1 + max(0, synergy) * 12 (capped at 10)
+        # syn=0.0 → 1, syn=0.25 → 4, syn=0.5 → 7, syn=0.75 → 10
+        print("Using EDHREC synergy data for training")
+        import re
 
-    pair_providers = {}
-    for row in conn.execute(
-        "SELECT commander_oid, card_oid, model FROM synergy_scores "
-        "WHERE model NOT LIKE 'auto%' AND model NOT LIKE 'spellbook%' AND model NOT LIKE 'manual%'"
-    ).fetchall():
-        pair_providers[(row[0], row[1])] = row[2]
+        def slug_to_name_pattern(slug):
+            parts = slug.split('-')
+            return '%' + '%'.join(parts) + '%'
 
-    target_mean = provider_means.get("gpt-5.4-mini", 4.5)
-    normalized_pairs = []
-    for cmdr_oid, card_oid, score in pairs:
-        provider = pair_providers.get((cmdr_oid, card_oid), "")
-        provider_mean = provider_means.get(provider, target_mean)
-        adjusted = score - (provider_mean - target_mean)
-        adjusted = max(1.0, min(10.0, adjusted))
-        normalized_pairs.append((cmdr_oid, card_oid, adjusted))
-    pairs = normalized_pairs
+        # Build slug → commander OID mapping
+        slug_to_oid = {}
+        all_slugs = set(r[0] for r in conn.execute(
+            "SELECT DISTINCT commander_slug FROM edhrec_card_synergy"))
+        for slug in all_slugs:
+            pattern = slug_to_name_pattern(slug)
+            row = conn.execute(
+                "SELECT oracle_id FROM cards "
+                "WHERE LOWER(REPLACE(REPLACE(name, '''', ''), ',', '')) LIKE ? "
+                "AND type_line LIKE '%Legendary%' LIMIT 1",
+                (pattern,)).fetchone()
+            if row:
+                slug_to_oid[slug] = row[0]
+
+        print(f"  Matched {len(slug_to_oid)}/{len(all_slugs)} commander slugs")
+
+        pairs = []
+        for slug, cmdr_oid in slug_to_oid.items():
+            for row in conn.execute(
+                "SELECT e.card_name, e.synergy, c.oracle_id "
+                "FROM edhrec_card_synergy e "
+                "JOIN cards c ON c.name = e.card_name "
+                "WHERE e.commander_slug = ? AND e.synergy > -0.1",
+                (slug,)):
+                syn = row[1]
+                # Map synergy → 1-10 scale
+                score = min(10.0, max(1.0, 1.0 + max(0, syn) * 12.0))
+                pairs.append((cmdr_oid, row[2], score))
+
+        print(f"Training pairs: {len(pairs)} (from EDHREC)")
+    elif forge_causal:
+        # Train on Forge causal graph scores: for each EDHREC commander,
+        # compute causal score for all its EDHREC cards. This teaches the
+        # tower to predict the causal signal from embeddings alone.
+        from mtg_synergy.causal import CausalContext
+        print("Using Forge causal scores for training")
+
+        # Load commander info
+        slug_to_oid = {}
+        for slug in set(r[0] for r in conn.execute(
+            "SELECT DISTINCT commander_slug FROM edhrec_card_synergy"
+        )):
+            row = conn.execute(
+                "SELECT oracle_id FROM cards "
+                "WHERE LOWER(REPLACE(REPLACE(name, '''', ''), ',', '')) LIKE ? "
+                "AND type_line LIKE '%Legendary%' LIMIT 1",
+                (f"%{slug.replace('-', '%')}%",)).fetchone()
+            if row:
+                slug_to_oid[slug] = row[0]
+        print(f"  Matched {len(slug_to_oid)} commanders")
+
+        # Card name → OID
+        name_to_oid = {}
+        for row in conn.execute("SELECT name, oracle_id FROM cards"):
+            name_to_oid[row[0]] = row[1]
+
+        pairs = []
+        scored_cmdrs = 0
+        for slug, cmdr_oid in list(slug_to_oid.items())[:200]:  # cap at 200 commanders
+            try:
+                ctx = CausalContext(conn, cmdr_oid, set())
+            except Exception:
+                continue
+
+            for row in conn.execute(
+                "SELECT card_name FROM edhrec_card_synergy WHERE commander_slug = ?",
+                (slug,)
+            ):
+                card_oid = name_to_oid.get(row[0])
+                if not card_oid or card_oid == cmdr_oid:
+                    continue
+                causal = ctx.causal_score(card_oid)
+                # Map causal score (typically 0-4) to 1-10 scale
+                # causal=0 → 3, causal=1 → 5, causal=2 → 7, causal=4 → 10
+                score = min(10.0, max(1.0, 3.0 + causal * 1.75))
+                if causal < -1:
+                    score = 1.0  # anti-synergy
+                pairs.append((cmdr_oid, card_oid, score))
+
+            scored_cmdrs += 1
+            if scored_cmdrs % 20 == 0:
+                print(f"  Scored {scored_cmdrs} commanders, {len(pairs)} pairs...")
+
+        print(f"Training pairs: {len(pairs)} (from Forge causal scores)")
+    else:
+        # Train on LLM-generated scores (original path)
+        pairs = conn.execute(
+            "SELECT commander_oid, card_oid, score FROM synergy_scores "
+            "WHERE model NOT LIKE 'auto%' AND model NOT LIKE 'spellbook%' AND model NOT LIKE 'manual%'"
+        ).fetchall()
+
+        # Normalize scores by provider to fix gemma3 scoring bias
+        provider_means = {}
+        for row in conn.execute(
+            "SELECT model, AVG(score) FROM synergy_scores "
+            "WHERE model NOT LIKE 'auto%' AND model NOT LIKE 'spellbook%' AND model NOT LIKE 'manual%' "
+            "GROUP BY model"
+        ).fetchall():
+            provider_means[row[0]] = row[1]
+
+        pair_providers = {}
+        for row in conn.execute(
+            "SELECT commander_oid, card_oid, model FROM synergy_scores "
+            "WHERE model NOT LIKE 'auto%' AND model NOT LIKE 'spellbook%' AND model NOT LIKE 'manual%'"
+        ).fetchall():
+            pair_providers[(row[0], row[1])] = row[2]
+
+        target_mean = provider_means.get("gpt-5.4-mini", 4.5)
+        normalized_pairs = []
+        for cmdr_oid, card_oid, score in pairs:
+            provider = pair_providers.get((cmdr_oid, card_oid), "")
+            provider_mean = provider_means.get(provider, target_mean)
+            adjusted = score - (provider_mean - target_mean)
+            adjusted = max(1.0, min(10.0, adjusted))
+            normalized_pairs.append((cmdr_oid, card_oid, adjusted))
+        pairs = normalized_pairs
+
+        print(f"Provider normalization: target_mean={target_mean:.2f}")
+        print(f"Training pairs: {len(pairs)}")
+
     conn.close()
-
-    print(f"Provider normalization: target_mean={target_mean:.2f}")
-    print(f"Training pairs: {len(pairs)}")
 
     # Build arrays
     cmdr_embs = []
@@ -530,6 +628,10 @@ def main():
     parser.add_argument("--predict", help="Score all cards for a commander")
     parser.add_argument("--eval", action="store_true")
     parser.add_argument("--stats", action="store_true")
+    parser.add_argument("--edhrec", action="store_true",
+                        help="Train on EDHREC synergy data instead of LLM scores")
+    parser.add_argument("--forge-causal", action="store_true",
+                        help="Train on Forge causal graph scores")
     args = parser.parse_args()
 
     if args.stats:
@@ -542,7 +644,7 @@ def main():
     elif args.predict:
         predict_commander(args.predict)
     else:
-        train()
+        train(edhrec=args.edhrec, forge_causal=args.forge_causal)
 
 
 if __name__ == "__main__":
