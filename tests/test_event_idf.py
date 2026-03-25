@@ -82,3 +82,36 @@ def test_idf_range():
     for side in ("producer", "responder"):
         for event, value in idf[side].items():
             assert 0.3 <= value <= 3.0, f"{side} IDF for {event} = {value} out of range"
+
+
+# ---------------------------------------------------------------------------
+# IDF-weighted edge building tests
+# ---------------------------------------------------------------------------
+
+from mtg_synergy.causal.graph_builder import build_causal_edges
+
+
+def test_trigger_edges_use_idf():
+    """Rare event edges should have higher strength than common event edges."""
+    cards = dict([_make_krenko(), _make_purphoros(), _make_cathars(),
+                  _make_goblin_sharpshooter()])
+    edges = build_causal_edges(cards)
+    kr_to_purph = [e for e in edges if e.source == "krenko" and e.target == "purphoros"
+                   and e.edge_type == "triggers"]
+    kr_to_cathars = [e for e in edges if e.source == "krenko" and e.target == "cathars"
+                     and e.edge_type == "triggers"]
+    assert len(kr_to_purph) >= 1
+    assert len(kr_to_cathars) >= 1
+    for e in kr_to_purph:
+        # creature_enters is common (multiple responders), so IDF dampens it below 0.6
+        assert e.strength < 0.6, f"Edge strength {e.strength} should be IDF-dampened below 0.6"
+
+
+def test_combined_idf_capped():
+    """Combined producer × responder IDF product must not exceed 3.0."""
+    cards = dict([_make_krenko(), _make_purphoros(), _make_cathars(),
+                  _make_goblin_sharpshooter()])
+    edges = build_causal_edges(cards)
+    for e in edges:
+        if e.edge_type == "triggers":
+            assert e.strength <= 3.0, f"Edge {e.source}->{e.target} strength {e.strength} exceeds cap"

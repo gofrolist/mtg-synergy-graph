@@ -45,7 +45,8 @@ def test_trigger_edge_exact_subtype():
     trigger_edges = [e for e in edges if e.edge_type == "triggers"]
     assert len(trigger_edges) >= 1
     assert trigger_edges[0].detail.filter_precision == "exact"
-    assert trigger_edges[0].strength == 1.0
+    # Base strength 1.0, boosted by IDF (small card pool = rare event = high IDF)
+    assert trigger_edges[0].strength >= 1.0
 
 def test_trigger_edge_broad_match():
     cards = dict([
@@ -61,7 +62,8 @@ def test_trigger_edge_broad_match():
     trigger_edges = [e for e in edges if e.edge_type == "triggers"]
     assert len(trigger_edges) >= 1
     assert trigger_edges[0].detail.filter_precision == "broad"
-    assert trigger_edges[0].strength == pytest.approx(0.6, abs=0.1)
+    # Base strength 0.6, boosted by IDF (small card pool = rare event = high IDF)
+    assert trigger_edges[0].strength >= 0.6
 
 def test_no_self_edge():
     cards = dict([_make_card("card", [

@@ -58,7 +58,7 @@ def _precision_to_strength(precision: str) -> float:
 # Edge builders
 # ---------------------------------------------------------------------------
 
-def _build_trigger_edges(index: CardIndex) -> list[Edge]:
+def _build_trigger_edges(index: CardIndex, event_idf: dict) -> list[Edge]:
     """Cross-match producers x responders for each event type."""
     edges: list[Edge] = []
 
@@ -78,6 +78,11 @@ def _build_trigger_edges(index: CardIndex) -> list[Edge]:
                     continue
                 precision = _compute_filter_precision(trigger.subject, sc.object)
                 strength = _precision_to_strength(precision)
+                # Apply combined IDF: dampen common events, boost rare ones
+                p_idf = event_idf["producer"].get(event, 1.0)
+                r_idf = event_idf["responder"].get(event, 1.0)
+                combined_idf = min(p_idf * r_idf, 3.0)
+                strength *= combined_idf
                 if strength <= 0:
                     continue
                 edges.append(Edge(
@@ -194,6 +199,7 @@ def _build_amplifies_edges(
     index: CardIndex,
     cards: dict[str, list[Ability]],
     oracle_texts: dict[str, str],
+    event_idf: dict,
 ) -> list[Edge]:
     """Build amplifies edges from replacement effects and trigger modifiers."""
     edges: list[Edge] = []
@@ -232,6 +238,9 @@ def _build_amplifies_edges(
                 modified_event = _detect_modifier_event(oracle)
                 if not modified_event:
                     continue
+                # Apply IDF to trigger modifier strength
+                r_idf = event_idf["responder"].get(modified_event, 1.0)
+                strength = 0.9 * min(r_idf, 3.0)
                 # Find all cards that trigger on that event
                 for resp_card, resp_ab, trigger in index._responders.get(modified_event, []):
                     if resp_card == mod_card:
@@ -242,7 +251,7 @@ def _build_amplifies_edges(
                         edge_type="amplifies",
                         ability_a=mod_ab,
                         ability_b=resp_ab,
-                        strength=0.9,
+                        strength=strength,
                         detail=EdgeDetail(
                             event=modified_event,
                         ),
@@ -425,11 +434,12 @@ def build_causal_edges(
     _all_cards = cards
 
     index = build_index(cards)
+    event_idf = index.compute_event_idf()
     edges: list[Edge] = []
-    edges.extend(_build_trigger_edges(index))
+    edges.extend(_build_trigger_edges(index, event_idf))
     edges.extend(_build_feeds_edges(index))
     if oracle_texts:
-        edges.extend(_build_amplifies_edges(index, cards, oracle_texts))
+        edges.extend(_build_amplifies_edges(index, cards, oracle_texts, event_idf))
     edges.extend(_build_enables_edges(index, cards))
     if type_lines:
         edges.extend(_build_tribal_edges(cards, type_lines))
