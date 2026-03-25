@@ -250,20 +250,29 @@ def _parse_single_effect(text: str) -> Optional[Effect]:
     """Try each verb pattern, most specific first."""
     parsers = [
         _try_create_token,
+        _try_copy,           # before damage (contains "create")
+        _try_damage_all,     # before deal_damage ("each" variant)
         _try_deal_damage,
         _try_draw,
+        _try_destroy_all,    # before destroy ("all" variant)
         _try_destroy,
+        _try_exile_all,      # before exile ("all" variant)
         _try_exile,
+        _try_return_all,     # before return ("all" variant)
         _try_return,
         _try_put_counter,
+        _try_gain_control,   # before gain_life ("gain control" vs "gain life")
         _try_gain_life,
         _try_lose_life,
         _try_sacrifice,
         _try_discard,
         _try_search,
         _try_mill,
+        _try_surveil,        # after mill (similar concept)
         _try_add_mana,
+        _try_pump_all,       # before pump ("all" variant)
         _try_pump,
+        _try_dig,            # "look at top N"
         _try_grant_keyword,
         _try_prevent,
         _try_counter,
@@ -721,3 +730,105 @@ def _try_untap(text: str) -> Optional[Effect]:
         return None
     target = _parse_target(m.group(1))
     return Effect(verb="untap", target=target)
+
+
+# ---- New verb parsers (derived from Forge's 32k training data) ----
+
+def _try_destroy_all(text: str) -> Optional[Effect]:
+    """'Destroy all creatures/permanents' → destroy_all."""
+    m = re.match(r'[Dd]estroy\s+all\s+(.+)', text, re.IGNORECASE)
+    if not m:
+        return None
+    target = _parse_target(m.group(1))
+    return Effect(verb="destroy_all", target=target)
+
+
+def _try_damage_all(text: str) -> Optional[Effect]:
+    """'deals N damage to each creature' → damage_all (not 'each opponent/player')."""
+    # Only match "each creature" / "each other creature" — not "each opponent"
+    m = re.search(r'deals?\s+(\d+|X)\s+damage\s+to\s+each\s+(?:other\s+)?(?:creature|permanent|nonland)', text, re.IGNORECASE)
+    if not m:
+        return None
+    raw_amount = m.group(1)
+    amount_val = "X" if raw_amount == "X" else int(raw_amount)
+    return Effect(verb="damage_all", amount=Amount(value=amount_val))
+
+
+def _try_pump_all(text: str) -> Optional[Effect]:
+    """'Creatures you control get +N/+N' → pump_all. Must be plural 'creatures'."""
+    # "Creatures you control get +N/+N" (plural = pump_all)
+    m = re.search(r'[Cc]reatures\s+(?:you\s+control\s+)?get\s+[+\-]\d+/[+\-]\d+', text)
+    if m:
+        target = _parse_target(text)
+        return Effect(verb="pump_all", target=target)
+    # "All creatures get +N/+N"
+    m = re.search(r'[Aa]ll\s+creatures\s+get\s+[+\-]\d+/[+\-]\d+', text)
+    if m:
+        return Effect(verb="pump_all")
+    # "Other creatures you control get +N/+N"
+    m = re.search(r'[Oo]ther\s+creatures\s+(?:you\s+control\s+)?get\s+[+\-]\d+/[+\-]\d+', text)
+    if m:
+        target = _parse_target(text)
+        return Effect(verb="pump_all", target=target)
+    return None
+
+
+def _try_gain_control(text: str) -> Optional[Effect]:
+    """'Gain control of target creature' → gain_control."""
+    m = re.search(r'[Gg]ain\s+control\s+of\s+(.+)', text, re.IGNORECASE)
+    if not m:
+        return None
+    # Don't match 'gain control' when it's part of another phrase
+    target = _parse_target(m.group(1))
+    return Effect(verb="gain_control", target=target)
+
+
+def _try_exile_all(text: str) -> Optional[Effect]:
+    """'Exile all creatures/permanents' → exile_all."""
+    m = re.match(r'[Ee]xile\s+all\s+(.+)', text, re.IGNORECASE)
+    if not m:
+        return None
+    target = _parse_target(m.group(1))
+    return Effect(verb="exile_all", target=target)
+
+
+def _try_return_all(text: str) -> Optional[Effect]:
+    """'Return all creatures to their owners' hands' → return_all."""
+    m = re.match(r'[Rr]eturn\s+all\s+(.+)', text, re.IGNORECASE)
+    if not m:
+        return None
+    target = _parse_target(m.group(1))
+    dest = None
+    body = m.group(1).lower()
+    if "hand" in body:
+        dest = "hand"
+    elif "battlefield" in body:
+        dest = "battlefield"
+    return Effect(verb="return_all", target=target, destination=dest)
+
+
+def _try_surveil(text: str) -> Optional[Effect]:
+    """'Surveil N' → surveil."""
+    m = re.match(r'[Ss]urveil\s+(\d+|X)', text, re.IGNORECASE)
+    if not m:
+        return None
+    raw = m.group(1)
+    val = "X" if raw == "X" else int(raw)
+    return Effect(verb="surveil", amount=Amount(value=val))
+
+
+def _try_dig(text: str) -> Optional[Effect]:
+    """'Look at the top N cards' / 'Reveal the top N cards' → dig."""
+    m = re.match(r'(?:[Ll]ook\s+at|[Rr]eveal)\s+the\s+top\s+(.+?)(?:\s+cards?\s+)', text, re.IGNORECASE)
+    if m:
+        amount = _parse_amount_prefix(m.group(1))
+        return Effect(verb="dig", amount=amount)
+    return None
+
+
+def _try_copy(text: str) -> Optional[Effect]:
+    """'Create a token that's a copy of' / 'Copy target' → copy."""
+    if re.search(r"(?:create\s+a\s+token\s+that'?s\s+a\s+copy\s+of|copy\s+target)", text, re.IGNORECASE):
+        target = _parse_target(text)
+        return Effect(verb="copy", target=target)
+    return None

@@ -122,8 +122,13 @@ def test_multiple_effects():
     assert effects[1].verb == "gain_life"
 
 def test_pump():
-    effects = parse_effects("Creatures you control get +1/+1 until end of turn.")
+    effects = parse_effects("Target creature gets +3/+3 until end of turn.")
     assert effects[0].verb == "pump"
+
+
+def test_pump_all():
+    effects = parse_effects("Creatures you control get +1/+1 until end of turn.")
+    assert effects[0].verb == "pump_all"
 
 def test_grant_keyword():
     effects = parse_effects("Creatures you control have haste.")
