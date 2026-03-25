@@ -1,7 +1,7 @@
 # Forge-Native Architecture — Design Spec
 
 **Date**: 2026-03-25
-**Goal**: Replace our hand-built effect/trigger vocabulary with Forge's battle-tested 20-year DSL. Use Forge's 32k encoded cards as primary data source, rebuild the causal graph on 200 trigger modes and 50+ effect verbs, and derive a new oracle parser from Forge patterns.
+**Goal**: Replace our hand-built effect/trigger vocabulary with Forge's battle-tested 20-year DSL. Use Forge's 32k encoded cards as primary data source, rebuild the causal graph on 134 trigger modes and 50+ effect verbs, and derive a new oracle parser from Forge patterns.
 
 **Priority**: This is an architectural rewrite of the parse + causal subsystems. Everything downstream (scoring, recommendations, swaps) consumes the output unchanged.
 
@@ -28,10 +28,12 @@ Replace `Effect`, `Trigger`, `ObjectFilter` in `ast_types.py` with Forge-aligned
 @dataclass
 class ForgeFilter:
     """Parses Forge filter strings like 'Creature.YouCtrl+powerGE4+attacking'"""
-    card_type: str | None = None       # Creature, Artifact, Enchantment, Permanent, Spell, Card
+    card_types: list[str] = field(default_factory=list)  # [Creature], [Instant, Sorcery], etc. (comma unions)
     subtypes: list[str] = field(default_factory=list)  # Goblin, Human, etc.
     controller: str | None = None      # YouCtrl, OppCtrl, YouOwn, YouDontCtrl
     zone: str | None = None            # Battlefield, Graveyard, Hand, Library, Exile
+    is_remembered: bool | None = None  # IsRemembered (Forge internal reference)
+    attached_by: str | None = None     # AttachedBy, EnchantedBy, EquippedBy
     power_ge: int | None = None        # powerGE4
     power_le: int | None = None
     toughness_ge: int | None = None
@@ -86,7 +88,7 @@ class ForgeEffect:
     zone_destination: str | None = None
 ```
 
-**Design decision**: `ForgeFilter.raw` stores unparsed modifiers. We import ALL Forge data and progressively parse more filters without losing information.
+**Design decision**: `ForgeFilter.raw` stores the original filter string. We import ALL Forge data and progressively parse more filters without losing information. **Expected day-one parse coverage**: ~60-70% of filters will parse into typed fields. The remaining 30-40% (Forge-internal references like `IsRemembered`, `EffectSource`, complex relationship modifiers) are stored in `raw` and treated as opaque for matching purposes. This is acceptable — the 60-70% that parse cleanly cover the synergy-relevant filters (card type, subtype, controller, power/toughness).
 
 ---
 
@@ -137,15 +139,31 @@ forge_svars (
 )
 ```
 
-**Import pipeline**: Rewrite `import_forge.py` to extract ALL fields. One pass over 32k files. Drop the old `forge_effects` table.
+**Shallow SVar Resolution** (required for triggered abilities):
 
-**Card matching**: Join `forge_abilities.card_name` to `cards.name`. Forge uses exact card names.
+Nearly all triggered abilities (`T:` lines) use `Execute$ TrigDraw` which references an SVar: `SVar:TrigDraw:DB$ Draw | NumCards$ 1 | ...`. The verb (`Draw`) lives in the SVar, not the trigger line itself. The import must follow ONE level of `Execute$ -> SVar -> DB$` to extract the verb.
+
+Algorithm:
+1. First pass: collect all SVars per card into `forge_svars` table
+2. Second pass: for each `T:` line with `Execute$`, look up the SVar, extract `DB$` value as verb
+3. Also extract SVar's parameters (NumDmg$, NumCards$, etc.) into the ability row
+
+This is NOT full SVar chain resolution (multi-hop). It's a single dereference: `Execute$ X -> SVar:X:DB$ Verb`. Sub-abilities (`SubAbility$`) within SVars are stored as references but not followed.
+
+**Import pipeline**: Rewrite `import_forge.py` to extract ALL fields with shallow SVar resolution. Two passes over each card file. Drop the old `forge_effects` table.
+
+**Keyword abilities** (`K:` lines): Stored with `verb=NULL`, `keyword=<keyword_name>`. Example: `K:Flying` → `ability_type='K', keyword='Flying', verb=NULL`.
+
+**Card name matching**: Join `forge_abilities.card_name` to `cards.name`. Requires a normalization layer for DFC/split cards:
+- Forge: filename `delver_of_secrets.txt` contains `Name:Delver of Secrets`
+- Scryfall: `Delver of Secrets // Insectile Aberration`
+- Strategy: match on front face name. Build a `forge_name_to_oracle_id` mapping table during import by matching `forge_abilities.card_name` against `cards.name` (exact) or `cards.name LIKE forge_name || ' //%'` (DFC front face).
 
 ---
 
 ### Section 3: Causal Graph on Forge Vocabulary
 
-Index directly on Forge's 200 trigger modes. The trigger's `ValidCard` filter provides specificity that IDF was approximating.
+Index directly on Forge's 134 trigger modes. The trigger's `ValidCard` filter provides specificity that IDF was approximating.
 
 **New indexer design**:
 - **Producer index**: `{(verb, target_filter_hash): [(card_name, ability_idx)]}`
@@ -189,6 +207,18 @@ Same logic but encoded in ForgeFilter grammar. IDF still applies on top for even
 | Tap | Taps |
 
 This mapping is the new "verb resolvers" — but instead of 20 hand-written functions, it's a lookup table derived from Forge's actual trigger/effect relationships across 32k cards.
+
+**Additional verbs requiring event mappings** (not in initial table above):
+| Forge Verb | Count | Game Event(s) |
+|------------|-------|---------------|
+| GainControl | 71 | (ownership change, no standard trigger) |
+| CopyPermanent | 36 | ChangesZone(Destination=Battlefield) — copy enters |
+| Animate/AnimateAll | 110 | (grants abilities, no zone change) |
+| Charm | 484 | Resolved via sub-verb in SVar (each choice is a separate verb) |
+| Effect | 170 | Generic wrapper — resolve from SVar chain |
+| RepeatEach | 74 | Iterates over a set, executing a sub-effect per item |
+
+`Charm` and `Effect` are meta-verbs that delegate to SVars. Shallow SVar resolution (Section 2) extracts the actual verbs from their choices.
 
 ---
 
@@ -242,7 +272,7 @@ Forge provides human-curated deck building tags:
 
 These complement our existing provides/wants tags (34k cards, LLM-generated). Where both exist, Forge's are higher quality (human-curated).
 
-**Integration in scoring.py**: Add `forge_deck_overlap` feature:
+**Integration in `mtg_synergy/recommend/scoring.py`**: Add `forge_deck_overlap` feature:
 ```python
 # Count matching DeckHas (candidate) <-> DeckHints (commander) and vice versa
 forge_overlap = len(candidate_has & commander_hints) + len(candidate_hints & commander_has)
@@ -274,7 +304,7 @@ mtg_synergy/causal/indexer.py            — rewritten for Forge vocabulary
 mtg_synergy/causal/graph_builder.py      — rewritten with ForgeFilter matching
 mtg_synergy/causal/__init__.py           — CausalContext updated for new edge types
 mtg_synergy/recommend/scoring.py         — add forge_deck_overlap feature
-import_forge.py                          — rewritten for full DSL import
+import_forge.py                          — thin CLI wrapper calling mtg_synergy/parse/forge_import.py
 ```
 
 **New**:
@@ -287,6 +317,8 @@ mtg_synergy/parse/oracle_triggers.py     — New trigger parser
 ```
 
 **Migration strategy**: Build new system alongside old. Both coexist in the codebase. Once new system's Recall@K beats old, flip. Old files retired (not deleted until confirmed).
+
+**Preserved signal layers**: The `card_mechanics` table (7k+ cards, LLM-extracted structured mechanics) and the mechanics matching engine (`mechanics_matcher.py`) are independent of the parser rewrite. They continue working as-is in the scoring pipeline. The `provides`/`wants` tag tables (34k cards) also remain — they complement Forge's DeckHas/DeckHints.
 
 **DB migration**: New `forge_abilities`, `forge_deck_tags`, `forge_svars` tables. Old `parsed_abilities`, `interaction_edges` tables backed up, then rebuilt from Forge data.
 
@@ -306,6 +338,7 @@ mtg_synergy/parse/oracle_triggers.py     — New trigger parser
 | Effect vocabulary | 22 verbs | 50+ verbs |
 | Cards with structured effects | 15k (45% have effects) | 32k+ (100%) |
 | New parser vs Forge match rate | N/A | >80% |
+| Causal-only Recall@100 (no LLM, no EDHREC) | 49.6% | >52% |
 
 **Testing**:
 - `tests/test_forge_types.py` — ForgeFilter parsing from strings, ForgeTrigger, ForgeEffect
@@ -342,4 +375,4 @@ Steps 5+6 can run in parallel. Steps 7+8 are sequential. Step 4 is independent a
 - Forge SVar chain resolution (complex subroutine execution) — we read SVars for metadata but don't execute them
 - Forge AI hints — interesting but not needed for synergy scoring
 - Token script parsing (TokenScript$ references) — we extract the token creation verb, not the full token definition
-- Replacement effects (R: lines) — 1,623 cards, handle in a future pass
+- Replacement effects (R: lines) — 1,623 cards, handle in a future pass. **Bridge**: The current "amplifies" edge builder (oracle text regex for Doubling Season, Panharmonicon, etc.) is preserved in the new graph builder as a legacy fallback until R: parsing is added. These are among the most synergy-dense cards in Commander and must not lose coverage.
