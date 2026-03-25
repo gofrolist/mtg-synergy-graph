@@ -183,13 +183,20 @@ class CausalContext:
         self.commander_id = commander_id
         self.deck_oids = deck_oids
 
-        # Load all edges into adjacency dicts
-        all_edges = load_edges(conn)
+        # Load edges only for relevant cards (commander + deck), not all 7M+
+        # Candidate edges are loaded on demand via _ensure_loaded()
+        self._conn = conn
+        self._loaded = {commander_id} | deck_oids
+        relevant_ids = {commander_id} | deck_oids
         self._outgoing = defaultdict(list)  # {source: [Edge]}
         self._incoming = defaultdict(list)  # {target: [Edge]}
-        for e in all_edges:
-            self._outgoing[e.source].append(e)
-            self._incoming[e.target].append(e)
+        for rid in relevant_ids:
+            for e in load_edges(conn, source_id=rid):
+                self._outgoing[e.source].append(e)
+                self._incoming[e.target].append(e)
+            for e in load_edges(conn, target_id=rid):
+                self._outgoing[e.source].append(e)
+                self._incoming[e.target].append(e)
 
         # Commander relevance: inversely proportional to ability count
         cmdr_ability_count = 1
@@ -268,6 +275,18 @@ class CausalContext:
             if mid not in self._cmdr_forward_map or edge.strength > self._cmdr_forward_map[mid]:
                 self._cmdr_forward_map[mid] = edge.strength
 
+    def _ensure_loaded(self, card_id: str):
+        """Lazy-load edges for a card not in the initial set."""
+        if card_id in self._outgoing or card_id in self._loaded:
+            return
+        self._loaded.add(card_id)
+        for e in load_edges(self._conn, source_id=card_id):
+            self._outgoing[e.source].append(e)
+            self._incoming[e.target].append(e)
+        for e in load_edges(self._conn, target_id=card_id):
+            self._outgoing[e.source].append(e)
+            self._incoming[e.target].append(e)
+
     def _chain_bonus(self, candidate_id: str) -> float:
         """Score chain paths: commander → candidate → deck cards.
 
@@ -284,6 +303,7 @@ class CausalContext:
 
     def causal_score(self, candidate_id: str) -> float:
         """Score a candidate with commander-centric weighting."""
+        self._ensure_loaded(candidate_id)
         # 1. Commander edges (weighted by relevance + strategy alignment)
         cmdr_to_candidate = 0.0
         candidate_to_cmdr = 0.0
