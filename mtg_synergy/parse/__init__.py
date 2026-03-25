@@ -26,6 +26,18 @@ def parse_card(oracle_text: str, type_line: str = "", mana_cost: str = "") -> li
         if raw.effect_text:
             effects = parse_effects(raw.effect_text)
 
+        # Parse modal modes if no effects from effect_text
+        if not effects and raw.modes:
+            import re as _re
+            for mode_text in raw.modes:
+                mode_text = mode_text.strip()
+                # Strip mode label (e.g., "Sell Contraband — ")
+                label_match = _re.match(r'^[A-Z][\w\s]+\s*—\s*', mode_text)
+                if label_match:
+                    mode_text = mode_text[label_match.end():]
+                mode_effects = parse_effects(mode_text)
+                effects.extend(mode_effects)
+
         # Pass 3c: Parse cost
         cost = None
         if raw.cost_text:
