@@ -77,6 +77,19 @@ def build_and_store_graph(conn, cards: dict[str, list[Ability]]):
     return len(edges)
 
 
+def store_edges(conn, edges: list[Edge]) -> int:
+    """Store edges in interaction_edges table."""
+    import json as _json
+    conn.execute("DELETE FROM interaction_edges")
+    for e in edges:
+        conn.execute(
+            "INSERT OR REPLACE INTO interaction_edges VALUES (?,?,?,?,?,?,?)",
+            (e.source, e.target, e.edge_type, e.ability_a, e.ability_b,
+             e.strength, _json.dumps(e.detail.to_dict())))
+    conn.commit()
+    return len(edges)
+
+
 def load_edges(conn, source_id=None, target_id=None) -> list[Edge]:
     query = "SELECT source_id, target_id, edge_type, ability_a, ability_b, strength, detail FROM interaction_edges"
     params = []
