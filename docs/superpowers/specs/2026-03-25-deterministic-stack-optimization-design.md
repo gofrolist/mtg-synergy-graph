@@ -7,13 +7,15 @@
 
 ## Current State
 
-| Signal | NDCG@30 | Coverage | Notes |
-|--------|---------|----------|-------|
+| Signal | Top-30 Overlap | Coverage | Notes |
+|--------|----------------|----------|-------|
 | LLM scores | 0.675 | 33 commanders | Best single signal, but $0.50/commander |
 | Causal graph | 0.571 | 5000 cards parsed | Below baseline (0.597) — noise from broad edges |
 | Tower model | disabled | trained on LLM | Circular dependency |
 | Mechanics | — | 41% coverage | Good quality, limited reach |
 | Tag graph | ~0.55 | 34k cards | Baseline signal |
+
+**Note on metrics**: The current `optimize_weights.py` computes top-30 set overlap (|our_30 & edhrec_30| / 30), not true NDCG (which is position-weighted). This spec uses "top-30 overlap" for the existing metric and introduces Recall@K as the new primary metric (Section 7).
 
 **Key problem**: 1.17M causal edges with uniform strength per precision class. "creature enters" (300+ producers) and "Goblin enters" (10 producers) both get `broad=0.6`. Noise drowns signal.
 
@@ -36,7 +38,7 @@ normalized to 0.3 - 3.0 range
 
 **Where**: `mtg_synergy/causal/graph_builder.py:_build_trigger_edges()`. After `strength = _precision_to_strength(precision)`, multiply by `event_idf[event]`.
 
-**Also apply to**: `_build_feeds_edges`, `_build_amplifies_edges`, `_build_enables_edges` — all edge types benefit from frequency dampening.
+**Also apply to**: `_build_amplifies_edges` (uses event types for matching). **Not** `_build_feeds_edges` or `_build_enables_edges` — these use resource-based matching (creature/mana/haste) with hardcoded strengths, not event types. Their fixed strengths remain unchanged.
 
 **IDF computation**: In `CardIndex` (indexer.py), add `producer_counts` and `responder_counts` dicts computed during `build_index()`. Pass to edge builders.
 
@@ -46,7 +48,7 @@ normalized to 0.3 - 3.0 range
 
 **Problem**: Only top 5000 cards by EDHREC rank are parsed. Misses staples in niche archetypes.
 
-**Solution**: Run `oracle_parser.py --parse-all --top 15000`. Parser had 0 failures on 5000 cards — scaling is safe.
+**Solution**: Run `oracle_parser.py --parse-all --top 15000`. Parser had 0 failures on 5000 cards — expected to scale safely. Monitor failure rate during 15k parse; new card text patterns may surface edge cases.
 
 **Impact**:
 - Better IDF statistics (more data for frequency estimation)
@@ -63,22 +65,25 @@ normalized to 0.3 - 3.0 range
 
 **Problem**: Producer IDF alone isn't enough. If 500 cards trigger on "creature enters," a producer connecting to all of them still creates fan-out noise.
 
-**Solution**: Combined IDF on both sides:
+**Solution**: Combined IDF on both sides, with capping to preserve precision hierarchy:
 
 ```
-edge_strength = precision_strength * producer_idf * responder_idf
+combined_idf = min(producer_idf * responder_idf, 3.0)
+edge_strength = precision_strength * combined_idf
 ```
 
 Where:
 - `producer_idf = log(N / cards_producing_event)` — rarity of producing this event
 - `responder_idf = log(N / cards_responding_to_event)` — rarity of caring about this event
+- Each individually normalized to 0.3-3.0 range
+- **Combined product capped at 3.0** to prevent inversion of precision hierarchy (without cap, 3.0 * 3.0 = 9.0 would make a `broad=0.6` edge score 5.4, higher than any `exact=1.0` edge)
 
-Both normalized to 0.3-3.0 range.
+**Example** (after cap):
+- Rare producer + rare responder: min(2.5 * 2.3, 3.0) = 3.0x (capped, high signal)
+- Common producer + common responder: min(0.4 * 0.3, 3.0) = 0.12x (heavily dampened)
+- Mixed: ~0.4 * 2.0 = 0.8x (moderate)
 
-**Example**:
-- Rare producer + rare responder: ~2.5 * 2.3 = 5.75x (high signal)
-- Common producer + common responder: ~0.4 * 0.3 = 0.12x (heavily dampened)
-- Mixed: moderate signal
+**Invariant**: `exact` edges always outrank `broad` edges for the same event: `1.0 * idf > 0.6 * idf`.
 
 **Implementation**: `build_index()` already tracks both `_producers` and `_responders` per event. Add cardinality counts to `CardIndex`, pass to edge builders.
 
@@ -90,22 +95,40 @@ Both normalized to 0.3-3.0 range.
 
 **Approach**: Commander-centric 2-3 card chains, computed at query time in `CausalContext`.
 
-**Algorithm**:
-1. At `CausalContext.__init__`, precompute commander's direct outgoing events (already done)
-2. For each candidate, check: does the candidate produce events that trigger OTHER deck cards?
-3. Chain score = `sum(cmdr_to_cand_strength * cand_to_deck_strength * 0.5)` for each path
+**Algorithm** (two-phase: precompute forward map at init, score per-candidate lazily):
 
+**Phase 1 — Init-time forward map** (`CausalContext.__init__`):
+Build a set of cards that the commander directly connects to, and for each, cache what deck cards they forward to:
 ```python
-chain_bonus = sum(
-    edge_cmdr_to_cand.strength * edge_cand_to_deck.strength * 0.5
-    for deck_card in deck_oids
-    for edge in candidate_outgoing if edge.target == deck_card
-)
+# {intermediate_card: [(deck_target, strength)]}
+self._cmdr_forward_map = {}
+for edge in self._outgoing[commander_id]:
+    mid = edge.target
+    if mid not in self._cmdr_forward_map:
+        self._cmdr_forward_map[mid] = edge.strength
+```
+This is `O(cmdr_fanout)` — bounded and fast.
+
+**Phase 2 — Per-candidate scoring** (called from `causal_score()`):
+```python
+def _chain_bonus(self, candidate_id):
+    # Is the candidate connected TO the commander? (candidate -> cmdr link)
+    cmdr_link = self._cmdr_forward_map.get(candidate_id, 0)
+    if cmdr_link == 0:
+        return 0.0
+    # Does the candidate also connect to deck cards?
+    bonus = 0.0
+    for edge in self._outgoing.get(candidate_id, []):
+        if edge.target in self.deck_oids:
+            bonus += cmdr_link * edge.strength * 0.5
+    return bonus
 ```
 
 The `* 0.5` dampener prevents chains from dominating over direct commander edges. IDF-weighted edges naturally prioritize rare chains.
 
-**Where**: New method `_compute_chain_bonus()` in `CausalContext.__init__`, populating `self._chain_bonus` (currently empty `{}`).
+**Complexity**: `O(candidate_fanout)` per candidate — no quadratic explosion.
+
+**Where**: New method `_chain_bonus()` on `CausalContext`, called from `causal_score()`. Replaces the empty `self._chain_bonus = {}` dict.
 
 **Not doing**: Full infinite loop detection (chain_finder.py) — that's for `--combos`, not recommendations.
 
@@ -138,6 +161,33 @@ class CommanderProfile:
 
 **Precomputation**: Run once over all 3,141 legal commanders, store in `commander_profiles` table. O(1) lookup at recommendation time.
 
+**Table schema**:
+```sql
+CREATE TABLE commander_profiles (
+    oracle_id TEXT PRIMARY KEY,
+    strategies TEXT NOT NULL,       -- JSON array: ["tokens", "tribal-goblin"]
+    tribal_type TEXT,               -- "Goblin", "Human", etc. or NULL
+    events_produced TEXT NOT NULL,  -- JSON array: ["creature_enters", ...]
+    events_consumed TEXT NOT NULL,  -- JSON array: ["dies", ...]
+    key_effects TEXT NOT NULL       -- JSON array: ["create", "deal_damage", ...]
+);
+```
+
+**DeckContext integration**: In `DeckContext.__init__` (scoring.py), when `active_strategies` is empty/None:
+```python
+if not self.active_strategies and self.cmdr_oid:
+    row = conn.execute(
+        "SELECT strategies, tribal_type FROM commander_profiles WHERE oracle_id = ?",
+        (self.cmdr_oid,)).fetchone()
+    if row:
+        self.active_strategies = set(json.loads(row[0]))
+        if row[1] and not self.deck_types:
+            self.deck_types = {row[1]}
+            self.is_tribal = True
+```
+
+**Note**: `CommanderProfile.key_events_produced/consumed` overlaps with `CausalContext._cmdr_events_produced/consumed`. This is intentional — profiles are precomputed offline for all 3k commanders; CausalContext computes at query time from the edge graph (only for the current commander). The profile serves as fallback when causal edges are sparse.
+
 **Where**: New module `mtg_synergy/recommend/commander_profile.py`. Used by `DeckContext` when no `active_strategies` provided.
 
 **Coverage**: 502 EDHREC commanders -> all 3,141 legal commanders (100%).
@@ -169,7 +219,20 @@ Extend `optimize_weights.py` to optimize more signals:
 
 ### Section 7: Validation Framework
 
-**Ground truth**: EDHREC average decklists for top 1000 commanders (scraped/fetched). Stored in `edhrec_average_decks(commander_slug, card_name, category)` table.
+**Ground truth — two datasets**:
+
+1. **Existing**: `edhrec_card_synergy` table (132k pairs, 502 commanders) — per-card synergy scores. Used for the current top-30 overlap metric and backward-compatible evaluation.
+
+2. **New**: EDHREC average decklists for top 1000 commanders. Fetched via EDHREC's JSON API (`https://json.edhrec.com/pages/average-decks/<slug>.json`). Stored in new table:
+```sql
+CREATE TABLE edhrec_average_decks (
+    commander_slug TEXT NOT NULL,
+    card_name TEXT NOT NULL,
+    category TEXT,               -- creature, instant, sorcery, etc.
+    PRIMARY KEY (commander_slug, card_name)
+);
+```
+**Fetch pipeline**: New script `fetch_edhrec_decks.py` — iterates top 1000 slugs from `edhrec_card_synergy`, fetches average deck JSON, parses card list, stores to DB. Rate-limited to 1 req/sec. Run once (~20 min), refresh monthly.
 
 **Primary metric — Recall@K**:
 Of the EDHREC average deck's ~65 non-basic cards, how many appear in our top K?
@@ -179,6 +242,9 @@ Recall@K = |our_top_K intersection edhrec_avg_deck| / |edhrec_avg_deck_nonbasic|
 ```
 
 Measured at K=100, K=50, K=30. This is the headline number.
+
+**Backward-compatible metric — Top-30 overlap** (existing):
+`|our_top_30 & edhrec_synergy_top_30| / 30`. Kept for continuity with previous evaluations. Note: this is set overlap, not position-weighted NDCG.
 
 **Secondary metric — Role coverage (diagnostic only)**:
 Sanity check that we're not missing entire categories. If our top 100 has zero removal but EDHREC avg has 8, that's worth flagging. Not optimized — just reported.
@@ -223,14 +289,29 @@ Steps 1+2 and 6 can run in parallel. Steps 4+5 can run in parallel after 3.
 | `mtg_synergy/causal/__init__.py` | Chain bonus computation in CausalContext |
 | `mtg_synergy/recommend/commander_profile.py` | **New** — CommanderProfile inference |
 | `mtg_synergy/recommend/scoring.py` | Use CommanderProfile when no strategies provided |
-| `optimize_weights.py` | Extended evaluation modes, average deck comparison |
+| `optimize_weights.py` | Extended evaluation modes, Recall@K, --no-llm, --novelty |
+| `fetch_edhrec_decks.py` | **New** — Fetch average decklists for top 1000 commanders |
 | `oracle_parser.py` | Just run with --top 15000 (no code change) |
 | `build_graph.py` | No code change — just rebuild |
 
+## Rollback Plan
+
+Before rebuilding the graph with IDF, back up the current edges:
+```sql
+CREATE TABLE interaction_edges_v1 AS SELECT * FROM interaction_edges;
+```
+
+Run evaluation on BOTH old-graph and new-graph scores for the same commander set before committing to the new graph. If IDF-weighted graph is worse, revert:
+```sql
+DROP TABLE interaction_edges;
+ALTER TABLE interaction_edges_v1 RENAME TO interaction_edges;
+```
+
 ## Success Criteria
 
-1. **Causal NDCG** (alone, no LLM): > 0.60 (up from 0.571)
-2. **Combined NDCG** (all signals): > 0.69 (up from 0.675)
-3. **Coverage NDCG** (no LLM, no EDHREC): > 0.58
+1. **Causal top-30 overlap** (alone, no LLM): > 0.60 (up from 0.571)
+2. **Combined top-30 overlap** (all signals): > 0.69 (up from 0.675)
+3. **Coverage top-30 overlap** (no LLM, no EDHREC): > 0.58
 4. **Recall@100** against EDHREC avg decks: > 40% across 1000 commanders
 5. **Commander profile coverage**: 100% of 3,141 legal commanders get auto-inferred profiles
+6. **IDF graph must beat non-IDF graph** on the same evaluation before committing
