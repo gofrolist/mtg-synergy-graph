@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Optimize scoring weights against EDHREC ground truth.
 
-Uses 502 commanders with ~263 synergy-scored cards each as training data.
-Grid searches weight combinations to maximize alignment between our
-causal scoring and EDHREC synergy rankings.
+Primary metric: Recall@100 against EDHREC average decklists.
+Fallback: synergy-based overlap (when average decks not fetched).
 
 Usage:
-    python3 optimize_weights.py              # Full optimization
+    python3 optimize_weights.py              # Grid search (optimizes Recall@100)
     python3 optimize_weights.py --quick      # Fast mode (50 commanders)
     python3 optimize_weights.py --evaluate   # Evaluate current weights
+    python3 optimize_weights.py --evaluate --no-llm  # Coverage mode (no LLM)
+    python3 optimize_weights.py --evaluate --novelty  # Show novel picks
+    python3 optimize_weights.py --evaluate --deck krenko-mob-boss  # Deep dive
 """
 import argparse
 import itertools
@@ -120,28 +122,52 @@ def precompute_scores(conn, ground_truth, commander_info, max_commanders=None):
     return precomputed
 
 
-def evaluate_weights(weights, precomputed):
-    """Evaluate weights using precomputed scores (fast — no DB queries).
+def _rank_cards(scored_cards, weights):
+    """Rank cards by weighted score. Returns [(name, score, edhrec_syn), ...]."""
+    ranked = []
+    for card_name, edhrec_syn, causal, llm in scored_cards:
+        total = (llm * weights.get("LLM", 0)
+                 + causal * weights.get("CAUSAL", 0))
+        ranked.append((card_name, total, edhrec_syn))
+    return sorted(ranked, key=lambda x: -x[1])
+
+
+def evaluate_weights(weights, precomputed, conn=None):
+    """Evaluate weights using Recall@K as primary metric.
+
+    If conn is provided and edhrec_average_decks table exists, uses Recall@100
+    against average decklists. Otherwise falls back to synergy-based overlap.
 
     IMPORTANT: EDHREC synergy is the TARGET, not a feature.
-    We only score using independent signals (LLM, CAUSAL) and measure
-    how well they predict EDHREC's ranking.
     """
+    # Try Recall@100 against average decks (primary metric)
+    if conn:
+        has_avg = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='edhrec_average_decks'"
+        ).fetchone()[0]
+        if has_avg:
+            recalls = []
+            for slug, scored_cards in precomputed.items():
+                avg_deck = set(r[0] for r in conn.execute(
+                    "SELECT card_name FROM edhrec_average_decks WHERE commander_slug = ?",
+                    (slug,)))
+                if len(avg_deck) < 20:
+                    continue
+                ranked = _rank_cards(scored_cards, weights)
+                our_ranked = [name for name, _, _ in ranked]
+                recalls.append(compute_recall_at_k(our_ranked, avg_deck, k=100))
+            if recalls:
+                return sum(recalls) / len(recalls), len(recalls)
+
+    # Fallback: synergy-based overlap (legacy, used when no average decks available)
     total_score = 0
     n_evaluated = 0
-
     for slug, scored_cards in precomputed.items():
-        ranked = []
-        for card_name, edhrec_syn, causal, llm in scored_cards:
-            # Score using ONLY independent signals — NOT edhrec_syn
-            total = (llm * weights.get("LLM", 0)
-                     + causal * weights.get("CAUSAL", 0))
-            ranked.append((card_name, total, edhrec_syn))
-
-        our_top30 = {name for name, _, _ in sorted(ranked, key=lambda x: -x[1])[:30]}
-        edhrec_top30 = {name for name, _, syn in sorted(ranked, key=lambda x: -x[2])[:30]}
+        ranked = _rank_cards(scored_cards, weights)
+        our_top30 = {name for name, _, _ in ranked[:30]}
+        edhrec_top30 = {card[0] for card in sorted(scored_cards, key=lambda x: -x[1])[:30]}
         overlap = len(our_top30 & edhrec_top30)
-        total_score += overlap
+        total_score += overlap / 30.0  # normalize to 0-1 like Recall
         n_evaluated += 1
 
     return total_score / max(n_evaluated, 1), n_evaluated
@@ -222,8 +248,8 @@ def novelty_report(conn, precomputed, weights, slug_filter=None, top_k=100):
                 print(f"    {c}  (causal={match[2]:.1f}, llm={match[3]})")
 
 
-def grid_search(precomputed):
-    """Grid search over weight combinations (fast — uses precomputed scores).
+def grid_search(precomputed, conn=None):
+    """Grid search over weight combinations optimizing Recall@100.
 
     Only optimizes LLM and CAUSAL weights since EDHREC is the target metric.
     """
@@ -241,13 +267,13 @@ def grid_search(precomputed):
         itertools.product(llm_range, causal_range)
     ):
         weights = {"LLM": llm_w, "CAUSAL": causal_w}
-        score, n = evaluate_weights(weights, precomputed)
+        score, n = evaluate_weights(weights, precomputed, conn=conn)
         results.append((score, weights, n))
 
         if score > best_score:
             best_score = score
             best_weights = weights
-            print(f"  [{i+1}/{total}] NEW BEST: {score:.1f}/30 with {weights}")
+            print(f"  [{i+1}/{total}] NEW BEST: Recall@100={score:.1%} with {weights}")
 
     return best_score, best_weights, results
 
@@ -286,8 +312,8 @@ def main():
                    "CAUSAL": SCORING_WEIGHTS.get("CAUSAL", 2)}
         mode = "no-LLM" if args.no_llm else "all signals"
         print(f"\nEvaluating ({mode}): {weights}")
-        score, n = evaluate_weights(weights, precomputed)
-        print(f"Top-30 overlap: {score:.1f}/30 ({n} commanders)")
+        score, n = evaluate_weights(weights, precomputed, conn=conn)
+        print(f"Recall@100: {score:.1%} ({n} commanders)")
         evaluate_recall(conn, precomputed, weights)
 
         if args.novelty:
@@ -296,17 +322,17 @@ def main():
             novelty_report(conn, precomputed, weights, slug_filter=args.deck)
     else:
         t0 = time.time()
-        best_score, best_weights, results = grid_search(precomputed)
+        best_score, best_weights, results = grid_search(precomputed, conn=conn)
         elapsed = time.time() - t0
 
         print(f"\n{'='*60}")
-        print(f"BEST: {best_score:.1f}/30 with {best_weights}")
+        print(f"BEST: Recall@100={best_score:.1%} with {best_weights}")
         print(f"Grid search time: {elapsed:.0f}s")
 
         results.sort(key=lambda x: -x[0])
         print(f"\nTop 10 weight combinations:")
         for score, weights, n in results[:10]:
-            print(f"  {score:.1f}/30  {weights}")
+            print(f"  Recall@100={score:.1%}  {weights}")
 
     conn.close()
 
