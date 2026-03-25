@@ -42,15 +42,20 @@ Pipeline order:
 ```
 effect_text
   → Rule 1: _strip_you_may()
-  → Rule 2: _extract_conditional()
-  → Rule 3: _normalize_subject() + deconjugate verb
+  → Rule 2: _extract_conditional() (max 3 iterations)
   → Rule 4: _normalize_you_verb()
-  → Rule 5: _split_multi_step()  → list of parts
   → Rule 6: _strip_for_each()
-  → _parse_single_effect() on each part
+  → Rule 5: _split_multi_step()  → list of parts
+  → For each part:
+    → Rule 3: _normalize_subject() + deconjugate verb
+    → _parse_single_effect()
 ```
 
-Each rule is a pure function `str → str` (or `str → list[str]` for multi-step). Order matters: strip "you may" first so conditionals see clean text.
+**Key ordering**: Rule 5 (split) runs BEFORE Rule 3 (subject normalization), so each part gets deconjugated independently. This prevents "each opponent draws a card and loses 1 life" from only deconjugating the first verb.
+
+Each rule is a pure function `str → str` (or `str → list[str]` for multi-step).
+
+**Relationship to `templates.py`**: The existing `decompose_reminder()` in `templates.py` also strips conditionals and splits on ", then ". The pre-processor replaces that logic for effect text — `decompose_reminder()` continues to handle reminder text and scaling detection. No duplication: different input contexts, different purposes.
 
 Existing `_parse_single_effect()` and all 22 `_try_*` functions remain unchanged.
 
@@ -61,9 +66,10 @@ Existing `_parse_single_effect()` and all 22 `_try_*` functions remain unchanged
 **Rule 1 — Strip "you may/might"** (fixes ~1,338):
 ```
 Pattern: ^(?:you|that player)\s+(?:may|might)\s+
-Action: strip prefix
-"you may search your library" → "search your library"
+Action: strip prefix, mark effect as optional
+"you may search your library" → "search your library" (optional=True)
 ```
+**Design note**: "You may" indicates an optional effect in MTG. We strip it for parsing but track it as a flag on the returned Effect for potential future use (cost/benefit analysis). For the causal graph, optional effects still represent what the card CAN do.
 
 **Rule 2 — Extract conditional effect** (fixes ~857):
 ```
@@ -72,7 +78,7 @@ Action: take capture group (the effect after the comma)
 "if the player doesn't, you create a Treasure token" → "you create a Treasure token"
 "if you do, exile it" → "exile it"
 ```
-Note: Multiple conditionals handled by re-applying after extraction.
+Applied in a loop with **max 3 iterations** to handle nested conditionals ("if X, if Y, do Z"). Loop terminates when the text no longer starts with "if" or iteration limit reached.
 
 **Rule 3 — Normalize subject prefix** (fixes ~584):
 ```
@@ -82,7 +88,7 @@ Action: strip prefix, deconjugate first verb
 "its controller creates a 3/3" → "create a 3/3"
 ```
 
-Deconjugation map (finite, exact):
+Deconjugation map (finite, exact), applied to the **first word** of each part after Rule 5 splitting:
 ```python
 _VERB_DECONJ = {
     "draws": "draw", "creates": "create", "deals": "deal",
@@ -92,14 +98,15 @@ _VERB_DECONJ = {
     "searches": "search", "taps": "tap", "untaps": "untap",
 }
 ```
+Because Rule 3 runs AFTER Rule 5 (split), each clause gets its own deconjugation. "each opponent draws a card and loses 1 life" → split → ["draws a card", "loses 1 life"] → deconj each → ["draw a card", "lose 1 life"].
 
 **Rule 4 — Normalize "you verb" → "Verb"** (fixes ~200):
 ```
-Pattern: ^you\s+(create|destroy|exile|return|search|discard|put|counter|tap|untap|scry)\b
+Pattern: ^you\s+(create|destroy|exile|return|search|discard|put|counter|tap|untap|scry|mill|sacrifice)\b
 Action: capitalize verb, drop "you"
 "you create a Treasure token" → "Create a Treasure token"
 ```
-Only applied for verbs where existing parsers expect capitalized start. Verbs like "draw", "gain", "lose" already work with lowercase.
+Applied for all verbs where existing `_try_*` parsers use `re.match` with a capitalized start. Verbs like "draw", "gain", "lose" use `re.search` and already handle lowercase — excluded to avoid unnecessary transforms.
 
 **Rule 5 — Split multi-step effects** (fixes ~129):
 ```
@@ -169,8 +176,9 @@ The `_VERB_DECONJ` map from Section 2 covers all 15 verb forms the parser recogn
 **Success criteria**:
 1. Empty-effect triggered/activated: 4,512 → under 1,500 (>65% reduction)
 2. Empty-effect overall: 55% → under 25%
-3. Zero regressions on existing 326 tests
-4. Causal edge coverage of EDHREC cards: 67% → 85%+
+3. Cards with at least one non-empty effect: increase from ~45% to ~70%
+4. Zero regressions on existing 326 tests
+5. Causal edge coverage of EDHREC cards: 67% → 85%+
 
 ---
 
@@ -196,12 +204,19 @@ FORGE_VERB_MAP = {
     "DealDamage": "deal_damage", "DrawCard": "draw", "GainLife": "gain_life",
     "LoseLife": "lose_life", "CreateToken": "create", "Destroy": "destroy",
     "DestroyAll": "destroy", "PutCounter": "put_counter", "Mill": "mill",
-    "ChangeZone": "return", "Discard": "discard", "Proliferate": "proliferate",
+    "Discard": "discard", "Proliferate": "proliferate",
     "Sacrifice": "sacrifice", "Tap": "tap", "Untap": "untap",
     "ExileAll": "exile", "Exile": "exile", "Dig": "draw",
     "PumpAll": "pump", "Pump": "pump", "Counter": "counter",
 }
 ```
+
+**ChangeZone handling**: Forge's `ChangeZone` covers ALL zone transitions. The mapping depends on `Origin$` and `Destination$` fields:
+- `Origin$ Graveyard | Destination$ Battlefield` → `return`
+- `Origin$ Hand | Destination$ Graveyard` → `discard`
+- `Origin$ Library | Destination$ Hand` → `draw` (search variant)
+- `Origin$ Battlefield | Destination$ Exile` → `exile`
+- `Origin$ Battlefield | Destination$ Graveyard` → `sacrifice` or `destroy`
 
 **Pipeline**:
 1. Script `import_forge.py`: download/clone Forge's `res/cardsfolder/`, parse `.txt` files, extract ability lines, store in `forge_effects` table
