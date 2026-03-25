@@ -30,6 +30,123 @@ _CARD_TYPES = {
 }
 
 
+# ---- Pre-processor: normalize effect text before verb matching ----
+
+_CAPITALIZE_VERBS = {
+    "create", "destroy", "exile", "return", "search", "discard",
+    "put", "counter", "tap", "untap", "scry", "mill", "sacrifice",
+}
+
+_VERB_DECONJ = {
+    "draws": "draw", "creates": "create", "deals": "deal",
+    "gains": "gain", "loses": "lose", "puts": "put",
+    "exiles": "exile", "destroys": "destroy", "returns": "return",
+    "sacrifices": "sacrifice", "discards": "discard", "mills": "mill",
+    "searches": "search", "taps": "tap", "untaps": "untap",
+}
+
+
+def _normalize_effect_text(text: str) -> list[tuple[str, bool]]:
+    """Normalize effect text to expose verb-initial patterns.
+
+    Returns list of (normalized_text, is_optional) tuples.
+    """
+    t = text.strip()
+    if not t:
+        return []
+
+    optional = False
+
+    # Rule 1: Strip "you may/might" prefix
+    m = re.match(r'^(?:you|that player)\s+(?:may|might)\s+', t, re.IGNORECASE)
+    if m:
+        t = t[m.end():]
+        optional = True
+
+    # Rule 2: Extract conditional effect (max 3 iterations)
+    for _ in range(3):
+        m = re.match(r'^[Ii]f\s+.+?,\s+(.+)$', t)
+        if m:
+            t = m.group(1).strip()
+        else:
+            break
+
+    # Rule 1 again after conditional (e.g., "if X, you may Y")
+    m = re.match(r'^(?:you|that player)\s+(?:may|might)\s+', t, re.IGNORECASE)
+    if m:
+        t = t[m.end():]
+        optional = True
+
+    # Rule 4: Normalize "you verb" -> "Verb"
+    m = re.match(r'^you\s+(\w+)\b(.*)', t, re.IGNORECASE)
+    if m:
+        verb = m.group(1).lower()
+        if verb in _CAPITALIZE_VERBS:
+            t = verb.capitalize() + m.group(2)
+
+    # Rule 6: Strip "for each X," prefix
+    m = re.match(r'^[Ff]or\s+each\s+.+?,\s+(.+)$', t)
+    if m:
+        t = m.group(1).strip()
+
+    # Rule 5: Split multi-step effects
+    parts = _split_multi_step(t)
+
+    # Rule 3: Normalize subject prefix on each part
+    result = []
+    for part in parts:
+        normalized = _normalize_subject(part.strip())
+        if normalized:
+            result.append(normalized)
+
+    return [(r, optional) for r in result] if result else [(text, False)]
+
+
+def _split_multi_step(text: str) -> list[str]:
+    """Split on ', then ' and '. ' sentence boundaries."""
+    parts = re.split(r',\s+then\s+', text)
+    expanded = []
+    for p in parts:
+        sents = re.split(r'\.\s+', p)
+        expanded.extend(s.strip() for s in sents if s.strip())
+    return expanded if expanded else [text]
+
+
+def _normalize_subject(text: str) -> str:
+    """Strip subject prefixes and deconjugate verb.
+
+    Only strips when the conjugated verb would NOT be matched by existing
+    parsers (which use re.search and already handle subject prefixes).
+    Verbs like 'sacrifices', 'loses', 'gains', 'deals' are already handled
+    by _try_sacrifice, _try_lose_life, _try_gain_life, _try_deal_damage.
+    """
+    t = text.strip()
+    m = re.match(
+        r'^(?:each\s+(?:opponent|player)|that\s+(?:player|creature)'
+        r'|its\s+controller|target\s+(?:opponent|player))\s+',
+        t, re.IGNORECASE
+    )
+    if m:
+        rest = t[m.end():]
+        words = rest.split(None, 1)
+        if words and words[0].lower() in _VERB_DECONJ:
+            verb = words[0].lower()
+            # These conjugated verbs are already handled by existing re.search parsers
+            # that work with subject prefixes — don't strip, preserve context
+            already_handled = {
+                "sacrifices", "loses", "gains", "deals",
+                "draws", "mills", "puts",
+            }
+            if verb in already_handled:
+                return t
+            deconj = _VERB_DECONJ[verb]
+            t = deconj + ((" " + words[1]) if len(words) > 1 else "")
+        else:
+            # Verb not conjugated or not recognized — don't strip subject
+            return t
+    return t
+
+
 def parse_effects(effect_text: str) -> list[Effect]:
     """Parse effect text into a list of Effect AST nodes."""
     text = effect_text.strip().rstrip(".")
@@ -40,15 +157,33 @@ def parse_effects(effect_text: str) -> list[Effect]:
     if len(multi) >= 2:
         return multi
 
-    parts = _split_effects(text)
+    # Normalize text before verb matching
+    normalized_parts = _normalize_effect_text(text)
+
     results = []
-    for part in parts:
-        part = part.strip()
-        if not part:
-            continue
-        effect = _parse_single_effect(part)
-        if effect:
-            results.append(effect)
+    for part, is_optional in normalized_parts:
+        sub_parts = _split_effects(part)
+        for sp in sub_parts:
+            sp = sp.strip()
+            if not sp:
+                continue
+            effect = _parse_single_effect(sp)
+            if effect:
+                if is_optional:
+                    effect.optional = True
+                results.append(effect)
+
+    # Fallback: if normalizer produced nothing, try original text directly
+    if not results:
+        parts = _split_effects(text)
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            effect = _parse_single_effect(part)
+            if effect:
+                results.append(effect)
+
     return results
 
 
