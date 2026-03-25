@@ -61,16 +61,19 @@ def build_forge_index(conn) -> ForgeIndex:
 
     # Index producers: cards with effect verbs -> trigger events they produce
     for row in conn.execute(
-        "SELECT card_name, ability_index, verb, target, trigger_origin, trigger_destination "
+        "SELECT card_name, ability_index, verb, target, trigger_origin, "
+        "trigger_destination, token_script "
         "FROM forge_abilities WHERE verb IS NOT NULL"
     ).fetchall():
-        card_name, ab_idx, verb, target, origin, dest = row
+        card_name, ab_idx, verb, target, origin, dest, token_script = row
         events = verb_to_events(verb)
         for event in events:
             mode = event["trigger_mode"]
+            # For Token verb, use token_script as target if target is empty
+            effective_target = target or token_script
             detail = {
                 "verb": verb,
-                "target": target,
+                "target": effective_target,
                 "origin": event.get("origin") or origin,
                 "destination": event.get("destination") or dest,
             }
