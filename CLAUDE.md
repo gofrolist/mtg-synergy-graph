@@ -18,10 +18,14 @@ For any commander, recommendations use 5 signal layers:
 
 2. CAUSAL GRAPH (deterministic, $0 cost, any commander)
    - Oracle text parser → AST → verb resolvers → StateChanges
-   - 1.17M causal edges: triggers, feeds, amplifies, enables, tribal
+   - 7.6M IDF-weighted causal edges: triggers, feeds, amplifies, enables, tribal
+   - IDF weighting: rare events (goblin_enters) get 3x, common (creature_enters) get 0.12x
+   - Chain scoring: commander → candidate → deck card paths get bonus
    - Anti-synergy detection (Rest in Peace=-2.72 in graveyard decks)
    - Commander relevance, effect impact, strategy alignment, bidirectional bonus
-   - NOTE: Currently NDCG@30=0.571 (below baseline), needs IDF edge weighting
+   - Lazy-loaded per card (0.1s init, <50MB memory)
+   - 15,000 cards parsed (up from 5,000), 30,961 abilities
+   - Top-30 overlap: 11.8/30 standalone (vs LLM=15.9/30)
 
 3. TOWER MODEL (instant, any commander, trained on LLM scores)
    - Two-tower neural net: commander_embedding × card_embedding → synergy
@@ -124,7 +128,7 @@ python3 optimize_weights.py --quick              # Optimize weights against 502 
 python3 optimize_weights.py --evaluate           # Evaluate current weights (NDCG@30)
 
 # Tests
-python3 -m pytest tests/ -v                    # Run all 307 tests
+python3 -m pytest tests/ -v                    # Run all 326 tests
 ```
 
 ## Architecture
@@ -154,7 +158,7 @@ Scryfall API → download_cards.py → data/oracle_cards.json (36k cards)
                                         ↓
                     oracle_parser.py → parsed_abilities table (5000 cards, 10635 abilities)
                                         ↓
-                    build_graph.py → interaction_edges table (1.17M causal edges)
+                    build_graph.py → interaction_edges table (7.6M IDF-weighted causal edges)
                                         ↓
                               synergy_graph.py --deck <name>
                               (5-layer scoring: LLM → tower → mechanics → causal → graph)
@@ -189,8 +193,9 @@ python3 build_graph.py --rebuild                        # 11. Rebuild causal gra
 | spellbook_combo_cards | 288,973 | Combo ↔ card junction |
 | card_mechanics | ~17k | Structured game mechanics (LLM-extracted) |
 | synergy_scores | ~180k | Commander × card synergy scores (LLM + auto) |
-| parsed_abilities | ~10k | Deterministic oracle text ASTs (from oracle_parser.py) |
-| interaction_edges | ~1.17M | Causal edges: triggers, feeds, amplifies, enables, tribal |
+| parsed_abilities | ~31k | Deterministic oracle text ASTs (from oracle_parser.py, 15k cards) |
+| interaction_edges | ~7.6M | IDF-weighted causal edges: triggers, feeds, amplifies, enables, tribal |
+| commander_profiles | ~3.4k | Auto-inferred commander archetypes (strategies, tribal, events) |
 | edhrec_card_synergy | ~132k | EDHREC synergy scores for 502 commanders |
 
 ### Tag Schema (3-field)
@@ -329,6 +334,7 @@ Suggests card swaps with multi-layer protection:
 | `mtg_synergy/recommend/engine.py` | `recommend_cards()` — 4-layer scoring pipeline |
 | `mtg_synergy/recommend/swaps.py` | `suggest_swaps()` — multi-layer card swap suggestions |
 | `mtg_synergy/recommend/affinity.py` | Commander affinity scoring |
+| `mtg_synergy/recommend/commander_profile.py` | Auto-infer archetype for any of 3,141 commanders |
 | `mtg_synergy/combos/detector.py` | `find_combos()`, `find_combos_tiered()`, `find_partial_combos()` |
 | `mtg_synergy/combos/anti_synergy.py` | Anti-synergy detection |
 | `mtg_synergy/combos/display.py` | Combo output formatting and validation |
@@ -354,7 +360,8 @@ Suggests card swaps with multi-layer protection:
 | `reclassify_tags.py` | Re-map generic provides/wants tags to specific sub-tags (~41k rows) |
 | `oracle_parser.py` | Deterministic oracle text parser CLI (parse-all, card, stats) |
 | `build_graph.py` | Causal interaction graph builder CLI (rebuild, stats) |
-| `optimize_weights.py` | Weight optimization against 502 EDHREC commanders (NDCG@30) |
+| `optimize_weights.py` | Weight optimization + Recall@K evaluation (--evaluate, --no-llm, --novelty, --deck) |
+| `fetch_edhrec_decks.py` | Fetch EDHREC average decklists for top 1000 commanders |
 
 ## Key Conventions
 
@@ -368,6 +375,6 @@ Suggests card swaps with multi-layer protection:
 - Local scoring uses gemma3:12b via Ollama (best quality/speed local model)
 - Qwen3 models need `think: false` in Ollama payload to disable thinking
 - Fine-tuning uses `.venv` with unsloth + torch (Python 3.12, not system Python 3.14)
-- Tests: 307 tests in `tests/`
+- Tests: 326 tests in `tests/`
 - Spellbook combo boosts must check color identity (fixed: 364 wrong-color boosts deleted)
 - Generic parent tags (`creature-pump`, `creature-board`, `creature-etb`, `combat-events`, `token-generation`, `evasion-grant`) no longer exist; sub-tags are the canonical vocabulary
