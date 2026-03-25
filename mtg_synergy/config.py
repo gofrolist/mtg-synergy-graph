@@ -29,6 +29,7 @@ SCORING_WEIGHTS = {
     "RANK": 0.2,                # Global card quality (EDHREC rank)
     "EDHREC_SYNERGY": 3.0,      # Per-commander EDHREC tiebreaker
     "CAUSAL": 2.0,              # Causal interaction graph (trigger/feeds edges)
+    "FORGE_DECK_OVERLAP": 3.0,  # Forge DeckHas/DeckHints human-curated tag overlap
     "EDHREC_INJECTION_THRESHOLD": 0.25,
 }
 

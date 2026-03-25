@@ -133,6 +133,32 @@ class DeckContext:
                     if dfc and dfc not in self.edhrec:
                         self.edhrec[dfc] = syn
 
+        # Forge DeckHas/DeckHints tags (cached for all candidates)
+        self.forge_cmdr_has = set()
+        self.forge_cmdr_hints = set()
+        try:
+            for r in conn.execute(
+                "SELECT tag_type, tag FROM forge_deck_tags WHERE card_name = ?",
+                (commander,)).fetchall():
+                if r[0] == "has":
+                    self.forge_cmdr_has.add(r[1])
+                elif r[0] == "hints":
+                    self.forge_cmdr_hints.add(r[1])
+        except Exception:
+            pass
+
+        # Bulk-load all candidate forge tags
+        self.forge_card_has = {}   # {card_name: set of tags}
+        self.forge_card_hints = {} # {card_name: set of tags}
+        try:
+            for r in conn.execute("SELECT card_name, tag_type, tag FROM forge_deck_tags"):
+                if r[1] == "has":
+                    self.forge_card_has.setdefault(r[0], set()).add(r[2])
+                elif r[1] == "hints":
+                    self.forge_card_hints.setdefault(r[0], set()).add(r[2])
+        except Exception:
+            pass
+
         # Tower model (loaded once, cached on class)
         self.tower_model = _load_tower_model()
 
@@ -356,6 +382,40 @@ def _compute_interaction_score(cmdr_mechs: list, card_mechs: list,
     return min(score, 10.0)
 
 
+def compute_forge_deck_overlap(conn, commander_name: str, candidate_name: str) -> int:
+    """Count matching DeckHas/DeckHints between commander and candidate.
+
+    DeckHas = what the card provides (abilities, types)
+    DeckHints = what the card wants in the deck
+
+    Overlap = (candidate provides what commander wants) +
+              (commander provides what candidate wants)
+    """
+    cmdr_has = set()
+    cmdr_hints = set()
+    for r in conn.execute(
+        "SELECT tag_type, tag FROM forge_deck_tags WHERE card_name = ?",
+        (commander_name,)
+    ).fetchall():
+        if r[0] == "has":
+            cmdr_has.add(r[1])
+        elif r[0] == "hints":
+            cmdr_hints.add(r[1])
+
+    cand_has = set()
+    cand_hints = set()
+    for r in conn.execute(
+        "SELECT tag_type, tag FROM forge_deck_tags WHERE card_name = ?",
+        (candidate_name,)
+    ).fetchall():
+        if r[0] == "has":
+            cand_has.add(r[1])
+        elif r[0] == "hints":
+            cand_hints.add(r[1])
+
+    return len(cand_has & cmdr_hints) + len(cand_hints & cmdr_has)
+
+
 def compute_dynamic_score(card_name: str, card_data: dict, ctx: DeckContext,
                           conn, oracle_text: str = "") -> dict:
     """Compute feature-based synergy score for a single card.
@@ -463,6 +523,13 @@ def compute_dynamic_score(card_name: str, card_data: dict, ctx: DeckContext,
     # --- Feature 11: LLM synergy score ---
     llm = ctx.llm_scores.get(oid, 0)
 
+    # --- Feature 12: Forge DeckHas/DeckHints overlap ---
+    forge_overlap = 0
+    if ctx.forge_cmdr_hints or ctx.forge_cmdr_has:
+        cand_has = ctx.forge_card_has.get(card_name, set())
+        cand_hints = ctx.forge_card_hints.get(card_name, set())
+        forge_overlap = len(cand_has & ctx.forge_cmdr_hints) + len(cand_hints & ctx.forge_cmdr_has)
+
     # --- Combine ---
     total = (llm * w.get("LLM", 0)
              + tower * w["TOWER"]
@@ -474,7 +541,8 @@ def compute_dynamic_score(card_name: str, card_data: dict, ctx: DeckContext,
              + tribal_adj
              + rank_score * w["RANK"]
              + edhrec_syn * w["EDHREC_SYNERGY"]
-             + causal * w.get("CAUSAL", 0))
+             + causal * w.get("CAUSAL", 0)
+             + forge_overlap * w.get("FORGE_DECK_OVERLAP", 0))
 
     return {
         "total": total,
@@ -489,6 +557,7 @@ def compute_dynamic_score(card_name: str, card_data: dict, ctx: DeckContext,
         "rank_score": round(rank_score, 2),
         "edhrec_syn": round(edhrec_syn, 3) if edhrec_syn > 0 else 0,
         "causal": round(causal, 1),
+        "forge_overlap": forge_overlap,
     }
 
 
