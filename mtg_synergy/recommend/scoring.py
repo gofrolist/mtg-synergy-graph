@@ -200,6 +200,10 @@ class DeckContext:
                     if profile.tribal_type and not self.deck_types:
                         self.deck_types = {profile.tribal_type}
                         self.is_tribal = True
+                    # Recompute strategy keywords after profile loads
+                    self.strategy_keywords = []
+                    for strat in self.active_strategies:
+                        self.strategy_keywords.extend(STRATEGY_KEYWORDS.get(strat, []))
             except Exception:
                 pass
 

@@ -89,7 +89,7 @@ def precompute_scores(conn, ground_truth, commander_info, max_commanders=None):
     ):
         card_data_map[row[0]] = {
             "name": row[0], "oracle_id": row[1],
-            "type_line": row[1] and row[2] or "", "edhrec_rank": row[3],
+            "type_line": row[2] or "", "edhrec_rank": row[3],
         }
         card_oracle_map[row[0]] = row[4] or ""
 
@@ -99,19 +99,31 @@ def precompute_scores(conn, ground_truth, commander_info, max_commanders=None):
             continue
 
         cmdr_name = info["name"]
-        # Build a minimal cards list for DeckContext
+
+        # Use EDHREC average deck as deck context (if available)
+        avg_deck_cards = set()
+        try:
+            for row in conn.execute(
+                "SELECT card_name FROM edhrec_average_decks WHERE commander_slug = ?",
+                (slug,)
+            ):
+                avg_deck_cards.add(row[0])
+        except Exception:
+            pass
+
+        # Build a cards list including EDHREC candidates + avg deck
         cards_list = []
-        for card_name in edhrec_cards:
+        all_card_names = set(edhrec_cards.keys()) | avg_deck_cards
+        for card_name in all_card_names:
             cd = card_data_map.get(card_name)
             if cd:
                 cards_list.append(cd)
-        # Add commander
         cmdr_cd = card_data_map.get(cmdr_name)
         if cmdr_cd and cmdr_cd not in cards_list:
             cards_list.append(cmdr_cd)
 
         try:
-            ctx = DeckContext(conn, cmdr_name, set(), cards_list,
+            ctx = DeckContext(conn, cmdr_name, avg_deck_cards, cards_list,
                               edhrec_slug=slug)
         except Exception:
             continue
