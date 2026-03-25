@@ -147,6 +147,81 @@ def evaluate_weights(weights, precomputed):
     return total_score / max(n_evaluated, 1), n_evaluated
 
 
+def compute_recall_at_k(our_ranked: list[str], edhrec_deck: set[str], k: int = 100) -> float:
+    """Compute Recall@K: fraction of EDHREC deck cards found in our top K."""
+    if not edhrec_deck:
+        return 0.0
+    our_top_k = set(our_ranked[:k])
+    found = len(our_top_k & edhrec_deck)
+    return found / len(edhrec_deck)
+
+
+def evaluate_recall(conn, precomputed, weights, k_values=(30, 50, 100)):
+    """Evaluate Recall@K against EDHREC average decks."""
+    has_avg = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='edhrec_average_decks'"
+    ).fetchone()[0]
+    if not has_avg:
+        print("  No edhrec_average_decks table. Run: python3 fetch_edhrec_decks.py")
+        return
+
+    recalls = {k: [] for k in k_values}
+    for slug, scored_cards in precomputed.items():
+        avg_deck = set(r[0] for r in conn.execute(
+            "SELECT card_name FROM edhrec_average_decks WHERE commander_slug = ?",
+            (slug,)))
+        if len(avg_deck) < 20:
+            continue
+
+        ranked = sorted(scored_cards, key=lambda x: -(
+            x[3] * weights.get("LLM", 0) + x[2] * weights.get("CAUSAL", 0)))
+        our_ranked = [name for name, _, _, _ in ranked]
+
+        for k in k_values:
+            recalls[k].append(compute_recall_at_k(our_ranked, avg_deck, k))
+
+    for k in k_values:
+        if recalls[k]:
+            avg = sum(recalls[k]) / len(recalls[k])
+            print(f"  Recall@{k}: {avg:.1%} ({len(recalls[k])} commanders)")
+
+
+def novelty_report(conn, precomputed, weights, slug_filter=None, top_k=100):
+    """Show cards we recommend that EDHREC average deck doesn't include."""
+    has_avg = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='edhrec_average_decks'"
+    ).fetchone()[0]
+    if not has_avg:
+        print("No edhrec_average_decks table. Run: python3 fetch_edhrec_decks.py")
+        return
+
+    slugs = [slug_filter] if slug_filter else list(precomputed.keys())[:10]
+    for slug in slugs:
+        if slug not in precomputed:
+            continue
+        avg_deck = set(r[0] for r in conn.execute(
+            "SELECT card_name FROM edhrec_average_decks WHERE commander_slug = ?", (slug,)))
+        if len(avg_deck) < 20:
+            continue
+
+        scored = precomputed[slug]
+        ranked = sorted(scored, key=lambda x: -(
+            x[3] * weights.get("LLM", 0) + x[2] * weights.get("CAUSAL", 0)))
+        our_top = [name for name, _, _, _ in ranked[:top_k]]
+
+        novel = [c for c in our_top if c not in avg_deck]
+        in_edhrec = [c for c in our_top if c in avg_deck]
+        recall = len(in_edhrec) / len(avg_deck) if avg_deck else 0
+
+        print(f"\n{'='*60}")
+        print(f"{slug}: Recall@{top_k}={recall:.0%} | {len(novel)} novel picks")
+        print(f"  Novel (not in EDHREC avg deck):")
+        for c in novel[:15]:
+            match = next((s for s in scored if s[0] == c), None)
+            if match:
+                print(f"    {c}  (causal={match[2]:.1f}, llm={match[3]})")
+
+
 def grid_search(precomputed):
     """Grid search over weight combinations (fast — uses precomputed scores).
 
@@ -182,6 +257,9 @@ def main():
     parser.add_argument("--quick", action="store_true", help="Fast mode (50 commanders)")
     parser.add_argument("--evaluate", action="store_true", help="Evaluate current weights only")
     parser.add_argument("--max-commanders", type=int, default=None)
+    parser.add_argument("--no-llm", action="store_true", help="Evaluate without LLM scores")
+    parser.add_argument("--novelty", action="store_true", help="Show novel picks not in EDHREC")
+    parser.add_argument("--deck", type=str, help="Single commander deep dive")
     args = parser.parse_args()
 
     conn = get_connection()
@@ -204,11 +282,18 @@ def main():
     print(f"Precomputed {len(precomputed)} commanders in {t_precompute:.0f}s")
 
     if args.evaluate:
-        current = {k: v for k, v in SCORING_WEIGHTS.items()
-                   if k in ("LLM", "CAUSAL", "EDHREC_SYNERGY")}
-        print(f"\nEvaluating current weights: {current}")
-        score, n = evaluate_weights(current, precomputed)
-        print(f"Score: {score:.1f}/30 ({n} commanders evaluated)")
+        weights = {"LLM": 0 if args.no_llm else SCORING_WEIGHTS.get("LLM", 10),
+                   "CAUSAL": SCORING_WEIGHTS.get("CAUSAL", 2)}
+        mode = "no-LLM" if args.no_llm else "all signals"
+        print(f"\nEvaluating ({mode}): {weights}")
+        score, n = evaluate_weights(weights, precomputed)
+        print(f"Top-30 overlap: {score:.1f}/30 ({n} commanders)")
+        evaluate_recall(conn, precomputed, weights)
+
+        if args.novelty:
+            novelty_report(conn, precomputed, weights, slug_filter=args.deck)
+        elif args.deck:
+            novelty_report(conn, precomputed, weights, slug_filter=args.deck)
     else:
         t0 = time.time()
         best_score, best_weights, results = grid_search(precomputed)
