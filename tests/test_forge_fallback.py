@@ -40,10 +40,12 @@ def test_map_forge_verb_unknown():
 
 
 def test_forge_schema(tmp_db):
+    """Test that the new forge_abilities schema exists (via forge_import)."""
+    from mtg_synergy.parse.forge_import import ensure_forge_schema as ensure_new
     conn = sqlite3.connect(tmp_db)
-    ensure_forge_schema(conn)
+    ensure_new(conn)
     count = conn.execute(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='forge_effects'"
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='forge_abilities'"
     ).fetchone()[0]
     assert count == 1
     conn.close()
