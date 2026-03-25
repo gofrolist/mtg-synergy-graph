@@ -10,7 +10,7 @@
 | Dimension | Ours | Forge |
 |-----------|------|-------|
 | Effect verbs | 22 | 50+ |
-| Trigger types | ~25 | 200 |
+| Trigger types | ~25 | 134 |
 | Filter grammar | `ObjectFilter(card_type, subtype, controller)` | `Creature.YouCtrl+powerGE4+attacking` |
 | Cards with structured effects | 15,000 (45% have effects) | 32,327 (100% encoded) |
 | EDHREC edge coverage | 70% | ~98% (Forge covers nearly all) |
@@ -54,7 +54,7 @@ class ForgeFilter:
 Parsed from Forge strings by splitting on `+` and `.`:
 ```
 "Creature.YouCtrl+powerGE4+attacking"
--> ForgeFilter(card_type="Creature", controller="YouCtrl", power_ge=4, is_attacking=True)
+-> ForgeFilter(card_types=["Creature"], controller="YouCtrl", power_ge=4, is_attacking=True)
 ```
 
 **ForgeTrigger** — replaces `Trigger`:
