@@ -309,9 +309,16 @@ ALTER TABLE interaction_edges_v1 RENAME TO interaction_edges;
 
 ## Success Criteria
 
-1. **Causal top-30 overlap** (alone, no LLM): > 0.60 (up from 0.571)
-2. **Combined top-30 overlap** (all signals): > 0.69 (up from 0.675)
-3. **Coverage top-30 overlap** (no LLM, no EDHREC): > 0.58
-4. **Recall@100** against EDHREC avg decks: > 40% across 1000 commanders
+**Primary (Recall@K against EDHREC average decks — the real measure):**
+1. **Recall@100** (all signals): > 45% across 1000 commanders
+2. **Recall@100** (no LLM, no EDHREC — coverage mode): > 30% across 1000 commanders
+3. **Recall@50** (all signals): > 35%
+
+These targets are initial estimates — calibrate after the first evaluation run shows baseline.
+
+**Secondary (quick iteration check — dev speed only):**
+4. **Top-30 overlap** must not regress below current baselines (LLM=0.675, combined=0.675). Not a target to optimize — just a sanity check that runs in seconds without needing average deck data.
+
+**Non-metric:**
 5. **Commander profile coverage**: 100% of 3,141 legal commanders get auto-inferred profiles
 6. **IDF graph must beat non-IDF graph** on the same evaluation before committing
