@@ -220,33 +220,53 @@ def compute_recall_at_k(our_ranked: list[str], edhrec_deck: set[str], k: int = 1
     return found / len(edhrec_deck)
 
 
-def evaluate_recall(conn, precomputed, weights, k_values=(30, 50, 100)):
-    """Evaluate Recall@K against EDHREC average decks."""
-    has_avg = conn.execute(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='edhrec_average_decks'"
-    ).fetchone()[0]
-    if not has_avg:
-        print("  No edhrec_average_decks table. Run: python3 fetch_edhrec_decks.py")
-        return
+def evaluate_recall(conn, precomputed, weights, k_values=(30, 50, 100), mode="both"):
+    """Evaluate Recall@K against EDHREC data.
 
-    recalls = {k: [] for k in k_values}
-    for slug, scored_cards in precomputed.items():
-        avg_deck = set(r[0] for r in conn.execute(
-            "SELECT card_name FROM edhrec_average_decks WHERE commander_slug = ?",
-            (slug,)))
-        if len(avg_deck) < 20:
-            continue
+    mode: "avg" (average decklists), "synergy" (top synergy cards), or "both"
+    """
+    # Average decklist recall: "would our picks build the consensus deck?"
+    if mode in ("avg", "both"):
+        has_avg = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='edhrec_average_decks'"
+        ).fetchone()[0]
+        if has_avg:
+            recalls = {k: [] for k in k_values}
+            for slug, scored_cards in precomputed.items():
+                avg_deck = set(r[0] for r in conn.execute(
+                    "SELECT card_name FROM edhrec_average_decks WHERE commander_slug = ?",
+                    (slug,)))
+                if len(avg_deck) < 20:
+                    continue
+                ranked = _rank_cards(scored_cards, weights)
+                our_ranked = [name for name, _, _ in ranked]
+                for k in k_values:
+                    recalls[k].append(compute_recall_at_k(our_ranked, avg_deck, k))
+            print("  [Average Deck]")
+            for k in k_values:
+                if recalls[k]:
+                    avg = sum(recalls[k]) / len(recalls[k])
+                    print(f"    Recall@{k}: {avg:.1%} ({len(recalls[k])} commanders)")
 
-        ranked = _rank_cards(scored_cards, weights)
-        our_ranked = [name for name, _, _ in ranked]
-
+    # Synergy recall: "do we find the commander-specific gems?"
+    if mode in ("synergy", "both"):
+        syn_recalls = {k: [] for k in k_values}
+        for slug, scored_cards in precomputed.items():
+            # Get top synergy cards (synergy > 0.2 = commander-specific)
+            syn_top = set(r[0] for r in conn.execute(
+                "SELECT card_name FROM edhrec_card_synergy WHERE commander_slug = ? AND synergy >= 0.2",
+                (slug,)))
+            if len(syn_top) < 5:
+                continue
+            ranked = _rank_cards(scored_cards, weights)
+            our_ranked = [name for name, _, _ in ranked]
+            for k in k_values:
+                syn_recalls[k].append(compute_recall_at_k(our_ranked, syn_top, k))
+        print("  [High Synergy Cards (>=0.2)]")
         for k in k_values:
-            recalls[k].append(compute_recall_at_k(our_ranked, avg_deck, k))
-
-    for k in k_values:
-        if recalls[k]:
-            avg = sum(recalls[k]) / len(recalls[k])
-            print(f"  Recall@{k}: {avg:.1%} ({len(recalls[k])} commanders)")
+            if syn_recalls[k]:
+                avg = sum(syn_recalls[k]) / len(syn_recalls[k])
+                print(f"    Recall@{k}: {avg:.1%} ({len(syn_recalls[k])} commanders)")
 
 
 def novelty_report(conn, precomputed, weights, slug_filter=None, top_k=100):
