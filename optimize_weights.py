@@ -68,50 +68,67 @@ def load_commander_info(conn):
 
 
 def precompute_scores(conn, ground_truth, commander_info, max_commanders=None):
-    """Precompute all per-card scores for each commander (expensive, do once).
+    """Precompute all per-card feature vectors for each commander.
 
-    Returns: {slug: [(card_name, edhrec_syn, causal, llm), ...]}
+    Returns: {slug: [(card_name, {feature_dict}), ...]}
+    Feature dict has: edhrec_syn, causal, llm, cmdr_overlap, mechanics,
+    strat_keywords, tribal, rank, forge_overlap, tower, deck_overlap, strat_overlap
     """
-    from mtg_synergy.causal import CausalContext
+    from mtg_synergy.recommend.scoring import DeckContext, compute_dynamic_score
 
     precomputed = {}
     commanders = list(ground_truth.items())
     if max_commanders:
         commanders = commanders[:max_commanders]
 
-    # Pre-load all LLM scores
-    llm_all = defaultdict(dict)
-    try:
-        for row in conn.execute("SELECT commander_oid, card_oid, score FROM synergy_scores"):
-            llm_all[row[0]][row[1]] = row[2]
-    except Exception:
-        pass
-
-    # Pre-load card name → oid mapping
-    card_oid_map = {}
-    for row in conn.execute("SELECT name, oracle_id FROM cards"):
-        card_oid_map[row[0]] = row[1]
+    # Pre-load card data for fast lookup
+    card_data_map = {}
+    card_oracle_map = {}
+    for row in conn.execute(
+        "SELECT name, oracle_id, type_line, edhrec_rank, oracle_text FROM cards"
+    ):
+        card_data_map[row[0]] = {
+            "name": row[0], "oracle_id": row[1],
+            "type_line": row[1] and row[2] or "", "edhrec_rank": row[3],
+        }
+        card_oracle_map[row[0]] = row[4] or ""
 
     for i, (slug, edhrec_cards) in enumerate(commanders):
         info = commander_info.get(slug)
         if not info:
             continue
 
-        cmdr_oid = info["oracle_id"]
+        cmdr_name = info["name"]
+        # Build a minimal cards list for DeckContext
+        cards_list = []
+        for card_name in edhrec_cards:
+            cd = card_data_map.get(card_name)
+            if cd:
+                cards_list.append(cd)
+        # Add commander
+        cmdr_cd = card_data_map.get(cmdr_name)
+        if cmdr_cd and cmdr_cd not in cards_list:
+            cards_list.append(cmdr_cd)
+
         try:
-            ctx = CausalContext(conn, cmdr_oid, set())
+            ctx = DeckContext(conn, cmdr_name, set(), cards_list,
+                              edhrec_slug=slug)
         except Exception:
             continue
 
-        cmdr_llm = llm_all.get(cmdr_oid, {})
         scored = []
         for card_name, edhrec_syn in edhrec_cards.items():
-            card_oid = card_oid_map.get(card_name)
-            if not card_oid:
+            cd = card_data_map.get(card_name)
+            if not cd:
                 continue
-            causal = ctx.causal_score(card_oid)
-            llm = cmdr_llm.get(card_oid, 0)
-            scored.append((card_name, edhrec_syn, causal, llm))
+            try:
+                features = compute_dynamic_score(
+                    card_name, cd, ctx, conn,
+                    oracle_text=card_oracle_map.get(card_name, ""))
+                features["edhrec_syn"] = edhrec_syn
+                scored.append((card_name, features))
+            except Exception:
+                continue
 
         if len(scored) >= 10:
             precomputed[slug] = scored
@@ -125,10 +142,18 @@ def precompute_scores(conn, ground_truth, commander_info, max_commanders=None):
 def _rank_cards(scored_cards, weights):
     """Rank cards by weighted score. Returns [(name, score, edhrec_syn), ...]."""
     ranked = []
-    for card_name, edhrec_syn, causal, llm in scored_cards:
-        total = (llm * weights.get("LLM", 0)
-                 + causal * weights.get("CAUSAL", 0))
-        ranked.append((card_name, total, edhrec_syn))
+    for card_name, features in scored_cards:
+        total = (features.get("llm", 0) * weights.get("LLM", 0)
+                 + features.get("causal", 0) * weights.get("CAUSAL", 0)
+                 + features.get("cmdr_overlap", 0) * weights.get("CMDR_TAG_OVERLAP", 0)
+                 + features.get("deck_overlap", 0) * weights.get("DECK_TAG_OVERLAP", 0)
+                 + features.get("mechanics", 0) * weights.get("MECHANICS", 0)
+                 + features.get("strat_overlap", 0) * weights.get("STRATEGY", 0)
+                 + features.get("strat_keywords", 0) * weights.get("STRATEGY_KEYWORD", 0)
+                 + features.get("rank_score", 0) * weights.get("RANK", 0)
+                 + features.get("forge_overlap", 0) * weights.get("FORGE_DECK_OVERLAP", 0)
+                 + features.get("tower", 0) * weights.get("TOWER", 0))
+        ranked.append((card_name, total, features.get("edhrec_syn", 0)))
     return sorted(ranked, key=lambda x: -x[1])
 
 
@@ -165,9 +190,10 @@ def evaluate_weights(weights, precomputed, conn=None):
     for slug, scored_cards in precomputed.items():
         ranked = _rank_cards(scored_cards, weights)
         our_top30 = {name for name, _, _ in ranked[:30]}
-        edhrec_top30 = {card[0] for card in sorted(scored_cards, key=lambda x: -x[1])[:30]}
+        edhrec_top30 = {card[0] for card
+                        in sorted(scored_cards, key=lambda x: -x[1].get("edhrec_syn", 0))[:30]}
         overlap = len(our_top30 & edhrec_top30)
-        total_score += overlap / 30.0  # normalize to 0-1 like Recall
+        total_score += overlap / 30.0
         n_evaluated += 1
 
     return total_score / max(n_evaluated, 1), n_evaluated
@@ -199,9 +225,8 @@ def evaluate_recall(conn, precomputed, weights, k_values=(30, 50, 100)):
         if len(avg_deck) < 20:
             continue
 
-        ranked = sorted(scored_cards, key=lambda x: -(
-            x[3] * weights.get("LLM", 0) + x[2] * weights.get("CAUSAL", 0)))
-        our_ranked = [name for name, _, _, _ in ranked]
+        ranked = _rank_cards(scored_cards, weights)
+        our_ranked = [name for name, _, _ in ranked]
 
         for k in k_values:
             recalls[k].append(compute_recall_at_k(our_ranked, avg_deck, k))
@@ -231,9 +256,8 @@ def novelty_report(conn, precomputed, weights, slug_filter=None, top_k=100):
             continue
 
         scored = precomputed[slug]
-        ranked = sorted(scored, key=lambda x: -(
-            x[3] * weights.get("LLM", 0) + x[2] * weights.get("CAUSAL", 0)))
-        our_top = [name for name, _, _, _ in ranked[:top_k]]
+        ranked = _rank_cards(scored, weights)
+        our_top = [name for name, _, _ in ranked[:top_k]]
 
         novel = [c for c in our_top if c not in avg_deck]
         in_edhrec = [c for c in our_top if c in avg_deck]
@@ -245,7 +269,8 @@ def novelty_report(conn, precomputed, weights, slug_filter=None, top_k=100):
         for c in novel[:15]:
             match = next((s for s in scored if s[0] == c), None)
             if match:
-                print(f"    {c}  (causal={match[2]:.1f}, llm={match[3]})")
+                f = match[1]
+                print(f"    {c}  (causal={f.get('causal',0):.1f}, llm={f.get('llm',0)}, overlap={f.get('cmdr_overlap',0)})")
 
 
 def grid_search(precomputed, conn=None):

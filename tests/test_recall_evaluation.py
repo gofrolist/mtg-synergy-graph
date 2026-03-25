@@ -35,11 +35,25 @@ def test_evaluate_weights_no_llm():
     from optimize_weights import evaluate_weights
     precomputed = {
         "test-commander": [
-            ("Card A", 0.5, 3.0, 8),
-            ("Card B", 0.3, 1.0, 6),
-            ("Card C", 0.1, 5.0, 0),
+            ("Card A", {"edhrec_syn": 0.5, "causal": 3.0, "llm": 8}),
+            ("Card B", {"edhrec_syn": 0.3, "causal": 1.0, "llm": 6}),
+            ("Card C", {"edhrec_syn": 0.1, "causal": 5.0, "llm": 0}),
         ]
     }
     score, n = evaluate_weights({"LLM": 0, "CAUSAL": 1.0}, precomputed)
     assert n == 1
     assert isinstance(score, float)
+
+
+def test_rank_cards_uses_all_features():
+    from optimize_weights import _rank_cards
+    scored = [
+        ("Card A", {"llm": 10, "causal": 0, "cmdr_overlap": 5, "mechanics": 3}),
+        ("Card B", {"llm": 0, "causal": 5, "cmdr_overlap": 0, "mechanics": 0}),
+    ]
+    # With only CMDR_TAG_OVERLAP weight, Card A should rank higher
+    ranked = _rank_cards(scored, {"CMDR_TAG_OVERLAP": 10})
+    assert ranked[0][0] == "Card A"
+    # With only CAUSAL weight, Card B should rank higher
+    ranked2 = _rank_cards(scored, {"CAUSAL": 10})
+    assert ranked2[0][0] == "Card B"
