@@ -46,9 +46,27 @@ def _load_oracle_texts(conn, card_ids: set[str]) -> dict[str, str]:
     return oracle_texts
 
 
+def _load_type_lines(conn, card_ids: set[str]) -> dict[str, str]:
+    """Load type_line from cards table for the given oracle_ids."""
+    if not card_ids:
+        return {}
+    type_lines = {}
+    card_list = list(card_ids)
+    for i in range(0, len(card_list), 500):
+        chunk = card_list[i:i + 500]
+        ph = ",".join("?" * len(chunk))
+        for oid, tl in conn.execute(
+            f"SELECT oracle_id, type_line FROM cards WHERE oracle_id IN ({ph})", chunk
+        ).fetchall():
+            if tl:
+                type_lines[oid] = tl
+    return type_lines
+
+
 def build_and_store_graph(conn, cards: dict[str, list[Ability]]):
     oracle_texts = _load_oracle_texts(conn, set(cards.keys()))
-    edges = build_causal_edges(cards, oracle_texts=oracle_texts)
+    type_lines = _load_type_lines(conn, set(cards.keys()))
+    edges = build_causal_edges(cards, oracle_texts=oracle_texts, type_lines=type_lines)
     conn.execute("DELETE FROM interaction_edges")
     for e in edges:
         conn.execute(

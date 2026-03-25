@@ -277,18 +277,17 @@ def _parse_target(text: str) -> Optional[ObjectFilter]:
     if "target player" in t:
         return ObjectFilter(controller="any")
 
-    # "each creature you control"
-    m = re.search(r'(?:each|all)\s+(\w+(?:\s+\w+)?)\s+you\s+control', t)
+    # "each creature you control" / "each Goblin you control" / "other Goblins you control"
+    m = re.search(r'(?:each|all|other)\s+([\w\s]+?)\s+you\s+control', t)
     if m:
-        card_type = _normalize_card_type(m.group(1))
-        return ObjectFilter(card_type=card_type, controller="you")
+        return _parse_type_phrase(m.group(1), controller="you")
 
-    # "creatures you control"
-    m = re.search(r'(\w+)s?\s+you\s+control', t)
+    # "Goblins you control" / "creatures you control"
+    m = re.search(r'([\w]+(?:\s+\w+)?)\s+you\s+control', t)
     if m:
-        card_type = _normalize_card_type(m.group(1))
-        if card_type:
-            return ObjectFilter(card_type=card_type, controller="you")
+        result = _parse_type_phrase(m.group(1), controller="you")
+        if result:
+            return result
 
     # "target creature/permanent/artifact/etc."
     m = re.search(r'target\s+([\w\s]+?)(?:\s+card|\s+to\b|\s+from\b|\s*$|\s*,)', t)
@@ -310,6 +309,37 @@ def _normalize_card_type(text: str) -> Optional[str]:
         if t == ct or t == ct + "s" or t.rstrip("s") == ct:
             return ct
     return t if t else None
+
+
+def _parse_type_phrase(phrase: str, controller: str = None) -> Optional[ObjectFilter]:
+    """Parse a type phrase like 'Goblin creatures', 'Goblins', 'creatures'.
+
+    Distinguishes subtypes (Goblin, Zombie, Human) from card types (creature, artifact).
+    'Goblins' → ObjectFilter(card_type='creature', subtype='Goblin')
+    'creatures' → ObjectFilter(card_type='creature')
+    'Goblin creatures' → ObjectFilter(card_type='creature', subtype='Goblin')
+    """
+    words = phrase.strip().lower().split()
+    if not words:
+        return None
+
+    # Try to match as a card type first
+    card_type = _normalize_card_type(phrase)
+    if card_type in _CARD_TYPES:
+        return ObjectFilter(card_type=card_type, controller=controller)
+
+    # Multi-word: "goblin creatures" → subtype=Goblin, card_type=creature
+    if len(words) >= 2:
+        last_word_type = _normalize_card_type(words[-1])
+        if last_word_type in _CARD_TYPES:
+            subtype = words[0].capitalize()
+            return ObjectFilter(card_type=last_word_type, subtype=subtype, controller=controller)
+
+    # Single word that's NOT a card type → it's a creature subtype
+    # "Goblins" → Goblin, "Zombies" → Zombie
+    single = words[0].rstrip("s").capitalize()
+    if single and single.lower() not in _CARD_TYPES:
+        return ObjectFilter(card_type="creature", subtype=single, controller=controller)
 
 
 # ---- Scaling ----

@@ -1,7 +1,8 @@
-"""Build causal edges (triggers / feeds / amplifies / enables) between parsed card pairs."""
+"""Build causal edges (triggers / feeds / amplifies / enables / tribal) between parsed card pairs."""
 from __future__ import annotations
 
 import re
+from collections import defaultdict
 
 from mtg_synergy.causal.indexer import build_index, CardIndex
 from mtg_synergy.causal.types import Edge, EdgeDetail
@@ -317,6 +318,70 @@ def _build_enables_edges(
 
 
 # ---------------------------------------------------------------------------
+# Tribal edges (subtype-aware scope matching)
+# ---------------------------------------------------------------------------
+
+def _build_tribal_edges(
+    cards: dict[str, list[Ability]],
+    type_lines: dict[str, str],
+) -> list[Edge]:
+    """Build tribal edges: cards that buff/care about a subtype → cards of that subtype.
+
+    'Goblins you control get +1/+1' (target.subtype=Goblin) → every Goblin card.
+    These are high-value edges because tribal lords are deck-defining.
+    """
+    edges: list[Edge] = []
+
+    # 1. Collect cards with subtype-specific effects
+    # {subtype: [(card_id, ability_index)]}
+    subtype_buffers: dict[str, list[tuple[str, int]]] = defaultdict(list)
+    for card_id, abilities in cards.items():
+        for ab_idx, ability in enumerate(abilities):
+            for effect in ability.effects:
+                if effect.target and effect.target.subtype:
+                    subtype_buffers[effect.target.subtype.lower()].append((card_id, ab_idx))
+            # Also check trigger subject subtypes
+            if ability.trigger and ability.trigger.subject and ability.trigger.subject.subtype:
+                subtype_buffers[ability.trigger.subject.subtype.lower()].append((card_id, ab_idx))
+
+    if not subtype_buffers:
+        return edges
+
+    # 2. Index cards by their creature subtypes (from type_line)
+    # {subtype: [card_id]}
+    cards_of_type: dict[str, list[str]] = defaultdict(list)
+    for card_id, type_line in type_lines.items():
+        if not type_line or "—" not in type_line:
+            continue
+        # Extract subtypes after the dash
+        try:
+            subtypes_part = type_line.split("—")[1].strip()
+            for subtype in subtypes_part.split():
+                cards_of_type[subtype.lower()].append(card_id)
+        except (IndexError, AttributeError):
+            continue
+
+    # 3. Create edges: buffer → card of matching type
+    for subtype, buffers in subtype_buffers.items():
+        matching_cards = cards_of_type.get(subtype, [])
+        for buffer_card, buffer_ab in buffers:
+            for target_card in matching_cards:
+                if buffer_card == target_card:
+                    continue
+                edges.append(Edge(
+                    source=buffer_card,
+                    target=target_card,
+                    edge_type="enables",  # tribal synergy is a form of enabling
+                    ability_a=buffer_ab,
+                    ability_b=0,
+                    strength=0.9,  # tribal match is a strong signal
+                    detail=EdgeDetail(resource=f"tribal:{subtype}"),
+                ))
+
+    return edges
+
+
+# ---------------------------------------------------------------------------
 # Dedup
 # ---------------------------------------------------------------------------
 
@@ -341,14 +406,17 @@ _all_cards: dict[str, list[Ability]] = {}
 def build_causal_edges(
     cards: dict[str, list[Ability]],
     oracle_texts: dict[str, str] | None = None,
+    type_lines: dict[str, str] | None = None,
 ) -> list[Edge]:
-    """Build all causal edges (triggers + feeds + amplifies + enables).
+    """Build all causal edges (triggers + feeds + amplifies + enables + tribal).
 
     Args:
         cards: mapping of card_id -> list of Ability AST nodes.
         oracle_texts: mapping of card_id -> oracle text string.
             Required for amplifies edges (replacement/trigger_modifier).
             If None, amplifies edges are skipped.
+        type_lines: mapping of card_id -> type_line string.
+            Required for tribal edges. If None, tribal edges are skipped.
 
     Returns:
         Deduplicated list of Edge objects.
@@ -363,4 +431,6 @@ def build_causal_edges(
     if oracle_texts:
         edges.extend(_build_amplifies_edges(index, cards, oracle_texts))
     edges.extend(_build_enables_edges(index, cards))
+    if type_lines:
+        edges.extend(_build_tribal_edges(cards, type_lines))
     return _dedup_edges(edges)
