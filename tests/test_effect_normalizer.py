@@ -100,3 +100,53 @@ def test_no_op_on_clean_text():
 def test_no_op_on_deal_damage():
     result = _normalize_effect_text("Purphoros deals 2 damage to each opponent")
     assert _texts(result) == ["Purphoros deals 2 damage to each opponent"]
+
+
+# --- Rule 3: Subject normalization + deconjugation ---
+
+from mtg_synergy.parse.effect_parser import _normalize_subject
+
+
+def test_normalize_each_opponent():
+    # "draws" is in already_handled set — _normalize_subject preserves original text
+    # because _try_draw uses re.search that already handles "each opponent draws"
+    result = _normalize_subject("each opponent draws a card")
+    assert "draws" in result or "draw" in result
+
+
+def test_normalize_that_player():
+    result = _normalize_subject("that player creates a token")
+    assert result == "create a token"
+
+
+def test_normalize_its_controller():
+    result = _normalize_subject("its controller creates a 3/3 green Beast creature token")
+    assert result.startswith("create")
+
+
+def test_normalize_target_opponent():
+    result = _normalize_subject("target opponent discards a card")
+    assert result == "discard a card"
+
+
+def test_deconjugation_all_verbs():
+    from mtg_synergy.parse.effect_parser import _VERB_DECONJ
+    # Verbs already handled by re.search parsers are preserved with their subject
+    already_handled = {
+        "sacrifices", "loses", "gains", "deals",
+        "draws", "mills", "puts",
+    }
+    for conj, inf in _VERB_DECONJ.items():
+        result = _normalize_subject(f"each opponent {conj} something")
+        if conj in already_handled:
+            # These return original text (existing parsers handle them)
+            assert result == f"each opponent {conj} something", (
+                f"{conj} should be preserved, got: {result}"
+            )
+        else:
+            assert result.startswith(inf), f"{conj} should become {inf}, got: {result}"
+
+
+def test_no_normalization_on_clean_text():
+    result = _normalize_subject("draw a card")
+    assert result == "draw a card"
