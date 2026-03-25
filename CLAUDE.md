@@ -11,7 +11,7 @@ MTG Synergy Graph — a tool for analyzing Magic: The Gathering EDH/Commander de
 ```
 For any commander, recommendations use 5 signal layers:
 
-1. LLM SCORES (best single signal, NDCG@30=0.675)
+1. LLM SCORES (best single signal, Recall@100=53%)
    - Pre-scored via score_synergies.py (OpenAI gpt-5.4-mini or local gemma3:12b)
    - 33 commanders scored, ~180k pairs
    - Integer 1-10 scale, PRIMARY ranking signal when available
@@ -125,7 +125,7 @@ python3 oracle_parser.py --stats                 # Parse coverage stats
 python3 build_graph.py --rebuild                 # Build causal interaction graph (~1.17M edges)
 python3 build_graph.py --stats                   # Graph stats
 python3 optimize_weights.py --quick              # Optimize weights against 502 EDHREC commanders
-python3 optimize_weights.py --evaluate           # Evaluate current weights (NDCG@30)
+python3 optimize_weights.py --evaluate           # Evaluate current weights (Recall@100)
 
 # Tests
 python3 -m pytest tests/ -v                    # Run all 326 tests

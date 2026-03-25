@@ -137,6 +137,9 @@ def compare_deck(deck_name: str, use_cache: bool = False, verbose: bool = True) 
 
     edhrec_cards = extract_edhrec_cards(edhrec_data)
     edhrec_by_synergy = sorted(edhrec_cards, key=lambda x: x["synergy"], reverse=True)
+    # Note: this compares our recommendations against EDHREC synergy-sorted cards.
+    # The primary evaluation metric is Recall@K in optimize_weights.py, which
+    # compares against EDHREC average decklists (a fuller ground truth).
     edhrec_top30_set = {normalize(c["name"]) for c in edhrec_by_synergy[:30]}
     edhrec_high_syn = {normalize(c["name"]): c for c in edhrec_cards if c["synergy"] >= 0.3}
     edhrec_all_names = {normalize(c["name"]): c for c in edhrec_cards}
