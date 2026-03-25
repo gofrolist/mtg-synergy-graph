@@ -63,6 +63,8 @@ Existing `_parse_single_effect()` and all 22 `_try_*` functions remain unchanged
 
 ### Section 2: Normalization Rules
 
+**Note**: Rules are numbered for reference but execute in the order shown in Section 1's pipeline diagram (1, 2, 4, 6, 5, then 3 per-part). Rule 5 (split) runs before Rule 3 (subject normalization) so each part gets independent deconjugation.
+
 **Rule 1 — Strip "you may/might"** (fixes ~1,338):
 ```
 Pattern: ^(?:you|that player)\s+(?:may|might)\s+
@@ -265,6 +267,7 @@ Steps 1-4 and 7 can run in parallel. Step 7 (Forge) is independent of the pre-pr
 | File | Change |
 |------|--------|
 | `mtg_synergy/parse/effect_parser.py` | Add `_normalize_effect_text()` + 6 rule functions |
+| `mtg_synergy/parse/ast_types.py` | Add `optional: bool = False` field to `Effect` dataclass |
 | `mtg_synergy/parse/__init__.py` | Add modal mode parsing in `parse_card()` |
 | `mtg_synergy/parse/forge_fallback.py` | **New** — Forge verb mapping + Effect lookup |
 | `import_forge.py` | **New** — Download + parse Forge card scripts |
