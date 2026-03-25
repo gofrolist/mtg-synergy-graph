@@ -103,10 +103,13 @@ EFFECT_IMPACT = {
 class CausalContext:
     """Pre-loaded edge data for fast per-candidate scoring.
 
-    Three refinements over naive edge counting:
+    Six scoring dimensions:
     1. Commander relevance: fewer abilities = each edge more defining
-    2. Bidirectional bonus: mutual interaction > one-way
-    3. Deck density: strength-weighted interactions normalized by deck size
+    2. Effect impact: deal_damage > gain_life
+    3. Bidirectional bonus: mutual interaction > one-way
+    4. Strategy alignment: edges matching commander's event profile score higher
+    5. Deck density: strength-weighted interactions normalized by deck size
+    6. Chain participation: cards in multi-card chains/loops with commander
     """
     def __init__(self, conn, commander_id: str, deck_oids: set[str]):
         self.commander_id = commander_id
@@ -120,9 +123,8 @@ class CausalContext:
             self._outgoing[e.source].append(e)
             self._incoming[e.target].append(e)
 
-        # Commander relevance: inversely proportional to ability count.
-        # Krenko (1 ability) = 1.0, Purphoros (4 abilities) = 0.5
-        cmdr_ability_count = 0
+        # Commander relevance: inversely proportional to ability count
+        cmdr_ability_count = 1
         try:
             row = conn.execute(
                 "SELECT COUNT(*) FROM parsed_abilities WHERE oracle_id = ?",
@@ -130,11 +132,22 @@ class CausalContext:
             ).fetchone()
             cmdr_ability_count = row[0] if row else 1
         except Exception:
-            cmdr_ability_count = 1
+            pass
         self._cmdr_relevance = min(1.0, 2.0 / max(cmdr_ability_count, 1))
 
+        # Commander strategy profile: derive from edges (no parsing needed)
+        # What events does the commander produce? = events on commander's outgoing trigger edges
+        # What events does the commander consume? = events on commander's incoming trigger edges
+        self._cmdr_events_produced = set()
+        self._cmdr_events_consumed = set()
+        for edge in self._outgoing.get(commander_id, []):
+            if edge.edge_type == "triggers" and edge.detail.event:
+                self._cmdr_events_produced.add(edge.detail.event)
+        for edge in self._incoming.get(commander_id, []):
+            if edge.edge_type == "triggers" and edge.detail.event:
+                self._cmdr_events_consumed.add(edge.detail.event)
+
         # Pre-load card effect verbs for impact weighting
-        # {oracle_id: max_impact_score}
         self._card_impact = {}
         try:
             import json as _json
@@ -147,40 +160,52 @@ class CausalContext:
                     for eff in effects:
                         verb = eff.get("verb", "")
                         ability_impact = max(ability_impact, EFFECT_IMPACT.get(verb, 0.7))
-                    # Keep the MAX impact across all abilities for this card
                     prev = self._card_impact.get(oid, 0.0)
                     self._card_impact[oid] = max(prev, ability_impact if ability_impact > 0 else 0.7)
                 except Exception:
                     if oid not in self._card_impact:
                         self._card_impact[oid] = 0.7
         except Exception:
-            pass  # parsed_abilities table may not exist
+            pass
+
+        # Chain participation bonus (pre-computed offline, not at query time)
+        # The chain finder DFS is too slow for 1M+ edges at recommendation time.
+        # TODO: Run chain_finder.py offline, store results in a table, load here.
+        self._chain_bonus = {}
 
     def causal_score(self, candidate_id: str) -> float:
         """Score a candidate with commander-centric weighting."""
-        # 1. Commander edges (weighted by relevance)
-        cmdr_to_candidate = 0.0  # commander produces → candidate responds
-        candidate_to_cmdr = 0.0  # candidate produces → commander responds
+        # 1. Commander edges (weighted by relevance + strategy alignment)
+        cmdr_to_candidate = 0.0
+        candidate_to_cmdr = 0.0
 
         for edge in self._outgoing.get(self.commander_id, []):
             if edge.target == candidate_id:
-                cmdr_to_candidate += edge.strength * EDGE_WEIGHTS.get(edge.edge_type, 1.0)
+                w = edge.strength * EDGE_WEIGHTS.get(edge.edge_type, 1.0)
+                # Strategy bonus: if this edge's event is one the commander produces,
+                # the candidate is responding to the commander's core strategy
+                if edge.detail.event in self._cmdr_events_produced:
+                    w *= 1.3
+                cmdr_to_candidate += w
 
         for edge in self._outgoing.get(candidate_id, []):
             if edge.target == self.commander_id:
-                candidate_to_cmdr += edge.strength * EDGE_WEIGHTS.get(edge.edge_type, 1.0)
+                w = edge.strength * EDGE_WEIGHTS.get(edge.edge_type, 1.0)
+                # Strategy bonus: candidate produces events the commander consumes
+                if edge.detail.event in self._cmdr_events_consumed:
+                    w *= 1.3
+                candidate_to_cmdr += w
 
-        # Apply candidate's effect impact multiplier
-        # Impact Tremors (deal_damage=1.5) vs Soul's Attendant (gain_life=0.5)
+        # Effect impact multiplier
         impact = self._card_impact.get(candidate_id, 0.7)
 
         cmdr_score = (cmdr_to_candidate + candidate_to_cmdr) * self._cmdr_relevance * impact
 
-        # 2. Bidirectional bonus: mutual interaction is much stronger
+        # 2. Bidirectional bonus
         if cmdr_to_candidate > 0 and candidate_to_cmdr > 0:
             cmdr_score *= 1.5
 
-        # 3. Deck synergy density: strength-weighted, normalized by deck size
+        # 3. Deck synergy density
         deck_strength_sum = 0.0
         for edge in self._outgoing.get(candidate_id, []):
             if edge.target in self.deck_oids:
@@ -191,7 +216,10 @@ class CausalContext:
 
         deck_density = deck_strength_sum / max(len(self.deck_oids), 1) * 10 * impact
 
-        score = cmdr_score + deck_density
+        # 4. Chain participation bonus
+        chain_bonus = self._chain_bonus.get(candidate_id, 0.0)
+
+        score = cmdr_score + deck_density + chain_bonus
         return min(score, 10.0)
 
 
