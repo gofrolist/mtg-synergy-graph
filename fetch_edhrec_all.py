@@ -72,11 +72,14 @@ def fetch_synergy_cards(slug):
 
     cards = []
     for section in data.get("container", {}).get("json_dict", {}).get("cardlists", []):
+        header = section.get("header", "")
         for cv in section.get("cardviews", []):
             name = cv.get("name", "")
             synergy = cv.get("synergy")
+            inclusion = cv.get("inclusion")
+            num_decks = cv.get("num_decks")
             if name and synergy is not None:
-                cards.append((name, synergy))
+                cards.append((name, synergy, inclusion, num_decks, header))
     return cards
 
 
@@ -135,10 +138,10 @@ def fetch_all(conn, max_slugs=500):
         # Fetch synergy scores
         syn_cards = fetch_synergy_cards(slug)
         if syn_cards:
-            for card_name, synergy in syn_cards:
+            for card_name, synergy, inclusion, num_decks, section in syn_cards:
                 conn.execute(
-                    "INSERT OR IGNORE INTO edhrec_card_synergy VALUES (?,?,?)",
-                    (slug, card_name, synergy))
+                    "INSERT OR IGNORE INTO edhrec_card_synergy VALUES (?,?,?,?,?,?)",
+                    (slug, card_name, synergy, inclusion, num_decks, section))
             fetched_syn += 1
         time.sleep(0.5)
 
