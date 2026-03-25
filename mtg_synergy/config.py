@@ -17,6 +17,7 @@ TOWER_MODEL_PATH = DATA_DIR / "tower_model.npz"
 
 # ── Dynamic scoring weights (feature-based, computed at recommendation time) ─
 SCORING_WEIGHTS = {
+    "LLM": 10.0,                # Pre-scored LLM synergy (1-10 scale, primary signal when available)
     "TOWER": 0.0,               # Disabled — trained on biased LLM data
     "MECHANICS": 2.0,           # Structured interaction scoring (trigger→effect chains + timing)
     "CMDR_TAG_OVERLAP": 3.0,    # Card provides↔wants with commander
