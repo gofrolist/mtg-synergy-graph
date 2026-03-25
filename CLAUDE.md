@@ -9,27 +9,31 @@ MTG Synergy Graph — a tool for analyzing Magic: The Gathering EDH/Commander de
 ### Signal Architecture (recommendation pipeline)
 
 ```
-For any commander, recommendations use 4 signal layers:
+For any commander, recommendations use 5 signal layers:
 
-1. LLM SCORES (best quality, cached in synergy_scores table)
+1. LLM SCORES (best single signal, NDCG@30=0.675)
    - Pre-scored via score_synergies.py (OpenAI gpt-5.4-mini or local gemma3:12b)
-   - 33 commanders scored, ~99k pairs
+   - 33 commanders scored, ~180k pairs
    - Integer 1-10 scale, PRIMARY ranking signal when available
-   - Tiebreaker: tower model prediction + EDHREC rank
 
-2. TOWER MODEL (instant, any commander, trained on LLM scores)
+2. CAUSAL GRAPH (deterministic, $0 cost, any commander)
+   - Oracle text parser → AST → verb resolvers → StateChanges
+   - 1.17M causal edges: triggers, feeds, amplifies, enables, tribal
+   - Anti-synergy detection (Rest in Peace=-2.72 in graveyard decks)
+   - Commander relevance, effect impact, strategy alignment, bidirectional bonus
+   - NOTE: Currently NDCG@30=0.571 (below baseline), needs IDF edge weighting
+
+3. TOWER MODEL (instant, any commander, trained on LLM scores)
    - Two-tower neural net: commander_embedding × card_embedding → synergy
    - Trained on 99k LLM-scored pairs, corr=0.75 with LLM scores
    - Scores ALL cards for any commander in <100ms
-   - Used as Tier 2 for unseen commanders + tiebreaker within same LLM score
 
-3. MECHANICS ENGINE (filter-aware event chain matching)
+4. MECHANICS ENGINE (filter-aware event chain matching)
    - 7105 cards with structured mechanics extracted via LLM
    - 6 matching modes: event chain, card-IS-event, shared trigger,
      modifier, enabler, self-sacrifice
-   - max(graph, mechanics) scoring prevents mechanics cards from being buried
 
-4. TAG GRAPH (provides/wants edges, baseline signal)
+5. TAG GRAPH (provides/wants edges, baseline signal)
    - 34k cards tagged with role/provides/wants
    - Composite edges: provides→wants + peer-enabler + shared-wants + embedding
    - Commander 5x edge weight, keyword-only creature penalty
@@ -38,20 +42,24 @@ For any commander, recommendations use 4 signal layers:
 
 ### Current Performance
 
-Average EDHREC alignment: **13.4/30** (up from 2.8/30 baseline, 4.8x improvement)
+Average EDHREC alignment: **14.9/30** (up from 2.8/30 baseline, 5.3x improvement)
 
 | Commander | Score | Signal source |
 |---|---|---|
-| Sram (equipment/aura) | 24/30 | LLM + mechanics |
-| Syr Konrad (graveyard) | 20/30 | LLM + mechanics |
-| Edgar (vampire tribal) | 17/30 | LLM + tribal tags |
-| Krenko (goblin tribal) | 15/30 | LLM + tribal tags |
-| Urza (artifacts) | 15/30 | LLM + mechanics |
-| Tatyova (landfall) | 15/30 | LLM + tower model |
-| Sauron (amass/ring) | 13/30 | LLM (gemma3 local) |
-| Pantlaza (dinosaur) | 12/30 | LLM + type matching |
-| Kyler (human tribal) | 11/30 | LLM + tribal tags |
+| Sram (equipment/aura) | 23/30 | LLM + mechanics |
+| Krenko (goblin tribal) | 23/30 | LLM + EDHREC tiebreaker |
+| Syr Konrad (graveyard) | 21/30 | LLM + mechanics |
+| Ur-Dragon (dragon tribal) | 20/30 | LLM + DFC fix |
+| Pantlaza (dinosaur) | 17/30 | LLM + type matching |
+| Urza (artifacts) | 17/30 | LLM + mechanics |
+| Edgar (vampire tribal) | 14/30 | LLM + tribal tags |
+| Kyler (human tribal) | 13/30 | LLM + tribal tags |
+| Tatyova (landfall) | 12/30 | LLM + tower model |
+| Sauron (amass/ring) | 11/30 | LLM (gemma3 local) |
+| Y'shtola (draw/lifegain) | 11/30 | LLM + event chains |
 | Niv-Mizzet (draw/damage) | 10/30 | LLM + event chains |
+| Kaalia (angels/demons/dragons) | 9/30 | LLM (EDHREC top cards already in deck) |
+| Atraxa (counters/proliferate) | 7/30 | LLM (counter build vs EDHREC superfriends) |
 
 ## Common Commands
 
@@ -106,8 +114,17 @@ python3 compare_edhrec.py --refresh --quiet    # Compare all decks vs EDHREC
 python3 compare_edhrec.py --deck krenko --fast  # Single deck (cached)
 python3 compare_edhrec.py --fast --quiet        # Summary only (0.07s)
 
+# === NEW: Deterministic rules engine ===
+python3 oracle_parser.py --parse-all --top 5000  # Parse oracle text into ASTs (0 failures)
+python3 oracle_parser.py --card "Krenko, Mob Boss" --verbose  # Single card parse
+python3 oracle_parser.py --stats                 # Parse coverage stats
+python3 build_graph.py --rebuild                 # Build causal interaction graph (~1.17M edges)
+python3 build_graph.py --stats                   # Graph stats
+python3 optimize_weights.py --quick              # Optimize weights against 502 EDHREC commanders
+python3 optimize_weights.py --evaluate           # Evaluate current weights (NDCG@30)
+
 # Tests
-python3 -m pytest tests/ -v                    # Run all 89 tests
+python3 -m pytest tests/ -v                    # Run all 307 tests
 ```
 
 ## Architecture
@@ -135,8 +152,12 @@ Scryfall API → download_cards.py → data/oracle_cards.json (36k cards)
                                         ↓
                     train_tower_model.py → data/tower_model.npz
                                         ↓
+                    oracle_parser.py → parsed_abilities table (5000 cards, 10635 abilities)
+                                        ↓
+                    build_graph.py → interaction_edges table (1.17M causal edges)
+                                        ↓
                               synergy_graph.py --deck <name>
-                              (4-layer scoring: LLM → tower → mechanics → graph)
+                              (5-layer scoring: LLM → tower → mechanics → causal → graph)
 ```
 
 ### New-set update workflow
@@ -151,6 +172,8 @@ python3 strategy_detector.py --populate                 # 6. Strategies
 python3 extract_mechanics.py --batch 1000               # 7. Extract mechanics for new cards
 python3 score_synergies.py --new-cards data/new.json    # 8. Score vs known commanders (~$0.10)
 python3 train_tower_model.py                            # 9. Retrain tower model (~45s)
+python3 oracle_parser.py --parse-all --top 5000         # 10. Parse oracle text
+python3 build_graph.py --rebuild                        # 11. Rebuild causal graph
 ```
 
 ### DB Schema (data/tags.db)
@@ -166,6 +189,9 @@ python3 train_tower_model.py                            # 9. Retrain tower model
 | spellbook_combo_cards | 288,973 | Combo ↔ card junction |
 | card_mechanics | ~17k | Structured game mechanics (LLM-extracted) |
 | synergy_scores | ~180k | Commander × card synergy scores (LLM + auto) |
+| parsed_abilities | ~10k | Deterministic oracle text ASTs (from oracle_parser.py) |
+| interaction_edges | ~1.17M | Causal edges: triggers, feeds, amplifies, enables, tribal |
+| edhrec_card_synergy | ~132k | EDHREC synergy scores for 502 commanders |
 
 ### Tag Schema (3-field)
 
@@ -209,10 +235,11 @@ Matching modes in mechanics_matcher.py:
 ### Synergy Scoring (synergy_scores table)
 
 Pre-computed commander × card synergy scores on 1-10 scale:
-- **Scoring providers**: OpenAI (gpt-5.4-mini), local Ollama (gemma3:12b)
+- **Scoring providers**: OpenAI (gpt-5.4-mini), local Ollama (gemma3:12b, normalized)
 - **Pre-filtering**: Top 2000 candidates per commander (by tag overlap + mechanics + EDHREC rank)
 - **Auto-scoring**: Cards with zero synergy signals auto-scored as 2
 - **Spellbook boost**: Cards in confirmed combos with commander boosted to 9
+- **No EDHREC score overrides**: LLM/auto scores are preserved as-is (EDHREC used only at runtime as tiebreaker)
 - **Resume-safe**: Every batch committed immediately, re-run picks up where it stopped
 - **Batch API**: `--batch-api` flag for 50% cheaper OpenAI processing
 
@@ -231,13 +258,16 @@ Two-tower neural network trained on LLM synergy scores:
 ```
 1. Build graph (provides→wants edges + embeddings + peer-enabler)
 2. Inject LLM≥7 candidates from synergy_scores (bypasses graph candidate pool)
-3. Inject mechanics≥1.5 candidates from card_mechanics
-4. Score candidates: tag graph × tribal × strategy × quality × CMC × popularity × affinity
-5. Apply mechanics boost: max(graph_score, mechanics_as_graph)
-6. Apply LLM/tower scoring: LLM_score × 1000 + overlap × 20 + tower_score × 10 + rank_tiebreak × 0.1
-   (overlap = count of shared sub-tags between card and commander pool; board-generic excluded)
-7. Unscored cards get tower model prediction or graph-only score
-8. Sort and output top 30
+3. Inject EDHREC≥0.25 synergy candidates from edhrec_card_synergy (DFC-aware)
+4. Inject mechanics≥1.5 candidates from card_mechanics
+5. Score candidates: tag graph × tribal × strategy × quality × CMC × popularity × affinity
+6. Apply mechanics boost: max(graph_score, mechanics_as_graph)
+7. Apply LLM/tower scoring with EDHREC tiebreaker:
+   LLM × 1000 + EDHREC_syn × 200 + overlap × 20 + tower × 10 + rank × 0.1
+   (EDHREC synergy is tiebreaker only — cannot override LLM judgement)
+   - Category boost: infrastructure cards (removal/draw/ramp/protection) with EDHREC support get small bonus
+8. Unscored cards with EDHREC: estimated score = 4.0 + edhrec_syn × 6.0
+9. Sort and output top 30
 ```
 
 ### Swap System (synergy_graph.py --swaps)
@@ -259,6 +289,31 @@ Suggests card swaps with multi-layer protection:
 | Synergy | `synergy` | Provides→wants cycle without trigger chain |
 
 ## Key Files
+
+### `mtg_synergy/parse/` package (deterministic oracle text parser)
+
+| Module | Purpose |
+|---|---|
+| `mtg_synergy/parse/__init__.py` | `parse_card()` pipeline + DB save/load |
+| `mtg_synergy/parse/ast_types.py` | AST dataclasses: Ability, Effect, Trigger, Cost, ObjectFilter, etc. |
+| `mtg_synergy/parse/splitter.py` | Pass 1-2: split oracle text into abilities, classify kind |
+| `mtg_synergy/parse/trigger_parser.py` | Pass 3a: extract trigger events + subject filters (~25 patterns) |
+| `mtg_synergy/parse/effect_parser.py` | Pass 3b: extract effect verbs + targets + amounts (~20 verbs) |
+| `mtg_synergy/parse/cost_parser.py` | Pass 3c: parse mana/tap/sacrifice/life/loyalty costs |
+| `mtg_synergy/parse/resolver.py` | Pass 4: resolve cross-references ("it", "that creature") |
+| `mtg_synergy/parse/templates.py` | Template library for complex patterns (scaling, modal) |
+| `mtg_synergy/parse/verb_resolvers.py` | Rules engine: Effect → StateChange (what game events occur) |
+
+### `mtg_synergy/causal/` package (interaction graph + chain discovery)
+
+| Module | Purpose |
+|---|---|
+| `mtg_synergy/causal/__init__.py` | DB storage, CausalContext (pre-loaded scoring), anti-synergy detection |
+| `mtg_synergy/causal/types.py` | Edge, EdgeDetail, Chain, ResourceDelta, LoopAnalysis dataclasses |
+| `mtg_synergy/causal/indexer.py` | Index cards by events produced/consumed for fast edge building |
+| `mtg_synergy/causal/graph_builder.py` | Build trigger/feeds/amplifies/enables/tribal edges |
+| `mtg_synergy/causal/chain_finder.py` | DFS chain discovery + infinite loop detection |
+| `mtg_synergy/causal/resource_flow.py` | Cost/production tracking for loop validation |
 
 ### `mtg_synergy/` package (core logic)
 
@@ -297,6 +352,9 @@ Suggests card swaps with multi-layer protection:
 | `tag_db.py` | SQLite DB management |
 | `fetch_spellbook.py` | Commander Spellbook API fetcher |
 | `reclassify_tags.py` | Re-map generic provides/wants tags to specific sub-tags (~41k rows) |
+| `oracle_parser.py` | Deterministic oracle text parser CLI (parse-all, card, stats) |
+| `build_graph.py` | Causal interaction graph builder CLI (rebuild, stats) |
+| `optimize_weights.py` | Weight optimization against 502 EDHREC commanders (NDCG@30) |
 
 ## Key Conventions
 
@@ -310,6 +368,6 @@ Suggests card swaps with multi-layer protection:
 - Local scoring uses gemma3:12b via Ollama (best quality/speed local model)
 - Qwen3 models need `think: false` in Ollama payload to disable thinking
 - Fine-tuning uses `.venv` with unsloth + torch (Python 3.12, not system Python 3.14)
-- Tests: 120 tests in `tests/`
+- Tests: 307 tests in `tests/`
 - Spellbook combo boosts must check color identity (fixed: 364 wrong-color boosts deleted)
 - Generic parent tags (`creature-pump`, `creature-board`, `creature-etb`, `combat-events`, `token-generation`, `evasion-grant`) no longer exist; sub-tags are the canonical vocabulary
