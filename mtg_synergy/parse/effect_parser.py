@@ -84,6 +84,11 @@ def _normalize_effect_text(text: str) -> list[tuple[str, bool]]:
         if verb in _CAPITALIZE_VERBS:
             t = verb.capitalize() + m.group(2)
 
+    # Rule 7: Strip "it/this/that" subject prefix (coreference)
+    m = re.match(r'^(?:it|this creature|this enchantment|this artifact|that creature|that card)\s+', t, re.IGNORECASE)
+    if m:
+        t = t[m.end():]
+
     # Rule 6: Strip "for each X," prefix
     m = re.match(r'^[Ff]or\s+each\s+.+?,\s+(.+)$', t)
     if m:
@@ -506,16 +511,18 @@ def _extract_scaling(text: str) -> Optional[ScalesWith]:
 # ---- Verb parsers ----
 
 def _try_deal_damage(text: str) -> Optional[Effect]:
-    # "X deals N damage to ..." — subject can be multi-word (e.g. "Syr Konrad, the Grim")
-    m = re.match(r'(?:.*?\s+)?deals\s+(\d+|X)\s+damage\s+to\s+(.+)', text, re.IGNORECASE)
-    if not m:
-        return None
-    raw_amount = m.group(1)
-    amount_val = "X" if raw_amount == "X" else int(raw_amount)
-    target = _parse_target(m.group(2))
-    if not target:
-        target = ObjectFilter()
-    return Effect(verb="deal_damage", amount=Amount(value=amount_val), target=target)
+    # "X deals N damage to ..."
+    m = re.search(r'deals\s+(\d+|X)\s+damage\s+(?:divided\s+.*?)?(?:to|among)\s+(.+)', text, re.IGNORECASE)
+    if m:
+        raw_amount = m.group(1)
+        amount_val = "X" if raw_amount == "X" else int(raw_amount)
+        target = _parse_target(m.group(2))
+        return Effect(verb="deal_damage", amount=Amount(value=amount_val), target=target or ObjectFilter())
+    # "deals damage equal to X"
+    m = re.search(r'deals\s+damage\s+equal\s+to\s+', text, re.IGNORECASE)
+    if m:
+        return Effect(verb="deal_damage", amount=Amount(value="X"))
+    return None
 
 
 def _try_draw(text: str) -> Optional[Effect]:
@@ -560,8 +567,8 @@ def _try_return(text: str) -> Optional[Effect]:
 
 
 def _try_put_counter(text: str) -> Optional[Effect]:
-    # Pattern 1: "put a/N +1/+1 counter(s) on X"
-    m = re.match(r'[Pp]ut\s+(?:a|an|\d+|two|three|four|five|six|seven|eight|nine|ten)\s+[+\-]\d+/[+\-]\d+\s+counters?\s+on\s+(.+)', text, re.IGNORECASE)
+    # Pattern 1: "put a/N/X +1/+1 counter(s) on X"
+    m = re.match(r'[Pp]ut\s+(?:a|an|\d+|X|two|three|four|five|six|seven|eight|nine|ten)\s+[+\-]\d+/[+\-]\d+\s+counters?\s+on\s+(.+)', text, re.IGNORECASE)
     if m:
         target = _parse_target(m.group(1))
         if not target:
@@ -642,18 +649,23 @@ def _try_mill(text: str) -> Optional[Effect]:
 def _try_add_mana(text: str) -> Optional[Effect]:
     if re.match(r'[Aa]dd\s+\{', text):
         return Effect(verb="add_mana")
-    # Word-form mana: "Add one mana of any color"
-    if re.match(r'[Aa]dd\s+(?:one|two|three|\d+)\s+mana', text):
+    # Word-form mana: "Add one mana of any color" / "Add an amount of {R}"
+    if re.match(r'[Aa]dd\s+(?:one|two|three|an\s+amount\s+of|\d+)\s+(?:mana|\{)', text):
         return Effect(verb="add_mana")
     return None
 
 
 def _try_pump(text: str) -> Optional[Effect]:
     m = re.search(r'gets?\s+[+\-]\d+/[+\-]\d+', text, re.IGNORECASE)
-    if not m:
-        return None
-    target = _parse_target(text)
-    return Effect(verb="pump", target=target)
+    if m:
+        target = _parse_target(text)
+        return Effect(verb="pump", target=target)
+    # "double target creature's power" / "triple target creature's power"
+    m = re.search(r'(?:double|triple|quadruple)\s+target\s+creature.{0,3}s?\s+power', text, re.IGNORECASE)
+    if m:
+        target = _parse_target(text)
+        return Effect(verb="pump", target=target)
+    return None
 
 
 def _try_grant_keyword(text: str) -> Optional[Effect]:
@@ -722,9 +734,7 @@ def _try_tap(text: str) -> Optional[Effect]:
     if not m:
         return None
     target = _parse_target(m.group(1))
-    if target:
-        return Effect(verb="tap", target=target)
-    return None
+    return Effect(verb="tap", target=target or ObjectFilter())
 
 
 def _try_scry(text: str) -> Optional[Effect]:
