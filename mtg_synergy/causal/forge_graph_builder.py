@@ -47,14 +47,17 @@ def compute_filter_match(responder_filter: ForgeFilter, producer_detail: dict,
 _PRECISION_STRENGTH = {"exact": 1.0, "broad": 0.6, "unfiltered": 0.3, "none": 0.0}
 
 
-def build_forge_edges(idx: ForgeIndex, max_edges_per_event: int = 50000) -> list[Edge]:
+def build_forge_edges(idx: ForgeIndex) -> list[Edge]:
     """Build causal edges from the Forge index.
 
     For each trigger mode, cross-match producers x responders with
-    filter matching and IDF weighting.
+    filter matching and IDF weighting. Skips Card.Self triggers
+    (only fire for the card itself, not synergy with other cards).
     """
     event_idf = idx.compute_event_idf()
-    edges = []
+
+    # Dedup in-place: keep strongest edge per (source, target)
+    best = {}
 
     # Get all trigger modes that have both producers and responders
     all_modes = set(idx._producers.keys()) & set(idx._responders.keys())
@@ -68,9 +71,17 @@ def build_forge_edges(idx: ForgeIndex, max_edges_per_event: int = 50000) -> list
         r_idf = event_idf["responder"].get(mode, 1.0)
         combined_idf = min(p_idf * r_idf, 3.0)
 
-        edge_count = 0
+        # Pre-parse responder filters (avoid re-parsing per producer)
+        parsed_responders = []
+        for resp_name, resp_idx, resp_filter_str, resp_origin, resp_dest in responders:
+            # Skip Card.Self triggers — only fire for the card itself
+            if resp_filter_str and "Self" in resp_filter_str and "Other" not in resp_filter_str:
+                continue
+            resp_filter = parse_forge_filter(resp_filter_str) if resp_filter_str else ForgeFilter()
+            parsed_responders.append((resp_name, resp_idx, resp_filter, resp_origin, resp_dest))
+
         for prod_name, prod_idx, prod_detail in producers:
-            for resp_name, resp_idx, resp_filter_str, resp_origin, resp_dest in responders:
+            for resp_name, resp_idx, resp_filter, resp_origin, resp_dest in parsed_responders:
                 if prod_name == resp_name:
                     continue
 
@@ -84,7 +95,6 @@ def build_forge_edges(idx: ForgeIndex, max_edges_per_event: int = 50000) -> list
                         continue
 
                 # Filter matching
-                resp_filter = parse_forge_filter(resp_filter_str) if resp_filter_str else ForgeFilter()
                 precision = compute_filter_match(resp_filter, prod_detail, mode)
                 strength = _PRECISION_STRENGTH.get(precision, 0.0)
                 if strength <= 0:
@@ -92,30 +102,19 @@ def build_forge_edges(idx: ForgeIndex, max_edges_per_event: int = 50000) -> list
 
                 strength *= combined_idf
 
-                edges.append(Edge(
-                    source=prod_name,
-                    target=resp_name,
-                    edge_type="triggers",
-                    ability_a=prod_idx,
-                    ability_b=resp_idx,
-                    strength=strength,
-                    detail=EdgeDetail(
-                        event=mode,
-                        filter_precision=precision,
-                    ),
-                ))
-                edge_count += 1
-
-                if edge_count >= max_edges_per_event:
-                    break
-            if edge_count >= max_edges_per_event:
-                break
-
-    # Dedup: keep strongest edge per (source, target)
-    best = {}
-    for e in edges:
-        key = (e.source, e.target)
-        if key not in best or e.strength > best[key].strength:
-            best[key] = e
+                key = (prod_name, resp_name)
+                if key not in best or strength > best[key].strength:
+                    best[key] = Edge(
+                        source=prod_name,
+                        target=resp_name,
+                        edge_type="triggers",
+                        ability_a=prod_idx,
+                        ability_b=resp_idx,
+                        strength=strength,
+                        detail=EdgeDetail(
+                            event=mode,
+                            filter_precision=precision,
+                        ),
+                    )
 
     return list(best.values())
