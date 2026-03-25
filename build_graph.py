@@ -20,8 +20,13 @@ def main():
         from mtg_synergy.causal.forge_graph_builder import build_forge_edges
         from mtg_synergy.causal import store_edges
         print("Building Forge-native graph...")
+        # Load name→oracle_id mapping so edges use oracle_ids
+        name_to_oid = {}
+        for row in conn.execute("SELECT forge_name, oracle_id FROM forge_name_map"):
+            name_to_oid[row[0]] = row[1]
+        print(f"  Name mapping: {len(name_to_oid)} cards")
         idx = build_forge_index(conn)
-        edges = build_forge_edges(idx)
+        edges = build_forge_edges(idx, name_to_oid=name_to_oid)
         count = store_edges(conn, edges)
         print(f"Done: {count} edges built")
     elif args.rebuild:

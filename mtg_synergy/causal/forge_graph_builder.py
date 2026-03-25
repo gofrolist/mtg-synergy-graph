@@ -47,12 +47,15 @@ def compute_filter_match(responder_filter: ForgeFilter, producer_detail: dict,
 _PRECISION_STRENGTH = {"exact": 1.0, "broad": 0.6, "unfiltered": 0.3, "none": 0.0}
 
 
-def build_forge_edges(idx: ForgeIndex) -> list[Edge]:
+def build_forge_edges(idx: ForgeIndex, name_to_oid: dict | None = None) -> list[Edge]:
     """Build causal edges from the Forge index.
 
     For each trigger mode, cross-match producers x responders with
     filter matching and IDF weighting. Skips Card.Self triggers
     (only fire for the card itself, not synergy with other cards).
+
+    If name_to_oid is provided, edge source/target IDs are oracle_ids
+    instead of card names. Cards without mapping are skipped.
     """
     event_idf = idx.compute_event_idf()
 
@@ -81,9 +84,19 @@ def build_forge_edges(idx: ForgeIndex) -> list[Edge]:
             parsed_responders.append((resp_name, resp_idx, resp_filter, resp_origin, resp_dest))
 
         for prod_name, prod_idx, prod_detail in producers:
+            # Resolve producer to oracle_id
+            prod_id = name_to_oid.get(prod_name, prod_name) if name_to_oid else prod_name
+            if name_to_oid and prod_id == prod_name:
+                continue  # skip unmapped cards
+
             for resp_name, resp_idx, resp_filter, resp_origin, resp_dest in parsed_responders:
                 if prod_name == resp_name:
                     continue
+
+                # Resolve responder to oracle_id
+                resp_id = name_to_oid.get(resp_name, resp_name) if name_to_oid else resp_name
+                if name_to_oid and resp_id == resp_name:
+                    continue  # skip unmapped cards
 
                 # Check zone match for ChangesZone
                 if mode == "ChangesZone":
@@ -102,11 +115,11 @@ def build_forge_edges(idx: ForgeIndex) -> list[Edge]:
 
                 strength *= combined_idf
 
-                key = (prod_name, resp_name)
+                key = (prod_id, resp_id)
                 if key not in best or strength > best[key].strength:
                     best[key] = Edge(
-                        source=prod_name,
-                        target=resp_name,
+                        source=prod_id,
+                        target=resp_id,
                         edge_type="triggers",
                         ability_a=prod_idx,
                         ability_b=resp_idx,
