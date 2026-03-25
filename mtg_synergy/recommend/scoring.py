@@ -164,6 +164,19 @@ class DeckContext:
         except Exception:
             pass
 
+        # Commander profile fallback (when no strategies provided by caller)
+        if not self.active_strategies and self.cmdr_oid:
+            try:
+                from mtg_synergy.recommend.commander_profile import load_profile
+                profile = load_profile(conn, self.cmdr_oid)
+                if profile:
+                    self.active_strategies = profile.strategies
+                    if profile.tribal_type and not self.deck_types:
+                        self.deck_types = {profile.tribal_type}
+                        self.is_tribal = True
+            except Exception:
+                pass
+
         # Causal graph (pre-loaded, O(1) per candidate)
         self.causal_ctx = None
         try:
