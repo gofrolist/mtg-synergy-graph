@@ -26,13 +26,20 @@ _KEYWORDS = {
 # Card types for target parsing
 _CARD_TYPES = {
     "creature", "artifact", "enchantment", "instant", "sorcery",
-    "planeswalker", "land", "permanent", "nonland permanent",
+    "planeswalker", "land", "permanent", "nonland permanent", "spell",
 }
 
 
 def parse_effects(effect_text: str) -> list[Effect]:
     """Parse effect text into a list of Effect AST nodes."""
     text = effect_text.strip().rstrip(".")
+
+    # Try multi-keyword grant first ("has haste and shroud", "has flying, haste, and trample")
+    # This avoids _split_effects breaking "haste and shroud" into separate non-parseable parts
+    multi = _try_grant_multiple_keywords(text)
+    if len(multi) >= 2:
+        return multi
+
     parts = _split_effects(text)
     results = []
     for part in parts:
@@ -93,7 +100,7 @@ def _looks_like_effect(text: str) -> bool:
     effect_starts = [
         "you ", "target ", "each ", "draw ", "create ", "destroy ", "exile ",
         "return ", "put ", "search ", "add ", "scry ", "untap ", "tap ",
-        "sacrifice ", "mill ", "discard ",
+        "sacrifice ", "mill ", "discard ", "counter ",
     ]
     for start in effect_starts:
         if t.startswith(start):
@@ -123,6 +130,9 @@ def _parse_single_effect(text: str) -> Optional[Effect]:
         _try_add_mana,
         _try_pump,
         _try_grant_keyword,
+        _try_prevent,
+        _try_counter,
+        _try_tap,
         _try_scry,
         _try_untap,
     ]
@@ -461,15 +471,73 @@ def _try_pump(text: str) -> Optional[Effect]:
 
 
 def _try_grant_keyword(text: str) -> Optional[Effect]:
-    m = re.search(r'(?:have|has|gains?)\s+(\w+(?:\s+\w+)?)', text, re.IGNORECASE)
+    m = re.search(r'(?:have|has|gains?)\s+(.+)', text, re.IGNORECASE)
     if not m:
         return None
-    candidate = m.group(1).lower().strip()
-    # Check if any keyword matches
+    rest = m.group(1).lower().strip().rstrip(".")
+    target = _parse_target(text)
+    # Check if any keyword matches (single keyword, first match)
     for kw in _KEYWORDS:
-        if candidate.startswith(kw):
-            target = _parse_target(text)
+        if rest.startswith(kw):
             return Effect(verb="grant_keyword", keyword=kw, target=target)
+    return None
+
+
+def _try_grant_multiple_keywords(text: str) -> list[Effect]:
+    """Parse 'has/have/gains KW1 and KW2 [and KW3 ...]' into multiple grant_keyword effects."""
+    m = re.search(r'(?:have|has|gains?)\s+(.+)', text, re.IGNORECASE)
+    if not m:
+        return []
+    rest = m.group(1).lower().strip().rstrip(".")
+    target = _parse_target(text)
+    # Split on " and " and "," to find multiple keywords
+    parts = re.split(r'\s*(?:,\s*and\s+|,\s+|\s+and\s+)\s*', rest)
+    found = []
+    for part in parts:
+        part = part.strip()
+        for kw in _KEYWORDS:
+            if part.startswith(kw):
+                found.append(Effect(verb="grant_keyword", keyword=kw, target=target))
+                break
+    return found
+
+
+def _try_prevent(text: str) -> Optional[Effect]:
+    """Parse 'can't' / 'cannot' abilities into prevent effects."""
+    m = re.search(r"(?:can'?t|cannot)\s+(.+)", text, re.IGNORECASE)
+    if not m:
+        return None
+    action_text = m.group(1).strip().rstrip(".")
+    # Normalize the blocked action to a compact keyword
+    action_lower = action_text.lower()
+    kw = action_lower.replace(" ", "_")
+    # Clean up common suffixes
+    kw = re.sub(r'_unless.*$', '', kw)
+    kw = re.sub(r'_except.*$', '', kw)
+    # Truncate overly long keywords
+    if len(kw) > 40:
+        kw = kw[:40]
+    target = _parse_target(text)
+    return Effect(verb="prevent", keyword=kw, target=target)
+
+
+def _try_counter(text: str) -> Optional[Effect]:
+    """Parse 'Counter target spell' effects."""
+    m = re.match(r'[Cc]ounter\s+(.+)', text, re.IGNORECASE)
+    if not m:
+        return None
+    target = _parse_target(m.group(1))
+    return Effect(verb="counter", target=target)
+
+
+def _try_tap(text: str) -> Optional[Effect]:
+    """Parse 'Tap target creature' effects."""
+    m = re.match(r'[Tt]ap\s+(.+)', text, re.IGNORECASE)
+    if not m:
+        return None
+    target = _parse_target(m.group(1))
+    if target:
+        return Effect(verb="tap", target=target)
     return None
 
 

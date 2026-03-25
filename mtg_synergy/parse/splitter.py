@@ -389,10 +389,13 @@ def _classify_line(text: str) -> RawAbility:
             restrictions_text=restriction,
         )
 
-    # Default: static
+    # Default: static — use raw_text as effect_text so the effect parser can
+    # handle patterns like "Equipped creature has haste", "Creatures you
+    # control have flying", "Players can't gain life", etc.
     return RawAbility(
         kind="static",
         raw_text=original,
+        effect_text=text,
         reminder_text=reminder,
         restrictions_text=restriction,
     )
