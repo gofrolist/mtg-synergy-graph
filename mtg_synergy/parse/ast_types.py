@@ -87,6 +87,7 @@ class Effect:
     destination: Optional[str] = None
     condition: Optional[Condition] = None
     unresolved_ref: Optional[str] = None
+    optional: bool = False
 
 
 @dataclass
