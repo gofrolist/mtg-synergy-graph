@@ -272,7 +272,9 @@ def _parse_single_effect(text: str) -> Optional[Effect]:
         _try_add_mana,
         _try_pump_all,       # before pump ("all" variant)
         _try_pump,
+        _try_put_onto_battlefield,  # "put X onto the battlefield"
         _try_dig,            # "look at top N"
+        _try_animate,        # "becomes a N/N creature"
         _try_grant_keyword,
         _try_prevent,
         _try_counter,
@@ -558,18 +560,28 @@ def _try_return(text: str) -> Optional[Effect]:
 
 
 def _try_put_counter(text: str) -> Optional[Effect]:
-    m = re.match(r'[Pp]ut\s+(?:a|an|\d+)\s+[+\-]\d+/[+\-]\d+\s+counters?\s+on\s+(.+)', text, re.IGNORECASE)
-    if not m:
-        return None
-    target = _parse_target(m.group(1))
-    if not target:
-        # Try parsing "each creature you control" directly
-        rest = m.group(1).lower()
-        if "each" in rest or "all" in rest:
-            target = _parse_target(rest)
+    # Pattern 1: "put a/N +1/+1 counter(s) on X"
+    m = re.match(r'[Pp]ut\s+(?:a|an|\d+|two|three|four|five|six|seven|eight|nine|ten)\s+[+\-]\d+/[+\-]\d+\s+counters?\s+on\s+(.+)', text, re.IGNORECASE)
+    if m:
+        target = _parse_target(m.group(1))
         if not target:
             target = ObjectFilter()
-    return Effect(verb="put_counter", target=target)
+        return Effect(verb="put_counter", target=target)
+    # Pattern 2: "put a/N TYPE counter(s) on X" (loyalty, charge, time, etc.)
+    m = re.match(r'[Pp]ut\s+(?:a|an|\d+|two|three)\s+\w+\s+counters?\s+on\s+(.+)', text, re.IGNORECASE)
+    if m:
+        target = _parse_target(m.group(1))
+        return Effect(verb="put_counter", target=target or ObjectFilter())
+    # Pattern 3: "enters with N +1/+1 counters" / "enters the battlefield with"
+    if re.search(r'enters?\s+(?:the\s+battlefield\s+)?with\s+(?:a|an|\d+|two|three|four|five)\s+[+\-]?\d*/?[+\-]?\d*\s*counters?', text, re.IGNORECASE):
+        return Effect(verb="put_counter", target=ObjectFilter(name="self"))
+    # Pattern 4: "distribute N +1/+1 counters"
+    if re.search(r'distribute\s+\w+\s+[+\-]\d+/[+\-]\d+\s+counters?', text, re.IGNORECASE):
+        return Effect(verb="put_counter")
+    # Pattern 5: "proliferate" (adds counters)
+    if re.match(r'[Pp]roliferate', text):
+        return Effect(verb="put_counter", keyword="proliferate")
+    return None
 
 
 def _try_gain_life(text: str) -> Optional[Effect]:
@@ -831,4 +843,27 @@ def _try_copy(text: str) -> Optional[Effect]:
     if re.search(r"(?:create\s+a\s+token\s+that'?s\s+a\s+copy\s+of|copy\s+target)", text, re.IGNORECASE):
         target = _parse_target(text)
         return Effect(verb="copy", target=target)
+    return None
+
+
+def _try_put_onto_battlefield(text: str) -> Optional[Effect]:
+    """'put X onto the battlefield' → change_zone (to battlefield)."""
+    m = re.search(r'[Pp]ut\s+(.+?)\s+onto\s+the\s+battlefield', text, re.IGNORECASE)
+    if m:
+        target = _parse_target(m.group(1))
+        return Effect(verb="return", target=target, destination="battlefield")
+    # "put X into your hand" / "put X into the graveyard"
+    m = re.search(r'[Pp]ut\s+(.+?)\s+into\s+(?:your\s+)?(?:hand|the\s+graveyard)', text, re.IGNORECASE)
+    if m:
+        dest = "hand" if "hand" in text.lower() else "graveyard"
+        target = _parse_target(m.group(1))
+        return Effect(verb="return", target=target, destination=dest)
+    return None
+
+
+def _try_animate(text: str) -> Optional[Effect]:
+    """'becomes a N/N creature' → animate (creature lands, artifacts)."""
+    m = re.search(r'becomes?\s+a\s+(\d+/\d+)\s+', text, re.IGNORECASE)
+    if m:
+        return Effect(verb="animate")
     return None
