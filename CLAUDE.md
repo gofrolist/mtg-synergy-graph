@@ -80,13 +80,12 @@ Average EDHREC alignment: **14.9/30** (up from 2.8/30 baseline, 5.3x improvement
 ```bash
 # === EXISTING PIPELINE ===
 python3 download_cards.py                  # Refresh Scryfall data (~150MB)
-python3 batch_tagger.py --candidates data/remaining_candidates.json --provider openai --model gpt-4.1-mini
-python3 tag_db.py import data/all_tags_gpt41mini.json
-python3 tag_db.py backfill && python3 tag_db.py fix-tribal && python3 tag_db.py rebuild-registry
+python3 derive_forge_tags.py               # Derive provides/wants/role from Forge abilities (wipe + repopulate)
+python3 derive_forge_tags.py --dry-run     # Preview without writing
+python3 derive_forge_tags.py --card "Krenko, Mob Boss"  # Show tags for one card
 python3 ability_parser.py                  # Parse oracle text into abilities
 python3 fetch_spellbook.py                 # Fetch 82k combos
 python3 strategy_detector.py --populate    # Assign strategies
-python3 reclassify_tags.py                 # Re-map generic tags → sub-tags (run after tag import)
 
 # === NEW: Synergy scoring pipeline ===
 # Score a commander with OpenAI (best quality, ~$0.50/commander, ~2 min)
@@ -157,11 +156,7 @@ python3 -m pytest tests/ -v                    # Run all 326 tests
 ```
 Scryfall API → download_cards.py → data/oracle_cards.json (36k cards)
                                         ↓
-                              batch_tagger.py (gpt-4.1-mini)
-                                        ↓
-                              tag_db.py import → data/tags.db
-                                        ↓
-                    tag_db.py backfill → fix-tribal → rebuild-registry
+                              derive_forge_tags.py → provides/wants/role in data/tags.db
                                         ↓
                     ability_parser.py → abilities table
                                         ↓
@@ -187,16 +182,15 @@ Scryfall API → download_cards.py → data/oracle_cards.json (36k cards)
 
 ```bash
 python3 download_cards.py                               # 1. Refresh Scryfall
-python3 batch_tagger.py --candidates <new>              # 2. Tag new cards
-python3 tag_db.py import <new_tags>                     # 3. Import tags
-python3 tag_db.py backfill && fix-tribal && rebuild-registry  # 4. Enrich
-python3 ability_parser.py                               # 5. Parse abilities
-python3 strategy_detector.py --populate                 # 6. Strategies
-python3 extract_mechanics.py --batch 1000               # 7. Extract mechanics for new cards
-python3 oracle_parser.py --parse-all --top 5000         # 8. Parse oracle text
-python3 build_graph.py --rebuild                        # 9. Rebuild causal graph
-python3 fetch_edhrec_decks.py --refresh                 # 10. Refresh EDHREC data (if new set)
-python3 train_fusion_model.py                           # 11. Retrain fusion model (~5 min, $0)
+python3 import_forge.py --download --import             # 2. Update Forge data
+python3 derive_forge_tags.py                            # 3. Derive provides/wants from Forge
+python3 ability_parser.py                               # 4. Parse abilities
+python3 strategy_detector.py --populate                 # 5. Strategies
+python3 extract_mechanics.py --batch 1000               # 6. Extract mechanics for new cards
+python3 oracle_parser.py --parse-all --top 5000         # 7. Parse oracle text
+python3 build_graph.py --rebuild                        # 8. Rebuild causal graph
+python3 fetch_edhrec_decks.py --refresh                 # 9. Refresh EDHREC data (if new set)
+python3 train_fusion_model.py                           # 10. Retrain fusion model (~5 min, $0)
 ```
 
 ### DB Schema (data/tags.db)
@@ -219,25 +213,14 @@ python3 train_fusion_model.py                           # 11. Retrain fusion mod
 
 ### Tag Schema (3-field)
 
+Tags are derived deterministically from Forge ability data (59k abilities, 93% card coverage) by `derive_forge_tags.py`. Zero LLM cost; auto-maintained on Forge import.
+
 Each card is tagged with:
-- **role**: ramp, draw, removal, protection, enabler, threat, utility, land
-- **provides**: what the card gives (e.g. `card-draw`, `token-generation`, `goblin-tribal`)
-- **wants**: what conditions benefit it (e.g. `creature-death`, `wide-board`, `spell-cast`)
+- **role**: land, removal, ramp, draw, protection, threat, utility — derived from Forge verbs
+- **provides**: ~90 tags — game actions (token, draw, mana, destroy, put-counter, mill, scry, surveil, etc.), keywords (flying, trample, etc.), tribal (goblin-tribal, human-tribal, etc.)
+- **wants**: ~35 tags — events the card benefits from (dies, enters-battlefield, spell-cast, damage-done, sacrificed, etc.)
 
-Tribal tags (human-tribal, goblin-tribal, etc.) are auto-assigned from creature type_line.
-
-**Sub-tag vocabulary (6→20 split):** Six generic parent tags were replaced with 20 specific sub-tags via `reclassify_tags.py`. Parent tags no longer exist in the DB; sub-tags are canonical:
-
-| Old tag | Sub-tags |
-|---|---|
-| `creature-pump` | `pump-lord`, `pump-anthem`, `pump-combat`, `pump-self` |
-| `creature-board` | `board-tokens`, `board-tribal`, `board-go-wide`, `board-generic` |
-| `creature-etb` | `etb-value`, `etb-tokens`, `etb-tribal` |
-| `combat-events` | `combat-attack`, `combat-damage`, `combat-block` |
-| `token-generation` | `tokens-creature`, `tokens-artifact`, `tokens-tribal` |
-| `evasion-grant` | `evasion-flying`, `evasion-unblockable`, `evasion-menace` |
-
-`board-generic` is excluded from tag-overlap tiebreaker calculations (too broad to be a meaningful signal).
+Tags are 1:1 with Forge verbs/triggers; no sub-tag hierarchy. Tribal tags auto-assigned from creature type_line.
 
 ### Mechanics Schema (card_mechanics table)
 
@@ -366,7 +349,7 @@ Suggests card swaps with multi-layer protection:
 | Module | Purpose |
 |---|---|
 | `mtg_synergy/config.py` | Centralized paths, thresholds, and DB settings |
-| `mtg_synergy/constants.py` | SEMANTIC_BRIDGES, TRIGGER_EFFECT_BRIDGES, STAPLE_ROLES |
+| `mtg_synergy/constants.py` | ACTION_EVENT_BRIDGES (~25 deterministic action→event mappings, same variable name as old SEMANTIC_BRIDGES for compat), TRIGGER_EFFECT_BRIDGES, STAPLE_ROLES |
 | `mtg_synergy/db.py` | Centralized DB connection factory |
 | `mtg_synergy/cli.py` | CLI dispatcher (argparse + command routing) |
 | `mtg_synergy/graph/builder.py` | `build_graph()` — composite edge graph |
@@ -388,18 +371,19 @@ Suggests card swaps with multi-layer protection:
 | File | Purpose |
 |---|---|
 | `synergy_graph.py` | Thin wrapper — re-exports from `mtg_synergy/`, CLI entry point |
+| `derive_forge_tags.py` | Derive provides/wants/role tags from Forge abilities (wipe + repopulate, $0) |
 | `score_synergies.py` | LLM synergy scoring (OpenAI + Ollama + Batch API) |
 | `extract_mechanics.py` | Structured mechanics extraction from oracle text |
 | `mechanics_matcher.py` | Filter-aware event chain matching engine |
 | `train_fusion_model.py` | Hybrid fusion model: tower retrain + LightGBM + holdout eval |
 | `train_tower_model.py` | Legacy two-tower neural synergy model training (superseded by fusion) |
 | `compare_edhrec.py` | Fast EDHREC comparison tool (parallel, cached) |
-| `batch_tagger.py` | Card tagging (provides/wants/role) via LLM |
+| `batch_tagger.py` | Legacy: LLM-based card tagging (superseded by derive_forge_tags.py) |
 | `ability_parser.py` | Deterministic oracle text parser |
 | `strategy_detector.py` | Rule-based strategy detection |
 | `tag_db.py` | SQLite DB management |
 | `fetch_spellbook.py` | Commander Spellbook API fetcher |
-| `reclassify_tags.py` | Re-map generic provides/wants tags to specific sub-tags (~41k rows) |
+| `reclassify_tags.py` | Legacy: re-map LLM tags to sub-tags (superseded by derive_forge_tags.py) |
 | `oracle_parser.py` | Deterministic oracle text parser CLI (parse-all, card, stats) |
 | `build_graph.py` | Causal interaction graph builder CLI (rebuild, stats) |
 | `optimize_weights.py` | Weight optimization + Recall@K evaluation (--evaluate, --fusion, --no-llm, --novelty, --deck) |
@@ -410,8 +394,8 @@ Suggests card swaps with multi-layer protection:
 - Cards keyed by `oracle_id` (Scryfall UUID) for dedup across reprints
 - `data/oracle_cards.json` is gitignored (~150MB); must run `download_cards.py` first
 - API calls use `urllib.request` (no `requests` dependency)
-- Tags use kebab-case (e.g., `mana-acceleration`, `creature-death`)
-- Tribal tags auto-assigned from type_line (e.g., Human creature → provides `human-tribal`)
+- Tags use kebab-case (e.g., `mana`, `dies`)
+- Tribal tags auto-assigned from Forge type_line (e.g., Human creature → provides `human-tribal`)
 - Deck configs live in `decks/` (15 decks: kyler, krenko, yshtola, atraxa, edgar, kaalia, niv_mizzet, pantlaza, sram, syr_konrad, tatyova, ur_dragon, urza, sauron)
 - LLM scoring uses gpt-5.4-mini (requires `max_completion_tokens` not `max_tokens`)
 - Local scoring uses gemma3:12b via Ollama (best quality/speed local model)
@@ -419,4 +403,4 @@ Suggests card swaps with multi-layer protection:
 - Fine-tuning uses `.venv` with unsloth + torch (Python 3.12, not system Python 3.14)
 - Tests: 439 tests in `tests/`
 - Spellbook combo boosts must check color identity (fixed: 364 wrong-color boosts deleted)
-- Generic parent tags (`creature-pump`, `creature-board`, `creature-etb`, `combat-events`, `token-generation`, `evasion-grant`) no longer exist; sub-tags are the canonical vocabulary
+- provides/wants tags are derived from Forge data; do not edit manually or re-run LLM tagger
