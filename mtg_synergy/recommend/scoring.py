@@ -12,8 +12,6 @@ import os
 
 from mtg_synergy.config import DATA_DIR, SCORING_WEIGHTS
 
-# Tags excluded from overlap (too broad to be discriminative)
-OVERLAP_EXCLUDE = {"board-generic"}
 
 
 class DeckContext:
@@ -39,37 +37,6 @@ class DeckContext:
         self.card_oid = {}
         for c in cards:
             self.card_oid[c["name"]] = c.get("oracle_id", "")
-
-        # Commander tags
-        self.cmdr_provides = set()
-        self.cmdr_wants = set()
-        if self.cmdr_oid:
-            self.cmdr_provides = set(
-                r[0] for r in conn.execute(
-                    "SELECT tag FROM provides WHERE oracle_id = ?", (self.cmdr_oid,))
-            ) - OVERLAP_EXCLUDE
-            self.cmdr_wants = set(
-                r[0] for r in conn.execute(
-                    "SELECT tag FROM wants WHERE oracle_id = ?", (self.cmdr_oid,))
-            ) - OVERLAP_EXCLUDE
-
-        # Deck-wide tags (union of all deck card provides/wants)
-        self.deck_provides = set()
-        self.deck_wants = set()
-        deck_oids = [self.card_oid.get(n, "") for n in deck_cards if self.card_oid.get(n)]
-        for i in range(0, len(deck_oids), 500):
-            chunk = deck_oids[i:i + 500]
-            ph = ",".join("?" * len(chunk))
-            for r in conn.execute(
-                f"SELECT tag FROM provides WHERE oracle_id IN ({ph})", chunk
-            ).fetchall():
-                self.deck_provides.add(r[0])
-            for r in conn.execute(
-                f"SELECT tag FROM wants WHERE oracle_id IN ({ph})", chunk
-            ).fetchall():
-                self.deck_wants.add(r[0])
-        self.deck_provides -= OVERLAP_EXCLUDE
-        self.deck_wants -= OVERLAP_EXCLUDE
 
         # EDHREC synergy map (DFC-aware)
         self.edhrec = {}
@@ -197,19 +164,7 @@ def compute_dynamic_score(card_name: str, card_data: dict, ctx: DeckContext,
     # --- Feature 1: Tower model (semantic synergy) ---
     tower = _get_tower_score(ctx, oid)
 
-    # --- Feature 2: (removed — card_mechanics superseded by forge + causal) ---
-
-    # --- Feature 3: Commander tag overlap ---
-    card_provides = set(
-        r[0] for r in conn.execute("SELECT tag FROM provides WHERE oracle_id = ?", (oid,))
-    ) - OVERLAP_EXCLUDE
-    card_wants = set(
-        r[0] for r in conn.execute("SELECT tag FROM wants WHERE oracle_id = ?", (oid,))
-    ) - OVERLAP_EXCLUDE
-    cmdr_overlap = len(card_provides & ctx.cmdr_wants) + len(card_wants & ctx.cmdr_provides)
-
-    # --- Feature 4: Deck-wide tag overlap ---
-    deck_overlap = len(card_provides & ctx.deck_wants) + len(card_wants & ctx.deck_provides)
+    # --- Features 2-4: removed (causal graph F10 captures these relationships) ---
 
     # --- Feature 5: Strategy overlap (tag-based) ---
     strat_overlap = 0
@@ -267,7 +222,7 @@ def compute_dynamic_score(card_name: str, card_data: dict, ctx: DeckContext,
                 tower_prob,
                 causal,
                 forge_overlap,
-                cmdr_overlap,
+                0.0,  # was cmdr_tag_overlap, removed (causal covers this)
                 0.0,  # was strat_keyword_hits, removed
                 1.0 if tribal_match else 0.0,
                 edhrec_syn,
@@ -285,8 +240,6 @@ def compute_dynamic_score(card_name: str, card_data: dict, ctx: DeckContext,
         total = fusion_score * w.get("FUSION", 10.0)
     else:
         total = (tower * w["TOWER"]
-                 + cmdr_overlap * w["CMDR_TAG_OVERLAP"]
-                 + deck_overlap * w["DECK_TAG_OVERLAP"]
                  + strat_overlap * w["STRATEGY"]
                  + tribal_adj
                  + rank_score * w["RANK"]
@@ -297,8 +250,6 @@ def compute_dynamic_score(card_name: str, card_data: dict, ctx: DeckContext,
     return {
         "total": total,
         "tower": round(tower, 1),
-        "cmdr_overlap": cmdr_overlap,
-        "deck_overlap": deck_overlap,
         "strat_overlap": strat_overlap,
         "tribal_match": tribal_match,
         "rank_score": round(rank_score, 2),
@@ -350,8 +301,6 @@ def score_all_candidates(candidate_scores: dict, cards: list, ctx: DeckContext,
         # Copy feature values for display
         if features["tower"] > 0:
             info["tower_score"] = features["tower"]
-        if features["cmdr_overlap"] > 0:
-            info["cmdr_overlap"] = features["cmdr_overlap"]
         if features["tribal_match"]:
             info["tribal_match"] = True
         if features["edhrec_syn"] > 0:

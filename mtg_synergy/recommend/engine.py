@@ -55,20 +55,6 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                         "commander_synergy": 0.0, "key_synergy": 0.0,
                     }
 
-            # Enrich with graph partner info (for display)
-            adj = graph.get("adjacency", {})
-            for card in deck_cards:
-                is_commander = card == commander
-                for edge in adj.get(card, []):
-                    target = edge["target"]
-                    if target in candidate_scores:
-                        info = candidate_scores[target]
-                        info["partners"].append((card, edge["score"], edge["signals"]))
-                        if edge["signals"] >= 2:
-                            info["multi_sig"] += 1
-                        if is_commander:
-                            info["commander_synergy"] += edge["score"]
-
             print(f"  Tower pre-filter: {len(prefiltered)} candidates "
                   f"({len(candidate_scores)} after excluding deck)")
         else:
@@ -173,8 +159,7 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
         bar = "█" * bar_len + "░" * (20 - bar_len)
         tower_str = f" T={info['tower_score']}" if info.get("tower_score") else ""
         edhrec_str = f" EDH={info['edhrec_syn']:.2f}" if info.get("edhrec_syn") else ""
-        overlap_str = f" ov={info['cmdr_overlap']}" if info.get("cmdr_overlap") else ""
-        print(f"\n  {pct:5.1f}% {bar} {card}{tribal}{combo}{tower_str}{edhrec_str}{overlap_str}{high_cmc}")
+        print(f"\n  {pct:5.1f}% {bar} {card}{tribal}{combo}{tower_str}{edhrec_str}{high_cmc}")
         print(f"    {type_line} | CMC {cmc} | {len(partners)} partners{multi}")
         for partner, score, sigs in partners[:5]:
             sig = f"{sigs}sig" if sigs > 1 else "1sig"
