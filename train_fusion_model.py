@@ -2,11 +2,13 @@
 """Train a hybrid fusion model for EDHREC deck membership prediction.
 
 Stage 1: Retrain two-tower neural net on EDHREC avg deck membership (binary).
-Stage 2 (future): LightGBM on tower probability + structural features.
+Stage 2: LightGBM classifier on tower probability + 9 structural features.
 
 Usage:
-    python3 train_fusion_model.py --tower-only    # Stage 1: binary tower
-    python3 train_fusion_model.py                  # Full pipeline (tower + GBM)
+    python3 train_fusion_model.py                      # Full pipeline (tower + features + GBM)
+    python3 train_fusion_model.py --tower-only         # Stage 1 only: binary tower
+    python3 train_fusion_model.py --features-only      # Tower + feature matrix (no GBM)
+    python3 train_fusion_model.py --feature-importance  # Print feature importance from saved GBM
 """
 
 import argparse
@@ -530,6 +532,72 @@ def build_feature_matrix(pairs_by_cmdr, tower_model_path=TOWER_EDHREC_PATH):
     return X, y, cmdr_ids
 
 
+def make_cv_splits(cmdr_ids, n_folds=5, seed=42):
+    """Leave-commander-group-out CV splits.
+
+    Ensures no commander appears in both train and test within the same fold.
+    Returns list of (train_idx, test_idx) tuples.
+    """
+    unique_cmdrs = np.unique(cmdr_ids)
+    rng = np.random.RandomState(seed)
+    rng.shuffle(unique_cmdrs)
+    fold_size = len(unique_cmdrs) // n_folds
+    splits = []
+    for i in range(n_folds):
+        start = i * fold_size
+        end = (i + 1) * fold_size if i < n_folds - 1 else len(unique_cmdrs)
+        test_cmdrs = set(unique_cmdrs[start:end])
+        test_idx = np.array([j for j, c in enumerate(cmdr_ids) if c in test_cmdrs])
+        train_idx = np.array([j for j, c in enumerate(cmdr_ids) if c not in test_cmdrs])
+        splits.append((train_idx, test_idx))
+    return splits
+
+
+def train_gbm(X, y, cmdr_ids):
+    """Train LightGBM with leave-commander-out CV.
+
+    Returns (model, cv_scores) where cv_scores is a dict with mean_auc and fold_aucs.
+    """
+    import lightgbm as lgb
+    import joblib
+    from sklearn.metrics import roc_auc_score as sklearn_auc
+
+    params = {
+        "objective": "binary",
+        "metric": "auc",
+        "num_leaves": 63,
+        "learning_rate": 0.05,
+        "n_estimators": 500,
+        "verbose": -1,
+    }
+
+    splits = make_cv_splits(cmdr_ids, n_folds=5)
+    fold_aucs = []
+    for fold_i, (train_idx, test_idx) in enumerate(splits):
+        model = lgb.LGBMClassifier(**params)
+        model.fit(
+            X[train_idx], y[train_idx],
+            eval_set=[(X[test_idx], y[test_idx])],
+            feature_name=FEATURE_NAMES,
+            callbacks=[lgb.early_stopping(50, verbose=False)],
+        )
+        proba = model.predict_proba(X[test_idx])[:, 1]
+        auc = sklearn_auc(y[test_idx], proba)
+        fold_aucs.append(auc)
+        print(f"  Fold {fold_i+1}: AUC={auc:.4f}")
+
+    print(f"  Mean AUC: {np.mean(fold_aucs):.4f}")
+
+    # Train final model on all data
+    final_model = lgb.LGBMClassifier(**params)
+    final_model.fit(X, y, feature_name=FEATURE_NAMES)
+    model_path = os.path.join(DATA_DIR, "fusion_model.lgb")
+    joblib.dump(final_model, model_path)
+    print(f"  Model saved to {model_path}")
+
+    return final_model, {"mean_auc": float(np.mean(fold_aucs)), "fold_aucs": fold_aucs}
+
+
 def train_tower_binary():
     """Train two-tower model on EDHREC membership (binary classification)."""
     print("=" * 60)
@@ -943,7 +1011,26 @@ def main():
         action="store_true",
         help="Build and inspect the 10-feature matrix without training GBM",
     )
+    parser.add_argument(
+        "--feature-importance",
+        action="store_true",
+        help="Print feature importance from trained GBM model",
+    )
     args = parser.parse_args()
+
+    if args.feature_importance:
+        import joblib
+        model_path = os.path.join(DATA_DIR, "fusion_model.lgb")
+        if not os.path.exists(model_path):
+            print(f"ERROR: No saved model at {model_path}. Run full training first.")
+            return
+        model = joblib.load(model_path)
+        print("Feature importance (split count):")
+        for name, imp in sorted(
+            zip(FEATURE_NAMES, model.feature_importances_), key=lambda x: -x[1]
+        ):
+            print(f"  {name:25s} {imp:6d}")
+        return
 
     if args.features_only:
         print("=" * 60)
@@ -966,9 +1053,29 @@ def main():
         train_tower_binary()
     else:
         # Full pipeline: tower + feature matrix + GBM
-        # For now, only tower is implemented
-        print("Full fusion pipeline not yet implemented. Use --tower-only for Stage 1.")
-        train_tower_binary()
+        # Stage 1: Tower (skip if model already exists)
+        if not os.path.exists(TOWER_EDHREC_PATH):
+            train_tower_binary()
+        else:
+            print(f"Tower model already exists at {TOWER_EDHREC_PATH}, skipping Stage 1.")
+
+        # Stage 2: Feature matrix + LightGBM
+        print("\n" + "=" * 60)
+        print("Stage 2: LightGBM on 10-feature matrix")
+        print("=" * 60)
+
+        print("\nLoading embeddings...")
+        _, _, oid_to_idx = load_embeddings()
+
+        conn = sqlite3.connect(DB_PATH)
+        pairs_by_cmdr = _load_pairs_for_features(conn, oid_to_idx)
+        conn.close()
+
+        X, y, cmdr_ids = build_feature_matrix(pairs_by_cmdr)
+
+        print(f"\nTraining LightGBM with leave-commander-out CV...")
+        model, cv_scores = train_gbm(X, y, cmdr_ids)
+        print(f"\nDone. Mean CV AUC: {cv_scores['mean_auc']:.4f}")
 
 
 if __name__ == "__main__":
