@@ -226,14 +226,17 @@ def run():
             swap_deck_types = _detect_deck_types(cards, deck_set)
             swaps = suggest_swaps(graph, deck_set, deck.COMMANDER, cards, args.top,
                                   active_strategies=active_strategies, db_path=db_path,
-                                  deck_types=swap_deck_types)
+                                  deck_types=swap_deck_types,
+                                  edhrec_slug=getattr(deck, 'EDHREC_SLUG', None),
+                                  color_identity=deck.COLOR_IDENTITY)
             show_swaps(swaps, args.top)
         if args.recommend:
             # Auto-detect dominant creature types for tribal boost
             deck_types = _detect_deck_types(cards, deck_set)
             recommend_cards(graph, deck_set, cards, deck_types, args.top,
                             active_strategies=active_strategies, db_path=db_path,
-                            color_identity=deck.COLOR_IDENTITY, commander=deck.COMMANDER)
+                            color_identity=deck.COLOR_IDENTITY, commander=deck.COMMANDER,
+                            edhrec_slug=getattr(deck, 'EDHREC_SLUG', None))
     elif args.validate:
         validate_against_curated(graph, deck.SYNERGY_PAIRS)
     elif args.export:

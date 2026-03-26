@@ -53,6 +53,10 @@ data/spellbook_unresolved.txt
 data/card2vec_embeddings.npy
 data/card2vec_index.json
 data/tower_model.npz
+data/tower_model_edhrec.npz
+data/tower_model_llm_backup.npz
+data/fusion_model.lgb
+data/forge/
 data/recommender_training.json
 data/recommender_weights.json
 data/edhrec_commanders/
