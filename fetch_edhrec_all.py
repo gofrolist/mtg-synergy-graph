@@ -14,6 +14,7 @@ import argparse
 import json
 import re
 import time
+import unicodedata
 import urllib.request
 import urllib.error
 
@@ -25,10 +26,24 @@ BASIC_LANDS = {"Plains", "Island", "Swamp", "Mountain", "Forest",
 
 
 def name_to_slug(name):
-    """Convert card name to EDHREC slug format."""
+    """Convert card name to EDHREC slug format.
+
+    Handles DFCs (front face only), accented characters, and apostrophes.
+    Examples:
+        "Krenko, Mob Boss" -> "krenko-mob-boss"
+        "Birgi, God of Storytelling // Harnfel, Horn of Bounty" -> "birgi-god-of-storytelling"
+        "Glóin, Dwarf Emissary" -> "gloin-dwarf-emissary"
+        "Éowyn, Fearless Knight" -> "eowyn-fearless-knight"
+    """
     name = name.split(" // ")[0]
-    slug = re.sub(r"[^a-z0-9\s-]", "", name.lower())
-    slug = re.sub(r"\s+", "-", slug.strip())
+    # Normalize accented characters (é→e, ó→o, û→u, etc.)
+    name = unicodedata.normalize("NFKD", name)
+    name = "".join(c for c in name if unicodedata.category(c) != "Mn")
+    slug = name.lower()
+    slug = slug.replace("'", "")
+    slug = slug.replace("\u2019", "")
+    slug = re.sub(r"[^a-z0-9]+", "-", slug)
+    slug = slug.strip("-")
     return slug
 
 

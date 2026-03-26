@@ -21,6 +21,7 @@ import os
 import re
 import sqlite3
 import time
+import unicodedata
 import urllib.request
 import urllib.error
 
@@ -69,11 +70,19 @@ def init_db(db_path=DB_PATH):
 def name_to_slug(name):
     """Convert a card name to an EDHREC slug.
 
+    Handles DFCs (front face only), accented characters, and apostrophes.
     Examples:
         "Krenko, Mob Boss" -> "krenko-mob-boss"
         "Adrix and Nev, Twincasters" -> "adrix-and-nev-twincasters"
         "Y'Shtola, Night's Blessed" -> "yshtola-nights-blessed"
+        "Birgi, God of Storytelling // Harnfel, Horn of Bounty" -> "birgi-god-of-storytelling"
+        "Glóin, Dwarf Emissary" -> "gloin-dwarf-emissary"
     """
+    # DFC: use front face only
+    name = name.split(" // ")[0]
+    # Normalize accented characters (é→e, ó→o, û→u, etc.)
+    name = unicodedata.normalize("NFKD", name)
+    name = "".join(c for c in name if unicodedata.category(c) != "Mn")
     slug = name.lower()
     # Remove apostrophes
     slug = slug.replace("'", "")
