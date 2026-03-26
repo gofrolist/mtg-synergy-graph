@@ -7,7 +7,7 @@ doubling effects, trigger modifiers, etc.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional, List
 
 from mtg_synergy.parse.ast_types import Effect, ScalesWith

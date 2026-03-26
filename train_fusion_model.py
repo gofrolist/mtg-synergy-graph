@@ -38,6 +38,54 @@ FEATURE_NAMES = [
     "tribal_match", "edhrec_synergy", "edhrec_rank", "cmc", "is_creature",
 ]
 
+FORGE_FEATURE_NAMES = [
+    "tower_forge",           # [0] forge tower (causal graph connectivity)
+    "embedding_cosine",      # [1] card2vec embedding cosine(cmdr, card)
+    "causal_cmdr_to_card",   # [2] commander → card edge strength
+    "causal_card_to_cmdr",   # [3] card → commander edge strength
+    "causal_bidirectional",  # [4] 1.0 if both directions have edges
+    "causal_event_diversity", # [5] distinct event types connecting cmdr↔card
+    "deck_edge_count",       # [6] deck cards with causal edges to this card
+    "strategy_overlap",      # [7] shared strategies count
+    "strategy_cosine",       # [8] strategy vector cosine similarity
+    "oracle_similarity",     # [9] oracle text TF-IDF cosine similarity
+    "phase_match",           # [10] cmdr and card trigger in same phase window
+    "has_phase_trigger",     # [11] card has any phase-based trigger
+    "tribal_match",          # [12] creature type match
+    "type_creature",         # [13] card is a Creature
+    "type_instant_sorcery",  # [14] card is Instant or Sorcery
+    "type_artifact",         # [15] card is an Artifact
+    "type_enchantment",      # [16] card is an Enchantment
+    "type_land",             # [17] card is a Land
+    "type_planeswalker",     # [18] card is a Planeswalker
+    "cmc",                   # [19] mana cost
+]
+
+# Phase timing: position in the turn cycle (0=start, 1=end).
+# Cards triggering at the same phase as the commander have natural synergy.
+_PHASE_ORDER = {
+    "Untap": 0.0,
+    "Upkeep": 0.1,
+    "Draw": 0.2,
+    "Main1": 0.3,
+    "Main": 0.35,
+    "BeginCombat": 0.4,
+    "Declare Attackers": 0.5,
+    "EndCombat": 0.6,
+    "BeginCombat->EndCombat": 0.5,
+    "Main2": 0.7,
+    "Main1,Main2": 0.5,
+    "End of Turn": 0.8,
+    "Cleanup": 0.9,
+}
+
+def _normalize_phase(phase: str) -> str:
+    """Normalize Forge phase spelling variants."""
+    if not phase:
+        return phase
+    # "End Of Turn" → "End of Turn"
+    return phase.replace("Of Turn", "of Turn")
+
 
 def sigmoid(x):
     """Numerically stable sigmoid."""
@@ -268,10 +316,7 @@ def build_feature_matrix(pairs_by_cmdr, tower_model_path=TOWER_EDHREC_PATH, verb
     except Exception:
         pass
 
-    # 5. Commander profiles (strategies — for tribal detection)
-    from mtg_synergy.recommend.commander_profile import load_profile
-
-    # 6. Tower model data (load once)
+    # 5. Tower model data (load once)
     print("  Loading tower model for inference...")
     normed_emb, oid_list, oid_to_idx = load_embeddings()
     sf_data = load_structural_features()
@@ -499,6 +544,458 @@ def build_feature_matrix(pairs_by_cmdr, tower_model_path=TOWER_EDHREC_PATH, verb
                   f"nonzero={np.count_nonzero(col)}/{len(col)}")
 
     return X, y, cmdr_ids
+
+
+def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=True):
+    """Build forge-only feature matrix (no EDHREC features).
+
+    Uses forge tower (trained on causal graph) if available,
+    falls back to EDHREC tower otherwise.
+    """
+    # Use forge tower (trained on causal graph connectivity)
+    if tower_model_path is None:
+        if os.path.exists(TOWER_FORGE_PATH):
+            tower_model_path = TOWER_FORGE_PATH
+        else:
+            tower_model_path = TOWER_EDHREC_PATH  # fallback
+
+    conn = sqlite3.connect(DB_PATH)
+
+    # ── Bulk-load DB data ──────────────────────────────────────────────
+    card_meta = {}
+    name_to_oid = {}
+    for row in conn.execute(
+        "SELECT oracle_id, name, type_line, cmc, edhrec_rank, oracle_text FROM cards"
+    ):
+        oid, name, type_line, cmc, edhrec_rank, oracle_text = row
+        card_meta[oid] = {
+            "name": name,
+            "type_line": type_line or "",
+            "cmc": cmc or 0.0,
+            "oracle_text": (oracle_text or "").lower(),
+        }
+        name_to_oid[name] = oid
+
+    # Forge abilities: verbs and trigger modes per card (by oracle_id)
+    forge_verbs = {}     # oid -> set of verbs + keywords
+    forge_triggers = {}  # oid -> set of trigger_modes
+    for row in conn.execute(
+        "SELECT fnm.oracle_id, fa.verb, fa.trigger_mode, fa.keyword "
+        "FROM forge_abilities fa "
+        "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name"
+    ):
+        oid = row[0]
+        if row[1]:
+            forge_verbs.setdefault(oid, set()).add(row[1])
+        if row[2]:
+            forge_triggers.setdefault(oid, set()).add(row[2])
+        if row[3]:
+            forge_verbs.setdefault(oid, set()).add(row[3])
+
+    # Card strategies
+    card_strats = {}
+    for oid, strat in conn.execute(
+        "SELECT oracle_id, strategy FROM card_strategies WHERE confidence >= 0.3"
+    ):
+        card_strats.setdefault(oid, set()).add(strat)
+
+    # Forge keywords per card (shared vocabulary — good for overlap)
+    forge_keywords = {}  # oid -> set of keywords
+    for row in conn.execute(
+        "SELECT fnm.oracle_id, fa.keyword FROM forge_abilities fa "
+        "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+        "WHERE fa.keyword IS NOT NULL"
+    ):
+        forge_keywords.setdefault(row[0], set()).add(row[1])
+
+    # Phase trigger positions per card (for phase_match with commander)
+    card_phase_order = {}    # oid → set of phase order positions
+    for row in conn.execute(
+        "SELECT fnm.oracle_id, fa.trigger_phase FROM forge_abilities fa "
+        "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+        "WHERE fa.trigger_phase IS NOT NULL"
+    ):
+        oid, phase = row
+        phase = _normalize_phase(phase)
+        if "," in (phase or ""):
+            for p in phase.split(","):
+                o = _PHASE_ORDER.get(p.strip())
+                if o is not None:
+                    card_phase_order.setdefault(oid, set()).add(o)
+        else:
+            order = _PHASE_ORDER.get(phase)
+            if order is not None:
+                card_phase_order.setdefault(oid, set()).add(order)
+
+    # Strategy vector for cosine similarity (one-hot over all strategies)
+    all_strategies = sorted({s for strats in card_strats.values() for s in strats})
+    strat_idx = {s: i for i, s in enumerate(all_strategies)}
+    n_strats = len(all_strategies)
+
+    def _strat_vector(oid):
+        strats = card_strats.get(oid, set())
+        if not strats:
+            return None
+        v = np.zeros(n_strats, dtype=np.float32)
+        for s in strats:
+            v[strat_idx[s]] = 1.0
+        return v
+
+    # Oracle text TF-IDF vectors for similarity
+    # Build vocabulary from all oracle texts, then compute per-card TF-IDF
+    from collections import Counter as _Counter
+    import re as _re
+
+    _oracle_tokenize = _re.compile(r'[a-z]{3,}')  # words with 3+ chars
+    doc_freq = _Counter()  # word → number of cards containing it
+    card_tokens = {}  # oid → Counter of word frequencies
+    n_docs = 0
+    for oid, meta in card_meta.items():
+        text = meta.get("oracle_text", "")
+        if not text:
+            continue
+        tokens = _Counter(_oracle_tokenize.findall(text))
+        if tokens:
+            card_tokens[oid] = tokens
+            for word in tokens:
+                doc_freq[word] += 1
+            n_docs += 1
+
+    # Keep top 2000 words by document frequency (skip very rare words)
+    vocab = [w for w, _ in doc_freq.most_common(2000)]
+    vocab_idx = {w: i for i, w in enumerate(vocab)}
+    n_vocab = len(vocab)
+
+    def _tfidf_vector(oid):
+        tokens = card_tokens.get(oid)
+        if not tokens:
+            return None
+        v = np.zeros(n_vocab, dtype=np.float32)
+        total = sum(tokens.values())
+        for word, count in tokens.items():
+            idx = vocab_idx.get(word)
+            if idx is not None:
+                tf = count / total
+                idf = math.log(n_docs / max(doc_freq[word], 1))
+                v[idx] = tf * idf
+        norm = np.linalg.norm(v)
+        if norm > 0:
+            v /= norm
+        return v
+
+    if verbose:
+        print(f"  Strategy vector: {n_strats} strategies")
+        print(f"  Oracle TF-IDF: {n_vocab} vocab, {len(card_tokens)} cards with text")
+
+    # Causal edge event types per (cmdr, card) pair — preloaded per commander below
+    # (loaded in the per-commander loop for efficiency)
+
+    # Tower model
+    normed_emb, oid_list, oid_to_idx = load_embeddings()
+    sf_data = load_structural_features()
+    provides_sf, wants_sf, strats_sf, types_sf, oracles_sf, ranks_sf, mech_sf = sf_data
+
+    # Load tower model
+    tower_model = None
+    tower_means = None
+    tower_stds = None
+    if os.path.exists(tower_model_path):
+        td = np.load(tower_model_path)
+        tower_model = {k: td[k] for k in td.files if k not in ("struct_means", "struct_stds")}
+        tower_means = td["struct_means"]
+        tower_stds = td["struct_stds"]
+        if verbose:
+            print(f"  Tower loaded from {tower_model_path}")
+
+    # ── Build pairs list ───────────────────────────────────────────────
+    cmdr_oids_ordered = sorted(pairs_by_cmdr.keys())
+    cmdr_to_idx = {oid: i for i, oid in enumerate(cmdr_oids_ordered)}
+
+    all_rows = []
+    for cmdr_oid, pairs in pairs_by_cmdr.items():
+        for card_oid, label in pairs:
+            all_rows.append((cmdr_oid, card_oid, label))
+
+    N = len(all_rows)
+    X = np.zeros((N, len(FORGE_FEATURE_NAMES)), dtype=np.float32)
+    y = np.zeros(N, dtype=np.float32)
+    cmdr_ids = np.zeros(N, dtype=np.int32)
+
+    # Re-organise for commander-batch processing
+    cmdr_pair_map = {}
+    for cmdr_oid, card_oid, label in all_rows:
+        cmdr_pair_map.setdefault(cmdr_oid, []).append((card_oid, label))
+
+    n_cmdrs = len(cmdr_oids_ordered)
+    row_idx = 0
+
+    for ci, cmdr_oid in enumerate(cmdr_oids_ordered):
+        if (ci + 1) % 50 == 0 or ci == 0:
+            if verbose:
+                print(f"  Building forge features for commander {ci+1}/{n_cmdrs}...", flush=True)
+
+        pairs = cmdr_pair_map.get(cmdr_oid, [])
+        if not pairs:
+            continue
+
+        card_oids = [p[0] for p in pairs]
+        labels = [p[1] for p in pairs]
+        n_pairs = len(pairs)
+
+        # --- (a) Tower batch inference ---
+        tower_probs = np.full(n_pairs, 0.5, dtype=np.float32)
+        if tower_model is not None:
+            cmdr_idx_emb = oid_to_idx.get(cmdr_oid)
+            if cmdr_idx_emb is not None:
+                batch_card_indices = []
+                batch_positions = []
+                for j, card_oid in enumerate(card_oids):
+                    cidx = oid_to_idx.get(card_oid)
+                    if cidx is not None:
+                        batch_card_indices.append(cidx)
+                        batch_positions.append(j)
+                if batch_card_indices:
+                    B = len(batch_card_indices)
+                    X_cmdr_batch = np.tile(normed_emb[cmdr_idx_emb], (B, 1)).astype(np.float32)
+                    X_card_batch = normed_emb[batch_card_indices].astype(np.float32)
+                    sf_batch = np.zeros((B, 12), dtype=np.float32)
+                    for k, pos in enumerate(batch_positions):
+                        sf_batch[k] = compute_struct_features(
+                            cmdr_oid, card_oids[pos],
+                            provides_sf, wants_sf, strats_sf, types_sf, oracles_sf, ranks_sf, mech_sf)
+                    sf_norm = (sf_batch - tower_means) / tower_stds
+                    raw, _ = forward(tower_model, X_cmdr_batch, X_card_batch, sf_norm)
+                    probs = sigmoid(raw)
+                    for k, pos in enumerate(batch_positions):
+                        tower_probs[pos] = probs[k]
+
+        # --- (b) Directional causal scores + event diversity ---
+        card_oid_set = set(card_oids)
+        cmdr_out = {}       # card_oid → total strength (cmdr→card)
+        cmdr_in = {}        # card_oid → total strength (card→cmdr)
+        cmdr_out_events = {}  # card_oid → set of event types (cmdr→card)
+        cmdr_in_events = {}   # card_oid → set of event types (card→cmdr)
+        try:
+            for row in conn.execute(
+                "SELECT target_id, SUM(strength), GROUP_CONCAT(DISTINCT json_extract(detail, '$.event')) "
+                "FROM interaction_edges WHERE source_id = ? GROUP BY target_id", (cmdr_oid,)):
+                if row[0] in card_oid_set:
+                    cmdr_out[row[0]] = row[1]
+                    cmdr_out_events[row[0]] = set(row[2].split(",")) if row[2] else set()
+            for row in conn.execute(
+                "SELECT source_id, SUM(strength), GROUP_CONCAT(DISTINCT json_extract(detail, '$.event')) "
+                "FROM interaction_edges WHERE target_id = ? GROUP BY source_id", (cmdr_oid,)):
+                if row[0] in card_oid_set:
+                    cmdr_in[row[0]] = row[1]
+                    cmdr_in_events[row[0]] = set(row[2].split(",")) if row[2] else set()
+        except Exception:
+            pass
+
+        # --- (c) Commander forge data + vectors ---
+        cmdr_strats = card_strats.get(cmdr_oid, set())
+        cmdr_strat_vec = _strat_vector(cmdr_oid)
+        cmdr_tfidf = _tfidf_vector(cmdr_oid)
+        cmdr_phases = card_phase_order.get(cmdr_oid, set())
+
+        # --- (c2) Deck edge counts: how many deck cards connect to each candidate ---
+        # For positive pairs (deck cards), count connections to OTHER deck cards
+        # For negative pairs (non-deck), count connections FROM deck cards
+        deck_oids_for_cmdr = {oid for oid, lbl in pairs if lbl == 1}
+        deck_edge_counts = {}  # card_oid -> count of deck cards connected
+        if deck_oids_for_cmdr:
+            deck_list = list(deck_oids_for_cmdr)
+            for di in range(0, len(deck_list), 500):
+                dchunk = deck_list[di:di + 500]
+                dph = ",".join("?" * len(dchunk))
+                for row in conn.execute(
+                    f"SELECT target_id, COUNT(DISTINCT source_id) FROM interaction_edges "
+                    f"WHERE source_id IN ({dph}) GROUP BY target_id", dchunk
+                ):
+                    deck_edge_counts[row[0]] = deck_edge_counts.get(row[0], 0) + row[1]
+                for row in conn.execute(
+                    f"SELECT source_id, COUNT(DISTINCT target_id) FROM interaction_edges "
+                    f"WHERE target_id IN ({dph}) GROUP BY source_id", dchunk
+                ):
+                    deck_edge_counts[row[0]] = deck_edge_counts.get(row[0], 0) + row[1]
+
+        # --- (d) Commander subtypes for tribal ---
+        cmdr_type_line = card_meta.get(cmdr_oid, {}).get("type_line", "")
+        cmdr_subtypes = set()
+        if "\u2014" in cmdr_type_line:
+            try:
+                cmdr_subtypes = {s.lower() for s in cmdr_type_line.split("\u2014")[1].strip().split()}
+            except (IndexError, AttributeError):
+                pass
+
+        # --- Fill feature rows ---
+        for j in range(n_pairs):
+            card_oid = card_oids[j]
+            meta = card_meta.get(card_oid, {})
+            card_type_line = meta.get("type_line", "")
+
+            out_str = cmdr_out.get(card_oid, 0.0)
+            in_str = cmdr_in.get(card_oid, 0.0)
+
+            # F0: tower_forge (causal connectivity prediction)
+            X[row_idx, 0] = tower_probs[j]
+
+            # F1: embedding_cosine (raw card2vec cosine)
+            cmdr_emb_idx = oid_to_idx.get(cmdr_oid)
+            card_emb_idx = oid_to_idx.get(card_oid)
+            if cmdr_emb_idx is not None and card_emb_idx is not None:
+                X[row_idx, 1] = float(np.dot(
+                    normed_emb[cmdr_emb_idx].astype(np.float32),
+                    normed_emb[card_emb_idx].astype(np.float32)))
+            else:
+                X[row_idx, 1] = 0.0
+
+            # F2: causal_cmdr_to_card
+            X[row_idx, 2] = min(out_str, 10.0)
+
+            # F3: causal_card_to_cmdr
+            X[row_idx, 3] = min(in_str, 10.0)
+
+            # F4: causal_bidirectional
+            X[row_idx, 4] = 1.0 if (out_str > 0 and in_str > 0) else 0.0
+
+            # F5: causal_event_diversity
+            events_out = cmdr_out_events.get(card_oid, set())
+            events_in = cmdr_in_events.get(card_oid, set())
+            X[row_idx, 5] = float(len(events_out | events_in))
+
+            # F6: deck_edge_count
+            X[row_idx, 6] = float(min(deck_edge_counts.get(card_oid, 0), 20))
+
+            # F7: strategy_overlap
+            c_strats = card_strats.get(card_oid, set())
+            X[row_idx, 7] = float(len(cmdr_strats & c_strats))
+
+            # F8: strategy_cosine
+            card_strat_vec = _strat_vector(card_oid)
+            if cmdr_strat_vec is not None and card_strat_vec is not None:
+                dot = float(np.dot(cmdr_strat_vec, card_strat_vec))
+                norm_c = float(np.linalg.norm(cmdr_strat_vec))
+                norm_d = float(np.linalg.norm(card_strat_vec))
+                X[row_idx, 8] = dot / (norm_c * norm_d) if norm_c > 0 and norm_d > 0 else 0.0
+            else:
+                X[row_idx, 8] = 0.0
+
+            # F9: oracle_similarity
+            card_tfidf = _tfidf_vector(card_oid)
+            if cmdr_tfidf is not None and card_tfidf is not None:
+                X[row_idx, 9] = float(np.dot(cmdr_tfidf, card_tfidf))
+            else:
+                X[row_idx, 9] = 0.0
+
+            # F10: phase_match
+            card_phases = card_phase_order.get(card_oid, set())
+            if cmdr_phases and card_phases:
+                best_match = 0.0
+                for cp in cmdr_phases:
+                    for dp in card_phases:
+                        dist = abs(cp - dp)
+                        match = max(0.0, 1.0 - dist * 2.0)
+                        best_match = max(best_match, match)
+                X[row_idx, 10] = best_match
+            else:
+                X[row_idx, 10] = 0.0
+
+            # F11: has_phase_trigger
+            X[row_idx, 11] = 1.0 if card_phases else 0.0
+
+            # F12: tribal_match
+            tribal = 0.0
+            if cmdr_subtypes and "creature" in card_type_line.lower():
+                card_sub = set()
+                if "\u2014" in card_type_line:
+                    try:
+                        card_sub = {s.lower() for s in card_type_line.split("\u2014")[1].strip().split()}
+                    except (IndexError, AttributeError):
+                        pass
+                if cmdr_subtypes & card_sub:
+                    tribal = 1.0
+            X[row_idx, 12] = tribal
+
+            # F13-F18: card type flags
+            tl_upper = card_type_line
+            X[row_idx, 13] = 1.0 if "Creature" in tl_upper else 0.0
+            X[row_idx, 14] = 1.0 if ("Instant" in tl_upper or "Sorcery" in tl_upper) else 0.0
+            X[row_idx, 15] = 1.0 if "Artifact" in tl_upper else 0.0
+            X[row_idx, 16] = 1.0 if "Enchantment" in tl_upper else 0.0
+            X[row_idx, 17] = 1.0 if "Land" in tl_upper else 0.0
+            X[row_idx, 18] = 1.0 if "Planeswalker" in tl_upper else 0.0
+
+            # F19: cmc
+            X[row_idx, 19] = float(meta.get("cmc", 0.0))
+
+            y[row_idx] = float(labels[j])
+            cmdr_ids[row_idx] = cmdr_to_idx[cmdr_oid]
+            row_idx += 1
+
+    X = X[:row_idx]
+    y = y[:row_idx]
+    cmdr_ids = cmdr_ids[:row_idx]
+    conn.close()
+
+    if verbose:
+        print(f"\nForge feature matrix: {X.shape}")
+        print(f"  Positive labels: {int(y.sum())}")
+        print(f"  Negative labels: {int(len(y) - y.sum())}")
+        print(f"  Commanders: {len(cmdr_oids_ordered)}")
+        print(f"\nPer-feature statistics:")
+        for i, name in enumerate(FORGE_FEATURE_NAMES):
+            col = X[:, i]
+            print(f"  {name:>25s}: "
+                  f"mean={col.mean():.4f}  std={col.std():.4f}  "
+                  f"min={col.min():.4f}  max={col.max():.4f}  "
+                  f"nonzero={np.count_nonzero(col)}/{len(col)}")
+
+    return X, y, cmdr_ids
+
+
+def train_forge_gbm(X, y, cmdr_ids):
+    """Train LightGBM on forge-only features with leave-commander-out CV.
+
+    Saves to fusion_model_forge.lgb. Returns (model, cv_scores).
+    """
+    import lightgbm as lgb
+    import joblib
+    from sklearn.metrics import roc_auc_score as sklearn_auc
+
+    params = {
+        "objective": "binary",
+        "metric": "auc",
+        "num_leaves": 63,
+        "learning_rate": 0.05,
+        "n_estimators": 500,
+        "verbose": -1,
+    }
+
+    splits = make_cv_splits(cmdr_ids, n_folds=5)
+    fold_aucs = []
+    for fold_i, (train_idx, test_idx) in enumerate(splits):
+        model = lgb.LGBMClassifier(**params)
+        model.fit(
+            X[train_idx], y[train_idx],
+            eval_set=[(X[test_idx], y[test_idx])],
+            feature_name=FORGE_FEATURE_NAMES,
+            callbacks=[lgb.early_stopping(50, verbose=False)],
+        )
+        proba = model.predict_proba(X[test_idx])[:, 1]
+        auc = sklearn_auc(y[test_idx], proba)
+        fold_aucs.append(auc)
+        print(f"  Fold {fold_i+1}: AUC={auc:.4f}")
+
+    print(f"  Mean AUC: {np.mean(fold_aucs):.4f}")
+
+    # Train final model on all data
+    final_model = lgb.LGBMClassifier(**params)
+    final_model.fit(X, y, feature_name=FORGE_FEATURE_NAMES)
+    model_path = os.path.join(DATA_DIR, "fusion_model_forge.lgb")
+    joblib.dump(final_model, model_path)
+    print(f"  Forge model saved to {model_path}")
+
+    return final_model, {"mean_auc": float(np.mean(fold_aucs)), "fold_aucs": fold_aucs}
 
 
 def make_cv_splits(cmdr_ids, n_folds=5, seed=42):
@@ -897,6 +1394,286 @@ def train_tower_binary():
     return final_model
 
 
+TOWER_FORGE_PATH = os.path.join(DATA_DIR, "tower_model_forge.npz")
+
+
+def load_forge_positives(conn, oid_to_idx, min_strength=0.3, max_per_cmdr=100):
+    """Load positive pairs from causal graph edges (forge-native).
+
+    Positive = card has a strong causal edge to/from a legendary creature.
+    Caps at max_per_cmdr cards per commander (keeps strongest edges).
+    Returns dict[cmdr_oid → set[card_oids]].
+    """
+    commanders = set()
+    for row in conn.execute(
+        "SELECT oracle_id FROM cards WHERE type_line LIKE '%Legendary%Creature%'"
+    ):
+        if row[0] in oid_to_idx:
+            commanders.add(row[0])
+
+    # Collect with strength for ranking
+    raw = {}  # cmdr_oid → {card_oid: max_strength}
+    for row in conn.execute(
+        "SELECT source_id, target_id, strength FROM interaction_edges WHERE strength >= ?",
+        (min_strength,)
+    ):
+        src, tgt, strength = row[0], row[1], row[2]
+        if src in commanders and tgt in oid_to_idx and tgt != src:
+            raw.setdefault(src, {})
+            raw[src][tgt] = max(raw[src].get(tgt, 0), strength)
+        if tgt in commanders and src in oid_to_idx and src != tgt:
+            raw.setdefault(tgt, {})
+            raw[tgt][src] = max(raw[tgt].get(src, 0), strength)
+
+    # Keep top N strongest per commander
+    positives = {}
+    for cmdr, cards in raw.items():
+        if len(cards) < 5:
+            continue
+        top = sorted(cards.items(), key=lambda x: -x[1])[:max_per_cmdr]
+        positives[cmdr] = {oid for oid, _ in top}
+
+    total = sum(len(v) for v in positives.values())
+    print(f"  Forge positives: {total:,} pairs across {len(positives)} commanders "
+          f"(strength >= {min_strength}, max {max_per_cmdr}/cmdr)")
+    return positives
+
+
+def train_tower_forge():
+    """Train two-tower model on causal graph connectivity (forge-native).
+
+    Same architecture as train_tower_binary() but uses forge causal edges
+    instead of EDHREC deck membership as training signal.
+    """
+    print("=" * 60)
+    print("FORGE TOWER: Training on causal graph connectivity")
+    print("=" * 60)
+
+    print("\nLoading embeddings...")
+    normed_emb, oid_list, oid_to_idx = load_embeddings()
+
+    print("Loading structural features...")
+    provides, wants, strats, types, oracles, ranks, mech_data = load_structural_features()
+
+    conn = sqlite3.connect(DB_PATH)
+
+    card_colors = {}
+    for row in conn.execute("SELECT oracle_id, color_identity FROM cards"):
+        card_colors[row[0]] = set(json.loads(row[1] or "[]"))
+
+    basic_land_names = {"Plains", "Island", "Swamp", "Mountain", "Forest",
+                        "Snow-Covered Plains", "Snow-Covered Island",
+                        "Snow-Covered Swamp", "Snow-Covered Mountain",
+                        "Snow-Covered Forest", "Wastes"}
+    basic_land_oids = set()
+    for name in basic_land_names:
+        row = conn.execute("SELECT oracle_id FROM cards WHERE name = ?", (name,)).fetchone()
+        if row:
+            basic_land_oids.add(row[0])
+
+    all_card_oids = [oid for oid in oid_list
+                     if oid not in basic_land_oids
+                     and "Token" not in types.get(oid, "")]
+
+    print(f"\nCard pool: {len(all_card_oids)} cards")
+
+    # Load forge positives (causal graph edges)
+    print("\nLoading causal graph positives...")
+    positives_by_cmdr = load_forge_positives(conn, oid_to_idx)
+
+    # Sample negatives (color-legal cards with no edge)
+    print("\nSampling negatives (ratio=3)...")
+    neg_pairs = sample_negatives(
+        positives_by_cmdr, all_card_oids, card_colors, card_colors, ratio=3
+    )
+    print(f"  Negative pairs: {len(neg_pairs)}")
+
+    # Build training data
+    print("\nBuilding feature arrays...")
+    all_pairs = []
+    for cmdr_oid, card_oids in positives_by_cmdr.items():
+        for card_oid in card_oids:
+            all_pairs.append((cmdr_oid, card_oid, 1))
+    all_pairs.extend(neg_pairs)
+
+    cmdr_embs = []
+    card_embs = []
+    struct_feats = []
+    labels = []
+    skipped = 0
+
+    for cmdr_oid, card_oid, label in all_pairs:
+        ci = oid_to_idx.get(cmdr_oid)
+        di = oid_to_idx.get(card_oid)
+        if ci is None or di is None:
+            skipped += 1
+            continue
+        cmdr_embs.append(normed_emb[ci])
+        card_embs.append(normed_emb[di])
+        struct_feats.append(compute_struct_features(
+            cmdr_oid, card_oid, provides, wants, strats, types, oracles, ranks, mech_data
+        ))
+        labels.append(label)
+
+    conn.close()
+
+    X_cmdr = np.array(cmdr_embs, dtype=np.float32)
+    X_card = np.array(card_embs, dtype=np.float32)
+    X_struct = np.array(struct_feats, dtype=np.float32)
+    y = np.array(labels, dtype=np.float32)
+
+    if skipped > 0:
+        print(f"  Skipped {skipped} pairs (missing embeddings)")
+
+    struct_means = X_struct.mean(axis=0)
+    struct_stds = X_struct.std(axis=0)
+    struct_stds[struct_stds == 0] = 1
+    X_struct = (X_struct - struct_means) / struct_stds
+
+    n_pos = int(y.sum())
+    n_neg = len(y) - n_pos
+    print(f"\nData: {len(y)} pairs ({n_pos} positive, {n_neg} negative)")
+    print(f"  cmdr={X_cmdr.shape}, card={X_card.shape}, struct={X_struct.shape}")
+
+    # Train/test split (stratified)
+    np.random.seed(42)
+    pos_idx = np.where(y == 1)[0]
+    neg_idx = np.where(y == 0)[0]
+    np.random.shuffle(pos_idx)
+    np.random.shuffle(neg_idx)
+
+    pos_split = int(0.8 * len(pos_idx))
+    neg_split = int(0.8 * len(neg_idx))
+    train_idx = np.concatenate([pos_idx[:pos_split], neg_idx[:neg_split]])
+    test_idx = np.concatenate([pos_idx[pos_split:], neg_idx[neg_split:]])
+    np.random.shuffle(train_idx)
+    np.random.shuffle(test_idx)
+
+    print(f"  Train: {len(train_idx)} ({int(y[train_idx].sum())} pos)")
+    print(f"  Test: {len(test_idx)} ({int(y[test_idx].sum())} pos)")
+
+    model = init_model()
+    model["b4"] = np.float32(0.0)
+
+    adam_m = {k: np.zeros_like(v) for k, v in model.items()}
+    adam_v = {k: np.zeros_like(v) for k, v in model.items()}
+
+    lr = 0.001
+    batch_size = 512
+    epochs = 150
+    dropout_rate = 0.1
+    patience = 20
+    best_auc = 0.0
+    best_model = None
+    best_epoch = 0
+    best_auc_epoch = 0
+    eps = 1e-7
+
+    print(f"\nTraining for {epochs} epochs (batch={batch_size}, lr={lr})...")
+    t0 = time.time()
+
+    for epoch in range(epochs):
+        perm = np.random.permutation(len(train_idx))
+        epoch_loss = 0
+        n_batches = 0
+
+        for i in range(0, len(train_idx), batch_size):
+            batch = train_idx[perm[i:i + batch_size]]
+
+            raw, cache = forward(model, X_cmdr[batch], X_card[batch], X_struct[batch],
+                                 dropout_rate=dropout_rate, training=True)
+            pred = sigmoid(raw)
+            N = len(batch)
+
+            loss = -np.mean(y[batch] * np.log(pred + eps) + (1 - y[batch]) * np.log(1 - pred + eps))
+            epoch_loss += loss
+            n_batches += 1
+
+            grad_out = (pred - y[batch]) / N
+
+            # Backward pass (inline chain rule)
+            dW4 = cache["h3"].T @ grad_out[:, None]
+            db4 = np.float32(grad_out.sum())
+            dh3 = grad_out[:, None] * model["W4"].T
+            dz3 = dh3 * (cache["h3"] > 0).astype(np.float32)
+            dW3 = cache["h2"].T @ dz3
+            db3 = dz3.sum(axis=0)
+            dh2 = dz3 @ model["W3"].T
+            if cache["mask2"] is not None:
+                dh2 = dh2 * cache["mask2"]
+            dz2 = dh2 * (cache["h2"] > 0).astype(np.float32)
+            dW2 = cache["h1"].T @ dz2
+            db2 = dz2.sum(axis=0)
+            dh1 = dz2 @ model["W2"].T
+            if cache["mask1"] is not None:
+                dh1 = dh1 * cache["mask1"]
+            dz1 = dh1 * (cache["h1"] > 0).astype(np.float32)
+            dW1 = cache["combined"].T @ dz1
+            db1 = dz1.sum(axis=0)
+            d_combined = dz1 @ model["W1"].T
+            d_interaction = d_combined[:, :128]
+            d_cmdr_proj = d_interaction * cache["card_proj"]
+            d_card_proj = d_interaction * cache["cmdr_proj"]
+            d_cmdr_proj = d_cmdr_proj * (cache["cmdr_proj"] > 0).astype(np.float32)
+            d_card_proj = d_card_proj * (cache["card_proj"] > 0).astype(np.float32)
+            dW_cmdr = X_cmdr[batch].T @ d_cmdr_proj
+            db_cmdr = d_cmdr_proj.sum(axis=0)
+            dW_card = X_card[batch].T @ d_card_proj
+            db_card = d_card_proj.sum(axis=0)
+
+            grads = {
+                "W_cmdr": dW_cmdr, "b_cmdr": db_cmdr,
+                "W_card": dW_card, "b_card": db_card,
+                "W1": dW1, "b1": db1, "W2": dW2, "b2": db2,
+                "W3": dW3, "b3": db3, "W4": dW4, "b4": db4,
+            }
+            beta1, beta2 = 0.9, 0.999
+            t_step = epoch * (len(train_idx) // batch_size) + i // batch_size + 1
+            for key in model:
+                g = grads[key]
+                adam_m[key] = beta1 * adam_m[key] + (1 - beta1) * g
+                adam_v[key] = beta2 * adam_v[key] + (1 - beta2) * g ** 2
+                m_hat = adam_m[key] / (1 - beta1 ** t_step)
+                v_hat = adam_v[key] / (1 - beta2 ** t_step)
+                model[key] -= lr * m_hat / (np.sqrt(v_hat) + eps)
+
+        if (epoch + 1) % 10 == 0 or epoch == 0:
+            test_raw, _ = forward(model, X_cmdr[test_idx], X_card[test_idx], X_struct[test_idx])
+            test_prob = sigmoid(test_raw)
+            auc = roc_auc_score(y[test_idx], test_prob)
+            accuracy = np.mean((test_prob >= 0.5).astype(np.float32) == y[test_idx])
+            test_bce = -np.mean(
+                y[test_idx] * np.log(test_prob + eps)
+                + (1 - y[test_idx]) * np.log(1 - test_prob + eps)
+            )
+
+            print(f"  Epoch {epoch+1:>3}: train_bce={epoch_loss/n_batches:.4f} "
+                  f"test_bce={test_bce:.4f} AUC={auc:.4f} acc={accuracy:.3f}")
+
+            if auc > best_auc:
+                best_auc = auc
+                best_model = {k: v.copy() for k, v in model.items()}
+                best_epoch = epoch + 1
+                best_auc_epoch = epoch + 1
+            elif (epoch + 1) - best_epoch >= patience and lr > 0.0001:
+                lr *= 0.5
+                best_epoch = epoch + 1
+                print(f"    LR reduced to {lr}")
+
+    elapsed = time.time() - t0
+    print(f"\nTraining: {elapsed:.1f}s, best AUC={best_auc:.4f} (epoch {best_auc_epoch})")
+
+    if best_model:
+        np.savez(TOWER_FORGE_PATH, **best_model,
+                 struct_means=struct_means, struct_stds=struct_stds)
+        print(f"Forge tower saved to {TOWER_FORGE_PATH}")
+    else:
+        np.savez(TOWER_FORGE_PATH, **model,
+                 struct_means=struct_means, struct_stds=struct_stds)
+
+    return best_model or model
+
+
 def _load_pairs_for_features(conn, oid_to_idx):
     """Load EDHREC membership + sample negatives, return pairs_by_cmdr for build_feature_matrix.
 
@@ -1207,10 +1984,81 @@ def main():
         default=[],
         help="Zero out a feature during holdout eval (e.g. --drop-feature edhrec_synergy)",
     )
+    parser.add_argument(
+        "--forge-only",
+        action="store_true",
+        help="Train forge-only model (no EDHREC features) and compare with baseline",
+    )
+    parser.add_argument(
+        "--forge-tower",
+        action="store_true",
+        help="Train tower model on causal graph connectivity (forge-native, no EDHREC)",
+    )
     args = parser.parse_args()
 
     if args.holdout_eval:
         holdout_evaluation(drop_features=args.drop_feature if args.drop_feature else None)
+        return
+
+    if args.forge_tower:
+        train_tower_forge()
+        return
+
+    if args.forge_only:
+        print("=" * 60)
+        print("FORGE-ONLY MODEL — no EDHREC features")
+        print("=" * 60)
+
+        print("\nLoading embeddings...")
+        _, _, oid_to_idx = load_embeddings()
+
+        conn = sqlite3.connect(DB_PATH)
+        pairs_by_cmdr = _load_pairs_for_features(conn, oid_to_idx)
+        conn.close()
+
+        # Build both feature matrices for comparison
+        print("\n--- Building BASELINE feature matrix (with EDHREC) ---")
+        X_base, y_base, cmdr_ids_base = build_feature_matrix(pairs_by_cmdr)
+
+        print("\n--- Building FORGE-ONLY feature matrix ---")
+        X_forge, y_forge, cmdr_ids_forge = build_forge_feature_matrix(pairs_by_cmdr)
+
+        # Train both models
+        print("\n" + "=" * 60)
+        print("Training BASELINE model (8 features, with EDHREC)")
+        print("=" * 60)
+        _, base_scores = train_gbm(X_base, y_base, cmdr_ids_base)
+
+        print("\n" + "=" * 60)
+        print("Training FORGE-ONLY model (10 features, no EDHREC)")
+        print("=" * 60)
+        _, forge_scores = train_forge_gbm(X_forge, y_forge, cmdr_ids_forge)
+
+        # Comparison
+        print("\n" + "=" * 60)
+        print("COMPARISON")
+        print("=" * 60)
+        base_auc = base_scores["mean_auc"]
+        forge_auc = forge_scores["mean_auc"]
+        diff = forge_auc - base_auc
+        print(f"  Baseline (EDHREC):  mean AUC = {base_auc:.4f}")
+        print(f"  Forge-only:         mean AUC = {forge_auc:.4f}")
+        print(f"  Difference:         {diff:+.4f} ({'better' if diff > 0 else 'worse'})")
+        print()
+        print("  Per-fold comparison:")
+        for i, (b, f) in enumerate(zip(base_scores["fold_aucs"], forge_scores["fold_aucs"])):
+            d = f - b
+            print(f"    Fold {i+1}: baseline={b:.4f}  forge={f:.4f}  delta={d:+.4f}")
+
+        # Print forge model feature importance
+        import joblib
+        forge_model = joblib.load(os.path.join(DATA_DIR, "fusion_model_forge.lgb"))
+        print(f"\n  Forge model feature importance:")
+        total_imp = sum(forge_model.feature_importances_)
+        for name, imp in sorted(
+            zip(FORGE_FEATURE_NAMES, forge_model.feature_importances_), key=lambda x: -x[1]
+        ):
+            print(f"    {name:25s} {imp:6d} ({imp/total_imp*100:5.1f}%)")
         return
 
     if args.feature_importance:

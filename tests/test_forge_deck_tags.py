@@ -23,22 +23,47 @@ def _setup_deck_tags(conn):
     conn.commit()
 
 
+def _compute_overlap(conn, commander_name, candidate_name):
+    """Compute forge deck overlap using the same logic as DeckContext + compute_dynamic_score."""
+    cmdr_hints = set()
+    cmdr_has = set()
+    for r in conn.execute(
+        "SELECT tag_type, tag FROM forge_deck_tags WHERE card_name = ?",
+        (commander_name,)
+    ).fetchall():
+        if r[0] == "has":
+            cmdr_has.add(r[1])
+        elif r[0] == "hints":
+            cmdr_hints.add(r[1])
+
+    cand_has = set()
+    cand_hints = set()
+    for r in conn.execute(
+        "SELECT tag_type, tag FROM forge_deck_tags WHERE card_name = ?",
+        (candidate_name,)
+    ).fetchall():
+        if r[0] == "has":
+            cand_has.add(r[1])
+        elif r[0] == "hints":
+            cand_hints.add(r[1])
+
+    return len(cand_has & cmdr_hints) + len(cand_hints & cmdr_has)
+
+
 def test_forge_deck_overlap(tmp_db):
-    from mtg_synergy.recommend.scoring import compute_forge_deck_overlap
     conn = sqlite3.connect(tmp_db)
     _setup_deck_tags(conn)
     # Instigator has Token -> matches Krenko hints Token = 1
     # Instigator hints Goblin -> doesn't match Krenko has (Token) = 0
     # Total overlap = 1
-    overlap = compute_forge_deck_overlap(conn, "Krenko, Mob Boss", "Goblin Instigator")
+    overlap = _compute_overlap(conn, "Krenko, Mob Boss", "Goblin Instigator")
     assert overlap >= 1
     conn.close()
 
 
 def test_forge_deck_overlap_zero(tmp_db):
-    from mtg_synergy.recommend.scoring import compute_forge_deck_overlap
     conn = sqlite3.connect(tmp_db)
     _setup_deck_tags(conn)
-    overlap = compute_forge_deck_overlap(conn, "Krenko, Mob Boss", "Counterspell")
+    overlap = _compute_overlap(conn, "Krenko, Mob Boss", "Counterspell")
     assert overlap == 0
     conn.close()

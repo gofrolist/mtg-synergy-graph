@@ -3,8 +3,7 @@
 Usage:
     python3 synergy_graph.py --deck kyler              # build + print top synergies
     python3 synergy_graph.py --deck krenko --validate  # compare vs hand-curated pairs
-    python3 synergy_graph.py --deck kyler --card "Hardened Scales"
-    python3 synergy_graph.py --deck kyler --visualize  # interactive HTML graph
+    python3 synergy_graph.py --deck kyler --recommend  # recommend cards
     python3 synergy_graph.py --deck kyler --export
 """
 
@@ -13,15 +12,14 @@ import json
 import os
 
 from mtg_synergy.config import DATA_DIR
-from mtg_synergy.combos import find_combos, find_combos_tiered
+from mtg_synergy.combos import find_combos
 from mtg_synergy.combos.display import show_combos, show_combos_tiered, validate_against_curated
 from mtg_synergy.recommend import recommend_cards, suggest_swaps, show_swaps
 from mtg_synergy.analysis import (
-    show_card_synergies, show_deck_synergies, show_deck_analysis,
+    show_deck_synergies, show_deck_analysis,
     load_merged, build_from_commander,
 )
 from mtg_synergy.analysis.strategy import _detect_deck_types
-from mtg_synergy.analysis.visualization import generate_visualization
 
 
 def run():
@@ -33,7 +31,6 @@ def run():
     parser.add_argument("--build", action="store_true",
                         help="Build deck from commander (use with --commander)")
     parser.add_argument("--input", type=str, help="Override: load cards from JSON file instead of DB")
-    parser.add_argument("--card", type=str, help="Show synergies for specific card")
     parser.add_argument("--deck-view", action="store_true",
                         help="Show synergy network within the deck")
     parser.add_argument("--recommend", action="store_true",
@@ -44,8 +41,6 @@ def run():
                         help="Suggest card swaps to improve deck synergy")
     parser.add_argument("--validate", action="store_true",
                         help="Validate against hand-curated synergy pairs")
-    parser.add_argument("--visualize", action="store_true",
-                        help="Generate interactive HTML visualization")
     parser.add_argument("--export", action="store_true", help="Export graph as JSON")
     parser.add_argument("--top", type=int, default=30, help="Top N edges to show")
     parser.add_argument("--strategies", default="auto",
@@ -77,7 +72,6 @@ def run():
         print(f"Loaded {len(cards)} deck cards from DB")
 
         # For --recommend and --swaps, tower pre-filter handles candidate discovery.
-        # --card and --visualize require the legacy graph which has been removed.
 
     # --- Strategy detection ---
     active_strategies = set()
@@ -96,10 +90,12 @@ def run():
             deck_names_set = set(deck.DECKLIST) | {deck.COMMANDER}
             deck_cards_for_types = [c for c in cards if c["name"] in deck_names_set]
             deck_types = _detect_deck_types(deck_cards_for_types, deck_names_set)
+            import sqlite3 as _sqlite3
+            _conn = _sqlite3.connect(db_path)
+
+            # 1a. Tribal strategies from creature type distribution
             if deck_types:
                 from strategy_detector import CREATURE_TYPE_STRATEGIES
-                import sqlite3 as _sqlite3
-                _conn = _sqlite3.connect(db_path)
                 for dtype in deck_types:
                     strat = CREATURE_TYPE_STRATEGIES.get(dtype.lower())
                     if strat and strat not in active_strategies:
@@ -109,23 +105,21 @@ def run():
                         ).fetchone()
                         if has_cards:
                             active_strategies.add(strat)
-                _conn.close()
 
             # 2. Strategies shared by 20%+ of non-land deck cards
-            import sqlite3 as _sqlite3
-            _conn = _sqlite3.connect(db_path)
             deck_oid_set = {c["oracle_id"] for c in cards if c["name"] in deck_names_set}
             non_land_count = sum(1 for c in cards
                                  if c["name"] in deck_names_set and "Land" not in c.get("type_line", ""))
-            if non_land_count > 0:
+            if non_land_count > 0 and deck_oid_set:
                 from collections import Counter as _Counter
                 strat_counts = _Counter()
-                for oid in deck_oid_set:
-                    for row in _conn.execute(
-                        "SELECT strategy FROM card_strategies WHERE oracle_id = ? AND confidence >= 0.3",
-                        (oid,)
-                    ):
-                        strat_counts[row[0]] += 1
+                _oid_list = list(deck_oid_set)
+                _ph = ",".join("?" * len(_oid_list))
+                for row in _conn.execute(
+                    f"SELECT strategy FROM card_strategies WHERE oracle_id IN ({_ph}) AND confidence >= 0.3",
+                    _oid_list
+                ):
+                    strat_counts[row[0]] += 1
                 for strat, cnt in strat_counts.items():
                     if cnt / non_land_count >= 0.2 and strat not in active_strategies:
                         active_strategies.add(strat)
@@ -138,7 +132,6 @@ def run():
             print(f"Active strategies: {', '.join(sorted(active_strategies))}")
 
     # The legacy provides/wants graph has been removed.
-    # --card and --visualize are no longer supported.
     # --recommend and --swaps use the tower pre-filter + causal graph.
     graph = {"adjacency": {}, "edges": [], "stats": {}}
 
@@ -147,11 +140,7 @@ def run():
         from decks import load_deck
         deck = load_deck(args.deck)
 
-    if args.card or args.visualize:
-        print("Note: --card and --visualize require the legacy provides/wants graph which has been removed.")
-        print("Use --recommend instead.")
-        return
-    elif args.deck_view or args.recommend or args.combos or args.swaps:
+    if args.deck_view or args.recommend or args.combos or args.swaps:
         deck_set = set(deck.DECKLIST) | {deck.COMMANDER}
         deck_oids = {c["oracle_id"] for c in cards if c["name"] in deck_set}
         if args.deck_view:

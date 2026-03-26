@@ -1,5 +1,4 @@
 """Card recommendation engine — scoring pipeline."""
-import json
 from collections import defaultdict
 
 from mtg_synergy.combos.detector import find_partial_combos
@@ -44,15 +43,18 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
             _shared_conn, cmdr_oid, color_identity or set(),
             top_n=3000, deck_cards=deck_cards)
 
+        tower_probs_map = None
         if prefiltered:
-            # Build candidate pool from tower results
+            # Build candidate pool from tower results + cache tower probs
             candidate_scores = {}
+            tower_probs_map = {}
             for oid, name, tower_prob in prefiltered:
                 if name not in deck_cards:
                     candidate_scores[name] = {
                         "total": 0.0, "partners": [], "multi_sig": 0,
                         "commander_synergy": 0.0, "key_synergy": 0.0,
                     }
+                    tower_probs_map[name] = tower_prob
 
             print(f"  Tower pre-filter: {len(prefiltered)} candidates "
                   f"({len(candidate_scores)} after excluding deck)")
@@ -70,8 +72,9 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                           deck_types=deck_types, active_strategies=active_strategies,
                           edhrec_slug=edhrec_slug)
 
-        # Score all candidates with full fusion model
-        score_all_candidates(candidate_scores, cards, ctx, _shared_conn)
+        # Score all candidates with full fusion model (batch)
+        score_all_candidates(candidate_scores, cards, ctx, _shared_conn,
+                             tower_probs=tower_probs_map)
 
         # Enrich candidates with causal graph partner info (for display)
         if ctx.causal_ctx:
@@ -106,23 +109,20 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                     if deck_name:
                         info["partners"].append((deck_name, edge.strength, 1))
 
-        # Build card metadata
-        for c in cards:
-            card_meta[c["name"]] = {
-                "type_line": c.get("type_line", ""), "cmc": c.get("cmc", 0),
-                "mana_cost": c.get("mana_cost", ""), "oracle_id": c.get("oracle_id", ""),
-                "edhrec_rank": c.get("edhrec_rank"),
-            }
-            card_oid_lookup[c["name"]] = c.get("oracle_id", "")
-
         # Find partial Spellbook combos for display
         deck_oids = {card_oid_lookup[n] for n in deck_cards if n in card_oid_lookup}
         partial_combos = find_partial_combos(deck_oids, db_path, color_identity=color_identity)
+        # Build reverse lookup: oid → candidate name (O(n) instead of O(n×m×k))
+        _oid_to_cand = {}
+        for cn in candidate_scores:
+            coid = card_oid_lookup.get(cn)
+            if coid:
+                _oid_to_cand[coid] = cn
         for pc in partial_combos:
             for oid in pc.get("missing_oids", []):
-                for cn in candidate_scores:
-                    if card_oid_lookup.get(cn) == oid:
-                        candidate_scores[cn]["combo_completion"] = True
+                cn = _oid_to_cand.get(oid)
+                if cn:
+                    candidate_scores[cn]["combo_completion"] = True
 
         _shared_conn.close()
     else:
@@ -133,13 +133,15 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
             key=lambda x: -x[1])[:10]}
         candidate_scores = _candidate_scores(
             graph, deck_cards, commander=commander, key_cards=key_cards)
-        for c in cards:
-            card_meta[c["name"]] = {
-                "type_line": c.get("type_line", ""), "cmc": c.get("cmc", 0),
-                "mana_cost": c.get("mana_cost", ""), "oracle_id": c.get("oracle_id", ""),
-                "edhrec_rank": c.get("edhrec_rank"),
-            }
-            card_oid_lookup[c["name"]] = c.get("oracle_id", "")
+
+    # Build card metadata (shared by both paths)
+    for c in cards:
+        card_meta[c["name"]] = {
+            "type_line": c.get("type_line", ""), "cmc": c.get("cmc", 0),
+            "mana_cost": c.get("mana_cost", ""), "oracle_id": c.get("oracle_id", ""),
+            "edhrec_rank": c.get("edhrec_rank"),
+        }
+        card_oid_lookup[c["name"]] = c.get("oracle_id", "")
 
     # Sort by total synergy
     ranked = sorted(candidate_scores.items(), key=lambda x: x[1]["total"], reverse=True)

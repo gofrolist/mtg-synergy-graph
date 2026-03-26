@@ -1,7 +1,7 @@
 """Resource cost/production tracking for loop validation."""
 from dataclasses import dataclass
 from mtg_synergy.causal.types import ResourceDelta
-from mtg_synergy.parse.ast_types import Ability, Effect, Amount
+from mtg_synergy.parse.ast_types import Ability
 
 
 @dataclass

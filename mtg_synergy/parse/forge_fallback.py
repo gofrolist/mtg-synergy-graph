@@ -3,12 +3,9 @@
 Maps Forge card script verbs to our effect vocabulary.
 Used as fallback when the regex parser produces empty effects.
 """
-import json
-import re
-import sqlite3
 from typing import Optional
 
-from mtg_synergy.parse.ast_types import Effect, Amount, ObjectFilter
+from mtg_synergy.parse.ast_types import Effect, Amount
 
 FORGE_VERB_MAP = {
     "DealDamage": "deal_damage",

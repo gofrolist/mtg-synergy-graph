@@ -1,85 +1,100 @@
 {
   "weights": {
-    "provides_to_wants": 0.08483092525572442,
-    "wants_from_provides": 0.22852005942946213,
-    "bridge_score": 0.4154871562633285,
-    "oracle_overlap": 0.2526745710137492,
-    "keyword_overlap": 0.24447691244161115,
-    "shared_types": 0.29444114006965844,
-    "type_match": 0.16823643445955364,
-    "cmc_diff": -0.8956687171154664,
-    "rank_log": -2.0716011156506333,
-    "total_tags": -0.3021316812031089,
-    "bridge_x_oracle": -0.38130242938680725,
-    "provides_x_bridge": -0.18408040357098887,
-    "bidirectional": 0.08543442621256629,
-    "rare_overlap": 0.10631225404400349,
-    "cmdr_type_in_oracle": 0.33447669818803916,
-    "card_type_in_cmdr_oracle": 0.3152785440202397,
-    "spellbook_combos": 0.48146605519623553,
-    "ability_match": -0.015008087733487718,
-    "color_overlap": 0.6381010597704995,
-    "card_rarity": 0.1672829982468087,
-    "total_spellbook": 0.14900570065355645,
-    "strategy_match": 0.47643873758778915,
-    "theme_overlap": 1.9218080176945065,
-    "card_saltiness": -0.10369636408513826,
-    "text_similarity": 0.35539107647885265
+    "provides_to_wants": 1.12551989935066,
+    "wants_from_provides": 0.05543744372954531,
+    "bridge_score": -0.7355631899128918,
+    "oracle_overlap": -0.3811372439804116,
+    "keyword_overlap": -0.3036817081655725,
+    "shared_types": 0.023589645750468017,
+    "type_match": 0.27672827457522486,
+    "cmc_diff": 0.15228607464465344,
+    "rank_log": 0.12890368158028362,
+    "total_tags": -0.2679932753581325,
+    "bridge_x_oracle": 1.346842623976005,
+    "provides_x_bridge": -0.5660696881886098,
+    "bidirectional": 1.1115968135442456,
+    "rare_overlap": -0.038471694054510674,
+    "cmdr_type_in_oracle": 0.3054058065469103,
+    "card_type_in_cmdr_oracle": 0.3703001291766892,
+    "spellbook_combos": 0.03632019840052005,
+    "ability_match": 0.4540277621786326,
+    "color_overlap": -0.15289340583515978,
+    "card_rarity": -0.505384905438832,
+    "total_spellbook": -0.0937529986209844,
+    "strategy_match": -0.15079816478781788,
+    "theme_overlap": 0.5509424950024429,
+    "card_saltiness": 0.1502880321168818,
+    "text_similarity": 0.09789697285615223,
+    "edhrec_cooccur": 0.25843072849520093,
+    "edhrec_direct_synergy": 62.91941326035606,
+    "card2vec_sim": 0.21162853048216554,
+    "spellbook_feature_match": 0.7772394755725968,
+    "precon_cooccur": 0.39046345465687493
   },
-  "bias": -2.0709656221788815,
+  "bias": -17.536763163671623,
   "means": {
-    "provides_to_wants": 0.03140632252075705,
-    "wants_from_provides": 0.035342856651711274,
-    "bridge_score": 1.4569594141612472,
-    "oracle_overlap": 1.0054320732986093,
-    "keyword_overlap": 0.05463015488284943,
-    "shared_types": 0.09727880631908274,
-    "type_match": 0.46292953775806645,
-    "cmc_diff": 19.436009832740275,
-    "rank_log": 3.812739930896244,
-    "total_tags": 5.175803207673663,
-    "bridge_x_oracle": 2.0964691523559105,
-    "provides_x_bridge": 0.0602788235091882,
-    "bidirectional": 0.004108435184707682,
-    "rare_overlap": 0.25967373179997594,
-    "cmdr_type_in_oracle": 0.02937789008646623,
-    "card_type_in_cmdr_oracle": 0.03774947140425971,
-    "spellbook_combos": 0.15366235195021746,
-    "ability_match": 0.0013752084300276762,
-    "color_overlap": 0.5220511233734093,
-    "card_rarity": 2.2084644078868205,
-    "total_spellbook": 3.6539803688996613,
-    "strategy_match": 0.5874890413078232,
-    "theme_overlap": 0.2841868220652193,
-    "card_saltiness": 0.30366527426813644,
-    "text_similarity": 0.05837924810478882
+    "provides_to_wants": 0.030111039252869152,
+    "wants_from_provides": 0.03458330136250534,
+    "bridge_score": 1.5176511854782093,
+    "oracle_overlap": 1.0301658463865657,
+    "keyword_overlap": 0.05181466419669184,
+    "shared_types": 0.09947494765918732,
+    "type_match": 0.46857907025178397,
+    "cmc_diff": 89.83396726917975,
+    "rank_log": 3.817502329303969,
+    "total_tags": 5.166284843635248,
+    "bridge_x_oracle": 2.2142246434794366,
+    "provides_x_bridge": 0.0630577996031965,
+    "bidirectional": 0.004647644937465061,
+    "rare_overlap": 0.26164925626719576,
+    "cmdr_type_in_oracle": 0.030987953392013504,
+    "card_type_in_cmdr_oracle": 0.04107246599217354,
+    "spellbook_combos": 0.12931195124357386,
+    "ability_match": 0.001414024049370266,
+    "color_overlap": 0.5063544486951035,
+    "card_rarity": 2.1999473851516513,
+    "total_spellbook": 3.6711571978208686,
+    "strategy_match": 0.602538666432823,
+    "theme_overlap": 0.2403731269662059,
+    "card_saltiness": 0.2987256245273106,
+    "text_similarity": 0.058841684113602966,
+    "edhrec_cooccur": 18.963049030461804,
+    "edhrec_direct_synergy": 0.10022810729044274,
+    "card2vec_sim": 0.19853547556149953,
+    "spellbook_feature_match": 1.1028181828146753,
+    "precon_cooccur": 2.4618377928071116
   },
   "stds": {
-    "provides_to_wants": 0.17753910039895734,
-    "wants_from_provides": 0.18778356238228636,
-    "bridge_score": 1.472897356814591,
-    "oracle_overlap": 0.9688944872061234,
-    "keyword_overlap": 0.2392690439917578,
-    "shared_types": 0.32710823554131285,
-    "type_match": 0.4986238871426941,
-    "cmc_diff": 4146.009224166313,
-    "rank_log": 0.7198450429654528,
-    "total_tags": 2.2181379154736343,
-    "bridge_x_oracle": 3.7765231837533464,
-    "provides_x_bridge": 0.4719292065197973,
-    "bidirectional": 0.06423345044282579,
-    "rare_overlap": 0.5193283158409777,
-    "cmdr_type_in_oracle": 0.17268838313284798,
-    "card_type_in_cmdr_oracle": 0.19104017867121184,
-    "spellbook_combos": 2.7569114254473903,
-    "ability_match": 0.037058295047126044,
-    "color_overlap": 0.42343422235631795,
-    "card_rarity": 0.9590748279265199,
-    "total_spellbook": 7.0826058410686965,
-    "strategy_match": 0.8464938951551453,
-    "theme_overlap": 0.9142475862639874,
-    "card_saltiness": 0.33104498301344426,
-    "text_similarity": 0.06535829811630336
+    "provides_to_wants": 0.17369217058073713,
+    "wants_from_provides": 0.18516515228852093,
+    "bridge_score": 1.50805408523926,
+    "oracle_overlap": 0.9665337107363946,
+    "keyword_overlap": 0.2318998700048767,
+    "shared_types": 0.3312503355381026,
+    "type_match": 0.49901174853243735,
+    "cmc_diff": 9363.89557887249,
+    "rank_log": 0.7141742577195728,
+    "total_tags": 2.208729647016604,
+    "bridge_x_oracle": 3.911486989109873,
+    "provides_x_bridge": 0.4971827303916673,
+    "bidirectional": 0.06817600155103738,
+    "rare_overlap": 0.520275129147167,
+    "cmdr_type_in_oracle": 0.17660580786313484,
+    "card_type_in_cmdr_oracle": 0.2008188268789223,
+    "spellbook_combos": 2.542244138654892,
+    "ability_match": 0.03757691559138336,
+    "color_overlap": 0.4091989244820199,
+    "card_rarity": 0.9554052631096099,
+    "total_spellbook": 7.0983222603474845,
+    "strategy_match": 0.8607331066848843,
+    "theme_overlap": 0.8256980443881901,
+    "card_saltiness": 0.32557586719591425,
+    "text_similarity": 0.06388487344375919,
+    "edhrec_cooccur": 24.319916876167927,
+    "edhrec_direct_synergy": 0.1621226902962818,
+    "card2vec_sim": 0.30508577824630057,
+    "spellbook_feature_match": 3.193812124405563,
+    "precon_cooccur": 6.298147923710126
   },
   "feature_names": [
     "provides_to_wants",
@@ -106,2607 +121,2612 @@
     "strategy_match",
     "theme_overlap",
     "card_saltiness",
-    "text_similarity"
+    "text_similarity",
+    "edhrec_cooccur",
+    "edhrec_direct_synergy",
+    "card2vec_sim",
+    "spellbook_feature_match",
+    "precon_cooccur"
   ],
   "trees": {
-    "init": -0.7175472062586017,
+    "init": -0.7003558621568888,
     "trees": [
       {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
         "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
+          "feature": "provides_to_wants",
+          "threshold": -0.1733586445042016,
           "left": {
-            "feature": "color_overlap",
-            "threshold": -1.2328978051615906,
+            "feature": "cmc_diff",
+            "threshold": -0.008846101130823783,
             "left": {
-              "leaf": 0.11759195849546039
+              "leaf": -0.3317333333333334
             },
             "right": {
-              "leaf": 0.40817082290101814
+              "leaf": -0.3317333333333334
             }
           },
           "right": {
-            "feature": "theme_overlap",
-            "threshold": 0.7829533144953701,
+            "feature": "cmc_diff",
+            "threshold": -0.008952894290954302,
             "left": {
-              "leaf": 0.6077325808878856
+              "leaf": -0.33173333333333344
             },
             "right": {
-              "leaf": 0.6562563899868247
+              "leaf": -0.3317333333333334
             }
           }
         },
         "right": {
-          "feature": "rank_log",
-          "threshold": 0.3018150520405583,
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
           "left": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
             "left": {
-              "leaf": -0.03407858472998142
+              "leaf": -0.3317333333333334
             },
             "right": {
-              "leaf": 0.5792831615120274
+              "leaf": 0.6682666666666666
             }
           },
           "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
+            "feature": "cmc_diff",
+            "threshold": -0.008739307970693262,
             "left": {
-              "leaf": -0.3027173957462618
+              "leaf": 0.6682666666666666
             },
             "right": {
-              "leaf": 0.6720666666666666
+              "leaf": 0.6682666666666666
             }
           }
         }
       },
       {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
         "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": -1.2328978051615906,
-            "left": {
-              "leaf": 0.1149950888202971
-            },
-            "right": {
-              "leaf": 0.39911266088933073
-            }
-          },
-          "right": {
-            "feature": "color_overlap",
-            "threshold": -0.45355597926092794,
-            "left": {
-              "leaf": 0.5818608416558803
-            },
-            "right": {
-              "leaf": 0.6349240636316568
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.3018150520405583,
-          "left": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.03332795724402867
-            },
-            "right": {
-              "leaf": 0.5663912670503718
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.2960807896290277
-            },
-            "right": {
-              "leaf": 0.6570871983886077
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": -1.2328978051615906,
-            "left": {
-              "leaf": 0.11244553711374206
-            },
-            "right": {
-              "leaf": 0.39013816174172744
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": 0.7829533144953701,
-            "left": {
-              "leaf": 0.5801334584445659
-            },
-            "right": {
-              "leaf": 0.6275515680330124
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.1767881439865153,
-          "left": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": 0.0018652492988172782
-            },
-            "right": {
-              "leaf": 0.5468902190624915
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.2781301718740653
-            },
-            "right": {
-              "leaf": 0.6437891009327482
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": -1.2328978051615906,
-            "left": {
-              "leaf": 0.1099430278818179
-            },
-            "right": {
-              "leaf": 0.3812581301951552
-            }
-          },
-          "right": {
-            "feature": "color_overlap",
-            "threshold": -0.45355597926092794,
-            "left": {
-              "leaf": 0.5546569337446108
-            },
-            "right": {
-              "leaf": 0.6064912674624945
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.3018150520405583,
-          "left": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.031207291719444516
-            },
-            "right": {
-              "leaf": 0.5408045228338679
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.283689802767794
-            },
-            "right": {
-              "leaf": 0.6272069031483798
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": 0.09343687195048683,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": 0.14295547781001183
-            },
-            "right": {
-              "leaf": 0.5258038490505716
-            }
-          },
-          "right": {
-            "feature": "strategy_match",
-            "threshold": -0.6940263180517661,
-            "left": {
-              "leaf": 0.5341542137746842
-            },
-            "right": {
-              "leaf": 0.5904017533084054
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.3573825667312439,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": -0.15038459206444757
-            },
-            "right": {
-              "leaf": 0.3327812543064931
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.28320320232628016
-            },
-            "right": {
-              "leaf": 0.6124285869533075
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": -1.2328978051615906,
-            "left": {
-              "leaf": 0.10415465833164672
-            },
-            "right": {
-              "leaf": 0.36751656692245804
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": 0.7829533144953701,
-            "left": {
-              "leaf": 0.5392913274649214
-            },
-            "right": {
-              "leaf": 0.5854160365195319
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.1767881439865153,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": -0.052076856827253305,
-            "left": {
-              "leaf": -0.09344141165075545
-            },
-            "right": {
-              "leaf": 0.2009872581239805
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.26106030915322953
-            },
-            "right": {
-              "leaf": 0.607941782475009
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": -1.2328978051615906,
-            "left": {
-              "leaf": 0.10180903614628134
-            },
-            "right": {
-              "leaf": 0.35892323622098155
-            }
-          },
-          "right": {
-            "feature": "color_overlap",
-            "threshold": -0.45355597926092794,
-            "left": {
-              "leaf": 0.5145992857235582
-            },
-            "right": {
-              "leaf": 0.5649452788258759
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.3018150520405583,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": -0.04300616596698791
-            },
-            "right": {
-              "leaf": 0.4010695883168113
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.2664608755079716
-            },
-            "right": {
-              "leaf": 0.5856158181465724
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": -1.2328978051615906,
-            "left": {
-              "leaf": 0.09950884592015251
-            },
-            "right": {
-              "leaf": 0.35045559901310647
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": 0.7829533144953701,
-            "left": {
-              "leaf": 0.5129460924182099
-            },
-            "right": {
-              "leaf": 0.5579029921564064
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.1767881439865153,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": -0.052076856827253305,
-            "left": {
-              "leaf": -0.09102454120619786
-            },
-            "right": {
-              "leaf": 0.19572821238041485
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.25058922729929134
-            },
-            "right": {
-              "leaf": 0.5841446811711255
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": 0.09343687195048683,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "strategy_match",
-            "threshold": -0.6940263180517661,
-            "left": {
-              "leaf": 0.06417802425454976
-            },
-            "right": {
-              "leaf": 0.3064155872949804
-            }
-          },
-          "right": {
-            "feature": "strategy_match",
-            "threshold": -0.6940263180517661,
-            "left": {
-              "leaf": 0.4841711313060503
-            },
-            "right": {
-              "leaf": 0.5390088957410838
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.3573825667312439,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": -0.1384761275312193
-            },
-            "right": {
-              "leaf": 0.32340190071140174
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.26127348655994553
-            },
-            "right": {
-              "leaf": 0.5544134323523043
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": -1.2328978051615906,
-            "left": {
-              "leaf": 0.09397764494568926
-            },
-            "right": {
-              "leaf": 0.33762707392916896
-            }
-          },
-          "right": {
-            "feature": "color_overlap",
-            "threshold": -0.45355597926092794,
-            "left": {
-              "leaf": 0.4762166578333211
-            },
-            "right": {
-              "leaf": 0.5250692427899616
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.3018150520405583,
-          "left": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.032530342098510336
-            },
-            "right": {
-              "leaf": 0.4999009557317882
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.2507923787746723
-            },
-            "right": {
-              "leaf": 0.5455322172404813
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "strategy_match",
-            "threshold": -0.6940263180517661,
-            "left": {
-              "leaf": 0.14577544377249982
-            },
-            "right": {
-              "leaf": 0.37546619460201314
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": 0.7829533144953701,
-            "left": {
-              "leaf": 0.4749028397079424
-            },
-            "right": {
-              "leaf": 0.5185685653690714
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.3018150520405583,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": -0.04329521451763273
-            },
-            "right": {
-              "leaf": 0.38434221343763697
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.24580918890055722
-            },
-            "right": {
-              "leaf": 0.5319833631289205
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": 0.09343687195048683,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": 0.1170741016014195
-            },
-            "right": {
-              "leaf": 0.47505236891694136
-            }
-          },
-          "right": {
-            "feature": "strategy_match",
-            "threshold": -0.6940263180517661,
-            "left": {
-              "leaf": 0.44825111944576995
-            },
-            "right": {
-              "leaf": 0.5016266484505643
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.4407338387672718,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": -0.14928907935453858
-            },
-            "right": {
-              "leaf": 0.2911057318462633
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.2517507096603323
-            },
-            "right": {
-              "leaf": 0.5138280306887045
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": -1.2328978051615906,
-            "left": {
-              "leaf": 0.08392603480057421
-            },
-            "right": {
-              "leaf": 0.3186820409308519
-            }
-          },
-          "right": {
-            "feature": "color_overlap",
-            "threshold": -0.45355597926092794,
-            "left": {
-              "leaf": 0.4400466487678218
-            },
-            "right": {
-              "leaf": 0.4874558367864194
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.1767881439865153,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": -0.052076856827253305,
-            "left": {
-              "leaf": -0.09380342173319513
-            },
-            "right": {
-              "leaf": 0.1820889627971188
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.2271518155714719
-            },
-            "right": {
-              "leaf": 0.5363509615391768
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "strategy_match",
-            "threshold": -0.6940263180517661,
-            "left": {
-              "leaf": 0.13336598825466592
-            },
-            "right": {
-              "leaf": 0.3558940480601312
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": 0.7829533144953701,
-            "left": {
-              "leaf": 0.43920059242795784
-            },
-            "right": {
-              "leaf": 0.48164058471196264
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.3018150520405583,
-          "left": {
-            "feature": "strategy_match",
-            "threshold": -0.6940263180517661,
-            "left": {
-              "leaf": -0.1146867235975498
-            },
-            "right": {
-              "leaf": 0.1435782334771533
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.23202272339114927
-            },
-            "right": {
-              "leaf": 0.4958077976059946
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "strategy_match",
-            "threshold": -0.6940263180517661,
-            "left": {
-              "leaf": 0.13018750724277073
-            },
-            "right": {
-              "leaf": 0.34724749656936166
-            }
-          },
-          "right": {
-            "feature": "color_overlap",
-            "threshold": -0.45355597926092794,
-            "left": {
-              "leaf": 0.4175019256417821
-            },
-            "right": {
-              "leaf": 0.46373179778808027
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.3018150520405583,
-          "left": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.032573996487915084
-            },
-            "right": {
-              "leaf": 0.47314127842722414
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.22761472175311795
-            },
-            "right": {
-              "leaf": 0.4834315208358778
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": 0.09343687195048683,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": 0.1038916331573306
-            },
-            "right": {
-              "leaf": 0.4490272368196109
-            }
-          },
-          "right": {
-            "feature": "oracle_overlap",
-            "threshold": -1.0377105934391728,
-            "left": {
-              "leaf": 0.3948755242692593
-            },
-            "right": {
-              "leaf": 0.4526229291387768
-            }
-          }
-        },
-        "right": {
-          "feature": "shared_types",
-          "threshold": -0.2973902694871059,
-          "left": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.21943175661082073
-            },
-            "right": {
-              "leaf": 0.49040419331716134
-            }
-          },
-          "right": {
-            "feature": "rank_log",
-            "threshold": 0.5240851108033009,
-            "left": {
-              "leaf": 0.24851513891569216
-            },
-            "right": {
-              "leaf": -0.15678941470495228
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": -1.2328978051615906,
-            "left": {
-              "leaf": 0.06990227061784376
-            },
-            "right": {
-              "leaf": 0.29479618220982273
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": 0.7829533144953701,
-            "left": {
-              "leaf": 0.40596534488743946
-            },
-            "right": {
-              "leaf": 0.44745946163538075
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.3018150520405583,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": 0.34940226560642146,
-            "left": {
-              "leaf": -0.11265510994368819
-            },
-            "right": {
-              "leaf": 0.1387869264854103
-            }
-          },
-          "right": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": -0.22586841318378406
-            },
-            "right": {
-              "leaf": -0.05928413464033419
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": 0.09343687195048683,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": 0.09822789045143485
-            },
-            "right": {
-              "leaf": 0.43285849535449245
-            }
-          },
-          "right": {
-            "feature": "strategy_match",
-            "threshold": -0.6940263180517661,
-            "left": {
-              "leaf": 0.38378557439397387
-            },
-            "right": {
-              "leaf": 0.4348864990225536
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.4407338387672718,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": -0.13277672332220483
-            },
-            "right": {
-              "leaf": 0.2829575730391115
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.22587533588188996
-            },
-            "right": {
-              "leaf": 0.457445633653019
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "strategy_match",
-            "threshold": -0.6940263180517661,
-            "left": {
-              "leaf": 0.1156327800382114
-            },
-            "right": {
-              "leaf": 0.32517798801246967
-            }
-          },
-          "right": {
-            "feature": "color_overlap",
-            "threshold": -1.2328978051615906,
-            "left": {
-              "leaf": 0.37019292308965734
-            },
-            "right": {
-              "leaf": 0.41834676424364703
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.1767881439865153,
-          "left": {
-            "feature": "strategy_match",
-            "threshold": -0.6940263180517661,
-            "left": {
-              "leaf": -0.09614109473128572
-            },
-            "right": {
-              "leaf": 0.1675411267729669
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.20346357083101987
-            },
-            "right": {
-              "leaf": 0.49056120836802397
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": -1.2328978051615906,
-            "left": {
-              "leaf": 0.0614561820082819
-            },
-            "right": {
-              "leaf": 0.27803148370895464
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": 0.7829533144953701,
-            "left": {
-              "leaf": 0.37547903282304745
-            },
-            "right": {
-              "leaf": 0.4159385903397723
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.3018150520405583,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": 0.34940226560642146,
-            "left": {
-              "leaf": -0.11079925734959437
-            },
-            "right": {
-              "leaf": 0.13343722073512884
-            }
-          },
-          "right": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": -0.2142251541352434
-            },
-            "right": {
-              "leaf": -0.052068932220880555
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": 0.09343687195048683,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "strategy_match",
-            "threshold": -0.6940263180517661,
-            "left": {
-              "leaf": 0.03396163495881316
-            },
-            "right": {
-              "leaf": 0.24673899846469555
-            }
-          },
-          "right": {
-            "feature": "oracle_overlap",
-            "threshold": -1.0377105934391728,
-            "left": {
-              "leaf": 0.3458742622874386
-            },
-            "right": {
-              "leaf": 0.40275336185276805
-            }
-          }
-        },
-        "right": {
-          "feature": "shared_types",
-          "threshold": -0.2973902694871059,
-          "left": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.2010103496250114
-            },
-            "right": {
-              "leaf": 0.4711543549706342
-            }
-          },
-          "right": {
-            "feature": "rank_log",
-            "threshold": 0.5240851108033009,
-            "left": {
-              "leaf": 0.24122423796688636
-            },
-            "right": {
-              "leaf": -0.14412590236505202
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": -1.2328978051615906,
-            "left": {
-              "leaf": 0.057509961353077246
-            },
-            "right": {
-              "leaf": 0.26758342697216614
-            }
-          },
-          "right": {
-            "feature": "color_overlap",
-            "threshold": -0.45355597926092794,
-            "left": {
-              "leaf": 0.3466322555349277
-            },
-            "right": {
-              "leaf": 0.3906053124009413
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.3018150520405583,
-          "left": {
-            "feature": "strategy_match",
-            "threshold": -0.6940263180517661,
-            "left": {
-              "leaf": -0.11002182587868314
-            },
-            "right": {
-              "leaf": 0.12882648597723823
-            }
-          },
-          "right": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": -0.20692725986322222
-            },
-            "right": {
-              "leaf": -0.050549085100976617
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "strategy_match",
-          "threshold": -0.6940263180517661,
-          "left": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": 0.10294878627818357
-            },
-            "right": {
-              "leaf": 0.3428375852955036
-            }
-          },
-          "right": {
-            "feature": "color_overlap",
-            "threshold": -0.45355597926092794,
-            "left": {
-              "leaf": 0.27187380848701564
-            },
-            "right": {
-              "leaf": 0.36495557575628773
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.4268419600946007,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": -0.06356351317883627
-            },
-            "right": {
-              "leaf": 0.3280714647927683
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.20720593954148536
-            },
-            "right": {
-              "leaf": 0.4333262284320402
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": 0.09343687195048683,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": 0.08092729149544209
-            },
-            "right": {
-              "leaf": 0.39731175584824036
-            }
-          },
-          "right": {
-            "feature": "oracle_overlap",
-            "threshold": -1.0377105934391728,
-            "left": {
-              "leaf": 0.3210133399717788
-            },
-            "right": {
-              "leaf": 0.3769159616008907
-            }
-          }
-        },
-        "right": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": -0.19116172475063292
-            },
-            "right": {
-              "leaf": 0.017764131888145848
-            }
-          },
-          "right": {
-            "feature": "total_tags",
-            "threshold": -0.9809143031618341,
-            "left": {
-              "leaf": 0.36506935539771346
-            },
-            "right": {
-              "leaf": 0.5104846687680383
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "strategy_match",
-          "threshold": -0.6940263180517661,
-          "left": {
-            "feature": "rank_log",
-            "threshold": -0.9067783924818534,
-            "left": {
-              "leaf": 0.24523888693381032
-            },
-            "right": {
-              "leaf": 0.03667062505630203
-            }
-          },
-          "right": {
-            "feature": "rank_log",
-            "threshold": -0.948454028499868,
-            "left": {
-              "leaf": 0.3634214274928768
-            },
-            "right": {
-              "leaf": 0.2809998868137427
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.4268419600946007,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": -0.06173602856324449
-            },
-            "right": {
-              "leaf": 0.3145878178057923
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.2005812186322164
-            },
-            "right": {
-              "leaf": 0.41283171453898265
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": 0.09343687195048683,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": 0.075998904524484
-            },
-            "right": {
-              "leaf": 0.3812032914465235
-            }
-          },
-          "right": {
-            "feature": "color_overlap",
-            "threshold": -1.2328978051615906,
-            "left": {
-              "leaf": 0.30752487437130693
-            },
-            "right": {
-              "leaf": 0.3618590915268072
-            }
-          }
-        },
-        "right": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": -0.18493980098375476
-            },
-            "right": {
-              "leaf": 0.017356273188632573
-            }
-          },
-          "right": {
-            "feature": "total_tags",
-            "threshold": -0.9809143031618341,
-            "left": {
-              "leaf": 0.35036365750817805
-            },
-            "right": {
-              "leaf": 0.49558936917227936
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "strategy_match",
-          "threshold": -0.6940263180517661,
-          "left": {
-            "feature": "rank_log",
-            "threshold": -0.9067783924818534,
-            "left": {
-              "leaf": 0.234886488033533
-            },
-            "right": {
-              "leaf": 0.032201352904739876
-            }
-          },
-          "right": {
-            "feature": "rank_log",
-            "threshold": -0.948454028499868,
-            "left": {
-              "leaf": 0.34872574450470956
-            },
-            "right": {
-              "leaf": 0.26889296738179363
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.4268419600946007,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": -0.05996695705111245
-            },
-            "right": {
-              "leaf": 0.30153145766294026
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.1943102415016576
-            },
-            "right": {
-              "leaf": 0.39347889073642456
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": 0.09343687195048683,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": 0.34940226560642146,
-            "left": {
-              "leaf": 0.023406116960282695
-            },
-            "right": {
-              "leaf": 0.2213639347808055
-            }
-          },
-          "right": {
-            "feature": "oracle_overlap",
-            "threshold": -1.0377105934391728,
-            "left": {
-              "leaf": 0.29276544561040935
-            },
-            "right": {
-              "leaf": 0.34735265319557934
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.4407338387672718,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": -0.10973753002277516
-            },
-            "right": {
-              "leaf": 0.25014112827641566
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.1914970942633889
-            },
-            "right": {
-              "leaf": 0.3841302718489642
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "strategy_match",
-          "threshold": -0.6940263180517661,
-          "left": {
-            "feature": "rank_log",
-            "threshold": -0.9067783924818534,
-            "left": {
-              "leaf": 0.2251333933879555
-            },
-            "right": {
-              "leaf": 0.028133154414111797
-            }
-          },
-          "right": {
-            "feature": "color_overlap",
-            "threshold": -0.45355597926092794,
-            "left": {
-              "leaf": 0.2359146629875347
-            },
-            "right": {
-              "leaf": 0.32263255648658967
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.4268419600946007,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": -0.0591297207854265
-            },
-            "right": {
-              "leaf": 0.2894357775201747
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.18802829652268233
-            },
-            "right": {
-              "leaf": 0.37508554273125155
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "strategy_match",
-          "threshold": -0.6940263180517661,
-          "left": {
-            "feature": "rank_log",
-            "threshold": -0.9067783924818534,
-            "left": {
-              "leaf": 0.2197149002606636
-            },
-            "right": {
-              "leaf": 0.027449297260035973
-            }
-          },
-          "right": {
-            "feature": "rank_log",
-            "threshold": -0.948454028499868,
-            "left": {
-              "leaf": 0.32768725972207713
-            },
-            "right": {
-              "leaf": 0.2502146400375674
-            }
-          }
-        },
-        "right": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "card_type_in_cmdr_oracle",
-            "threshold": -0.19759964457125082,
-            "left": {
-              "leaf": -0.14875987655712283
-            },
-            "right": {
-              "leaf": 0.2761525129396074
-            }
-          },
-          "right": {
-            "feature": "oracle_overlap",
-            "threshold": -1.0377105934391728,
-            "left": {
-              "leaf": 0.2389811368015384
-            },
-            "right": {
-              "leaf": 0.42747983137234646
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": 0.09343687195048683,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": -0.7605694258278557,
-            "left": {
-              "leaf": -0.03705181547163264
-            },
-            "right": {
-              "leaf": 0.1657600793122388
-            }
-          },
-          "right": {
-            "feature": "color_overlap",
-            "threshold": -1.2328978051615906,
-            "left": {
-              "leaf": 0.275303053053866
-            },
-            "right": {
-              "leaf": 0.3276125301612814
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.4407338387672718,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": -0.10410833735795572
-            },
-            "right": {
-              "leaf": 0.23804721566773926
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.18308479839768702
-            },
-            "right": {
-              "leaf": 0.3583391810273266
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": 0.09343687195048683,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": 0.06185072044590612
-            },
-            "right": {
-              "leaf": 0.3489951571464965
-            }
-          },
-          "right": {
-            "feature": "oracle_overlap",
-            "threshold": -1.0377105934391728,
-            "left": {
-              "leaf": 0.2676347724458013
-            },
-            "right": {
-              "leaf": 0.3201328303419526
-            }
-          }
-        },
-        "right": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "spellbook_combos",
-            "threshold": -0.05573713777376116,
-            "left": {
-              "leaf": -0.160657210586012
-            },
-            "right": {
-              "leaf": 0.5534342254282337
-            }
-          },
-          "right": {
-            "feature": "total_tags",
-            "threshold": -0.9809143031618341,
-            "left": {
-              "leaf": 0.31426722602777807
-            },
-            "right": {
-              "leaf": 0.46750274142362575
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "strategy_match",
-          "threshold": -0.6940263180517661,
-          "left": {
-            "feature": "rank_log",
-            "threshold": -0.9067783924818534,
-            "left": {
-              "leaf": 0.20703917008775563
-            },
-            "right": {
-              "leaf": 0.020771378966587477
-            }
-          },
-          "right": {
-            "feature": "rank_log",
-            "threshold": -0.948454028499868,
-            "left": {
-              "leaf": 0.3097984223570887
-            },
-            "right": {
-              "leaf": 0.2351512914979987
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.4268419600946007,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": 0.1840873328396141,
-            "left": {
-              "leaf": -0.11677448440969787
-            },
-            "right": {
-              "leaf": 0.08977378942467906
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.17737618482436082
-            },
-            "right": {
-              "leaf": 0.3420557111397972
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": 0.09343687195048683,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": 0.34940226560642146,
-            "left": {
-              "leaf": 0.012593779006631035
-            },
-            "right": {
-              "leaf": 0.1995610554926176
-            }
-          },
-          "right": {
-            "feature": "color_overlap",
-            "threshold": -1.2328978051615906,
-            "left": {
-              "leaf": 0.25684141768375335
-            },
-            "right": {
-              "leaf": 0.3082257828119295
-            }
-          }
-        },
-        "right": {
-          "feature": "shared_types",
-          "threshold": -0.2973902694871059,
-          "left": {
-            "feature": "spellbook_combos",
-            "threshold": -0.05573713777376116,
-            "left": {
-              "leaf": -0.1634448970625655
-            },
-            "right": {
-              "leaf": 0.5218006370791156
-            }
-          },
-          "right": {
-            "feature": "rank_log",
-            "threshold": 0.6074363828393287,
-            "left": {
-              "leaf": 0.18681640388775894
-            },
-            "right": {
-              "leaf": -0.1399096612590534
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "strategy_match",
-          "threshold": -0.6940263180517661,
-          "left": {
-            "feature": "rank_log",
-            "threshold": -0.9067783924818534,
-            "left": {
-              "leaf": 0.19861072190525808
-            },
-            "right": {
-              "leaf": 0.01745828973453065
-            }
-          },
-          "right": {
-            "feature": "rank_log",
-            "threshold": -0.948454028499868,
-            "left": {
-              "leaf": 0.2978856649540123
-            },
-            "right": {
-              "leaf": 0.22548332972572882
-            }
-          }
-        },
-        "right": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "card_type_in_cmdr_oracle",
-            "threshold": -0.19759964457125082,
-            "left": {
-              "leaf": -0.13891639097963793
-            },
-            "right": {
-              "leaf": 0.26811060737885095
-            }
-          },
-          "right": {
-            "feature": "text_similarity",
-            "threshold": -0.8932186086134692,
-            "left": {
-              "leaf": 0.1713378371317536
-            },
-            "right": {
-              "leaf": 0.38971741331901805
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": 0.09343687195048683,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": 0.053775243494478896
-            },
-            "right": {
-              "leaf": 0.3311349928434255
-            }
-          },
-          "right": {
-            "feature": "oracle_overlap",
-            "threshold": -1.0377105934391728,
-            "left": {
-              "leaf": 0.24487426545062382
-            },
-            "right": {
-              "leaf": 0.29579084423093915
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.4407338387672718,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": -0.09415279549086161
-            },
-            "right": {
-              "leaf": 0.23043602176361208
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.17056002504803913
-            },
-            "right": {
-              "leaf": 0.33003676094835627
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "strategy_match",
-          "threshold": -0.6940263180517661,
-          "left": {
-            "feature": "rank_log",
-            "threshold": -0.9067783924818534,
-            "left": {
-              "leaf": 0.19057763219632615
-            },
-            "right": {
-              "leaf": 0.014259110890728682
-            }
-          },
-          "right": {
-            "feature": "rank_log",
-            "threshold": -0.948454028499868,
-            "left": {
-              "leaf": 0.28672400440640466
-            },
-            "right": {
-              "leaf": 0.21617127332780073
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.4268419600946007,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": 0.1840873328396141,
-            "left": {
-              "leaf": -0.11191653096122688
-            },
-            "right": {
-              "leaf": 0.08651827929964542
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.1676901352727868
-            },
-            "right": {
-              "leaf": 0.32278459342430615
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": 0.09343687195048683,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": -0.7605694258278557,
-            "left": {
-              "leaf": -0.04525974726091032
-            },
-            "right": {
-              "leaf": 0.14551065540311986
-            }
-          },
-          "right": {
-            "feature": "color_overlap",
-            "threshold": -1.2328978051615906,
-            "left": {
-              "leaf": 0.23494819590753785
-            },
-            "right": {
-              "leaf": 0.2853475156130292
-            }
-          }
-        },
-        "right": {
-          "feature": "spellbook_combos",
-          "threshold": -0.05573713777376116,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": -0.15442567244315053
-            },
-            "right": {
-              "leaf": 0.028115708274138757
-            }
-          },
-          "right": {
-            "feature": "rank_log",
-            "threshold": 0.5935445041666576,
-            "left": {
-              "leaf": 0.6004064477691528
-            },
-            "right": {
-              "leaf": 0.09701846375566063
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "strategy_match",
-          "threshold": -0.6940263180517661,
-          "left": {
-            "feature": "rank_log",
-            "threshold": -0.9067783924818534,
-            "left": {
-              "leaf": 0.1830704342378949
-            },
-            "right": {
-              "leaf": 0.011476271224237175
-            }
-          },
-          "right": {
-            "feature": "rank_log",
-            "threshold": -0.948454028499868,
-            "left": {
-              "leaf": 0.2760904563941218
-            },
-            "right": {
-              "leaf": 0.20735234368300348
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.4268419600946007,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": 0.1840873328396141,
-            "left": {
-              "leaf": -0.10914657087447056
-            },
-            "right": {
-              "leaf": 0.0837627003627711
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.16308797126798166
-            },
-            "right": {
-              "leaf": 0.318455065713977
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": 0.09343687195048683,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "oracle_overlap",
-            "threshold": -0.005606465275979697,
-            "left": {
-              "leaf": 0.02021455836371173
-            },
-            "right": {
-              "leaf": 0.2104433864157409
-            }
-          },
-          "right": {
-            "feature": "color_overlap",
-            "threshold": -1.2328978051615906,
-            "left": {
-              "leaf": 0.22549436704201195
-            },
-            "right": {
-              "leaf": 0.27513178444593045
-            }
-          }
-        },
-        "right": {
-          "feature": "shared_types",
-          "threshold": -0.2973902694871059,
-          "left": {
-            "feature": "spellbook_combos",
-            "threshold": -0.05573713777376116,
-            "left": {
-              "leaf": -0.15013001564285325
-            },
-            "right": {
-              "leaf": 0.5050114178114238
-            }
-          },
-          "right": {
-            "feature": "rank_log",
-            "threshold": 0.6074363828393287,
-            "left": {
-              "leaf": 0.18080374268958047
-            },
-            "right": {
-              "leaf": -0.12872832443228796
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "color_overlap",
-          "threshold": -1.2328978051615906,
-          "left": {
-            "feature": "rank_log",
-            "threshold": -1.0179134218632246,
-            "left": {
-              "leaf": 0.17996218529757133
-            },
-            "right": {
-              "leaf": -0.06566902291077265
-            }
-          },
-          "right": {
-            "feature": "oracle_overlap",
-            "threshold": -0.005606465275979697,
-            "left": {
-              "leaf": 0.1841880305247643
-            },
-            "right": {
-              "leaf": 0.2764779691152121
-            }
-          }
-        },
-        "right": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "card_type_in_cmdr_oracle",
-            "threshold": -0.19759964457125082,
-            "left": {
-              "leaf": -0.1284880143727413
-            },
-            "right": {
-              "leaf": 0.2598296801652568
-            }
-          },
-          "right": {
-            "feature": "text_similarity",
-            "threshold": -0.8932186086134692,
-            "left": {
-              "leaf": 0.15447091695029708
-            },
-            "right": {
-              "leaf": 0.3627723665988415
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": 0.09343687195048683,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": 0.04251519636167677
-            },
-            "right": {
-              "leaf": 0.3080986383545105
-            }
-          },
-          "right": {
-            "feature": "oracle_overlap",
-            "threshold": -1.0377105934391728,
-            "left": {
-              "leaf": 0.21570638042060072
-            },
-            "right": {
-              "leaf": 0.2648012287415415
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.3573825667312439,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": 0.34940226560642146,
-            "left": {
-              "leaf": -0.12469910113627602
-            },
-            "right": {
-              "leaf": 0.06386903447275821
-            }
-          },
-          "right": {
-            "feature": "spellbook_combos",
-            "threshold": -0.05573713777376116,
-            "left": {
-              "leaf": -0.153277358131874
-            },
-            "right": {
-              "leaf": 0.3972318313922147
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "color_overlap",
-          "threshold": -1.2328978051615906,
-          "left": {
-            "feature": "rank_log",
-            "threshold": -1.0179134218632246,
-            "left": {
-              "leaf": 0.17309571861820322
-            },
-            "right": {
-              "leaf": -0.06604475924965632
-            }
-          },
-          "right": {
-            "feature": "oracle_overlap",
-            "threshold": -0.005606465275979697,
-            "left": {
-              "leaf": 0.17666935365039838
-            },
-            "right": {
-              "leaf": 0.2666031368281554
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.4268419600946007,
-          "left": {
-            "feature": "text_similarity",
-            "threshold": 0.89691368326172,
-            "left": {
-              "leaf": -0.05788010350546492
-            },
-            "right": {
-              "leaf": 0.2110287715980159
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.15474222028883466
-            },
-            "right": {
-              "leaf": 0.3102100581929636
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": 0.09343687195048683,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": 0.34940226560642146,
-            "left": {
-              "leaf": -0.0019144357925302417
-            },
-            "right": {
-              "leaf": 0.16974738654264324
-            }
-          },
-          "right": {
-            "feature": "oracle_overlap",
-            "threshold": -1.0377105934391728,
-            "left": {
-              "leaf": 0.20797231771475116
-            },
-            "right": {
-              "leaf": 0.2557128290422861
-            }
-          }
-        },
-        "right": {
-          "feature": "shared_types",
-          "threshold": -0.2973902694871059,
-          "left": {
-            "feature": "spellbook_combos",
-            "threshold": -0.05573713777376116,
-            "left": {
-              "leaf": -0.14233348615949198
-            },
-            "right": {
-              "leaf": 0.49498786929425115
-            }
-          },
-          "right": {
-            "feature": "rank_log",
-            "threshold": 0.6074363828393287,
-            "left": {
-              "leaf": 0.17919284416537906
-            },
-            "right": {
-              "leaf": -0.1207564006964252
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "strategy_match",
-          "threshold": -0.6940263180517661,
-          "left": {
-            "feature": "rank_log",
-            "threshold": -0.9067783924818534,
-            "left": {
-              "leaf": 0.16249858987770024
-            },
-            "right": {
-              "leaf": -0.00048111219333610826
-            }
-          },
-          "right": {
-            "feature": "rank_log",
-            "threshold": -0.948454028499868,
-            "left": {
-              "leaf": 0.24975221990162363
-            },
-            "right": {
-              "leaf": 0.1840322217646566
-            }
-          }
-        },
-        "right": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "card_type_in_cmdr_oracle",
-            "threshold": -0.19759964457125082,
-            "left": {
-              "leaf": -0.12211682889097657
-            },
-            "right": {
-              "leaf": 0.25265791613943556
-            }
-          },
-          "right": {
-            "feature": "text_similarity",
-            "threshold": -0.8932186086134692,
-            "left": {
-              "leaf": 0.14607528070818798
-            },
-            "right": {
-              "leaf": 0.34324053529914267
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": 0.09343687195048683,
-        "left": {
-          "feature": "strategy_match",
-          "threshold": -0.6940263180517661,
-          "left": {
-            "feature": "rank_log",
-            "threshold": -0.9067783924818534,
-            "left": {
-              "leaf": 0.1587291566564643
-            },
-            "right": {
-              "leaf": -0.04613218574470098
-            }
-          },
-          "right": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": 0.17608237019900363
-            },
-            "right": {
-              "leaf": 0.3015147301081714
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.3573825667312439,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": 0.34940226560642146,
-            "left": {
-              "leaf": -0.11826609572140782
-            },
-            "right": {
-              "leaf": 0.06570363860735935
-            }
-          },
-          "right": {
-            "feature": "spellbook_combos",
-            "threshold": -0.05573713777376116,
-            "left": {
-              "leaf": -0.14555677276160617
-            },
-            "right": {
-              "leaf": 0.3852414500122425
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": 0.09343687195048683,
-        "left": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
-            "left": {
-              "leaf": 0.03422993961149455
-            },
-            "right": {
-              "leaf": 0.28816516871802134
-            }
-          },
-          "right": {
-            "feature": "oracle_overlap",
-            "threshold": -1.0377105934391728,
-            "left": {
-              "leaf": 0.19670634688413624
-            },
-            "right": {
-              "leaf": 0.24315214440293878
-            }
-          }
-        },
-        "right": {
-          "feature": "shared_types",
-          "threshold": -0.2973902694871059,
-          "left": {
-            "feature": "spellbook_combos",
-            "threshold": -0.05573713777376116,
-            "left": {
-              "leaf": -0.1368398678811285
-            },
-            "right": {
-              "leaf": 0.48423113948891916
-            }
-          },
-          "right": {
-            "feature": "rank_log",
-            "threshold": 0.6074363828393287,
-            "left": {
-              "leaf": 0.17662332491610394
-            },
-            "right": {
-              "leaf": -0.11559263272931643
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "color_overlap",
-          "threshold": -1.2328978051615906,
-          "left": {
-            "feature": "rank_log",
-            "threshold": -1.0179134218632246,
-            "left": {
-              "leaf": 0.1565118078616622
-            },
-            "right": {
-              "leaf": -0.07034736595689642
-            }
-          },
-          "right": {
-            "feature": "oracle_overlap",
-            "threshold": -0.005606465275979697,
-            "left": {
-              "leaf": 0.1601430499824036
-            },
-            "right": {
-              "leaf": 0.24608928449603149
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.4268419600946007,
-          "left": {
-            "feature": "color_overlap",
-            "threshold": 0.1840873328396141,
-            "left": {
-              "leaf": -0.10118582464270968
-            },
-            "right": {
-              "leaf": 0.07939921408635084
-            }
-          },
-          "right": {
-            "feature": "theme_overlap",
-            "threshold": -0.31084229954221704,
-            "left": {
-              "leaf": -0.14536596228952958
-            },
-            "right": {
-              "leaf": 0.3045020702623008
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": -0.33721136690232656,
-        "left": {
-          "feature": "color_overlap",
-          "threshold": -1.2328978051615906,
-          "left": {
-            "feature": "rank_log",
-            "threshold": -1.0179134218632246,
-            "left": {
-              "leaf": 0.1529496522162142
-            },
-            "right": {
-              "leaf": -0.06868384682722707
-            }
-          },
-          "right": {
-            "feature": "oracle_overlap",
-            "threshold": -0.005606465275979697,
-            "left": {
-              "leaf": 0.15657690620457146
-            },
-            "right": {
-              "leaf": 0.24080878294537356
-            }
-          }
-        },
-        "right": {
-          "feature": "theme_overlap",
-          "threshold": -0.31084229954221704,
-          "left": {
-            "feature": "card_type_in_cmdr_oracle",
-            "threshold": -0.19759964457125082,
-            "left": {
-              "leaf": -0.11622747348333473
-            },
-            "right": {
-              "leaf": 0.24469920262397493
-            }
-          },
-          "right": {
-            "feature": "text_similarity",
-            "threshold": -0.12820480866680717,
-            "left": {
-              "leaf": 0.22912532904044486
-            },
-            "right": {
-              "leaf": 0.34920044370679487
-            }
-          }
-        }
-      },
-      {
-        "feature": "rank_log",
-        "threshold": 0.09343687195048683,
-        "left": {
-          "feature": "strategy_match",
-          "threshold": -0.6940263180517661,
-          "left": {
-            "feature": "rank_log",
-            "threshold": -0.9067783924818534,
-            "left": {
-              "leaf": 0.14547422317273465
-            },
-            "right": {
-              "leaf": -0.047706541785331714
-            }
-          },
-          "right": {
-            "feature": "card_type_in_cmdr_oracle",
-            "threshold": -0.19759964457125082,
-            "left": {
-              "leaf": 0.16825542618187472
-            },
-            "right": {
-              "leaf": 0.309504440556291
-            }
-          }
-        },
-        "right": {
-          "feature": "rank_log",
-          "threshold": 0.3573825667312439,
+          "feature": "bridge_x_oracle",
+          "threshold": 3.780090640128992,
           "left": {
             "feature": "keyword_overlap",
-            "threshold": -0.22832103130203213,
+            "threshold": -0.22343550341620377,
             "left": {
-              "leaf": -0.05551585816899885
+              "leaf": -0.3244207480481732
             },
             "right": {
-              "leaf": 0.3062248546596409
+              "leaf": -0.3244207480481732
             }
           },
           "right": {
-            "feature": "shared_types",
-            "threshold": -0.2973902694871059,
+            "feature": "bridge_score",
+            "threshold": 1.9776139620672997,
             "left": {
-              "leaf": -0.14249087887178533
+              "leaf": -0.3244207480481732
             },
             "right": {
-              "leaf": -0.04085240571896668
+              "leaf": -0.3244207480481732
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.3244207480481732
+            },
+            "right": {
+              "leaf": 0.653289265298953
+            }
+          },
+          "right": {
+            "feature": "rank_log",
+            "threshold": -3.1049877608087804,
+            "left": {
+              "leaf": 0.653289265298953
+            },
+            "right": {
+              "leaf": 0.653289265298953
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "bridge_score",
+          "threshold": 2.707030771959419,
+          "left": {
+            "feature": "bridge_score",
+            "threshold": 1.7786821048239945,
+            "left": {
+              "leaf": -0.31735124504354406
+            },
+            "right": {
+              "leaf": -0.31735124504354406
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 2.7733413910405216,
+            "left": {
+              "leaf": -0.31735124504354406
+            },
+            "right": {
+              "leaf": -0.3173512450435441
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.31735124504354406
+            },
+            "right": {
+              "leaf": 0.6383477929799078
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 2.707030771959419,
+            "left": {
+              "leaf": 0.6383477929799078
+            },
+            "right": {
+              "leaf": 0.6383477929799078
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "bridge_score",
+          "threshold": -0.27694708669016127,
+          "left": {
+            "feature": "total_spellbook",
+            "threshold": -0.517186605957385,
+            "left": {
+              "leaf": -0.31051635692073454
+            },
+            "right": {
+              "leaf": -0.31051635692073454
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 1.3808183903373838,
+            "left": {
+              "leaf": -0.31051635692073454
+            },
+            "right": {
+              "leaf": -0.31051635692073454
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.31051635692073454
+            },
+            "right": {
+              "leaf": 0.6234846876992877
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 3.900621915419252,
+            "left": {
+              "leaf": 0.6234846876992877
+            },
+            "right": {
+              "leaf": 0.6234846876992877
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "total_tags",
+          "threshold": -0.9807831603842112,
+          "left": {
+            "feature": "cmc_diff",
+            "threshold": -0.008525721650432222,
+            "left": {
+              "leaf": -0.3039077421211025
+            },
+            "right": {
+              "leaf": -0.3039077421211025
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": 1.0034147209149333,
+            "left": {
+              "leaf": -0.3039077421211025
+            },
+            "right": {
+              "leaf": -0.3039077421211025
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.3039077421211025
+            },
+            "right": {
+              "leaf": 0.6087395413614238
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": -1.0063638965822812,
+            "left": {
+              "leaf": 0.6087395413614238
+            },
+            "right": {
+              "leaf": 0.6087395413614238
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "provides_x_bridge",
+          "threshold": 5.504901986922822,
+          "left": {
+            "feature": "type_match",
+            "threshold": -0.939014104637508,
+            "left": {
+              "leaf": -0.297517215419721
+            },
+            "right": {
+              "leaf": -0.297517215419721
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 1.1155759140129766,
+            "left": {
+              "leaf": -0.297517215419721
+            },
+            "right": {
+              "leaf": -0.297517215419721
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.297517215419721
+            },
+            "right": {
+              "leaf": 0.5941487671270139
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 5.492076773365696,
+            "left": {
+              "leaf": 0.5941487671270139
+            },
+            "right": {
+              "leaf": 0.5941487671270139
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "bridge_score",
+          "threshold": 3.9669325345003537,
+          "left": {
+            "feature": "rank_log",
+            "threshold": 0.885634932734284,
+            "left": {
+              "leaf": -0.2913367723200607
+            },
+            "right": {
+              "leaf": -0.2913367723200607
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 4.630038725311372,
+            "left": {
+              "leaf": -0.2913367723200607
+            },
+            "right": {
+              "leaf": -0.2913367723200607
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.2913367723200607
+            },
+            "right": {
+              "leaf": 0.5797453674711152
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 2.1102352002295035,
+            "left": {
+              "leaf": 0.5797453674711152
+            },
+            "right": {
+              "leaf": 0.5797453674711152
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "total_tags",
+          "threshold": 0.37746365087772316,
+          "left": {
+            "feature": "cmc_diff",
+            "threshold": -0.008418928490301701,
+            "left": {
+              "leaf": -0.28535860815458786
+            },
+            "right": {
+              "leaf": -0.28535860815458786
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 3.9669325345003537,
+            "left": {
+              "leaf": -0.28535860815458786
+            },
+            "right": {
+              "leaf": -0.28535860815458786
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.28535860815458786
+            },
+            "right": {
+              "leaf": 0.5655587980222141
+            }
+          },
+          "right": {
+            "feature": "total_tags",
+            "threshold": -0.9807831603842112,
+            "left": {
+              "leaf": 0.5655587980222141
+            },
+            "right": {
+              "leaf": 0.5655587980222141
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "bridge_score",
+          "threshold": 0.916644056769671,
+          "left": {
+            "feature": "cmc_diff",
+            "threshold": -0.008952894290954302,
+            "left": {
+              "leaf": -0.2795751326173114
+            },
+            "right": {
+              "leaf": -0.2795751326173114
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 4.232175010824761,
+            "left": {
+              "leaf": -0.2795751326173114
+            },
+            "right": {
+              "leaf": -0.2795751326173114
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.2795751326173114
+            },
+            "right": {
+              "leaf": 0.5516149190444805
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 3.900621915419252,
+            "left": {
+              "leaf": 0.5516149190444805
+            },
+            "right": {
+              "leaf": 0.5516149190444805
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "provides_to_wants",
+          "threshold": -0.1733586445042016,
+          "left": {
+            "feature": "bridge_score",
+            "threshold": 2.1102352002295035,
+            "left": {
+              "leaf": -0.27397898037836077
+            },
+            "right": {
+              "leaf": -0.27397898037836077
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 0.1872272468775513,
+            "left": {
+              "leaf": -0.27397898037836077
+            },
+            "right": {
+              "leaf": -0.27397898037836077
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.27397898037836077
+            },
+            "right": {
+              "leaf": 0.5379360241695934
+            }
+          },
+          "right": {
+            "feature": "provides_to_wants",
+            "threshold": -0.1733586445042016,
+            "left": {
+              "leaf": 0.5379360241695934
+            },
+            "right": {
+              "leaf": 0.5379360241695934
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "cmc_diff",
+          "threshold": -0.009593653251737423,
+          "left": {
+            "feature": "card2vec_sim",
+            "threshold": 0.602009459419066,
+            "left": {
+              "leaf": -0.26856301835884944
+            },
+            "right": {
+              "leaf": -0.26856301835884944
+            }
+          },
+          "right": {
+            "feature": "bridge_x_oracle",
+            "threshold": 2.7574616473350595,
+            "left": {
+              "leaf": -0.26856301835884944
+            },
+            "right": {
+              "leaf": -0.26856301835884944
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.26856301835884944
+            },
+            "right": {
+              "leaf": 0.5245409346447516
+            }
+          },
+          "right": {
+            "feature": "provides_to_wants",
+            "threshold": -0.1733586445042016,
+            "left": {
+              "leaf": 0.5245409346447516
+            },
+            "right": {
+              "leaf": 0.5245409346447516
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "oracle_overlap",
+          "threshold": 3.072664844096064,
+          "left": {
+            "feature": "provides_x_bridge",
+            "threshold": 4.901502106634004,
+            "left": {
+              "leaf": -0.2633203501773556
+            },
+            "right": {
+              "leaf": -0.2633203501773556
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 1.4471290094184854,
+            "left": {
+              "leaf": -0.2633203501773556
+            },
+            "right": {
+              "leaf": -0.2633203501773556
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.2633203501773556
+            },
+            "right": {
+              "leaf": 0.51144514684422
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 3.900621915419252,
+            "left": {
+              "leaf": 0.51144514684422
+            },
+            "right": {
+              "leaf": 0.51144514684422
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "rank_log",
+          "threshold": -0.164528933987575,
+          "left": {
+            "feature": "card2vec_sim",
+            "threshold": 0.18933863377881296,
+            "left": {
+              "leaf": -0.25824431821773725
+            },
+            "right": {
+              "leaf": -0.25824431821773725
+            }
+          },
+          "right": {
+            "feature": "precon_cooccur",
+            "threshold": 2.6258770685478843,
+            "left": {
+              "leaf": -0.25824431821773725
+            },
+            "right": {
+              "leaf": -0.25824431821773725
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.25824431821773725
+            },
+            "right": {
+              "leaf": 0.49866102095680664
+            }
+          },
+          "right": {
+            "feature": "cmc_diff",
+            "threshold": -0.008952894290954302,
+            "left": {
+              "leaf": 0.49866102095680664
+            },
+            "right": {
+              "leaf": 0.4986610209568067
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "bridge_score",
+          "threshold": 4.630038725311372,
+          "left": {
+            "feature": "bridge_score",
+            "threshold": 3.370136962770437,
+            "left": {
+              "leaf": -0.2533285037118361
+            },
+            "right": {
+              "leaf": -0.2533285037118361
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 5.359455535203491,
+            "left": {
+              "leaf": -0.2533285037118361
+            },
+            "right": {
+              "leaf": -0.2533285037118361
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.2533285037118361
+            },
+            "right": {
+              "leaf": 0.48619799945581904
+            }
+          },
+          "right": {
+            "feature": "wants_from_provides",
+            "threshold": -0.1867700316991519,
+            "left": {
+              "leaf": 0.48619799945581904
+            },
+            "right": {
+              "leaf": 0.48619799945581904
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "bridge_score",
+          "threshold": 0.916644056769671,
+          "left": {
+            "feature": "bridge_score",
+            "threshold": 0.8503334376885692,
+            "left": {
+              "leaf": -0.24856672517986256
+            },
+            "right": {
+              "leaf": -0.24856672517986256
+            }
+          },
+          "right": {
+            "feature": "provides_to_wants",
+            "threshold": -0.1733586445042016,
+            "left": {
+              "leaf": -0.24856672517986259
+            },
+            "right": {
+              "leaf": -0.24856672517986253
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.24856672517986256
+            },
+            "right": {
+              "leaf": 0.47406284502527307
+            }
+          },
+          "right": {
+            "feature": "cmc_diff",
+            "threshold": -0.008952894290954302,
+            "left": {
+              "leaf": 0.4740628450252731
+            },
+            "right": {
+              "leaf": 0.47406284502527307
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "wants_from_provides",
+          "threshold": -0.1867700316991519,
+          "left": {
+            "feature": "bridge_score",
+            "threshold": -0.27694708669016127,
+            "left": {
+              "leaf": -0.2439530355257015
+            },
+            "right": {
+              "leaf": -0.24395303552570147
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": -0.03121034067563209,
+            "left": {
+              "leaf": -0.2439530355257015
+            },
+            "right": {
+              "leaf": -0.24395303552570147
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.24395303552570147
+            },
+            "right": {
+              "leaf": 0.46225988891268466
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": 3.072664844096064,
+            "left": {
+              "leaf": 0.4622598889126847
+            },
+            "right": {
+              "leaf": 0.46225988891268466
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "precon_cooccur",
+          "threshold": 2.4671002325457665,
+          "left": {
+            "feature": "provides_x_bridge",
+            "threshold": 0.8788362380418806,
+            "left": {
+              "leaf": -0.2394817180437601
+            },
+            "right": {
+              "leaf": -0.2394817180437601
+            }
+          },
+          "right": {
+            "feature": "cmc_diff",
+            "threshold": -0.009380066931476383,
+            "left": {
+              "leaf": -0.2394817180437601
+            },
+            "right": {
+              "leaf": -0.2394817180437601
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.2394817180437601
+            },
+            "right": {
+              "leaf": 0.45079128208159874
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": 3.072664844096064,
+            "left": {
+              "leaf": 0.45079128208159885
+            },
+            "right": {
+              "leaf": 0.4507912820815988
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "bridge_score",
+          "threshold": 1.513439628499587,
+          "left": {
+            "feature": "provides_x_bridge",
+            "threshold": 3.493569052626761,
+            "left": {
+              "leaf": -0.23514728155795908
+            },
+            "right": {
+              "leaf": -0.23514728155795905
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 1.579750247580689,
+            "left": {
+              "leaf": -0.23514728155795905
+            },
+            "right": {
+              "leaf": -0.23514728155795905
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.23514728155795905
+            },
+            "right": {
+              "leaf": 0.4396572429476869
+            }
+          },
+          "right": {
+            "feature": "cmc_diff",
+            "threshold": -0.009486860091606902,
+            "left": {
+              "leaf": 0.4396572429476868
+            },
+            "right": {
+              "leaf": 0.4396572429476869
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "bridge_score",
+          "threshold": -1.0063638965822812,
+          "left": {
+            "feature": "total_tags",
+            "threshold": 1.282961525052346,
+            "left": {
+              "leaf": -0.23094445488168108
+            },
+            "right": {
+              "leaf": -0.23094445488168108
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": 3.072664844096064,
+            "left": {
+              "leaf": -0.23094445488168108
+            },
+            "right": {
+              "leaf": -0.23094445488168108
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.23094445488168108
+            },
+            "right": {
+              "leaf": 0.4288562968275598
+            }
+          },
+          "right": {
+            "feature": "provides_x_bridge",
+            "threshold": 9.929834442374158,
+            "left": {
+              "leaf": 0.4288562968275599
+            },
+            "right": {
+              "leaf": 0.4288562968275599
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "bridge_score",
+          "threshold": 2.707030771959419,
+          "left": {
+            "feature": "cmc_diff",
+            "threshold": -0.009059687451084823,
+            "left": {
+              "leaf": -0.2268681807595688
+            },
+            "right": {
+              "leaf": -0.2268681807595688
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 3.370136962770437,
+            "left": {
+              "leaf": -0.2268681807595688
+            },
+            "right": {
+              "leaf": -0.2268681807595688
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.2268681807595688
+            },
+            "right": {
+              "leaf": 0.41838550345966796
+            }
+          },
+          "right": {
+            "feature": "card_saltiness",
+            "threshold": 1.2939361234018885,
+            "left": {
+              "leaf": 0.41838550345966796
+            },
+            "right": {
+              "leaf": 0.41838550345966796
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "cmdr_type_in_oracle",
+          "threshold": -0.17546395425471173,
+          "left": {
+            "feature": "wants_from_provides",
+            "threshold": -0.1867700316991519,
+            "left": {
+              "leaf": -0.22291360942763086
+            },
+            "right": {
+              "leaf": -0.22291360942763083
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": -0.5421895630145686,
+            "left": {
+              "leaf": -0.22291360942763083
+            },
+            "right": {
+              "leaf": -0.22291360942763086
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.22291360942763083
+            },
+            "right": {
+              "leaf": 0.4082406700421797
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": -1.0063638965822812,
+            "left": {
+              "leaf": 0.4082406700421796
+            },
+            "right": {
+              "leaf": 0.4082406700421797
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "bridge_score",
+          "threshold": -0.27694708669016127,
+          "left": {
+            "feature": "cmc_diff",
+            "threshold": -0.009059687451084823,
+            "left": {
+              "leaf": -0.21907609190681762
+            },
+            "right": {
+              "leaf": -0.21907609190681765
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 1.911303342986198,
+            "left": {
+              "leaf": -0.21907609190681762
+            },
+            "right": {
+              "leaf": -0.21907609190681762
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.21907609190681762
+            },
+            "right": {
+              "leaf": 0.39841654816033634
+            }
+          },
+          "right": {
+            "feature": "card_rarity",
+            "threshold": -0.2092801797018279,
+            "left": {
+              "leaf": 0.3984165481603364
+            },
+            "right": {
+              "leaf": 0.3984165481603364
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "bridge_x_oracle",
+          "threshold": 3.780090640128992,
+          "left": {
+            "feature": "provides_to_wants",
+            "threshold": -0.1733586445042016,
+            "left": {
+              "leaf": -0.21535117312672988
+            },
+            "right": {
+              "leaf": -0.21535117312672986
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 2.3091670574728087,
+            "left": {
+              "leaf": -0.21535117312672986
+            },
+            "right": {
+              "leaf": -0.21535117312672986
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.21535117312672986
+            },
+            "right": {
+              "leaf": 0.38890701374451037
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": -0.27694708669016127,
+            "left": {
+              "leaf": 0.3889070137445103
+            },
+            "right": {
+              "leaf": 0.38890701374451037
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "bridge_score",
+          "threshold": 0.916644056769671,
+          "left": {
+            "feature": "provides_to_wants",
+            "threshold": -0.1733586445042016,
+            "left": {
+              "leaf": -0.2117345849601075
+            },
+            "right": {
+              "leaf": -0.2117345849601075
+            }
+          },
+          "right": {
+            "feature": "rank_log",
+            "threshold": -1.130679691371686,
+            "left": {
+              "leaf": -0.2117345849601075
+            },
+            "right": {
+              "leaf": -0.2117345849601075
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.2117345849601075
+            },
+            "right": {
+              "leaf": 0.3797052298179019
+            }
+          },
+          "right": {
+            "feature": "wants_from_provides",
+            "threshold": -0.1867700316991519,
+            "left": {
+              "leaf": 0.3797052298179019
+            },
+            "right": {
+              "leaf": 0.3797052298179019
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "text_similarity",
+          "threshold": 3.1957223186193997,
+          "left": {
+            "feature": "bridge_score",
+            "threshold": 4.630038725311372,
+            "left": {
+              "leaf": -0.20822223923492697
+            },
+            "right": {
+              "leaf": -0.20822223923492694
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": -0.03121034067563209,
+            "left": {
+              "leaf": -0.20822223923492694
+            },
+            "right": {
+              "leaf": -0.20822223923492697
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.20822223923492694
+            },
+            "right": {
+              "leaf": 0.3708037922728511
+            }
+          },
+          "right": {
+            "feature": "provides_to_wants",
+            "threshold": -0.1733586445042016,
+            "left": {
+              "leaf": 0.3708037922728511
+            },
+            "right": {
+              "leaf": 0.3708037922728511
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "provides_to_wants",
+          "threshold": -0.1733586445042016,
+          "left": {
+            "feature": "bridge_score",
+            "threshold": -0.27694708669016127,
+            "left": {
+              "leaf": -0.2048102207790458
+            },
+            "right": {
+              "leaf": -0.20481022077904576
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": -1.0658354022661976,
+            "left": {
+              "leaf": -0.20481022077904576
+            },
+            "right": {
+              "leaf": -0.20481022077904576
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.2048102207790458
+            },
+            "right": {
+              "leaf": 0.3621948592736174
+            }
+          },
+          "right": {
+            "feature": "provides_x_bridge",
+            "threshold": 5.10263540006361,
+            "left": {
+              "leaf": 0.3621948592736174
+            },
+            "right": {
+              "leaf": 0.3621948592736174
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "bridge_score",
+          "threshold": 0.3198484850397549,
+          "left": {
+            "feature": "cmc_diff",
+            "threshold": -0.008846101130823783,
+            "left": {
+              "leaf": -0.2014947805421401
+            },
+            "right": {
+              "leaf": -0.2014947805421401
+            }
+          },
+          "right": {
+            "feature": "total_tags",
+            "threshold": -0.5280342232968998,
+            "left": {
+              "leaf": -0.2014947805421401
+            },
+            "right": {
+              "leaf": -0.2014947805421401
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.2014947805421401
+            },
+            "right": {
+              "leaf": 0.3538702651388278
+            }
+          },
+          "right": {
+            "feature": "rank_log",
+            "threshold": 0.6335956047210369,
+            "left": {
+              "leaf": 0.3538702651388278
+            },
+            "right": {
+              "leaf": 0.3538702651388278
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "spellbook_feature_match",
+          "threshold": -0.032192933964082786,
+          "left": {
+            "feature": "provides_to_wants",
+            "threshold": -0.1733586445042016,
+            "left": {
+              "leaf": -0.1982723288309669
+            },
+            "right": {
+              "leaf": -0.1982723288309669
+            }
+          },
+          "right": {
+            "feature": "text_similarity",
+            "threshold": 0.6129512946577239,
+            "left": {
+              "leaf": -0.19827232883096693
+            },
+            "right": {
+              "leaf": -0.1982723288309669
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.1982723288309669
+            },
+            "right": {
+              "leaf": 0.3458216197260814
+            }
+          },
+          "right": {
+            "feature": "provides_to_wants",
+            "threshold": 5.583953251918736,
+            "left": {
+              "leaf": 0.3458216197260814
+            },
+            "right": {
+              "leaf": 0.3458216197260814
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "bridge_score",
+          "threshold": -1.0063638965822812,
+          "left": {
+            "feature": "cmc_diff",
+            "threshold": -0.009273273771345862,
+            "left": {
+              "leaf": -0.1951394286865585
+            },
+            "right": {
+              "leaf": -0.19513942868655848
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": -0.21063646760905957,
+            "left": {
+              "leaf": -0.19513942868655848
+            },
+            "right": {
+              "leaf": -0.19513942868655848
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.19513942868655848
+            },
+            "right": {
+              "leaf": 0.3380403944407988
+            }
+          },
+          "right": {
+            "feature": "provides_to_wants",
+            "threshold": -0.1733586445042016,
+            "left": {
+              "leaf": 0.3380403944407988
+            },
+            "right": {
+              "leaf": 0.3380403944407988
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "provides_to_wants",
+          "threshold": -0.1733586445042016,
+          "left": {
+            "feature": "oracle_overlap",
+            "threshold": -0.03121034067563209,
+            "left": {
+              "leaf": -0.19209278942565403
+            },
+            "right": {
+              "leaf": -0.19209278942565403
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": -0.27694708669016127,
+            "left": {
+              "leaf": -0.19209278942565403
+            },
+            "right": {
+              "leaf": -0.19209278942565403
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.19209278942565403
+            },
+            "right": {
+              "leaf": 0.33051799603607446
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": -1.0658354022661976,
+            "left": {
+              "leaf": 0.33051799603607446
+            },
+            "right": {
+              "leaf": 0.3305179960360745
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "strategy_match",
+          "threshold": 0.46177070508882867,
+          "left": {
+            "feature": "rank_log",
+            "threshold": -1.5647474229500538,
+            "left": {
+              "leaf": -0.18912926036334235
+            },
+            "right": {
+              "leaf": -0.18912926036334235
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 2.839652010121623,
+            "left": {
+              "leaf": -0.18912926036334238
+            },
+            "right": {
+              "leaf": -0.18912926036334235
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.18912926036334235
+            },
+            "right": {
+              "leaf": 0.3232458293728907
+            }
+          },
+          "right": {
+            "feature": "spellbook_combos",
+            "threshold": 1.129194480226165,
+            "left": {
+              "leaf": 0.3232458293728907
+            },
+            "right": {
+              "leaf": 0.3232458293728907
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "spellbook_feature_match",
+          "threshold": -0.345298389466141,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.3003014245935611,
+            "left": {
+              "leaf": -0.18624582472939674
+            },
+            "right": {
+              "leaf": -0.18624582472939674
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": -0.40956832485236494,
+            "left": {
+              "leaf": -0.18624582472939677
+            },
+            "right": {
+              "leaf": -0.18624582472939674
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.18624582472939677
+            },
+            "right": {
+              "leaf": 0.3162153502815186
+            }
+          },
+          "right": {
+            "feature": "spellbook_combos",
+            "threshold": 10.963025786934406,
+            "left": {
+              "leaf": 0.3162153502815186
+            },
+            "right": {
+              "leaf": 0.3162153502815186
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "bridge_score",
+          "threshold": 3.9669325345003537,
+          "left": {
+            "feature": "type_match",
+            "threshold": -0.939014104637508,
+            "left": {
+              "leaf": -0.18343959378701644
+            },
+            "right": {
+              "leaf": -0.18343959378701644
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 4.630038725311372,
+            "left": {
+              "leaf": -0.18343959378701644
+            },
+            "right": {
+              "leaf": -0.18343959378701644
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.18343959378701644
+            },
+            "right": {
+              "leaf": 0.30941810961430527
+            }
+          },
+          "right": {
+            "feature": "text_similarity",
+            "threshold": 5.465430188161478,
+            "left": {
+              "leaf": 0.30941810961430527
+            },
+            "right": {
+              "leaf": 0.30941810961430527
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "total_spellbook",
+          "threshold": 1.4551104364305805,
+          "left": {
+            "feature": "bridge_score",
+            "threshold": 4.630038725311372,
+            "left": {
+              "leaf": -0.18070780115954282
+            },
+            "right": {
+              "leaf": -0.1807078011595428
+            }
+          },
+          "right": {
+            "feature": "provides_to_wants",
+            "threshold": -0.1733586445042016,
+            "left": {
+              "leaf": -0.18070780115954285
+            },
+            "right": {
+              "leaf": -0.18070780115954282
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.18070780115954282
+            },
+            "right": {
+              "leaf": 0.3028457895146748
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": -1.0063638965822812,
+            "left": {
+              "leaf": 0.3028457895146748
+            },
+            "right": {
+              "leaf": 0.3028457895146748
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "shared_types",
+          "threshold": 2.718563441990018,
+          "left": {
+            "feature": "total_tags",
+            "threshold": 2.188459399226969,
+            "left": {
+              "leaf": -0.1780477973681104
+            },
+            "right": {
+              "leaf": -0.1780477973681104
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": -0.6748108011767722,
+            "left": {
+              "leaf": -0.1780477973681104
+            },
+            "right": {
+              "leaf": -0.1780477973681104
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.1780477973681104
+            },
+            "right": {
+              "leaf": 0.2964902328528307
+            }
+          },
+          "right": {
+            "feature": "spellbook_feature_match",
+            "threshold": 2.7857561655544414,
+            "left": {
+              "leaf": 0.2964902328528307
+            },
+            "right": {
+              "leaf": 0.2964902328528307
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "rank_log",
+          "threshold": -1.5787496078396788,
+          "left": {
+            "feature": "bridge_score",
+            "threshold": -0.27694708669016127,
+            "left": {
+              "leaf": -0.17545704458103875
+            },
+            "right": {
+              "leaf": -0.17545704458103878
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 1.513439628499587,
+            "left": {
+              "leaf": -0.17545704458103875
+            },
+            "right": {
+              "leaf": -0.17545704458103875
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.17545704458103875
+            },
+            "right": {
+              "leaf": 0.2903434666998671
+            }
+          },
+          "right": {
+            "feature": "bridge_x_oracle",
+            "threshold": 0.9422951851258301,
+            "left": {
+              "leaf": 0.29034346669986716
+            },
+            "right": {
+              "leaf": 0.2903434666998671
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "bridge_score",
+          "threshold": 0.916644056769671,
+          "left": {
+            "feature": "keyword_overlap",
+            "threshold": -0.22343550341620377,
+            "left": {
+              "leaf": -0.17293311157401126
+            },
+            "right": {
+              "leaf": -0.17293311157401126
+            }
+          },
+          "right": {
+            "feature": "provides_to_wants",
+            "threshold": -0.1733586445042016,
+            "left": {
+              "leaf": -0.17293311157401126
+            },
+            "right": {
+              "leaf": -0.17293311157401123
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.17293311157401126
+            },
+            "right": {
+              "leaf": 0.28439772063211377
+            }
+          },
+          "right": {
+            "feature": "bridge_x_oracle",
+            "threshold": 0.9422951851258301,
+            "left": {
+              "leaf": 0.28439772063211377
+            },
+            "right": {
+              "leaf": 0.28439772063211377
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "provides_to_wants",
+          "threshold": -0.1733586445042016,
+          "left": {
+            "feature": "bridge_score",
+            "threshold": 1.513439628499587,
+            "left": {
+              "leaf": -0.1704736688986594
+            },
+            "right": {
+              "leaf": -0.1704736688986594
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": -0.03121034067563209,
+            "left": {
+              "leaf": -0.1704736688986594
+            },
+            "right": {
+              "leaf": -0.1704736688986594
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.1704736688986594
+            },
+            "right": {
+              "leaf": 0.27864544057906737
+            }
+          },
+          "right": {
+            "feature": "provides_to_wants",
+            "threshold": -0.1733586445042016,
+            "left": {
+              "leaf": 0.27864544057906737
+            },
+            "right": {
+              "leaf": 0.27864544057906737
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "wants_from_provides",
+          "threshold": -0.1867700316991519,
+          "left": {
+            "feature": "bridge_score",
+            "threshold": 2.707030771959419,
+            "left": {
+              "leaf": -0.16807648425602584
+            },
+            "right": {
+              "leaf": -0.16807648425602584
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": -1.0063638965822812,
+            "left": {
+              "leaf": -0.16807648425602584
+            },
+            "right": {
+              "leaf": -0.16807648425602584
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.16807648425602584
+            },
+            "right": {
+              "leaf": 0.27307929885290994
+            }
+          },
+          "right": {
+            "feature": "spellbook_combos",
+            "threshold": 18.043384327764336,
+            "left": {
+              "leaf": 0.27307929885290994
+            },
+            "right": {
+              "leaf": 0.27307929885290994
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "bridge_score",
+          "threshold": 3.3038263436893356,
+          "left": {
+            "feature": "card2vec_sim",
+            "threshold": 1.1766019592978298,
+            "left": {
+              "leaf": -0.16573941807047646
+            },
+            "right": {
+              "leaf": -0.16573941807047646
+            }
+          },
+          "right": {
+            "feature": "bridge_x_oracle",
+            "threshold": 2.9108559962541496,
+            "left": {
+              "leaf": -0.16573941807047646
+            },
+            "right": {
+              "leaf": -0.16573941807047646
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.16573941807047646
+            },
+            "right": {
+              "leaf": 0.26769220092655344
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": 1.0034147209149333,
+            "left": {
+              "leaf": 0.26769220092655344
+            },
+            "right": {
+              "leaf": 0.26769220092655344
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "bridge_score",
+          "threshold": 2.707030771959419,
+          "left": {
+            "feature": "provides_to_wants",
+            "threshold": -0.1733586445042016,
+            "left": {
+              "leaf": -0.16346041925892954
+            },
+            "right": {
+              "leaf": -0.16346041925892954
+            }
+          },
+          "right": {
+            "feature": "edhrec_cooccur",
+            "threshold": 0.24823074027255618,
+            "left": {
+              "leaf": -0.16346041925892954
+            },
+            "right": {
+              "leaf": -0.16346041925892954
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.16346041925892954
+            },
+            "right": {
+              "leaf": 0.26247728946107474
+            }
+          },
+          "right": {
+            "feature": "provides_to_wants",
+            "threshold": -0.1733586445042016,
+            "left": {
+              "leaf": 0.26247728946107474
+            },
+            "right": {
+              "leaf": 0.26247728946107474
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "bridge_score",
+          "threshold": 0.916644056769671,
+          "left": {
+            "feature": "bridge_score",
+            "threshold": -1.0063638965822812,
+            "left": {
+              "leaf": -0.16123752118973994
+            },
+            "right": {
+              "leaf": -0.16123752118973994
+            }
+          },
+          "right": {
+            "feature": "provides_to_wants",
+            "threshold": -0.1733586445042016,
+            "left": {
+              "leaf": -0.16123752118973994
+            },
+            "right": {
+              "leaf": -0.16123752118973994
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.16123752118973994
+            },
+            "right": {
+              "leaf": 0.2574279460226785
+            }
+          },
+          "right": {
+            "feature": "oracle_overlap",
+            "threshold": 3.072664844096064,
+            "left": {
+              "leaf": 0.2574279460226785
+            },
+            "right": {
+              "leaf": 0.2574279460226785
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "keyword_overlap",
+          "threshold": -0.22343550341620377,
+          "left": {
+            "feature": "shared_types",
+            "threshold": -0.3003014245935611,
+            "left": {
+              "leaf": -0.15906883782518896
+            },
+            "right": {
+              "leaf": -0.15906883782518896
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 1.1818865330940782,
+            "left": {
+              "leaf": -0.159068837825189
+            },
+            "right": {
+              "leaf": -0.15906883782518896
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.15906883782518896
+            },
+            "right": {
+              "leaf": 0.25253779087406103
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 2.1102352002295035,
+            "left": {
+              "leaf": 0.25253779087406103
+            },
+            "right": {
+              "leaf": 0.25253779087406103
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "spellbook_feature_match",
+          "threshold": 2.1595452545503244,
+          "left": {
+            "feature": "bridge_score",
+            "threshold": 0.916644056769671,
+            "left": {
+              "leaf": -0.15695256004126362
+            },
+            "right": {
+              "leaf": -0.15695256004126362
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": -0.6085001820956704,
+            "left": {
+              "leaf": -0.15695256004126362
+            },
+            "right": {
+              "leaf": -0.15695256004126362
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.15695256004126362
+            },
+            "right": {
+              "leaf": 0.24780068117514864
+            }
+          },
+          "right": {
+            "feature": "cmdr_type_in_oracle",
+            "threshold": -0.17546395425471173,
+            "left": {
+              "leaf": 0.24780068117514867
+            },
+            "right": {
+              "leaf": 0.24780068117514864
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "text_similarity",
+          "threshold": -0.9210581619983018,
+          "left": {
+            "feature": "bridge_score",
+            "threshold": 1.1155759140129766,
+            "left": {
+              "leaf": -0.15488695211824047
+            },
+            "right": {
+              "leaf": -0.15488695211824047
+            }
+          },
+          "right": {
+            "feature": "provides_to_wants",
+            "threshold": -0.1733586445042016,
+            "left": {
+              "leaf": -0.15488695211824047
+            },
+            "right": {
+              "leaf": -0.15488695211824047
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.15488695211824047
+            },
+            "right": {
+              "leaf": 0.2432107078834671
+            }
+          },
+          "right": {
+            "feature": "total_tags",
+            "threshold": 3.5467062104889036,
+            "left": {
+              "leaf": 0.24321070788346713
+            },
+            "right": {
+              "leaf": 0.2432107078834671
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "oracle_overlap",
+          "threshold": -0.03121034067563209,
+          "left": {
+            "feature": "bridge_score",
+            "threshold": 2.839652010121623,
+            "left": {
+              "leaf": -0.15287034839550387
+            },
+            "right": {
+              "leaf": -0.15287034839550387
+            }
+          },
+          "right": {
+            "feature": "wants_from_provides",
+            "threshold": -0.1867700316991519,
+            "left": {
+              "leaf": -0.15287034839550387
+            },
+            "right": {
+              "leaf": -0.15287034839550387
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.15287034839550387
+            },
+            "right": {
+              "leaf": 0.23876219160455328
+            }
+          },
+          "right": {
+            "feature": "bridge_x_oracle",
+            "threshold": 6.106571598735188,
+            "left": {
+              "leaf": 0.23876219160455325
+            },
+            "right": {
+              "leaf": 0.23876219160455323
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "bridge_score",
+          "threshold": 2.707030771959419,
+          "left": {
+            "feature": "bridge_score",
+            "threshold": 1.1155759140129766,
+            "left": {
+              "leaf": -0.15090115008401173
+            },
+            "right": {
+              "leaf": -0.15090115008401173
+            }
+          },
+          "right": {
+            "feature": "rank_log",
+            "threshold": 0.8296261931757848,
+            "left": {
+              "leaf": -0.15090115008401175
+            },
+            "right": {
+              "leaf": -0.15090115008401173
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.15090115008401173
+            },
+            "right": {
+              "leaf": 0.234449677607523
+            }
+          },
+          "right": {
+            "feature": "total_tags",
+            "threshold": -0.5280342232968998,
+            "left": {
+              "leaf": 0.234449677607523
+            },
+            "right": {
+              "leaf": 0.23444967760752303
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "cmc_diff",
+          "threshold": -0.008632514810562741,
+          "left": {
+            "feature": "cmc_diff",
+            "threshold": -0.009273273771345862,
+            "left": {
+              "leaf": -0.14897782222985678
+            },
+            "right": {
+              "leaf": -0.14897782222985678
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": -1.0063638965822812,
+            "left": {
+              "leaf": -0.14897782222985678
+            },
+            "right": {
+              "leaf": -0.14897782222985678
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.14897782222985678
+            },
+            "right": {
+              "leaf": 0.2302679301897761
+            }
+          },
+          "right": {
+            "feature": "bridge_x_oracle",
+            "threshold": 4.85385108256262,
+            "left": {
+              "leaf": 0.23026793018977612
+            },
+            "right": {
+              "leaf": 0.2302679301897761
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "spellbook_feature_match",
+          "threshold": 1.2202288880441499,
+          "left": {
+            "feature": "oracle_overlap",
+            "threshold": -0.03121034067563209,
+            "left": {
+              "leaf": -0.14709889082245572
+            },
+            "right": {
+              "leaf": -0.14709889082245572
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": -0.078015229446856,
+            "left": {
+              "leaf": -0.14709889082245572
+            },
+            "right": {
+              "leaf": -0.14709889082245572
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.14709889082245572
+            },
+            "right": {
+              "leaf": 0.22621192654750022
+            }
+          },
+          "right": {
+            "feature": "text_similarity",
+            "threshold": 5.465430188161478,
+            "left": {
+              "leaf": 0.22621192654750025
+            },
+            "right": {
+              "leaf": 0.2262119265475002
+            }
+          }
+        }
+      },
+      {
+        "feature": "edhrec_direct_synergy",
+        "threshold": -0.18645204588697845,
+        "left": {
+          "feature": "provides_to_wants",
+          "threshold": -0.1733586445042016,
+          "left": {
+            "feature": "bridge_x_oracle",
+            "threshold": -0.08033380766810219,
+            "left": {
+              "leaf": -0.14526294004101337
+            },
+            "right": {
+              "leaf": -0.14526294004101337
+            }
+          },
+          "right": {
+            "feature": "cmc_diff",
+            "threshold": -0.009166480611215343,
+            "left": {
+              "leaf": -0.14526294004101337
+            },
+            "right": {
+              "leaf": -0.14526294004101337
+            }
+          }
+        },
+        "right": {
+          "feature": "edhrec_direct_synergy",
+          "threshold": 0.3686830794648373,
+          "left": {
+            "feature": "edhrec_direct_synergy",
+            "threshold": 0.30700139887019107,
+            "left": {
+              "leaf": -0.14526294004101337
+            },
+            "right": {
+              "leaf": 0.22227685028473398
+            }
+          },
+          "right": {
+            "feature": "bridge_score",
+            "threshold": 0.916644056769671,
+            "left": {
+              "leaf": 0.22227685028473398
+            },
+            "right": {
+              "leaf": 0.22227685028473398
             }
           }
         }

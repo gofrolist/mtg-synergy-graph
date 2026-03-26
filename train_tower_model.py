@@ -25,14 +25,28 @@ MODEL_PATH = os.path.join(DATA_DIR, "tower_model.npz")
 
 
 def load_embeddings():
-    """Load pre-computed card embeddings."""
-    emb = np.load(os.path.join(DATA_DIR, "embeddings.npy"), mmap_mode='c')  # copy-on-write: avoids full read unless modified
-    oid_list = json.load(open(os.path.join(DATA_DIR, "embeddings_index.json")))["oracle_ids"]
+    """Load pre-computed card embeddings.
+
+    Uses a pre-normalized float16 cache if available (saves ~50MB vs float32 copy).
+    Falls back to normalizing on-the-fly from the original float32 file.
+    """
+    cache_path = os.path.join(DATA_DIR, "embeddings_normed_f16.npy")
+    index_path = os.path.join(DATA_DIR, "embeddings_index.json")
+    oid_list = json.load(open(index_path))["oracle_ids"]
     oid_to_idx = {oid: i for i, oid in enumerate(oid_list)}
-    # L2 normalize
+
+    if os.path.exists(cache_path):
+        normed = np.load(cache_path)
+        return normed, oid_list, oid_to_idx
+
+    # Fall back: normalize from original float32 and create cache
+    emb = np.load(os.path.join(DATA_DIR, "embeddings.npy"), mmap_mode='c')
     norms = np.linalg.norm(emb, axis=1, keepdims=True)
     norms[norms == 0] = 1
-    return emb / norms, oid_list, oid_to_idx
+    normed = (emb / norms).astype(np.float16)
+    # Save cache for next time
+    np.save(cache_path, normed)
+    return normed, oid_list, oid_to_idx
 
 
 def load_structural_features():
@@ -227,7 +241,6 @@ def train(edhrec=False, forge_causal=False):
         # Formula: score = 1 + max(0, synergy) * 12 (capped at 10)
         # syn=0.0 → 1, syn=0.25 → 4, syn=0.5 → 7, syn=0.75 → 10
         print("Using EDHREC synergy data for training")
-        import re
 
         def slug_to_name_pattern(slug):
             parts = slug.split('-')

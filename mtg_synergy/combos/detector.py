@@ -1,9 +1,9 @@
 """Combo detection: Spellbook confirmed, trigger chains, synergy cycles."""
 import json
-import os
 import re
 import sqlite3
 from collections import defaultdict
+from itertools import combinations
 
 from mtg_synergy.config import DB_PATH
 
@@ -297,20 +297,20 @@ def find_combos_tiered(deck_oids, db_path=None):
                 "reason": f"Spellbook #{row['combo_id']}",
             })
             # Mark all pairs as confirmed
-            oid_list = list(combo_oids)
-            for i in range(len(oid_list)):
-                for j in range(i + 1, len(oid_list)):
-                    confirmed_pairs.add(frozenset([oid_list[i], oid_list[j]]))
+            for pair in combinations(combo_oids, 2):
+                confirmed_pairs.add(frozenset(pair))
 
-    # --- Load causal edges between deck cards for trigger chain detection ---
+    # --- Load causal edges + card names in batched queries ---
     deck_list = list(deck_oids)
     _chunk_size = 500
 
-    # Build bidirectional edge map: (source, target) -> max strength
     card_edges = {}  # (source_oid, target_oid) -> max strength
+    conn_names = {}
+
     for _ci in range(0, len(deck_list), _chunk_size):
         _chunk = deck_list[_ci:_ci + _chunk_size]
         _ph = ",".join("?" * len(_chunk))
+
         for row in conn.execute(
             f"SELECT source_id, target_id, strength FROM interaction_edges "
             f"WHERE source_id IN ({_ph})", _chunk
@@ -320,10 +320,6 @@ def find_combos_tiered(deck_oids, db_path=None):
                 key = (src, tgt)
                 card_edges[key] = max(card_edges.get(key, 0), strength)
 
-    conn_names = {}
-    for _ci in range(0, len(deck_list), _chunk_size):
-        _chunk = deck_list[_ci:_ci + _chunk_size]
-        _ph = ",".join("?" * len(_chunk))
         for row in conn.execute(
             f"SELECT oracle_id, name FROM cards WHERE oracle_id IN ({_ph})", _chunk
         ).fetchall():

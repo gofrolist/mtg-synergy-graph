@@ -3,7 +3,7 @@ import math
 from collections import defaultdict
 from dataclasses import dataclass, field
 from mtg_synergy.parse.ast_types import Ability
-from mtg_synergy.parse.verb_resolvers import resolve_effect, StateChange
+from mtg_synergy.parse.verb_resolvers import resolve_effect
 
 
 @dataclass

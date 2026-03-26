@@ -16,7 +16,6 @@ import os
 import re
 import time
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 GOLDEN_FILE = os.path.join(os.path.dirname(__file__), "golden_cards.json")
 OLLAMA_URL = "http://localhost:11434/api/chat"

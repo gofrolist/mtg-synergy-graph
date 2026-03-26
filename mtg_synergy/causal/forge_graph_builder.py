@@ -3,8 +3,6 @@
 Matches effect producers against trigger responders using ForgeFilter
 matching and IDF weighting. Replaces the old graph_builder.py.
 """
-from collections import defaultdict
-
 from mtg_synergy.causal.forge_indexer import ForgeIndex
 from mtg_synergy.causal.types import Edge, EdgeDetail
 from mtg_synergy.parse.forge_filter_parser import parse_forge_filter

@@ -7,7 +7,6 @@ from collections import defaultdict
 from mtg_synergy.causal.indexer import build_index, CardIndex
 from mtg_synergy.causal.types import Edge, EdgeDetail
 from mtg_synergy.parse.ast_types import Ability, ObjectFilter
-from mtg_synergy.parse.verb_resolvers import StateChange
 
 
 # ---------------------------------------------------------------------------

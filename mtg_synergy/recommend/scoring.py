@@ -85,8 +85,9 @@ class DeckContext:
         except Exception:
             pass
 
-        # Tower model (loaded once, cached on class)
-        self.tower_model = _load_tower_model()
+        # Tower model (lazy-loaded on first use — not needed when fusion model is available)
+        self._tower_model = None
+        self._tower_model_loaded = False
 
         # LLM synergy scores removed — superseded by fusion model
 
@@ -113,40 +114,13 @@ class DeckContext:
         except Exception:
             pass
 
-
-
-def compute_forge_deck_overlap(conn, commander_name: str, candidate_name: str) -> int:
-    """Count matching DeckHas/DeckHints between commander and candidate.
-
-    DeckHas = what the card provides (abilities, types)
-    DeckHints = what the card wants in the deck
-
-    Overlap = (candidate provides what commander wants) +
-              (commander provides what candidate wants)
-    """
-    cmdr_has = set()
-    cmdr_hints = set()
-    for r in conn.execute(
-        "SELECT tag_type, tag FROM forge_deck_tags WHERE card_name = ?",
-        (commander_name,)
-    ).fetchall():
-        if r[0] == "has":
-            cmdr_has.add(r[1])
-        elif r[0] == "hints":
-            cmdr_hints.add(r[1])
-
-    cand_has = set()
-    cand_hints = set()
-    for r in conn.execute(
-        "SELECT tag_type, tag FROM forge_deck_tags WHERE card_name = ?",
-        (candidate_name,)
-    ).fetchall():
-        if r[0] == "has":
-            cand_has.add(r[1])
-        elif r[0] == "hints":
-            cand_hints.add(r[1])
-
-    return len(cand_has & cmdr_hints) + len(cand_hints & cmdr_has)
+    @property
+    def tower_model(self):
+        """Lazy-load old tower model on first access (display feature only)."""
+        if not self._tower_model_loaded:
+            self._tower_model = _load_tower_model()
+            self._tower_model_loaded = True
+        return self._tower_model
 
 
 def compute_dynamic_score(card_name: str, card_data: dict, ctx: DeckContext,
@@ -259,57 +233,186 @@ def compute_dynamic_score(card_name: str, card_data: dict, ctx: DeckContext,
 
 
 def score_all_candidates(candidate_scores: dict, cards: list, ctx: DeckContext,
-                         conn, verbose: bool = True) -> None:
+                         conn, verbose: bool = True,
+                         tower_probs: dict = None) -> None:
     """Score all candidates using dynamic features. Modifies candidate_scores in-place.
 
     Candidates are pre-selected by tower_prefilter() or graph edges.
-    EDHREC synergy is used as a scoring feature (F8), not for injection.
+    Uses batch GBM prediction for speed.
+
+    Args:
+        tower_probs: optional {card_name: tower_prob} from prefilter to avoid recomputation.
     """
     # Build card data lookup — ensure all candidates have card data
     card_data = {}
     for c in cards:
         card_data[c["name"]] = c
 
-    # Load card data for candidates not yet in cards list (from tower prefilter)
+    # Batch-load card data for candidates not yet in cards list (from tower prefilter)
     missing = [n for n in candidate_scores if n not in card_data]
     if missing:
-        import json as _json
-        for name in missing:
-            row = conn.execute(
-                "SELECT oracle_id, name, type_line, mana_cost, cmc, edhrec_rank "
-                "FROM cards WHERE name = ?", (name,)).fetchone()
-            if row:
+        # Batch query
+        chunk_size = 500
+        for i in range(0, len(missing), chunk_size):
+            chunk = missing[i:i + chunk_size]
+            ph = ",".join("?" * len(chunk))
+            for row in conn.execute(
+                f"SELECT oracle_id, name, type_line, mana_cost, cmc, edhrec_rank "
+                f"FROM cards WHERE name IN ({ph})", chunk
+            ).fetchall():
                 cd = {"oracle_id": row[0], "name": row[1], "type_line": row[2] or "",
                       "mana_cost": row[3] or "", "cmc": row[4] or 0, "edhrec_rank": row[5]}
                 cards.append(cd)
-                card_data[name] = cd
-                ctx.card_oid[name] = row[0]
+                card_data[row[1]] = cd
+                ctx.card_oid[row[1]] = row[0]
 
     if ctx.edhrec and verbose:
         print(f"  EDHREC synergy: {len(ctx.edhrec)} cards loaded for scoring")
 
-    # Score all candidates
-    scored = 0
-    for card_name, info in candidate_scores.items():
-        cd = card_data.get(card_name)
-        if not cd:
-            continue
-        features = compute_dynamic_score(card_name, cd, ctx, conn)
-        info["total"] = features["total"]
-        # Copy feature values for display
-        if features["tower"] > 0:
-            info["tower_score"] = features["tower"]
-        if features["tribal_match"]:
-            info["tribal_match"] = True
-        if features["edhrec_syn"] > 0:
-            info["edhrec_syn"] = features["edhrec_syn"]
-        if features["fusion"] > 0:
-            info["fusion_score"] = features["fusion"]
-        scored += 1
+    # Prepare ordered list of candidates with card data
+    cand_list = [(name, card_data[name]) for name in candidate_scores if name in card_data]
+    if not cand_list:
+        return
+
+    w = SCORING_WEIGHTS
+
+    # --- Batch causal loading ---
+    if ctx.causal_ctx:
+        cand_oids = [cd.get("oracle_id") or ctx.card_oid.get(name, "")
+                     for name, cd in cand_list]
+        ctx.causal_ctx.batch_load([oid for oid in cand_oids if oid])
+
+    # --- Batch strategy query ---
+    all_oids = [(cd.get("oracle_id") or ctx.card_oid.get(name, ""))
+                for name, cd in cand_list]
+    oid_strats = {}
+    if ctx.active_strategies:
+        for i in range(0, len(all_oids), 500):
+            chunk = all_oids[i:i + 500]
+            ph = ",".join("?" * len(chunk))
+            for row in conn.execute(
+                f"SELECT oracle_id, strategy FROM card_strategies "
+                f"WHERE oracle_id IN ({ph}) AND confidence >= 0.3", chunk
+            ):
+                oid_strats.setdefault(row[0], set()).add(row[1])
+
+    # --- Compute per-card features + build batch feature matrix for GBM ---
+    from mtg_synergy.config import USE_FUSION_MODEL
+    fusion = _load_fusion_model() if USE_FUSION_MODEL else None
+    use_batch_gbm = fusion is not None
+
+    feature_rows = []  # parallel to cand_list
+    per_card_features = []  # dicts for display
+
+    for idx, (card_name, cd) in enumerate(cand_list):
+        oid = cd.get("oracle_id") or ctx.card_oid.get(card_name, "")
+        type_line = cd.get("type_line", "")
+        is_creature = "Creature" in type_line
+        rank = cd.get("edhrec_rank") or 50000
+
+        # Tower score (old model, used as display feature)
+        tower = _get_tower_score(ctx, oid)
+
+        # Strategy overlap
+        strat_overlap = len(oid_strats.get(oid, set()) & ctx.active_strategies) if ctx.active_strategies else 0
+
+        # Tribal match
+        tribal_match = False
+        tribal_adj = 0.0
+        if ctx.is_tribal and is_creature:
+            type_lower = type_line.lower()
+            if any(t.lower() in type_lower for t in ctx.deck_types):
+                tribal_adj = w["TRIBAL_BONUS"]
+                tribal_match = True
+            else:
+                tribal_adj = w["TRIBAL_PENALTY"]
+
+        # Rank
+        rank_score = max(0, 3.0 - 0.6 * math.log10(max(rank, 1)))
+
+        # EDHREC synergy
+        edhrec_syn = max(0, ctx.edhrec.get(card_name, 0.0))
+
+        # Causal score
+        causal = ctx.causal_ctx.causal_score(oid) if ctx.causal_ctx else 0.0
+
+        # Forge overlap
+        forge_overlap = 0
+        if ctx.forge_cmdr_hints or ctx.forge_cmdr_has:
+            cand_has = ctx.forge_card_has.get(card_name, set())
+            cand_hints = ctx.forge_card_hints.get(card_name, set())
+            forge_overlap = len(cand_has & ctx.forge_cmdr_hints) + len(cand_hints & ctx.forge_cmdr_has)
+
+        # Tower prob (reuse from prefilter if available)
+        tower_prob = (tower_probs or {}).get(card_name, None)
+        if tower_prob is None and fusion:
+            tower_prob = _get_fusion_score(fusion, ctx.cmdr_oid, oid)
+        elif tower_prob is None:
+            tower_prob = 0.0
+
+        per_card_features.append({
+            "tower": round(tower, 1),
+            "tribal_match": tribal_match,
+            "edhrec_syn": round(edhrec_syn, 3) if edhrec_syn > 0 else 0,
+            # Fallback score (used when GBM unavailable)
+            "fallback_total": (tower * w["TOWER"]
+                               + strat_overlap * w["STRATEGY"]
+                               + tribal_adj
+                               + rank_score * w["RANK"]
+                               + edhrec_syn * w["EDHREC_SYNERGY"]
+                               + causal * w.get("CAUSAL", 0)
+                               + forge_overlap * w.get("FORGE_DECK_OVERLAP", 0)),
+        })
+
+        if use_batch_gbm:
+            feature_rows.append([
+                tower_prob,
+                causal,
+                forge_overlap,
+                1.0 if tribal_match else 0.0,
+                edhrec_syn,
+                math.log10(max(rank, 1)),
+                cd.get("cmc", 0),
+                1.0 if is_creature else 0.0,
+            ])
+
+    # --- Batch GBM prediction ---
+    if use_batch_gbm and feature_rows:
+        import numpy as np
+        import warnings
+        feature_matrix = np.array(feature_rows, dtype=np.float64)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            gbm_scores = fusion["gbm"].predict(feature_matrix, raw_score=True)
+
+        for idx, (card_name, _) in enumerate(cand_list):
+            info = candidate_scores[card_name]
+            fusion_score = float(gbm_scores[idx])
+            pcf = per_card_features[idx]
+            info["total"] = fusion_score * w.get("FUSION", 10.0) if fusion_score > 0 else pcf["fallback_total"]
+            if pcf["tower"] > 0:
+                info["tower_score"] = pcf["tower"]
+            if pcf["tribal_match"]:
+                info["tribal_match"] = True
+            if pcf["edhrec_syn"] > 0:
+                info["edhrec_syn"] = pcf["edhrec_syn"]
+            if fusion_score > 0:
+                info["fusion_score"] = round(fusion_score, 4)
+    else:
+        for idx, (card_name, _) in enumerate(cand_list):
+            info = candidate_scores[card_name]
+            pcf = per_card_features[idx]
+            info["total"] = pcf["fallback_total"]
+            if pcf["tower"] > 0:
+                info["tower_score"] = pcf["tower"]
+            if pcf["tribal_match"]:
+                info["tribal_match"] = True
+            if pcf["edhrec_syn"] > 0:
+                info["edhrec_syn"] = pcf["edhrec_syn"]
 
     if verbose:
-        print(f"  Dynamic scoring: {scored} candidates scored "
-              f"(tower + tags + strategy + tribal)")
+        print(f"  Dynamic scoring: {len(cand_list)} candidates scored "
+              f"({'batch GBM' if use_batch_gbm else 'feature-based'})")
 
 
 # === Tower model singleton ===
@@ -318,7 +421,7 @@ _tower_cache = {}
 
 
 def _load_tower_model():
-    """Load tower model data (cached). Returns dict or None."""
+    """Load tower model data (cached). Reuses fusion model embeddings when available."""
     if _tower_cache:
         return _tower_cache
     tower_path = os.path.join(DATA_DIR, "tower_model.npz")
@@ -326,14 +429,27 @@ def _load_tower_model():
         return None
     try:
         import numpy as np
-        from train_tower_model import (load_embeddings, load_structural_features,
-                                        compute_struct_features, forward)
         td = np.load(tower_path)
         model = {k: td[k] for k in td.files if k not in ("struct_means", "struct_stds")}
         if model["W1"].shape[0] != 140:
             return None
-        normed_emb, oid_list, oid_to_idx = load_embeddings()
-        sf_data = load_structural_features()
+
+        # Reuse fusion model's pre-loaded embeddings if available
+        fusion = _fusion_cache
+        if fusion:
+            normed_emb = fusion["emb"]
+            oid_to_idx = fusion["oid_to_idx"]
+            sf_data = fusion["sf_data"]
+            compute_sf = fusion["compute_sf"]
+            forward_fn = fusion["forward"]
+        else:
+            from train_tower_model import (load_embeddings, load_structural_features,
+                                            compute_struct_features, forward)
+            normed_emb, _, oid_to_idx = load_embeddings()
+            sf_data = load_structural_features()
+            compute_sf = compute_struct_features
+            forward_fn = forward
+
         _tower_cache.update({
             "model": model,
             "means": td["struct_means"],
@@ -341,8 +457,8 @@ def _load_tower_model():
             "emb": normed_emb,
             "oid_to_idx": oid_to_idx,
             "sf_data": sf_data,
-            "compute_sf": compute_struct_features,
-            "forward": forward,
+            "compute_sf": compute_sf,
+            "forward": forward_fn,
         })
         return _tower_cache
     except Exception:
@@ -436,7 +552,7 @@ def tower_prefilter(conn, cmdr_oid: str, color_identity: set,
     if fusion is None:
         return []
 
-    import json as _json
+    import json
     import numpy as np
 
     oid_to_idx = fusion["oid_to_idx"]
@@ -460,7 +576,7 @@ def tower_prefilter(conn, cmdr_oid: str, color_identity: set,
             continue
         if oid not in oid_to_idx:
             continue
-        card_ci = set(_json.loads(ci_json or "[]"))
+        card_ci = set(json.loads(ci_json or "[]"))
         if cmdr_ci and not card_ci.issubset(cmdr_ci):
             continue
         legal.append((oid, name))
@@ -468,24 +584,31 @@ def tower_prefilter(conn, cmdr_oid: str, color_identity: set,
     if not legal:
         return []
 
-    # Batch tower scoring
-    card_indices = [oid_to_idx[oid] for oid, _ in legal]
-    X_card = emb[card_indices].astype(np.float32)
+    # Chunked tower scoring — process 2000 cards at a time to limit peak memory
+    # (avoids allocating full 13k×768 float32 arrays = ~80MB)
+    chunk_size = 2000
+    cmdr_emb_f32 = emb[cmdr_idx].astype(np.float32)
+    all_probs = np.empty(len(legal), dtype=np.float64)
 
-    sf_batch = np.array(
-        [fusion["compute_sf"](cmdr_oid, oid, *fusion["sf_data"]) for oid, _ in legal],
-        dtype=np.float32
-    )
-    sf_norm = (sf_batch - fusion["struct_means"]) / (fusion["struct_stds"] + 1e-8)
+    for ci in range(0, len(legal), chunk_size):
+        chunk = legal[ci:ci + chunk_size]
+        chunk_indices = [oid_to_idx[oid] for oid, _ in chunk]
+        X_card = emb[chunk_indices].astype(np.float32)
+        X_cmdr = np.broadcast_to(cmdr_emb_f32, X_card.shape).copy()
 
-    X_cmdr = np.tile(emb[cmdr_idx], (len(legal), 1)).astype(np.float32)
+        sf_batch = np.array(
+            [fusion["compute_sf"](cmdr_oid, oid, *fusion["sf_data"]) for oid, _ in chunk],
+            dtype=np.float32
+        )
+        sf_norm = (sf_batch - fusion["struct_means"]) / (fusion["struct_stds"] + 1e-8)
 
-    scores, _ = fusion["forward"](fusion["tower"], X_cmdr, X_card, sf_norm)
-    probs = 1.0 / (1.0 + np.exp(-scores.astype(np.float64)))
+        scores, _ = fusion["forward"](fusion["tower"], X_cmdr, X_card, sf_norm)
+        all_probs[ci:ci + len(chunk)] = 1.0 / (1.0 + np.exp(-scores.astype(np.float64)))
 
     # Sort and take top N
-    ranked = sorted(zip(legal, probs), key=lambda x: -x[1])
-    return [(oid, name, float(prob)) for (oid, name), prob in ranked[:top_n]]
+    ranked_idx = np.argpartition(-all_probs, min(top_n, len(all_probs) - 1))[:top_n]
+    ranked_idx = ranked_idx[np.argsort(-all_probs[ranked_idx])]
+    return [(legal[i][0], legal[i][1], float(all_probs[i])) for i in ranked_idx]
 
 
 def _get_fusion_score(fusion, cmdr_oid, card_oid):

@@ -3,7 +3,6 @@
 All magic numbers and path definitions live here. Other modules import
 from config instead of defining their own DATA_DIR / DB_PATH.
 """
-import os
 from pathlib import Path
 
 # ── Paths ──────────────────────────────────────────────────────────────

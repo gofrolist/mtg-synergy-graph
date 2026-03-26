@@ -9,7 +9,6 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 from mtg_synergy.causal.verb_event_map import verb_to_events
-from mtg_synergy.parse.forge_filter_parser import parse_forge_filter
 
 
 @dataclass

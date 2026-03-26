@@ -5,7 +5,6 @@ Two-pass import:
   Pass 2: Parse ability lines, resolve Execute$ references via SVars
 """
 import os
-import re
 
 CARDS_DIR_DEFAULT = os.path.join("data", "forge", "forge-gui", "res", "cardsfolder")
 
@@ -87,7 +86,8 @@ def shallow_svar_resolve(svar_name: str, svars: dict) -> dict:
     result["defined"] = fields.get("Defined")
     result["target"] = fields.get("ValidTgts") or fields.get("Tgt")
     result["amount"] = (fields.get("NumDmg") or fields.get("NumCards")
-                        or fields.get("TokenAmount") or fields.get("CounterNum"))
+                        or fields.get("TokenAmount") or fields.get("CounterNum")
+                        or fields.get("LifeAmount") or fields.get("Amount"))
     result["keyword"] = fields.get("KW")
     result["token_script"] = fields.get("TokenScript")
     result["counter_type"] = fields.get("CounterType")
@@ -185,6 +185,55 @@ def extract_ability_fields(line: str, prefix: str, svars: dict) -> dict:
     return result
 
 
+def _follow_sub_abilities(parent_ab: dict, svars: dict, ab_idx_start: int,
+                          max_depth: int = 10) -> list[dict]:
+    """Walk SubAbility$ chain from a parent ability, emitting one row per sub-verb.
+
+    Each sub-ability inherits the parent's trigger context (trigger_mode, filter, etc.)
+    so the causal graph knows the sub-effect fires in the same trigger context.
+    """
+    result = []
+    visited = set()
+    current_ref = parent_ab.get("sub_ability")
+    idx = ab_idx_start
+
+    while current_ref and current_ref not in visited and len(result) < max_depth:
+        visited.add(current_ref)
+        resolved = shallow_svar_resolve(current_ref, svars)
+        verb = resolved.get("verb")
+        if not verb:
+            break
+
+        sub_ab = {
+            "ability_type": parent_ab.get("ability_type", "A"),
+            "ability_index": idx,
+            "verb": verb,
+            # Inherit trigger context from parent
+            "trigger_mode": parent_ab.get("trigger_mode"),
+            "trigger_filter": parent_ab.get("trigger_filter"),
+            "trigger_origin": parent_ab.get("trigger_origin"),
+            "trigger_destination": parent_ab.get("trigger_destination"),
+            "trigger_phase": parent_ab.get("trigger_phase"),
+            "trigger_zones": parent_ab.get("trigger_zones"),
+            # Sub-ability's own fields
+            "target": resolved.get("target"),
+            "defined": resolved.get("defined"),
+            "amount": resolved.get("amount"),
+            "cost": None,
+            "keyword": resolved.get("keyword"),
+            "token_script": resolved.get("token_script"),
+            "counter_type": resolved.get("counter_type"),
+            "sub_ability": resolved.get("sub_ability"),
+            "unless_cost": resolved.get("unless_cost"),
+            "raw_line": f"Sub:{current_ref}:{svars.get(current_ref, '')}",
+        }
+        result.append(sub_ab)
+        idx += 1
+        current_ref = resolved.get("sub_ability")
+
+    return result
+
+
 def parse_forge_card_file(text: str) -> dict:
     """Parse a Forge card file text into structured data.
 
@@ -234,6 +283,16 @@ def parse_forge_card_file(text: str) -> dict:
         ab["ability_index"] = ab_idx
         abilities.append(ab)
         ab_idx += 1
+
+    # Pass 3: Follow SubAbility$ chains to capture secondary effects
+    sub_idx = 10000
+    additional = []
+    for ab in abilities:
+        if ab.get("sub_ability"):
+            subs = _follow_sub_abilities(ab, svars, sub_idx)
+            additional.extend(subs)
+            sub_idx += len(subs)
+    abilities.extend(additional)
 
     return {
         "name": name,

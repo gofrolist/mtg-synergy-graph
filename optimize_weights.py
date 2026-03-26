@@ -14,8 +14,6 @@ Usage:
 """
 import argparse
 import itertools
-import json
-import sys
 import time
 from collections import defaultdict
 

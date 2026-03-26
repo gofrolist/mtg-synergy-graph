@@ -1,5 +1,4 @@
 """Card swap suggestion engine with multi-layer protection."""
-import json
 import sqlite3
 
 from mtg_synergy.recommend.scoring import (
@@ -19,12 +18,14 @@ SYNERGY_PROVIDES = {
 _SYNERGY_PROVIDES = SYNERGY_PROVIDES
 
 
-def _classify_card_slot(name: str, cards: list[dict],
-                        deck_types: set = None) -> str:
+def _classify_card_slot(name: str, cards, deck_types: set = None) -> str:
     """Classify a card as 'land', 'staple', or 'spell' for swap bucketing.
 
     Lands swap with lands, staples are protected, spells swap with spells.
     Protected from cuts: removal, protection, ramp, card draw, commander's tribe.
+
+    Args:
+        cards: list[dict] or dict[str, dict] (name→card lookup for efficiency).
     """
     from card_db import CARD_DB, NAME_INDEX
 
@@ -41,11 +42,10 @@ def _classify_card_slot(name: str, cards: list[dict],
     # Provides tags that indicate synergy value (okay to keep as "spell")
     SYNERGY_PROVIDES = _SYNERGY_PROVIDES
 
-    card_data = None
-    for card in cards:
-        if card["name"] == name:
-            card_data = card
-            break
+    if isinstance(cards, dict):
+        card_data = cards.get(name)
+    else:
+        card_data = next((c for c in cards if c["name"] == name), None)
 
     if card_data:
         role = card_data.get("role", "")
@@ -132,12 +132,13 @@ def suggest_swaps(graph: dict, deck_cards: set[str], commander: str,
     score_all_candidates(cand_scores, cards, ctx, conn, verbose=False)
 
     # Score deck cards on the same scale
+    card_by_name = {c["name"]: c for c in cards}
     deck_scores = {}
     for card_name in deck_cards:
         if card_name == commander:
             deck_scores[card_name] = {"total": 999.0, "partners": 0}
             continue
-        cd = next((c for c in cards if c["name"] == card_name), None)
+        cd = card_by_name.get(card_name)
         if cd:
             features = compute_dynamic_score(card_name, cd, ctx, conn)
             deck_scores[card_name] = {"total": features["total"], "partners": 0}
@@ -165,16 +166,23 @@ def suggest_swaps(graph: dict, deck_cards: set[str], commander: str,
     # Check which deck cards have zero strategy overlap (cut priority)
     anti_synergy_cards = set()
     if active_strategies:
-        for card_name in deck_cards:
-            oid = card_oid_lookup.get(card_name, "")
-            if not oid:
-                continue
-            card_strats = {r[0] for r in conn.execute(
-                "SELECT strategy FROM card_strategies WHERE oracle_id = ? AND confidence >= 0.3",
-                (oid,)
-            ).fetchall()}
-            if not (card_strats & active_strategies):
-                anti_synergy_cards.add(card_name)
+        deck_oids_list = [oid for n in deck_cards if (oid := card_oid_lookup.get(n, ""))]
+        if deck_oids_list:
+            # Batch-load all deck card strategies in one query
+            _ph = ",".join("?" * len(deck_oids_list))
+            oid_strats = {}
+            for row in conn.execute(
+                f"SELECT oracle_id, strategy FROM card_strategies "
+                f"WHERE oracle_id IN ({_ph}) AND confidence >= 0.3",
+                deck_oids_list
+            ):
+                oid_strats.setdefault(row[0], set()).add(row[1])
+            for card_name in deck_cards:
+                oid = card_oid_lookup.get(card_name, "")
+                if not oid:
+                    continue
+                if not (oid_strats.get(oid, set()) & active_strategies):
+                    anti_synergy_cards.add(card_name)
 
     # Protect cards with high causal graph synergy with commander
     commander_protected = set()
@@ -212,8 +220,8 @@ def suggest_swaps(graph: dict, deck_cards: set[str], commander: str,
     conn.close()
 
     # Classify every deck card and candidate by slot type
-    deck_slots = {name: _classify_card_slot(name, cards, deck_types=deck_types) for name in deck_cards}
-    cand_slots = {name: _classify_card_slot(name, cards, deck_types=deck_types) for name in cand_scores}
+    deck_slots = {name: _classify_card_slot(name, card_by_name, deck_types=deck_types) for name in deck_cards}
+    cand_slots = {name: _classify_card_slot(name, card_by_name, deck_types=deck_types) for name in cand_scores}
 
     # Split into buckets: lands vs spells (protected cards excluded from cuts)
     cuttable = {"land": [], "spell": []}

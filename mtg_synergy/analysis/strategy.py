@@ -45,50 +45,6 @@ def _detect_deck_types(cards: list[dict], deck_cards: set[str],
     return dominant
 
 
-def _filter_candidates(candidates: list[dict], color_identity: set[str],
-                       db_path: str = None) -> list[dict]:
-    """Filter candidates by color identity, commander legality, and paper availability.
-
-    Uses Scryfall metadata from the DB (backfilled via tag_db.py backfill).
-    """
-    import sqlite3
-    if db_path is None:
-        from tag_db import DB_PATH
-        db_path = DB_PATH
-
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-
-    # Batch-load metadata for all candidates
-    oids = [c["oracle_id"] for c in candidates]
-    filtered = []
-
-    chunk_size = 500
-    legal_oids = set()
-    for i in range(0, len(oids), chunk_size):
-        chunk = oids[i:i + chunk_size]
-        placeholders = ",".join("?" * len(chunk))
-        rows = conn.execute(
-            f"SELECT oracle_id, color_identity, legal_commander FROM cards "
-            f"WHERE oracle_id IN ({placeholders})", chunk
-        ).fetchall()
-        for row in rows:
-            # Check commander legality
-            if not row["legal_commander"]:
-                continue
-            # Check color identity subset
-            try:
-                card_colors = set(json.loads(row["color_identity"]))
-            except (json.JSONDecodeError, TypeError):
-                card_colors = set()
-            if card_colors <= color_identity:
-                legal_oids.add(row["oracle_id"])
-
-    conn.close()
-
-    filtered = [c for c in candidates if c["oracle_id"] in legal_oids]
-    return filtered
-
 
 def _find_embedding_candidates(deck_cards: list[dict], deck_oids: set[str],
                                db_path: str, top_per_card: int = 3,
@@ -164,7 +120,7 @@ def build_from_commander(commander_name: str, top_n: int = 30):
     5. Group and display by strategy
     """
     import sqlite3
-    from tag_db import DB_PATH, get_cards_by_names
+    from tag_db import DB_PATH
 
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row

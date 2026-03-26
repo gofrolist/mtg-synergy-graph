@@ -18,29 +18,6 @@ def load_merged(path: str) -> list[dict]:
     return cards
 
 
-def show_card_synergies(graph: dict, card_name: str, top_n: int = 20):
-    """Show top synergies for a specific card."""
-    adj = graph["adjacency"]
-    edges = adj.get(card_name, [])
-
-    if not edges:
-        print(f"No synergies found for '{card_name}'")
-        # Try fuzzy match
-        matches = [k for k in adj if card_name.lower() in k.lower()]
-        if matches:
-            print(f"Did you mean: {', '.join(matches[:5])}?")
-        return
-
-    ranked = sorted(edges, key=lambda e: e["score"], reverse=True)
-
-    print(f"\nTop synergies for: {card_name}")
-    print(f"{'─' * 60}")
-    for edge in ranked[:top_n]:
-        sig = f"{edge['signals']}sig" if edge["signals"] > 1 else "1sig"
-        print(f"\n  {edge['target']}  (score: {edge['score']}, {sig})")
-        for reason in edge["reasons"][:3]:
-            print(f"    {reason}")
-
 
 def show_deck_synergies(graph: dict, deck_cards: set[str], commander: str,
                         cards: list[dict] = None, top_n: int = 30):
