@@ -153,18 +153,31 @@ def precompute_scores(conn, ground_truth, commander_info, max_commanders=None):
 
 def _rank_cards(scored_cards, weights):
     """Rank cards by weighted score. Returns [(name, score, edhrec_syn), ...]."""
+    # Check if this commander has LLM scores (conditional blending)
+    has_llm = any(f.get("llm", 0) > 0 for _, f in scored_cards)
+    conditional = weights.get("_CONDITIONAL", False)
+
     ranked = []
     for card_name, features in scored_cards:
-        total = (features.get("llm", 0) * weights.get("LLM", 0)
-                 + features.get("causal", 0) * weights.get("CAUSAL", 0)
-                 + features.get("cmdr_overlap", 0) * weights.get("CMDR_TAG_OVERLAP", 0)
-                 + features.get("deck_overlap", 0) * weights.get("DECK_TAG_OVERLAP", 0)
-                 + features.get("mechanics", 0) * weights.get("MECHANICS", 0)
-                 + features.get("strat_overlap", 0) * weights.get("STRATEGY", 0)
-                 + features.get("strat_keywords", 0) * weights.get("STRATEGY_KEYWORD", 0)
-                 + features.get("rank_score", 0) * weights.get("RANK", 0)
-                 + features.get("forge_overlap", 0) * weights.get("FORGE_DECK_OVERLAP", 0)
-                 + features.get("tower", 0) * weights.get("TOWER", 0))
+        if conditional and has_llm:
+            # LLM mode: use LLM as primary, causal as tiebreaker only
+            total = (features.get("llm", 0) * weights.get("LLM", 0)
+                     + features.get("causal", 0) * weights.get("CAUSAL_TIEBREAK", 0.1))
+        elif conditional and not has_llm:
+            # No-LLM mode: use causal as primary
+            total = features.get("causal", 0) * weights.get("CAUSAL", 0)
+        else:
+            # Standard weighted sum
+            total = (features.get("llm", 0) * weights.get("LLM", 0)
+                     + features.get("causal", 0) * weights.get("CAUSAL", 0)
+                     + features.get("cmdr_overlap", 0) * weights.get("CMDR_TAG_OVERLAP", 0)
+                     + features.get("deck_overlap", 0) * weights.get("DECK_TAG_OVERLAP", 0)
+                     + features.get("mechanics", 0) * weights.get("MECHANICS", 0)
+                     + features.get("strat_overlap", 0) * weights.get("STRATEGY", 0)
+                     + features.get("strat_keywords", 0) * weights.get("STRATEGY_KEYWORD", 0)
+                     + features.get("rank_score", 0) * weights.get("RANK", 0)
+                     + features.get("forge_overlap", 0) * weights.get("FORGE_DECK_OVERLAP", 0)
+                     + features.get("tower", 0) * weights.get("TOWER", 0))
         ranked.append((card_name, total, features.get("edhrec_syn", 0)))
     return sorted(ranked, key=lambda x: -x[1])
 
