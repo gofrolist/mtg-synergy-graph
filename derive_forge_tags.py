@@ -470,6 +470,55 @@ def derive_wants_from_cost(cost: Optional[str]) -> set[str]:
 
 
 # ---------------------------------------------------------------------------
+# Role derivation from provides tags + type_line
+# ---------------------------------------------------------------------------
+
+REMOVAL_TAGS: frozenset[str] = frozenset({
+    "destroy", "destroy-all", "counter-spell", "exile",
+    "remove", "force-sacrifice", "force-sacrifice-all",
+})
+RAMP_TAGS: frozenset[str] = frozenset({"mana", "reduce-cost"})
+DRAW_TAGS: frozenset[str] = frozenset({"draw", "dig", "scry", "surveil"})
+PROTECTION_TAGS: frozenset[str] = frozenset({
+    "fog", "prevent-damage", "regenerate", "hexproof",
+    "indestructible", "ward", "shroud", "protection-grant",
+})
+THREAT_TAGS: frozenset[str] = frozenset({
+    "token", "pump", "pump-all", "deal-damage", "deal-damage-all",
+    "put-counter", "put-counter-all",
+})
+
+
+def derive_role(provides_tags: set, type_line: str) -> str:
+    """Derive card role from provides tags and type_line.
+
+    Priority: land > removal > ramp > draw > protection > threat > utility
+    First matching role wins.
+
+    Args:
+        provides_tags: Set of provides tag strings derived from Forge abilities.
+        type_line: Card type line string (e.g. "Basic Land — Plains", "Instant").
+
+    Returns:
+        Role string: one of "land", "removal", "ramp", "draw",
+        "protection", "threat", or "utility".
+    """
+    if "Land" in type_line:
+        return "land"
+    if provides_tags & REMOVAL_TAGS:
+        return "removal"
+    if provides_tags & RAMP_TAGS:
+        return "ramp"
+    if provides_tags & DRAW_TAGS:
+        return "draw"
+    if provides_tags & PROTECTION_TAGS:
+        return "protection"
+    if provides_tags & THREAT_TAGS:
+        return "threat"
+    return "utility"
+
+
+# ---------------------------------------------------------------------------
 # DB pipeline: read forge_abilities, derive tags, write to provides
 # ---------------------------------------------------------------------------
 

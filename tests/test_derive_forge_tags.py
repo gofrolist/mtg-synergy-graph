@@ -1,4 +1,4 @@
-"""Tests for derive_forge_tags.py — verb→provides mapping (Task 1) and trigger→wants mapping (Task 2)."""
+"""Tests for derive_forge_tags.py — verb→provides mapping (Task 1), trigger→wants mapping (Task 2), and role derivation (Task 3)."""
 import pytest
 import sys
 import os
@@ -16,6 +16,7 @@ from derive_forge_tags import (
     derive_provides_from_ability,
     derive_wants_from_trigger,
     derive_wants_from_cost,
+    derive_role,
 )
 
 
@@ -587,3 +588,51 @@ def test_derive_wants_for_cost():
     assert derive_wants_from_cost("T") == set()
     assert derive_wants_from_cost(None) == set()
     assert derive_wants_from_cost("2") == set()
+
+
+# ===========================================================================
+# Task 3: role derivation tests
+# ===========================================================================
+
+def test_derive_role():
+    """Role derived from provides tags with correct priority."""
+    # Removal cards
+    assert derive_role({"destroy"}, "Instant") == "removal"
+    assert derive_role({"counter-spell"}, "Instant") == "removal"
+    assert derive_role({"destroy-all"}, "Sorcery") == "removal"
+    assert derive_role({"exile"}, "Instant") == "removal"
+    assert derive_role({"force-sacrifice"}, "Enchantment") == "removal"
+
+    # Ramp cards
+    assert derive_role({"mana"}, "Artifact") == "ramp"
+    assert derive_role({"reduce-cost"}, "Creature") == "ramp"
+
+    # Draw cards
+    assert derive_role({"draw"}, "Enchantment") == "draw"
+    assert derive_role({"surveil"}, "Creature") == "draw"
+    assert derive_role({"scry"}, "Instant") == "draw"
+    assert derive_role({"dig"}, "Sorcery") == "draw"
+
+    # Protection
+    assert derive_role({"fog"}, "Instant") == "protection"
+    assert derive_role({"hexproof", "indestructible"}, "Creature") == "protection"
+    assert derive_role({"ward"}, "Creature") == "protection"
+
+    # Lands
+    assert derive_role(set(), "Basic Land — Plains") == "land"
+    assert derive_role({"mana"}, "Land") == "land"  # land beats ramp
+
+    # Threats (has token/pump/damage but no higher-priority tags)
+    assert derive_role({"token", "pump-all"}, "Creature") == "threat"
+    assert derive_role({"deal-damage"}, "Creature") == "threat"
+    assert derive_role({"put-counter"}, "Creature") == "threat"
+
+    # Utility (fallback)
+    assert derive_role({"flash"}, "Instant") == "utility"
+    assert derive_role(set(), "Creature") == "utility"
+    assert derive_role({"changeling"}, "Creature") == "utility"
+
+    # Priority: removal beats ramp (card that destroys AND makes mana)
+    assert derive_role({"destroy", "mana"}, "Creature") == "removal"
+    # Priority: ramp beats draw
+    assert derive_role({"mana", "draw"}, "Artifact") == "ramp"
