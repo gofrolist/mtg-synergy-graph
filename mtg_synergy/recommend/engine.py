@@ -73,6 +73,39 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
         # Score all candidates with full fusion model
         score_all_candidates(candidate_scores, cards, ctx, _shared_conn)
 
+        # Enrich candidates with causal graph partner info (for display)
+        if ctx.causal_ctx:
+            # Build name→oid lookup for candidates
+            _cand_oid = {}
+            for c in cards:
+                if c["name"] in candidate_scores:
+                    _cand_oid[c["name"]] = c.get("oracle_id", "")
+            # Also check cards loaded by score_all_candidates
+            for name in candidate_scores:
+                if name not in _cand_oid:
+                    _cand_oid[name] = ctx.card_oid.get(name, "")
+
+            # Build oid→name reverse lookup for deck cards
+            _deck_oid_to_name = {}
+            for c in cards:
+                if c["name"] in deck_cards:
+                    _deck_oid_to_name[c.get("oracle_id", "")] = c["name"]
+
+            for card_name, info in candidate_scores.items():
+                card_oid = _cand_oid.get(card_name, "")
+                if not card_oid:
+                    continue
+                # Find causal edges from deck cards to this candidate
+                ctx.causal_ctx._ensure_loaded(card_oid)
+                for edge in ctx.causal_ctx._incoming.get(card_oid, []):
+                    deck_name = _deck_oid_to_name.get(edge.source)
+                    if deck_name:
+                        info["partners"].append((deck_name, edge.strength, 1))
+                for edge in ctx.causal_ctx._outgoing.get(card_oid, []):
+                    deck_name = _deck_oid_to_name.get(edge.target)
+                    if deck_name:
+                        info["partners"].append((deck_name, edge.strength, 1))
+
         # Build card metadata
         for c in cards:
             card_meta[c["name"]] = {
