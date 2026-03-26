@@ -71,8 +71,8 @@ def precompute_scores(conn, ground_truth, commander_info, max_commanders=None):
     """Precompute all per-card feature vectors for each commander.
 
     Returns: {slug: [(card_name, {feature_dict}), ...]}
-    Feature dict has: edhrec_syn, causal, llm, cmdr_overlap, mechanics,
-    strat_keywords, tribal, rank, forge_overlap, tower, deck_overlap, strat_overlap
+    Feature dict has: edhrec_syn, causal, llm, cmdr_overlap,
+    tribal, rank, forge_overlap, tower, deck_overlap, strat_overlap
     """
     from mtg_synergy.recommend.scoring import DeckContext, compute_dynamic_score
 
@@ -83,15 +83,13 @@ def precompute_scores(conn, ground_truth, commander_info, max_commanders=None):
 
     # Pre-load card data for fast lookup
     card_data_map = {}
-    card_oracle_map = {}
     for row in conn.execute(
-        "SELECT name, oracle_id, type_line, edhrec_rank, oracle_text FROM cards"
+        "SELECT name, oracle_id, type_line, edhrec_rank FROM cards"
     ):
         card_data_map[row[0]] = {
             "name": row[0], "oracle_id": row[1],
             "type_line": row[2] or "", "edhrec_rank": row[3],
         }
-        card_oracle_map[row[0]] = row[4] or ""
 
     for i, (slug, edhrec_cards) in enumerate(commanders):
         info = commander_info.get(slug)
@@ -135,8 +133,7 @@ def precompute_scores(conn, ground_truth, commander_info, max_commanders=None):
                 continue
             try:
                 features = compute_dynamic_score(
-                    card_name, cd, ctx, conn,
-                    oracle_text=card_oracle_map.get(card_name, ""))
+                    card_name, cd, ctx, conn)
                 features["edhrec_syn"] = edhrec_syn
                 scored.append((card_name, features))
             except Exception:
@@ -179,9 +176,7 @@ def _rank_cards(scored_cards, weights, fusion_mode=False):
                      + features.get("causal", 0) * weights.get("CAUSAL", 0)
                      + features.get("cmdr_overlap", 0) * weights.get("CMDR_TAG_OVERLAP", 0)
                      + features.get("deck_overlap", 0) * weights.get("DECK_TAG_OVERLAP", 0)
-                     + features.get("mechanics", 0) * weights.get("MECHANICS", 0)
                      + features.get("strat_overlap", 0) * weights.get("STRATEGY", 0)
-                     + features.get("strat_keywords", 0) * weights.get("STRATEGY_KEYWORD", 0)
                      + features.get("rank_score", 0) * weights.get("RANK", 0)
                      + features.get("forge_overlap", 0) * weights.get("FORGE_DECK_OVERLAP", 0)
                      + features.get("tower", 0) * weights.get("TOWER", 0))

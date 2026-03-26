@@ -277,7 +277,7 @@ def build_feature_matrix(pairs_by_cmdr, tower_model_path=TOWER_EDHREC_PATH, verb
 
     # 5. Commander profiles (strategies)
     from mtg_synergy.recommend.commander_profile import load_profile
-    from mtg_synergy.recommend.scoring import STRATEGY_KEYWORDS
+    from mtg_synergy.recommend.commander_profile import STRATEGY_KEYWORDS
 
     # 6. Tower model data (load once)
     print("  Loading tower model for inference...")

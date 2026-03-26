@@ -132,11 +132,9 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
         bar_len = round(pct / 5)
         bar = "█" * bar_len + "░" * (20 - bar_len)
         tower_str = f" T={info['tower_score']}" if info.get("tower_score") else ""
-        mech_str = f" M={info['mechanics_score']}" if info.get("mechanics_score") else ""
         edhrec_str = f" EDH={info['edhrec_syn']:.2f}" if info.get("edhrec_syn") else ""
         overlap_str = f" ov={info['cmdr_overlap']}" if info.get("cmdr_overlap") else ""
-        sk_str = f" sk={info['strat_keywords']}" if info.get("strat_keywords") else ""
-        print(f"\n  {pct:5.1f}% {bar} {card}{tribal}{combo}{tower_str}{mech_str}{sk_str}{edhrec_str}{overlap_str}{high_cmc}")
+        print(f"\n  {pct:5.1f}% {bar} {card}{tribal}{combo}{tower_str}{edhrec_str}{overlap_str}{high_cmc}")
         print(f"    {type_line} | CMC {cmc} | {len(partners)} partners{multi}")
         for partner, score, sigs in partners[:5]:
             sig = f"{sigs}sig" if sigs > 1 else "1sig"

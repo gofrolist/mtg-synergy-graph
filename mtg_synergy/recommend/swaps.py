@@ -277,7 +277,6 @@ def suggest_swaps(graph: dict, deck_cards: set[str], commander: str,
                     "add_top_partners": top_partners[:5],
                     "add_strategy_rel": add_info.get("strategy_rel"),
                     "add_tower": add_info.get("tower_score"),
-                    "add_mechanics": add_info.get("mechanics_score"),
                     "add_edhrec_syn": add_info.get("edhrec_syn"),
                     "net_delta": round(net, 1),
                 })

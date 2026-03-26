@@ -7,7 +7,42 @@ the commander_profiles table for O(1) lookup at recommendation time.
 import json
 import re
 from dataclasses import dataclass, field
-from mtg_synergy.recommend.scoring import STRATEGY_KEYWORDS
+# Strategy keyword maps: oracle text patterns that indicate real synergy
+# with each strategy.  Moved here from scoring.py after the scoring pipeline
+# stopped using them (superseded by forge + causal graph).
+STRATEGY_KEYWORDS = {
+    "+1/+1-counters": ["+1/+1 counter", "proliferate", "+1/+1 counters on",
+                       "counter equal", "counter among", "modify", "modified",
+                       "twice that many", "additional +1"],
+    "tokens": ["create a", "create two", "create x", "token creature", "populate", "amass"],
+    "spellslinger": ["instant or sorcery", "noncreature spell", "magecraft",
+                     "prowess", "storm", "copy a spell", "copies of"],
+    "aristocrats": ["whenever a creature dies", "whenever another creature",
+                    "sacrifice a creature", "sacrifice a permanent", "blood artist"],
+    "equipment": ["equip", "equipment enters", "equipped creature", "attach"],
+    "auras": ["enchant creature", "enchanted creature", "constellation", "aura"],
+    "enchantress": ["enchantment enters", "constellation", "whenever you cast an enchantment"],
+    "landfall": ["landfall", "whenever a land enters", "land you control enters"],
+    "reanimator": ["return target creature card from your graveyard",
+                   "put a creature card from a graveyard", "unearth", "reanimate"],
+    "mill": ["mill", "cards from the top of", "into your graveyard from your library"],
+    "self-mill": ["mill", "cards from the top of your library"],
+    "artifacts": ["artifact enters", "affinity for artifacts", "metalcraft", "improvise"],
+    "voltron": ["equipped creature gets", "enchanted creature gets", "hexproof",
+                "indestructible", "double strike", "commander damage"],
+    "lifegain": ["gain life", "lifelink", "whenever you gain life"],
+    "lifedrain": ["each opponent loses", "drain", "deals damage to each opponent"],
+    "go-wide": ["create a 1/1", "create two", "create x", "for each creature you control"],
+    "blink": ["exile target creature you control, then return",
+              "exile any number of target creatures you control",
+              "flicker", "enters, you may"],
+    "wheels": ["each player discards", "wheel", "each player draws"],
+    "proliferate": ["proliferate", "+1/+1 counter"],
+    "burn": ["deals damage to any target", "deals damage to each opponent",
+             "whenever.*deals damage"],
+    "stax": ["can't cast", "costs .* more to cast", "each opponent sacrifices",
+             "opponents can't"],
+}
 
 
 @dataclass
