@@ -353,21 +353,26 @@ def find_combos_tiered(deck_oids, db_path=None):
         ).fetchall():
             wants_by_card.setdefault(row[0], set()).add(row[1])
 
-    # --- Load abilities for deck cards (batch) ---
+    # --- Load abilities for deck cards (batch, from provides/wants) ---
     abilities_by_card = {}
     for _ci in range(0, len(deck_list), _chunk_size):
         _chunk = deck_list[_ci:_ci + _chunk_size]
         _ph = ",".join("?" * len(_chunk))
         for row in conn.execute(
-            f"SELECT oracle_id, trigger_tags, effect_tags FROM abilities WHERE oracle_id IN ({_ph})",
+            f"SELECT oracle_id, tag FROM provides WHERE oracle_id IN ({_ph})",
             _chunk
         ).fetchall():
-            oid = row[0]
+            oid, tag = row
             ab = abilities_by_card.get(oid, {"trigger_tags": set(), "effect_tags": set()})
-            if row[1]:
-                ab["trigger_tags"].update(json.loads(row[1]))
-            if row[2]:
-                ab["effect_tags"].update(json.loads(row[2]))
+            ab["effect_tags"].add(tag)
+            abilities_by_card[oid] = ab
+        for row in conn.execute(
+            f"SELECT oracle_id, tag FROM wants WHERE oracle_id IN ({_ph})",
+            _chunk
+        ).fetchall():
+            oid, tag = row
+            ab = abilities_by_card.get(oid, {"trigger_tags": set(), "effect_tags": set()})
+            ab["trigger_tags"].add(tag)
             abilities_by_card[oid] = ab
     # Remove empty entries
     abilities_by_card = {k: v for k, v in abilities_by_card.items()

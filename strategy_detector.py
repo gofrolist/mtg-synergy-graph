@@ -292,51 +292,51 @@ def detect_strategies(oracle_id, db_path=None):
 # Maps ability effect_tags/trigger_tags to strategies.
 # Only includes tags that are SPECIFIC to a strategy (not generic creature tags).
 ABILITY_STRATEGY_MAP = {
-    # Effect tags → strategies
-    "tokens-creature": ("tokens", 0.9),
-    "tokens-tribal": ("tokens", 0.9),
-    "tokens-artifact": ("tokens", 0.6),
-    "counter-placement": ("+1/+1-counters", 0.8),
-    "life-gain": ("lifegain", 0.7),
-    "life-drain": ("lifedrain", 0.7),
+    # Provides tags → strategies
+    "token": ("tokens", 0.9),
+    "token-treasure": ("treasure", 0.8),
+    "put-counter": ("+1/+1-counters", 0.8),
+    "put-counter-all": ("+1/+1-counters", 0.8),
+    "gain-life": ("lifegain", 0.7),
+    "lose-life": ("lifedrain", 0.7),
     "mill": ("mill", 0.8),
-    "graveyard-recursion": ("reanimator", 0.7),
-    "copy-effect": ("spellslinger", 0.6),
+    "reanimate": ("reanimator", 0.7),
+    "graveyard-to-hand": ("reanimator", 0.5),
+    "copy-spell": ("spellslinger", 0.6),
     "untap": ("combo", 0.5),
-    "treasure-generation": ("treasure", 0.8),
     "proliferate": ("proliferate", 0.8),
-    # Trigger tags → strategies (these are triggers, so the card CARES about the event)
-    "counter-placement-events": ("+1/+1-counters", 0.7),
-    "life-gain-events": ("lifegain", 0.6),
-    "sacrifice-events": ("aristocrats", 0.6),
-    "draw-events": ("card-draw", 0.5),
-    "landfall": ("landfall", 0.7),
+    "equip": ("equipment", 0.7),
+    "enchant": ("enchantress", 0.5),
+    # Wants tags → strategies
+    "counter-added": ("+1/+1-counters", 0.7),
+    "life-gained": ("lifegain", 0.6),
+    "sacrificed": ("aristocrats", 0.6),
+    "dies": ("aristocrats", 0.5),
+    "card-drawn": ("card-draw", 0.5),
+    "land-played": ("landfall", 0.7),
+    "enters-battlefield": ("blink", 0.4),
 }
 
 
 def _strategies_from_abilities(oracle_id, db_path):
-    """Derive strategies from a card's parsed abilities.
+    """Derive strategies from a card's Forge-derived tags.
 
     Returns dict of {strategy_name: confidence}.
     """
     conn = sqlite3.connect(db_path)
-    abilities = conn.execute(
-        "SELECT trigger_tags, effect_tags FROM abilities WHERE oracle_id = ?",
-        (oracle_id,)
-    ).fetchall()
+    tags = set()
+    for row in conn.execute("SELECT tag FROM provides WHERE oracle_id = ?", (oracle_id,)):
+        tags.add(row[0])
+    for row in conn.execute("SELECT tag FROM wants WHERE oracle_id = ?", (oracle_id,)):
+        tags.add(row[0])
     conn.close()
 
     strategies = {}
-    for trigger_tags_json, effect_tags_json in abilities:
-        for tags_json in (trigger_tags_json, effect_tags_json):
-            if not tags_json:
-                continue
-            tags = json.loads(tags_json)
-            for tag in tags:
-                if tag in ABILITY_STRATEGY_MAP:
-                    strat_name, conf = ABILITY_STRATEGY_MAP[tag]
-                    if strat_name not in strategies or strategies[strat_name] < conf:
-                        strategies[strat_name] = conf
+    for tag in tags:
+        if tag in ABILITY_STRATEGY_MAP:
+            strat_name, conf = ABILITY_STRATEGY_MAP[tag]
+            if strat_name not in strategies or strategies[strat_name] < conf:
+                strategies[strat_name] = conf
 
     return strategies
 
@@ -383,13 +383,6 @@ def populate_card_strategies(db_path=None):
     for oid, tag in conn.execute("SELECT oracle_id, tag FROM wants").fetchall():
         wants_by_card.setdefault(oid, set()).add(tag)
 
-    # Load parsed abilities (trigger_tags, effect_tags per card)
-    abilities_by_card = {}
-    for oid, ttags, etags in conn.execute(
-        "SELECT oracle_id, trigger_tags, effect_tags FROM abilities"
-    ).fetchall():
-        abilities_by_card.setdefault(oid, []).append((ttags, etags))
-
     # Load EDHREC data
     edhrec = _load_edhrec_strategies()
 
@@ -417,18 +410,12 @@ def populate_card_strategies(db_path=None):
                 if strategy not in strategies or strategies[strategy] < confidence:
                     strategies[strategy] = confidence
 
-        # Ability-based strategy derivation
-        card_abilities = abilities_by_card.get(oracle_id, [])
-        for trigger_tags, effect_tags in card_abilities:
-            for tags_json in (trigger_tags, effect_tags):
-                if not tags_json:
-                    continue
-                tags = json.loads(tags_json)
-                for tag in tags:
-                    if tag in ABILITY_STRATEGY_MAP:
-                        strat_name, conf = ABILITY_STRATEGY_MAP[tag]
-                        if strat_name not in strategies or strategies[strat_name] < conf:
-                            strategies[strat_name] = conf
+        # Ability-based strategy derivation (from provides/wants tags)
+        for tag in (card_provides | card_wants):
+            if tag in ABILITY_STRATEGY_MAP:
+                strat_name, conf = ABILITY_STRATEGY_MAP[tag]
+                if strat_name not in strategies or strategies[strat_name] < conf:
+                    strategies[strat_name] = conf
 
         # Oracle text tribal detection
         oracle_lower = (oracle_text or "").lower()
