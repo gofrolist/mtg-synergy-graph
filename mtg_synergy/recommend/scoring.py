@@ -218,12 +218,10 @@ def compute_dynamic_score(card_name: str, card_data: dict, ctx: DeckContext,
         if fusion is not None:
             import numpy as np
             tower_prob = _get_fusion_score(fusion, ctx.cmdr_oid, oid)
-            features_10 = np.array([[
+            features = np.array([[
                 tower_prob,
                 causal,
                 forge_overlap,
-                0.0,  # was cmdr_tag_overlap, removed (causal covers this)
-                0.0,  # was strat_keyword_hits, removed
                 1.0 if tribal_match else 0.0,
                 edhrec_syn,
                 math.log10(max(rank, 1)),
@@ -233,7 +231,7 @@ def compute_dynamic_score(card_name: str, card_data: dict, ctx: DeckContext,
             import warnings
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", UserWarning)
-                fusion_score = float(fusion["gbm"].predict(features_10, raw_score=True)[0])
+                fusion_score = float(fusion["gbm"].predict(features, raw_score=True)[0])
 
     # --- Combine ---
     if fusion_score > 0:

@@ -35,8 +35,7 @@ TOWER_EDHREC_PATH = os.path.join(DATA_DIR, "tower_model_edhrec.npz")
 
 FEATURE_NAMES = [
     "tower_prob", "causal_score", "forge_deck_overlap",
-    "cmdr_tag_overlap", "strategy_keyword", "tribal_match",
-    "edhrec_synergy", "edhrec_rank", "cmc", "is_creature",
+    "tribal_match", "edhrec_synergy", "edhrec_rank", "cmc", "is_creature",
 ]
 
 
@@ -304,7 +303,7 @@ def build_feature_matrix(pairs_by_cmdr, tower_model_path=TOWER_EDHREC_PATH, verb
             all_rows.append((cmdr_oid, card_oid, label))
 
     N = len(all_rows)
-    X = np.zeros((N, 10), dtype=np.float32)
+    X = np.zeros((N, len(FEATURE_NAMES)), dtype=np.float32)
     y = np.zeros(N, dtype=np.float32)
     cmdr_ids = np.zeros(N, dtype=np.int32)
 
@@ -443,14 +442,7 @@ def build_feature_matrix(pairs_by_cmdr, tower_model_path=TOWER_EDHREC_PATH, verb
                 len(card_has & cmdr_forge_hints) + len(card_hints & cmdr_forge_has)
             )
 
-            # F3: cmdr_tag_overlap — removed (zeroed out)
-            X[row_idx, 3] = 0.0
-
-            # F4: strategy_keyword — removed (zeroed out)
-            kw_hits = 0
-            X[row_idx, 4] = float(kw_hits)
-
-            # F5: tribal_match
+            # F3: tribal_match
             tribal = 0.0
             if cmdr_subtypes and "creature" in card_type_line.lower():
                 card_subtypes_raw = set()
@@ -464,22 +456,22 @@ def build_feature_matrix(pairs_by_cmdr, tower_model_path=TOWER_EDHREC_PATH, verb
                         pass
                 if cmdr_subtypes & card_subtypes_raw:
                     tribal = 1.0
-            X[row_idx, 5] = tribal
+            X[row_idx, 3] = tribal
 
-            # F6: edhrec_synergy
+            # F4: edhrec_synergy
             edh_syn = 0.0
             if cmdr_slug and card_name:
                 edh_syn = edhrec_syn_map.get((cmdr_slug, card_name), 0.0)
-            X[row_idx, 6] = edh_syn
+            X[row_idx, 4] = edh_syn
 
-            # F7: edhrec_rank (log10)
-            X[row_idx, 7] = math.log10(max(meta.get("edhrec_rank", 50000), 1))
+            # F5: edhrec_rank (log10)
+            X[row_idx, 5] = math.log10(max(meta.get("edhrec_rank", 50000), 1))
 
-            # F8: cmc
-            X[row_idx, 8] = float(meta.get("cmc", 0.0))
+            # F6: cmc
+            X[row_idx, 6] = float(meta.get("cmc", 0.0))
 
-            # F9: is_creature
-            X[row_idx, 9] = 1.0 if "Creature" in card_type_line else 0.0
+            # F7: is_creature
+            X[row_idx, 7] = 1.0 if "Creature" in card_type_line else 0.0
 
             y[row_idx] = float(labels[j])
             cmdr_ids[row_idx] = cmdr_to_idx[cmdr_oid]

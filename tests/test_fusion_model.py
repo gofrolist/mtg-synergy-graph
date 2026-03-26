@@ -40,9 +40,9 @@ def test_tower_binary_output_range():
 
 
 def test_feature_names():
-    """Feature list should have exactly 10 named features."""
+    """Feature list should have exactly 8 named features."""
     from train_fusion_model import FEATURE_NAMES
-    assert len(FEATURE_NAMES) == 10
+    assert len(FEATURE_NAMES) == 8
     assert FEATURE_NAMES[0] == "tower_prob"
     assert "causal_score" in FEATURE_NAMES
     assert "is_creature" in FEATURE_NAMES
