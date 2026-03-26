@@ -233,7 +233,7 @@ def compute_dynamic_score(card_name: str, card_data: dict, ctx: DeckContext,
             import warnings
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", UserWarning)
-                fusion_score = float(fusion["gbm"].predict_proba(features_10)[0][1])
+                fusion_score = float(fusion["gbm"].predict(features_10, raw_score=True)[0])
 
     # --- Combine ---
     if fusion_score > 0:
@@ -450,11 +450,12 @@ def tower_prefilter(conn, cmdr_oid: str, color_identity: set,
     deck_cards = deck_cards or set()
     cmdr_ci = color_identity or set()
 
-    # CI filter: find all legal cards
+    # CI filter: find all legal non-token cards
     legal = []
     for row in conn.execute(
         "SELECT oracle_id, name, color_identity FROM cards "
-        "WHERE color_identity IS NOT NULL"
+        "WHERE color_identity IS NOT NULL "
+        "AND type_line NOT LIKE '%Token%'"
     ):
         oid, name, ci_json = row
         if name in deck_cards or oid == cmdr_oid:
