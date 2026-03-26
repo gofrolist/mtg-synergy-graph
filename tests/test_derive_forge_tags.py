@@ -738,3 +738,57 @@ def test_cards_without_forge_data_skipped():
     from derive_forge_tags import derive_all
     stats = derive_all(db_path, dry_run=True)
     assert stats["cards_skipped"] >= 0
+
+
+# ===========================================================================
+# Task 5: ACTION_EVENT_BRIDGES tests
+# ===========================================================================
+
+def test_action_event_bridges():
+    """Bridges connect provides actions to wants events."""
+    from mtg_synergy.constants import ACTION_EVENT_BRIDGES
+    assert ("draw", "card-drawn") in ACTION_EVENT_BRIDGES
+    assert ("token", "token-created") in ACTION_EVENT_BRIDGES
+    assert ("token", "enters-battlefield") in ACTION_EVENT_BRIDGES
+    assert ("deal-damage", "damage-done") in ACTION_EVENT_BRIDGES
+    assert ("gain-life", "life-gained") in ACTION_EVENT_BRIDGES
+    assert ("sacrifice-outlet", "dies") in ACTION_EVENT_BRIDGES
+    assert ("sacrifice-outlet", "sacrificed") in ACTION_EVENT_BRIDGES
+    assert ("destroy", "dies") in ACTION_EVENT_BRIDGES
+    assert ("put-counter", "counter-added") in ACTION_EVENT_BRIDGES
+    assert ("mill", "enters-graveyard") in ACTION_EVENT_BRIDGES
+    assert ("discard", "discarded") in ACTION_EVENT_BRIDGES
+    assert ("proliferate", "counter-added") in ACTION_EVENT_BRIDGES
+    # All bridges have weight 1.0
+    for key, weight in ACTION_EVENT_BRIDGES.items():
+        assert weight == 1.0
+
+
+def test_provides_satisfies_want_new_vocab():
+    """_provides_satisfies_want works with new Forge vocabulary."""
+    from mtg_synergy.constants import _provides_satisfies_want
+    # Exact match
+    assert _provides_satisfies_want("draw", "draw")
+    # Bridge match
+    assert _provides_satisfies_want("draw", "card-drawn")
+    assert _provides_satisfies_want("destroy", "dies")
+    assert _provides_satisfies_want("token", "enters-battlefield")
+    assert _provides_satisfies_want("sacrifice-outlet", "sacrificed")
+    # No match
+    assert not _provides_satisfies_want("draw", "dies")
+    assert not _provides_satisfies_want("mill", "attacks")
+    assert not _provides_satisfies_want("pump", "card-drawn")
+
+
+def test_trigger_effect_bridges_new_vocab():
+    """TRIGGER_EFFECT_BRIDGES uses new Forge tag vocabulary."""
+    from mtg_synergy.constants import TRIGGER_EFFECT_BRIDGES
+    assert "token" in TRIGGER_EFFECT_BRIDGES
+    assert "enters-battlefield" in TRIGGER_EFFECT_BRIDGES["token"]
+    assert "destroy" in TRIGGER_EFFECT_BRIDGES
+    assert "dies" in TRIGGER_EFFECT_BRIDGES["destroy"]
+    assert "sacrifice-outlet" in TRIGGER_EFFECT_BRIDGES
+    assert "dies" in TRIGGER_EFFECT_BRIDGES["sacrifice-outlet"]
+    # Old vocabulary should NOT be present
+    assert "tokens-creature" not in TRIGGER_EFFECT_BRIDGES
+    assert "spot-removal" not in TRIGGER_EFFECT_BRIDGES
