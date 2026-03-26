@@ -534,19 +534,44 @@ def compute_dynamic_score(card_name: str, card_data: dict, ctx: DeckContext,
         cand_hints = ctx.forge_card_hints.get(card_name, set())
         forge_overlap = len(cand_has & ctx.forge_cmdr_hints) + len(cand_hints & ctx.forge_cmdr_has)
 
+    # --- Fusion model (hybrid tower + GBM) ---
+    fusion_score = 0.0
+    from mtg_synergy.config import USE_FUSION_MODEL
+    if USE_FUSION_MODEL:
+        fusion = _load_fusion_model()
+        if fusion is not None:
+            import numpy as np
+            tower_prob = _get_fusion_score(fusion, ctx.cmdr_oid, oid)
+            features_10 = np.array([[
+                tower_prob,
+                causal,
+                forge_overlap,
+                cmdr_overlap,
+                strat_keyword_hits,
+                1.0 if tribal_match else 0.0,
+                edhrec_syn,
+                math.log10(max(rank, 1)),
+                card_data.get("cmc", 0),
+                1.0 if is_creature else 0.0,
+            ]])
+            fusion_score = float(fusion["gbm"].predict_proba(features_10)[0][1])
+
     # --- Combine ---
-    total = (llm * w.get("LLM", 0)
-             + tower * w["TOWER"]
-             + min(mech, 10) * w["MECHANICS"]
-             + cmdr_overlap * w["CMDR_TAG_OVERLAP"]
-             + deck_overlap * w["DECK_TAG_OVERLAP"]
-             + strat_overlap * w["STRATEGY"]
-             + strat_keyword_hits * w["STRATEGY_KEYWORD"]
-             + tribal_adj
-             + rank_score * w["RANK"]
-             + edhrec_syn * w["EDHREC_SYNERGY"]
-             + causal * w.get("CAUSAL", 0)
-             + forge_overlap * w.get("FORGE_DECK_OVERLAP", 0))
+    if fusion_score > 0:
+        total = fusion_score * w.get("FUSION", 10.0)
+    else:
+        total = (llm * w.get("LLM", 0)
+                 + tower * w["TOWER"]
+                 + min(mech, 10) * w["MECHANICS"]
+                 + cmdr_overlap * w["CMDR_TAG_OVERLAP"]
+                 + deck_overlap * w["DECK_TAG_OVERLAP"]
+                 + strat_overlap * w["STRATEGY"]
+                 + strat_keyword_hits * w["STRATEGY_KEYWORD"]
+                 + tribal_adj
+                 + rank_score * w["RANK"]
+                 + edhrec_syn * w["EDHREC_SYNERGY"]
+                 + causal * w.get("CAUSAL", 0)
+                 + forge_overlap * w.get("FORGE_DECK_OVERLAP", 0))
 
     return {
         "total": total,
@@ -562,6 +587,7 @@ def compute_dynamic_score(card_name: str, card_data: dict, ctx: DeckContext,
         "edhrec_syn": round(edhrec_syn, 3) if edhrec_syn > 0 else 0,
         "causal": round(causal, 1),
         "forge_overlap": forge_overlap,
+        "fusion": round(fusion_score, 4),
     }
 
 
@@ -646,6 +672,8 @@ def score_all_candidates(candidate_scores: dict, cards: list, ctx: DeckContext,
             info["edhrec_syn"] = features["edhrec_syn"]
         if features["strat_keywords"] > 0:
             info["strat_keywords"] = features["strat_keywords"]
+        if features["fusion"] > 0:
+            info["fusion_score"] = features["fusion"]
         scored += 1
 
     if verbose:
@@ -709,3 +737,80 @@ def _get_tower_score(ctx: DeckContext, card_oid: str) -> float:
         return float(np.clip(score, 1, 10)[0])
     except Exception:
         return 5.0
+
+
+# === Fusion model singleton (hybrid tower + LightGBM) ===
+
+_fusion_cache = None
+
+
+def _load_fusion_model(tower_path=None, gbm_path=None):
+    """Load fusion model (tower + GBM). Returns None on any failure.
+
+    Caches the result as a singleton (like _load_tower_model).
+    When tower_path/gbm_path are specified (for testing), bypasses the cache.
+    """
+    global _fusion_cache
+    if tower_path is None and gbm_path is None and _fusion_cache is not None:
+        return _fusion_cache
+
+    from mtg_synergy.config import TOWER_EDHREC_PATH, FUSION_MODEL_PATH
+
+    tp = tower_path or TOWER_EDHREC_PATH
+    gp = gbm_path or FUSION_MODEL_PATH
+
+    try:
+        import numpy as np
+        import joblib
+
+        if not os.path.exists(str(tp)) or not os.path.exists(str(gp)):
+            return None
+
+        tower_data = np.load(str(tp))
+        gbm = joblib.load(str(gp))
+
+        from train_tower_model import (load_embeddings, load_structural_features,
+                                        compute_struct_features, forward)
+
+        emb, oid_list, oid_to_idx = load_embeddings()
+        sf_data = load_structural_features()
+
+        result = {
+            "tower": {k: tower_data[k] for k in tower_data.files},
+            "gbm": gbm,
+            "emb": emb,
+            "oid_to_idx": oid_to_idx,
+            "sf_data": sf_data,
+            "compute_sf": compute_struct_features,
+            "forward": forward,
+            "struct_means": tower_data["struct_means"],
+            "struct_stds": tower_data["struct_stds"],
+        }
+        if tower_path is None and gbm_path is None:
+            _fusion_cache = result
+        return result
+    except Exception:
+        return None
+
+
+def _get_fusion_score(fusion, cmdr_oid, card_oid):
+    """Get tower probability for a card (Stage 1). Returns 0.0 if unavailable."""
+    import numpy as np
+
+    oid_to_idx = fusion["oid_to_idx"]
+    cmdr_idx = oid_to_idx.get(cmdr_oid)
+    card_idx = oid_to_idx.get(card_oid)
+    if cmdr_idx is None or card_idx is None:
+        return 0.0
+
+    emb = fusion["emb"]
+    sf = fusion["compute_sf"](cmdr_oid, card_oid, *fusion["sf_data"])
+    sf_norm = (sf - fusion["struct_means"]) / (fusion["struct_stds"] + 1e-8)
+
+    cmdr_emb = emb[cmdr_idx:cmdr_idx + 1]
+    card_emb = emb[card_idx:card_idx + 1]
+    sf_batch = sf_norm.reshape(1, -1)
+
+    pred, _ = fusion["forward"](fusion["tower"], cmdr_emb, card_emb, sf_batch)
+    # Sigmoid to get probability (tower was trained with BCE, raw logits output)
+    return float(1.0 / (1.0 + np.exp(-float(pred[0]))))

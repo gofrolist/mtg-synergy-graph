@@ -64,3 +64,23 @@ def test_leave_commander_out_split():
     for _, test_idx in splits:
         all_test.update(test_idx)
     assert all_test == set(range(len(cmdr_ids)))
+
+
+def test_load_fusion_model_returns_none_when_missing(tmp_path):
+    """Fusion model loader should return None gracefully when files missing."""
+    from mtg_synergy.recommend.scoring import _load_fusion_model
+    result = _load_fusion_model(tower_path=tmp_path / "nope.npz", gbm_path=tmp_path / "nope.lgb")
+    assert result is None
+
+
+def test_load_fusion_model_returns_dict_when_present():
+    """Fusion model loader should return dict with expected keys."""
+    from mtg_synergy.recommend.scoring import _load_fusion_model
+    tower_path = os.path.join("data", "tower_model_edhrec.npz")
+    gbm_path = os.path.join("data", "fusion_model.lgb")
+    if not os.path.exists(tower_path) or not os.path.exists(gbm_path):
+        pytest.skip("Fusion model not trained yet")
+    result = _load_fusion_model()
+    assert result is not None
+    assert "tower" in result
+    assert "gbm" in result
