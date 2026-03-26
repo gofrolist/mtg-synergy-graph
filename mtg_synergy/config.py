@@ -15,6 +15,11 @@ EMBEDDINGS_NPY = DATA_DIR / "card2vec_embeddings.npy"
 EMBEDDINGS_INDEX = DATA_DIR / "card2vec_index.json"
 TOWER_MODEL_PATH = DATA_DIR / "tower_model.npz"
 
+# Fusion model (hybrid tower + LightGBM)
+USE_FUSION_MODEL = True
+TOWER_EDHREC_PATH = DATA_DIR / "tower_model_edhrec.npz"
+FUSION_MODEL_PATH = DATA_DIR / "fusion_model.lgb"
+
 # ── Dynamic scoring weights (feature-based, computed at recommendation time) ─
 SCORING_WEIGHTS = {
     "LLM": 10.0,                # Pre-scored LLM synergy (1-10 scale, best single signal Recall@100=53%)
@@ -31,6 +36,7 @@ SCORING_WEIGHTS = {
     "CAUSAL": 2.0,              # Causal interaction graph (trigger/feeds edges)
     "FORGE_DECK_OVERLAP": 3.0,  # Forge DeckHas/DeckHints human-curated tag overlap
     "EDHREC_INJECTION_THRESHOLD": 0.25,
+    "FUSION": 10.0,             # Hybrid tower + LightGBM fusion model
 }
 
 # ── Legacy scoring weights (kept for backward compat with score_synergies.py) ─
