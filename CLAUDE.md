@@ -9,14 +9,24 @@ MTG Synergy Graph — a tool for analyzing Magic: The Gathering EDH/Commander de
 ### Signal Architecture (recommendation pipeline)
 
 ```
-For any commander, recommendations use 5 signal layers:
+For any commander, recommendations use 6 signal layers:
 
-1. LLM SCORES (best single signal, Recall@100=53%)
+0. FUSION MODEL (PRIMARY signal for 871 EDHREC commanders, $0 cost)
+   - Two-stage hybrid: retrained tower (AUC=0.979) + LightGBM (CV AUC=0.999)
+   - Tower: binary P(card in deck) from 768-dim embeddings + 12 structural features
+   - GBM: 10 features (tower_prob, causal, forge, tags, tribal, edhrec_synergy, rank, cmc, etc.)
+   - Trained on 871 EDHREC commanders × ~260k pairs (positive + 3:1 negative)
+   - Recall@100=89.4% on training commanders (replaces LLM scoring at $0)
+   - Held-out generalization: ~25% Recall@100 on unseen commanders
+   - CAUSAL GRAPH is the fallback for unknown commanders
+   - train_fusion_model.py → data/tower_model_edhrec.npz + data/fusion_model.lgb
+
+1. LLM SCORES (legacy, 33 commanders only — superseded by fusion for EDHREC commanders)
    - Pre-scored via score_synergies.py (OpenAI gpt-5.4-mini or local gemma3:12b)
    - 33 commanders scored, ~180k pairs
-   - Integer 1-10 scale, PRIMARY ranking signal when available
+   - Integer 1-10 scale, was primary ranking signal before fusion model
 
-2. CAUSAL GRAPH (deterministic, $0 cost, any commander)
+2. CAUSAL GRAPH (deterministic, $0 cost, any commander — fallback for non-EDHREC commanders)
    - Oracle text parser → AST → verb resolvers → StateChanges
    - 7.6M IDF-weighted causal edges: triggers, feeds, amplifies, enables, tribal
    - IDF weighting: rare events (goblin_enters) get 3x, common (creature_enters) get 0.12x
@@ -25,9 +35,9 @@ For any commander, recommendations use 5 signal layers:
    - Commander relevance, effect impact, strategy alignment, bidirectional bonus
    - Lazy-loaded per card (0.1s init, <50MB memory)
    - 15,000 cards parsed (up from 5,000), 30,961 abilities
-   - Top-30 overlap: 11.8/30 standalone (vs LLM=15.9/30)
+   - Recall@100=64.2% standalone
 
-3. TOWER MODEL (instant, any commander, trained on LLM scores)
+3. TOWER MODEL (legacy, trained on LLM scores — superseded by fusion tower)
    - Two-tower neural net: commander_embedding × card_embedding → synergy
    - Trained on 99k LLM-scored pairs, corr=0.75 with LLM scores
    - Scores ALL cards for any commander in <100ms
@@ -102,7 +112,15 @@ python3 extract_mechanics.py --card "Krenko, Mob Boss"  # Single card
 python3 extract_mechanics.py --stats        # Check coverage
 python3 extract_mechanics.py --validate     # Test matching quality
 
-# === NEW: Tower model training ===
+# === Fusion model (hybrid tower + LightGBM) ===
+python3 train_fusion_model.py                  # Full pipeline: tower + features + GBM (~5 min)
+python3 train_fusion_model.py --tower-only     # Stage 1 only: retrain tower (~2 min)
+python3 train_fusion_model.py --features-only  # Build + inspect 10-feature matrix
+python3 train_fusion_model.py --feature-importance  # Print GBM feature importance
+python3 train_fusion_model.py --holdout-eval   # True generalization (train 80% / test 20%)
+python3 train_fusion_model.py --holdout-eval --drop-feature edhrec_synergy  # Ablation
+
+# === Legacy tower model training (superseded by fusion) ===
 python3 train_tower_model.py               # Train from LLM scores (~45s)
 python3 train_tower_model.py --predict "Any Commander"  # Score all cards (<100ms)
 python3 train_tower_model.py --stats       # Check training data
@@ -126,6 +144,7 @@ python3 build_graph.py --rebuild                 # Build causal interaction grap
 python3 build_graph.py --stats                   # Graph stats
 python3 optimize_weights.py --quick              # Optimize weights against 502 EDHREC commanders
 python3 optimize_weights.py --evaluate           # Evaluate current weights (Recall@100)
+python3 optimize_weights.py --fusion --evaluate  # Evaluate fusion model (Recall@100)
 
 # Tests
 python3 -m pytest tests/ -v                    # Run all 326 tests
@@ -154,14 +173,14 @@ Scryfall API → download_cards.py → data/oracle_cards.json (36k cards)
                                         ↓
                     score_synergies.py → synergy_scores table (99k pairs, 33 commanders)
                                         ↓
-                    train_tower_model.py → data/tower_model.npz
-                                        ↓
                     oracle_parser.py → parsed_abilities table (5000 cards, 10635 abilities)
                                         ↓
                     build_graph.py → interaction_edges table (7.6M IDF-weighted causal edges)
                                         ↓
+                    train_fusion_model.py → data/tower_model_edhrec.npz + data/fusion_model.lgb
+                                        ↓
                               synergy_graph.py --deck <name>
-                              (5-layer scoring: LLM → tower → mechanics → causal → graph)
+                              (fusion model primary → causal fallback → tags)
 ```
 
 ### New-set update workflow
@@ -174,10 +193,10 @@ python3 tag_db.py backfill && fix-tribal && rebuild-registry  # 4. Enrich
 python3 ability_parser.py                               # 5. Parse abilities
 python3 strategy_detector.py --populate                 # 6. Strategies
 python3 extract_mechanics.py --batch 1000               # 7. Extract mechanics for new cards
-python3 score_synergies.py --new-cards data/new.json    # 8. Score vs known commanders (~$0.10)
-python3 train_tower_model.py                            # 9. Retrain tower model (~45s)
-python3 oracle_parser.py --parse-all --top 5000         # 10. Parse oracle text
-python3 build_graph.py --rebuild                        # 11. Rebuild causal graph
+python3 oracle_parser.py --parse-all --top 5000         # 8. Parse oracle text
+python3 build_graph.py --rebuild                        # 9. Rebuild causal graph
+python3 fetch_edhrec_decks.py --refresh                 # 10. Refresh EDHREC data (if new set)
+python3 train_fusion_model.py                           # 11. Retrain fusion model (~5 min, $0)
 ```
 
 ### DB Schema (data/tags.db)
@@ -248,15 +267,38 @@ Pre-computed commander × card synergy scores on 1-10 scale:
 - **Resume-safe**: Every batch committed immediately, re-run picks up where it stopped
 - **Batch API**: `--batch-api` flag for 50% cheaper OpenAI processing
 
-### Tower Model (data/tower_model.npz)
+### Fusion Model (data/tower_model_edhrec.npz + data/fusion_model.lgb)
 
-Two-tower neural network trained on LLM synergy scores:
-- **Input**: Commander embedding (768-dim) × Card embedding (768-dim) + 10 structural features
-- **Architecture**: Projection (768→128) → element-wise product → MLP (138→64→32→1)
-- **Training**: 99k pairs from 33 commanders, Adam optimizer, 100 epochs, ~45s
+Two-stage hybrid model trained on EDHREC avg deck membership:
+- **Stage 1 — Tower** (data/tower_model_edhrec.npz):
+  - Same architecture as legacy tower (768→128 projection, MLP 140→128→64→32→1)
+  - Binary cross-entropy loss, sigmoid output P(card in deck)
+  - Trained on 871 EDHREC commanders × ~260k pairs (65k positive + 195k negative)
+  - AUC=0.979, accuracy=93.4%
+- **Stage 2 — LightGBM** (data/fusion_model.lgb):
+  - 10 features: tower_prob, causal_score, forge_deck_overlap, cmdr_tag_overlap,
+    strategy_keyword, tribal_match, edhrec_synergy, edhrec_rank, cmc, is_creature
+  - 5-fold leave-commander-out CV, mean AUC=0.999
+  - Feature importance: edhrec_rank > tower_prob > edhrec_synergy > cmc
+- **Performance on EDHREC commanders**: Recall@100=89.4% (replaces LLM at $0)
+- **Held-out generalization**: ~25% Recall@100 on unseen commanders (model over-relies
+  on edhrec_synergy for known commanders; causal graph fallback handles unknown)
+- **Ablation**: Dropping edhrec_synergy barely changes generalization (~24→26% Recall@100);
+  edhrec_rank and tower_prob carry most of the generalizable signal
+- **Training**: `python3 train_fusion_model.py` (~5 min)
+- **Evaluation**: `python3 optimize_weights.py --fusion --evaluate`
+- **Holdout eval**: `python3 train_fusion_model.py --holdout-eval`
+- **Feature ablation**: `python3 train_fusion_model.py --holdout-eval --drop-feature edhrec_synergy`
+
+### Legacy Tower Model (data/tower_model.npz)
+
+Two-tower neural network trained on LLM synergy scores (superseded by fusion model):
+- **Input**: Commander embedding (768-dim) × Card embedding (768-dim) + 12 structural features
+- **Architecture**: Projection (768→128) → element-wise product → MLP (140→128→64→32→1)
+- **Training**: 99k pairs from 33 commanders, Adam optimizer, 150 epochs, ~45s
 - **Performance**: correlation=0.75, MAE=1.01 with LLM scores
 - **Inference**: <100ms for ALL cards for any commander
-- **Training data filter**: Excludes auto-scored and spellbook-boosted pairs
+- **Status**: Weight=0 in SCORING_WEIGHTS (disabled), kept for backward compat
 
 ### Recommendation Pipeline (synergy_graph.py --recommend)
 
@@ -265,14 +307,13 @@ Two-tower neural network trained on LLM synergy scores:
 2. Inject LLM≥7 candidates from synergy_scores (bypasses graph candidate pool)
 3. Inject EDHREC≥0.25 synergy candidates from edhrec_card_synergy (DFC-aware)
 4. Inject mechanics≥1.5 candidates from card_mechanics
-5. Score candidates: tag graph × tribal × strategy × quality × CMC × popularity × affinity
-6. Apply mechanics boost: max(graph_score, mechanics_as_graph)
-7. Apply LLM/tower scoring with EDHREC tiebreaker:
-   LLM × 1000 + EDHREC_syn × 200 + overlap × 20 + tower × 10 + rank × 0.1
-   (EDHREC synergy is tiebreaker only — cannot override LLM judgement)
-   - Category boost: infrastructure cards (removal/draw/ramp/protection) with EDHREC support get small bonus
-8. Unscored cards with EDHREC: estimated score = 4.0 + edhrec_syn × 6.0
-9. Sort and output top 30
+5. Score all candidates with compute_dynamic_score():
+   a. Compute 12 base features (tags, strategy, tribal, causal, forge, rank, etc.)
+   b. If USE_FUSION_MODEL and model loaded:
+      → Run tower P(in deck) + build 10-feature vector → GBM predict_proba
+      → total = fusion_score × FUSION_weight (PRIMARY signal)
+   c. Else (fallback): weighted sum of 12 base features
+6. Sort and output top 30
 ```
 
 ### Swap System (synergy_graph.py --swaps)
@@ -350,7 +391,8 @@ Suggests card swaps with multi-layer protection:
 | `score_synergies.py` | LLM synergy scoring (OpenAI + Ollama + Batch API) |
 | `extract_mechanics.py` | Structured mechanics extraction from oracle text |
 | `mechanics_matcher.py` | Filter-aware event chain matching engine |
-| `train_tower_model.py` | Two-tower neural synergy model training |
+| `train_fusion_model.py` | Hybrid fusion model: tower retrain + LightGBM + holdout eval |
+| `train_tower_model.py` | Legacy two-tower neural synergy model training (superseded by fusion) |
 | `compare_edhrec.py` | Fast EDHREC comparison tool (parallel, cached) |
 | `batch_tagger.py` | Card tagging (provides/wants/role) via LLM |
 | `ability_parser.py` | Deterministic oracle text parser |
@@ -360,7 +402,7 @@ Suggests card swaps with multi-layer protection:
 | `reclassify_tags.py` | Re-map generic provides/wants tags to specific sub-tags (~41k rows) |
 | `oracle_parser.py` | Deterministic oracle text parser CLI (parse-all, card, stats) |
 | `build_graph.py` | Causal interaction graph builder CLI (rebuild, stats) |
-| `optimize_weights.py` | Weight optimization + Recall@K evaluation (--evaluate, --no-llm, --novelty, --deck) |
+| `optimize_weights.py` | Weight optimization + Recall@K evaluation (--evaluate, --fusion, --no-llm, --novelty, --deck) |
 | `fetch_edhrec_decks.py` | Fetch EDHREC average decklists for top 1000 commanders |
 
 ## Key Conventions
@@ -375,6 +417,6 @@ Suggests card swaps with multi-layer protection:
 - Local scoring uses gemma3:12b via Ollama (best quality/speed local model)
 - Qwen3 models need `think: false` in Ollama payload to disable thinking
 - Fine-tuning uses `.venv` with unsloth + torch (Python 3.12, not system Python 3.14)
-- Tests: 326 tests in `tests/`
+- Tests: 439 tests in `tests/`
 - Spellbook combo boosts must check color identity (fixed: 364 wrong-color boosts deleted)
 - Generic parent tags (`creature-pump`, `creature-board`, `creature-etb`, `combat-events`, `token-generation`, `evasion-grant`) no longer exist; sub-tags are the canonical vocabulary

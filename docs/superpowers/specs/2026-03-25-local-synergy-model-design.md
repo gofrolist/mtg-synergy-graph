@@ -130,15 +130,37 @@ python3 train_fusion_model.py                  # Retrain both stages (<5 min)
 
 ## Success Criteria
 
-| Metric | Floor (causal) | Ceiling (LLM) | Target |
-|--------|---------------|---------------|--------|
-| Synergy Recall@100 | 64.2% | 72.5% | >70% |
-| Avg Deck Recall@100 | 53.5% | 57.1% | >56% |
-| Synergy Recall@30 | 25.3% | ~35% | >33% |
-| Training time | N/A | N/A | <5 min |
-| Inference time | N/A | N/A | <1ms/card |
-| Coverage | 100% | 4% | 100% |
-| Cost per set update | $0 | $0.50/cmdr | $0 |
+| Metric | Floor (causal) | Ceiling (LLM) | Target | **Achieved** |
+|--------|---------------|---------------|--------|------------|
+| Avg Deck Recall@100 | 52.1% | 57.1% | >56% | **89.4%** (training cmdrs) |
+| Synergy Recall@100 | 64.2% | 72.5% | >70% | **96.6%** (training cmdrs) |
+| Training time | N/A | N/A | <5 min | **~5 min** |
+| Inference time | N/A | N/A | <1ms/card | **<1ms/card** |
+| Coverage | 100% | 4% | 100% | **871 commanders** |
+| Cost per set update | $0 | $0.50/cmdr | $0 | **$0** |
+
+### Generalization (held-out evaluation)
+
+Training on 80% of commanders (693), evaluating on 20% (174):
+
+| Configuration | Avg Deck Recall@100 | Synergy Recall@100 | Test AUC |
+|---|---|---|---|
+| All 10 features | 22.0% | 13.0% | 0.9991 |
+| Drop `edhrec_synergy` | 24.2% | 11.4% | 0.9860 |
+| Drop `edhrec_synergy` + `edhrec_rank` | 26.2% | 15.0% | 0.9852 |
+
+**Key insight**: The model strongly outperforms on known EDHREC commanders (89.4%) but
+generalizes poorly to unseen commanders (~25%). The `edhrec_synergy` feature dominates for
+known commanders but adds nothing for unknown ones. Dropping it slightly improves generalization.
+
+**Practical implication**: Fusion model is primary for 871 EDHREC commanders. Causal graph
+(64.2% Recall@100) remains the fallback for the ~2500 commanders without EDHREC data.
+
+### Model metrics
+
+- Tower (Stage 1): AUC=0.979, accuracy=93.4%, precision=84.7%, recall=89.7%
+- GBM (Stage 2): 5-fold CV mean AUC=0.999
+- Feature importance: edhrec_rank (8954) > tower_prob (8302) > edhrec_synergy (7702) > cmc (3365)
 
 ## Prerequisite Data (verified available)
 
@@ -148,12 +170,13 @@ python3 train_fusion_model.py                  # Retrain both stages (<5 min)
 - Card embeddings: 768-dim for 34k cards (data/embeddings.npy)
 - Commander profiles: 3,438 with auto-detected strategies
 
-## Implementation Tasks
+## Implementation Tasks (all completed)
 
-1. Retrain tower on EDHREC membership (binary cross-entropy, sigmoid output)
-2. Build 10-feature matrix for 871 commanders (positive + negative sampling)
-3. Train LightGBM with 5-fold leave-commander-out CV
-4. Wire fusion model into scoring.py as primary signal (FUSION weight=10.0)
-5. Add `--fusion` evaluation mode to optimize_weights.py
-6. Evaluate on dual metrics (synergy recall + avg deck recall)
-7. Build retrain pipeline in train_fusion_model.py
+1. ~~Retrain tower on EDHREC membership (binary cross-entropy, sigmoid output)~~
+2. ~~Build 10-feature matrix for 871 commanders (positive + negative sampling)~~
+3. ~~Train LightGBM with 5-fold leave-commander-out CV~~
+4. ~~Wire fusion model into scoring.py as primary signal (FUSION weight=10.0)~~
+5. ~~Add `--fusion` evaluation mode to optimize_weights.py~~
+6. ~~Evaluate on dual metrics (synergy recall + avg deck recall)~~
+7. ~~Build retrain pipeline in train_fusion_model.py~~
+8. ~~Add held-out evaluation + feature ablation~~
