@@ -554,7 +554,10 @@ def compute_dynamic_score(card_name: str, card_data: dict, ctx: DeckContext,
                 card_data.get("cmc", 0),
                 1.0 if is_creature else 0.0,
             ]])
-            fusion_score = float(fusion["gbm"].predict_proba(features_10)[0][1])
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                fusion_score = float(fusion["gbm"].predict_proba(features_10)[0][1])
 
     # --- Combine ---
     if fusion_score > 0:

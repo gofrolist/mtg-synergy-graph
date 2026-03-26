@@ -416,7 +416,10 @@ def apply_llm_scoring(candidate_scores, cards, deck_cards,
                 meta.get("cmc", 0),
                 1.0 if "Creature" in meta.get("type_line", "") else 0.0,
             ]])
-            score = float(fusion["gbm"].predict_proba(features_10)[0][1])
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                score = float(fusion["gbm"].predict_proba(features_10)[0][1])
             info["total"] = score * 10000  # scale to match LLM formula range
             info["fusion_score"] = round(score, 3)
     elif llm_scores or model_scores:
