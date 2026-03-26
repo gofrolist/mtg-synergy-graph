@@ -792,3 +792,23 @@ def test_trigger_effect_bridges_new_vocab():
     # Old vocabulary should NOT be present
     assert "tokens-creature" not in TRIGGER_EFFECT_BRIDGES
     assert "spot-removal" not in TRIGGER_EFFECT_BRIDGES
+
+
+# ===========================================================================
+# Task 6: swaps.py tag vocabulary tests
+# ===========================================================================
+
+def test_swaps_tag_sets_use_forge_vocabulary():
+    """SYNERGY_PROVIDES and INFRASTRUCTURE_PROVIDES use Forge tag names."""
+    from mtg_synergy.recommend.swaps import SYNERGY_PROVIDES
+    # New Forge vocabulary tags present
+    assert "token" in SYNERGY_PROVIDES
+    assert "put-counter" in SYNERGY_PROVIDES
+    assert "sacrifice-outlet" in SYNERGY_PROVIDES
+    assert "pump" in SYNERGY_PROVIDES
+    assert "mill" in SYNERGY_PROVIDES
+    # Old LLM tags should NOT be present
+    assert "tokens-creature" not in SYNERGY_PROVIDES
+    assert "counter-placement" not in SYNERGY_PROVIDES
+    assert "pump-lord" not in SYNERGY_PROVIDES
+    assert "sacrifice-payoff" not in SYNERGY_PROVIDES

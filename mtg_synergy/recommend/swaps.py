@@ -3,17 +3,16 @@ import json
 import sqlite3
 
 from mtg_synergy.recommend.engine import _deck_card_scores, _candidate_scores
+from mtg_synergy.recommend.scoring import DeckContext, score_all_candidates
 from mtg_synergy.combos.detector import compute_strategy_relevance
 
 # Provides tags that indicate synergy value (okay to keep as "spell").
-# Uses sub-tags instead of parent tags (token-generation, creature-pump removed).
+# Uses Forge-derived vocabulary (verb→provides mapping from derive_forge_tags.py).
 SYNERGY_PROVIDES = {
-    "tokens-creature", "tokens-artifact", "tokens-tribal",
-    "pump-lord", "pump-anthem", "pump-combat", "pump-self",
-    "counter-placement", "board-wide-counter-placement",
-    "counter-amplification", "trigger-doubling",
-    "card-draw-payoff", "etb-payoff", "sacrifice-payoff", "goblin-tribal",
-    "combat-trigger",
+    "token", "token-treasure", "put-counter", "put-counter-all",
+    "sacrifice-outlet", "pump", "pump-all", "deal-damage",
+    "gain-life", "lose-life", "mill", "reanimate", "copy-permanent",
+    "proliferate", "amass", "connive", "explore", "animate",
 }
 
 # Alias used inside _classify_card_slot to keep the function readable
@@ -33,9 +32,10 @@ def _classify_card_slot(name: str, cards: list[dict],
 
     # Provides tags that indicate infrastructure function (should be protected)
     INFRASTRUCTURE_PROVIDES = {
-        "targeted-removal", "board-wide-removal", "board-protection",
-        "reactive-protection", "mana-acceleration", "card-draw",
-        "graveyard-recursion", "indestructible-grant",
+        "destroy", "destroy-all", "counter-spell", "exile", "remove",
+        "force-sacrifice", "mana", "reduce-cost", "draw",
+        "dig", "scry", "surveil", "fog", "prevent-damage",
+        "hexproof", "indestructible", "ward",
     }
 
     # Provides tags that indicate synergy value (okay to keep as "spell")
@@ -91,16 +91,40 @@ def _classify_card_slot(name: str, cards: list[dict],
 def suggest_swaps(graph: dict, deck_cards: set[str], commander: str,
                   cards: list[dict], top_n: int = 15,
                   active_strategies: set = None, db_path: str = None,
-                  deck_types: set = None) -> list[dict]:
+                  deck_types: set = None, edhrec_slug: str = None,
+                  color_identity: set = None) -> list[dict]:
     """Suggest swaps: pair weak deck cards with strong non-deck candidates.
 
     Lands swap with lands, spells swap with spells. Commander and staple
     infrastructure (mana rocks, removal, protection) are never cut.
-    Strategy-weighted: candidates matching active strategies score higher,
-    deck cards with zero strategy overlap are prioritized for cutting.
+    Uses the same dynamic feature-based scoring as recommend.
     """
     deck_scores = _deck_card_scores(graph, deck_cards)
-    cand_scores = _candidate_scores(graph, deck_cards)
+    cand_scores = _candidate_scores(graph, deck_cards, commander=commander)
+
+    # Apply dynamic scoring to candidates (same as recommend)
+    if commander and db_path:
+        import sqlite3 as _sq_swap
+        try:
+            _sc = _sq_swap.connect(db_path)
+            ctx = DeckContext(_sc, commander, deck_cards, cards,
+                              deck_types=deck_types, active_strategies=active_strategies,
+                              edhrec_slug=edhrec_slug)
+            score_all_candidates(cand_scores, cards, ctx, _sc, verbose=False)
+
+            # Also score deck cards so cut/add comparison uses the same scale
+            from mtg_synergy.recommend.scoring import compute_dynamic_score
+            for card_name, info in deck_scores.items():
+                if card_name == commander:
+                    continue
+                cd = next((c for c in cards if c["name"] == card_name), None)
+                if cd:
+                    features = compute_dynamic_score(card_name, cd, ctx, _sc)
+                    info["total"] = features["total"]
+
+            _sc.close()
+        except Exception:
+            pass
 
     # Build card metadata for strategy/anti-synergy checks
     card_oid_lookup = {}
@@ -112,26 +136,14 @@ def suggest_swaps(graph: dict, deck_cards: set[str], commander: str,
             "cmc": c.get("cmc", 0),
         }
 
-    # Apply strategy relevance to candidate scores
+    # Annotate strategy relevance for display (not used in scoring —
+    # LLM scoring already accounts for card quality)
     if active_strategies and db_path:
         for card_name, info in cand_scores.items():
             oid = card_oid_lookup.get(card_name, "")
             if oid:
                 rel = compute_strategy_relevance(oid, active_strategies, db_path)
-                info["total"] *= rel
                 info["strategy_rel"] = rel
-
-    # Apply mana cost penalty to candidates
-    deck_cmc_values = [card_meta[n]["cmc"] for n in deck_cards
-                       if n in card_meta and "Land" not in card_meta[n].get("type_line", "")
-                       and card_meta[n]["cmc"]]
-    deck_avg_cmc = sum(deck_cmc_values) / max(len(deck_cmc_values), 1)
-    for card_name, info in cand_scores.items():
-        meta = card_meta.get(card_name, {})
-        cmc = meta.get("cmc", 0) or 0
-        if cmc > deck_avg_cmc + 3:
-            penalty = max(0.3, 1.0 - 0.15 * (cmc - deck_avg_cmc - 3))
-            info["total"] *= penalty
 
     # Check which deck cards have zero strategy overlap (cut priority)
     anti_synergy_cards = set()
@@ -264,6 +276,9 @@ def suggest_swaps(graph: dict, deck_cards: set[str], commander: str,
                     "add_multi_sig": add_info["multi_sig"],
                     "add_top_partners": top_partners[:5],
                     "add_strategy_rel": add_info.get("strategy_rel"),
+                    "add_tower": add_info.get("tower_score"),
+                    "add_mechanics": add_info.get("mechanics_score"),
+                    "add_edhrec_syn": add_info.get("edhrec_syn"),
                     "net_delta": round(net, 1),
                 })
                 break
@@ -296,11 +311,14 @@ def show_swaps(swaps: list[dict], top_n: int = 15):
         strat_rel = swap.get("add_strategy_rel")
         strat_str = f" [strat×{strat_rel:.1f}]" if strat_rel and strat_rel != 1.0 else ""
 
+        tower_str = f" T={swap['add_tower']}" if swap.get("add_tower") else ""
+        mech_str = f" M={swap['add_mechanics']}" if swap.get("add_mechanics") else ""
+        edh_str = f" EDH={swap['add_edhrec_syn']:.2f}" if swap.get("add_edhrec_syn") else ""
         print(f"\n  {pct:5.1f}% {bar}{slot_label}")
-        print(f"    OUT: {swap['cut']:<35} (synergy: {swap['cut_score']:>5.1f}, "
+        print(f"    OUT: {swap['cut']:<35} (score: {swap['cut_score']:>7.1f}, "
               f"{swap['cut_partners']} partners){anti}")
-        print(f"     IN: {swap['add']:<35} (synergy: {swap['add_score']:>5.1f}, "
-              f"{swap['add_partners']} partners){strat_str}")
+        print(f"     IN: {swap['add']:<35} (score: {swap['add_score']:>7.1f}, "
+              f"{swap['add_partners']} partners){strat_str}{tower_str}{mech_str}{edh_str}")
         if swap["add_top_partners"]:
             top = swap["add_top_partners"][:3]
             partners_str = ", ".join(
