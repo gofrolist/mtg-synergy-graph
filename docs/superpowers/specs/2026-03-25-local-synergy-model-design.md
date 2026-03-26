@@ -1,7 +1,7 @@
-# Local Synergy Model — Design Spec (Next Session)
+# Local Synergy Model — Design Spec
 
 **Date**: 2026-03-25
-**Goal**: Replace LLM scoring with a local model that scores any commander × card pair instantly, retrains automatically when Forge updates with new sets. Zero ongoing cost.
+**Goal**: Replace LLM scoring with a hybrid local model (tower + LightGBM) that scores any commander × card pair instantly, retrains when Forge updates. Zero ongoing cost.
 
 ## Why
 
@@ -19,87 +19,141 @@
 | Tower model (current) | ~65% | ~53% | $0 | 100% |
 | Conditional blend | 64.4% | 53.4% | $0 | 100% |
 
-## Architecture
+## Architecture: Two-Stage Hybrid
 
-Train a model that takes (commander_features, card_features) → synergy_score.
+### Stage 1 — Tower Model (retrained)
 
-### Training Data
-- **Positive labels**: EDHREC average deck cards (829 commanders × ~75 cards = 62k positive pairs)
-- **Negative labels**: Random cards NOT in the average deck (sample 3:1 negative:positive)
-- **Features per card**: Forge verb/trigger profile, DeckHas/DeckHints tags, embeddings, type line, subtypes, keywords
-- **Features per commander**: Same as card features + commander profile (strategies, tribal type, events produced/consumed)
+Retrain the existing two-tower neural net on EDHREC avg deck membership.
 
-### Model Options
+- **Architecture**: Same as current (768→128 projection per tower, element-wise product, MLP head) with 12 structural features unchanged (MLP input: 128+12=140)
+- **Loss**: Binary cross-entropy (was MSE on LLM scores)
+- **Output**: Sigmoid probability P(card belongs in commander's deck), range 0-1
+- **Training data**: 871 EDHREC commanders, from `edhrec_average_decks` table (columns: commander_slug, card_name, category)
+  - Positive: cards in average decklist (~75 per commander, ~65k total)
+  - Negative: 3:1 random cards filtered by color identity, excluding basics/tokens
+  - Total: ~260k training pairs
+- **Purpose**: Captures semantic embedding similarity — "this card's text is conceptually related to what this commander does"
+- **Output file**: `data/tower_model_edhrec.npz`
 
-**Option A: Gradient Boosting (XGBoost/LightGBM)**
-- Input: handcrafted features (tag overlap, Forge verb compatibility, tribal match, etc.)
-- Fast to train (<1 min), interpretable, easy to retrain
-- Pro: works well with sparse features, no GPU needed
-- Con: limited by feature engineering quality
+### Stage 2 — LightGBM Classifier
 
-**Option B: Neural Tower Model (improved)**
-- Input: embeddings (768-dim) + structural features
-- Current tower architecture but trained on EDHREC avg deck membership instead of causal scores
-- Pro: learns from raw embeddings, less feature engineering
-- Con: narrow score distribution issue (current model outputs 3.0-5.3)
+Gradient boosting on tower probability + 9 handcrafted features.
 
-**Option C: Hybrid — Gradient Boosting on Neural Features**
-- Tower model produces an embedding-based score
-- Gradient boosting combines tower score + all 12 handcrafted features
-- Best of both: neural generalization + feature engineering precision
+- **Library**: LightGBM (fast, handles missing values natively, no GPU)
+- **Target**: Binary — card in EDHREC avg deck (same labels as tower)
+- **Output**: `predict_proba()` probability used for final ranking
+- **Hyperparameters**: `num_leaves=63, learning_rate=0.05, n_estimators=500, early_stopping=50`
+- **Output file**: `data/fusion_model.lgb`
 
-### Recommended: Option C (Hybrid)
+### Feature Vector (10 features per commander×card pair)
 
-1. Retrain tower on EDHREC avg deck membership (binary: in deck or not)
-2. Tower outputs a probability (0-1) — fixes the narrow distribution issue
-3. Gradient boosting takes: tower_prob + causal + tag_overlap + Forge_deck + mechanics + ... → final score
-4. Train on 829 commanders, validate with cross-validation (leave commanders out)
+| # | Feature | Source | Notes |
+|---|---------|--------|-------|
+| 1 | `tower_prob` | Stage 1 tower output | P(in deck), 0-1 |
+| 2 | `causal_score` | interaction_edges (9.2M Forge-native edges) | IDF-weighted |
+| 3 | `forge_deck_overlap` | forge_deck_tags (14k tags) | Bidirectional: `len(card_has & cmdr_hints) + len(card_hints & cmdr_has)` |
+| 4 | `cmdr_tag_overlap` | provides/wants tables (105k+89k) | Card ↔ commander overlap |
+| 5 | `strategy_keyword` | Oracle text pattern match via `STRATEGY_KEYWORDS` dict in scoring.py (~80 patterns across 20 strategies) | Count of matching keywords for deck's detected strategies |
+| 6 | `tribal_match` | Creature type line overlap | Binary |
+| 7 | `edhrec_synergy` | edhrec_card_synergy (230k pairs) | 0 if missing |
+| 8 | `edhrec_rank` | cards table | log10(popularity rank) |
+| 9 | `cmc` | cards table | Converted mana cost |
+| 10 | `is_creature` | cards table | Binary |
 
-### Retrain Pipeline
+**Dropped features** (redundant post-Forge migration):
+- `mechanics_score` — overlaps with causal_score (both detect trigger→effect chains)
+- `strategy_overlap` — from card_strategies, uses old tag vocabulary
+
+### Inference Flow
 
 ```
-New set released
-  → Forge community updates card scripts (~2 weeks)
-  → python3 import_forge.py --download && --import
-  → python3 build_graph.py --forge
-  → python3 train_tower_model.py --forge-causal
-  → python3 train_fusion_model.py
-  → All commanders scored in <10 seconds
+recommend_cards(commander)
+  → tower.predict(commander_emb, all_card_embs)    # <100ms, 34k cards
+  → take top 2000 by tower_prob (+ any with causal_score > threshold as safety net)
+  → build feature matrix for candidates
+  → gbm.predict_proba(features)                    # <10ms, 2000 cards
+  → rank by GBM probability, return top 30
 ```
 
-### Success Criteria
+### Cross-Validation
 
-| Metric | Current (causal) | Target |
-|--------|-----------------|--------|
-| Synergy Recall@100 | 64.2% | >70% |
-| Avg Deck Recall@100 | 53.5% | >56% |
-| Synergy Recall@30 | 25.3% | >33% |
-| Training time | N/A | <5 min |
-| Inference time | <1ms/card | <1ms/card |
-| Coverage | 100% | 100% |
-| Cost per set update | $0 | $0 |
+- **Method**: 5-fold leave-commander-group-out
+- Train on 80% of commanders (697), test on 20% (174)
+- Tests generalization to unseen commanders (the real use case)
+- EDHREC synergy as a feature: no leakage because CV split is by commander (each commander's synergy scores are computed independently by EDHREC). For commanders outside the 871 training set, `edhrec_synergy=0` — the model must handle this gracefully via LightGBM's native missing-value support
 
-### Evaluation
+## Training Approach
 
-- 829 commanders with both EDHREC synergy scores and average decklists
-- Dual metric: Average Deck Recall + Synergy Recall
-- Cross-validation: train on 80% of commanders, test on 20%
-- Compare against: LLM-only (72.5% synergy ceiling), causal-only (64.2% floor)
+GBM trained on binary deck membership (Approach 3 from brainstorming):
+- **Target**: 1 if card in EDHREC avg deck, 0 if not (clean labels)
+- **EDHREC synergy as input feature**, not target — GBM learns "high synergy → likely in deck" without being enslaved to noisy scores
+- **Negative sampling**: 3:1 ratio, color-identity filtered, excluding basics/tokens
 
-## Prerequisite Data (already available)
+## Integration
 
-- 871 EDHREC commanders: synergy scores (231k pairs) + average decklists (66k cards)
-- Forge: 32k cards with structured effects, 12.7k DeckHas/DeckHints tags
-- Forge causal graph: 9.2M edges, 135 trigger modes
-- Card embeddings: 768-dim for 34k cards
+### New files
+- `train_fusion_model.py` — trains both stages, constructs feature matrix, outputs tower + GBM models
+- `data/tower_model_edhrec.npz` — retrained tower weights
+- `data/fusion_model.lgb` — LightGBM model
+
+### Modified files
+- `mtg_synergy/recommend/scoring.py` — add fusion model loading + inference, replaces both `compute_dynamic_score()` (recommendations) and `apply_llm_scoring()` (swaps) paths
+- `mtg_synergy/config.py` — add `USE_FUSION_MODEL = True`, `FUSION` weight (10.0)
+- `optimize_weights.py` — add `--fusion` evaluation mode
+
+### Unchanged
+- `synergy_graph.py`, `cli.py` — call `recommend_cards()` internally
+- `compare_edhrec.py` — already uses recommendation pipeline
+- All Forge/causal/tag code — untouched, features read at inference time
+
+### Fallback behavior
+- If `data/fusion_model.lgb` or `data/tower_model_edhrec.npz` missing/corrupt: fall back to current causal+tags pipeline (same pattern as existing `_load_tower_model()` which returns `None` on failure)
+- If `lightgbm` not installed: skip fusion scoring, use causal fallback
+
+### New dependency
+- `lightgbm` (pip install, no GPU, ~2MB)
+
+### Feature matrix construction time budget
+- 871 CausalContext instantiations × ~0.1s each = ~87s
+- Tag/Forge/embedding lookups: ~30s (bulk-loaded)
+- Total feature matrix build: ~2 min (within <5 min budget with training)
+
+## Retrain Pipeline (new set update)
+
+```bash
+python3 fetch_edhrec_decks.py --refresh        # Refresh EDHREC avg decklists + synergy (if new set)
+python3 import_forge.py --download --import    # Update Forge data
+python3 build_graph.py --rebuild               # Rebuild causal graph
+python3 train_fusion_model.py                  # Retrain both stages (<5 min)
+# All 3438 commanders scored in <10 seconds
+```
+
+## Success Criteria
+
+| Metric | Floor (causal) | Ceiling (LLM) | Target |
+|--------|---------------|---------------|--------|
+| Synergy Recall@100 | 64.2% | 72.5% | >70% |
+| Avg Deck Recall@100 | 53.5% | 57.1% | >56% |
+| Synergy Recall@30 | 25.3% | ~35% | >33% |
+| Training time | N/A | N/A | <5 min |
+| Inference time | N/A | N/A | <1ms/card |
+| Coverage | 100% | 4% | 100% |
+| Cost per set update | $0 | $0.50/cmdr | $0 |
+
+## Prerequisite Data (verified available)
+
+- 871 EDHREC commanders: synergy scores (230k pairs) + average decklists
+- Forge: 59k abilities, 14k DeckHas/DeckHints tags
+- Forge causal graph: 9.2M IDF-weighted edges
+- Card embeddings: 768-dim for 34k cards (data/embeddings.npy)
 - Commander profiles: 3,438 with auto-detected strategies
-- Full 12-feature evaluator in optimize_weights.py
 
-## Implementation Tasks (estimated)
+## Implementation Tasks
 
-1. Retrain tower on EDHREC membership (binary classification)
-2. Build gradient boosting feature matrix (829 cmdr × ~250 cards)
-3. Train + cross-validate fusion model
-4. Wire into scoring.py as new primary signal
-5. Build retrain pipeline script
-6. Evaluate on dual metrics
+1. Retrain tower on EDHREC membership (binary cross-entropy, sigmoid output)
+2. Build 10-feature matrix for 871 commanders (positive + negative sampling)
+3. Train LightGBM with 5-fold leave-commander-out CV
+4. Wire fusion model into scoring.py as primary signal (FUSION weight=10.0)
+5. Add `--fusion` evaluation mode to optimize_weights.py
+6. Evaluate on dual metrics (synergy recall + avg deck recall)
+7. Build retrain pipeline in train_fusion_model.py
