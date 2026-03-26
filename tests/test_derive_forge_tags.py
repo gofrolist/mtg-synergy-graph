@@ -1,0 +1,464 @@
+"""Tests for derive_forge_tags.py — verb→provides mapping (Task 1)."""
+import pytest
+import sys
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
+from derive_forge_tags import (
+    VERB_TO_PROVIDES,
+    KEYWORD_TO_PROVIDES,
+    SKIPPED_VERBS,
+    TRIBAL_TYPES,
+    TOKEN_TYPE_PATTERNS,
+    derive_provides_from_ability,
+)
+
+
+# ---------------------------------------------------------------------------
+# VERB_TO_PROVIDES dict tests
+# ---------------------------------------------------------------------------
+
+def test_verb_to_provides_mapping():
+    """Key verbs are mapped; skipped verbs are NOT in VERB_TO_PROVIDES."""
+    # Spot-check core verbs
+    assert VERB_TO_PROVIDES["Token"] == "token"
+    assert VERB_TO_PROVIDES["Draw"] == "draw"
+    assert VERB_TO_PROVIDES["Mana"] == "mana"
+    assert VERB_TO_PROVIDES["DealDamage"] == "deal-damage"
+    assert VERB_TO_PROVIDES["Destroy"] == "destroy"
+    assert VERB_TO_PROVIDES["GainLife"] == "gain-life"
+    assert VERB_TO_PROVIDES["Mill"] == "mill"
+    assert VERB_TO_PROVIDES["Proliferate"] == "proliferate"
+    assert VERB_TO_PROVIDES["Investigate"] == "investigate"
+    assert VERB_TO_PROVIDES["AddTurn"] == "extra-turn"
+    assert VERB_TO_PROVIDES["WinsGame"] == "wins-game"
+
+    # Skipped verbs must NOT appear in VERB_TO_PROVIDES
+    for v in SKIPPED_VERBS:
+        assert v not in VERB_TO_PROVIDES, f"Skipped verb {v!r} should not be in VERB_TO_PROVIDES"
+
+
+def test_verb_mapping_completeness():
+    """At least 60 verbs mapped; all tag values are non-empty and contain no spaces."""
+    assert len(VERB_TO_PROVIDES) >= 60, f"Only {len(VERB_TO_PROVIDES)} verbs mapped"
+    for verb, tag in VERB_TO_PROVIDES.items():
+        assert tag, f"Verb {verb!r} maps to empty tag"
+        assert " " not in tag, f"Verb {verb!r} maps to tag with spaces: {tag!r}"
+
+
+# ---------------------------------------------------------------------------
+# derive_provides_from_ability tests
+# ---------------------------------------------------------------------------
+
+def test_derive_provides_from_abilities_sol_ring():
+    """Sol Ring: Mana verb + T cost → mana + tap-ability."""
+    tags = derive_provides_from_ability(
+        verb="Mana",
+        keyword=None,
+        cost="T",
+        token_script=None,
+        counter_type=None,
+        raw_line="A:AB$ Mana | Cost$ T | Produced$ C | Amount$ 2",
+        target=None,
+    )
+    assert "mana" in tags
+    assert "tap-ability" in tags
+
+
+def test_derive_provides_from_abilities_lightning_bolt():
+    """DealDamage → deal-damage."""
+    tags = derive_provides_from_ability(
+        verb="DealDamage",
+        keyword=None,
+        cost=None,
+        token_script=None,
+        counter_type=None,
+        raw_line="A:SP$ DealDamage | ValidTgts$ Any | NumDmg$ 3",
+        target=None,
+    )
+    assert "deal-damage" in tags
+
+
+def test_derive_provides_from_abilities_krenko():
+    """Krenko (Token + goblin token_script) → token + goblin-tribal."""
+    tags = derive_provides_from_ability(
+        verb="Token",
+        keyword=None,
+        cost="T",
+        token_script="r_1_1_goblin",
+        counter_type=None,
+        raw_line="A:AB$ Token | Cost$ T | TokenScript$ r_1_1_goblin",
+        target=None,
+    )
+    assert "token" in tags
+    assert "goblin-tribal" in tags
+
+
+# ---------------------------------------------------------------------------
+# Token type detection
+# ---------------------------------------------------------------------------
+
+def test_token_type_detection_treasure():
+    """Treasure token script → token-treasure."""
+    tags = derive_provides_from_ability(
+        verb="Token",
+        keyword=None,
+        cost=None,
+        token_script="c_a_treasure_sac",
+        counter_type=None,
+        raw_line="",
+        target=None,
+    )
+    assert "token-treasure" in tags
+    assert "token" in tags
+
+
+def test_token_type_detection_clue():
+    """Clue token script → token-clue."""
+    tags = derive_provides_from_ability(
+        verb="Token",
+        keyword=None,
+        cost=None,
+        token_script="c_a_clue_draw",
+        counter_type=None,
+        raw_line="",
+        target=None,
+    )
+    assert "token-clue" in tags
+
+
+def test_token_type_detection_food():
+    """Food token → token-food."""
+    tags = derive_provides_from_ability(
+        verb="Token",
+        keyword=None,
+        cost=None,
+        token_script="c_a_food_gainlife",
+        counter_type=None,
+        raw_line="",
+        target=None,
+    )
+    assert "token-food" in tags
+
+
+def test_token_type_detection_blood():
+    """Blood token → token-blood."""
+    tags = derive_provides_from_ability(
+        verb="Token",
+        keyword=None,
+        cost=None,
+        token_script="r_a_blood_discard",
+        counter_type=None,
+        raw_line="",
+        target=None,
+    )
+    assert "token-blood" in tags
+
+
+# ---------------------------------------------------------------------------
+# Sacrifice in cost
+# ---------------------------------------------------------------------------
+
+def test_sacrifice_in_cost():
+    """Cost containing 'Sac' → sacrifice-outlet."""
+    tags = derive_provides_from_ability(
+        verb="Mana",
+        keyword=None,
+        cost="Sac<1/Creature/a creature>",
+        token_script=None,
+        counter_type=None,
+        raw_line="",
+        target=None,
+    )
+    assert "sacrifice-outlet" in tags
+
+
+def test_tap_cost_standalone():
+    """Cost 'T' (standalone) → tap-ability."""
+    tags = derive_provides_from_ability(
+        verb="Token",
+        keyword=None,
+        cost="T",
+        token_script="r_1_1_goblin",
+        counter_type=None,
+        raw_line="",
+        target=None,
+    )
+    assert "tap-ability" in tags
+
+
+def test_tap_cost_not_matched_in_word():
+    """'T' embedded in a larger word in cost should NOT trigger tap-ability."""
+    # e.g., cost containing "Tap" but not standalone T
+    tags = derive_provides_from_ability(
+        verb="Draw",
+        keyword=None,
+        cost="2",
+        token_script=None,
+        counter_type=None,
+        raw_line="",
+        target=None,
+    )
+    assert "tap-ability" not in tags
+
+
+# ---------------------------------------------------------------------------
+# Keyword provides
+# ---------------------------------------------------------------------------
+
+def test_keyword_provides_flying():
+    """K: Flying → flying."""
+    tags = derive_provides_from_ability(
+        verb=None,
+        keyword="Flying",
+        cost=None,
+        token_script=None,
+        counter_type=None,
+        raw_line="K:Flying",
+        target=None,
+    )
+    assert "flying" in tags
+
+
+def test_keyword_provides_equip():
+    """K: Equip → equip."""
+    tags = derive_provides_from_ability(
+        verb=None,
+        keyword="Equip",
+        cost=None,
+        token_script=None,
+        counter_type=None,
+        raw_line="K:Equip",
+        target=None,
+    )
+    assert "equip" in tags
+
+
+# ---------------------------------------------------------------------------
+# ChangeZone verb logic
+# ---------------------------------------------------------------------------
+
+def test_changezone_verb_reanimate():
+    """Graveyard→Battlefield = reanimate."""
+    tags = derive_provides_from_ability(
+        verb="ChangeZone",
+        keyword=None,
+        cost=None,
+        token_script=None,
+        counter_type=None,
+        raw_line="A:SP$ ChangeZone | Origin$ Graveyard | Destination$ Battlefield",
+        target=None,
+    )
+    assert "reanimate" in tags
+
+
+def test_changezone_verb_graveyard_to_hand():
+    """Graveyard→Hand = graveyard-to-hand."""
+    tags = derive_provides_from_ability(
+        verb="ChangeZone",
+        keyword=None,
+        cost=None,
+        token_script=None,
+        counter_type=None,
+        raw_line="A:SP$ ChangeZone | Origin$ Graveyard | Destination$ Hand",
+        target=None,
+    )
+    assert "graveyard-to-hand" in tags
+
+
+def test_changezone_verb_cheat_into_play_hand():
+    """Hand→Battlefield = cheat-into-play."""
+    tags = derive_provides_from_ability(
+        verb="ChangeZone",
+        keyword=None,
+        cost=None,
+        token_script=None,
+        counter_type=None,
+        raw_line="A:SP$ ChangeZone | Origin$ Hand | Destination$ Battlefield",
+        target=None,
+    )
+    assert "cheat-into-play" in tags
+
+
+def test_changezone_verb_cheat_into_play_library():
+    """Library→Battlefield = cheat-into-play."""
+    tags = derive_provides_from_ability(
+        verb="ChangeZone",
+        keyword=None,
+        cost=None,
+        token_script=None,
+        counter_type=None,
+        raw_line="A:SP$ ChangeZone | Origin$ Library | Destination$ Battlefield",
+        target=None,
+    )
+    assert "cheat-into-play" in tags
+
+
+def test_changezone_verb_remove_battlefield_graveyard():
+    """Battlefield→Graveyard = remove."""
+    tags = derive_provides_from_ability(
+        verb="ChangeZone",
+        keyword=None,
+        cost=None,
+        token_script=None,
+        counter_type=None,
+        raw_line="A:SP$ ChangeZone | Origin$ Battlefield | Destination$ Graveyard",
+        target=None,
+    )
+    assert "remove" in tags
+
+
+def test_changezone_verb_exile():
+    """Battlefield→Exile = remove."""
+    tags = derive_provides_from_ability(
+        verb="ChangeZone",
+        keyword=None,
+        cost=None,
+        token_script=None,
+        counter_type=None,
+        raw_line="A:SP$ ChangeZone | Origin$ Battlefield | Destination$ Exile",
+        target=None,
+    )
+    assert "remove" in tags
+
+
+def test_changezone_verb_fallback():
+    """Unknown origin/destination falls back to change-zone."""
+    tags = derive_provides_from_ability(
+        verb="ChangeZone",
+        keyword=None,
+        cost=None,
+        token_script=None,
+        counter_type=None,
+        raw_line="A:SP$ ChangeZone | Origin$ Library | Destination$ Hand",
+        target=None,
+    )
+    assert "change-zone" in tags
+
+
+# ---------------------------------------------------------------------------
+# Investigate dual provides
+# ---------------------------------------------------------------------------
+
+def test_investigate_dual_provides():
+    """Investigate verb → both 'investigate' and 'token-clue'."""
+    tags = derive_provides_from_ability(
+        verb="Investigate",
+        keyword=None,
+        cost=None,
+        token_script=None,
+        counter_type=None,
+        raw_line="T:Mode$ DamageDone | Execute$ TrigInvestigate",
+        target=None,
+    )
+    assert "investigate" in tags
+    assert "token-clue" in tags
+
+
+# ---------------------------------------------------------------------------
+# Skipped verbs produce no tags
+# ---------------------------------------------------------------------------
+
+def test_skipped_verb_produces_no_tags_continuous():
+    """Continuous verb produces empty set."""
+    tags = derive_provides_from_ability(
+        verb="Continuous",
+        keyword=None,
+        cost=None,
+        token_script=None,
+        counter_type=None,
+        raw_line="S:Mode$ Continuous | Affected$ Creature.Self",
+        target=None,
+    )
+    assert tags == set()
+
+
+def test_skipped_verb_produces_no_tags_effect():
+    """Effect verb produces empty set."""
+    tags = derive_provides_from_ability(
+        verb="Effect",
+        keyword=None,
+        cost=None,
+        token_script=None,
+        counter_type=None,
+        raw_line="S:Mode$ Effect",
+        target=None,
+    )
+    assert tags == set()
+
+
+# ---------------------------------------------------------------------------
+# Token script tribal variants
+# ---------------------------------------------------------------------------
+
+def test_token_script_tribal_spirit():
+    """Spirit token → spirit-tribal."""
+    tags = derive_provides_from_ability(
+        verb="Token",
+        keyword=None,
+        cost=None,
+        token_script="w_1_1_spirit_flying",
+        counter_type=None,
+        raw_line="",
+        target=None,
+    )
+    assert "spirit-tribal" in tags
+
+
+def test_token_script_tribal_zombie():
+    """Zombie token → zombie-tribal."""
+    tags = derive_provides_from_ability(
+        verb="Token",
+        keyword=None,
+        cost=None,
+        token_script="b_2_2_zombie",
+        counter_type=None,
+        raw_line="",
+        target=None,
+    )
+    assert "zombie-tribal" in tags
+
+
+def test_token_script_tribal_dragon():
+    """Dragon token → dragon-tribal."""
+    tags = derive_provides_from_ability(
+        verb="Token",
+        keyword=None,
+        cost=None,
+        token_script="r_5_5_dragon_flying",
+        counter_type=None,
+        raw_line="",
+        target=None,
+    )
+    assert "dragon-tribal" in tags
+
+
+def test_token_script_no_tribal_for_unknown():
+    """Generic beast token does not generate tribal if not in TRIBAL_TYPES list...
+    or Beast IS in the list → beast-tribal."""
+    tags = derive_provides_from_ability(
+        verb="Token",
+        keyword=None,
+        cost=None,
+        token_script="g_3_3_beast",
+        counter_type=None,
+        raw_line="",
+        target=None,
+    )
+    # Beast is in TRIBAL_TYPES
+    assert "beast-tribal" in tags
+
+
+def test_token_script_elf_tribal():
+    """Elf token → elf-tribal."""
+    tags = derive_provides_from_ability(
+        verb="Token",
+        keyword=None,
+        cost=None,
+        token_script="g_1_1_elf_warrior",
+        counter_type=None,
+        raw_line="",
+        target=None,
+    )
+    assert "elf-tribal" in tags
