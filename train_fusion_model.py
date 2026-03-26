@@ -25,9 +25,17 @@ from train_tower_model import (
     init_model,
 )
 
+import math
+
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "tags.db")
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 TOWER_EDHREC_PATH = os.path.join(DATA_DIR, "tower_model_edhrec.npz")
+
+FEATURE_NAMES = [
+    "tower_prob", "causal_score", "forge_deck_overlap",
+    "cmdr_tag_overlap", "strategy_keyword", "tribal_match",
+    "edhrec_synergy", "edhrec_rank", "cmc", "is_creature",
+]
 
 
 def sigmoid(x):
@@ -174,6 +182,352 @@ def sample_negatives(positives_by_cmdr, all_card_oids, card_colors, cmdr_colors,
             negatives.append((cmdr_oid, candidates[idx], 0))
 
     return negatives
+
+
+def build_feature_matrix(pairs_by_cmdr, tower_model_path=TOWER_EDHREC_PATH):
+    """Build 10-feature matrix for all (commander, card) pairs.
+
+    Args:
+        pairs_by_cmdr: dict[cmdr_oid -> list[(card_oid, label)]] from
+            load_edhrec_membership + sample_negatives
+        tower_model_path: path to trained tower model (.npz)
+
+    Returns:
+        X: np.array(N, 10) feature matrix
+        y: np.array(N,) labels
+        cmdr_ids: np.array(N,) commander index per pair (for CV splits)
+    """
+    conn = sqlite3.connect(DB_PATH)
+
+    # ── Bulk-load all DB data at startup ──────────────────────────────────
+
+    # 1. Card metadata (name, oracle_id, type_line, cmc, edhrec_rank, oracle_text)
+    card_meta = {}          # oid -> {name, type_line, cmc, edhrec_rank, oracle_text}
+    name_to_oid = {}        # name -> oid
+    for row in conn.execute(
+        "SELECT oracle_id, name, type_line, cmc, edhrec_rank, oracle_text FROM cards"
+    ):
+        oid, name, type_line, cmc, edhrec_rank, oracle_text = row
+        card_meta[oid] = {
+            "name": name,
+            "type_line": type_line or "",
+            "cmc": cmc or 0.0,
+            "edhrec_rank": edhrec_rank or 50000,
+            "oracle_text": (oracle_text or "").lower(),
+        }
+        name_to_oid[name] = oid
+
+    # 2. Provides / wants tags (bulk)
+    provides_map = {}       # oid -> set[tag]
+    wants_map = {}          # oid -> set[tag]
+    for oid, tag in conn.execute("SELECT oracle_id, tag FROM provides"):
+        provides_map.setdefault(oid, set()).add(tag)
+    for oid, tag in conn.execute("SELECT oracle_id, tag FROM wants"):
+        wants_map.setdefault(oid, set()).add(tag)
+
+    # 3. Forge deck tags (bulk)
+    forge_has = {}          # oid -> set[tag]
+    forge_hints = {}        # oid -> set[tag]
+    try:
+        for card_name, tag_type, tag in conn.execute(
+            "SELECT card_name, tag_type, tag FROM forge_deck_tags"
+        ):
+            oid = name_to_oid.get(card_name)
+            if not oid:
+                continue
+            if tag_type == "has":
+                forge_has.setdefault(oid, set()).add(tag)
+            elif tag_type == "hints":
+                forge_hints.setdefault(oid, set()).add(tag)
+    except Exception:
+        pass
+
+    # 4. EDHREC synergy (slug, card_name) -> synergy score
+    #    Also build slug -> cmdr_oid mapping
+    slug_to_oid = {}
+    all_slugs = set(
+        r[0] for r in conn.execute(
+            "SELECT DISTINCT commander_slug FROM edhrec_average_decks"
+        )
+    )
+    for slug in all_slugs:
+        parts = slug.split("-")
+        pattern = "%" + "%".join(parts) + "%"
+        row = conn.execute(
+            "SELECT oracle_id FROM cards "
+            "WHERE LOWER(REPLACE(REPLACE(name, '''', ''), ',', '')) LIKE ? "
+            "AND type_line LIKE '%Legendary%' LIMIT 1",
+            (pattern,),
+        ).fetchone()
+        if row:
+            slug_to_oid[slug] = row[0]
+    oid_to_slug = {v: k for k, v in slug_to_oid.items()}
+
+    edhrec_syn_map = {}     # (slug, card_name) -> synergy
+    try:
+        for slug, card_name, syn in conn.execute(
+            "SELECT commander_slug, card_name, synergy FROM edhrec_card_synergy"
+        ):
+            if syn is not None:
+                edhrec_syn_map[(slug, card_name)] = syn
+    except Exception:
+        pass
+
+    # 5. Commander profiles (strategies)
+    from mtg_synergy.recommend.commander_profile import load_profile
+    from mtg_synergy.recommend.scoring import STRATEGY_KEYWORDS
+
+    # 6. Tower model data (load once)
+    print("  Loading tower model for inference...")
+    normed_emb, oid_list, oid_to_idx = load_embeddings()
+    sf_data = load_structural_features()
+    provides_sf, wants_sf, strats_sf, types_sf, oracles_sf, ranks_sf, mech_sf = sf_data
+
+    tower_model = None
+    tower_means = None
+    tower_stds = None
+    if os.path.exists(tower_model_path):
+        td = np.load(tower_model_path)
+        tower_model = {
+            k: td[k] for k in td.files
+            if k not in ("struct_means", "struct_stds")
+        }
+        tower_means = td["struct_means"]
+        tower_stds = td["struct_stds"]
+        print(f"  Tower model loaded from {tower_model_path}", flush=True)
+    else:
+        print(f"  WARNING: Tower model not found at {tower_model_path}, tower_prob=0.5")
+
+    # ── Build pairs list with commander index ─────────────────────────────
+
+    cmdr_oids_ordered = sorted(pairs_by_cmdr.keys())
+    cmdr_to_idx = {oid: i for i, oid in enumerate(cmdr_oids_ordered)}
+
+    all_rows = []       # list of (cmdr_oid, card_oid, label)
+    for cmdr_oid, pairs in pairs_by_cmdr.items():
+        for card_oid, label in pairs:
+            all_rows.append((cmdr_oid, card_oid, label))
+
+    N = len(all_rows)
+    X = np.zeros((N, 10), dtype=np.float32)
+    y = np.zeros(N, dtype=np.float32)
+    cmdr_ids = np.zeros(N, dtype=np.int32)
+
+    # ── Process commander-by-commander ────────────────────────────────────
+
+    n_cmdrs = len(cmdr_oids_ordered)
+    row_idx = 0      # tracks position in X/y for sequential fill
+
+    # Re-organise for commander-batch processing
+    cmdr_pair_map = {}  # cmdr_oid -> [(card_oid, label)]
+    for cmdr_oid, card_oid, label in all_rows:
+        cmdr_pair_map.setdefault(cmdr_oid, []).append((card_oid, label))
+
+    for ci, cmdr_oid in enumerate(cmdr_oids_ordered):
+        if (ci + 1) % 50 == 0 or ci == 0:
+            print(f"  Building features for commander {ci+1}/{n_cmdrs}...", flush=True)
+
+        pairs = cmdr_pair_map.get(cmdr_oid, [])
+        if not pairs:
+            continue
+
+        card_oids = [p[0] for p in pairs]
+        labels = [p[1] for p in pairs]
+        n_pairs = len(pairs)
+
+        # --- (a) Tower batch inference ---
+        tower_probs = np.full(n_pairs, 0.5, dtype=np.float32)
+        if tower_model is not None:
+            cmdr_idx = oid_to_idx.get(cmdr_oid)
+            if cmdr_idx is not None:
+                # Gather card indices that exist in embeddings
+                batch_card_indices = []
+                batch_positions = []
+                for j, card_oid in enumerate(card_oids):
+                    cidx = oid_to_idx.get(card_oid)
+                    if cidx is not None:
+                        batch_card_indices.append(cidx)
+                        batch_positions.append(j)
+
+                if batch_card_indices:
+                    B = len(batch_card_indices)
+                    X_cmdr_batch = np.tile(
+                        normed_emb[cmdr_idx], (B, 1)
+                    ).astype(np.float32)
+                    X_card_batch = normed_emb[batch_card_indices].astype(np.float32)
+
+                    # Compute structural features for batch
+                    sf_batch = np.zeros((B, 12), dtype=np.float32)
+                    for k, pos in enumerate(batch_positions):
+                        sf_batch[k] = compute_struct_features(
+                            cmdr_oid, card_oids[pos],
+                            provides_sf, wants_sf, strats_sf,
+                            types_sf, oracles_sf, ranks_sf, mech_sf,
+                        )
+                    # Normalize
+                    sf_norm = (sf_batch - tower_means) / tower_stds
+
+                    raw, _ = forward(tower_model, X_cmdr_batch, X_card_batch, sf_norm)
+                    probs = sigmoid(raw)
+                    for k, pos in enumerate(batch_positions):
+                        tower_probs[pos] = probs[k]
+
+        # --- (b) Causal score (lightweight bulk query) ---
+        causal_scores = np.zeros(n_pairs, dtype=np.float32)
+        card_oid_set = set(card_oids)
+        try:
+            # Commander -> card edges (outgoing)
+            cmdr_out = {}
+            for row in conn.execute(
+                "SELECT target_id, SUM(strength) FROM interaction_edges "
+                "WHERE source_id = ? GROUP BY target_id",
+                (cmdr_oid,),
+            ):
+                if row[0] in card_oid_set:
+                    cmdr_out[row[0]] = row[1]
+            # Card -> commander edges (incoming)
+            cmdr_in = {}
+            for row in conn.execute(
+                "SELECT source_id, SUM(strength) FROM interaction_edges "
+                "WHERE target_id = ? GROUP BY source_id",
+                (cmdr_oid,),
+            ):
+                if row[0] in card_oid_set:
+                    cmdr_in[row[0]] = row[1]
+            for j, card_oid in enumerate(card_oids):
+                out_str = cmdr_out.get(card_oid, 0.0)
+                in_str = cmdr_in.get(card_oid, 0.0)
+                score = out_str + in_str
+                # Bidirectional bonus
+                if out_str > 0 and in_str > 0:
+                    score *= 1.5
+                causal_scores[j] = max(min(score, 10.0), -5.0)
+        except Exception:
+            pass  # causal_scores stays 0
+
+        # --- (c) Forge deck overlap ---
+        cmdr_forge_has = forge_has.get(cmdr_oid, set())
+        cmdr_forge_hints = forge_hints.get(cmdr_oid, set())
+
+        # --- (d) Commander tag overlap ---
+        cmdr_provides = provides_map.get(cmdr_oid, set())
+        cmdr_wants = wants_map.get(cmdr_oid, set())
+
+        # --- (e) Strategy keyword hits ---
+        profile = None
+        strategy_keywords = []
+        try:
+            profile = load_profile(conn, cmdr_oid)
+            if profile and profile.strategies:
+                for strat in profile.strategies:
+                    strategy_keywords.extend(STRATEGY_KEYWORDS.get(strat, []))
+        except Exception:
+            pass
+
+        # --- (f) Tribal match: commander subtypes ---
+        cmdr_type_line = card_meta.get(cmdr_oid, {}).get("type_line", "")
+        cmdr_subtypes = set()
+        if "\u2014" in cmdr_type_line:
+            try:
+                cmdr_subtypes = {
+                    s.lower() for s in cmdr_type_line.split("\u2014")[1].strip().split()
+                }
+            except (IndexError, AttributeError):
+                pass
+
+        # --- (g) EDHREC synergy: get slug for this commander ---
+        cmdr_slug = oid_to_slug.get(cmdr_oid, "")
+
+        # --- Fill feature rows for all pairs of this commander ---
+        for j in range(n_pairs):
+            card_oid = card_oids[j]
+            meta = card_meta.get(card_oid, {})
+            card_name = meta.get("name", "")
+            card_type_line = meta.get("type_line", "")
+            card_oracle = meta.get("oracle_text", "")
+
+            # F0: tower_prob
+            X[row_idx, 0] = tower_probs[j]
+
+            # F1: causal_score
+            X[row_idx, 1] = causal_scores[j]
+
+            # F2: forge_deck_overlap
+            card_has = forge_has.get(card_oid, set())
+            card_hints = forge_hints.get(card_oid, set())
+            X[row_idx, 2] = float(
+                len(card_has & cmdr_forge_hints) + len(card_hints & cmdr_forge_has)
+            )
+
+            # F3: cmdr_tag_overlap
+            card_prov = provides_map.get(card_oid, set())
+            card_want = wants_map.get(card_oid, set())
+            X[row_idx, 3] = float(
+                len(card_prov & cmdr_wants) + len(card_want & cmdr_provides)
+            )
+
+            # F4: strategy_keyword
+            kw_hits = 0
+            if strategy_keywords and card_oracle:
+                kw_hits = sum(1 for kw in strategy_keywords if kw in card_oracle)
+            X[row_idx, 4] = float(kw_hits)
+
+            # F5: tribal_match
+            tribal = 0.0
+            if cmdr_subtypes and "creature" in card_type_line.lower():
+                card_subtypes_raw = set()
+                if "\u2014" in card_type_line:
+                    try:
+                        card_subtypes_raw = {
+                            s.lower()
+                            for s in card_type_line.split("\u2014")[1].strip().split()
+                        }
+                    except (IndexError, AttributeError):
+                        pass
+                if cmdr_subtypes & card_subtypes_raw:
+                    tribal = 1.0
+            X[row_idx, 5] = tribal
+
+            # F6: edhrec_synergy
+            edh_syn = 0.0
+            if cmdr_slug and card_name:
+                edh_syn = edhrec_syn_map.get((cmdr_slug, card_name), 0.0)
+            X[row_idx, 6] = edh_syn
+
+            # F7: edhrec_rank (log10)
+            X[row_idx, 7] = math.log10(max(meta.get("edhrec_rank", 50000), 1))
+
+            # F8: cmc
+            X[row_idx, 8] = float(meta.get("cmc", 0.0))
+
+            # F9: is_creature
+            X[row_idx, 9] = 1.0 if "Creature" in card_type_line else 0.0
+
+            y[row_idx] = float(labels[j])
+            cmdr_ids[row_idx] = cmdr_to_idx[cmdr_oid]
+            row_idx += 1
+
+    # Trim arrays to actual rows filled (in case any were skipped)
+    X = X[:row_idx]
+    y = y[:row_idx]
+    cmdr_ids = cmdr_ids[:row_idx]
+
+    conn.close()
+
+    # Print summary statistics
+    print(f"\nFeature matrix: {X.shape}")
+    print(f"  Positive labels: {int(y.sum())}")
+    print(f"  Negative labels: {int(len(y) - y.sum())}")
+    print(f"  Commanders: {len(cmdr_oids_ordered)}")
+    print(f"\nPer-feature statistics:")
+    for i, name in enumerate(FEATURE_NAMES):
+        col = X[:, i]
+        print(f"  {name:>20s}: "
+              f"mean={col.mean():.4f}  std={col.std():.4f}  "
+              f"min={col.min():.4f}  max={col.max():.4f}  "
+              f"nonzero={np.count_nonzero(col)}/{len(col)}")
+
+    return X, y, cmdr_ids
 
 
 def train_tower_binary():
@@ -506,6 +860,77 @@ def train_tower_binary():
     return final_model
 
 
+def _load_pairs_for_features(conn, oid_to_idx):
+    """Load EDHREC membership + sample negatives, return pairs_by_cmdr for build_feature_matrix.
+
+    Returns dict[cmdr_oid -> list[(card_oid, label)]].
+    """
+    # Load color identities
+    card_colors = {}
+    for row in conn.execute("SELECT oracle_id, color_identity FROM cards"):
+        card_colors[row[0]] = set(json.loads(row[1] or "[]"))
+
+    # Get basic land oracle IDs to exclude
+    basic_land_names = {"Plains", "Island", "Swamp", "Mountain", "Forest",
+                        "Snow-Covered Plains", "Snow-Covered Island",
+                        "Snow-Covered Swamp", "Snow-Covered Mountain",
+                        "Snow-Covered Forest", "Wastes"}
+    basic_land_oids = set()
+    for name in basic_land_names:
+        row = conn.execute("SELECT oracle_id FROM cards WHERE name = ?", (name,)).fetchone()
+        if row:
+            basic_land_oids.add(row[0])
+
+    # Pre-load type lines for token filtering
+    type_lines = {}
+    for row in conn.execute("SELECT oracle_id, type_line FROM cards"):
+        type_lines[row[0]] = row[1] or ""
+
+    # Build card pool
+    all_card_oids = []
+    for oid in oid_to_idx:
+        if oid in basic_land_oids:
+            continue
+        tl = type_lines.get(oid, "")
+        if "Token" in tl or "token" in tl:
+            continue
+        all_card_oids.append(oid)
+
+    # Load positives
+    print("\nLoading EDHREC membership data...")
+    positives_by_cmdr = load_edhrec_membership(conn)
+
+    # Filter to commanders with embeddings
+    positives_by_cmdr = {
+        k: v for k, v in positives_by_cmdr.items() if k in oid_to_idx
+    }
+    for cmdr_oid in list(positives_by_cmdr.keys()):
+        positives_by_cmdr[cmdr_oid] = {
+            oid for oid in positives_by_cmdr[cmdr_oid] if oid in oid_to_idx
+        }
+        if not positives_by_cmdr[cmdr_oid]:
+            del positives_by_cmdr[cmdr_oid]
+
+    total_pos = sum(len(v) for v in positives_by_cmdr.values())
+    print(f"  Positive pairs with embeddings: {total_pos} across {len(positives_by_cmdr)} commanders")
+
+    # Sample negatives
+    print("\nSampling negatives (ratio=3)...")
+    neg_pairs = sample_negatives(
+        positives_by_cmdr, all_card_oids, card_colors, card_colors, ratio=3
+    )
+    print(f"  Negative pairs: {len(neg_pairs)}")
+
+    # Combine into pairs_by_cmdr: dict[cmdr_oid -> list[(card_oid, label)]]
+    pairs_by_cmdr = {}
+    for cmdr_oid, card_oids in positives_by_cmdr.items():
+        pairs_by_cmdr[cmdr_oid] = [(oid, 1) for oid in card_oids]
+    for cmdr_oid, card_oid, label in neg_pairs:
+        pairs_by_cmdr.setdefault(cmdr_oid, []).append((card_oid, label))
+
+    return pairs_by_cmdr
+
+
 def main():
     parser = argparse.ArgumentParser(description="Train hybrid fusion model")
     parser.add_argument(
@@ -513,9 +938,31 @@ def main():
         action="store_true",
         help="Train only Stage 1 (binary tower on EDHREC membership)",
     )
+    parser.add_argument(
+        "--features-only",
+        action="store_true",
+        help="Build and inspect the 10-feature matrix without training GBM",
+    )
     args = parser.parse_args()
 
-    if args.tower_only:
+    if args.features_only:
+        print("=" * 60)
+        print("Building 10-feature matrix for Stage 2 (LightGBM)")
+        print("=" * 60)
+
+        # Load embeddings for oid_to_idx
+        print("\nLoading embeddings...")
+        _, _, oid_to_idx = load_embeddings()
+
+        conn = sqlite3.connect(DB_PATH)
+        pairs_by_cmdr = _load_pairs_for_features(conn, oid_to_idx)
+        conn.close()
+
+        X, y, cmdr_ids = build_feature_matrix(pairs_by_cmdr)
+        print(f"\nDone. Feature matrix shape: {X.shape}")
+        print(f"Labels shape: {y.shape} (pos={int(y.sum())}, neg={int(len(y)-y.sum())})")
+        print(f"Commander IDs shape: {cmdr_ids.shape} (unique={len(np.unique(cmdr_ids))})")
+    elif args.tower_only:
         train_tower_binary()
     else:
         # Full pipeline: tower + feature matrix + GBM

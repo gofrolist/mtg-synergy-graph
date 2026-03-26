@@ -37,3 +37,12 @@ def test_tower_binary_output_range():
     data = np.load(model_path)
     assert "struct_means" in data.files
     assert "struct_stds" in data.files
+
+
+def test_feature_names():
+    """Feature list should have exactly 10 named features."""
+    from train_fusion_model import FEATURE_NAMES
+    assert len(FEATURE_NAMES) == 10
+    assert FEATURE_NAMES[0] == "tower_prob"
+    assert "causal_score" in FEATURE_NAMES
+    assert "is_creature" in FEATURE_NAMES
