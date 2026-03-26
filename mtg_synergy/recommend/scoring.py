@@ -313,48 +313,31 @@ def score_all_candidates(candidate_scores: dict, cards: list, ctx: DeckContext,
                          conn, verbose: bool = True) -> None:
     """Score all candidates using dynamic features. Modifies candidate_scores in-place.
 
-    Also injects high-tower and high-EDHREC candidates not in the graph pool.
+    Candidates are pre-selected by tower_prefilter() or graph edges.
+    EDHREC synergy is used as a scoring feature (F8), not for injection.
     """
-    # Build card data lookup
+    # Build card data lookup — ensure all candidates have card data
     card_data = {}
     for c in cards:
         card_data[c["name"]] = c
 
-    # Inject high-EDHREC candidates
-    edh_threshold = SCORING_WEIGHTS.get("EDHREC_INJECTION_THRESHOLD", 0.25)
-    edh_injected = 0
-    for card_name, syn in ctx.edhrec.items():
-        if syn < edh_threshold or card_name in ctx.deck_cards or card_name in candidate_scores:
-            continue
-        row = conn.execute(
-            "SELECT oracle_id, name, type_line, mana_cost, cmc, edhrec_rank, color_identity "
-            "FROM cards WHERE name = ?", (card_name,)).fetchone()
-        if not row:
-            continue
-        oid, name, type_line, mana_cost, cmc, edhrec_rank, ci_json = row
+    # Load card data for candidates not yet in cards list (from tower prefilter)
+    missing = [n for n in candidate_scores if n not in card_data]
+    if missing:
         import json as _json
-        card_ci = set(_json.loads(ci_json or "[]"))
-        # Color identity check (use deck commander's CI)
-        cmdr_ci_row = conn.execute(
-            "SELECT color_identity FROM cards WHERE oracle_id = ?", (ctx.cmdr_oid,)).fetchone()
-        if cmdr_ci_row:
-            cmdr_ci = set(_json.loads(cmdr_ci_row[0] or "[]"))
-            if not card_ci.issubset(cmdr_ci):
-                continue
-        candidate_scores[name] = {
-            "total": 0.0, "partners": [], "multi_sig": 0,
-            "commander_synergy": 0.0, "key_synergy": 0.0,
-        }
-        new_card = {"oracle_id": oid, "name": name, "type_line": type_line or "",
-                    "mana_cost": mana_cost or "", "cmc": cmc or 0, "edhrec_rank": edhrec_rank}
-        cards.append(new_card)
-        card_data[name] = new_card
-        ctx.card_oid[name] = oid
-        edh_injected += 1
-    if edh_injected and verbose:
-        print(f"  EDHREC injection: {edh_injected} high-synergy cards added to candidate pool")
+        for name in missing:
+            row = conn.execute(
+                "SELECT oracle_id, name, type_line, mana_cost, cmc, edhrec_rank "
+                "FROM cards WHERE name = ?", (name,)).fetchone()
+            if row:
+                cd = {"oracle_id": row[0], "name": row[1], "type_line": row[2] or "",
+                      "mana_cost": row[3] or "", "cmc": row[4] or 0, "edhrec_rank": row[5]}
+                cards.append(cd)
+                card_data[name] = cd
+                ctx.card_oid[name] = row[0]
+
     if ctx.edhrec and verbose:
-        print(f"  EDHREC synergy: {len(ctx.edhrec)} cards loaded for blending")
+        print(f"  EDHREC synergy: {len(ctx.edhrec)} cards loaded for scoring")
 
     # Score all candidates
     scored = 0
@@ -492,6 +475,69 @@ def _load_fusion_model(tower_path=None, gbm_path=None):
         return result
     except Exception:
         return None
+
+
+def tower_prefilter(conn, cmdr_oid: str, color_identity: set,
+                    top_n: int = 3000, deck_cards: set = None) -> list:
+    """Score all color-legal cards with the fusion tower and return top N.
+
+    Uses batch forward pass for speed (<200ms for 10k+ cards).
+    Returns: [(oracle_id, name, tower_prob), ...] sorted by probability descending.
+    Returns empty list if tower model is not available.
+    """
+    fusion = _load_fusion_model()
+    if fusion is None:
+        return []
+
+    import json as _json
+    import numpy as np
+
+    oid_to_idx = fusion["oid_to_idx"]
+    emb = fusion["emb"]
+    cmdr_idx = oid_to_idx.get(cmdr_oid)
+    if cmdr_idx is None:
+        return []
+
+    deck_cards = deck_cards or set()
+    cmdr_ci = color_identity or set()
+
+    # CI filter: find all legal cards
+    legal = []
+    for row in conn.execute(
+        "SELECT oracle_id, name, color_identity FROM cards "
+        "WHERE color_identity IS NOT NULL"
+    ):
+        oid, name, ci_json = row
+        if name in deck_cards or oid == cmdr_oid:
+            continue
+        if oid not in oid_to_idx:
+            continue
+        card_ci = set(_json.loads(ci_json or "[]"))
+        if cmdr_ci and not card_ci.issubset(cmdr_ci):
+            continue
+        legal.append((oid, name))
+
+    if not legal:
+        return []
+
+    # Batch tower scoring
+    card_indices = [oid_to_idx[oid] for oid, _ in legal]
+    X_card = emb[card_indices].astype(np.float32)
+
+    sf_batch = np.array(
+        [fusion["compute_sf"](cmdr_oid, oid, *fusion["sf_data"]) for oid, _ in legal],
+        dtype=np.float32
+    )
+    sf_norm = (sf_batch - fusion["struct_means"]) / (fusion["struct_stds"] + 1e-8)
+
+    X_cmdr = np.tile(emb[cmdr_idx], (len(legal), 1)).astype(np.float32)
+
+    scores, _ = fusion["forward"](fusion["tower"], X_cmdr, X_card, sf_norm)
+    probs = 1.0 / (1.0 + np.exp(-scores.astype(np.float64)))
+
+    # Sort and take top N
+    ranked = sorted(zip(legal, probs), key=lambda x: -x[1])
+    return [(oid, name, float(prob)) for (oid, name), prob in ranked[:top_n]]
 
 
 def _get_fusion_score(fusion, cmdr_oid, card_oid):

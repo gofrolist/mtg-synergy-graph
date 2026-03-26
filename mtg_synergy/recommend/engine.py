@@ -13,25 +13,10 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                     edhrec_slug: str = None):
     """Rank non-deck cards by total synergy with the current decklist.
 
-    Commander synergy is weighted 5x, key card synergy 3x.
-    If deck_types is provided, cards matching those types get a synergy boost.
-    If active_strategies is provided, cards matching strategies get a relevance multiplier.
-    Combo completions get x2.0.
+    Uses tower pre-filter (CI + batch scoring) for candidate discovery,
+    then full fusion model for final ranking. Graph edges used for
+    partner display only.
     """
-    # Identify key cards: top 10 highest-synergy cards in the deck (excluding commander)
-    deck_scores = _deck_card_scores(graph, deck_cards)
-    key_cards_ranked = sorted(
-        [(name, info["total"]) for name, info in deck_scores.items() if name != commander],
-        key=lambda x: -x[1]
-    )
-    key_cards = {name for name, score in key_cards_ranked[:10]}
-
-    candidate_scores = _candidate_scores(graph, deck_cards, commander=commander, key_cards=key_cards)
-
-
-    # === Dynamic feature-based scoring ===
-    # Replaces static LLM scores with features computed at recommendation time:
-    # tower model + mechanics + tag overlap + strategy + tribal + rank + EDHREC
     import sqlite3 as _sql_dyn
     _shared_conn = None
     card_meta = {}
@@ -45,16 +30,65 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
             _shared_conn = None
 
     if _shared_conn:
-        from mtg_synergy.recommend.scoring import DeckContext, score_all_candidates
+        from mtg_synergy.recommend.scoring import (
+            DeckContext, score_all_candidates, tower_prefilter)
+
+        # Get commander oracle_id
+        cmdr_oid = ""
+        for c in cards:
+            if c["name"] == commander:
+                cmdr_oid = c.get("oracle_id", "")
+                break
+
+        # Tower pre-filter: score all color-legal cards, take top 3000
+        prefiltered = tower_prefilter(
+            _shared_conn, cmdr_oid, color_identity or set(),
+            top_n=3000, deck_cards=deck_cards)
+
+        if prefiltered:
+            # Build candidate pool from tower results
+            candidate_scores = {}
+            for oid, name, tower_prob in prefiltered:
+                if name not in deck_cards:
+                    candidate_scores[name] = {
+                        "total": 0.0, "partners": [], "multi_sig": 0,
+                        "commander_synergy": 0.0, "key_synergy": 0.0,
+                    }
+
+            # Enrich with graph partner info (for display)
+            adj = graph.get("adjacency", {})
+            for card in deck_cards:
+                is_commander = card == commander
+                for edge in adj.get(card, []):
+                    target = edge["target"]
+                    if target in candidate_scores:
+                        info = candidate_scores[target]
+                        info["partners"].append((card, edge["score"], edge["signals"]))
+                        if edge["signals"] >= 2:
+                            info["multi_sig"] += 1
+                        if is_commander:
+                            info["commander_synergy"] += edge["score"]
+
+            print(f"  Tower pre-filter: {len(prefiltered)} candidates "
+                  f"({len(candidate_scores)} after excluding deck)")
+        else:
+            # Fallback: use graph-based candidate discovery
+            deck_scores = _deck_card_scores(graph, deck_cards)
+            key_cards = {name for name, _ in sorted(
+                [(n, i["total"]) for n, i in deck_scores.items() if n != commander],
+                key=lambda x: -x[1])[:10]}
+            candidate_scores = _candidate_scores(
+                graph, deck_cards, commander=commander, key_cards=key_cards)
+            print("  Tower not available — using graph candidates (fallback)")
 
         ctx = DeckContext(_shared_conn, commander, deck_cards, cards,
                           deck_types=deck_types, active_strategies=active_strategies,
                           edhrec_slug=edhrec_slug)
 
-        # Score all candidates (handles EDHREC injection too)
+        # Score all candidates with full fusion model
         score_all_candidates(candidate_scores, cards, ctx, _shared_conn)
 
-        # Build card metadata (after injection may have added cards)
+        # Build card metadata
         for c in cards:
             card_meta[c["name"]] = {
                 "type_line": c.get("type_line", ""), "cmc": c.get("cmc", 0),
@@ -74,7 +108,13 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
 
         _shared_conn.close()
     else:
-        # Fallback: just use graph scores
+        # Fallback: graph scores only (no DB)
+        deck_scores = _deck_card_scores(graph, deck_cards)
+        key_cards = {name for name, _ in sorted(
+            [(n, i["total"]) for n, i in deck_scores.items() if n != commander],
+            key=lambda x: -x[1])[:10]}
+        candidate_scores = _candidate_scores(
+            graph, deck_cards, commander=commander, key_cards=key_cards)
         for c in cards:
             card_meta[c["name"]] = {
                 "type_line": c.get("type_line", ""), "cmc": c.get("cmc", 0),
