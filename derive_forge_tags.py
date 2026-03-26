@@ -330,6 +330,146 @@ def derive_provides_from_ability(
 
 
 # ---------------------------------------------------------------------------
+# Trigger mode → wants tag mapping
+# ---------------------------------------------------------------------------
+
+TRIGGER_TO_WANTS: dict[str, str] = {
+    "Attacks": "attacks",
+    "AttackersDeclared": "attackers-declared",
+    "AttackerBlocked": "attacker-blocked",
+    "AttackerBlockedByCreature": "attacker-blocked",
+    "AttackerUnblocked": "attacker-unblocked",
+    "Blocks": "blocks",
+    "SpellCast": "spell-cast",
+    "SpellCastOrCopy": "spell-cast",
+    "AbilityCast": "spell-cast",
+    "DamageDone": "damage-done",
+    "DamageDoneOnce": "damage-done",
+    "DamageDealtOnce": "damage-done",
+    "Sacrificed": "sacrificed",
+    "SacrificedOnce": "sacrificed",
+    "LifeGained": "life-gained",
+    "LifeLost": "life-lost",
+    "Drawn": "card-drawn",
+    "Discarded": "discarded",
+    "DiscardedAll": "discarded",
+    "Phase": "phase-trigger",
+    "CounterAdded": "counter-added",
+    "CounterAddedOnce": "counter-added",
+    "Taps": "tapped",
+    "Untaps": "untapped",
+    "BecomesTarget": "becomes-target",
+    "BecomesTargetOnce": "becomes-target",
+    "Cycled": "cycled",
+    "Scry": "scry-trigger",
+    "Surveil": "surveil-trigger",
+    "TapsForMana": "taps-for-mana",
+    "LandPlayed": "land-played",
+    "Transformed": "transformed",
+    "TurnFaceUp": "turn-face-up",
+    "Exploited": "exploited",
+    "TokenCreated": "token-created",
+    "TokenCreatedOnce": "token-created",
+    "Crewed": "crewed",
+    "BecomesCrewed": "crewed",
+    "Mutates": "mutated",
+    "Explores": "explored",
+    "ChangesZoneAll": "mass-zone-change",
+    "Exiled": "exiled",
+    "CommitCrime": "commit-crime",
+    "RolledDie": "rolled-die",
+    "RolledDieOnce": "rolled-die",
+    "FlippedCoin": "flipped-coin",
+    "Proliferate": "proliferated",
+}
+
+# ChangesZone trigger: (origin, destination) → wants tag
+ZONE_TRIGGER_MAP: dict[tuple[Optional[str], Optional[str]], str] = {
+    ("Battlefield", "Graveyard"): "dies",
+    ("Any", "Battlefield"): "enters-battlefield",
+    (None, "Battlefield"): "enters-battlefield",
+    ("Battlefield", "Exile"): "exiled",
+    ("Graveyard", "Battlefield"): "leaves-graveyard",
+    ("Any", "Graveyard"): "enters-graveyard",
+    ("Library", "Graveyard"): "enters-graveyard",
+    ("Battlefield", "Hand"): "bounced",
+    ("Battlefield", "Any"): "leaves-battlefield",
+}
+
+# Types that are NOT tribal (generic/non-creature-type filters)
+_NON_TRIBAL_TYPES: frozenset[str] = frozenset({"Card", "Self", "Creature", "Permanent"})
+
+
+def derive_wants_from_trigger(
+    trigger_mode: Optional[str],
+    origin: Optional[str],
+    destination: Optional[str],
+    trigger_filter: Optional[str],
+) -> set[str]:
+    """Derive wants tags from a Forge trigger row.
+
+    Args:
+        trigger_mode: Forge trigger mode (e.g. "ChangesZone", "Attacks", "SpellCast").
+        origin: Zone origin for ChangesZone triggers (e.g. "Battlefield").
+        destination: Zone destination for ChangesZone triggers (e.g. "Graveyard").
+        trigger_filter: Filter string (e.g. "Goblin.YouCtrl", "Creature.Zombie+Other").
+
+    Returns:
+        Set of wants tag strings.
+    """
+    tags: set[str] = set()
+
+    if not trigger_mode:
+        return tags
+
+    if trigger_mode == "ChangesZone":
+        # Try exact (origin, destination) lookup first
+        key = (origin, destination)
+        if key in ZONE_TRIGGER_MAP:
+            tags.add(ZONE_TRIGGER_MAP[key])
+        elif origin == "Battlefield":
+            # Fallback for unknown battlefield departures
+            tags.add(ZONE_TRIGGER_MAP[("Battlefield", "Any")])
+    else:
+        # Simple trigger_mode lookup
+        tag = TRIGGER_TO_WANTS.get(trigger_mode)
+        if tag:
+            tags.add(tag)
+
+    # Parse trigger_filter for tribal creature types
+    if trigger_filter:
+        # Split filter on common Forge delimiters: . + space comma
+        # e.g. "Goblin.YouCtrl" → ["Goblin", "YouCtrl"]
+        # e.g. "Creature.Zombie+Other+YouCtrl" → ["Creature", "Zombie", "Other", "YouCtrl"]
+        parts = re.split(r"[.+, ]+", trigger_filter)
+        for part in parts:
+            part = part.strip()
+            if part and part not in _NON_TRIBAL_TYPES:
+                # Check if this part is a recognised tribal type (case-insensitive match)
+                for tribal in TRIBAL_TYPES:
+                    if part.lower() == tribal.lower():
+                        tags.add(f"{tribal.lower()}-tribal")
+                        break
+
+    return tags
+
+
+def derive_wants_from_cost(cost: Optional[str]) -> set[str]:
+    """Derive wants tags from a Forge ability cost string.
+
+    Args:
+        cost: Raw cost string (e.g. "Sac<1/Creature/a creature>", "T", "2").
+
+    Returns:
+        Set of wants tag strings.
+    """
+    tags: set[str] = set()
+    if cost and "Sac" in cost:
+        tags.add("sacrifice-fodder")
+    return tags
+
+
+# ---------------------------------------------------------------------------
 # DB pipeline: read forge_abilities, derive tags, write to provides
 # ---------------------------------------------------------------------------
 

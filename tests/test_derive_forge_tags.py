@@ -1,4 +1,4 @@
-"""Tests for derive_forge_tags.py — verb→provides mapping (Task 1)."""
+"""Tests for derive_forge_tags.py — verb→provides mapping (Task 1) and trigger→wants mapping (Task 2)."""
 import pytest
 import sys
 import os
@@ -11,7 +11,11 @@ from derive_forge_tags import (
     SKIPPED_VERBS,
     TRIBAL_TYPES,
     TOKEN_TYPE_PATTERNS,
+    TRIGGER_TO_WANTS,
+    ZONE_TRIGGER_MAP,
     derive_provides_from_ability,
+    derive_wants_from_trigger,
+    derive_wants_from_cost,
 )
 
 
@@ -462,3 +466,124 @@ def test_token_script_elf_tribal():
         target=None,
     )
     assert "elf-tribal" in tags
+
+
+# ===========================================================================
+# Task 2: trigger→wants mapping tests
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# TRIGGER_TO_WANTS dict tests
+# ---------------------------------------------------------------------------
+
+def test_trigger_to_wants_mapping():
+    """Key triggers are mapped to correct wants tags."""
+    assert TRIGGER_TO_WANTS["Attacks"] == "attacks"
+    assert TRIGGER_TO_WANTS["SpellCast"] == "spell-cast"
+    assert TRIGGER_TO_WANTS["DamageDone"] == "damage-done"
+    assert TRIGGER_TO_WANTS["Sacrificed"] == "sacrificed"
+    assert TRIGGER_TO_WANTS["LifeGained"] == "life-gained"
+    assert TRIGGER_TO_WANTS["Drawn"] == "card-drawn"
+    assert TRIGGER_TO_WANTS["LandPlayed"] == "land-played"
+    assert TRIGGER_TO_WANTS["TokenCreated"] == "token-created"
+    assert TRIGGER_TO_WANTS["TurnFaceUp"] == "turn-face-up"
+
+
+# ---------------------------------------------------------------------------
+# ZONE_TRIGGER_MAP and ChangesZone tests
+# ---------------------------------------------------------------------------
+
+def test_zone_trigger_mapping():
+    """All 6 zone combinations produce the correct wants tag."""
+    # Battlefield → Graveyard = dies
+    tags = derive_wants_from_trigger("ChangesZone", "Battlefield", "Graveyard", None)
+    assert tags == {"dies"}
+
+    # Any → Battlefield = enters-battlefield
+    tags = derive_wants_from_trigger("ChangesZone", "Any", "Battlefield", None)
+    assert tags == {"enters-battlefield"}
+
+    # Battlefield → Exile = exiled
+    tags = derive_wants_from_trigger("ChangesZone", "Battlefield", "Exile", None)
+    assert tags == {"exiled"}
+
+    # Graveyard → Battlefield = leaves-graveyard
+    tags = derive_wants_from_trigger("ChangesZone", "Graveyard", "Battlefield", None)
+    assert tags == {"leaves-graveyard"}
+
+    # Battlefield → Any (fallback) = leaves-battlefield
+    tags = derive_wants_from_trigger("ChangesZone", "Battlefield", "Any", None)
+    assert tags == {"leaves-battlefield"}
+
+    # None → Battlefield = enters-battlefield
+    tags = derive_wants_from_trigger("ChangesZone", None, "Battlefield", None)
+    assert tags == {"enters-battlefield"}
+
+
+# ---------------------------------------------------------------------------
+# Trigger filter tribal tests
+# ---------------------------------------------------------------------------
+
+def test_trigger_filter_tribal():
+    """Filter 'Goblin.YouCtrl' on ChangesZone(Battlefield→Graveyard) → goblin-tribal + dies."""
+    tags = derive_wants_from_trigger("ChangesZone", "Battlefield", "Graveyard", "Goblin.YouCtrl")
+    assert "dies" in tags
+    assert "goblin-tribal" in tags
+
+
+def test_trigger_filter_other_qualifier():
+    """Filter 'Creature.Zombie+Other+YouCtrl' → zombie-tribal (Creature is generic, not tribal)."""
+    tags = derive_wants_from_trigger("ChangesZone", "Battlefield", "Graveyard", "Creature.Zombie+Other+YouCtrl")
+    assert "dies" in tags
+    assert "zombie-tribal" in tags
+    assert "creature-tribal" not in tags
+
+
+def test_trigger_filter_no_tribal_for_generic():
+    """Filter 'Card.Self' produces no tribal tags."""
+    tags = derive_wants_from_trigger("ChangesZone", "Battlefield", "Graveyard", "Card.Self")
+    assert "dies" in tags
+    assert "card-tribal" not in tags
+    assert "self-tribal" not in tags
+
+
+# ---------------------------------------------------------------------------
+# ChangesZoneAll trigger test
+# ---------------------------------------------------------------------------
+
+def test_changezone_all_trigger():
+    """ChangesZoneAll trigger mode → mass-zone-change."""
+    tags = derive_wants_from_trigger("ChangesZoneAll", None, None, None)
+    assert "mass-zone-change" in tags
+
+
+# ---------------------------------------------------------------------------
+# Additional trigger modes
+# ---------------------------------------------------------------------------
+
+def test_additional_trigger_modes():
+    """Spot-check additional trigger modes map to correct wants tags."""
+    assert derive_wants_from_trigger("Blocks", None, None, None) == {"blocks"}
+    assert derive_wants_from_trigger("Discarded", None, None, None) == {"discarded"}
+    assert derive_wants_from_trigger("CounterAdded", None, None, None) == {"counter-added"}
+    assert derive_wants_from_trigger("CounterAddedOnce", None, None, None) == {"counter-added"}
+    assert derive_wants_from_trigger("Phase", None, None, None) == {"phase-trigger"}
+    assert derive_wants_from_trigger("Taps", None, None, None) == {"tapped"}
+    assert derive_wants_from_trigger("Untaps", None, None, None) == {"untapped"}
+    assert derive_wants_from_trigger("BecomesTarget", None, None, None) == {"becomes-target"}
+    assert derive_wants_from_trigger("AttackerBlocked", None, None, None) == {"attacker-blocked"}
+    assert derive_wants_from_trigger("AttackerBlockedByCreature", None, None, None) == {"attacker-blocked"}
+    assert derive_wants_from_trigger("AttackerUnblocked", None, None, None) == {"attacker-unblocked"}
+    assert derive_wants_from_trigger("SpellCastOrCopy", None, None, None) == {"spell-cast"}
+
+
+# ---------------------------------------------------------------------------
+# derive_wants_from_cost tests
+# ---------------------------------------------------------------------------
+
+def test_derive_wants_for_cost():
+    """Sac in cost → sacrifice-fodder; T alone → empty set."""
+    assert derive_wants_from_cost("Sac<1/Creature/a creature>") == {"sacrifice-fodder"}
+    assert derive_wants_from_cost("T") == set()
+    assert derive_wants_from_cost(None) == set()
+    assert derive_wants_from_cost("2") == set()
