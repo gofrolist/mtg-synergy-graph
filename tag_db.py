@@ -1,15 +1,13 @@
 """
-SQLite tag database for storing and querying card tags at scale.
+SQLite tag database — card query and Scryfall tag utilities.
 
-Replaces loading entire merged JSON files into memory. Enables targeted
-queries for specific cards, tags, or tag relationships.
+The provides/wants tagging tables are managed by derive_forge_tags.py.
+This module provides card lookup functions and Scryfall tagger integration.
 
 Usage:
-    python3 tag_db.py import data/top10000_tags.json         # import LLM tags
-    python3 tag_db.py import data/kyler_merged.json          # import merged tags
-    python3 tag_db.py stats                                   # show DB stats
-    python3 tag_db.py query --provides tokens-creature        # find providers
-    python3 tag_db.py query --wants etb-value                 # find wanters
+    python3 tag_db.py import-scryfall data/scryfall_tags.json  # import scryfall tags
+    python3 tag_db.py scryfall-stats                           # show scryfall tag stats
+    python3 tag_db.py scryfall-gap                             # show cards missing scryfall tags
 """
 
 import argparse
@@ -634,139 +632,17 @@ def get_cards_without_scryfall_tags(db_path: str = DB_PATH) -> list[dict]:
     return cards
 
 
-def find_synergy_candidates(deck_cards: list[dict], db_path: str = DB_PATH,
-                            commander: dict = None) -> list[dict]:
-    """Find cards in DB that synergize with the given deck cards.
-
-    Queries for cards that:
-    1. Provide what deck cards want (direct match)
-    2. Want what deck cards provide (direct match)
-    3. (Commander-specific) Provide what bridges to commander's wants
-    4. (Commander-specific) Want what bridges from commander's provides
-
-    Bridge expansion only applies to the COMMANDER's tags (not the whole deck),
-    keeping the candidate pool focused.
-
-    Returns deduplicated candidate cards (excluding deck cards).
-    """
-    deck_oids = {c["oracle_id"] for c in deck_cards}
-
-    conn = get_connection(db_path)
-    conn.row_factory = sqlite3.Row
-    candidate_oids = set()
-
-    # Collect deck's wants and provides
-    deck_wants = set()
-    deck_provides = set()
-    for card in deck_cards:
-        deck_wants.update(card.get("wants", []))
-        deck_provides.update(card.get("provides", []))
-
-    # Cards that provide what deck wants (direct)
-    for tag in deck_wants:
-        for row in conn.execute(
-            "SELECT oracle_id FROM provides WHERE tag = ?", (tag,)
-        ):
-            if row[0] not in deck_oids:
-                candidate_oids.add(row[0])
-
-    # Cards that want what deck provides (direct)
-    for tag in deck_provides:
-        for row in conn.execute(
-            "SELECT oracle_id FROM wants WHERE tag = ?", (tag,)
-        ):
-            if row[0] not in deck_oids:
-                candidate_oids.add(row[0])
-
-    # Bridge expansion for commander AND top deck tags
-    try:
-        import sys
-        sys.path.insert(0, os.path.dirname(__file__))
-        from mtg_synergy.constants import SEMANTIC_BRIDGES
-
-        # Expand from commander's tags (threshold 0.6)
-        bridge_wants = set()
-        bridge_provides = set()
-        if commander:
-            bridge_wants.update(commander.get("wants", []))
-            bridge_provides.update(commander.get("provides", []))
-
-        # Also expand from deck's FREQUENT provides/wants (threshold 0.7 — stricter)
-        # Count tag frequency across deck cards
-        from collections import Counter
-        deck_provides_freq = Counter()
-        deck_wants_freq = Counter()
-        for card in deck_cards:
-            for p in card.get("provides", []):
-                deck_provides_freq[p] += 1
-            for w in card.get("wants", []):
-                deck_wants_freq[w] += 1
-
-        # Only bridge-expand tags appearing on 3+ deck cards (strategy-defining tags)
-        for tag, count in deck_provides_freq.items():
-            if count >= 3:
-                bridge_provides.add(tag)
-        for tag, count in deck_wants_freq.items():
-            if count >= 3:
-                bridge_wants.add(tag)
-
-        # Cards providing something that bridges to deck's wants
-        for (p_tag, w_tag), weight in SEMANTIC_BRIDGES.items():
-            min_weight = 0.6 if w_tag in (commander.get("wants", []) if commander else []) else 0.7
-            if w_tag in bridge_wants and weight >= min_weight:
-                for row in conn.execute(
-                    "SELECT oracle_id FROM provides WHERE tag = ?", (p_tag,)
-                ):
-                    if row[0] not in deck_oids:
-                        candidate_oids.add(row[0])
-
-        # Cards wanting something that bridges from deck's provides
-        for (p_tag, w_tag), weight in SEMANTIC_BRIDGES.items():
-            min_weight = 0.6 if p_tag in (commander.get("provides", []) if commander else []) else 0.7
-            if p_tag in bridge_provides and weight >= min_weight:
-                for row in conn.execute(
-                    "SELECT oracle_id FROM wants WHERE tag = ?", (w_tag,)
-                ):
-                    if row[0] not in deck_oids:
-                        candidate_oids.add(row[0])
-    except ImportError:
-        pass
-
-    conn.close()
-
-    # Load full card data
-    candidates = get_cards_by_oids(list(candidate_oids), db_path)
-    return candidates
-
 
 # ── CLI ──
 
 
 def main():
-    parser = argparse.ArgumentParser(description="SQLite tag database")
+    parser = argparse.ArgumentParser(description="SQLite tag database (card query utilities)")
     sub = parser.add_subparsers(dest="command")
-
-    imp = sub.add_parser("import", help="Import tags from JSON file")
-    imp.add_argument("file", help="JSON file to import")
-    imp.add_argument("--db", default=DB_PATH, help="Database path")
-
-    stats = sub.add_parser("stats", help="Show database statistics")
-    stats.add_argument("--db", default=DB_PATH, help="Database path")
-
-    query = sub.add_parser("query", help="Query cards by tag")
-    query.add_argument("--provides", help="Find cards providing this tag")
-    query.add_argument("--wants", help="Find cards wanting this tag")
-    query.add_argument("--scryfall", help="Find cards with this scryfall tag")
-    query.add_argument("--db", default=DB_PATH, help="Database path")
 
     scry = sub.add_parser("import-scryfall", help="Import scryfall tagger tags")
     scry.add_argument("file", help="Scryfall tags JSON file")
     scry.add_argument("--db", default=DB_PATH, help="Database path")
-
-    bf = sub.add_parser("backfill", help="Backfill Scryfall metadata into cards table")
-    bf.add_argument("--scryfall", default=os.path.join(DATA_DIR, "oracle_cards.json"),
-                    help="Scryfall oracle cards JSON")
-    bf.add_argument("--db", default=DB_PATH, help="Database path")
 
     scry_stats = sub.add_parser("scryfall-stats", help="Show scryfall tag statistics")
     scry_stats.add_argument("--db", default=DB_PATH, help="Database path")
@@ -775,45 +651,13 @@ def main():
     gap.add_argument("--db", default=DB_PATH, help="Database path")
     gap.add_argument("--limit", type=int, default=20, help="Max cards to show")
 
-    fix_tribal_parser = sub.add_parser("fix-tribal", help="Remove false positive tribal wants tags")
-    fix_tribal_parser.add_argument("--dry-run", action="store_true", help="Show what would be removed without deleting")
-    fix_tribal_parser.add_argument("--db", default=DB_PATH, help="Database path")
-
-    rebuild_parser = sub.add_parser("rebuild-registry", help="Rebuild tag registry from all DB cards")
-    rebuild_parser.add_argument("--min-freq", type=int, default=3, help="Minimum tag frequency (default: 3)")
-    rebuild_parser.add_argument("--output", default=None, help="Output path (default: synergy_tag_registry.json)")
-
     args = parser.parse_args()
 
-    if args.command == "backfill":
-        init_db(args.db)
-        backfill_scryfall(args.scryfall, args.db)
-
-    elif args.command == "import":
-        import_file(args.file, args.db)
-        s = get_db_stats(args.db)
-        print(f"\nDB stats: {s['cards']} cards, {s['provides_rows']} provides, "
-              f"{s['wants_rows']} wants, {s['scryfall_tags_rows']} scryfall tags")
-
-    elif args.command == "import-scryfall":
+    if args.command == "import-scryfall":
         import_scryfall_file(args.file, args.db)
         s = get_db_stats(args.db)
         print(f"\nDB: {s['scryfall_tags_cards']} cards with scryfall tags, "
               f"{s['scryfall_tags_rows']} tag assignments, {s['unique_scryfall']} unique tags")
-
-    elif args.command == "stats":
-        s = get_db_stats(args.db)
-        print(f"Cards: {s['cards']}")
-        print(f"LLM provides: {s['provides_rows']} rows, {s['unique_provides']} unique tags")
-        print(f"LLM wants: {s['wants_rows']} rows, {s['unique_wants']} unique tags")
-        print(f"Scryfall tags: {s['scryfall_tags_rows']} rows, {s['scryfall_tags_cards']} cards, "
-              f"{s['unique_scryfall']} unique tags")
-        print(f"\nTop LLM provides:")
-        for tag, cnt in s["top_provides"]:
-            print(f"  {tag:35s} {cnt}")
-        print(f"\nTop LLM wants:")
-        for tag, cnt in s["top_wants"]:
-            print(f"  {tag:35s} {cnt}")
 
     elif args.command == "scryfall-stats":
         counts = get_scryfall_tag_counts(args.db)
@@ -832,58 +676,6 @@ def main():
         if len(missing) > args.limit:
             print(f"  ... and {len(missing) - args.limit} more")
 
-    elif args.command == "fix-tribal":
-        if args.dry_run:
-            conn = sqlite3.connect(args.db)
-            rows = conn.execute("""
-                SELECT w.oracle_id, w.tag, c.name, c.oracle_text
-                FROM wants w JOIN cards c ON w.oracle_id = c.oracle_id
-                WHERE w.tag LIKE '%-tribal'
-            """).fetchall()
-            conn.close()
-            false_pos = []
-            for oid, tag, name, oracle in rows:
-                creature_type = tag.replace("-tribal", "")
-                if creature_type.lower() not in (oracle or "").lower():
-                    false_pos.append((name, tag))
-            print(f"Would remove {len(false_pos)} false positive tribal wants:")
-            for name, tag in false_pos[:20]:
-                print(f"  {name}: {tag}")
-            if len(false_pos) > 20:
-                print(f"  ... and {len(false_pos) - 20} more")
-        else:
-            removed = fix_tribal_wants(args.db)
-            print(f"Removed {len(removed)} false positive tribal wants tags")
-            for entry in removed[:20]:
-                print(f"  {entry['name']}: {entry['tag']}")
-            if len(removed) > 20:
-                print(f"  ... and {len(removed) - 20} more")
-
-    elif args.command == "rebuild-registry":
-        registry = rebuild_registry(output_path=args.output, min_freq=args.min_freq)
-        meta = registry["_meta"]["stats"]
-        print(f"Registry v4.0: {meta['provides_count']} provides, {meta['wants_count']} wants")
-        print(f"Source: {meta['source']}")
-
-    elif args.command == "query":
-        if args.provides:
-            cards = get_cards_providing(args.provides, args.db)
-            print(f"Cards providing '{args.provides}': {len(cards)}")
-            for c in cards[:20]:
-                print(f"  {c['name']}")
-        elif args.wants:
-            cards = get_cards_wanting(args.wants, args.db)
-            print(f"Cards wanting '{args.wants}': {len(cards)}")
-            for c in cards[:20]:
-                print(f"  {c['name']}")
-        elif args.scryfall:
-            oids = get_cards_with_scryfall_tag(args.scryfall, args.db)
-            print(f"Cards with scryfall tag '{args.scryfall}': {len(oids)}")
-            # Resolve names
-            if oids:
-                cards = get_cards_by_oids(oids[:20], args.db)
-                for c in cards:
-                    print(f"  {c['name']}")
     else:
         parser.print_help()
 

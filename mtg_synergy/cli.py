@@ -13,7 +13,6 @@ import json
 import os
 
 from mtg_synergy.config import DATA_DIR
-from mtg_synergy.graph import build_graph
 from mtg_synergy.combos import find_combos, find_combos_tiered
 from mtg_synergy.combos.display import show_combos, show_combos_tiered, validate_against_curated
 from mtg_synergy.recommend import recommend_cards, suggest_swaps, show_swaps
@@ -21,9 +20,7 @@ from mtg_synergy.analysis import (
     show_card_synergies, show_deck_synergies, show_deck_analysis,
     load_merged, build_from_commander,
 )
-from mtg_synergy.analysis.strategy import (
-    _detect_deck_types, _filter_candidates, _find_embedding_candidates,
-)
+from mtg_synergy.analysis.strategy import _detect_deck_types
 from mtg_synergy.analysis.visualization import generate_visualization
 
 
@@ -71,7 +68,7 @@ def run():
         print(f"Loaded {len(cards)} cards from {args.input}")
     else:
         # Default: load deck cards from SQLite DB
-        from tag_db import get_cards_by_names, find_synergy_candidates, DB_PATH
+        from tag_db import get_cards_by_names, DB_PATH
         from decks import load_deck
         deck = load_deck(args.deck)
         deck_names = deck.DECKLIST + [deck.COMMANDER]
@@ -80,26 +77,7 @@ def run():
         print(f"Loaded {len(cards)} deck cards from DB")
 
         # For --recommend and --swaps, tower pre-filter handles candidate discovery.
-        # For --card, --deck-view, --visualize, --combos, load tag-based candidates for graph.
-        needs_candidates = args.card or args.visualize or args.deck_view or args.combos
-        if needs_candidates:
-            commander_card = next((c for c in cards if c["name"] == deck.COMMANDER), None)
-            candidates = find_synergy_candidates(cards, DB_PATH, commander=commander_card)
-            deck_oids = {c["oracle_id"] for c in cards}
-            emb_candidates = _find_embedding_candidates(cards, deck_oids, DB_PATH)
-            color_id = deck.COLOR_IDENTITY
-            candidates = _filter_candidates(candidates, color_id, DB_PATH)
-            if emb_candidates:
-                emb_candidates = _filter_candidates(emb_candidates, color_id, DB_PATH)
-            all_candidate_oids = set()
-            for c in candidates:
-                if c["oracle_id"] not in deck_oids:
-                    all_candidate_oids.add(c["oracle_id"])
-                    cards.append(c)
-            for c in emb_candidates:
-                if c["oracle_id"] not in deck_oids and c["oracle_id"] not in all_candidate_oids:
-                    cards.append(c)
-            print(f"Loaded {len(cards)} cards (deck + candidates)")
+        # --card and --visualize require the legacy graph which has been removed.
 
     # --- Strategy detection ---
     active_strategies = set()
@@ -159,47 +137,20 @@ def run():
         if active_strategies:
             print(f"Active strategies: {', '.join(sorted(active_strategies))}")
 
-    # Build provides/wants graph only when needed (--card, --visualize, --deck-view, --combos)
-    # Recommend and swaps use tower pre-filter + causal graph instead
-    needs_graph = args.card or args.visualize or args.deck_view or args.combos
+    # The legacy provides/wants graph has been removed.
+    # --card and --visualize are no longer supported.
+    # --recommend and --swaps use the tower pre-filter + causal graph.
     graph = {"adjacency": {}, "edges": [], "stats": {}}
-    if needs_graph:
-        _build_deck_oids = None
-        if not args.input:
-            deck_names_for_oids = set(deck.DECKLIST) | {deck.COMMANDER}
-            _build_deck_oids = {c["oracle_id"] for c in cards if c["name"] in deck_names_for_oids}
-
-        graph = build_graph(cards, deck_oids=_build_deck_oids)
-        stats = graph["stats"]
-        print(f"\nGraph stats:")
-        print(f"  raw signal edges:      {stats['total_raw_edges']}")
-        print(f"    provides→wants:      {stats['provides_wants_edges']}")
-        print(f"    peer-enabler:        {stats['peer_enabler_edges']}")
-        print(f"    shared-wants:        {stats['shared_wants_edges']}")
-        print(f"    embedding:           {stats.get('embedding_edges', 0)}")
-        print(f"  composite edges:       {stats['pruned_edges']} (unique card pairs)")
-        print(f"  cards with edges:      {stats['cards_with_edges']}/{stats['cards_total']}")
 
     # Ensure deck config is loaded (already set in DB path, need it for --input path)
     if args.input:
         from decks import load_deck
         deck = load_deck(args.deck)
 
-    if args.card:
-        show_card_synergies(graph, args.card)
-    elif args.visualize:
-        deck_set = set(deck.DECKLIST) | {deck.COMMANDER}
-        combos = find_combos(graph, cards, deck_set, deck.COMMANDER, top_n=20)
-        # Enrich with Spellbook / inferred tiered combo data if DB is available
-        tiered = None
-        if db_path:
-            deck_oids = {c["oracle_id"] for c in cards if c["name"] in deck_set}
-            tiered = find_combos_tiered(deck_oids, db_path)
-            confirmed = [c for c in tiered if c["tier"] == "infinite-confirmed"]
-            if confirmed:
-                print(f"\n  Spellbook confirmed combos: {len(confirmed)} (highlighted in visualization)")
-        generate_visualization(graph, cards, deck_set, deck.COMMANDER, args.deck, combos,
-                               tiered_combos=tiered)
+    if args.card or args.visualize:
+        print("Note: --card and --visualize require the legacy provides/wants graph which has been removed.")
+        print("Use --recommend instead.")
+        return
     elif args.deck_view or args.recommend or args.combos or args.swaps:
         deck_set = set(deck.DECKLIST) | {deck.COMMANDER}
         deck_oids = {c["oracle_id"] for c in cards if c["name"] in deck_set}
