@@ -359,32 +359,11 @@ def apply_llm_scoring(candidate_scores, cards, deck_cards,
 
     _cmdr_oid = card_oid_lookup.get(commander, "")
 
-    # LLM injection
-    _has = conn.execute(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='synergy_scores'"
-    ).fetchone()[0] if _cmdr_oid else 0
-    if _has:
-        for r in conn.execute(
-            "SELECT ss.card_oid, ss.score, c.name, c.type_line, c.mana_cost, c.cmc, c.edhrec_rank "
-            "FROM synergy_scores ss JOIN cards c ON c.oracle_id = ss.card_oid "
-            "WHERE ss.commander_oid = ? AND ss.score >= 7", (_cmdr_oid,)):
-            oid, score, name = r[0], r[1], r[2]
-            if name not in deck_cards and name not in candidate_scores:
-                _inject_candidate(candidate_scores, cards, card_oid_lookup, card_meta,
-                                  oid, (name, r[3], r[4], r[5], r[6]))
-
     # EDHREC loading + injection
     edhrec_synergy_map = _load_edhrec_synergy(conn, edhrec_slug)
 
-    # LLM scores
-    llm_scores = {}
-    if _has:
-        for r in conn.execute(
-            "SELECT card_oid, score FROM synergy_scores WHERE commander_oid = ?", (_cmdr_oid,)):
-            llm_scores[r[0]] = r[1]
-
     # Tower model
-    model_scores = _score_tower_model(_cmdr_oid, candidate_scores, card_oid_lookup, llm_scores)
+    model_scores = _score_tower_model(_cmdr_oid, candidate_scores, card_oid_lookup, {})
 
     # Fusion model (tower + LightGBM hybrid)
     from mtg_synergy.config import USE_FUSION_MODEL
@@ -422,24 +401,19 @@ def apply_llm_scoring(candidate_scores, cards, deck_cards,
                 score = float(fusion["gbm"].predict_proba(features_10)[0][1])
             info["total"] = score * 10000  # scale to match LLM formula range
             info["fusion_score"] = round(score, 3)
-    elif llm_scores or model_scores:
+    elif model_scores:
         cmdr_tag_overlap = _compute_tag_overlap(conn, _cmdr_oid, candidate_scores, card_oid_lookup)
         for card_name, info in candidate_scores.items():
             oid = card_oid_lookup.get(card_name, "")
-            llm = llm_scores.get(oid)
-            ms = model_scores.get(card_name) if llm is None else None
-            if llm is not None or ms is not None:
-                score_val = llm if llm is not None else ms
+            ms = model_scores.get(card_name)
+            if ms is not None:
                 meta = card_meta.get(card_name, {})
                 rank = meta.get("edhrec_rank") or 50000
                 rank_tb = max(0, 10.0 - 2.0 * math.log10(max(rank, 1)))
-                tower = model_scores.get(card_name, 5.0) if card_name in model_scores else 5.0
                 overlap = cmdr_tag_overlap.get(card_name, 0)
                 edhrec_syn = max(0, edhrec_synergy_map.get(card_name, 0.0))
-                info["total"] = (score_val * w["LLM"] + edhrec_syn * w["EDHREC_SYNERGY"]
-                                 + overlap * w["OVERLAP"] + tower * w["TOWER"]
-                                 + rank_tb * w["RANK_TIEBREAK"])
-                info["llm_score"] = score_val if llm is not None else round(ms, 1)
+                info["total"] = (ms * w["TOWER"] + edhrec_syn * w["EDHREC_SYNERGY"]
+                                 + overlap * w["OVERLAP"] + rank_tb * w["RANK_TIEBREAK"])
                 if edhrec_syn > 0:
                     info["edhrec_syn"] = round(edhrec_syn, 3)
             else:
@@ -447,8 +421,8 @@ def apply_llm_scoring(candidate_scores, cards, deck_cards,
                 graph_norm = info["total"] / max_graph
                 if edhrec_syn > 0:
                     est = 4.0 + edhrec_syn * 6.0
-                    info["total"] = est * w["LLM"] + edhrec_syn * w["EDHREC_SYNERGY"] + graph_norm * w["TOWER"]
+                    info["total"] = est * w["TOWER"] + edhrec_syn * w["EDHREC_SYNERGY"] + graph_norm * w["TOWER"]
                 else:
-                    info["total"] = 2 * w["LLM"] + graph_norm * w["TOWER"]
+                    info["total"] = 2 * w["TOWER"] + graph_norm * w["TOWER"]
 
     conn.close()

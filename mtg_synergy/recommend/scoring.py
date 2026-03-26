@@ -176,19 +176,7 @@ class DeckContext:
         except Exception:
             pass
 
-        # LLM synergy scores (pre-scored by score_synergies.py)
-        self.llm_scores = {}  # {oracle_id: score}
-        try:
-            has = conn.execute(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='synergy_scores'"
-            ).fetchone()[0]
-            if has and self.cmdr_oid:
-                for r in conn.execute(
-                    "SELECT card_oid, score FROM synergy_scores WHERE commander_oid = ?",
-                    (self.cmdr_oid,)):
-                    self.llm_scores[r[0]] = r[1]
-        except Exception:
-            pass
+        # LLM synergy scores removed — superseded by fusion model
 
         # Commander profile fallback (when no strategies provided by caller)
         if not self.active_strategies and self.cmdr_oid:
@@ -524,8 +512,7 @@ def compute_dynamic_score(card_name: str, card_data: dict, ctx: DeckContext,
     if ctx.causal_ctx:
         causal = ctx.causal_ctx.causal_score(oid)
 
-    # --- Feature 11: LLM synergy score ---
-    llm = ctx.llm_scores.get(oid, 0)
+    # --- Feature 11: (removed — LLM scores superseded by fusion model) ---
 
     # --- Feature 12: Forge DeckHas/DeckHints overlap ---
     forge_overlap = 0
@@ -563,8 +550,7 @@ def compute_dynamic_score(card_name: str, card_data: dict, ctx: DeckContext,
     if fusion_score > 0:
         total = fusion_score * w.get("FUSION", 10.0)
     else:
-        total = (llm * w.get("LLM", 0)
-                 + tower * w["TOWER"]
+        total = (tower * w["TOWER"]
                  + min(mech, 10) * w["MECHANICS"]
                  + cmdr_overlap * w["CMDR_TAG_OVERLAP"]
                  + deck_overlap * w["DECK_TAG_OVERLAP"]
@@ -578,7 +564,6 @@ def compute_dynamic_score(card_name: str, card_data: dict, ctx: DeckContext,
 
     return {
         "total": total,
-        "llm": llm,
         "tower": round(tower, 1),
         "mechanics": round(mech, 1),
         "cmdr_overlap": cmdr_overlap,
