@@ -219,13 +219,17 @@ def build_feature_matrix(pairs_by_cmdr, tower_model_path=TOWER_EDHREC_PATH, verb
         }
         name_to_oid[name] = oid
 
-    # 2. Provides / wants tags (bulk)
+    # 2. Provides / wants tags — legacy, cmdr_tag_overlap feature zeroed out at inference
+    # Keep loading for backward compat with existing model weights
     provides_map = {}       # oid -> set[tag]
     wants_map = {}          # oid -> set[tag]
-    for oid, tag in conn.execute("SELECT oracle_id, tag FROM provides"):
-        provides_map.setdefault(oid, set()).add(tag)
-    for oid, tag in conn.execute("SELECT oracle_id, tag FROM wants"):
-        wants_map.setdefault(oid, set()).add(tag)
+    try:
+        for oid, tag in conn.execute("SELECT oracle_id, tag FROM provides"):
+            provides_map.setdefault(oid, set()).add(tag)
+        for oid, tag in conn.execute("SELECT oracle_id, tag FROM wants"):
+            wants_map.setdefault(oid, set()).add(tag)
+    except Exception:
+        pass  # Tables may not exist — feature will be 0
 
     # 3. Forge deck tags (bulk)
     forge_has = {}          # oid -> set[tag]

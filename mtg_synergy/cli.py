@@ -109,7 +109,7 @@ def run():
                 if c["oracle_id"] not in deck_oids and c["oracle_id"] not in all_candidate_oids:
                     cards.append(c)
 
-            print(f"Building graph for {len(cards)} cards (deck + candidates)")
+            print(f"Loaded {len(cards)} cards (deck + candidates)")
 
     # --- Strategy detection ---
     active_strategies = set()
@@ -169,22 +169,26 @@ def run():
         if active_strategies:
             print(f"Active strategies: {', '.join(sorted(active_strategies))}")
 
-    # Collect deck oracle_ids for fan-out cap preservation
-    _build_deck_oids = None
-    if not args.input:
-        deck_names_for_oids = set(deck.DECKLIST) | {deck.COMMANDER}
-        _build_deck_oids = {c["oracle_id"] for c in cards if c["name"] in deck_names_for_oids}
+    # Build provides/wants graph only when needed (--card, --visualize, --deck-view, --combos)
+    # Recommend and swaps use tower pre-filter + causal graph instead
+    needs_graph = args.card or args.visualize or args.deck_view or args.combos
+    graph = {"adjacency": {}, "edges": [], "stats": {}}
+    if needs_graph:
+        _build_deck_oids = None
+        if not args.input:
+            deck_names_for_oids = set(deck.DECKLIST) | {deck.COMMANDER}
+            _build_deck_oids = {c["oracle_id"] for c in cards if c["name"] in deck_names_for_oids}
 
-    graph = build_graph(cards, deck_oids=_build_deck_oids)
-    stats = graph["stats"]
-    print(f"\nGraph stats:")
-    print(f"  raw signal edges:      {stats['total_raw_edges']}")
-    print(f"    provides→wants:      {stats['provides_wants_edges']}")
-    print(f"    peer-enabler:        {stats['peer_enabler_edges']}")
-    print(f"    shared-wants:        {stats['shared_wants_edges']}")
-    print(f"    embedding:           {stats.get('embedding_edges', 0)}")
-    print(f"  composite edges:       {stats['pruned_edges']} (unique card pairs)")
-    print(f"  cards with edges:      {stats['cards_with_edges']}/{stats['cards_total']}")
+        graph = build_graph(cards, deck_oids=_build_deck_oids)
+        stats = graph["stats"]
+        print(f"\nGraph stats:")
+        print(f"  raw signal edges:      {stats['total_raw_edges']}")
+        print(f"    provides→wants:      {stats['provides_wants_edges']}")
+        print(f"    peer-enabler:        {stats['peer_enabler_edges']}")
+        print(f"    shared-wants:        {stats['shared_wants_edges']}")
+        print(f"    embedding:           {stats.get('embedding_edges', 0)}")
+        print(f"  composite edges:       {stats['pruned_edges']} (unique card pairs)")
+        print(f"  cards with edges:      {stats['cards_with_edges']}/{stats['cards_total']}")
 
     # Ensure deck config is loaded (already set in DB path, need it for --input path)
     if args.input:
