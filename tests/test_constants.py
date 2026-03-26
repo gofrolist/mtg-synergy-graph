@@ -36,7 +36,7 @@ def test_key_forge_bridges_exist():
     assert ("token", "enters-battlefield") in SEMANTIC_BRIDGES
     assert ("destroy", "dies") in SEMANTIC_BRIDGES
     assert ("sacrifice-outlet", "sacrificed") in SEMANTIC_BRIDGES
-    assert ("put-counter", "counter-added") in SEMANTIC_BRIDGES
+    assert ("put-counter-p1p1", "counter-added-p1p1") in SEMANTIC_BRIDGES
     assert ("mill", "enters-graveyard") in SEMANTIC_BRIDGES
     assert ("gain-life", "life-gained") in SEMANTIC_BRIDGES
 

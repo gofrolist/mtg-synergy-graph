@@ -755,7 +755,7 @@ def test_action_event_bridges():
     assert ("sacrifice-outlet", "dies") in ACTION_EVENT_BRIDGES
     assert ("sacrifice-outlet", "sacrificed") in ACTION_EVENT_BRIDGES
     assert ("destroy", "dies") in ACTION_EVENT_BRIDGES
-    assert ("put-counter", "counter-added") in ACTION_EVENT_BRIDGES
+    assert ("put-counter-p1p1", "counter-added-p1p1") in ACTION_EVENT_BRIDGES
     assert ("mill", "enters-graveyard") in ACTION_EVENT_BRIDGES
     assert ("discard", "discarded") in ACTION_EVENT_BRIDGES
     assert ("proliferate", "counter-added") in ACTION_EVENT_BRIDGES

@@ -312,6 +312,21 @@ def derive_provides_from_ability(
         elif verb == "Investigate":
             tags.add("investigate")
             tags.add("token-clue")
+        elif verb in ("PutCounter", "PutCounterAll"):
+            base_tag = VERB_TO_PROVIDES[verb]
+            # Use type-specific tag when counter type is known, generic only as fallback
+            if counter_type:
+                ct = counter_type.upper()
+                if ct == "P1P1":
+                    tags.add(f"{base_tag}-p1p1")
+                elif ct == "M1M1":
+                    tags.add(f"{base_tag}-m1m1")
+                elif ct == "ENERGY":
+                    tags.add(f"{base_tag}-energy")
+                else:
+                    tags.add(f"{base_tag}-other")
+            else:
+                tags.add(base_tag)  # generic only when type unknown
         elif verb in VERB_TO_PROVIDES:
             tags.add(VERB_TO_PROVIDES[verb])
 
@@ -406,6 +421,7 @@ def derive_wants_from_trigger(
     origin: Optional[str],
     destination: Optional[str],
     trigger_filter: Optional[str],
+    raw_line: str = "",
 ) -> set[str]:
     """Derive wants tags from a Forge trigger row.
 
@@ -414,6 +430,7 @@ def derive_wants_from_trigger(
         origin: Zone origin for ChangesZone triggers (e.g. "Battlefield").
         destination: Zone destination for ChangesZone triggers (e.g. "Graveyard").
         trigger_filter: Filter string (e.g. "Goblin.YouCtrl", "Creature.Zombie+Other").
+        raw_line: Full raw DSL line for counter type parsing.
 
     Returns:
         Set of wants tag strings.
@@ -431,6 +448,21 @@ def derive_wants_from_trigger(
         elif origin == "Battlefield":
             # Fallback for unknown battlefield departures
             tags.add(ZONE_TRIGGER_MAP[("Battlefield", "Any")])
+    elif trigger_mode in ("CounterAdded", "CounterAddedOnce"):
+        # Counter-type-specific wants tags — only specific tag when type known
+        ct_match = re.search(r"CounterType\$\s*(\w+)", raw_line or "")
+        if ct_match:
+            ct = ct_match.group(1).upper()
+            if ct in ("P1P1", "PLUSONEPLUSONE"):
+                tags.add("counter-added-p1p1")
+            elif ct in ("M1M1", "MINUSONEMINUSONE"):
+                tags.add("counter-added-m1m1")
+            elif ct == "ENERGY":
+                tags.add("counter-added-energy")
+            else:
+                tags.add("counter-added-other")
+        else:
+            tags.add("counter-added")  # generic only when type unknown
     else:
         # Simple trigger_mode lookup
         tag = TRIGGER_TO_WANTS.get(trigger_mode)
@@ -609,6 +641,7 @@ def derive_all(db_path: str, dry_run: bool = False) -> dict:
                     origin=trigger_origin,
                     destination=trigger_destination,
                     trigger_filter=trigger_filter,
+                    raw_line=raw_line,
                 )
                 wants.update(w_tags)
 
@@ -783,6 +816,7 @@ def _show_card_tags(conn, db_path: str, card_name: str) -> None:
             w = derive_wants_from_trigger(
                 trigger_mode=trigger_mode, origin=trigger_origin,
                 destination=trigger_destination, trigger_filter=trigger_filter,
+                raw_line=raw_line or "",
             )
             wants.update(w)
 
