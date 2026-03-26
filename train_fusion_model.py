@@ -1001,18 +1001,32 @@ def _load_pairs_for_features(conn, oid_to_idx):
     return pairs_by_cmdr
 
 
-def holdout_evaluation(seed=42):
+def holdout_evaluation(seed=42, drop_features=None):
     """Train on 80% of commanders, evaluate Recall@K on held-out 20%.
 
     This gives the TRUE generalization performance, avoiding the trap of
     evaluating on training commanders.
+
+    Args:
+        drop_features: list of feature names to zero out (e.g. ["edhrec_synergy"])
     """
     import lightgbm as lgb
     import joblib
     from sklearn.metrics import roc_auc_score as sklearn_auc
 
+    drop_indices = []
+    if drop_features:
+        for f in drop_features:
+            if f in FEATURE_NAMES:
+                drop_indices.append(FEATURE_NAMES.index(f))
+            else:
+                print(f"WARNING: Unknown feature '{f}', ignoring")
+
+    title = "HELD-OUT EVALUATION: Train 80% / Test 20% commanders"
+    if drop_features:
+        title += f" (dropped: {', '.join(drop_features)})"
     print("=" * 60)
-    print("HELD-OUT EVALUATION: Train 80% / Test 20% commanders")
+    print(title)
     print("=" * 60)
 
     # Load embeddings
@@ -1038,6 +1052,12 @@ def holdout_evaluation(seed=42):
     print("\nBuilding feature matrix for TRAIN commanders...")
     X_train, y_train, cmdr_ids_train = build_feature_matrix(train_pairs)
 
+    # Zero out dropped features
+    if drop_indices:
+        for idx in drop_indices:
+            X_train[:, idx] = 0.0
+        print(f"  Zeroed out features: {[FEATURE_NAMES[i] for i in drop_indices]}")
+
     # Train GBM on train split
     print(f"\nTraining LightGBM on {len(train_cmdrs)} commanders...")
     params = {
@@ -1057,6 +1077,11 @@ def holdout_evaluation(seed=42):
     test_pairs = {c: pairs_by_cmdr[c] for c in test_cmdrs}
     print(f"\nBuilding feature matrix for TEST commanders...")
     X_test, y_test, cmdr_ids_test = build_feature_matrix(test_pairs)
+
+    # Zero out dropped features in test set too
+    if drop_indices:
+        for idx in drop_indices:
+            X_test[:, idx] = 0.0
 
     test_auc = sklearn_auc(y_test, model.predict_proba(X_test)[:, 1])
     print(f"  Test AUC: {test_auc:.4f}")
@@ -1209,10 +1234,16 @@ def main():
         action="store_true",
         help="Train on 80%% of commanders, evaluate Recall@K on held-out 20%%",
     )
+    parser.add_argument(
+        "--drop-feature",
+        action="append",
+        default=[],
+        help="Zero out a feature during holdout eval (e.g. --drop-feature edhrec_synergy)",
+    )
     args = parser.parse_args()
 
     if args.holdout_eval:
-        holdout_evaluation()
+        holdout_evaluation(drop_features=args.drop_feature if args.drop_feature else None)
         return
 
     if args.feature_importance:
