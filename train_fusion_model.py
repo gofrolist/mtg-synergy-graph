@@ -186,7 +186,7 @@ def sample_negatives(positives_by_cmdr, all_card_oids, card_colors, cmdr_colors,
     return negatives
 
 
-def build_feature_matrix(pairs_by_cmdr, tower_model_path=TOWER_EDHREC_PATH):
+def build_feature_matrix(pairs_by_cmdr, tower_model_path=TOWER_EDHREC_PATH, verbose=True):
     """Build 10-feature matrix for all (commander, card) pairs.
 
     Args:
@@ -327,7 +327,8 @@ def build_feature_matrix(pairs_by_cmdr, tower_model_path=TOWER_EDHREC_PATH):
 
     for ci, cmdr_oid in enumerate(cmdr_oids_ordered):
         if (ci + 1) % 50 == 0 or ci == 0:
-            print(f"  Building features for commander {ci+1}/{n_cmdrs}...", flush=True)
+            if verbose:
+                print(f"  Building features for commander {ci+1}/{n_cmdrs}...", flush=True)
 
         pairs = cmdr_pair_map.get(cmdr_oid, [])
         if not pairs:
@@ -517,17 +518,18 @@ def build_feature_matrix(pairs_by_cmdr, tower_model_path=TOWER_EDHREC_PATH):
     conn.close()
 
     # Print summary statistics
-    print(f"\nFeature matrix: {X.shape}")
-    print(f"  Positive labels: {int(y.sum())}")
-    print(f"  Negative labels: {int(len(y) - y.sum())}")
-    print(f"  Commanders: {len(cmdr_oids_ordered)}")
-    print(f"\nPer-feature statistics:")
-    for i, name in enumerate(FEATURE_NAMES):
-        col = X[:, i]
-        print(f"  {name:>20s}: "
-              f"mean={col.mean():.4f}  std={col.std():.4f}  "
-              f"min={col.min():.4f}  max={col.max():.4f}  "
-              f"nonzero={np.count_nonzero(col)}/{len(col)}")
+    if verbose:
+        print(f"\nFeature matrix: {X.shape}")
+        print(f"  Positive labels: {int(y.sum())}")
+        print(f"  Negative labels: {int(len(y) - y.sum())}")
+        print(f"  Commanders: {len(cmdr_oids_ordered)}")
+        print(f"\nPer-feature statistics:")
+        for i, name in enumerate(FEATURE_NAMES):
+            col = X[:, i]
+            print(f"  {name:>20s}: "
+                  f"mean={col.mean():.4f}  std={col.std():.4f}  "
+                  f"min={col.min():.4f}  max={col.max():.4f}  "
+                  f"nonzero={np.count_nonzero(col)}/{len(col)}")
 
     return X, y, cmdr_ids
 
@@ -999,6 +1001,192 @@ def _load_pairs_for_features(conn, oid_to_idx):
     return pairs_by_cmdr
 
 
+def holdout_evaluation(seed=42):
+    """Train on 80% of commanders, evaluate Recall@K on held-out 20%.
+
+    This gives the TRUE generalization performance, avoiding the trap of
+    evaluating on training commanders.
+    """
+    import lightgbm as lgb
+    import joblib
+    from sklearn.metrics import roc_auc_score as sklearn_auc
+
+    print("=" * 60)
+    print("HELD-OUT EVALUATION: Train 80% / Test 20% commanders")
+    print("=" * 60)
+
+    # Load embeddings
+    print("\nLoading embeddings...")
+    _, _, oid_to_idx = load_embeddings()
+
+    conn = sqlite3.connect(DB_PATH)
+
+    # Load pairs
+    pairs_by_cmdr = _load_pairs_for_features(conn, oid_to_idx)
+
+    # Split commanders 80/20
+    rng = np.random.RandomState(seed)
+    all_cmdrs = list(pairs_by_cmdr.keys())
+    rng.shuffle(all_cmdrs)
+    split_idx = int(len(all_cmdrs) * 0.8)
+    train_cmdrs = set(all_cmdrs[:split_idx])
+    test_cmdrs = set(all_cmdrs[split_idx:])
+    print(f"\nCommander split: {len(train_cmdrs)} train / {len(test_cmdrs)} test")
+
+    # Build feature matrix for train commanders only
+    train_pairs = {c: pairs_by_cmdr[c] for c in train_cmdrs}
+    print("\nBuilding feature matrix for TRAIN commanders...")
+    X_train, y_train, cmdr_ids_train = build_feature_matrix(train_pairs)
+
+    # Train GBM on train split
+    print(f"\nTraining LightGBM on {len(train_cmdrs)} commanders...")
+    params = {
+        "objective": "binary",
+        "metric": "auc",
+        "num_leaves": 63,
+        "learning_rate": 0.05,
+        "n_estimators": 500,
+        "verbose": -1,
+    }
+    model = lgb.LGBMClassifier(**params)
+    model.fit(X_train, y_train, feature_name=FEATURE_NAMES)
+    train_auc = sklearn_auc(y_train, model.predict_proba(X_train)[:, 1])
+    print(f"  Train AUC: {train_auc:.4f}")
+
+    # Build feature matrix for test commanders
+    test_pairs = {c: pairs_by_cmdr[c] for c in test_cmdrs}
+    print(f"\nBuilding feature matrix for TEST commanders...")
+    X_test, y_test, cmdr_ids_test = build_feature_matrix(test_pairs)
+
+    test_auc = sklearn_auc(y_test, model.predict_proba(X_test)[:, 1])
+    print(f"  Test AUC: {test_auc:.4f}")
+
+    # Now compute Recall@K on test commanders
+    # For each test commander: rank ALL their candidate cards by GBM probability,
+    # then check how many of the EDHREC avg deck cards appear in our top K
+    print("\n" + "=" * 60)
+    print("RECALL@K ON HELD-OUT COMMANDERS")
+    print("=" * 60)
+
+    # Load EDHREC avg decks for test commanders
+    # We need commander slug for each test commander OID
+    cmdr_oid_to_slug = {}
+    for row in conn.execute(
+        "SELECT DISTINCT commander_slug FROM edhrec_average_decks"
+    ):
+        slug = row[0]
+        # Map slug -> commander name -> oracle_id
+        name_row = conn.execute(
+            "SELECT oracle_id, name FROM cards WHERE REPLACE(LOWER(name), ' ', '-') = ? "
+            "OR REPLACE(REPLACE(LOWER(name), ',', ''), ' ', '-') = ?",
+            (slug, slug)
+        ).fetchone()
+        if name_row and name_row[0] in test_cmdrs:
+            cmdr_oid_to_slug[name_row[0]] = slug
+
+    # Also try loading the slug mapping used in load_edhrec_membership
+    # The membership loader mapped slug → cmdr_oid, so let's reverse it
+    positives = load_edhrec_membership(conn)
+    slug_lookup = {}
+    for row in conn.execute("SELECT DISTINCT commander_slug FROM edhrec_average_decks"):
+        slug = row[0]
+        # Find which cmdr_oid has cards matching this slug's deck
+        deck_cards = set(r[0] for r in conn.execute(
+            "SELECT card_name FROM edhrec_average_decks WHERE commander_slug = ?", (slug,)))
+        for cmdr_oid in test_cmdrs:
+            if cmdr_oid in positives:
+                # Check overlap between this commander's positive cards and the slug's deck
+                cmdr_card_names = set()
+                for card_oid in positives[cmdr_oid]:
+                    name_row = conn.execute(
+                        "SELECT name FROM cards WHERE oracle_id = ?", (card_oid,)).fetchone()
+                    if name_row:
+                        cmdr_card_names.add(name_row[0])
+                overlap = len(cmdr_card_names & deck_cards)
+                if overlap > 10:  # Strong match
+                    slug_lookup[cmdr_oid] = slug
+                    break
+
+    print(f"  Mapped {len(slug_lookup)} test commanders to EDHREC slugs")
+
+    # For each test commander, get ALL their pairs (positive + negative),
+    # score with GBM, rank, and compute Recall@K
+    k_values = [30, 50, 100]
+    recalls_avg = {k: [] for k in k_values}
+    recalls_syn = {k: [] for k in k_values}
+
+    test_cmdr_list = sorted(test_cmdrs & set(slug_lookup.keys()))
+
+    for cmdr_oid in test_cmdr_list:
+        slug = slug_lookup[cmdr_oid]
+
+        # Get avg deck card names
+        avg_deck = set(r[0] for r in conn.execute(
+            "SELECT card_name FROM edhrec_average_decks WHERE commander_slug = ?", (slug,)))
+        if len(avg_deck) < 20:
+            continue
+
+        # Get high-synergy cards
+        syn_top = set(r[0] for r in conn.execute(
+            "SELECT card_name FROM edhrec_card_synergy WHERE commander_slug = ? AND synergy >= 0.2",
+            (slug,)))
+
+        # Get this commander's test pairs
+        pairs = pairs_by_cmdr.get(cmdr_oid, [])
+        if not pairs:
+            continue
+
+        # Build feature matrix for just this commander
+        single_pairs = {cmdr_oid: pairs}
+        X_cmdr, y_cmdr, _ = build_feature_matrix(single_pairs, verbose=False)
+        if len(X_cmdr) == 0:
+            continue
+
+        # Score with GBM
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            probs = model.predict_proba(X_cmdr)[:, 1]
+
+        # Map card_oid back to card_name for recall computation
+        card_names_ordered = []
+        for card_oid, label in pairs:
+            name_row = conn.execute(
+                "SELECT name FROM cards WHERE oracle_id = ?", (card_oid,)).fetchone()
+            card_names_ordered.append(name_row[0] if name_row else "")
+
+        # Rank by probability
+        ranked_indices = np.argsort(-probs)
+        ranked_names = [card_names_ordered[i] for i in ranked_indices if card_names_ordered[i]]
+
+        # Compute Recall@K against avg deck
+        for k in k_values:
+            our_top_k = set(ranked_names[:k])
+            recall = len(our_top_k & avg_deck) / len(avg_deck) if avg_deck else 0
+            recalls_avg[k].append(recall)
+
+        # Compute Recall@K against high synergy
+        if len(syn_top) >= 5:
+            for k in k_values:
+                our_top_k = set(ranked_names[:k])
+                recall = len(our_top_k & syn_top) / len(syn_top) if syn_top else 0
+                recalls_syn[k].append(recall)
+
+    print(f"\n  [Average Deck Recall — {len(recalls_avg[100])} held-out commanders]")
+    for k in k_values:
+        if recalls_avg[k]:
+            avg = sum(recalls_avg[k]) / len(recalls_avg[k])
+            print(f"    Recall@{k}: {avg:.1%}")
+
+    print(f"\n  [High Synergy Recall (>=0.2) — {len(recalls_syn[100])} held-out commanders]")
+    for k in k_values:
+        if recalls_syn[k]:
+            avg = sum(recalls_syn[k]) / len(recalls_syn[k])
+            print(f"    Recall@{k}: {avg:.1%}")
+
+    conn.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Train hybrid fusion model")
     parser.add_argument(
@@ -1016,7 +1204,16 @@ def main():
         action="store_true",
         help="Print feature importance from trained GBM model",
     )
+    parser.add_argument(
+        "--holdout-eval",
+        action="store_true",
+        help="Train on 80%% of commanders, evaluate Recall@K on held-out 20%%",
+    )
     args = parser.parse_args()
+
+    if args.holdout_eval:
+        holdout_evaluation()
+        return
 
     if args.feature_importance:
         import joblib
