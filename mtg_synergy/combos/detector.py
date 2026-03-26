@@ -5,7 +5,6 @@ import re
 import sqlite3
 from collections import defaultdict
 
-from mtg_synergy.constants import SEMANTIC_BRIDGES, TRIGGER_EFFECT_BRIDGES
 from mtg_synergy.config import DB_PATH
 
 
@@ -91,14 +90,6 @@ def find_combos(graph: dict, cards: list[dict], deck_cards: set[str], commander:
     }
 
 
-def _expand_through_bridges(tags: set[str]) -> set[str]:
-    """Expand provides tags through semantic bridges to match wants tags."""
-    expanded = set(tags)
-    for p_tag in tags:
-        for (bridge_p, bridge_w), weight in SEMANTIC_BRIDGES.items():
-            if bridge_p == p_tag and weight >= 0.6:
-                expanded.add(bridge_w)
-    return expanded
 
 
 # Oracle text patterns that indicate combo/loop potential
@@ -130,11 +121,9 @@ def _combo_potential(oracle_text: str) -> float:
 
 def _find_two_card_combos(cards: list[dict], deck_cards: set[str],
                           commander: str) -> list[dict]:
-    """Find 2-card combo candidates via provides→wants cycles with semantic bridges.
+    """Find 2-card combo candidates via oracle text combo pattern matching.
 
-    Uses SEMANTIC_BRIDGES to expand provides before matching (e.g. life-gain
-    matches life-gain-events). Scores by tag overlap * combo potential from
-    oracle text pattern matching.
+    Scores by combo potential from oracle text pattern matching.
     """
     # Build card lookup
     card_lookup = {}
@@ -142,8 +131,6 @@ def _find_two_card_combos(cards: list[dict], deck_cards: set[str],
         name = c["name"]
         if name in deck_cards:
             card_lookup[name] = {
-                "provides": set(c.get("provides", [])),
-                "wants": set(c.get("wants", [])),
                 "oracle_text": c.get("oracle_text", ""),
             }
 
@@ -154,55 +141,34 @@ def _find_two_card_combos(cards: list[dict], deck_cards: set[str],
         if a not in card_lookup:
             continue
         a_data = card_lookup[a]
-        a_provides = a_data["provides"]
-        a_wants = a_data["wants"]
-        if not a_provides or not a_wants:
+        cp_a = _combo_potential(a_data["oracle_text"])
+        if cp_a == 0:
             continue
-        # Expand provides through bridges
-        a_expanded = _expand_through_bridges(a_provides)
 
         for b in deck_sorted[i + 1:]:
             if b not in card_lookup:
                 continue
             b_data = card_lookup[b]
-            b_provides = b_data["provides"]
-            b_wants = b_data["wants"]
-            if not b_provides or not b_wants:
+            cp_b = _combo_potential(b_data["oracle_text"])
+            if cp_b == 0:
                 continue
-            b_expanded = _expand_through_bridges(b_provides)
 
-            # A provides (expanded) something B wants
-            a_to_b = a_expanded & b_wants
-            # B provides (expanded) something A wants
-            b_to_a = b_expanded & a_wants
+            # Both cards have combo potential
+            score = cp_a + cp_b
 
-            if a_to_b and b_to_a:
-                # Circular dependency found
-                # Base score from tag overlap
-                score = len(a_to_b) + len(b_to_a)
+            has_commander = commander in (a, b)
+            if has_commander:
+                score *= 1.5
 
-                # Combo potential bonus from oracle text
-                cp_a = _combo_potential(a_data["oracle_text"])
-                cp_b = _combo_potential(b_data["oracle_text"])
-                combo_bonus = 1.0 + (cp_a + cp_b)  # 1.0 to 3.0 multiplier
+            combo_label = "combo" if (cp_a + cp_b) >= 0.6 else "synergy"
 
-                score *= combo_bonus
-
-                has_commander = commander in (a, b)
-                if has_commander:
-                    score *= 1.5
-
-                combo_label = "combo" if (cp_a + cp_b) >= 0.6 else "synergy"
-
-                pairs.append({
-                    "cards": (a, b),
-                    "score": round(score, 1),
-                    "a_provides_b_wants": sorted(a_to_b),
-                    "b_provides_a_wants": sorted(b_to_a),
-                    "commander": has_commander,
-                    "combo_potential": round(cp_a + cp_b, 2),
-                    "label": combo_label,
-                })
+            pairs.append({
+                "cards": (a, b),
+                "score": round(score, 1),
+                "commander": has_commander,
+                "combo_potential": round(cp_a + cp_b, 2),
+                "label": combo_label,
+            })
 
     pairs.sort(key=lambda p: p["score"], reverse=True)
     return pairs
@@ -336,47 +302,23 @@ def find_combos_tiered(deck_oids, db_path=None):
                 for j in range(i + 1, len(oid_list)):
                     confirmed_pairs.add(frozenset([oid_list[i], oid_list[j]]))
 
-    # --- Load provides/wants for deck cards (batch) ---
+    # --- Load causal edges between deck cards for trigger chain detection ---
     deck_list = list(deck_oids)
-    provides_by_card = {}
-    wants_by_card = {}
     _chunk_size = 500
-    for _ci in range(0, len(deck_list), _chunk_size):
-        _chunk = deck_list[_ci:_ci + _chunk_size]
-        _ph = ",".join("?" * len(_chunk))
-        for row in conn.execute(
-            f"SELECT oracle_id, tag FROM provides WHERE oracle_id IN ({_ph})", _chunk
-        ).fetchall():
-            provides_by_card.setdefault(row[0], set()).add(row[1])
-        for row in conn.execute(
-            f"SELECT oracle_id, tag FROM wants WHERE oracle_id IN ({_ph})", _chunk
-        ).fetchall():
-            wants_by_card.setdefault(row[0], set()).add(row[1])
 
-    # --- Load abilities for deck cards (batch, from provides/wants) ---
-    abilities_by_card = {}
+    # Build bidirectional edge map: (source, target) -> max strength
+    card_edges = {}  # (source_oid, target_oid) -> max strength
     for _ci in range(0, len(deck_list), _chunk_size):
         _chunk = deck_list[_ci:_ci + _chunk_size]
         _ph = ",".join("?" * len(_chunk))
         for row in conn.execute(
-            f"SELECT oracle_id, tag FROM provides WHERE oracle_id IN ({_ph})",
-            _chunk
+            f"SELECT source_id, target_id, strength FROM interaction_edges "
+            f"WHERE source_id IN ({_ph})", _chunk
         ).fetchall():
-            oid, tag = row
-            ab = abilities_by_card.get(oid, {"trigger_tags": set(), "effect_tags": set()})
-            ab["effect_tags"].add(tag)
-            abilities_by_card[oid] = ab
-        for row in conn.execute(
-            f"SELECT oracle_id, tag FROM wants WHERE oracle_id IN ({_ph})",
-            _chunk
-        ).fetchall():
-            oid, tag = row
-            ab = abilities_by_card.get(oid, {"trigger_tags": set(), "effect_tags": set()})
-            ab["trigger_tags"].add(tag)
-            abilities_by_card[oid] = ab
-    # Remove empty entries
-    abilities_by_card = {k: v for k, v in abilities_by_card.items()
-                         if v["trigger_tags"] or v["effect_tags"]}
+            src, tgt, strength = row
+            if tgt in deck_oids:
+                key = (src, tgt)
+                card_edges[key] = max(card_edges.get(key, 0), strength)
 
     conn_names = {}
     for _ci in range(0, len(deck_list), _chunk_size):
@@ -389,63 +331,38 @@ def find_combos_tiered(deck_oids, db_path=None):
 
     conn.close()
 
-    # --- Find provides->wants cycles ---
+    # --- Find causal edge cycles (bidirectional edges = combo-likely) ---
     for i, oid_a in enumerate(deck_list):
         for oid_b in deck_list[i + 1:]:
             pair = frozenset([oid_a, oid_b])
             if pair in confirmed_pairs:
                 continue
 
-            prov_a = provides_by_card.get(oid_a, set())
-            want_a = wants_by_card.get(oid_a, set())
-            prov_b = provides_by_card.get(oid_b, set())
-            want_b = wants_by_card.get(oid_b, set())
-
-            # Check cycle: A provides what B wants AND B provides what A wants
-            a_to_b = prov_a & want_b
-            b_to_a = prov_b & want_a
-
-            if not (a_to_b and b_to_a):
-                continue
+            a_to_b = card_edges.get((oid_a, oid_b), 0)
+            b_to_a = card_edges.get((oid_b, oid_a), 0)
 
             name_a = conn_names.get(oid_a, oid_a)
             name_b = conn_names.get(oid_b, oid_b)
 
-            # --- Tier 2: Check trigger chain ---
-            ab_a = abilities_by_card.get(oid_a)
-            ab_b = abilities_by_card.get(oid_b)
-
-            if ab_a and ab_b:
-                # Expand effect tags with bridge mappings so that e.g.
-                # tokens-creature (effect) matches etb-value (trigger).
-                a_effects_expanded = set(ab_a["effect_tags"])
-                for et in ab_a["effect_tags"]:
-                    a_effects_expanded |= TRIGGER_EFFECT_BRIDGES.get(et, set())
-                b_effects_expanded = set(ab_b["effect_tags"])
-                for et in ab_b["effect_tags"]:
-                    b_effects_expanded |= TRIGGER_EFFECT_BRIDGES.get(et, set())
-
-                a_triggers_b = a_effects_expanded & ab_b["trigger_tags"]
-                b_triggers_a = b_effects_expanded & ab_a["trigger_tags"]
-
-                if a_triggers_b and b_triggers_a:
-                    combos.append({
-                        "tier": "combo-likely",
-                        "cards": [name_a, name_b],
-                        "card_oids": [oid_a, oid_b],
-                        "result": f"Trigger chain: {name_a} -> {', '.join(a_triggers_b)} -> {name_b} -> {', '.join(b_triggers_a)}",
-                        "reason": f"Circular triggers via {a_triggers_b} / {b_triggers_a}",
-                    })
-                    continue
-
-            # --- Tier 3: Synergy ---
-            combos.append({
-                "tier": "synergy",
-                "cards": [name_a, name_b],
-                "card_oids": [oid_a, oid_b],
-                "result": f"Provides/wants cycle: {a_to_b} / {b_to_a}",
-                "reason": "Tag cycle without trigger chain",
-            })
+            if a_to_b > 0 and b_to_a > 0:
+                # Bidirectional causal edges = circular trigger chain
+                combos.append({
+                    "tier": "combo-likely",
+                    "cards": [name_a, name_b],
+                    "card_oids": [oid_a, oid_b],
+                    "result": f"Circular triggers: {name_a} ({a_to_b:.2f}) <-> {name_b} ({b_to_a:.2f})",
+                    "reason": f"Bidirectional causal edges (strength {a_to_b:.2f} / {b_to_a:.2f})",
+                })
+            elif a_to_b > 0 or b_to_a > 0:
+                # One-way causal edge = synergy
+                strength = max(a_to_b, b_to_a)
+                combos.append({
+                    "tier": "synergy",
+                    "cards": [name_a, name_b],
+                    "card_oids": [oid_a, oid_b],
+                    "result": f"Causal link: {name_a} -> {name_b} (strength {strength:.2f})",
+                    "reason": "One-way causal edge",
+                })
 
     # Sort: confirmed first, then likely, then synergy
     tier_order = {"infinite-confirmed": 0, "combo-likely": 1, "synergy": 2}

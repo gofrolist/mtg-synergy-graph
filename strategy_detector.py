@@ -16,184 +16,96 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 DB_PATH = os.path.join(DATA_DIR, "tags.db")
 EDHREC_PATH = os.path.join(DATA_DIR, "edhrec_theme_cards.json")
 
-# Strategy mapping rules: (provides_tag_or_set, strategy_name, base_confidence)
-# A card with any of these provides tags maps to the strategy.
+# Strategy mapping rules: (forge_verb_or_keyword_set, strategy_name, base_confidence)
+# A card with any of these Forge verbs/keywords/triggers maps to the strategy.
+# Forge verbs are PascalCase: Token, PutCounter, Mill, Draw, etc.
+# Forge trigger_modes are PascalCase: ChangesZone, Attacks, SpellCast, etc.
+# Forge keywords are mixed case: Flying, Lifelink, Equip, etc.
 STRATEGY_RULES = [
     # Token strategies
-    ({"tokens-creature", "tokens-tribal"}, "tokens", 1.0),
-    ({"treasure-generation"}, "treasure", 1.0),
-    ({"food-generation"}, "food", 0.8),
-    ({"clue-generation"}, "clues", 0.8),
+    ({"Token"}, "tokens", 1.0),
 
     # Counter strategies
-    ({"counter-placement", "board-wide-counter-placement"}, "+1/+1-counters", 1.0),
-    ({"counter-amplification"}, "+1/+1-counters", 0.9),
-    ({"proliferate"}, "proliferate", 1.0),
-
-    # Tribal/typal
-    ({"human-tribal"}, "humans", 1.0),
-    ({"goblin-tribal"}, "goblins", 1.0),
-    ({"elf-tribal"}, "elves", 1.0),
-    ({"sliver-tribal"}, "slivers", 1.0),
-    ({"tribal-enabler"}, "tribal", 0.7),
+    ({"PutCounter", "PutCounterAll"}, "+1/+1-counters", 1.0),
+    ({"Proliferate"}, "proliferate", 1.0),
 
     # Aristocrats / sacrifice
-    ({"sacrifice-outlet"}, "aristocrats", 0.9),
-    ({"death-trigger"}, "aristocrats", 0.8),
-    ({"sacrifice-payoff"}, "aristocrats", 0.8),  # Payoff for sacrificing creatures
+    ({"Sacrifice", "SacrificeAll"}, "aristocrats", 0.9),
+    ({"Sacrificed"}, "aristocrats", 0.8),             # trigger_mode
 
     # Spellslinger
-    ({"spell-copy"}, "spellslinger", 1.0),
-    ({"spell-cost-reduction"}, "spellslinger", 0.8),
-    ({"storm-count"}, "storm", 1.0),
+    ({"CopySpellAbility"}, "spellslinger", 1.0),
+    ({"ReduceCost"}, "spellslinger", 0.8),
+    ({"Storm"}, "storm", 1.0),
 
-    # Graveyard
-    ({"graveyard-recursion"}, "reanimator", 0.9),
-    ({"self-mill"}, "self-mill", 0.9),
-    ({"dredge"}, "dredge", 1.0),
-    ({"graveyard-payoff"}, "reanimator", 0.8),  # Payoff for graveyard filling
+    # Graveyard / Reanimator
+    ({"ChangeZone"}, "reanimator", 0.6),              # broad — covers reanimate + bounce
+    ({"Mill"}, "self-mill", 0.9),
+    ({"Dredge"}, "dredge", 1.0),
 
     # Artifacts
-    ({"artifact-enabler", "artifact-presence"}, "artifacts", 0.8),
+    ({"Equip"}, "artifacts", 0.7),
 
     # Enchantments
-    ({"enchantment-synergy", "aura-synergy"}, "enchantress", 0.8),
+    ({"Enchant"}, "enchantress", 0.7),
 
-    # Combat / Voltron — only equipment/aura-specific cards, NOT generic pump
-    ({"extra-combat"}, "extra-combats", 1.0),
-    ({"evasion"}, "voltron", 0.4),
-    # creature-pump removed from voltron — too generic (goblin lords get voltron)
-    ({"trample-grant", "evasion-flying", "evasion-unblockable", "evasion-menace"}, "voltron", 0.5),
-    ({"lifelink-grant"}, "voltron", 0.4),
+    # Combat / Voltron
+    ({"Flying", "Menace"}, "voltron", 0.5),
+    ({"Trample"}, "voltron", 0.4),
 
     # Equipment
-    ({"equipment-synergy"}, "equipment", 0.9),
-    ({"combat-trigger"}, "equipment", 0.6),
+    ({"Equip"}, "equipment", 0.9),
 
     # Control / Stax
-    ({"counterspell"}, "control", 0.7),
-    ({"board-control"}, "control", 0.6),
-    ({"tap-control"}, "stax", 0.7),
-    ({"stax-tax"}, "stax", 0.9),                    # Tax effects ARE stax
-    ({"resource-denial"}, "stax", 0.8),
-    ({"mana-denial"}, "stax", 0.8),
+    ({"Counter"}, "control", 0.7),
+    ({"Tap"}, "stax", 0.7),
 
     # Card advantage
-    ({"card-draw"}, "card-draw", 0.5),
-    ({"card-draw-payoff"}, "card-draw", 0.7),
-    ({"card-draw-payoff"}, "wheels", 0.6),           # Draw payoffs benefit from wheels
-    ({"tutor"}, "toolbox", 0.7),
-
-    # Storm — only very specific storm enablers
-    ({"storm-count"}, "storm", 1.0),                  # Actual storm keyword cards
+    ({"Draw"}, "card-draw", 0.5),
+    ({"Dig"}, "card-draw", 0.5),
 
     # Life
-    ({"life-gain"}, "lifegain", 0.9),
-    ({"life-drain"}, "lifedrain", 0.9),
+    ({"GainLife"}, "lifegain", 0.9),
+    ({"Lifelink"}, "lifegain", 0.7),
+    ({"LoseLife"}, "lifedrain", 0.9),
 
     # Lands
-    ({"landfall-trigger"}, "landfall", 1.0),
-    ({"land-ramp"}, "lands-matter", 0.7),
+    ({"Mana"}, "lands-matter", 0.4),                  # very broad
 
     # Mill
-    ({"mill"}, "mill", 1.0),
-
-    # Blink
-    ({"blink"}, "blink", 1.0),
-
-    # Wheels
-    ({"wheel"}, "wheels", 1.0),
+    ({"Mill"}, "mill", 1.0),
 
     # Go wide
-    ({"board-wide-creature-pump", "pump-anthem", "pump-lord"}, "go-wide", 0.7),
+    ({"PumpAll"}, "go-wide", 0.7),
 
     # Infect / poison
-    ({"infect", "poison-counter-placement", "toxic-ability", "toxic-1", "toxic-deal"}, "infect", 0.9),
+    ({"Infect", "Toxic"}, "infect", 0.9),
 
-    # Payoff patterns — cards that benefit from a strategy's output
-    ({"etb-payoff"}, "tokens", 0.7),
-    ({"etb-payoff"}, "blink", 0.7),              # ETB payoffs ARE blink payoffs
-    ({"damage-dealing"}, "burn", 0.6),
+    # Burn
+    ({"DealDamage", "DamageAll"}, "burn", 0.6),
 
-    # Landfall enablers
-    ({"land-search"}, "landfall", 0.7),           # Fetching lands triggers landfall
-    ({"land-ramp", "land-animation"}, "landfall", 0.6),
+    # Lifedrain: life-gain also enables drain combos
+    ({"GainLife"}, "lifedrain", 0.5),
 
-    # Lifedrain: life-gain provides also enable drain combos
-    ({"life-gain"}, "lifedrain", 0.5),            # Life gain enables drain payoffs
-
-    # Reanimator enablers
-    ({"self-mill"}, "reanimator", 0.7),           # Self-mill fuels reanimation
-    # graveyard-recursion→blink removed (recursion is NOT blink — blink is exile+return)
-
-    # Treasure: token-generation of artifact tokens
-    ({"treasure-generation"}, "artifacts", 0.5),  # Treasures are artifacts
-
-    # Storm: mana-acceleration→storm removed (too generic — every deck has mana rocks)
+    # Treasure: token generation of artifact tokens → artifacts
+    ({"Token"}, "artifacts", 0.3),                     # weak — only some tokens are artifacts
 ]
 
 
-# Wants-based strategy rules: (wants_tag_set, strategy_name, base_confidence)
-# Lower confidence than provides-based rules since wanting something doesn't mean you enable it.
+# Wants-based strategy rules: (forge_trigger_mode_set, strategy_name, base_confidence)
+# These match on trigger_mode (what event the card triggers on).
 WANTS_STRATEGY_RULES = [
-    ({"counter-placement-events", "counter-distribution"}, "+1/+1-counters", 0.7),
-    # NOTE: creature-etb, creature-death, creature-board are too generic for strategy
-    # mapping. Any creature-heavy deck wants these (humans, counters, tribal, etc.).
-    # Blink only detects from provides:blink. Tokens only from provides:token-generation
-    # or token-specific wants (token-events, wide-board).
-    ({"creature-death", "sacrifice-events"}, "aristocrats", 0.7),
-    ({"spell-casting", "instant-sorcery-casting", "noncreature-spells", "cast-spell-events",
-      "second-spell-casting", "instant-or-sorcery-spells"}, "spellslinger", 0.7),
-    ({"token-events", "wide-board"}, "tokens", 0.6),
-    # creature-board is too generic — any creature deck wants it. Only wide-board maps to go-wide.
-    ({"wide-board"}, "go-wide", 0.6),
-    ({"life-gain-events"}, "lifegain", 0.7),
-    ({"graveyard-events", "graveyard-fill"}, "reanimator", 0.6),
-    # graveyard-filling: cards wanting graveyard fill benefit from self-mill strategy
-    ({"graveyard-filling"}, "self-mill", 0.6),
-    ({"artifact-etb", "artifact-presence", "artifact-casting"}, "artifacts", 0.6),
-    ({"enchantment-presence", "enchantment-casting-events"}, "enchantress", 0.6),
-    ({"landfall", "land-play"}, "landfall", 0.7),
-    ({"attack-events", "combat-damage-events"}, "voltron", 0.5),
-    ({"commander-casting"}, "commander-matters", 0.7),
-    # opponent-life-loss wants: lifedrain strategy payoffs
-    ({"opponent-life-loss"}, "lifedrain", 0.6),
-
-    # Stax: cards wanting to disrupt opponents
-    ({"opponent-spell-casting"}, "stax", 0.6),         # Tax effects care about opponent spells
-    ({"opponent-mana-denial"}, "stax", 0.7),
-
-    # Voltron / Equipment: cards wanting to be equipped or pump
-    ({"equip-target"}, "voltron", 0.5),
-    ({"equip-target"}, "equipment", 0.6),
-    ({"equipment-presence"}, "equipment", 0.7),
-    ({"equipment-presence"}, "voltron", 0.5),
-    ({"aura-presence"}, "voltron", 0.5),
-
-    # Storm removed from spell-casting wants — too generic (32% of cards get storm)
-
-    # Wheels: wants card draw events
-    ({"card-draw-events"}, "wheels", 0.6),
-    ({"discard-events"}, "wheels", 0.6),
-
-    # Lifedrain: wants life loss events
-    ({"life-payment"}, "lifedrain", 0.5),
-
-    # land-density→landfall removed — too generic (every deck wants lands, not just landfall)
-
-    # counter-placement-events → +1/+1-counters (NOT proliferate — wanting counters ≠ proliferating)
-    ({"counter-placement-events"}, "+1/+1-counters", 0.6),
-
-    # Reanimator: cards wanting graveyard
-    ({"graveyard-filling"}, "reanimator", 0.6),
-
-    # Blink removed from creature-etb wants — too generic (any creature deck wants ETBs)
-
-    # Treasure: cards wanting artifacts or tokens
-    ({"token-events"}, "treasure", 0.5),
-
-    # Storm: only storm-specific wants (removed mana-needs and life-payment — too generic)
+    ({"Attacks"}, "voltron", 0.5),
+    ({"Attacks", "AttackersDeclared"}, "equipment", 0.5),
+    ({"DamageDone", "DamageDoneOnce"}, "voltron", 0.5),
+    ({"SpellCast"}, "spellslinger", 0.7),
+    ({"Sacrificed"}, "aristocrats", 0.7),
+    ({"LifeGained"}, "lifegain", 0.7),
+    ({"Discarded"}, "wheels", 0.6),
+    ({"Drawn"}, "wheels", 0.6),
+    ({"Drawn"}, "card-draw", 0.6),
 ]
+
 
 
 # Common creature types for oracle text scanning
@@ -208,10 +120,10 @@ CREATURE_TYPE_STRATEGIES = {
 
 
 def detect_strategies(oracle_id, db_path=None):
-    """Detect strategies for a single card based on provides tags + oracle text.
+    """Detect strategies for a single card based on Forge abilities + oracle text.
 
     Also scans oracle text for creature type references to detect tribal strategies
-    even when the LLM tagger didn't assign X-tribal provides tags.
+    even when forge data doesn't cover the card.
 
     Returns list of {"name": str, "confidence": float, "signals": [str]}.
     """
@@ -219,13 +131,16 @@ def detect_strategies(oracle_id, db_path=None):
         db_path = DB_PATH
     conn = sqlite3.connect(db_path)
 
-    provides = {row[0] for row in conn.execute(
-        "SELECT tag FROM provides WHERE oracle_id = ?", (oracle_id,)
-    ).fetchall()}
-
-    wants = {row[0] for row in conn.execute(
-        "SELECT tag FROM wants WHERE oracle_id = ?", (oracle_id,)
-    ).fetchall()}
+    # Get Forge verbs, trigger_modes, and keywords (what the card does / triggers on)
+    forge_verbs = set()
+    forge_triggers = set()
+    for row in conn.execute(
+        "SELECT fa.verb, fa.trigger_mode, fa.keyword FROM forge_abilities fa "
+        "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+        "WHERE fnm.oracle_id = ?", (oracle_id,)):
+        if row[0]: forge_verbs.add(row[0])
+        if row[1]: forge_triggers.add(row[1])
+        if row[2]: forge_verbs.add(row[2])
 
     oracle_text = conn.execute(
         "SELECT oracle_text FROM cards WHERE oracle_id = ?", (oracle_id,)
@@ -235,24 +150,27 @@ def detect_strategies(oracle_id, db_path=None):
     conn.close()
 
     strategies = {}
+    # Match verbs + keywords against STRATEGY_RULES
+    forge_all = forge_verbs | forge_triggers
     for tag_set, strategy, confidence in STRATEGY_RULES:
-        matching = provides & tag_set
+        matching = forge_all & tag_set
         if matching:
             if strategy not in strategies or strategies[strategy]["confidence"] < confidence:
                 strategies[strategy] = {
                     "name": strategy,
                     "confidence": confidence,
-                    "signals": [f"provides:{t}" for t in matching],
+                    "signals": [f"forge:{t}" for t in matching],
                 }
 
+    # Match trigger_modes against WANTS_STRATEGY_RULES
     for tag_set, strategy, confidence in WANTS_STRATEGY_RULES:
-        matching = wants & tag_set
+        matching = forge_triggers & tag_set
         if matching:
             if strategy not in strategies or strategies[strategy]["confidence"] < confidence:
                 strategies[strategy] = {
                     "name": strategy,
                     "confidence": confidence,
-                    "signals": [f"wants:{t}" for t in matching],
+                    "signals": [f"trigger:{t}" for t in matching],
                 }
 
     # Oracle text tribal detection: if oracle text references a creature type
@@ -274,67 +192,59 @@ def detect_strategies(oracle_id, db_path=None):
                             "signals": [f"oracle:{ctype}"],
                         }
 
-    # Ability-based strategy derivation: use parsed abilities to infer strategies
-    # that the provides/wants tags missed
-    if db_path:
-        ab_strategies = _strategies_from_abilities(oracle_id, db_path)
-        for strat_name, conf in ab_strategies.items():
-            if strat_name not in strategies or strategies[strat_name]["confidence"] < conf:
-                strategies[strat_name] = {
-                    "name": strat_name,
-                    "confidence": conf,
-                    "signals": [f"ability-derived"],
-                }
+    # Ability-based strategy derivation from Forge verbs
+    ab_strategies = _strategies_from_forge_verbs(forge_all)
+    for strat_name, conf in ab_strategies.items():
+        if strat_name not in strategies or strategies[strat_name]["confidence"] < conf:
+            strategies[strat_name] = {
+                "name": strat_name,
+                "confidence": conf,
+                "signals": ["forge-derived"],
+            }
 
     return sorted(strategies.values(), key=lambda s: -s["confidence"])
 
 
-# Maps ability effect_tags/trigger_tags to strategies.
-# Only includes tags that are SPECIFIC to a strategy (not generic creature tags).
+# Maps Forge verbs/trigger_modes to strategies.
+# Only includes verbs that are SPECIFIC to a strategy (not generic).
 ABILITY_STRATEGY_MAP = {
-    # Provides tags → strategies
-    "token": ("tokens", 0.9),
-    "token-treasure": ("treasure", 0.8),
-    "put-counter": ("+1/+1-counters", 0.8),
-    "put-counter-all": ("+1/+1-counters", 0.8),
-    "gain-life": ("lifegain", 0.7),
-    "lose-life": ("lifedrain", 0.7),
-    "mill": ("mill", 0.8),
-    "reanimate": ("reanimator", 0.7),
-    "graveyard-to-hand": ("reanimator", 0.5),
-    "copy-spell": ("spellslinger", 0.6),
-    "untap": ("combo", 0.5),
-    "proliferate": ("proliferate", 0.8),
-    "equip": ("equipment", 0.7),
-    "enchant": ("enchantress", 0.5),
-    # Wants tags → strategies
-    "counter-added": ("+1/+1-counters", 0.7),
-    "life-gained": ("lifegain", 0.6),
-    "sacrificed": ("aristocrats", 0.6),
-    "dies": ("aristocrats", 0.5),
-    "card-drawn": ("card-draw", 0.5),
-    "land-played": ("landfall", 0.7),
-    "enters-battlefield": ("blink", 0.4),
+    # Forge verbs → strategies
+    "Token": ("tokens", 0.9),
+    "PutCounter": ("+1/+1-counters", 0.8),
+    "PutCounterAll": ("+1/+1-counters", 0.8),
+    "GainLife": ("lifegain", 0.7),
+    "LoseLife": ("lifedrain", 0.7),
+    "Mill": ("mill", 0.8),
+    "CopySpellAbility": ("spellslinger", 0.6),
+    "Untap": ("combo", 0.5),
+    "Proliferate": ("proliferate", 0.8),
+    "Equip": ("equipment", 0.7),
+    "Enchant": ("enchantress", 0.5),
+    "DealDamage": ("burn", 0.5),
+    "DamageAll": ("burn", 0.6),
+    "Draw": ("card-draw", 0.5),
+    "Sacrifice": ("aristocrats", 0.6),
+    # Forge trigger_modes → strategies
+    "Sacrificed": ("aristocrats", 0.6),
+    "LifeGained": ("lifegain", 0.6),
+    "Drawn": ("card-draw", 0.5),
+    "SpellCast": ("spellslinger", 0.5),
+    "ChangesZone": ("blink", 0.3),
 }
 
 
-def _strategies_from_abilities(oracle_id, db_path):
-    """Derive strategies from a card's Forge-derived tags.
+def _strategies_from_forge_verbs(forge_all):
+    """Derive strategies from a card's Forge verbs/triggers/keywords.
+
+    Args:
+        forge_all: set of Forge verbs + trigger_modes + keywords
 
     Returns dict of {strategy_name: confidence}.
     """
-    conn = sqlite3.connect(db_path)
-    tags = set()
-    for row in conn.execute("SELECT tag FROM provides WHERE oracle_id = ?", (oracle_id,)):
-        tags.add(row[0])
-    for row in conn.execute("SELECT tag FROM wants WHERE oracle_id = ?", (oracle_id,)):
-        tags.add(row[0])
-    conn.close()
-
     strategies = {}
-    for tag in tags:
-        if tag in ABILITY_STRATEGY_MAP:
-            strat_name, conf = ABILITY_STRATEGY_MAP[tag]
+    for verb in forge_all:
+        if verb in ABILITY_STRATEGY_MAP:
+            strat_name, conf = ABILITY_STRATEGY_MAP[verb]
             if strat_name not in strategies or strategies[strat_name] < conf:
                 strategies[strat_name] = conf
 
@@ -373,15 +283,22 @@ def populate_card_strategies(db_path=None):
     # Clear existing
     conn.execute("DELETE FROM card_strategies")
 
-    # Get all cards with their provides tags, wants tags, and oracle text
+    # Get all cards with oracle text
     cards = conn.execute("SELECT oracle_id, name, oracle_text FROM cards").fetchall()
-    provides_by_card = {}
-    for oid, tag in conn.execute("SELECT oracle_id, tag FROM provides").fetchall():
-        provides_by_card.setdefault(oid, set()).add(tag)
 
-    wants_by_card = {}
-    for oid, tag in conn.execute("SELECT oracle_id, tag FROM wants").fetchall():
-        wants_by_card.setdefault(oid, set()).add(tag)
+    # Load Forge verbs, trigger_modes, and keywords for all cards (bulk)
+    forge_verbs_by_card = {}    # oid -> set of verbs + keywords
+    forge_triggers_by_card = {} # oid -> set of trigger_modes
+    for row in conn.execute(
+        "SELECT fnm.oracle_id, fa.verb, fa.trigger_mode, fa.keyword "
+        "FROM forge_abilities fa "
+        "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name"):
+        oid = row[0]
+        v = forge_verbs_by_card.setdefault(oid, set())
+        t = forge_triggers_by_card.setdefault(oid, set())
+        if row[1]: v.add(row[1])
+        if row[2]: t.add(row[2])
+        if row[3]: v.add(row[3])
 
     # Load EDHREC data
     edhrec = _load_edhrec_strategies()
@@ -394,26 +311,27 @@ def populate_card_strategies(db_path=None):
 
     count = 0
     for oracle_id, name, oracle_text in cards:
-        card_provides = provides_by_card.get(oracle_id, set())
+        card_verbs = forge_verbs_by_card.get(oracle_id, set())
+        card_triggers = forge_triggers_by_card.get(oracle_id, set())
+        card_all = card_verbs | card_triggers
 
-        # Rule-based strategies (provides-based)
+        # Rule-based strategies (Forge verb/keyword matching)
         strategies = {}
         for tag_set, strategy, confidence in STRATEGY_RULES:
-            if card_provides & tag_set:
+            if card_all & tag_set:
                 if strategy not in strategies or strategies[strategy] < confidence:
                     strategies[strategy] = confidence
 
-        # Wants-based strategies
-        card_wants = wants_by_card.get(oracle_id, set())
+        # Trigger-mode-based strategies
         for tag_set, strategy, confidence in WANTS_STRATEGY_RULES:
-            if card_wants & tag_set:
+            if card_triggers & tag_set:
                 if strategy not in strategies or strategies[strategy] < confidence:
                     strategies[strategy] = confidence
 
-        # Ability-based strategy derivation (from provides/wants tags)
-        for tag in (card_provides | card_wants):
-            if tag in ABILITY_STRATEGY_MAP:
-                strat_name, conf = ABILITY_STRATEGY_MAP[tag]
+        # Ability-based strategy derivation (from Forge verbs)
+        for verb in card_all:
+            if verb in ABILITY_STRATEGY_MAP:
+                strat_name, conf = ABILITY_STRATEGY_MAP[verb]
                 if strat_name not in strategies or strategies[strat_name] < conf:
                     strategies[strat_name] = conf
 

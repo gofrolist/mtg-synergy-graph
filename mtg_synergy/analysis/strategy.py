@@ -5,7 +5,6 @@ import sqlite3
 from collections import defaultdict
 
 from mtg_synergy.config import DATA_DIR
-from mtg_synergy.constants import SEMANTIC_BRIDGES
 
 
 def _detect_deck_types(cards: list[dict], deck_cards: set[str],
@@ -189,43 +188,29 @@ def build_from_commander(commander_name: str, top_n: int = 30):
     except (json.JSONDecodeError, TypeError):
         cmd_colors = set()
 
-    # Get commander's tags
-    cmd_provides = [r[0] for r in conn.execute(
-        "SELECT tag FROM provides WHERE oracle_id=?", (cmd_oid,))]
-    cmd_wants = [r[0] for r in conn.execute(
-        "SELECT tag FROM wants WHERE oracle_id=?", (cmd_oid,))]
+    # Get commander's Forge abilities (verbs = what it does, triggers = what it responds to)
+    cmd_verbs = set()
+    cmd_triggers = set()
+    for r in conn.execute(
+        "SELECT fa.verb, fa.trigger_mode, fa.keyword FROM forge_abilities fa "
+        "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+        "WHERE fnm.oracle_id = ?", (cmd_oid,)):
+        if r[0]: cmd_verbs.add(r[0])
+        if r[1]: cmd_triggers.add(r[1])
+        if r[2]: cmd_verbs.add(r[2])
 
     # Extract creature types from commander
     cmd_subtypes = set()
     if " — " in cmd_type:
         cmd_subtypes = {s.strip(",") for s in cmd_type.split(" — ")[1].split()}
 
-    # Build expanded wants: what the commander wants + semantic bridges from provides
-    # e.g. commander provides tokens-creature → also find cards wanting token-events, board-go-wide
-    expanded_wants = set(cmd_wants)
-    for p_tag in cmd_provides:
-        for (bridge_p, bridge_w), weight in SEMANTIC_BRIDGES.items():
-            if bridge_p == p_tag and weight >= 0.5:
-                expanded_wants.add(bridge_w)
-
-    # Build expanded provides: what the commander provides + semantic bridges from wants
-    expanded_provides = set(cmd_provides)
-    for w_tag in cmd_wants:
-        for (bridge_p, bridge_w), weight in SEMANTIC_BRIDGES.items():
-            if bridge_w == w_tag and weight >= 0.5:
-                expanded_provides.add(bridge_p)
-
     print(f"\n{'═' * 70}")
     print(f"COMMANDER: {cmd_name}")
     print(f"  {cmd_type} | CMC {row['cmc']}")
     print(f"  {cmd_text}")
     print(f"  Colors: {','.join(sorted(cmd_colors)) or 'C'}")
-    print(f"  Provides: {cmd_provides}")
-    print(f"  Wants: {cmd_wants}")
-    if expanded_wants - set(cmd_wants):
-        print(f"  Expanded wants (via bridges): {sorted(expanded_wants - set(cmd_wants))}")
-    if expanded_provides - set(cmd_provides):
-        print(f"  Expanded provides (via bridges): {sorted(expanded_provides - set(cmd_provides))}")
+    print(f"  Verbs: {sorted(cmd_verbs)}")
+    print(f"  Triggers: {sorted(cmd_triggers)}")
     if cmd_subtypes:
         print(f"  Creature types: {', '.join(sorted(cmd_subtypes))}")
     print(f"{'═' * 70}")
@@ -251,50 +236,48 @@ def build_from_commander(commander_name: str, top_n: int = 30):
                 "oracle_text": r["oracle_text"] or "",
             }
 
-    # Load all provides/wants for legal cards
-    legal_oids = list(legal_cards.keys())
-    card_provides = defaultdict(set)
-    card_wants = defaultdict(set)
-
-    chunk_size = 500
-    for i in range(0, len(legal_oids), chunk_size):
-        chunk = legal_oids[i:i + chunk_size]
-        placeholders = ",".join("?" * len(chunk))
-        for r in conn.execute(
-            f"SELECT oracle_id, tag FROM provides WHERE oracle_id IN ({placeholders})", chunk
-        ):
-            card_provides[r[0]].add(r[1])
-        for r in conn.execute(
-            f"SELECT oracle_id, tag FROM wants WHERE oracle_id IN ({placeholders})", chunk
-        ):
-            card_wants[r[0]].add(r[1])
+    # Load Forge verbs and triggers for all legal cards (bulk)
+    card_verbs = defaultdict(set)    # oid -> set of verbs + keywords
+    card_triggers = defaultdict(set)  # oid -> set of trigger_modes
+    for r in conn.execute(
+        "SELECT fnm.oracle_id, fa.verb, fa.trigger_mode, fa.keyword "
+        "FROM forge_abilities fa "
+        "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name"):
+        oid = r[0]
+        if oid in legal_cards:
+            if r[1]: card_verbs[oid].add(r[1])
+            if r[2]: card_triggers[oid].add(r[2])
+            if r[3]: card_verbs[oid].add(r[3])
 
     conn.close()
 
-    # Score each card
+    # Score each card by Forge verb/trigger overlap with commander
     scores = {}
     for oid, meta in legal_cards.items():
         name = meta["name"]
-        c_provides = card_provides.get(oid, set())
-        c_wants = card_wants.get(oid, set())
+        c_verbs = card_verbs.get(oid, set())
+        c_triggers = card_triggers.get(oid, set())
 
-        enabler_tags = []  # this card provides what commander wants
-        payoff_tags = []   # this card wants what commander provides
+        enabler_verbs = []  # card produces events the commander triggers on
+        payoff_verbs = []   # card triggers on events the commander produces
         score = 0.0
 
-        # Exact + semantic: card provides what commander wants
-        for p_tag in c_provides:
-            if p_tag in expanded_wants:
-                weight = 1.0 if p_tag in cmd_wants else 0.7  # bridge match = lower weight
-                score += weight
-                enabler_tags.append(p_tag)
+        # Card's verbs match commander's triggers (card enables commander)
+        for verb in c_verbs:
+            if verb in cmd_triggers:
+                score += 1.0
+                enabler_verbs.append(verb)
 
-        # Exact + semantic: card wants what commander provides
-        for w_tag in c_wants:
-            if w_tag in expanded_provides:
-                weight = 1.0 if w_tag in cmd_provides else 0.7
-                score += weight
-                payoff_tags.append(w_tag)
+        # Card's triggers match commander's verbs (card benefits from commander)
+        for trigger in c_triggers:
+            if trigger in cmd_verbs:
+                score += 1.0
+                payoff_verbs.append(trigger)
+
+        # Shared verbs (same strategy)
+        shared = c_verbs & cmd_verbs
+        if shared:
+            score += len(shared) * 0.5
 
         # Tribal boost
         tribal = False
@@ -308,11 +291,11 @@ def build_from_commander(commander_name: str, top_n: int = 30):
                 "type_line": meta["type_line"],
                 "cmc": meta["cmc"],
                 "mana_cost": meta["mana_cost"],
-                "enabler_tags": enabler_tags,
-                "payoff_tags": payoff_tags,
+                "enabler_tags": enabler_verbs,
+                "payoff_tags": payoff_verbs,
                 "tribal": tribal,
-                "is_enabler": len(enabler_tags) > 0,
-                "is_payoff": len(payoff_tags) > 0,
+                "is_enabler": len(enabler_verbs) > 0,
+                "is_payoff": len(payoff_verbs) > 0,
             }
 
     ranked = sorted(scores.items(), key=lambda x: -x[1]["score"])

@@ -39,12 +39,20 @@ def load_structural_features():
     """Pre-load all data needed for structural features."""
     conn = sqlite3.connect(DB_PATH)
 
-    provides = {}
-    for oid, tag in conn.execute("SELECT oracle_id, tag FROM provides"):
-        provides.setdefault(oid, set()).add(tag)
-    wants = {}
-    for oid, tag in conn.execute("SELECT oracle_id, tag FROM wants"):
-        wants.setdefault(oid, set()).add(tag)
+    # Load Forge verbs (what card does) and triggers (what card responds to)
+    provides = {}  # oid -> set of verbs + keywords
+    wants = {}     # oid -> set of trigger_modes
+    for row in conn.execute(
+        "SELECT fnm.oracle_id, fa.verb, fa.trigger_mode, fa.keyword "
+        "FROM forge_abilities fa "
+        "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name"):
+        oid = row[0]
+        if row[1]:
+            provides.setdefault(oid, set()).add(row[1])
+        if row[2]:
+            wants.setdefault(oid, set()).add(row[2])
+        if row[3]:
+            provides.setdefault(oid, set()).add(row[3])
     strats = {}
     for oid, s in conn.execute("SELECT oracle_id, strategy FROM card_strategies WHERE confidence >= 0.3"):
         strats.setdefault(oid, set()).add(s)
