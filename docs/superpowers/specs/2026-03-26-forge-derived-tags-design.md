@@ -91,6 +91,43 @@ Reads `forge_abilities` + `forge_svars` + `cards.type_line`, writes to existing 
 | `Protection` | `protection-grant` | Protection from colors/types |
 | `SetState` | `set-state` | Phase out, transform, etc. |
 | `PeekAndReveal` | `peek` | Top-of-library matters |
+| `SetLife` | `set-life` | Set life total to a specific value |
+| `MultiplyCounter` | `multiply-counter` | Double/triple counters |
+| `MoveCounter` | `move-counter` | Move counters between permanents |
+| `AddOrRemoveCounter` | `add-or-remove-counter` | |
+| `ManifestDread` / `Manifest` | `manifest` | Face-down creature |
+| `Incubate` | `incubate` | Incubator token |
+| `Discover` | `discover` | Cascade variant |
+| `Connive` | `connive` | Draw + discard + counter |
+| `Vote` | `vote` | Will of the council |
+| `Poison` | `poison` | Poison counters |
+| `Detain` | `detain` | Can't attack/block/activate |
+| `ExchangeControl` | `exchange-control` | Swap permanents |
+| `MustBlock` | `force-block` | Target must block |
+| `RingTemptsYou` | `ring-tempts` | Ring tempts mechanic |
+| `TakeInitiative` | `take-initiative` | Initiative/Undercity |
+| `Clash` | `clash` | Compare top cards |
+| `RearrangeTopOfLibrary` | `rearrange-top` | Reorder top of library |
+| `Phases` | `phase-out` | Phase out target |
+| `Endure` | `endure` | Endure mechanic |
+| `WinsGame` | `wins-game` | Alt win condition |
+| `LosesGame` | `loses-game` | Force opponent to lose |
+| `CantTarget` | `cant-target` | Hexproof/shroud grant |
+| `CantGainLife` | `cant-gain-life` | Stax effect |
+| `CantBeCast` | `cant-cast` | Stax effect |
+| `CantAttackUnless` | `restrict-attack` | Conditional attack restriction |
+| `CantAttack,CantBlock` | `restrict-combat` | Full combat lockdown |
+| `CantAttack,CantBlock,CantBeActivated` | `full-lockdown` | Complete lockdown |
+| `CantPlayLand` | `cant-play-land` | Stax effect |
+| `CantPreventDamage` | `cant-prevent-damage` | Anti-fog |
+| `CantSacrifice` | `cant-sacrifice` | Anti-sac |
+| `CombatDamageToughness` | `damage-toughness` | Deals damage with toughness |
+| `AssignCombatDamageAsUnblocked` | `damage-unblocked` | Trample variant |
+| `SkipPhase` | `skip-phase` | Skip draw/combat/etc. |
+| `AddPhase` | `add-phase` | Extra combat/main phase |
+| `FlipACoin` / `RollDice` | `random-outcome` | Coin flip / dice roll |
+| `Radiation` | `radiation` | Fallout radiation counters |
+| `DigMultiple` | `dig` | Dig variant |
 
 ### ChangeZone Verb Rules (zone-dependent provides)
 
@@ -106,17 +143,24 @@ For `ChangeZone` effects (verb, not trigger), parse `Origin$` and `Destination$`
 
 ### Skipped Verbs
 
-These Forge verbs are too generic, are wrapper/internal mechanics, or have <20 occurrences:
+These Forge verbs are internal/wrapper mechanics that don't represent game actions:
 
-- `Continuous` — static effects, too broad (covered by keywords)
-- `Effect` — generic wrapper
+- `Continuous` — static effects, too broad (specific effects captured via keywords and sub-abilities)
+- `Effect` — generic wrapper, not a game action
 - `Charm` — modal spell, sub-abilities carry the real verbs
-- `DelayedTrigger` / `RepeatEach` — timing/iteration mechanics
-- `ChooseCard` / `ChooseType` / `ChooseColor` / `ChoosePlayer` / `ChooseSource` — selection mechanics
-- `GenericChoice` / `Branch` — decision mechanics
-- `AlternativeCost` / `OptionalCost` — cost mechanics
-- `Cleanup` / `StoreSVar` — internal bookkeeping
-- Verbs with <20 occurrences (niche: `Subgame`, `RestartGame`, `Meld`, etc.)
+- `DelayedTrigger` / `RepeatEach` / `Repeat` — timing/iteration wrappers
+- `ChooseCard` / `ChooseType` / `ChooseColor` / `ChoosePlayer` / `ChooseSource` / `ChooseNumber` / `ChooseDirection` / `ChooseEvenOdd` / `ChooseSector` — selection UI, not game actions
+- `GenericChoice` / `Branch` / `VillainousChoice` / `TwoPiles` — decision wrappers
+- `AlternativeCost` / `OptionalCost` / `OptionalAttackCost` — cost modifiers, not actions
+- `Cleanup` / `StoreSVar` / `AlterAttribute` / `ChangeText` — internal bookkeeping
+- `Panharmonicon` — modifier (doubles triggers), not a standalone action
+- `Reveal` / `RevealHand` / `LookAt` — information actions, no board impact
+- `NameCard` — naming a card, no direct game effect
+- `Draft` / `AssembleContraption` / `OpenAttraction` / `Abandon` — format-specific mechanics not relevant to Commander
+- `Subgame` / `RestartGame` — meta-game actions
+- `PermanentCreature` / `PermanentNoncreature` — type markers, not actions
+
+All remaining verbs with actual game effects are mapped regardless of occurrence count.
 
 ### Provides Rules (from cost parsing)
 
@@ -346,3 +390,19 @@ Step 3 replaces the old: `batch_tagger.py` → `tag_db.py import` → `tag_db.py
 | Simplification | Remove `batch_tagger.py` dependency, `reclassify_tags.py`, old `SEMANTIC_BRIDGES` |
 
 **Note**: The fusion model's `cmdr_tag_overlap` feature will produce different values with the new vocabulary. The model should be retrained after tag migration (`train_fusion_model.py`).
+
+## Tag Vocabulary Summary
+
+~90 provides tags (from verbs + keywords + tribal):
+- Core actions: `token`, `draw`, `mana`, `deal-damage`, `destroy`, `put-counter`, `mill`, `scry`, `surveil`, `dig`, `discard`, `counter-spell`, `gain-life`, `lose-life`, `pump`, `pump-all`, `sacrifice-outlet`, `exile`, `reanimate`, `copy-permanent`, `copy-spell`, `fight`, `proliferate`, `goad`, `extra-turn`, `free-cast`, `tutor`, etc.
+- Stax/restriction: `restrict-attack`, `restrict-block`, `restrict-combat`, `full-lockdown`, `raise-cost`, `cant-gain-life`, `cant-cast`, `cant-play-land`, `skip-phase`
+- Mechanics: `connive`, `manifest`, `incubate`, `discover`, `amass`, `explore`, `investigate`, `poison`, `detain`, `ring-tempts`, `take-initiative`, `radiation`
+- Keywords: `flying`, `trample`, `haste`, `lifelink`, `deathtouch`, `flash`, `hexproof`, `equip`, `prowess`, `changeling`, etc.
+- Tribal: `goblin-tribal`, `zombie-tribal`, `elf-tribal`, etc.
+
+~35 wants tags (from triggers + zones + costs):
+- Zone triggers: `dies`, `enters-battlefield`, `enters-graveyard`, `exiled`, `bounced`, `leaves-battlefield`, `leaves-graveyard`, `mass-zone-change`
+- Combat: `attacks`, `blocks`, `attacker-blocked`, `attacker-unblocked`, `attackers-declared`
+- Events: `spell-cast`, `damage-done`, `sacrificed`, `life-gained`, `life-lost`, `card-drawn`, `discarded`, `counter-added`, `land-played`, `token-created`, `tapped`, `untapped`, `becomes-target`, `turn-face-up`, `scry-trigger`, `surveil-trigger`, `taps-for-mana`, `cycled`, `exploited`, `crewed`, `mutated`, `explored`, `transformed`
+- Costs: `sacrifice-fodder`
+- Tribal: `goblin-tribal`, `zombie-tribal`, etc. (from trigger_filter)
