@@ -267,41 +267,45 @@ def _row_to_card(row: sqlite3.Row) -> dict:
 
 
 def _attach_tags(conn: sqlite3.Connection, cards: list[dict]) -> list[dict]:
-    """Batch-load provides/wants for a list of cards."""
+    """Attach empty tag lists for backward compatibility."""
+    for c in cards:
+        c["provides"] = []
+        c["wants"] = []
+        c["scryfall_tags"] = []
+    return cards
+
+def _attach_tags_legacy(conn: sqlite3.Connection, cards: list[dict]) -> list[dict]:
+    """Legacy: batch-load provides/wants (tables may not exist)."""
     if not cards:
         return cards
 
     oids = [c["oracle_id"] for c in cards]
-    oid_set = set(oids)
     card_idx = {c["oracle_id"]: c for c in cards}
 
-    # Initialize empty tag lists
     for c in cards:
         c["provides"] = []
         c["wants"] = []
         c["scryfall_tags"] = []
 
-    # Batch query tags using chunked IN clauses
     chunk_size = 500
     for i in range(0, len(oids), chunk_size):
         chunk = oids[i : i + chunk_size]
         placeholders = ",".join("?" * len(chunk))
 
-        for row in conn.execute(
-            f"SELECT oracle_id, tag FROM provides WHERE oracle_id IN ({placeholders})",
-            chunk,
-        ):
-            card_idx[row[0]]["provides"].append(row[1])
+        try:
+            for row in conn.execute(
+                f"SELECT oracle_id, tag FROM provides WHERE oracle_id IN ({placeholders})",
+                chunk,
+            ):
+                card_idx[row[0]]["provides"].append(row[1])
+            for row in conn.execute(
+                f"SELECT oracle_id, tag FROM wants WHERE oracle_id IN ({placeholders})",
+                chunk,
+            ):
+                card_idx[row[0]]["wants"].append(row[1])
+        except Exception:
+            pass
 
-        for row in conn.execute(
-            f"SELECT oracle_id, tag FROM wants WHERE oracle_id IN ({placeholders})",
-            chunk,
-        ):
-            card_idx[row[0]]["wants"].append(row[1])
-
-        # Load scryfall community tags into separate field (validation only,
-        # not used for graph edge building — avoids inheriting Scryfall's
-        # inconsistencies into synergy scores)
         try:
             for row in conn.execute(
                 f"SELECT oracle_id, tag FROM scryfall_tags WHERE oracle_id IN ({placeholders})",

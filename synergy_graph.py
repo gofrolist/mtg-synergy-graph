@@ -8,15 +8,11 @@ public symbols so existing ``from synergy_graph import X`` imports work.
 import os
 
 # Re-export all public symbols
-from mtg_synergy.constants import (
-    SEMANTIC_BRIDGES, TRIGGER_EFFECT_BRIDGES, STAPLE_ROLES,
-    _provides_satisfies_want,
-)
+from mtg_synergy.constants import STAPLE_ROLES
 from mtg_synergy.graph import build_graph
 from mtg_synergy.recommend import recommend_cards, suggest_swaps, show_swaps
 from mtg_synergy.recommend.engine import _deck_card_scores, _candidate_scores
 from mtg_synergy.recommend.swaps import _classify_card_slot
-from mtg_synergy.recommend.affinity import _compute_commander_affinity
 from mtg_synergy.combos import (
     find_combos, find_combos_tiered, find_partial_combos,
     compute_strategy_relevance, find_anti_synergy,

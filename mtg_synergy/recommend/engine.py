@@ -2,7 +2,6 @@
 import json
 from collections import defaultdict
 
-from mtg_synergy.recommend.affinity import _compute_commander_affinity
 from mtg_synergy.combos.detector import find_partial_combos
 
 

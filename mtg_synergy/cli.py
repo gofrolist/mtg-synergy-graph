@@ -79,27 +79,18 @@ def run():
         cards = get_cards_by_names(deck_names, DB_PATH)
         print(f"Loaded {len(cards)} deck cards from DB")
 
-        if args.recommend or args.swaps:
-            # Find synergy candidates from DB (targeted + commander bridge expansion)
+        # For --recommend and --swaps, tower pre-filter handles candidate discovery.
+        # For --card, --deck-view, --visualize, --combos, load tag-based candidates for graph.
+        needs_candidates = args.card or args.visualize or args.deck_view or args.combos
+        if needs_candidates:
             commander_card = next((c for c in cards if c["name"] == deck.COMMANDER), None)
             candidates = find_synergy_candidates(cards, DB_PATH, commander=commander_card)
-            print(f"Found {len(candidates)} tag-based candidates from DB")
             deck_oids = {c["oracle_id"] for c in cards}
-
-            # Hybrid: also find candidates via embedding similarity
             emb_candidates = _find_embedding_candidates(cards, deck_oids, DB_PATH)
-            if emb_candidates:
-                print(f"Found {len(emb_candidates)} embedding-based candidates")
-
-            # Filter candidates by color identity + commander legality
             color_id = deck.COLOR_IDENTITY
             candidates = _filter_candidates(candidates, color_id, DB_PATH)
             if emb_candidates:
                 emb_candidates = _filter_candidates(emb_candidates, color_id, DB_PATH)
-            print(f"After filter (color={','.join(sorted(color_id))}, legal, paper): "
-                  f"{len(candidates)} tag + {len(emb_candidates)} embedding candidates")
-
-            # Merge: union of tag-based and embedding-based candidates
             all_candidate_oids = set()
             for c in candidates:
                 if c["oracle_id"] not in deck_oids:
@@ -108,7 +99,6 @@ def run():
             for c in emb_candidates:
                 if c["oracle_id"] not in deck_oids and c["oracle_id"] not in all_candidate_oids:
                     cards.append(c)
-
             print(f"Loaded {len(cards)} cards (deck + candidates)")
 
     # --- Strategy detection ---

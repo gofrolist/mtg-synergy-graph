@@ -2,7 +2,6 @@
 import os
 from collections import defaultdict
 
-from mtg_synergy.constants import SEMANTIC_BRIDGES, _provides_satisfies_want
 from mtg_synergy.graph.idf import compute_idf
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
@@ -36,12 +35,9 @@ def build_provides_wants_edges(cards: list[dict], deck_oids: set = None) -> list
         for p in card.get("provides", []):
             provides_index[p].append((name, oid))
 
-    # Pre-compute reverse bridge lookup: want_tag -> [(provide_tag, base_weight)]
+    # Build exact-match lookup: want_tag -> [(provide_tag, weight)]
+    # No bridges needed — provides and wants use the same Forge-derived vocabulary
     want_to_provides = defaultdict(list)
-    for (p_tag, w_tag), weight in SEMANTIC_BRIDGES.items():
-        if p_tag in provides_index:
-            want_to_provides[w_tag].append((p_tag, weight))
-    # Add identity matches (exact tag matches)
     for tag in provides_index:
         want_to_provides[tag].append((tag, 1.0))
 
