@@ -151,8 +151,15 @@ def precompute_scores(conn, ground_truth, commander_info, max_commanders=None):
     return precomputed
 
 
-def _rank_cards(scored_cards, weights):
+def _rank_cards(scored_cards, weights, fusion_mode=False):
     """Rank cards by weighted score. Returns [(name, score, edhrec_syn), ...]."""
+    if fusion_mode:
+        return sorted(
+            [(name, info.get("fusion", 0), info.get("edhrec_syn", 0))
+             for name, info in scored_cards],
+            key=lambda x: -x[1]
+        )
+
     # Check if this commander has LLM scores (conditional blending)
     has_llm = any(f.get("llm", 0) > 0 for _, f in scored_cards)
     conditional = weights.get("_CONDITIONAL", False)
@@ -182,7 +189,7 @@ def _rank_cards(scored_cards, weights):
     return sorted(ranked, key=lambda x: -x[1])
 
 
-def evaluate_weights(weights, precomputed, conn=None):
+def evaluate_weights(weights, precomputed, conn=None, fusion_mode=False):
     """Evaluate weights using Recall@K as primary metric.
 
     If conn is provided and edhrec_average_decks table exists, uses Recall@100
@@ -203,7 +210,7 @@ def evaluate_weights(weights, precomputed, conn=None):
                     (slug,)))
                 if len(avg_deck) < 20:
                     continue
-                ranked = _rank_cards(scored_cards, weights)
+                ranked = _rank_cards(scored_cards, weights, fusion_mode=fusion_mode)
                 our_ranked = [name for name, _, _ in ranked]
                 recalls.append(compute_recall_at_k(our_ranked, avg_deck, k=100))
             if recalls:
@@ -213,7 +220,7 @@ def evaluate_weights(weights, precomputed, conn=None):
     total_score = 0
     n_evaluated = 0
     for slug, scored_cards in precomputed.items():
-        ranked = _rank_cards(scored_cards, weights)
+        ranked = _rank_cards(scored_cards, weights, fusion_mode=fusion_mode)
         our_top30 = {name for name, _, _ in ranked[:30]}
         edhrec_top30 = {card[0] for card
                         in sorted(scored_cards, key=lambda x: -x[1].get("edhrec_syn", 0))[:30]}
@@ -233,7 +240,8 @@ def compute_recall_at_k(our_ranked: list[str], edhrec_deck: set[str], k: int = 1
     return found / len(edhrec_deck)
 
 
-def evaluate_recall(conn, precomputed, weights, k_values=(30, 50, 100), mode="both"):
+def evaluate_recall(conn, precomputed, weights, k_values=(30, 50, 100), mode="both",
+                    fusion_mode=False):
     """Evaluate Recall@K against EDHREC data.
 
     mode: "avg" (average decklists), "synergy" (top synergy cards), or "both"
@@ -251,7 +259,7 @@ def evaluate_recall(conn, precomputed, weights, k_values=(30, 50, 100), mode="bo
                     (slug,)))
                 if len(avg_deck) < 20:
                     continue
-                ranked = _rank_cards(scored_cards, weights)
+                ranked = _rank_cards(scored_cards, weights, fusion_mode=fusion_mode)
                 our_ranked = [name for name, _, _ in ranked]
                 for k in k_values:
                     recalls[k].append(compute_recall_at_k(our_ranked, avg_deck, k))
@@ -271,7 +279,7 @@ def evaluate_recall(conn, precomputed, weights, k_values=(30, 50, 100), mode="bo
                 (slug,)))
             if len(syn_top) < 5:
                 continue
-            ranked = _rank_cards(scored_cards, weights)
+            ranked = _rank_cards(scored_cards, weights, fusion_mode=fusion_mode)
             our_ranked = [name for name, _, _ in ranked]
             for k in k_values:
                 syn_recalls[k].append(compute_recall_at_k(our_ranked, syn_top, k))
@@ -356,6 +364,7 @@ def main():
     parser.add_argument("--no-llm", action="store_true", help="Evaluate without LLM scores")
     parser.add_argument("--novelty", action="store_true", help="Show novel picks not in EDHREC")
     parser.add_argument("--deck", type=str, help="Single commander deep dive")
+    parser.add_argument("--fusion", action="store_true", help="Evaluate fusion model as primary signal")
     args = parser.parse_args()
 
     conn = get_connection()
@@ -377,7 +386,18 @@ def main():
     t_precompute = time.time() - t0
     print(f"Precomputed {len(precomputed)} commanders in {t_precompute:.0f}s")
 
-    if args.evaluate:
+    if args.evaluate and args.fusion:
+        weights = {}
+        print("\n=== FUSION MODEL EVALUATION ===")
+        score, n = evaluate_weights(weights, precomputed, conn=conn, fusion_mode=True)
+        print(f"Recall@100: {score:.1%} ({n} commanders)")
+        evaluate_recall(conn, precomputed, weights, fusion_mode=True)
+
+        if args.novelty:
+            novelty_report(conn, precomputed, weights, slug_filter=args.deck)
+        elif args.deck:
+            novelty_report(conn, precomputed, weights, slug_filter=args.deck)
+    elif args.evaluate:
         weights = {"LLM": 0 if args.no_llm else SCORING_WEIGHTS.get("LLM", 10),
                    "CAUSAL": SCORING_WEIGHTS.get("CAUSAL", 2)}
         mode = "no-LLM" if args.no_llm else "all signals"
