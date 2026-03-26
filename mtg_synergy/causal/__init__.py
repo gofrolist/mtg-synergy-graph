@@ -160,24 +160,36 @@ def _detect_prevented_events(oracle_text: str) -> set[str]:
     return prevented
 
 # Effect impact: how game-relevant is the triggered card's output?
-# Used to differentiate cards with the same trigger but different effects.
+# Keyed by Forge verb names (from forge_abilities table).
 EFFECT_IMPACT = {
-    "deal_damage": 1.5,     # direct win condition
-    "lose_life": 1.3,       # drain is strong
-    "create": 1.2,          # token generation compounds
-    "draw": 1.2,            # card advantage is always good
-    "destroy": 1.1,         # removal
-    "sacrifice": 1.1,       # forced sacrifice
-    "exile": 1.1,           # premium removal
-    "put_counter": 1.0,     # buffs
-    "return": 0.9,          # recursion/bounce (context-dependent)
-    "add_mana": 0.8,        # mana production (enabler, not win-con)
-    "gain_life": 0.5,       # lifegain rarely wins games
-    "scry": 0.4,            # marginal card selection
-    "untap": 0.8,           # enabler
-    "mill": 0.9,            # alternate win condition
-    "pump": 0.7,            # combat buff
-    "grant_keyword": 0.6,   # marginal unless haste
+    "DealDamage": 1.5,      # direct win condition
+    "DamageAll": 1.5,       # board-wide damage
+    "LoseLife": 1.3,        # drain is strong
+    "Token": 1.2,           # token generation compounds
+    "Draw": 1.2,            # card advantage is always good
+    "Destroy": 1.1,         # removal
+    "DestroyAll": 1.1,      # board wipe
+    "Sacrifice": 1.1,       # forced sacrifice
+    "SacrificeAll": 1.1,    # mass sacrifice
+    "ChangeZone": 1.0,      # exile/reanimate/bounce (context-dependent)
+    "PutCounter": 1.0,      # buffs
+    "PutCounterAll": 1.0,   # mass buffs
+    "Mana": 0.8,            # mana production (enabler, not win-con)
+    "GainLife": 0.5,        # lifegain rarely wins games
+    "Scry": 0.4,            # marginal card selection
+    "Surveil": 0.6,         # better than scry (graveyard value)
+    "Untap": 0.8,           # enabler
+    "Mill": 0.9,            # alternate win condition
+    "Pump": 0.7,            # combat buff
+    "PumpAll": 0.9,         # board-wide buff
+    "Counter": 1.0,         # counterspell
+    "GainControl": 1.2,     # steal effects
+    "CopyPermanent": 1.1,   # clone
+    "Discard": 0.9,         # hand disruption
+    "Proliferate": 1.0,     # counter synergy
+    "Connive": 0.8,         # draw + discard + counter
+    "Explore": 0.7,         # card advantage
+    "Fight": 0.8,           # removal
 }
 
 
@@ -215,7 +227,9 @@ class CausalContext:
         cmdr_ability_count = 1
         try:
             row = conn.execute(
-                "SELECT COUNT(*) FROM parsed_abilities WHERE oracle_id = ?",
+                "SELECT COUNT(*) FROM forge_abilities fa "
+                "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+                "WHERE fnm.oracle_id = ?",
                 (commander_id,)
             ).fetchone()
             cmdr_ability_count = row[0] if row else 1
@@ -235,24 +249,18 @@ class CausalContext:
             if edge.edge_type == "triggers" and edge.detail.event:
                 self._cmdr_events_consumed.add(edge.detail.event)
 
-        # Pre-load card effect verbs for impact weighting
+        # Pre-load card effect verbs for impact weighting (from Forge abilities)
         self._card_impact = {}
         try:
-            import json as _json
-            for row in conn.execute("SELECT oracle_id, ast_json FROM parsed_abilities"):
-                oid, ast_json = row
-                try:
-                    d = _json.loads(ast_json)
-                    effects = d.get("effects", [])
-                    ability_impact = 0.0
-                    for eff in effects:
-                        verb = eff.get("verb", "")
-                        ability_impact = max(ability_impact, EFFECT_IMPACT.get(verb, 0.7))
-                    prev = self._card_impact.get(oid, 0.0)
-                    self._card_impact[oid] = max(prev, ability_impact if ability_impact > 0 else 0.7)
-                except Exception:
-                    if oid not in self._card_impact:
-                        self._card_impact[oid] = 0.7
+            for row in conn.execute(
+                "SELECT fnm.oracle_id, fa.verb FROM forge_abilities fa "
+                "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+                "WHERE fa.verb IS NOT NULL"
+            ):
+                oid, verb = row
+                impact = EFFECT_IMPACT.get(verb, 0.7)
+                prev = self._card_impact.get(oid, 0.0)
+                self._card_impact[oid] = max(prev, impact)
         except Exception:
             pass
 
