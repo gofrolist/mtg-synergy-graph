@@ -219,17 +219,7 @@ def build_feature_matrix(pairs_by_cmdr, tower_model_path=TOWER_EDHREC_PATH, verb
         }
         name_to_oid[name] = oid
 
-    # 2. Provides / wants tags — legacy, cmdr_tag_overlap feature zeroed out at inference
-    # Keep loading for backward compat with existing model weights
-    provides_map = {}       # oid -> set[tag]
-    wants_map = {}          # oid -> set[tag]
-    try:
-        for oid, tag in conn.execute("SELECT oracle_id, tag FROM provides"):
-            provides_map.setdefault(oid, set()).add(tag)
-        for oid, tag in conn.execute("SELECT oracle_id, tag FROM wants"):
-            wants_map.setdefault(oid, set()).add(tag)
-    except Exception:
-        pass  # Tables may not exist — feature will be 0
+    # 2. (removed — provides/wants tags no longer used, F3 zeroed out)
 
     # 3. Forge deck tags (bulk)
     forge_has = {}          # oid -> set[tag]
@@ -279,9 +269,8 @@ def build_feature_matrix(pairs_by_cmdr, tower_model_path=TOWER_EDHREC_PATH, verb
     except Exception:
         pass
 
-    # 5. Commander profiles (strategies)
+    # 5. Commander profiles (strategies — for tribal detection)
     from mtg_synergy.recommend.commander_profile import load_profile
-    from mtg_synergy.recommend.commander_profile import STRATEGY_KEYWORDS
 
     # 6. Tower model data (load once)
     print("  Loading tower model for inference...")
@@ -416,20 +405,8 @@ def build_feature_matrix(pairs_by_cmdr, tower_model_path=TOWER_EDHREC_PATH, verb
         cmdr_forge_has = forge_has.get(cmdr_oid, set())
         cmdr_forge_hints = forge_hints.get(cmdr_oid, set())
 
-        # --- (d) Commander tag overlap ---
-        cmdr_provides = provides_map.get(cmdr_oid, set())
-        cmdr_wants = wants_map.get(cmdr_oid, set())
-
-        # --- (e) Strategy keyword hits ---
-        profile = None
-        strategy_keywords = []
-        try:
-            profile = load_profile(conn, cmdr_oid)
-            if profile and profile.strategies:
-                for strat in profile.strategies:
-                    strategy_keywords.extend(STRATEGY_KEYWORDS.get(strat, []))
-        except Exception:
-            pass
+        # --- (d) F3 cmdr_tag_overlap: removed (causal graph covers this) ---
+        # --- (e) F4 strategy_keyword: removed (Forge tags cover this) ---
 
         # --- (f) Tribal match: commander subtypes ---
         cmdr_type_line = card_meta.get(cmdr_oid, {}).get("type_line", "")
@@ -466,17 +443,11 @@ def build_feature_matrix(pairs_by_cmdr, tower_model_path=TOWER_EDHREC_PATH, verb
                 len(card_has & cmdr_forge_hints) + len(card_hints & cmdr_forge_has)
             )
 
-            # F3: cmdr_tag_overlap
-            card_prov = provides_map.get(card_oid, set())
-            card_want = wants_map.get(card_oid, set())
-            X[row_idx, 3] = float(
-                len(card_prov & cmdr_wants) + len(card_want & cmdr_provides)
-            )
+            # F3: cmdr_tag_overlap — removed (zeroed out)
+            X[row_idx, 3] = 0.0
 
-            # F4: strategy_keyword
+            # F4: strategy_keyword — removed (zeroed out)
             kw_hits = 0
-            if strategy_keywords and card_oracle:
-                kw_hits = sum(1 for kw in strategy_keywords if kw in card_oracle)
             X[row_idx, 4] = float(kw_hits)
 
             # F5: tribal_match
