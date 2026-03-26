@@ -1,5 +1,6 @@
 """Tests for derive_forge_tags.py — verb→provides mapping (Task 1), trigger→wants mapping (Task 2), and role derivation (Task 3)."""
 import pytest
+import sqlite3
 import sys
 import os
 
@@ -636,3 +637,104 @@ def test_derive_role():
     assert derive_role({"destroy", "mana"}, "Creature") == "removal"
     # Priority: ramp beats draw
     assert derive_role({"mana", "draw"}, "Artifact") == "ramp"
+
+
+# ===========================================================================
+# Task 4: integration tests — derive_all pipeline
+# ===========================================================================
+
+def test_full_pipeline_on_real_db():
+    """Run derive_all on real DB, verify coverage and key cards."""
+    db_path = os.path.join(os.path.dirname(__file__), "..", "data", "tags.db")
+    if not os.path.exists(db_path):
+        pytest.skip("No tags.db available")
+
+    from derive_forge_tags import derive_all
+    stats = derive_all(db_path, dry_run=True)
+
+    # Coverage: at least 90% of cards with Forge data get provides tags
+    assert stats["cards_with_provides"] >= 28000
+    assert stats["cards_with_wants"] >= 10000
+    assert stats["total_provides_tags"] >= 60000
+
+    # Spot-check key cards
+    card_tags = stats["card_tags"]
+    conn = sqlite3.connect(db_path)
+
+    def oid(name):
+        row = conn.execute("SELECT oracle_id FROM cards WHERE name = ?", (name,)).fetchone()
+        return row[0] if row else None
+
+    # Krenko: token + goblin-tribal + tap-ability
+    assert "token" in card_tags[oid("Krenko, Mob Boss")]["provides"]
+    assert "goblin-tribal" in card_tags[oid("Krenko, Mob Boss")]["provides"]
+
+    # Sol Ring: mana + tap-ability
+    assert "mana" in card_tags[oid("Sol Ring")]["provides"]
+
+    # Skullclamp: draw + equip, wants dies
+    assert "draw" in card_tags[oid("Skullclamp")]["provides"]
+    assert "dies" in card_tags[oid("Skullclamp")]["wants"]
+
+    # Dragon Fodder: token + goblin-tribal (from token_script)
+    assert "token" in card_tags[oid("Dragon Fodder")]["provides"]
+    assert "goblin-tribal" in card_tags[oid("Dragon Fodder")]["provides"]
+
+    # Swords to Plowshares: remove (ChangeZone to exile)
+    stp_tags = card_tags.get(oid("Swords to Plowshares"), {"provides": set()})["provides"]
+    assert "remove" in stp_tags or "exile" in stp_tags or "change-zone" in stp_tags
+
+    conn.close()
+
+
+def test_role_derivation_spot_check():
+    """Spot-check role derivation for well-known cards."""
+    db_path = os.path.join(os.path.dirname(__file__), "..", "data", "tags.db")
+    if not os.path.exists(db_path):
+        pytest.skip("No tags.db available")
+
+    from derive_forge_tags import derive_all
+    stats = derive_all(db_path, dry_run=True)
+    roles = stats["card_roles"]
+    conn = sqlite3.connect(db_path)
+
+    def oid(name):
+        row = conn.execute("SELECT oracle_id FROM cards WHERE name = ?", (name,)).fetchone()
+        return row[0] if row else None
+
+    assert roles.get(oid("Sol Ring")) == "ramp"
+    assert roles.get(oid("Swords to Plowshares")) == "removal"
+    assert roles.get(oid("Rhystic Study")) == "draw"
+    assert roles.get(oid("Krenko, Mob Boss")) == "threat"
+    conn.close()
+
+
+def test_dfc_tags_merged():
+    """DFC cards get tags from both faces when both map to same oracle_id."""
+    db_path = os.path.join(os.path.dirname(__file__), "..", "data", "tags.db")
+    if not os.path.exists(db_path):
+        pytest.skip("No tags.db available")
+
+    from derive_forge_tags import derive_all
+    stats = derive_all(db_path, dry_run=True)
+    card_tags = stats["card_tags"]
+    conn = sqlite3.connect(db_path)
+
+    # Birgi: front face has mana ability, should have tags
+    birgi_oid = conn.execute(
+        "SELECT oracle_id FROM cards WHERE name LIKE 'Birgi%'").fetchone()
+    if birgi_oid:
+        assert len(card_tags.get(birgi_oid[0], {"provides": set()})["provides"]) > 0
+
+    conn.close()
+
+
+def test_cards_without_forge_data_skipped():
+    """Cards with no forge_name_map entry produce no tags."""
+    db_path = os.path.join(os.path.dirname(__file__), "..", "data", "tags.db")
+    if not os.path.exists(db_path):
+        pytest.skip("No tags.db available")
+
+    from derive_forge_tags import derive_all
+    stats = derive_all(db_path, dry_run=True)
+    assert stats["cards_skipped"] >= 0

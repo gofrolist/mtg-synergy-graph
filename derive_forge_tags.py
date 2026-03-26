@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import sqlite3
 from collections import defaultdict
 from typing import Optional
 
@@ -519,88 +520,296 @@ def derive_role(provides_tags: set, type_line: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# DB pipeline: read forge_abilities, derive tags, write to provides
+# DB pipeline: derive_all — full pipeline
 # ---------------------------------------------------------------------------
 
-def derive_all_tags(conn) -> dict[str, set[str]]:
-    """Derive provides tags for all Forge abilities joined with oracle_ids.
+def derive_all(db_path: str, dry_run: bool = False) -> dict:
+    """Derive all provides/wants/role tags from Forge abilities and write to DB.
+
+    1. Load ALL forge_abilities joined with forge_name_map
+    2. Group abilities by oracle_id (merging DFC faces, adventure halves, etc.)
+    3. For each oracle_id: derive provides, wants, and role tags
+    4. Add tribal tags from type_line
+    5. If not dry_run: wipe provides/wants, bulk insert, update cards.role
+
+    Args:
+        db_path: Path to tags.db SQLite database.
+        dry_run: If True, compute everything but don't write to DB.
 
     Returns:
-        dict mapping oracle_id → set of provides tags
+        Stats dict with coverage counts and per-card tag/role data.
     """
-    results: dict[str, set[str]] = defaultdict(set)
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
 
+    # --- Step 1: Load all forge abilities joined with oracle_id ---
     cur = conn.execute("""
-        SELECT
-            fnm.oracle_id,
-            fa.verb,
-            fa.keyword,
-            fa.cost,
-            fa.token_script,
-            fa.counter_type,
-            fa.raw_line,
-            fa.target
+        SELECT fa.card_name, fa.ability_index, fa.ability_type, fa.verb,
+               fa.trigger_mode, fa.trigger_filter, fa.trigger_origin,
+               fa.trigger_destination, fa.target, fa.cost, fa.keyword,
+               fa.token_script, fa.counter_type, fa.raw_line,
+               fnm.oracle_id
         FROM forge_abilities fa
-        JOIN forge_name_map fnm ON fa.card_name = fnm.forge_name
+        JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name
         WHERE fnm.oracle_id IS NOT NULL
     """)
+    rows = cur.fetchall()
 
-    for row in cur.fetchall():
-        oracle_id, verb, keyword, cost, token_script, counter_type, raw_line, target = row
-        tags = derive_provides_from_ability(
-            verb=verb,
-            keyword=keyword,
-            cost=cost,
-            token_script=token_script,
-            counter_type=counter_type,
-            raw_line=raw_line or "",
-            target=target,
+    # --- Step 2: Group abilities by oracle_id ---
+    abilities_by_oid: dict[str, list] = defaultdict(list)
+    for row in rows:
+        oracle_id = row[14]  # last column
+        abilities_by_oid[oracle_id].append(row)
+
+    # Count cards in forge_abilities that have no forge_name_map entry
+    cur = conn.execute("""
+        SELECT COUNT(DISTINCT fa.card_name)
+        FROM forge_abilities fa
+        LEFT JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name
+        WHERE fnm.forge_name IS NULL
+    """)
+    cards_skipped = cur.fetchone()[0]
+
+    # --- Step 3-4: Load type_lines and derive tags ---
+    # Preload type_lines for all cards
+    type_lines: dict[str, str] = {}
+    cur = conn.execute("SELECT oracle_id, type_line FROM cards")
+    for oid, tl in cur.fetchall():
+        type_lines[oid] = tl or ""
+
+    card_tags: dict[str, dict[str, set[str]]] = {}
+    card_roles: dict[str, str] = {}
+
+    for oracle_id, ability_rows in abilities_by_oid.items():
+        provides: set[str] = set()
+        wants: set[str] = set()
+
+        for row in ability_rows:
+            (card_name, ability_index, ability_type, verb, trigger_mode,
+             trigger_filter, trigger_origin, trigger_destination, target,
+             cost, keyword, token_script, counter_type, raw_line, _oid) = row
+
+            # Derive provides from every ability
+            p_tags = derive_provides_from_ability(
+                verb=verb,
+                keyword=keyword,
+                cost=cost,
+                token_script=token_script,
+                counter_type=counter_type,
+                raw_line=raw_line or "",
+                target=target,
+            )
+            provides.update(p_tags)
+
+            # Derive wants from triggered abilities (ability_type='T')
+            if ability_type == "T":
+                w_tags = derive_wants_from_trigger(
+                    trigger_mode=trigger_mode,
+                    origin=trigger_origin,
+                    destination=trigger_destination,
+                    trigger_filter=trigger_filter,
+                )
+                wants.update(w_tags)
+
+            # Derive wants from cost (any ability with sacrifice cost)
+            if cost:
+                w_cost = derive_wants_from_cost(cost)
+                wants.update(w_cost)
+
+        # --- Step 5-6: Add tribal from type_line ---
+        type_line = type_lines.get(oracle_id, "")
+        if " \u2014 " in type_line:
+            # Handle DFC type_lines like "Legendary Creature — God // Legendary Artifact"
+            # Split on " // " first to handle each face, then extract subtypes
+            for face_type in type_line.split(" // "):
+                parts = face_type.split(" \u2014 ")
+                if len(parts) >= 2:
+                    subtypes = parts[1].strip().split()
+                    for word in subtypes:
+                        for tribal in TRIBAL_TYPES:
+                            if word.lower() == tribal.lower():
+                                provides.add(f"{tribal.lower()}-tribal")
+                                break
+
+        # --- Step 7: Derive role ---
+        role = derive_role(provides, type_line)
+
+        card_tags[oracle_id] = {"provides": provides, "wants": wants}
+        card_roles[oracle_id] = role
+
+    # --- Step 8: Write to DB if not dry_run ---
+    if not dry_run:
+        conn.execute("DELETE FROM provides")
+        conn.execute("DELETE FROM wants")
+
+        provides_rows = []
+        for oracle_id, tags in card_tags.items():
+            for tag in sorted(tags["provides"]):
+                provides_rows.append((oracle_id, tag))
+
+        wants_rows = []
+        for oracle_id, tags in card_tags.items():
+            for tag in sorted(tags["wants"]):
+                wants_rows.append((oracle_id, tag))
+
+        conn.executemany(
+            "INSERT OR IGNORE INTO provides (oracle_id, tag) VALUES (?, ?)",
+            provides_rows,
         )
-        if tags:
-            results[oracle_id].update(tags)
+        conn.executemany(
+            "INSERT OR IGNORE INTO wants (oracle_id, tag) VALUES (?, ?)",
+            wants_rows,
+        )
 
-    return dict(results)
+        role_rows = [(role, oid) for oid, role in card_roles.items()]
+        conn.executemany(
+            "UPDATE cards SET role = ? WHERE oracle_id = ?",
+            role_rows,
+        )
+
+        conn.commit()
+
+    # --- Step 9: Compute stats ---
+    total_cards = len(card_tags)
+    cards_with_provides = sum(1 for t in card_tags.values() if t["provides"])
+    cards_with_wants = sum(1 for t in card_tags.values() if t["wants"])
+    total_provides_tags = sum(len(t["provides"]) for t in card_tags.values())
+    total_wants_tags = sum(len(t["wants"]) for t in card_tags.values())
+
+    conn.close()
+
+    return {
+        "total_cards": total_cards,
+        "cards_with_provides": cards_with_provides,
+        "cards_with_wants": cards_with_wants,
+        "total_provides_tags": total_provides_tags,
+        "total_wants_tags": total_wants_tags,
+        "cards_skipped": cards_skipped,
+        "card_tags": card_tags,
+        "card_roles": card_roles,
+    }
 
 
-def write_tags_to_db(conn, tags_by_oracle_id: dict[str, set[str]], source: str = "forge") -> int:
-    """Write derived tags to the provides table.
+def _show_stats_from_db(conn) -> None:
+    """Print current provides/wants/role stats from DB."""
+    provides_count = conn.execute("SELECT COUNT(*) FROM provides").fetchone()[0]
+    wants_count = conn.execute("SELECT COUNT(*) FROM wants").fetchone()[0]
+    provides_cards = conn.execute(
+        "SELECT COUNT(DISTINCT oracle_id) FROM provides"
+    ).fetchone()[0]
+    wants_cards = conn.execute(
+        "SELECT COUNT(DISTINCT oracle_id) FROM wants"
+    ).fetchone()[0]
 
-    Only writes tags that don't already exist (INSERT OR IGNORE).
+    # Role distribution
+    role_dist = conn.execute(
+        "SELECT role, COUNT(*) FROM cards WHERE role != '' GROUP BY role ORDER BY COUNT(*) DESC"
+    ).fetchall()
 
-    Returns:
-        Number of new rows inserted.
-    """
-    rows = []
-    for oracle_id, tags in tags_by_oracle_id.items():
-        for tag in sorted(tags):
-            rows.append((oracle_id, tag))
+    print(f"Provides: {provides_count} rows across {provides_cards} cards")
+    print(f"Wants:    {wants_count} rows across {wants_cards} cards")
+    print(f"\nRole distribution:")
+    for role, count in role_dist:
+        print(f"  {count:6d}  {role}")
 
-    conn.executemany(
-        "INSERT OR IGNORE INTO provides (oracle_id, tag) VALUES (?, ?)",
-        rows,
-    )
-    conn.commit()
-    return len(rows)
-
-
-def show_stats(conn) -> None:
-    """Print derivation statistics."""
-    tags_by_id = derive_all_tags(conn)
-    total_cards = len(tags_by_id)
-    total_tags = sum(len(t) for t in tags_by_id.values())
-
-    # Tag frequency
-    freq: dict[str, int] = defaultdict(int)
-    for tags in tags_by_id.values():
-        for t in tags:
-            freq[t] += 1
-
-    print(f"Cards with derived tags: {total_cards}")
-    print(f"Total derived tag rows:  {total_tags}")
-    print(f"Unique tag values:       {len(freq)}")
-    print("\nTop 20 most common tags:")
-    for tag, count in sorted(freq.items(), key=lambda x: -x[1])[:20]:
+    # Top 20 provides tags
+    print(f"\nTop 20 provides tags:")
+    top_provides = conn.execute(
+        "SELECT tag, COUNT(*) as cnt FROM provides GROUP BY tag ORDER BY cnt DESC LIMIT 20"
+    ).fetchall()
+    for tag, count in top_provides:
         print(f"  {count:6d}  {tag}")
+
+    # Top 20 wants tags
+    print(f"\nTop 20 wants tags:")
+    top_wants = conn.execute(
+        "SELECT tag, COUNT(*) as cnt FROM wants GROUP BY tag ORDER BY cnt DESC LIMIT 20"
+    ).fetchall()
+    for tag, count in top_wants:
+        print(f"  {count:6d}  {tag}")
+
+
+def _show_card_tags(conn, db_path: str, card_name: str) -> None:
+    """Show derived tags for a single card by name."""
+    # Look up oracle_id from cards table
+    row = conn.execute(
+        "SELECT oracle_id, type_line FROM cards WHERE name = ?", (card_name,)
+    ).fetchone()
+    if not row:
+        # Try partial match
+        row = conn.execute(
+            "SELECT oracle_id, type_line FROM cards WHERE name LIKE ?",
+            (f"%{card_name}%",),
+        ).fetchone()
+    if not row:
+        print(f"Card not found: {card_name!r}")
+        return
+
+    oracle_id, type_line = row
+
+    # Load abilities for this oracle_id
+    cur = conn.execute("""
+        SELECT fa.card_name, fa.ability_index, fa.ability_type, fa.verb,
+               fa.trigger_mode, fa.trigger_filter, fa.trigger_origin,
+               fa.trigger_destination, fa.target, fa.cost, fa.keyword,
+               fa.token_script, fa.counter_type, fa.raw_line
+        FROM forge_abilities fa
+        JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name
+        WHERE fnm.oracle_id = ?
+    """, (oracle_id,))
+    ability_rows = cur.fetchall()
+
+    if not ability_rows:
+        print(f"{card_name} ({oracle_id}): no Forge abilities found")
+        return
+
+    provides: set[str] = set()
+    wants: set[str] = set()
+
+    for r in ability_rows:
+        (card_name_r, ability_index, ability_type, verb, trigger_mode,
+         trigger_filter, trigger_origin, trigger_destination, target,
+         cost, keyword, token_script, counter_type, raw_line) = r
+
+        p = derive_provides_from_ability(
+            verb=verb, keyword=keyword, cost=cost,
+            token_script=token_script, counter_type=counter_type,
+            raw_line=raw_line or "", target=target,
+        )
+        provides.update(p)
+
+        if ability_type == "T":
+            w = derive_wants_from_trigger(
+                trigger_mode=trigger_mode, origin=trigger_origin,
+                destination=trigger_destination, trigger_filter=trigger_filter,
+            )
+            wants.update(w)
+
+        if cost:
+            w_cost = derive_wants_from_cost(cost)
+            wants.update(w_cost)
+
+    # Add tribal from type_line
+    if " \u2014 " in type_line:
+        for face_type in type_line.split(" // "):
+            parts = face_type.split(" \u2014 ")
+            if len(parts) >= 2:
+                subtypes = parts[1].strip().split()
+                for word in subtypes:
+                    for tribal in TRIBAL_TYPES:
+                        if word.lower() == tribal.lower():
+                            provides.add(f"{tribal.lower()}-tribal")
+                            break
+
+    role = derive_role(provides, type_line)
+
+    print(f"Card:     {card_name} ({oracle_id})")
+    print(f"Type:     {type_line}")
+    print(f"Role:     {role}")
+    print(f"Provides: {sorted(provides)}")
+    print(f"Wants:    {sorted(wants)}")
+    print(f"Abilities: {len(ability_rows)}")
 
 
 # ---------------------------------------------------------------------------
@@ -609,48 +818,48 @@ def show_stats(conn) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Derive provides tags from Forge DSL abilities"
+        description="Derive provides/wants/role tags from Forge DSL abilities"
     )
     parser.add_argument("--dry-run", action="store_true",
-                        help="Print derived tags without writing to DB")
-    parser.add_argument("--write", action="store_true",
-                        help="Write tags to provides table")
+                        help="Compute everything but don't write to DB")
     parser.add_argument("--stats", action="store_true",
-                        help="Show derivation statistics")
+                        help="Show current provides/wants/role stats from DB")
     parser.add_argument("--card", type=str,
-                        help="Derive tags for a single card name only")
+                        help="Show derived tags for one card by name")
+    parser.add_argument("--db", type=str, default=None,
+                        help="Path to tags.db (default: auto-detect)")
     args = parser.parse_args()
 
     from mtg_synergy.db import get_connection
-    conn = get_connection()
 
     if args.stats:
-        show_stats(conn)
-    elif args.dry_run:
-        tags_by_id = derive_all_tags(conn)
-        if args.card:
-            # Filter by card name via forge_name_map
-            cur = conn.execute(
-                "SELECT oracle_id FROM forge_name_map WHERE forge_name = ?",
-                (args.card,),
-            )
-            row = cur.fetchone()
-            if row:
-                oid = row[0]
-                print(f"{args.card} ({oid}): {sorted(tags_by_id.get(oid, set()))}")
-            else:
-                print(f"Card not found in forge_name_map: {args.card!r}")
-        else:
-            for oracle_id, tags in sorted(tags_by_id.items()):
-                print(f"{oracle_id}: {sorted(tags)}")
-    elif args.write:
-        tags_by_id = derive_all_tags(conn)
-        n = write_tags_to_db(conn, tags_by_id)
-        print(f"Inserted {n} provides rows from Forge abilities.")
+        conn = get_connection(args.db)
+        _show_stats_from_db(conn)
+        conn.close()
+    elif args.card:
+        conn = get_connection(args.db)
+        _show_card_tags(conn, args.db or "", args.card)
+        conn.close()
     else:
-        parser.print_help()
+        # Full pipeline: derive all tags and write to DB (unless --dry-run)
+        if args.db:
+            db_path = args.db
+        else:
+            from mtg_synergy.config import DB_PATH
+            db_path = str(DB_PATH)
 
-    conn.close()
+        stats = derive_all(db_path, dry_run=args.dry_run)
+
+        action = "DRY RUN" if args.dry_run else "WRITTEN"
+        print(f"=== Forge tag derivation ({action}) ===")
+        print(f"Total cards with Forge data: {stats['total_cards']}")
+        print(f"Cards with provides tags:    {stats['cards_with_provides']}")
+        print(f"Cards with wants tags:       {stats['cards_with_wants']}")
+        print(f"Total provides tag rows:     {stats['total_provides_tags']}")
+        print(f"Total wants tag rows:        {stats['total_wants_tags']}")
+        print(f"Cards skipped (no mapping):  {stats['cards_skipped']}")
+
+    return
 
 
 if __name__ == "__main__":
