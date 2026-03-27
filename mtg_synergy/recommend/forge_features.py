@@ -100,6 +100,37 @@ class ForgeFeatureContext:
         self._n_vocab = len(self._vocab)
         self._doc_freq = doc_freq
 
+        # Forge ability profiles: per-card structured data from forge_abilities
+        # Replaces oracle text regex matching for features F25-F30
+        self._forge_profiles = {}
+        for row in conn.execute(
+            "SELECT fnm.oracle_id, fa.verb, fa.trigger_mode, fa.keyword, "
+            "fa.counter_type, fa.target, fa.ability_type, fa.trigger_filter "
+            "FROM forge_abilities fa "
+            "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name"
+        ):
+            oid = row[0]
+            p = self._forge_profiles.setdefault(oid, {
+                'verbs': set(), 'triggers': set(), 'keywords': set(),
+                'counter_types': set(), 'targets': set(), 'ability_types': set(),
+                'trigger_filters': set(),
+            })
+            if row[1]: p['verbs'].add(row[1])
+            if row[2]: p['triggers'].add(row[2])
+            if row[3]: p['keywords'].add(row[3])
+            if row[4]: p['counter_types'].add(row[4])
+            if row[5]:
+                for t in row[5].split(","):
+                    main = t.split(".")[0].strip()
+                    if main:
+                        p['targets'].add(main)
+            if row[6]: p['ability_types'].add(row[6])
+            if row[7]:
+                for part in row[7].split(","):
+                    main = part.split(".")[0].strip()
+                    if main and main != "Card" and main[0].isupper():
+                        p['trigger_filters'].add(main.lower())
+
         # Forge mechanics vectors: encode each card's full mechanical profile
         from mtg_synergy.recommend.mechanics_vectors import build_mechanics_vectors
         self._mech_produces, self._mech_consumes, self._mech_dim, _ = \
