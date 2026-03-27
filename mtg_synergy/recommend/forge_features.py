@@ -48,11 +48,8 @@ class ForgeFeatureContext:
         self.oid_to_idx = oid_to_idx
         self._has_edge_index = False
 
-        # Load oracle texts for keyword features
-        self._card_oracle = {}
-        for oid, text in conn.execute("SELECT oracle_id, oracle_text FROM cards"):
-            if text:
-                self._card_oracle[oid] = text.lower()
+        # _card_oracle removed — F25-F30 now use Forge profiles,
+        # F28 (cmdr_keyword_match) uses _card_tokens (loaded below for TF-IDF).
 
         # Card strategies
         self.card_strats = {}
@@ -320,11 +317,12 @@ class CmdrFeatureContext:
             'trigger_filters': set(),
         })
 
-        # Commander-specific keywords: top TF-IDF words from commander oracle
-        cmdr_oracle = ctx._card_oracle.get(cmdr_oid, "")
+        # Commander-specific keywords: unique tokens from commander oracle text
+        # Uses _card_tokens (already loaded for TF-IDF) instead of _card_oracle
+        cmdr_tokens = ctx._card_tokens.get(cmdr_oid, {})
         self.cmdr_keywords = set()
-        if cmdr_oracle:
-            words = re.findall(r"[a-z]{3,}", cmdr_oracle)
+        if cmdr_tokens:
+            # cmdr_tokens is a Counter, keys are 3+ letter lowercase words
             # Exclude common MTG boilerplate
             stop = {"the", "and", "for", "you", "your", "each", "that", "this",
                     "its", "with", "from", "into", "than", "may", "can", "all",
@@ -341,13 +339,12 @@ class CmdrFeatureContext:
                     "much", "nor", "not", "either", "both", "every", "most",
                     "some", "such", "own", "over", "under", "before", "after"}
             # Also filter commander's own name words
-            cmdr_name_parts = set(re.findall(r"[a-z]{3,}", cmdr_oid[:36]))  # won't match oid
-            # Get commander name
             cmdr_name_row = ctx.conn.execute(
                 "SELECT name FROM cards WHERE oracle_id = ?", (cmdr_oid,)).fetchone()
+            cmdr_name_parts = set()
             if cmdr_name_row:
                 cmdr_name_parts = set(re.findall(r"[a-z]{3,}", cmdr_name_row[0].lower()))
-            self.cmdr_keywords = {w for w in set(words) if w not in stop and w not in cmdr_name_parts}
+            self.cmdr_keywords = {w for w in cmdr_tokens.keys() if w not in stop and w not in cmdr_name_parts}
 
         if ctx._has_edge_index:
             self._init_from_index(ctx, cmdr_oid, deck_oids)
@@ -596,7 +593,6 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
 
     # F25: forge_type_synergy — card's Forge trigger_filter or target references
     # commander's creature subtypes. Replaces oracle text substring matching.
-    card_oracle = ctx._card_oracle.get(card_oid, "")
     card_profile = ctx._forge_profiles.get(card_oid, {})
     card_trigger_types = card_profile.get('trigger_filters', set())
     card_targets = card_profile.get('targets', set())
@@ -610,7 +606,6 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
 
     # F26: cmdr_forge_type_match — commander's Forge trigger_filter or target
     # references card's subtypes.
-    cmdr_oracle = ctx._card_oracle.get(cmdr.cmdr_oid, "")
     cmdr_profile = ctx._forge_profiles.get(cmdr.cmdr_oid, {})
     cmdr_trigger_types = cmdr_profile.get('trigger_filters', set())
     cmdr_targets = cmdr_profile.get('targets', set())
@@ -642,9 +637,9 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
 
     # F28: cmdr_keyword_match — how many commander-specific keywords appear in card text
     cmdr_kw_match = 0.0
-    if cmdr.cmdr_keywords and card_oracle:
-        card_words = set(re.findall(r"[a-z]{3,}", card_oracle))
-        cmdr_kw_match = float(len(cmdr.cmdr_keywords & card_words))
+    if cmdr.cmdr_keywords:
+        card_tokens_set = set(ctx._card_tokens.get(card_oid, {}).keys())
+        cmdr_kw_match = float(len(cmdr.cmdr_keywords & card_tokens_set))
 
     # F29: forge_anti_tribal — card's Forge trigger_filter requires a creature
     # subtype that conflicts with the commander's type.
