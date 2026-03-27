@@ -193,12 +193,14 @@ def load_edhrec_membership(conn):
 
 
 def sample_negatives(positives_by_cmdr, all_card_oids, card_colors, cmdr_colors,
-                     ratio=3, hard_ratio=0.5, card_strats=None, card_subtypes=None):
+                     ratio=3, hard_ratio=0.5, card_strats=None, card_subtypes=None,
+                     normed_emb=None, emb_oid_to_idx=None):
     """Sample negative pairs (cards NOT in a commander's avg deck).
 
     For each commander, samples ratio * |positives| negative cards:
-    - hard_ratio fraction are "semi-hard" (share a strategy or subtype with
-      the commander but are NOT in their deck — textually similar but wrong)
+    - hard_ratio fraction are "hard" negatives, split between:
+      - strategy/subtype overlap (cards that look similar by mechanics)
+      - embedding-ranked (highest cosine similarity to commander)
     - remainder are random color-legal cards
 
     Returns list of (cmdr_oid, card_oid, 0) tuples.
@@ -224,28 +226,50 @@ def sample_negatives(positives_by_cmdr, all_card_oids, card_colors, cmdr_colors,
         if n_neg == 0:
             continue
 
-        # Split into hard + random
-        n_hard = 0
+        n_hard = int(n_neg * hard_ratio) if hard_ratio > 0 else 0
         hard_chosen = set()
-        if hard_ratio > 0 and (card_strats or card_subtypes):
-            n_hard = int(n_neg * hard_ratio)
-            cmdr_strats = card_strats.get(cmdr_oid, set()) if card_strats else set()
-            cmdr_subs = card_subtypes.get(cmdr_oid, set()) if card_subtypes else set()
 
-            # Find candidates sharing strategy or subtype with commander
-            hard_pool = []
-            for oid in candidates:
-                shared_strat = bool(cmdr_strats & card_strats.get(oid, set())) if card_strats else False
-                shared_sub = bool(cmdr_subs & card_subtypes.get(oid, set())) if card_subtypes else False
-                if shared_strat or shared_sub:
-                    hard_pool.append(oid)
+        if n_hard > 0:
+            # Half of hard budget: strategy/subtype overlap
+            n_strat_hard = n_hard // 2
+            if card_strats or card_subtypes:
+                cmdr_strats = card_strats.get(cmdr_oid, set()) if card_strats else set()
+                cmdr_subs = card_subtypes.get(cmdr_oid, set()) if card_subtypes else set()
 
-            if hard_pool:
-                n_hard = min(n_hard, len(hard_pool))
-                chosen_idx = rng.choice(len(hard_pool), size=n_hard, replace=False)
-                for idx in chosen_idx:
-                    hard_chosen.add(hard_pool[idx])
-                    negatives.append((cmdr_oid, hard_pool[idx], 0))
+                hard_pool = []
+                for oid in candidates:
+                    shared_strat = bool(cmdr_strats & card_strats.get(oid, set())) if card_strats else False
+                    shared_sub = bool(cmdr_subs & card_subtypes.get(oid, set())) if card_subtypes else False
+                    if shared_strat or shared_sub:
+                        hard_pool.append(oid)
+
+                if hard_pool:
+                    n_pick = min(n_strat_hard, len(hard_pool))
+                    chosen_idx = rng.choice(len(hard_pool), size=n_pick, replace=False)
+                    for idx in chosen_idx:
+                        hard_chosen.add(hard_pool[idx])
+
+            # Other half: embedding-ranked (highest cosine to commander)
+            n_emb_hard = n_hard - len(hard_chosen)
+            if n_emb_hard > 0 and normed_emb is not None and emb_oid_to_idx is not None:
+                cmdr_idx = emb_oid_to_idx.get(cmdr_oid)
+                if cmdr_idx is not None:
+                    # Score remaining candidates by embedding similarity
+                    emb_pool = [(oid, emb_oid_to_idx[oid]) for oid in candidates
+                                if oid not in hard_chosen and oid in emb_oid_to_idx]
+                    if emb_pool:
+                        pool_oids = [o for o, _ in emb_pool]
+                        pool_indices = [i for _, i in emb_pool]
+                        cmdr_vec = normed_emb[cmdr_idx].astype(np.float32)
+                        scores = normed_emb[pool_indices].astype(np.float32) @ cmdr_vec
+                        # Take top-N most similar
+                        n_pick = min(n_emb_hard, len(pool_oids))
+                        top_idx = np.argpartition(-scores, n_pick)[:n_pick]
+                        for idx in top_idx:
+                            hard_chosen.add(pool_oids[idx])
+
+            for oid in hard_chosen:
+                negatives.append((cmdr_oid, oid, 0))
 
         # Fill remainder with random
         n_random = n_neg - len(hard_chosen)
@@ -1773,7 +1797,7 @@ def _load_pairs_for_features(conn, oid_to_idx):
         except (IndexError, AttributeError):
             pass
 
-    # Sample negatives: 50% hard (share strategy/subtype) + 50% random
+    # Sample negatives: 50% hard (strategy/subtype overlap) + 50% random
     print("\nSampling negatives (ratio=3, 50% hard)...")
     neg_pairs = sample_negatives(
         positives_by_cmdr, all_card_oids, card_colors, card_colors, ratio=3,
