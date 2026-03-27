@@ -1752,6 +1752,64 @@ def _load_pairs_for_features(conn, oid_to_idx):
     return pairs_by_cmdr
 
 
+def _load_forge_pairs_for_features(conn, oid_to_idx):
+    """Load causal graph positives + sample negatives. Zero EDHREC dependency.
+
+    Returns dict[cmdr_oid -> list[(card_oid, label)]].
+    """
+    # Load color identities
+    card_colors = {}
+    for row in conn.execute("SELECT oracle_id, color_identity FROM cards"):
+        card_colors[row[0]] = set(json.loads(row[1] or "[]"))
+
+    # Build card pool (exclude basic lands and tokens)
+    basic_land_names = {"Plains", "Island", "Swamp", "Mountain", "Forest",
+                        "Snow-Covered Plains", "Snow-Covered Island",
+                        "Snow-Covered Swamp", "Snow-Covered Mountain",
+                        "Snow-Covered Forest", "Wastes"}
+    basic_land_oids = set()
+    for name in basic_land_names:
+        row = conn.execute("SELECT oracle_id FROM cards WHERE name = ?", (name,)).fetchone()
+        if row:
+            basic_land_oids.add(row[0])
+
+    type_lines = {}
+    for row in conn.execute("SELECT oracle_id, type_line FROM cards"):
+        type_lines[row[0]] = row[1] or ""
+
+    all_card_oids = []
+    for oid in oid_to_idx:
+        if oid in basic_land_oids:
+            continue
+        tl = type_lines.get(oid, "")
+        if "Token" in tl or "token" in tl:
+            continue
+        all_card_oids.append(oid)
+
+    # Load positives from causal graph (not EDHREC)
+    print("\nLoading causal graph positives...")
+    positives_by_cmdr = load_forge_positives(conn, oid_to_idx)
+
+    total_pos = sum(len(v) for v in positives_by_cmdr.values())
+    print(f"  Positive pairs with embeddings: {total_pos} across {len(positives_by_cmdr)} commanders")
+
+    # Sample negatives (same 3:1 ratio, color-legal)
+    print("\nSampling negatives (ratio=3)...")
+    neg_pairs = sample_negatives(
+        positives_by_cmdr, all_card_oids, card_colors, card_colors, ratio=3
+    )
+    print(f"  Negative pairs: {len(neg_pairs)}")
+
+    # Combine into pairs_by_cmdr
+    pairs_by_cmdr = {}
+    for cmdr_oid, card_oids in positives_by_cmdr.items():
+        pairs_by_cmdr[cmdr_oid] = [(oid, 1) for oid in card_oids]
+    for cmdr_oid, card_oid, label in neg_pairs:
+        pairs_by_cmdr.setdefault(cmdr_oid, []).append((card_oid, label))
+
+    return pairs_by_cmdr
+
+
 def holdout_evaluation(seed=42, drop_features=None):
     """Train on 80% of commanders, evaluate Recall@K on held-out 20%.
 
@@ -1994,7 +2052,12 @@ def main():
     parser.add_argument(
         "--forge-only",
         action="store_true",
-        help="Train forge-only model (no EDHREC features) and compare with baseline",
+        help="Train forge-only GBM on causal labels (uses cached features if available)",
+    )
+    parser.add_argument(
+        "--rebuild-features",
+        action="store_true",
+        help="Force rebuild feature matrix (ignore cache) when used with --forge-only",
     )
     parser.add_argument(
         "--forge-tower",
@@ -2013,49 +2076,42 @@ def main():
 
     if args.forge_only:
         print("=" * 60)
-        print("FORGE-ONLY MODEL — no EDHREC features")
+        print("FORGE-ONLY MODEL — EDHREC labels, forge features")
         print("=" * 60)
 
-        print("\nLoading embeddings...")
-        _, _, oid_to_idx = load_embeddings()
+        # Check for cached feature matrix (skip 3+ min rebuild)
+        cache_path = os.path.join(DATA_DIR, "forge_features_cache.npz")
+        if os.path.exists(cache_path) and not args.rebuild_features:
+            print(f"\nLoading cached feature matrix from {cache_path}")
+            cached = np.load(cache_path)
+            X_forge = cached["X"]
+            y_forge = cached["y"]
+            cmdr_ids_forge = cached["cmdr_ids"]
+            print(f"  Matrix: {X_forge.shape}, positives: {int(y_forge.sum())}, "
+                  f"negatives: {int(len(y_forge) - y_forge.sum())}")
+        else:
+            print("\nLoading embeddings...")
+            _, _, oid_to_idx = load_embeddings()
 
-        conn = sqlite3.connect(DB_PATH)
-        pairs_by_cmdr = _load_pairs_for_features(conn, oid_to_idx)
-        conn.close()
+            conn = sqlite3.connect(DB_PATH)
+            pairs_by_cmdr = _load_pairs_for_features(conn, oid_to_idx)
+            conn.close()
 
-        # Build both feature matrices for comparison
-        print("\n--- Building BASELINE feature matrix (with EDHREC) ---")
-        X_base, y_base, cmdr_ids_base = build_feature_matrix(pairs_by_cmdr)
+            print("\n--- Building FORGE-ONLY feature matrix ---")
+            X_forge, y_forge, cmdr_ids_forge = build_forge_feature_matrix(pairs_by_cmdr)
 
-        print("\n--- Building FORGE-ONLY feature matrix ---")
-        X_forge, y_forge, cmdr_ids_forge = build_forge_feature_matrix(pairs_by_cmdr)
+            # Cache for fast reruns
+            np.savez(cache_path, X=X_forge, y=y_forge, cmdr_ids=cmdr_ids_forge)
+            print(f"  Feature matrix cached to {cache_path}")
 
-        # Train both models
+        # Train forge GBM only (no baseline)
         print("\n" + "=" * 60)
-        print("Training BASELINE model (8 features, with EDHREC)")
-        print("=" * 60)
-        _, base_scores = train_gbm(X_base, y_base, cmdr_ids_base)
-
-        print("\n" + "=" * 60)
-        print("Training FORGE-ONLY model (10 features, no EDHREC)")
+        print("Training FORGE-ONLY model (20 features)")
         print("=" * 60)
         _, forge_scores = train_forge_gbm(X_forge, y_forge, cmdr_ids_forge)
 
-        # Comparison
-        print("\n" + "=" * 60)
-        print("COMPARISON")
-        print("=" * 60)
-        base_auc = base_scores["mean_auc"]
         forge_auc = forge_scores["mean_auc"]
-        diff = forge_auc - base_auc
-        print(f"  Baseline (EDHREC):  mean AUC = {base_auc:.4f}")
-        print(f"  Forge-only:         mean AUC = {forge_auc:.4f}")
-        print(f"  Difference:         {diff:+.4f} ({'better' if diff > 0 else 'worse'})")
-        print()
-        print("  Per-fold comparison:")
-        for i, (b, f) in enumerate(zip(base_scores["fold_aucs"], forge_scores["fold_aucs"])):
-            d = f - b
-            print(f"    Fold {i+1}: baseline={b:.4f}  forge={f:.4f}  delta={d:+.4f}")
+        print(f"\n  Forge-only AUC: {forge_auc:.4f}")
 
         # Print forge model feature importance
         import joblib
