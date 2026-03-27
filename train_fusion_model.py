@@ -192,31 +192,25 @@ def load_edhrec_membership(conn):
     return positives
 
 
-def sample_negatives(positives_by_cmdr, all_card_oids, card_colors, cmdr_colors, ratio=3):
+def sample_negatives(positives_by_cmdr, all_card_oids, card_colors, cmdr_colors,
+                     ratio=3, hard_ratio=0.5, card_strats=None, card_subtypes=None):
     """Sample negative pairs (cards NOT in a commander's avg deck).
 
-    For each commander, samples ratio * |positives| random cards that:
-    - Are NOT in their avg deck
-    - Have color identity subset of commander's color identity
-    - Are not basic lands or tokens
+    For each commander, samples ratio * |positives| negative cards:
+    - hard_ratio fraction are "semi-hard" (share a strategy or subtype with
+      the commander but are NOT in their deck — textually similar but wrong)
+    - remainder are random color-legal cards
 
     Returns list of (cmdr_oid, card_oid, 0) tuples.
     """
     rng = np.random.RandomState(42)
 
-    # Pre-compute basic land oracle IDs to exclude
-    basic_land_names = {"Plains", "Island", "Swamp", "Mountain", "Forest",
-                        "Snow-Covered Plains", "Snow-Covered Island",
-                        "Snow-Covered Swamp", "Snow-Covered Mountain",
-                        "Snow-Covered Forest", "Wastes"}
-
-    all_oids_set = set(all_card_oids)
     negatives = []
 
     for cmdr_oid, pos_cards in positives_by_cmdr.items():
         cmdr_ci = cmdr_colors.get(cmdr_oid, set())
 
-        # Candidate pool: color-legal, not in deck, not basic land
+        # Candidate pool: color-legal, not in deck
         candidates = []
         for oid in all_card_oids:
             if oid in pos_cards or oid == cmdr_oid:
@@ -230,9 +224,38 @@ def sample_negatives(positives_by_cmdr, all_card_oids, card_colors, cmdr_colors,
         if n_neg == 0:
             continue
 
-        chosen = rng.choice(len(candidates), size=n_neg, replace=False)
-        for idx in chosen:
-            negatives.append((cmdr_oid, candidates[idx], 0))
+        # Split into hard + random
+        n_hard = 0
+        hard_chosen = set()
+        if hard_ratio > 0 and (card_strats or card_subtypes):
+            n_hard = int(n_neg * hard_ratio)
+            cmdr_strats = card_strats.get(cmdr_oid, set()) if card_strats else set()
+            cmdr_subs = card_subtypes.get(cmdr_oid, set()) if card_subtypes else set()
+
+            # Find candidates sharing strategy or subtype with commander
+            hard_pool = []
+            for oid in candidates:
+                shared_strat = bool(cmdr_strats & card_strats.get(oid, set())) if card_strats else False
+                shared_sub = bool(cmdr_subs & card_subtypes.get(oid, set())) if card_subtypes else False
+                if shared_strat or shared_sub:
+                    hard_pool.append(oid)
+
+            if hard_pool:
+                n_hard = min(n_hard, len(hard_pool))
+                chosen_idx = rng.choice(len(hard_pool), size=n_hard, replace=False)
+                for idx in chosen_idx:
+                    hard_chosen.add(hard_pool[idx])
+                    negatives.append((cmdr_oid, hard_pool[idx], 0))
+
+        # Fill remainder with random
+        n_random = n_neg - len(hard_chosen)
+        if n_random > 0:
+            random_pool = [oid for oid in candidates if oid not in hard_chosen]
+            if random_pool:
+                n_random = min(n_random, len(random_pool))
+                chosen_idx = rng.choice(len(random_pool), size=n_random, replace=False)
+                for idx in chosen_idx:
+                    negatives.append((cmdr_oid, random_pool[idx], 0))
 
     return negatives
 
@@ -1735,10 +1758,26 @@ def _load_pairs_for_features(conn, oid_to_idx):
     total_pos = sum(len(v) for v in positives_by_cmdr.values())
     print(f"  Positive pairs with embeddings: {total_pos} across {len(positives_by_cmdr)} commanders")
 
-    # Sample negatives
-    print("\nSampling negatives (ratio=3)...")
+    # Load strategies + subtypes for hard negative sampling
+    card_strats = {}
+    for oid, s in conn.execute("SELECT oracle_id, strategy FROM card_strategies WHERE confidence >= 0.3"):
+        card_strats.setdefault(oid, set()).add(s)
+
+    card_subtypes = {}
+    for row in conn.execute("SELECT oracle_id, type_line FROM cards WHERE type_line LIKE '%—%'"):
+        oid, tl = row
+        try:
+            subs = {s.lower() for s in tl.split("—")[1].strip().split()}
+            if subs:
+                card_subtypes[oid] = subs
+        except (IndexError, AttributeError):
+            pass
+
+    # Sample negatives: 50% hard (share strategy/subtype) + 50% random
+    print("\nSampling negatives (ratio=3, 50% hard)...")
     neg_pairs = sample_negatives(
-        positives_by_cmdr, all_card_oids, card_colors, card_colors, ratio=3
+        positives_by_cmdr, all_card_oids, card_colors, card_colors, ratio=3,
+        hard_ratio=0.5, card_strats=card_strats, card_subtypes=card_subtypes,
     )
     print(f"  Negative pairs: {len(neg_pairs)}")
 
