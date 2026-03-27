@@ -1250,7 +1250,7 @@ def train_tower_binary():
 TOWER_FORGE_PATH = os.path.join(DATA_DIR, "tower_model_forge.npz")
 
 
-def load_forge_positives(conn, min_strength=0.1, max_per_cmdr=150):
+def load_forge_positives(conn, min_strength=0.2, max_per_cmdr=80):
     """Load graded positive pairs from causal graph edges (forge-native).
 
     Grade criteria (1-9):
@@ -1784,10 +1784,10 @@ def _load_forge_pairs_for_features(conn):
     # Convert positives to the set format that sample_negatives expects
     pos_sets = {cmdr: {oid for oid, _ in pairs} for cmdr, pairs in positives_by_cmdr.items()}
 
-    # Sample negatives
-    print("\nSampling negatives (ratio=3, 50% hard)...")
+    # Sample negatives (ratio=2 to keep training set manageable: ~3k cmdrs × 80 pos × 3 = ~720k pairs)
+    print("\nSampling negatives (ratio=2, 50% hard)...")
     neg_pairs = sample_negatives(
-        pos_sets, all_card_oids, card_colors, card_colors, ratio=3,
+        pos_sets, all_card_oids, card_colors, card_colors, ratio=2,
         hard_ratio=0.5, card_strats=card_strats, card_subtypes=card_subtypes,
     )
     print(f"  Negative pairs: {len(neg_pairs)}")
