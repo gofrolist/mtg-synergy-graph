@@ -45,46 +45,44 @@ FEATURE_NAMES = [
 ]
 
 FORGE_FEATURE_NAMES = [
-    "tower_forge",           # [0] forge tower (causal graph connectivity)
-    "embedding_cosine",      # [1] card2vec embedding cosine(cmdr, card)
-    "causal_cmdr_to_card",   # [2] commander → card edge strength
-    "causal_card_to_cmdr",   # [3] card → commander edge strength
-    "causal_bidirectional",  # [4] 1.0 if both directions have edges
-    "causal_event_diversity", # [5] distinct event types connecting cmdr↔card
-    "deck_edge_count",       # [6] deck cards with causal edges to this card
-    "strategy_overlap",      # [7] shared strategies count
-    "strategy_cosine",       # [8] strategy vector cosine similarity
-    "forge_ability_cosine",  # [9] Forge ability vector cosine similarity
-    "phase_match",           # [10] cmdr and card trigger in same phase window
-    "has_phase_trigger",     # [11] card has any phase-based trigger
-    "tribal_match",          # [12] creature type match
-    "type_creature",         # [13] card is a Creature
-    "type_instant_sorcery",  # [14] card is Instant or Sorcery
-    "type_artifact",         # [15] card is an Artifact
-    "type_enchantment",      # [16] card is an Enchantment
-    "type_land",             # [17] card is a Land
-    "type_planeswalker",     # [18] card is a Planeswalker
-    "cmc",                   # [19] mana cost
-    "deck_exact_edge_ratio", # [20] fraction of deck edges with exact filter precision
-    "cmdr_exact_edge",       # [21] 1.0 if any exact-precision edge to commander
-    "causal_composite",      # [22] combined causal signal (strength × events × exact)
-    "card_hub_score",        # [23] total unique causal neighbors (connectedness)
-    "deck_exact_count",      # [24] absolute count of exact-precision deck connections
-    "forge_type_synergy",    # [25] card's Forge trigger_filter/target references cmdr's creature type
-    "cmdr_forge_type_match", # [26] commander's Forge trigger_filter/target references card's type
-    "shared_forge_mechanics", # [27] shared Forge verbs/trigger_modes/keywords count
-    "forge_ability_depth",  # [28] total distinct mechanical components (verbs+triggers+keywords+counters)
-    "forge_anti_tribal",    # [29] card's Forge trigger_filter requires conflicting creature subtype
-    "forge_verb_alignment", # [30] card's verbs produce events that commander's triggers consume
-    "forge_mech_fwd",       # [31] card produces what commander consumes (mechanics vector dot)
-    "forge_mech_rev",       # [32] commander produces what card consumes (mechanics vector dot)
-    "counter_type_match",   # [33] card uses same counter type as commander
-    "ability_type_ratio_T", # [34] fraction of card's abilities that are Triggered
-    "ability_type_ratio_A", # [35] fraction of card's abilities that are Activated
-    "zone_alignment",       # [36] card's trigger zones match commander's zones
-    "target_alignment",     # [37] card targets what commander produces
-    "forge_keyword_synergy", # [38] card keywords synergize with cmdr mechanics
-    "activated_ability_count", # [39] number of activated abilities
+    "causal_cmdr_to_card",   # [0] commander → card edge strength
+    "causal_card_to_cmdr",   # [1] card → commander edge strength
+    "causal_bidirectional",  # [2] 1.0 if both directions have edges
+    "causal_event_diversity", # [3] distinct event types connecting cmdr↔card
+    "deck_edge_count",       # [4] deck cards with causal edges to this card
+    "strategy_overlap",      # [5] shared strategies count
+    "strategy_cosine",       # [6] strategy vector cosine similarity
+    "forge_ability_cosine",  # [7] Forge ability vector cosine similarity
+    "phase_match",           # [8] cmdr and card trigger in same phase window
+    "has_phase_trigger",     # [9] card has any phase-based trigger
+    "tribal_match",          # [10] creature type match
+    "type_creature",         # [11] card is a Creature
+    "type_instant_sorcery",  # [12] card is Instant or Sorcery
+    "type_artifact",         # [13] card is an Artifact
+    "type_enchantment",      # [14] card is an Enchantment
+    "type_land",             # [15] card is a Land
+    "type_planeswalker",     # [16] card is a Planeswalker
+    "cmc",                   # [17] mana cost
+    "deck_exact_edge_ratio", # [18] fraction of deck edges with exact filter precision
+    "cmdr_exact_edge",       # [19] 1.0 if any exact-precision edge to commander
+    "causal_composite",      # [20] combined causal signal (strength × events × exact)
+    "card_hub_score",        # [21] total unique causal neighbors (connectedness)
+    "deck_exact_count",      # [22] absolute count of exact-precision deck connections
+    "forge_type_synergy",    # [23] card's Forge trigger_filter/target references cmdr's creature type
+    "cmdr_forge_type_match", # [24] commander's Forge trigger_filter/target references card's type
+    "shared_forge_mechanics", # [25] shared Forge verbs/trigger_modes/keywords count
+    "forge_ability_depth",  # [26] total distinct mechanical components (verbs+triggers+keywords+counters)
+    "forge_anti_tribal",    # [27] card's Forge trigger_filter requires conflicting creature subtype
+    "forge_verb_alignment", # [28] card's verbs produce events that commander's triggers consume
+    "forge_mech_fwd",       # [29] card produces what commander consumes (mechanics vector dot)
+    "forge_mech_rev",       # [30] commander produces what card consumes (mechanics vector dot)
+    "counter_type_match",   # [31] card uses same counter type as commander
+    "ability_type_ratio_T", # [32] fraction of card's abilities that are Triggered
+    "ability_type_ratio_A", # [33] fraction of card's abilities that are Activated
+    "zone_alignment",       # [34] card's trigger zones match commander's zones
+    "target_alignment",     # [35] card targets what commander produces
+    "forge_keyword_synergy", # [36] card keywords synergize with cmdr mechanics
+    "activated_ability_count", # [37] number of activated abilities
 ]
 
 def sigmoid(x):
@@ -606,21 +604,14 @@ def build_feature_matrix(pairs_by_cmdr, tower_model_path=TOWER_EDHREC_PATH, verb
 
 
 def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=True):
-    """Build forge-only feature matrix (no EDHREC features).
+    """Build forge-only feature matrix (no EDHREC, no tower, no embeddings).
 
-    Uses forge tower (trained on causal graph) if available,
-    falls back to EDHREC tower otherwise.
+    Pure Forge-native features: 38 features from causal graph, strategies,
+    card mechanics, and Forge ability data.
 
     Delegates per-card feature computation to the shared forge_features module
     (ForgeFeatureContext / CmdrFeatureContext / compute_card_features).
     """
-    # Use forge tower (trained on causal graph connectivity)
-    if tower_model_path is None:
-        if os.path.exists(TOWER_FORGE_PATH):
-            tower_model_path = TOWER_FORGE_PATH
-        else:
-            tower_model_path = TOWER_EDHREC_PATH  # fallback
-
     conn = sqlite3.connect(DB_PATH)
 
     # ── Card metadata (needed for type_line, cmc lookups) ─────────────
@@ -636,28 +627,12 @@ def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=Tru
             "cmc": cmc or 0.0,
         }
 
-    # ── Shared forge feature context (strategies, TF-IDF, phases) ─────
-    normed_emb, oid_list, oid_to_idx = load_embeddings()
-    ctx = ForgeFeatureContext(conn, normed_emb, oid_to_idx, preload_edges=True)
+    # ── Shared forge feature context (strategies, phases, mechanics) ──
+    ctx = ForgeFeatureContext(conn, preload_edges=True)
 
     if verbose:
         print(f"  Strategy vector: {ctx._n_strats} strategies")
         print(f"  Forge ability vectors: {ctx._n_abilities} vocab, {len(ctx._ability_vectors)} cards with vectors")
-
-    # ── Tower model (kept here for batch inference) ───────────────────
-    sf_data = load_structural_features()
-    provides_sf, wants_sf, strats_sf, types_sf, oracles_sf, ranks_sf, mech_sf = sf_data
-
-    tower_model = None
-    tower_means = None
-    tower_stds = None
-    if os.path.exists(tower_model_path):
-        td = np.load(tower_model_path)
-        tower_model = {k: td[k] for k in td.files if k not in ("struct_means", "struct_stds")}
-        tower_means = td["struct_means"]
-        tower_stds = td["struct_stds"]
-        if verbose:
-            print(f"  Tower loaded from {tower_model_path}")
 
     # ── Build pairs list ───────────────────────────────────────────────
     cmdr_oids_ordered = sorted(pairs_by_cmdr.keys())
@@ -694,34 +669,7 @@ def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=Tru
         labels = [p[1] for p in pairs]
         n_pairs = len(pairs)
 
-        # --- (a) Tower batch inference ---
-        tower_probs = np.full(n_pairs, 0.5, dtype=np.float32)
-        if tower_model is not None:
-            cmdr_idx_emb = oid_to_idx.get(cmdr_oid)
-            if cmdr_idx_emb is not None:
-                batch_card_indices = []
-                batch_positions = []
-                for j, card_oid in enumerate(card_oids):
-                    cidx = oid_to_idx.get(card_oid)
-                    if cidx is not None:
-                        batch_card_indices.append(cidx)
-                        batch_positions.append(j)
-                if batch_card_indices:
-                    B = len(batch_card_indices)
-                    X_cmdr_batch = np.tile(normed_emb[cmdr_idx_emb], (B, 1)).astype(np.float32)
-                    X_card_batch = normed_emb[batch_card_indices].astype(np.float32)
-                    sf_batch = np.zeros((B, 12), dtype=np.float32)
-                    for k, pos in enumerate(batch_positions):
-                        sf_batch[k] = compute_struct_features(
-                            cmdr_oid, card_oids[pos],
-                            provides_sf, wants_sf, strats_sf, types_sf, oracles_sf, ranks_sf, mech_sf)
-                    sf_norm = (sf_batch - tower_means) / tower_stds
-                    raw, _ = forward(tower_model, X_cmdr_batch, X_card_batch, sf_norm)
-                    probs = sigmoid(raw)
-                    for k, pos in enumerate(batch_positions):
-                        tower_probs[pos] = probs[k]
-
-        # --- (b) Per-commander context (causal edges, deck edges, precision) ---
+        # --- Per-commander context (causal edges, deck edges, precision) ---
         deck_oids_for_cmdr = {oid for oid, lbl in pairs if lbl > 0}
         cmdr_ctx = CmdrFeatureContext(ctx, cmdr_oid, deck_oids_for_cmdr)
 
@@ -744,7 +692,7 @@ def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=Tru
 
             feats = compute_card_features(
                 card_oid, card_type_line, card_cmc,
-                float(tower_probs[j]), ctx, cmdr_ctx,
+                ctx, cmdr_ctx,
             )
             X[row_idx] = feats
 

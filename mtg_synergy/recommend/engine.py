@@ -33,7 +33,7 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
     if _shared_conn:
         from mtg_synergy.recommend.scoring import (
             DeckContext, score_all_candidates, tower_prefilter,
-            score_forge_candidates)
+            color_identity_filter, score_forge_candidates)
 
         # Get commander oracle_id
         cmdr_oid = ""
@@ -42,55 +42,59 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                 cmdr_oid = c.get("oracle_id", "")
                 break
 
-        # Tower pre-filter: score all color-legal cards, take top 3000
-        # Use forge tower when --forge flag is set
-        forge_tower_path = None
         if use_forge:
-            import os
-            from mtg_synergy.config import DATA_DIR
-            fp = os.path.join(DATA_DIR, "tower_model_forge.npz")
-            if os.path.exists(fp):
-                forge_tower_path = fp
-                print("  Using forge-only model (no EDHREC)")
+            # Forge mode: simple color-identity filter (no tower/embeddings)
+            print("  Using forge-only model (no EDHREC)")
+            ci_results = color_identity_filter(
+                _shared_conn, cmdr_oid, color_identity or set(),
+                deck_cards=deck_cards)
 
-        # Forge: score ALL color-legal cards (tower misses key synergy cards)
-        # Baseline: tower is accurate enough for top-3000 prefilter
-        prefilter_n = 0 if forge_tower_path else 3000
-        prefiltered = tower_prefilter(
-            _shared_conn, cmdr_oid, color_identity or set(),
-            top_n=prefilter_n, deck_cards=deck_cards,
-            tower_path=forge_tower_path)
-
-        tower_probs_map = None
-        if prefiltered:
-            # Build candidate pool from tower results + cache tower probs
             candidate_scores = {}
-            tower_probs_map = {}
-            for oid, name, tower_prob in prefiltered:
+            for oid, name in ci_results:
                 if name not in deck_cards:
                     candidate_scores[name] = {
                         "total": 0.0, "partners": [], "multi_sig": 0,
                         "commander_synergy": 0.0, "key_synergy": 0.0,
                     }
-                    tower_probs_map[name] = tower_prob
 
-            print(f"  Tower pre-filter: {len(prefiltered)} candidates "
+            print(f"  Color-identity filter: {len(ci_results)} color-legal cards "
                   f"({len(candidate_scores)} after excluding deck)")
         else:
-            # Fallback: use graph-based candidate discovery
-            deck_scores = _deck_card_scores(graph, deck_cards)
-            key_cards = {name for name, _ in sorted(
-                [(n, i["total"]) for n, i in deck_scores.items() if n != commander],
-                key=lambda x: -x[1])[:10]}
-            candidate_scores = _candidate_scores(
-                graph, deck_cards, commander=commander, key_cards=key_cards)
-            print("  Tower not available — using graph candidates (fallback)")
+            # Baseline mode: tower pre-filter, take top 3000
+            prefiltered = tower_prefilter(
+                _shared_conn, cmdr_oid, color_identity or set(),
+                top_n=3000, deck_cards=deck_cards)
+
+            tower_probs_map = None
+            if prefiltered:
+                # Build candidate pool from tower results + cache tower probs
+                candidate_scores = {}
+                tower_probs_map = {}
+                for oid, name, tower_prob in prefiltered:
+                    if name not in deck_cards:
+                        candidate_scores[name] = {
+                            "total": 0.0, "partners": [], "multi_sig": 0,
+                            "commander_synergy": 0.0, "key_synergy": 0.0,
+                        }
+                        tower_probs_map[name] = tower_prob
+
+                print(f"  Tower pre-filter: {len(prefiltered)} candidates "
+                      f"({len(candidate_scores)} after excluding deck)")
+            else:
+                # Fallback: use graph-based candidate discovery
+                deck_scores = _deck_card_scores(graph, deck_cards)
+                key_cards = {name for name, _ in sorted(
+                    [(n, i["total"]) for n, i in deck_scores.items() if n != commander],
+                    key=lambda x: -x[1])[:10]}
+                candidate_scores = _candidate_scores(
+                    graph, deck_cards, commander=commander, key_cards=key_cards)
+                print("  Tower not available — using graph candidates (fallback)")
 
         if use_forge:
-            # Forge-only scoring (20 features, no EDHREC)
+            # Forge-only scoring (38 features, no EDHREC)
             score_forge_candidates(candidate_scores, cards, _shared_conn,
                                    commander, deck_cards, deck_types,
-                                   active_strategies, tower_probs=tower_probs_map)
+                                   active_strategies)
         else:
             ctx = DeckContext(_shared_conn, commander, deck_cards, cards,
                               deck_types=deck_types, active_strategies=active_strategies,

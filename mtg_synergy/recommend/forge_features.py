@@ -1,7 +1,9 @@
 """Shared forge feature computation for training and inference.
 
-Extracts the 40-feature forge GBM feature vector computation into a
+Extracts the 38-feature forge GBM feature vector computation into a
 single module used by both train_fusion_model.py and scoring.py.
+
+No oracle-text embeddings or tower model — pure Forge-native features.
 """
 import time
 
@@ -39,11 +41,16 @@ class ForgeFeatureContext:
     training (build_forge_feature_matrix) and inference (score_forge_candidates).
     """
 
-    def __init__(self, conn, normed_emb, oid_to_idx, preload_edges=False):
+    def __init__(self, conn, preload_edges=False):
         self.conn = conn
-        self.normed_emb = normed_emb
-        self.oid_to_idx = oid_to_idx
         self._has_edge_index = False
+
+        # Build oid_to_idx from cards table (replaces embedding-based index)
+        self.oid_to_idx = {}
+        for i, (oid,) in enumerate(
+            conn.execute("SELECT DISTINCT oracle_id FROM cards")
+        ):
+            self.oid_to_idx[oid] = i
 
         # Card strategies
         self.card_strats = {}
@@ -472,27 +479,20 @@ class CmdrFeatureContext:
 
 
 def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
-                          tower_prob: float,
                           ctx: ForgeFeatureContext, cmdr: CmdrFeatureContext) -> list:
-    """Compute the 40-feature vector for a single (commander, card) pair.
+    """Compute the 38-feature vector for a single (commander, card) pair.
 
-    Returns a list of 40 floats matching FORGE_FEATURE_NAMES order.
+    Returns a list of 38 floats matching FORGE_FEATURE_NAMES order.
+    Pure Forge-native features — no tower model or oracle-text embeddings.
     """
     out_s = cmdr.cmdr_out.get(card_oid, 0.0)
     in_s = cmdr.cmdr_in.get(card_oid, 0.0)
     tl = card_type_line
 
-    # F0: tower_forge — binary indicator (tower already used for pre-filter;
-    # continuous value hurts zero-tower cards which are 90% of candidates)
-    f0 = 1.0 if tower_prob > 0.001 else 0.0
-
-    # F1: embedding_cosine
-    ci = ctx.oid_to_idx.get(cmdr.cmdr_oid)
+    # Card index for hub score lookup
     di = ctx.oid_to_idx.get(card_oid)
-    f1 = float(np.dot(ctx.normed_emb[ci].astype(np.float32),
-                       ctx.normed_emb[di].astype(np.float32))) if ci is not None and di is not None else 0.0
 
-    # F2-F5: causal features
+    # F0-F3: causal features
     ev_out = cmdr.cmdr_out_events.get(card_oid, set())
     ev_in = cmdr.cmdr_in_events.get(card_oid, set())
 
@@ -701,44 +701,42 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
     activated_count = float(min(ctx._activated_counts.get(card_oid, 0), 5))
 
     return [
-        f0,                                              # F0 tower_forge
-        f1,                                              # F1 embedding_cosine
-        min(out_s, 10.0),                                # F2 causal_cmdr_to_card
-        min(in_s, 10.0),                                 # F3 causal_card_to_cmdr
-        1.0 if (out_s > 0 and in_s > 0) else 0.0,       # F4 causal_bidirectional
-        float(len(ev_out | ev_in)),                      # F5 causal_event_diversity
-        float(min(cmdr.deck_edge_counts.get(card_oid, 0), 20)),  # F6 deck_edge_count
-        float(len(cmdr.cmdr_strats & c_strats)),         # F7 strategy_overlap
-        strat_cos,                                       # F8 strategy_cosine
-        forge_ability_cos,                                   # F9 forge_ability_cosine
-        phase_m,                                         # F10 phase_match
-        1.0 if cp else 0.0,                              # F11 has_phase_trigger
-        tribal,                                          # F12 tribal_match
-        1.0 if "Creature" in tl else 0.0,                # F13 type_creature
-        1.0 if ("Instant" in tl or "Sorcery" in tl) else 0.0,  # F14
-        1.0 if "Artifact" in tl else 0.0,                # F15
-        1.0 if "Enchantment" in tl else 0.0,             # F16
-        1.0 if "Land" in tl else 0.0,                    # F17
-        1.0 if "Planeswalker" in tl else 0.0,            # F18
-        float(card_cmc),                                 # F19 cmc
-        deck_exact_ratio,                                # F20 deck_exact_edge_ratio
-        1.0 if card_oid in cmdr.cmdr_exact else 0.0,     # F21 cmdr_exact_edge
-        causal_composite,                                # F22 causal_composite
-        hub,                                             # F23 card_hub_score
-        deck_exact_abs,                                  # F24 deck_exact_count
-        forge_type_syn,                                  # F25 forge_type_synergy
-        cmdr_type_match,                                 # F26 cmdr_forge_type_match
-        shared_forge,                                    # F27 shared_forge_mechanics
-        forge_depth,                                         # F28 forge_ability_depth
-        anti_tribal,                                     # F29 forge_anti_tribal
-        verb_align,                                      # F30 forge_verb_alignment
-        mech_fwd,                                        # F31 forge_mech_synergy_fwd
-        mech_rev,                                        # F32 forge_mech_synergy_rev
-        counter_match,                                   # F33 counter_type_match
-        ratio_T,                                         # F34 ability_type_ratio_T
-        ratio_A,                                         # F35 ability_type_ratio_A
-        zone_align,                                      # F36 zone_alignment
-        target_align,                                    # F37 target_alignment
-        kw_syn,                                          # F38 forge_keyword_synergy
-        activated_count,                                 # F39 activated_ability_count
+        min(out_s, 10.0),                                # F0 causal_cmdr_to_card
+        min(in_s, 10.0),                                 # F1 causal_card_to_cmdr
+        1.0 if (out_s > 0 and in_s > 0) else 0.0,       # F2 causal_bidirectional
+        float(len(ev_out | ev_in)),                      # F3 causal_event_diversity
+        float(min(cmdr.deck_edge_counts.get(card_oid, 0), 20)),  # F4 deck_edge_count
+        float(len(cmdr.cmdr_strats & c_strats)),         # F5 strategy_overlap
+        strat_cos,                                       # F6 strategy_cosine
+        forge_ability_cos,                               # F7 forge_ability_cosine
+        phase_m,                                         # F8 phase_match
+        1.0 if cp else 0.0,                              # F9 has_phase_trigger
+        tribal,                                          # F10 tribal_match
+        1.0 if "Creature" in tl else 0.0,                # F11 type_creature
+        1.0 if ("Instant" in tl or "Sorcery" in tl) else 0.0,  # F12
+        1.0 if "Artifact" in tl else 0.0,                # F13
+        1.0 if "Enchantment" in tl else 0.0,             # F14
+        1.0 if "Land" in tl else 0.0,                    # F15
+        1.0 if "Planeswalker" in tl else 0.0,            # F16
+        float(card_cmc),                                 # F17 cmc
+        deck_exact_ratio,                                # F18 deck_exact_edge_ratio
+        1.0 if card_oid in cmdr.cmdr_exact else 0.0,     # F19 cmdr_exact_edge
+        causal_composite,                                # F20 causal_composite
+        hub,                                             # F21 card_hub_score
+        deck_exact_abs,                                  # F22 deck_exact_count
+        forge_type_syn,                                  # F23 forge_type_synergy
+        cmdr_type_match,                                 # F24 cmdr_forge_type_match
+        shared_forge,                                    # F25 shared_forge_mechanics
+        forge_depth,                                     # F26 forge_ability_depth
+        anti_tribal,                                     # F27 forge_anti_tribal
+        verb_align,                                      # F28 forge_verb_alignment
+        mech_fwd,                                        # F29 forge_mech_synergy_fwd
+        mech_rev,                                        # F30 forge_mech_synergy_rev
+        counter_match,                                   # F31 counter_type_match
+        ratio_T,                                         # F32 ability_type_ratio_T
+        ratio_A,                                         # F33 ability_type_ratio_A
+        zone_align,                                      # F34 zone_alignment
+        target_align,                                    # F35 target_alignment
+        kw_syn,                                          # F36 forge_keyword_synergy
+        activated_count,                                 # F37 activated_ability_count
     ]

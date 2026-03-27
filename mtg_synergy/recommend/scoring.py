@@ -415,19 +415,37 @@ def score_all_candidates(candidate_scores: dict, cards: list, ctx: DeckContext,
               f"({'batch GBM' if use_batch_gbm else 'feature-based'})")
 
 
+def color_identity_filter(conn, cmdr_oid: str, color_identity: set,
+                          deck_cards: set = None) -> list:
+    """Return all color-legal non-token cards as (oid, name) pairs."""
+    import json
+    results = []
+    deck_cards = deck_cards or set()
+    for row in conn.execute(
+        "SELECT oracle_id, name, color_identity FROM cards "
+        "WHERE type_line NOT LIKE '%Token%'"
+    ):
+        oid, name, ci_json = row
+        if name in deck_cards or oid == cmdr_oid:
+            continue
+        ci = set(json.loads(ci_json)) if ci_json else set()
+        if ci <= color_identity:  # card CI must be subset of commander CI
+            results.append((oid, name))
+    return results
+
+
 def score_forge_candidates(candidate_scores: dict, cards: list, conn,
                            commander: str, deck_cards: set,
-                           deck_types: set = None, active_strategies: set = None,
-                           tower_probs: dict = None) -> None:
-    """Score candidates using forge-only model (20 features, no EDHREC).
+                           deck_types: set = None, active_strategies: set = None) -> None:
+    """Score candidates using forge-only model (38 features, no EDHREC).
 
-    Uses forge GBM (data/fusion_model_forge.lgb) with features from
-    causal graph, strategies, oracle text, and card properties.
+    Uses forge GBM (data/fusion_model_forge.lgb) with pure Forge-native
+    features from causal graph, strategies, and card mechanics.
+    No tower model or oracle-text embeddings.
     """
     import warnings
     import joblib
     import numpy as np
-    from train_tower_model import load_embeddings
     from mtg_synergy.recommend.forge_features import (
         ForgeFeatureContext, CmdrFeatureContext, compute_card_features,
     )
@@ -454,12 +472,11 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
             chunk = missing[i:i + 500]
             ph = ",".join("?" * len(chunk))
             for row in conn.execute(
-                f"SELECT oracle_id, name, type_line, mana_cost, cmc, edhrec_rank, oracle_text "
+                f"SELECT oracle_id, name, type_line, mana_cost, cmc, edhrec_rank "
                 f"FROM cards WHERE name IN ({ph}) AND type_line NOT LIKE '%Token%'", chunk
             ).fetchall():
                 cd = {"oracle_id": row[0], "name": row[1], "type_line": row[2] or "",
-                      "mana_cost": row[3] or "", "cmc": row[4] or 0,
-                      "oracle_text": row[6] or ""}
+                      "mana_cost": row[3] or "", "cmc": row[4] or 0}
                 cards.append(cd)
                 card_data[row[1]] = cd
 
@@ -470,9 +487,8 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
             cmdr_oid = c.get("oracle_id", "")
             break
 
-    # Load embeddings and build shared context
-    normed_emb, _, oid_to_idx = load_embeddings()
-    ctx = ForgeFeatureContext(conn, normed_emb, oid_to_idx)
+    # Build shared context (no embeddings needed)
+    ctx = ForgeFeatureContext(conn)
 
     # Card OID lookup
     card_oid = {c["name"]: c.get("oracle_id", "") for c in cards}
@@ -498,8 +514,7 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
         oid = cd.get("oracle_id") or card_oid.get(name, "")
         tl = cd.get("type_line", "")
         cmc = float(cd.get("cmc", 0))
-        tp = (tower_probs or {}).get(name, 0.0)
-        features.append(compute_card_features(oid, tl, cmc, tp, ctx, cmdr_ctx))
+        features.append(compute_card_features(oid, tl, cmc, ctx, cmdr_ctx))
 
     if features:
         X = np.array(features, dtype=np.float64)

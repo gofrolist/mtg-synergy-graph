@@ -19,16 +19,7 @@ def _make_ctx():
     from mtg_synergy.recommend.forge_features import ForgeFeatureContext
 
     conn = sqlite3.connect(DB_PATH)
-    # Build minimal oid_to_idx from cards table
-    oid_to_idx = {}
-    for i, (oid,) in enumerate(
-        conn.execute("SELECT DISTINCT oracle_id FROM cards")
-    ):
-        oid_to_idx[oid] = i
-    n = len(oid_to_idx)
-    # Dummy normed embeddings (not needed for profile tests)
-    normed_emb = np.zeros((n, 8), dtype=np.float16)
-    ctx = ForgeFeatureContext(conn, normed_emb, oid_to_idx, preload_edges=False)
+    ctx = ForgeFeatureContext(conn, preload_edges=False)
     return ctx, conn
 
 
@@ -78,7 +69,7 @@ def test_forge_profile_krenko():
 
 
 # ---------------------------------------------------------------------------
-# Tests for Forge-native features F25-F30
+# Tests for Forge-native features F23-F28
 # ---------------------------------------------------------------------------
 
 def _make_cmdr(ctx, cmdr_oid, subtypes=None):
@@ -106,11 +97,11 @@ def _compute_features(ctx, cmdr, card_oid, conn):
     ).fetchone()
     tl = row[0] if row else ""
     cmc = row[1] if row else 0.0
-    return compute_card_features(card_oid, tl, cmc, 0.0, ctx, cmdr)
+    return compute_card_features(card_oid, tl, cmc, ctx, cmdr)
 
 
-class TestF25ForgeTypeSynergy:
-    """F25: card's Forge trigger_filter/target references commander's creature subtypes."""
+class TestF23ForgeTypeSynergy:
+    """F23: card's Forge trigger_filter/target references commander's creature subtypes."""
 
     def test_goblin_trigger_for_goblin_commander(self):
         """A card with Goblin trigger_filter should get >0 for a Goblin commander."""
@@ -126,8 +117,8 @@ class TestF25ForgeTypeSynergy:
             if found_oid is None:
                 pytest.skip("No card with 'goblin' trigger_filter found in DB")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert features[25] > 0.0, (
-                f"F25 should be >0 for a goblin-triggering card with Goblin commander, got {features[25]}"
+            assert features[23] > 0.0, (
+                f"F23 should be >0 for a goblin-triggering card with Goblin commander, got {features[23]}"
             )
         finally:
             conn.close()
@@ -150,15 +141,15 @@ class TestF25ForgeTypeSynergy:
             if found_oid is None:
                 pytest.skip("No card with non-goblin trigger_filter found")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert features[25] == 0.0, (
-                f"F25 should be 0 for non-goblin card with Goblin commander, got {features[25]}"
+            assert features[23] == 0.0, (
+                f"F23 should be 0 for non-goblin card with Goblin commander, got {features[23]}"
             )
         finally:
             conn.close()
 
 
-class TestF26CmdrForgeTypeMatch:
-    """F26: commander's Forge trigger_filter/target references card's subtypes."""
+class TestF24CmdrForgeTypeMatch:
+    """F24: commander's Forge trigger_filter/target references card's subtypes."""
 
     def test_human_commander_human_card(self):
         """Commander with Human trigger_filter → Human creature card gets >0."""
@@ -181,15 +172,15 @@ class TestF26CmdrForgeTypeMatch:
             if row is None:
                 pytest.skip("No Human creature card found")
             features = _compute_features(ctx, cmdr, row[0], conn)
-            assert features[26] > 0.0, (
-                f"F26 should be >0 for Human card with Human-trigger commander, got {features[26]}"
+            assert features[24] > 0.0, (
+                f"F24 should be >0 for Human card with Human-trigger commander, got {features[24]}"
             )
         finally:
             conn.close()
 
 
-class TestF27SharedForgeMechanics:
-    """F27: count of shared Forge verbs, trigger_modes, and keywords."""
+class TestF25SharedForgeMechanics:
+    """F25: count of shared Forge verbs, trigger_modes, and keywords."""
 
     def test_shared_token_verb(self):
         """Two cards sharing Token verb should get >0."""
@@ -206,15 +197,15 @@ class TestF27SharedForgeMechanics:
                 pytest.skip("Need at least 2 cards with Token verb")
             cmdr = _make_cmdr(ctx, token_cards[0])
             features = _compute_features(ctx, cmdr, token_cards[1], conn)
-            assert features[27] > 0.0, (
-                f"F27 should be >0 for two cards sharing Token verb, got {features[27]}"
+            assert features[25] > 0.0, (
+                f"F25 should be >0 for two cards sharing Token verb, got {features[25]}"
             )
         finally:
             conn.close()
 
 
-class TestF29ForgeAntiTribal:
-    """F29: card's Forge trigger_filter requires conflicting creature subtype."""
+class TestF27ForgeAntiTribal:
+    """F27: card's Forge trigger_filter requires conflicting creature subtype."""
 
     def test_spirit_trigger_in_goblin_deck(self):
         """A Spirit-triggering card in a Goblin deck should get >0 anti-tribal."""
@@ -235,8 +226,8 @@ class TestF29ForgeAntiTribal:
             if found_oid is None:
                 pytest.skip("No card with conflicting tribal trigger_filter found")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert features[29] > 0.0, (
-                f"F29 should be >0 for conflicting-tribal card in Goblin deck, got {features[29]}"
+            assert features[27] > 0.0, (
+                f"F27 should be >0 for conflicting-tribal card in Goblin deck, got {features[27]}"
             )
         finally:
             conn.close()
@@ -259,15 +250,15 @@ class TestF29ForgeAntiTribal:
             if found_oid is None:
                 pytest.skip("No card with goblin-only trigger_filter found")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert features[29] == 0.0, (
-                f"F29 should be 0 for goblin card in Goblin deck, got {features[29]}"
+            assert features[27] == 0.0, (
+                f"F27 should be 0 for goblin card in Goblin deck, got {features[27]}"
             )
         finally:
             conn.close()
 
 
-class TestF30ForgeVerbAlignment:
-    """F30: card's verbs produce events that commander's triggers consume."""
+class TestF28ForgeVerbAlignment:
+    """F28: card's verbs produce events that commander's triggers consume."""
 
     def test_token_creator_changeszone_trigger(self):
         """Token-creating card + ChangesZone-triggering commander gets >0."""
@@ -291,8 +282,8 @@ class TestF30ForgeVerbAlignment:
             if token_oid is None:
                 pytest.skip("No card with Token verb found")
             features = _compute_features(ctx, cmdr, token_oid, conn)
-            assert features[30] > 0.0, (
-                f"F30 should be >0 for Token card + ChangesZone commander, got {features[30]}"
+            assert features[28] > 0.0, (
+                f"F28 should be >0 for Token card + ChangesZone commander, got {features[28]}"
             )
         finally:
             conn.close()
@@ -319,22 +310,22 @@ class TestF30ForgeVerbAlignment:
             if card_oid is None:
                 pytest.skip("No other card found")
             features = _compute_features(ctx, cmdr, card_oid, conn)
-            assert features[30] == 0.0, (
-                f"F30 should be 0 when commander has no triggers/verbs, got {features[30]}"
+            assert features[28] == 0.0, (
+                f"F28 should be 0 when commander has no triggers/verbs, got {features[28]}"
             )
         finally:
             conn.close()
 
 
 # ---------------------------------------------------------------------------
-# Tests for new features F33-F39
+# Tests for new features F31-F37
 # ---------------------------------------------------------------------------
 
 KYLER_OID = "726cd041-5d0b-436c-bced-9335f56c0b0d"  # Kyler, Sigardian Emissary
 
 
-class TestF33CounterTypeMatch:
-    """F33: card uses same counter type as commander."""
+class TestF31CounterTypeMatch:
+    """F31: card uses same counter type as commander."""
 
     def test_p1p1_counter_match_with_kyler(self):
         """Kyler (P1P1 counters) + another P1P1 card → >0."""
@@ -350,8 +341,8 @@ class TestF33CounterTypeMatch:
             if found_oid is None:
                 pytest.skip("No card with P1P1 counter_type found")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert features[33] > 0.0, (
-                f"F33 should be >0 for P1P1 card with Kyler, got {features[33]}"
+            assert features[31] > 0.0, (
+                f"F31 should be >0 for P1P1 card with Kyler, got {features[31]}"
             )
         finally:
             conn.close()
@@ -370,8 +361,8 @@ class TestF33CounterTypeMatch:
             if found_oid is None:
                 pytest.skip("No card without counter_types found")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert features[33] == 0.0, (
-                f"F33 should be 0 for card without counters, got {features[33]}"
+            assert features[31] == 0.0, (
+                f"F31 should be 0 for card without counters, got {features[31]}"
             )
         finally:
             conn.close()
@@ -432,8 +423,8 @@ def test_commander_profile_uses_forge():
     assert "tribal-human" in profile.strategies
 
 
-class TestF9ForgeAbilityCosine:
-    """F9: forge_ability_cosine — cosine similarity of Forge ability vectors."""
+class TestF7ForgeAbilityCosine:
+    """F7: forge_ability_cosine — cosine similarity of Forge ability vectors."""
 
     def test_shared_verbs_positive_cosine(self):
         """Two cards sharing verbs should have >0 cosine similarity."""
@@ -450,8 +441,8 @@ class TestF9ForgeAbilityCosine:
                 pytest.skip("Need at least 2 cards with Token verb")
             cmdr = _make_cmdr(ctx, token_cards[0])
             features = _compute_features(ctx, cmdr, token_cards[1], conn)
-            assert features[9] > 0.0, (
-                f"F9 should be >0 for two cards sharing Token verb, got {features[9]}"
+            assert features[7] > 0.0, (
+                f"F7 should be >0 for two cards sharing Token verb, got {features[7]}"
             )
         finally:
             conn.close()
@@ -470,15 +461,15 @@ class TestF9ForgeAbilityCosine:
             if found_oid is None:
                 pytest.skip("All cards have forge profiles")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert features[9] == 0.0, (
-                f"F9 should be 0 for card without forge profile, got {features[9]}"
+            assert features[7] == 0.0, (
+                f"F7 should be 0 for card without forge profile, got {features[7]}"
             )
         finally:
             conn.close()
 
 
-class TestF28ForgeAbilityDepth:
-    """F28: forge_ability_depth — total distinct mechanical components."""
+class TestF26ForgeAbilityDepth:
+    """F26: forge_ability_depth — total distinct mechanical components."""
 
     def test_card_with_abilities_has_depth(self):
         """Card with multiple verbs/triggers should have depth > 0."""
@@ -498,8 +489,8 @@ class TestF28ForgeAbilityDepth:
             if found_oid is None:
                 pytest.skip("No card with 2+ mechanical components found")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert features[28] >= 2.0, (
-                f"F28 should be >= 2.0 for card with 2+ components, got {features[28]}"
+            assert features[26] >= 2.0, (
+                f"F26 should be >= 2.0 for card with 2+ components, got {features[26]}"
             )
         finally:
             conn.close()
@@ -518,14 +509,14 @@ class TestF28ForgeAbilityDepth:
             if found_oid is None:
                 pytest.skip("All cards have forge profiles")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert features[28] == 0.0, (
-                f"F28 should be 0 for card without forge profile, got {features[28]}"
+            assert features[26] == 0.0, (
+                f"F26 should be 0 for card without forge profile, got {features[26]}"
             )
         finally:
             conn.close()
 
     def test_depth_capped_at_10(self):
-        """F28 should be capped at 10.0."""
+        """F26 should be capped at 10.0."""
         ctx, conn = _make_ctx()
         try:
             cmdr = _make_cmdr(ctx, KRENKO_OID, subtypes={"goblin"})
@@ -533,8 +524,8 @@ class TestF28ForgeAbilityDepth:
             for oid in ctx._forge_profiles:
                 if oid != KRENKO_OID:
                     features = _compute_features(ctx, cmdr, oid, conn)
-                    assert features[28] <= 10.0, (
-                        f"F28 should be capped at 10.0, got {features[28]}"
+                    assert features[26] <= 10.0, (
+                        f"F26 should be capped at 10.0, got {features[26]}"
                     )
                     break
         finally:
@@ -594,10 +585,10 @@ class TestNoOracleTextInFeatures:
 
 
 class TestFeatureCount:
-    """Verify compute_card_features returns exactly 40 elements."""
+    """Verify compute_card_features returns exactly 38 elements."""
 
-    def test_feature_count_is_40(self):
-        """Feature vector length should be 40."""
+    def test_feature_count_is_38(self):
+        """Feature vector length should be 38."""
         ctx, conn = _make_ctx()
         try:
             cmdr = _make_cmdr(ctx, KRENKO_OID, subtypes={"goblin"})
@@ -610,8 +601,8 @@ class TestFeatureCount:
             if found_oid is None:
                 pytest.skip("No card found for feature count test")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert len(features) == 40, (
-                f"Expected 40 features, got {len(features)}"
+            assert len(features) == 38, (
+                f"Expected 38 features, got {len(features)}"
             )
         finally:
             conn.close()
