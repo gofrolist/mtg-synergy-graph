@@ -1,5 +1,6 @@
 """Card recommendation engine — scoring pipeline."""
 from collections import defaultdict
+from urllib.parse import quote
 
 from mtg_synergy.combos.detector import find_partial_combos
 
@@ -52,9 +53,9 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                 forge_tower_path = fp
                 print("  Using forge-only model (no EDHREC)")
 
-        # Forge tower needs broader prefilter (8000) because it's trained
-        # on causal connectivity and misses infrastructure cards
-        prefilter_n = 8000 if forge_tower_path else 3000
+        # Forge: score ALL color-legal cards (tower misses key synergy cards)
+        # Baseline: tower is accurate enough for top-3000 prefilter
+        prefilter_n = 0 if forge_tower_path else 3000
         prefiltered = tower_prefilter(
             _shared_conn, cmdr_oid, color_identity or set(),
             top_n=prefilter_n, deck_cards=deck_cards,
@@ -221,8 +222,11 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
         bar = "█" * bar_len + "░" * (20 - bar_len)
         tower_str = f" T={info['tower_score']}" if info.get("tower_score") else ""
         edhrec_str = f" EDH={info['edhrec_syn']:.2f}" if info.get("edhrec_syn") else ""
-        print(f"\n  {pct:5.1f}% {bar} {card}{tribal}{combo}{tower_str}{edhrec_str}{high_cmc}")
-        print(f"    {type_line} | CMC {cmc} | {len(partners)} partners{multi}")
+        scryfall_url = f"https://scryfall.com/search?q=!%22{quote(card, safe='')}%22"
+        osc_name = f"\033]8;;{scryfall_url}\033\\{card}\033]8;;\033\\"
+        print(f"\n  {pct:5.1f}% {bar} {osc_name}{tribal}{combo}{tower_str}{edhrec_str}{high_cmc}")
+        partner_str = f" | {len(partners)} partners{multi}" if partners else ""
+        print(f"    {type_line} | CMC {cmc}{partner_str}")
         for partner, score, sigs in partners[:5]:
             sig = f"{sigs}sig" if sigs > 1 else "1sig"
             print(f"    ↔ {partner:<30} ({score:.1f}, {sig})")

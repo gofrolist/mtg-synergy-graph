@@ -437,7 +437,14 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
         print("  ERROR: forge model not found. Run: python3 train_fusion_model.py --forge-only")
         return
 
-    forge_gbm = joblib.load(forge_gbm_path)
+    # Load model: detect format by file header
+    import lightgbm as lgb
+    with open(forge_gbm_path, 'rb') as f:
+        header = f.read(4)
+    if header[:4] == b'tree':
+        forge_gbm = lgb.Booster(model_file=forge_gbm_path)
+    else:
+        forge_gbm = joblib.load(forge_gbm_path)
 
     # Build card data lookup
     card_data = {c["name"]: c for c in cards}
@@ -505,7 +512,7 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
             if info["total"] > 0:
                 info["fusion_score"] = round(float(scores[i]), 4)
 
-    print(f"  Forge scoring: {len(cand_list)} candidates scored (22 features, no EDHREC)")
+    print(f"  Forge scoring: {len(cand_list)} candidates scored ({len(features[0]) if features else 0} features, no EDHREC)")
 
 
 # === Tower model singleton ===
@@ -607,7 +614,14 @@ def _load_fusion_model(tower_path=None, gbm_path=None):
             return None
 
         tower_data = np.load(str(tp))
-        gbm = joblib.load(str(gp))
+        # Load model: detect format by file header
+        import lightgbm as lgb
+        with open(str(gp), 'rb') as f:
+            header = f.read(4)
+        if header[:4] == b'tree':
+            gbm = lgb.Booster(model_file=str(gp))
+        else:
+            gbm = joblib.load(str(gp))
 
         from train_tower_model import (load_embeddings, load_structural_features,
                                         compute_struct_features, forward)
@@ -717,9 +731,12 @@ def tower_prefilter(conn, cmdr_oid: str, color_identity: set,
             scores, _ = fusion["forward"](fusion["tower"], X_cmdr, X_card, sf_norm)
         all_probs[ci:ci + len(chunk)] = 1.0 / (1.0 + np.exp(-scores.astype(np.float64)))
 
-    # Sort and take top N
-    ranked_idx = np.argpartition(-all_probs, min(top_n, len(all_probs) - 1))[:top_n]
-    ranked_idx = ranked_idx[np.argsort(-all_probs[ranked_idx])]
+    # Sort and take top N (0 = return all)
+    if top_n <= 0 or top_n >= len(all_probs):
+        ranked_idx = np.argsort(-all_probs)
+    else:
+        ranked_idx = np.argpartition(-all_probs, min(top_n, len(all_probs) - 1))[:top_n]
+        ranked_idx = ranked_idx[np.argsort(-all_probs[ranked_idx])]
     return [(legal[i][0], legal[i][1], float(all_probs[i])) for i in ranked_idx]
 
 

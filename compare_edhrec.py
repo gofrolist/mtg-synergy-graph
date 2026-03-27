@@ -78,27 +78,35 @@ def parse_recommend_output(output: str) -> list[str]:
             match = re.match(r'[\d.]+%\s+(.*)', rest)
             if match:
                 rest = match.group(1).strip()
+                # Strip OSC 8 hyperlink escape sequences
+                rest = re.sub(r'\033\]8;;[^\033]*\033\\', '', rest)
+                # Strip diagnostic tags: [brackets], T=x.x, EDH=x.xx, ⚠ HIGH CMC
                 if "[" in rest:
-                    card_name = rest[:rest.index("[")].strip()
-                else:
-                    card_name = rest.strip()
+                    rest = rest[:rest.index("[")].strip()
+                rest = re.sub(r'\s+T=[\d.]+', '', rest)
+                rest = re.sub(r'\s+EDH=[\d.-]+', '', rest)
+                rest = re.sub(r'\s+⚠.*$', '', rest)
+                card_name = rest.strip()
                 if card_name:
                     cards.append(card_name)
     return cards
 
 
-def get_our_recommendations(deck_name: str, use_cache: bool = False) -> list[str]:
+def get_our_recommendations(deck_name: str, use_cache: bool = False,
+                            forge: bool = False) -> list[str]:
     """Get recommendations, with caching."""
-    cache = RECOMMEND_CACHE_DIR / f"{deck_name}.json"
+    suffix = "_forge" if forge else ""
+    cache = RECOMMEND_CACHE_DIR / f"{deck_name}{suffix}.json"
 
     if use_cache and cache.exists():
         return json.loads(cache.read_text())
 
+    cmd = [sys.executable, "synergy_graph.py", "--deck", deck_name, "--recommend"]
+    if forge:
+        cmd.append("--forge")
+
     try:
-        result = subprocess.run(
-            [sys.executable, "synergy_graph.py", "--deck", deck_name, "--recommend"],
-            capture_output=True, text=True, timeout=120
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         cards = parse_recommend_output(result.stdout)
         cache.write_text(json.dumps(cards, indent=2))
         return cards
@@ -117,7 +125,7 @@ def normalize(name: str) -> str:
     return name
 
 
-def compare_deck(deck_name: str, use_cache: bool = False, verbose: bool = True) -> dict:
+def compare_deck(deck_name: str, use_cache: bool = False, verbose: bool = True, **kwargs) -> dict:
     """Compare one deck against EDHREC. Returns metrics dict."""
     deck = load_deck(deck_name)
     commander = deck.COMMANDER
@@ -144,7 +152,8 @@ def compare_deck(deck_name: str, use_cache: bool = False, verbose: bool = True) 
     edhrec_high_syn = {normalize(c["name"]): c for c in edhrec_cards if c["synergy"] >= 0.3}
     edhrec_all_names = {normalize(c["name"]): c for c in edhrec_cards}
 
-    our_recs = get_our_recommendations(deck_name, use_cache=use_cache)
+    our_recs = get_our_recommendations(deck_name, use_cache=use_cache,
+                                       forge=kwargs.get('forge', False))
     our_recs_set = {normalize(c) for c in our_recs}
 
     overlap = edhrec_top30_set & our_recs_set
@@ -222,6 +231,7 @@ def main():
     parser.add_argument("--refresh", action="store_true", help="Re-run recommend (clear cache)")
     parser.add_argument("--deck", help="Single deck to compare")
     parser.add_argument("--quiet", action="store_true", help="Summary only")
+    parser.add_argument("--forge", action="store_true", help="Use forge model instead of baseline")
     args = parser.parse_args()
 
     if args.refresh:
@@ -236,11 +246,12 @@ def main():
     # Pre-generate recommendations in parallel (biggest bottleneck)
     if not args.fast and len(decks) > 1:
         from concurrent.futures import ProcessPoolExecutor, as_completed
-        missing = [d for d in decks if not (RECOMMEND_CACHE_DIR / f"{d}.json").exists()]
+        suffix = "_forge" if args.forge else ""
+        missing = [d for d in decks if not (RECOMMEND_CACHE_DIR / f"{d}{suffix}.json").exists()]
         if missing:
             print(f"Generating recommendations for {len(missing)} decks in parallel...")
             with ProcessPoolExecutor(max_workers=min(4, len(missing))) as pool:
-                futures = {pool.submit(get_our_recommendations, d, False): d for d in missing}
+                futures = {pool.submit(get_our_recommendations, d, False, args.forge): d for d in missing}
                 for future in as_completed(futures):
                     deck_name = futures[future]
                     try:
@@ -253,7 +264,8 @@ def main():
     all_results = {}
     for deck_name in decks:
         # Use cache since we just generated it (or it already existed)
-        result = compare_deck(deck_name, use_cache=True, verbose=not args.quiet)
+        result = compare_deck(deck_name, use_cache=True, verbose=not args.quiet,
+                              forge=args.forge)
         if result:
             all_results[deck_name] = result
 

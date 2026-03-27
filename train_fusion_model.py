@@ -67,6 +67,15 @@ FORGE_FEATURE_NAMES = [
     "cmc",                   # [19] mana cost
     "deck_exact_edge_ratio", # [20] fraction of deck edges with exact filter precision
     "cmdr_exact_edge",       # [21] 1.0 if any exact-precision edge to commander
+    "causal_composite",      # [22] combined causal signal (strength × events × exact)
+    "card_hub_score",        # [23] total unique causal neighbors (connectedness)
+    "deck_exact_count",      # [24] absolute count of exact-precision deck connections
+    "text_mentions_cmdr_type",  # [25] card oracle mentions commander's creature type
+    "cmdr_text_mentions_card_type",  # [26] commander oracle mentions card's type
+    "shared_keyword_count",  # [27] MTG keywords shared between card and commander
+    "cmdr_keyword_match",   # [28] commander-specific oracle keywords found in card text
+    "anti_tribal_text",     # [29] card says "non-[commander_type]" — anti-synergy
+    "mechanic_match",       # [30] card produces commander's specific mechanic
 ]
 
 def sigmoid(x):
@@ -80,35 +89,18 @@ def sigmoid(x):
 
 
 def roc_auc_score(y_true, y_score):
-    """Compute ROC AUC without sklearn dependency."""
-    # Sort by descending score
-    order = np.argsort(-y_score)
-    y_sorted = y_true[order]
-
-    n_pos = y_sorted.sum()
-    n_neg = len(y_sorted) - n_pos
+    """Compute ROC AUC via Mann-Whitney U statistic (vectorized)."""
+    n_pos = int(y_true.sum())
+    n_neg = len(y_true) - n_pos
     if n_pos == 0 or n_neg == 0:
         return 0.5
-
-    # Accumulate true positives and compute AUC via trapezoidal rule
-    tp = 0.0
-    fp = 0.0
-    auc = 0.0
-    prev_fpr = 0.0
-    prev_tpr = 0.0
-
-    for i in range(len(y_sorted)):
-        if y_sorted[i] == 1:
-            tp += 1
-        else:
-            fp += 1
-        fpr = fp / n_neg
-        tpr = tp / n_pos
-        auc += (fpr - prev_fpr) * (tpr + prev_tpr) / 2
-        prev_fpr = fpr
-        prev_tpr = tpr
-
-    return auc
+    # Rank all scores (ascending, 1-based)
+    order = np.argsort(y_score)
+    ranks = np.empty(len(y_score), dtype=np.float64)
+    ranks[order] = np.arange(1, len(y_score) + 1, dtype=np.float64)
+    # AUC = (sum_of_positive_ranks - n_pos*(n_pos+1)/2) / (n_pos * n_neg)
+    u = ranks[y_true == 1].sum() - n_pos * (n_pos + 1) / 2.0
+    return u / (n_pos * n_neg)
 
 
 def load_edhrec_membership(conn):
@@ -637,7 +629,7 @@ def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=Tru
 
     # ── Shared forge feature context (strategies, TF-IDF, phases) ─────
     normed_emb, oid_list, oid_to_idx = load_embeddings()
-    ctx = ForgeFeatureContext(conn, normed_emb, oid_to_idx)
+    ctx = ForgeFeatureContext(conn, normed_emb, oid_to_idx, preload_edges=True)
 
     if verbose:
         print(f"  Strategy vector: {ctx._n_strats} strategies")
@@ -721,7 +713,7 @@ def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=Tru
                         tower_probs[pos] = probs[k]
 
         # --- (b) Per-commander context (causal edges, deck edges, precision) ---
-        deck_oids_for_cmdr = {oid for oid, lbl in pairs if lbl == 1}
+        deck_oids_for_cmdr = {oid for oid, lbl in pairs if lbl > 0}
         cmdr_ctx = CmdrFeatureContext(ctx, cmdr_oid, deck_oids_for_cmdr)
 
         # --- (c) Commander subtypes for tribal ---
@@ -758,8 +750,12 @@ def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=Tru
 
     if verbose:
         print(f"\nForge feature matrix: {X.shape}")
-        print(f"  Positive labels: {int(y.sum())}")
-        print(f"  Negative labels: {int(len(y) - y.sum())}")
+        n_pos = int((y > 0).sum())
+        print(f"  Positive (grade>0): {n_pos}, Negative (grade=0): {int(len(y) - n_pos)}")
+        if y.max() > 1:
+            for g in range(int(y.max()), 0, -1):
+                print(f"    Grade {g}: {int((y == g).sum())}")
+
         print(f"  Commanders: {len(cmdr_oids_ordered)}")
         print(f"\nPer-feature statistics:")
         for i, name in enumerate(FORGE_FEATURE_NAMES):
@@ -772,52 +768,127 @@ def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=Tru
     return X, y, cmdr_ids
 
 
+def _build_group_array(cmdr_ids, idx_array):
+    """Build LambdaRank group array from commander IDs for a subset of indices."""
+    sub_cmdrs = cmdr_ids[idx_array]
+    groups = []
+    prev = sub_cmdrs[0]
+    count = 1
+    for i in range(1, len(sub_cmdrs)):
+        if sub_cmdrs[i] == prev:
+            count += 1
+        else:
+            groups.append(count)
+            prev = sub_cmdrs[i]
+            count = 1
+    groups.append(count)
+    return groups
+
+
 def train_forge_gbm(X, y, cmdr_ids):
-    """Train LightGBM on forge-only features with leave-commander-out CV.
+    """Train LightGBM LambdaRank on forge features with graded relevance.
+
+    Uses synergy-based relevance grades (0-4) instead of binary labels.
+    LambdaRank optimizes NDCG, teaching the model to rank high-synergy
+    cards above low-synergy ones.
 
     Saves to fusion_model_forge.lgb. Returns (model, cv_scores).
     """
     import lightgbm as lgb
     import joblib
-    from sklearn.metrics import roc_auc_score as sklearn_auc
+
+    # Sort data by commander ID (required for LambdaRank groups)
+    sort_order = np.argsort(cmdr_ids)
+    X = X[sort_order]
+    y = y[sort_order]
+    cmdr_ids = cmdr_ids[sort_order]
+
+    is_graded = y.max() > 1  # Check if we have graded labels
+    if not is_graded:
+        print("  WARNING: Binary labels detected, using classification instead of ranking")
 
     params = {
-        "objective": "binary",
-        "metric": "auc",
-        "num_leaves": 127,
-        "learning_rate": 0.02,
-        "n_estimators": 1000,
+        "objective": "lambdarank",
+        "metric": "ndcg",
+        "eval_at": [10, 30],
+        "num_leaves": 255,
+        "learning_rate": 0.03,
+        "n_estimators": 1500,
         "subsample": 0.8,
         "colsample_bytree": 0.8,
-        "min_child_samples": 30,
+        "min_child_samples": 20,
+        "min_data_in_bin": 5,
         "verbose": -1,
+        "label_gain": [0, 1, 2, 3, 5, 8, 12, 18, 25, 35],  # 10 grades (0-9)
     }
 
     splits = make_cv_splits(cmdr_ids, n_folds=5)
-    fold_aucs = []
+    fold_ndcgs = []
     for fold_i, (train_idx, test_idx) in enumerate(splits):
-        model = lgb.LGBMClassifier(**params)
-        model.fit(
-            X[train_idx], y[train_idx],
-            eval_set=[(X[test_idx], y[test_idx])],
-            feature_name=FORGE_FEATURE_NAMES,
-            callbacks=[lgb.early_stopping(50, verbose=False)],
-        )
-        proba = model.predict_proba(X[test_idx])[:, 1]
-        auc = sklearn_auc(y[test_idx], proba)
-        fold_aucs.append(auc)
-        print(f"  Fold {fold_i+1}: AUC={auc:.4f}")
+        # Ensure data within each fold is sorted by commander
+        train_sort = np.argsort(cmdr_ids[train_idx])
+        test_sort = np.argsort(cmdr_ids[test_idx])
+        ti = train_idx[train_sort]
+        vi = test_idx[test_sort]
 
-    print(f"  Mean AUC: {np.mean(fold_aucs):.4f}")
+        train_group = _build_group_array(cmdr_ids, ti)
+        test_group = _build_group_array(cmdr_ids, vi)
+
+        train_data = lgb.Dataset(X[ti], label=y[ti], group=train_group,
+                                 feature_name=FORGE_FEATURE_NAMES, free_raw_data=False)
+        eval_data = lgb.Dataset(X[vi], label=y[vi], group=test_group,
+                                reference=train_data, feature_name=FORGE_FEATURE_NAMES,
+                                free_raw_data=False)
+
+        booster = lgb.train(
+            params, train_data,
+            num_boost_round=1000,
+            valid_sets=[eval_data],
+            callbacks=[lgb.early_stopping(50, verbose=False),
+                       lgb.log_evaluation(0)],
+        )
+
+        # Compute NDCG@30 manually for reporting
+        preds = booster.predict(X[vi])
+        test_cmdr_vals = cmdr_ids[vi]
+
+        ndcg30_scores = []
+        start = 0
+        for g in test_group:
+            end = start + g
+            pred_slice = preds[start:end]
+            label_slice = y[vi][start:end]
+            # Compute NDCG@30
+            k = min(30, g)
+            top_k = np.argsort(-pred_slice)[:k]
+            dcg = sum(params["label_gain"][int(label_slice[j])] / np.log2(i + 2)
+                      for i, j in enumerate(top_k))
+            ideal_sorted = sorted(label_slice, reverse=True)[:k]
+            idcg = sum(params["label_gain"][int(ideal_sorted[i])] / np.log2(i + 2)
+                       for i in range(len(ideal_sorted)))
+            ndcg = dcg / idcg if idcg > 0 else 0.0
+            ndcg30_scores.append(ndcg)
+            start = end
+
+        avg_ndcg = np.mean(ndcg30_scores) if ndcg30_scores else 0.0
+        fold_ndcgs.append(avg_ndcg)
+        print(f"  Fold {fold_i+1}: NDCG@30={avg_ndcg:.4f} "
+              f"({booster.best_iteration} rounds)")
+
+    print(f"  Mean NDCG@30: {np.mean(fold_ndcgs):.4f}")
 
     # Train final model on all data
-    final_model = lgb.LGBMClassifier(**params)
-    final_model.fit(X, y, feature_name=FORGE_FEATURE_NAMES)
+    all_group = _build_group_array(cmdr_ids, np.arange(len(cmdr_ids)))
+    all_data = lgb.Dataset(X, label=y, group=all_group,
+                           feature_name=FORGE_FEATURE_NAMES)
+    final_booster = lgb.train(params, all_data, num_boost_round=1000)
+
     model_path = os.path.join(DATA_DIR, "fusion_model_forge.lgb")
-    joblib.dump(final_model, model_path)
+    final_booster.save_model(model_path)
     print(f"  Forge model saved to {model_path}")
 
-    return final_model, {"mean_auc": float(np.mean(fold_aucs)), "fold_aucs": fold_aucs}
+    return final_booster, {"mean_ndcg30": float(np.mean(fold_ndcgs)),
+                           "fold_ndcgs": fold_ndcgs}
 
 
 def make_cv_splits(cmdr_ids, n_folds=5, seed=42):
@@ -842,13 +913,16 @@ def make_cv_splits(cmdr_ids, n_folds=5, seed=42):
 
 
 def train_gbm(X, y, cmdr_ids):
-    """Train LightGBM with leave-commander-out CV.
+    """Train LightGBM with leave-commander-out CV (binary classification).
 
     Returns (model, cv_scores) where cv_scores is a dict with mean_auc and fold_aucs.
     """
     import lightgbm as lgb
     import joblib
     from sklearn.metrics import roc_auc_score as sklearn_auc
+
+    # Convert graded labels to binary for baseline model
+    y_bin = (y > 0).astype(np.float32)
 
     params = {
         "objective": "binary",
@@ -864,13 +938,13 @@ def train_gbm(X, y, cmdr_ids):
     for fold_i, (train_idx, test_idx) in enumerate(splits):
         model = lgb.LGBMClassifier(**params)
         model.fit(
-            X[train_idx], y[train_idx],
-            eval_set=[(X[test_idx], y[test_idx])],
+            X[train_idx], y_bin[train_idx],
+            eval_set=[(X[test_idx], y_bin[test_idx])],
             feature_name=FEATURE_NAMES,
             callbacks=[lgb.early_stopping(50, verbose=False)],
         )
         proba = model.predict_proba(X[test_idx])[:, 1]
-        auc = sklearn_auc(y[test_idx], proba)
+        auc = sklearn_auc(y_bin[test_idx], proba)
         fold_aucs.append(auc)
         print(f"  Fold {fold_i+1}: AUC={auc:.4f}")
 
@@ -878,7 +952,7 @@ def train_gbm(X, y, cmdr_ids):
 
     # Train final model on all data
     final_model = lgb.LGBMClassifier(**params)
-    final_model.fit(X, y, feature_name=FEATURE_NAMES)
+    final_model.fit(X, y_bin, feature_name=FEATURE_NAMES)
     model_path = os.path.join(DATA_DIR, "fusion_model.lgb")
     joblib.dump(final_model, model_path)
     print(f"  Model saved to {model_path}")
@@ -1573,12 +1647,64 @@ def _load_pairs_for_features(conn, oid_to_idx):
     )
     print(f"  Negative pairs: {len(neg_pairs)}")
 
-    # Combine into pairs_by_cmdr: dict[cmdr_oid -> list[(card_oid, label)]]
+    # Load synergy scores for graded relevance labels
+    slug_to_oid_map = {}
+    for slug in set(r[0] for r in conn.execute(
+            "SELECT DISTINCT commander_slug FROM edhrec_card_synergy")):
+        parts = slug.split("-")
+        pattern = "%" + "%".join(parts) + "%"
+        row = conn.execute(
+            "SELECT oracle_id FROM cards "
+            "WHERE LOWER(REPLACE(REPLACE(name, '''', ''), ',', '')) LIKE ? "
+            "AND type_line LIKE '%Legendary%' LIMIT 1",
+            (pattern,),
+        ).fetchone()
+        if row:
+            slug_to_oid_map[slug] = row[0]
+    oid_to_slug_map = {v: k for k, v in slug_to_oid_map.items()}
+
+    # Build (cmdr_slug, card_name) -> synergy lookup
+    syn_map = {}  # (slug, card_name) -> synergy
+    for slug, card_name, syn in conn.execute(
+        "SELECT commander_slug, card_name, synergy FROM edhrec_card_synergy"
+    ):
+        if syn is not None:
+            syn_map[(slug, card_name)] = syn
+
+    # oid -> card_name for synergy lookup
+    oid_to_name = {}
+    for row in conn.execute("SELECT oracle_id, name FROM cards"):
+        oid_to_name[row[0]] = row[1]
+
+    # Combine into pairs_by_cmdr with graded relevance labels:
+    # Use finer grades (0-9) quantized from synergy scores for better ranking
     pairs_by_cmdr = {}
+    n_graded = 0
     for cmdr_oid, card_oids in positives_by_cmdr.items():
-        pairs_by_cmdr[cmdr_oid] = [(oid, 1) for oid in card_oids]
+        slug = oid_to_slug_map.get(cmdr_oid, "")
+        pairs = []
+        for oid in card_oids:
+            card_name = oid_to_name.get(oid, "")
+            syn = syn_map.get((slug, card_name))
+            if syn is not None:
+                # Quantize synergy into 9 grades (1-9) for richer ranking signal
+                grade = min(9, max(1, int(1 + max(0, syn) * 16)))
+                n_graded += 1
+            else:
+                grade = 1  # in deck but no synergy data
+            pairs.append((oid, grade))
+        pairs_by_cmdr[cmdr_oid] = pairs
+
     for cmdr_oid, card_oid, label in neg_pairs:
-        pairs_by_cmdr.setdefault(cmdr_oid, []).append((card_oid, label))
+        pairs_by_cmdr.setdefault(cmdr_oid, []).append((card_oid, 0))
+
+    grade_counts = {}
+    for pairs in pairs_by_cmdr.values():
+        for _, g in pairs:
+            grade_counts[g] = grade_counts.get(g, 0) + 1
+    print(f"  Graded relevance: {n_graded} cards with synergy scores")
+    for g in sorted(grade_counts.keys(), reverse=True):
+        print(f"    Grade {g}: {grade_counts[g]:,}")
 
     return pairs_by_cmdr
 
@@ -1941,17 +2067,26 @@ def main():
         print("=" * 60)
         _, forge_scores = train_forge_gbm(X_forge, y_forge, cmdr_ids_forge)
 
-        forge_auc = forge_scores["mean_auc"]
-        print(f"\n  Forge-only AUC: {forge_auc:.4f}")
+        if "mean_ndcg30" in forge_scores:
+            print(f"\n  Forge-only NDCG@30: {forge_scores['mean_ndcg30']:.4f}")
+        elif "mean_auc" in forge_scores:
+            print(f"\n  Forge-only AUC: {forge_scores['mean_auc']:.4f}")
 
         # Print forge model feature importance
-        import joblib
-        forge_model = joblib.load(os.path.join(DATA_DIR, "fusion_model_forge.lgb"))
+        import lightgbm as lgb
+        forge_model_path = os.path.join(DATA_DIR, "fusion_model_forge.lgb")
+        try:
+            booster = lgb.Booster(model_file=forge_model_path)
+            importances = booster.feature_importance(importance_type="split")
+            names = booster.feature_name()
+        except Exception:
+            import joblib
+            m = joblib.load(forge_model_path)
+            importances = m.feature_importances_
+            names = FORGE_FEATURE_NAMES
         print(f"\n  Forge model feature importance:")
-        total_imp = sum(forge_model.feature_importances_)
-        for name, imp in sorted(
-            zip(FORGE_FEATURE_NAMES, forge_model.feature_importances_), key=lambda x: -x[1]
-        ):
+        total_imp = sum(importances)
+        for name, imp in sorted(zip(names, importances), key=lambda x: -x[1]):
             print(f"    {name:25s} {imp:6d} ({imp/total_imp*100:5.1f}%)")
         return
 
@@ -2012,7 +2147,9 @@ def main():
 
         print(f"\nTraining LightGBM with leave-commander-out CV...")
         model, cv_scores = train_gbm(X, y, cmdr_ids)
-        print(f"\nDone. Mean CV AUC: {cv_scores['mean_auc']:.4f}")
+        metric = cv_scores.get('mean_ndcg30', cv_scores.get('mean_auc', 0))
+        metric_name = "NDCG@30" if 'mean_ndcg30' in cv_scores else "AUC"
+        print(f"\nDone. Mean CV {metric_name}: {metric:.4f}")
 
 
 if __name__ == "__main__":
