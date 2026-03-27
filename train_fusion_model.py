@@ -1019,9 +1019,12 @@ def train_forge_gbm(X, y, cmdr_ids):
     params = {
         "objective": "binary",
         "metric": "auc",
-        "num_leaves": 63,
-        "learning_rate": 0.05,
-        "n_estimators": 500,
+        "num_leaves": 127,
+        "learning_rate": 0.02,
+        "n_estimators": 1000,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "min_child_samples": 30,
         "verbose": -1,
     }
 
