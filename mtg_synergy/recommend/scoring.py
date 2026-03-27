@@ -572,6 +572,45 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
                 f"WHERE target_id IN ({ph}) GROUP BY source_id", chunk):
                 deck_edge_counts[row[0]] = deck_edge_counts.get(row[0], 0) + row[1]
 
+    # Deck edge precision: exact vs broad per candidate
+    deck_exact_counts = {}
+    deck_broad_counts = {}
+    if deck_oids:
+        dl2 = list(deck_oids)
+        for i in range(0, len(dl2), 500):
+            chunk = dl2[i:i + 500]
+            ph = ",".join("?" * len(chunk))
+            for row in conn.execute(
+                f"SELECT target_id, json_extract(detail, '$.filter_precision'), COUNT(*) "
+                f"FROM interaction_edges WHERE source_id IN ({ph}) "
+                f"GROUP BY target_id, json_extract(detail, '$.filter_precision')", chunk):
+                if row[1] == "exact":
+                    deck_exact_counts[row[0]] = deck_exact_counts.get(row[0], 0) + row[2]
+                else:
+                    deck_broad_counts[row[0]] = deck_broad_counts.get(row[0], 0) + row[2]
+            for row in conn.execute(
+                f"SELECT source_id, json_extract(detail, '$.filter_precision'), COUNT(*) "
+                f"FROM interaction_edges WHERE target_id IN ({ph}) "
+                f"GROUP BY source_id, json_extract(detail, '$.filter_precision')", chunk):
+                if row[1] == "exact":
+                    deck_exact_counts[row[0]] = deck_exact_counts.get(row[0], 0) + row[2]
+                else:
+                    deck_broad_counts[row[0]] = deck_broad_counts.get(row[0], 0) + row[2]
+
+    # Commander exact edges
+    cmdr_exact = set()
+    try:
+        for row in conn.execute(
+            "SELECT target_id FROM interaction_edges WHERE source_id = ? "
+            "AND json_extract(detail, '$.filter_precision') = 'exact'", (cmdr_oid,)):
+            cmdr_exact.add(row[0])
+        for row in conn.execute(
+            "SELECT source_id FROM interaction_edges WHERE target_id = ? "
+            "AND json_extract(detail, '$.filter_precision') = 'exact'", (cmdr_oid,)):
+            cmdr_exact.add(row[0])
+    except Exception:
+        pass
+
     # Tribal subtypes
     cmdr_type = next((c.get("type_line", "") for c in cards if c.get("oracle_id") == cmdr_oid), "")
     cmdr_subtypes = set()
@@ -655,6 +694,10 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
             1.0 if "Land" in tl else 0.0,                # F17
             1.0 if "Planeswalker" in tl else 0.0,        # F18
             float(cd.get("cmc", 0)),                     # F19 cmc
+            # F20: deck_exact_edge_ratio
+            (lambda ne=deck_exact_counts.get(oid, 0), nb=deck_broad_counts.get(oid, 0):
+             ne / (ne + nb) if (ne + nb) > 0 else 0.0)(),
+            1.0 if oid in cmdr_exact else 0.0,           # F21 cmdr_exact_edge
         ])
 
     if features:
@@ -668,7 +711,7 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
             if info["total"] > 0:
                 info["fusion_score"] = round(float(scores[i]), 4)
 
-    print(f"  Forge scoring: {len(cand_list)} candidates scored (20 features, no EDHREC)")
+    print(f"  Forge scoring: {len(cand_list)} candidates scored (22 features, no EDHREC)")
 
 
 # === Tower model singleton ===

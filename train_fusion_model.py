@@ -59,6 +59,8 @@ FORGE_FEATURE_NAMES = [
     "type_land",             # [17] card is a Land
     "type_planeswalker",     # [18] card is a Planeswalker
     "cmc",                   # [19] mana cost
+    "deck_exact_edge_ratio", # [20] fraction of deck edges with exact filter precision
+    "cmdr_exact_edge",       # [21] 1.0 if any exact-precision edge to commander
 ]
 
 # Phase timing: position in the turn cycle (0=start, 1=end).
@@ -897,6 +899,47 @@ def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=Tru
                 ):
                     deck_edge_counts[row[0]] = deck_edge_counts.get(row[0], 0) + row[1]
 
+        # --- (c3) Deck edge precision: exact vs broad edges per candidate ---
+        deck_exact_counts = {}  # card_oid -> count of exact edges from deck
+        deck_broad_counts = {}  # card_oid -> count of broad edges from deck
+        if deck_oids_for_cmdr:
+            deck_list2 = list(deck_oids_for_cmdr)
+            for di in range(0, len(deck_list2), 500):
+                dchunk = deck_list2[di:di + 500]
+                dph = ",".join("?" * len(dchunk))
+                for row in conn.execute(
+                    f"SELECT target_id, json_extract(detail, '$.filter_precision'), COUNT(*) "
+                    f"FROM interaction_edges WHERE source_id IN ({dph}) "
+                    f"GROUP BY target_id, json_extract(detail, '$.filter_precision')", dchunk
+                ):
+                    if row[1] == "exact":
+                        deck_exact_counts[row[0]] = deck_exact_counts.get(row[0], 0) + row[2]
+                    else:
+                        deck_broad_counts[row[0]] = deck_broad_counts.get(row[0], 0) + row[2]
+                for row in conn.execute(
+                    f"SELECT source_id, json_extract(detail, '$.filter_precision'), COUNT(*) "
+                    f"FROM interaction_edges WHERE target_id IN ({dph}) "
+                    f"GROUP BY source_id, json_extract(detail, '$.filter_precision')", dchunk
+                ):
+                    if row[1] == "exact":
+                        deck_exact_counts[row[0]] = deck_exact_counts.get(row[0], 0) + row[2]
+                    else:
+                        deck_broad_counts[row[0]] = deck_broad_counts.get(row[0], 0) + row[2]
+
+        # --- (c4) Commander edge precision per candidate ---
+        cmdr_exact = set()  # card_oids with exact edges to/from commander
+        try:
+            for row in conn.execute(
+                "SELECT target_id FROM interaction_edges WHERE source_id = ? "
+                "AND json_extract(detail, '$.filter_precision') = 'exact'", (cmdr_oid,)):
+                cmdr_exact.add(row[0])
+            for row in conn.execute(
+                "SELECT source_id FROM interaction_edges WHERE target_id = ? "
+                "AND json_extract(detail, '$.filter_precision') = 'exact'", (cmdr_oid,)):
+                cmdr_exact.add(row[0])
+        except Exception:
+            pass
+
         # --- (d) Commander subtypes for tribal ---
         cmdr_type_line = card_meta.get(cmdr_oid, {}).get("type_line", "")
         cmdr_subtypes = set()
@@ -1006,6 +1049,14 @@ def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=Tru
 
             # F19: cmc
             X[row_idx, 19] = float(meta.get("cmc", 0.0))
+
+            # F20: deck_exact_edge_ratio — fraction of deck edges with exact filter precision
+            n_exact = deck_exact_counts.get(card_oid, 0)
+            n_broad = deck_broad_counts.get(card_oid, 0)
+            X[row_idx, 20] = n_exact / (n_exact + n_broad) if (n_exact + n_broad) > 0 else 0.0
+
+            # F21: cmdr_exact_edge — any exact-precision edge to commander
+            X[row_idx, 21] = 1.0 if card_oid in cmdr_exact else 0.0
 
             y[row_idx] = float(labels[j])
             cmdr_ids[row_idx] = cmdr_to_idx[cmdr_oid]
