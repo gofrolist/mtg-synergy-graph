@@ -184,8 +184,33 @@ def load_edhrec_membership(conn):
         if card_oids:
             positives[cmdr_oid] = card_oids
 
-    total_pos = sum(len(v) for v in positives.values())
+    # Filter out generic staples: cards in >30% of all EDHREC decks
+    # These are auto-includes (Sol Ring, Arcane Signet, etc.) with no
+    # commander-specific synergy — noise that teaches "popular = good"
+    n_cmdrs_total = len(slug_to_oid)
+    staple_threshold = n_cmdrs_total * 0.3
+    card_deck_count = {}
+    for row in conn.execute(
+        "SELECT card_name, COUNT(DISTINCT commander_slug) FROM edhrec_average_decks GROUP BY card_name"
+    ):
+        card_deck_count[row[0]] = row[1]
+
+    staple_oids = set()
+    for card_name, count in card_deck_count.items():
+        if count > staple_threshold:
+            oid = name_to_oid.get(card_name)
+            if oid:
+                staple_oids.add(oid)
+
+    n_before = sum(len(v) for v in positives.values())
+    for cmdr_oid in positives:
+        positives[cmdr_oid] -= staple_oids
+    positives = {k: v for k, v in positives.items() if v}
+    n_after = sum(len(v) for v in positives.values())
+
+    total_pos = n_after
     print(f"  Positive pairs: {total_pos} across {len(positives)} commanders")
+    print(f"  Filtered {n_before - n_after} staple pairs ({len(staple_oids)} cards in >30% of decks)")
     if unmatched_cards > 0:
         print(f"  Unmatched card names: {unmatched_cards}")
 
