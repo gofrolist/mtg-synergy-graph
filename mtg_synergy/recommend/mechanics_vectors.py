@@ -233,13 +233,21 @@ def build_mechanics_vectors(conn):
                     if sac_type in subtype_idx:
                         c[subtype_idx[sac_type]] += 1.0
 
-    # Mine oracle text for "for each [Type]" scaling (captures Brightstone Ritual etc.)
-    # These cards CONSUME entity presence but it's hidden from Forge parsed fields
-    for row in conn.execute("SELECT oracle_id, oracle_text FROM cards WHERE oracle_text IS NOT NULL"):
-        oid, text = row[0], (row[1] or "").lower()
-        if "for each" not in text:
+    # Parse "for each [Type]" scaling from Forge raw_line SpellDescription
+    # (replaces oracle text fallback). Amount=X abilities with "for each" in
+    # their SpellDescription encode entity-count scaling that Forge doesn't
+    # capture in structured fields.
+    for row in conn.execute(
+        "SELECT fnm.oracle_id, fa.raw_line FROM forge_abilities fa "
+        "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+        "WHERE fa.amount = 'X' AND fa.raw_line LIKE '%for each%'"
+    ):
+        oid, raw = row[0], (row[1] or "").lower()
+        idx = raw.find("for each")
+        if idx < 0:
             continue
-        for m in re.finditer(r"for each (\w+)", text):
+        snippet = raw[idx:]
+        for m in re.finditer(r"for each (\w+)", snippet):
             t = m.group(1)
             if t in subtype_idx:
                 c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
@@ -251,21 +259,23 @@ def build_mechanics_vectors(conn):
                 c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
                 c[_concept_idx["artifact_enters"]] += 0.5
 
-    # "tap an untapped [Type]" — consumes entity presence
-    for row in conn.execute("SELECT oracle_id, oracle_text FROM cards WHERE oracle_text LIKE '%tap%untapped%'"):
-        oid, text = row[0], (row[1] or "").lower()
-        for m in re.finditer(r"tap (?:an|a|\d+) untapped (\w+)", text):
-            t = m.group(1)
+    # Parse "tap an untapped [Type]" from Forge raw_line cost patterns
+    for row in conn.execute(
+        "SELECT fnm.oracle_id, fa.raw_line FROM forge_abilities fa "
+        "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+        "WHERE fa.raw_line LIKE '%Tap<%'"
+    ):
+        oid, raw = row[0], (row[1] or "").lower()
+        for m in re.finditer(r"tap<\d+/([^/>]+)", raw):
+            t = m.group(1).split("/")[0].split(".")[0].lower()
             if t in subtype_idx:
                 c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
                 c[subtype_idx[t]] += 1.0
                 c[_concept_idx["creature_tapped"]] += 0.5
-
-    # Re-normalize after oracle text additions
-    for oid in consumes:
-        norm = np.linalg.norm(consumes[oid])
-        if norm > 0:
-            consumes[oid] /= norm
+            elif t == "creature":
+                c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
+                c[_concept_idx["creature_tapped"]] += 1.0
+                c[_concept_idx["creature_available"]] += 0.5
 
     # L2 normalize all vectors
     for oid in produces:

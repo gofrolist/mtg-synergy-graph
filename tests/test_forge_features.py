@@ -377,6 +377,44 @@ class TestF33CounterTypeMatch:
             conn.close()
 
 
+class TestMechanicsVectorsNoOracleText:
+    """Verify mechanics_vectors does not query cards.oracle_text."""
+
+    def test_mechanics_vectors_no_oracle_text(self):
+        """mechanics_vectors should not query cards.oracle_text anymore."""
+        if not os.path.exists(DB_PATH):
+            pytest.skip("tags.db not found")
+        from mtg_synergy.recommend.mechanics_vectors import build_mechanics_vectors
+
+        real_conn = sqlite3.connect(DB_PATH)
+
+        # Wrap connection to track queries (sqlite3.Connection.execute is read-only)
+        queries = []
+
+        class TrackingConn:
+            """Thin wrapper that logs SQL and delegates to the real connection."""
+            def __init__(self, conn):
+                self._conn = conn
+
+            def execute(self, sql, *args, **kwargs):
+                queries.append(sql)
+                return self._conn.execute(sql, *args, **kwargs)
+
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
+
+        wrapper = TrackingConn(real_conn)
+        produces, consumes, dim, subtype_idx = build_mechanics_vectors(wrapper)
+        real_conn.close()
+
+        oracle_queries = [q for q in queries if 'oracle_text' in q.lower()]
+        assert len(oracle_queries) == 0, (
+            f"mechanics_vectors should not query oracle_text, found: {oracle_queries}"
+        )
+        assert len(produces) > 0
+        assert len(consumes) > 0
+
+
 class TestFeatureCount:
     """Verify compute_card_features returns exactly 40 elements."""
 
