@@ -17,17 +17,17 @@ BASELINE (--recommend): EDHREC-trained, optimized for known commanders
   3. AUC=0.999 on EDHREC commanders
 
 FORGE-ONLY (--recommend --forge): Zero EDHREC dependency, mechanical synergy
-  1. ALL color-legal cards scored (no tower pre-filter cutoff)
-  2. Forge LambdaRank GBM: 40 features with 10-grade synergy relevance labels
-     100% Forge-native: zero oracle text parsing in feature pipeline
-     Top features: embedding_cosine 20%, strategy_cosine 10%, card_hub_score 10%,
-     deck_edge_count 8%, cmc 8%, forge_ability_cosine 6%, forge_ability_depth 6%
+  1. Color-identity filter → all legal cards scored directly by GBM (no tower pre-filter)
+  2. Forge LambdaRank GBM: 38 features with 10-grade synergy relevance labels
+     100% Forge-native: no oracle text, no embeddings, no neural network
+     Top features: strategy_cosine 12%, card_hub_score 12%, deck_edge_count 10%,
+     cmc 9%, forge_ability_cosine 9%, forge_ability_depth 6%
   3. Forge mechanics vectors: 107-dim shared concept space encoding ALL mechanical
      interactions (27 game concepts + 80 subtypes). Captures synergy through
      card produces → commander consumes dot product.
   4. Can evaluate new cards day-1 without playtesting data
   5. Works for any of 3,141+ commanders (not just 1,361 with EDHREC)
-  6. NDCG@30 = 0.53 on leave-commander-out CV
+  6. NDCG@30 = 0.49 on leave-commander-out CV
 
 CAUSAL GRAPH (shared by both modes):
   - 18.4M edges across 30+ event types (verb_event_map extracted from Forge Java source)
@@ -158,27 +158,22 @@ python3 train_fusion_model.py                           # 7. Retrain fusion mode
 - Training: `python3 train_fusion_model.py`
 
 **Forge-only** (data/tower_model_forge.npz + data/fusion_model_forge.lgb):
-- Tower trained on causal graph connectivity (AUC=0.999)
-- LambdaRank GBM on 40 features (shared via `mtg_synergy/recommend/forge_features.py`):
-  Forge-native features (F25-F30 replaced, F33-F39 added):
-  tower_forge, embedding_cosine, oracle_similarity, strategy_cosine,
-  causal scores (directional + event diversity + bidirectional + composite),
-  deck_edge_count, deck_exact_edge_ratio, cmdr_exact_edge, deck_exact_count,
-  phase_match, card types (6), tribal, cmc, card_hub_score,
-  forge_type_synergy, cmdr_forge_type_match, shared_forge_mechanics,
-  cmdr_keyword_match, forge_anti_tribal, forge_verb_alignment,
-  forge_mech_fwd, forge_mech_rev,
-  counter_type_match, ability_type_ratio_T/A, zone_alignment,
-  target_alignment, forge_keyword_synergy, activated_ability_count
-- 100% Forge-native: zero oracle text parsing in feature pipeline
+- No tower model, no embeddings, no neural network — pure LightGBM on Forge data
+- LambdaRank GBM on 38 features (shared via `mtg_synergy/recommend/forge_features.py`):
+  100% Forge-native: causal scores (6), strategy (2), forge_ability_cosine,
+  phase (2), tribal, card types (6), cmc, deck edges (3), causal_composite,
+  card_hub_score, forge_type_synergy, cmdr_forge_type_match,
+  shared_forge_mechanics, forge_ability_depth, forge_anti_tribal,
+  forge_verb_alignment, forge_mech_fwd/rev, counter_type_match,
+  ability_type_ratio_T/A, zone_alignment, target_alignment,
+  forge_keyword_synergy, activated_ability_count
 - Mechanics vectors (`mtg_synergy/recommend/mechanics_vectors.py`): 107-dim shared
   concept space (27 game concepts + 80 subtypes). Effects and triggers map to same
   dimensions. Dot product = mechanical synergy score.
 - EDHREC-free features, trained on EDHREC deck membership with 10-grade synergy labels
-- Training: `python3 train_fusion_model.py --forge-tower` then `--forge-only`
-- Feature importance: embedding_cosine 20%, strategy_cosine 10%, card_hub_score 10%,
-  deck_edge_count 8%, cmc 8%, forge_ability_cosine 6%, forge_ability_depth 6%,
-  forge_mech_fwd 3%, forge_mech_rev 3%, activated_ability_count 2%
+- Training: `python3 train_fusion_model.py --forge-only --rebuild-features`
+- Feature importance: strategy_cosine 12%, card_hub_score 12%, deck_edge_count 10%,
+  cmc 9%, forge_ability_cosine 9%, forge_ability_depth 6%, forge_mech_fwd 4%
 - Fast iteration: `--forge-only` uses cached features (~50s); `--rebuild-features` (~2 min)
 - Edge index pre-loaded: CmdrFeatureContext uses in-memory adjacency (6.8ms vs 549ms)
 - Training data: generic staples (>30% deck frequency) filtered from positives
@@ -190,14 +185,14 @@ Both towers share architecture: 768→128 projection, MLP 140→128→64→32→
 ### Recommendation Pipeline (synergy_graph.py --recommend [--forge])
 
 ```
-1. Tower pre-filter: score all color-legal cards, take top candidates
-   Baseline: EDHREC tower top 3000
-   Forge: ALL color-legal cards (no cutoff — tower misses key synergy cards)
+1. Candidate selection:
+   Baseline: EDHREC tower scores 13k cards, takes top 3000
+   Forge: Color-identity filter → ALL legal cards (no tower, no embeddings)
 2. Score all candidates with GBM (batch predict, ~0.5s for 8000 cards):
    Baseline: 8 features (tower_prob, causal, edhrec_synergy, edhrec_rank, ...)
-   Forge:    40 features (LambdaRank Booster, Forge-native, mechanics vectors, ...)
+   Forge:    38 features (LambdaRank, 100% Forge-native, no oracle text)
 3. Sort and output top 30 with clickable Scryfall hyperlinks (OSC 8)
-Total time: ~1.7s
+Total time: ~1.5s (forge mode, no neural net overhead)
 ```
 
 ### Swap System (synergy_graph.py --swaps)
@@ -256,7 +251,7 @@ Suggests card swaps with multi-layer protection:
 | `mtg_synergy/recommend/engine.py` | `recommend_cards()` — tower pre-filter + fusion model pipeline |
 | `mtg_synergy/recommend/swaps.py` | `suggest_swaps()` — multi-layer card swap suggestions |
 | `mtg_synergy/recommend/scoring.py` | `DeckContext`, `score_all_candidates()`, `tower_prefilter()` |
-| `mtg_synergy/recommend/forge_features.py` | Shared 40-feature computation: `ForgeFeatureContext` (Forge profiles, edge index, mechanics vectors), `CmdrFeatureContext`, `compute_card_features()` |
+| `mtg_synergy/recommend/forge_features.py` | Shared 38-feature computation: `ForgeFeatureContext` (Forge profiles, edge index, mechanics vectors — no embeddings), `CmdrFeatureContext`, `compute_card_features()` |
 | `mtg_synergy/recommend/mechanics_vectors.py` | 107-dim forge mechanics vectors: shared game concept space for effect→trigger synergy |
 | `mtg_synergy/recommend/affinity.py` | Commander affinity scoring |
 | `mtg_synergy/recommend/commander_profile.py` | Auto-infer archetype for any of 3,141 commanders |
