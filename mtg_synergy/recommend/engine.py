@@ -52,9 +52,12 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                 forge_tower_path = fp
                 print("  Using forge-only model (no EDHREC)")
 
+        # Forge tower needs broader prefilter (8000) because it's trained
+        # on causal connectivity and misses infrastructure cards
+        prefilter_n = 8000 if forge_tower_path else 3000
         prefiltered = tower_prefilter(
             _shared_conn, cmdr_oid, color_identity or set(),
-            top_n=3000, deck_cards=deck_cards,
+            top_n=prefilter_n, deck_cards=deck_cards,
             tower_path=forge_tower_path)
 
         tower_probs_map = None
