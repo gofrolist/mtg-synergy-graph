@@ -76,6 +76,8 @@ FORGE_FEATURE_NAMES = [
     "cmdr_keyword_match",   # [28] commander-specific oracle keywords found in card text
     "anti_tribal_text",     # [29] card says "non-[commander_type]" — anti-synergy
     "mechanic_match",       # [30] card produces commander's specific mechanic
+    "forge_mech_fwd",       # [31] card produces what commander consumes (mechanics vector dot)
+    "forge_mech_rev",       # [32] commander produces what card consumes (mechanics vector dot)
 ]
 
 def sigmoid(x):

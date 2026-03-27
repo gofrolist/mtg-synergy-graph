@@ -100,6 +100,11 @@ class ForgeFeatureContext:
         self._n_vocab = len(self._vocab)
         self._doc_freq = doc_freq
 
+        # Forge mechanics vectors: encode each card's full mechanical profile
+        from mtg_synergy.recommend.mechanics_vectors import build_mechanics_vectors
+        self._mech_produces, self._mech_consumes, self._mech_dim, _ = \
+            build_mechanics_vectors(conn)
+
         if preload_edges:
             self._build_edge_index(conn)
 
@@ -221,6 +226,10 @@ class CmdrFeatureContext:
 
         # Commander subtypes for tribal matching
         self.cmdr_subtypes = set()
+
+        # Commander mechanics vectors
+        self.cmdr_produces = ctx._mech_produces.get(cmdr_oid)
+        self.cmdr_consumes = ctx._mech_consumes.get(cmdr_oid)
 
         # Commander-specific keywords: top TF-IDF words from commander oracle
         cmdr_oracle = ctx._card_oracle.get(cmdr_oid, "")
@@ -583,6 +592,17 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
                 if phrase in card_oracle:
                     mech_match += 1.0
 
+    # F31: forge_mech_synergy — does this card PRODUCE what the commander CONSUMES?
+    # Captures ALL mechanical interactions at once via dense vector dot product
+    mech_fwd = 0.0  # card produces → commander consumes
+    mech_rev = 0.0  # commander produces → card consumes
+    card_prod = ctx._mech_produces.get(card_oid)
+    card_cons = ctx._mech_consumes.get(card_oid)
+    if cmdr.cmdr_consumes is not None and card_prod is not None:
+        mech_fwd = float(np.dot(cmdr.cmdr_consumes, card_prod))
+    if cmdr.cmdr_produces is not None and card_cons is not None:
+        mech_rev = float(np.dot(cmdr.cmdr_produces, card_cons))
+
     return [
         f0,                                              # F0 tower_forge
         f1,                                              # F1 embedding_cosine
@@ -615,4 +635,6 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         cmdr_kw_match,                                   # F28 cmdr_keyword_match
         anti_tribal,                                     # F29 anti_tribal_text
         mech_match,                                      # F30 mechanic_match
+        mech_fwd,                                        # F31 forge_mech_synergy_fwd
+        mech_rev,                                        # F32 forge_mech_synergy_rev
     ]
