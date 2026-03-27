@@ -17,9 +17,10 @@ BASELINE (--recommend): EDHREC-trained, optimized for known commanders
   3. AUC=0.999 on EDHREC commanders
 
 FORGE-ONLY (--recommend --forge): Zero EDHREC dependency, mechanical synergy
-  1. Forge tower pre-filter: trained on causal graph connectivity (AUC=0.999)
-  2. Forge GBM: 20 features — tower_forge, embedding_cosine, oracle_similarity,
-     strategy_cosine, causal scores, phase_match, card types, tribal, cmc
+  1. Forge tower pre-filter: trained on causal graph connectivity (top 8000 candidates)
+  2. Forge GBM: 22 features — tower_forge, embedding_cosine, oracle_similarity,
+     strategy_cosine, causal scores, deck_edge_count, deck_exact_edge_ratio,
+     cmdr_exact_edge, phase_match, card types, tribal, cmc
   3. Can evaluate new cards day-1 without playtesting data
   4. Works for any of 3,141+ commanders (not just 1,361 with EDHREC)
 
@@ -154,12 +155,14 @@ python3 train_fusion_model.py                           # 7. Retrain fusion mode
 
 **Forge-only** (data/tower_model_forge.npz + data/fusion_model_forge.lgb):
 - Tower trained on causal graph connectivity (AUC=0.999)
-- GBM on 20 features: tower_forge, embedding_cosine, oracle_similarity, strategy_cosine,
-  causal scores (directional + event diversity), phase_match, card types, tribal, cmc
+- GBM on 22 features (shared via `mtg_synergy/recommend/forge_features.py`):
+  tower_forge, embedding_cosine, oracle_similarity, strategy_cosine,
+  causal scores (directional + event diversity + bidirectional), deck_edge_count,
+  deck_exact_edge_ratio, cmdr_exact_edge, phase_match, card types (6), tribal, cmc
 - EDHREC-free features but trained on EDHREC deck membership labels (staples filtered out)
 - Training: `python3 train_fusion_model.py --forge-tower` then `--forge-only`
-- Feature importance: tower_forge 19%, embedding_cosine 17%, oracle_similarity 16%, cmc 10%, deck_edge_count 9%
-- Fast iteration: `--forge-only` uses cached features (~50s); `--rebuild-features` forces rebuild (~4 min)
+- Feature importance: tower_forge 19%, embedding_cosine 16%, oracle_similarity 16%, cmc 9%, deck_edge_count 9%, strategy_cosine 9%, deck_exact_edge_ratio 2.5%
+- Fast iteration: `--forge-only` uses cached features (~50s); `--rebuild-features` forces rebuild (~6 min)
 - Training data: generic staples (>30% deck frequency) filtered from positives
 - Hard negative sampling: 50% strategy/subtype overlap + 50% random
 - GBM: num_leaves=127, lr=0.02, n_estimators=1000, subsample/colsample=0.8
@@ -171,9 +174,9 @@ Both towers share architecture: 768→128 projection, MLP 140→128→64→32→
 ```
 1. Tower pre-filter: score all color-legal cards, take top candidates
    (EDHREC tower: top 3000, forge tower: top 8000 due to sparser coverage)
-2. Score all candidates with GBM (batch predict, ~0.5s for 3000 cards):
+2. Score all candidates with GBM (batch predict, ~0.5s for 8000 cards):
    Baseline: 8 features (tower_prob, causal, edhrec_synergy, edhrec_rank, ...)
-   Forge:    20 features (tower_forge, embedding_cosine, oracle_similarity, ...)
+   Forge:    22 features (tower_forge, embedding_cosine, oracle_similarity, ...)
 3. Sort and output top 30
 Total time: ~1.7s (was 16s before optimization)
 ```
@@ -234,6 +237,7 @@ Suggests card swaps with multi-layer protection:
 | `mtg_synergy/recommend/engine.py` | `recommend_cards()` — tower pre-filter + fusion model pipeline |
 | `mtg_synergy/recommend/swaps.py` | `suggest_swaps()` — multi-layer card swap suggestions |
 | `mtg_synergy/recommend/scoring.py` | `DeckContext`, `score_all_candidates()`, `tower_prefilter()` |
+| `mtg_synergy/recommend/forge_features.py` | Shared 22-feature computation: `ForgeFeatureContext`, `CmdrFeatureContext`, `compute_card_features()` |
 | `mtg_synergy/recommend/affinity.py` | Commander affinity scoring |
 | `mtg_synergy/recommend/commander_profile.py` | Auto-infer archetype for any of 3,141 commanders |
 | `mtg_synergy/combos/detector.py` | `find_combos()`, `find_combos_tiered()`, `find_partial_combos()` |
