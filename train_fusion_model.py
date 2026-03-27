@@ -1270,37 +1270,39 @@ def load_forge_positives(conn, min_strength=0.2, max_per_cmdr=80):
 
     print(f"  Loading causal edges for {len(commanders)} legendary creatures...")
 
-    # Collect per-pair edge properties
-    # pair_data[cmdr][card] = {strength, count, events, has_exact, directions}
+    # Collect per-pair edge properties using pre-aggregated SQL
+    # Much faster than scanning raw edges with json_extract (~42s → ~5s)
     pair_data = {}
 
+    # Use materialized filter_precision column if available
+    has_col = any(
+        r[1] == "filter_precision"
+        for r in conn.execute("PRAGMA table_info(interaction_edges)")
+    )
+    prec_expr = "filter_precision" if has_col else "json_extract(detail, '$.filter_precision')"
+
+    # Aggregate per (source, target): sum strength, count edges, exact count
     for row in conn.execute(
-        "SELECT source_id, target_id, strength, "
-        "json_extract(detail, '$.event'), "
-        "COALESCE(filter_precision, json_extract(detail, '$.filter_precision')) "
-        "FROM interaction_edges WHERE strength >= ?",
+        f"SELECT source_id, target_id, SUM(strength), COUNT(*), "
+        f"SUM(CASE WHEN {prec_expr} = 'exact' THEN 1 ELSE 0 END) "
+        f"FROM interaction_edges WHERE strength >= ? "
+        f"GROUP BY source_id, target_id",
         (min_strength,)
     ):
-        src, tgt, strength, event, precision = row
+        src, tgt, total_str, edge_count, exact_count = row
 
-        for cmdr, card in [(src, tgt), (tgt, src)]:
+        for cmdr, card, direction in [(src, tgt, 'out'), (tgt, src, 'in')]:
             if cmdr not in commanders or card == cmdr:
                 continue
             d = pair_data.setdefault(cmdr, {}).setdefault(card, {
-                'strength': 0.0, 'count': 0, 'events': set(),
+                'strength': 0.0, 'count': 0,
                 'has_exact': False, 'directions': set(),
             })
-            d['strength'] += strength
-            d['count'] += 1
-            if event:
-                d['events'].add(event)
-            if precision == 'exact':
+            d['strength'] += total_str
+            d['count'] += edge_count
+            if exact_count > 0:
                 d['has_exact'] = True
-            # Track which direction this edge goes
-            if src == cmdr:
-                d['directions'].add('out')
-            else:
-                d['directions'].add('in')
+            d['directions'].add(direction)
 
     # Grade each pair
     positives = {}
@@ -1312,13 +1314,12 @@ def load_forge_positives(conn, min_strength=0.2, max_per_cmdr=80):
         for card_oid, d in cards.items():
             # Compute a raw score from edge properties
             strength_score = min(d['strength'], 3.0) / 3.0  # 0-1, capped at 3.0
-            event_score = min(len(d['events']), 3) / 3.0    # 0-1, capped at 3 events
             bidir_bonus = 1.0 if len(d['directions']) == 2 else 0.0
             exact_bonus = 1.0 if d['has_exact'] else 0.0
             count_score = min(d['count'], 5) / 5.0          # 0-1, capped at 5 edges
 
-            raw = (strength_score * 3 + event_score * 2 +
-                   bidir_bonus * 2 + exact_bonus * 1.5 + count_score * 1.5)
+            raw = (strength_score * 3.5 +
+                   bidir_bonus * 2.5 + exact_bonus * 2.0 + count_score * 2.0)
             # raw range: 0 to 10
             grade = min(9, max(1, int(raw)))
             graded.append((card_oid, grade, raw))
@@ -1781,15 +1782,64 @@ def _load_forge_pairs_for_features(conn):
         except (IndexError, AttributeError):
             pass
 
-    # Convert positives to the set format that sample_negatives expects
-    pos_sets = {cmdr: {oid for oid, _ in pairs} for cmdr, pairs in positives_by_cmdr.items()}
+    # Fast negative sampling: pre-group cards by color identity to avoid 100M iterations
+    # Old approach: for each of 3024 commanders, iterate all 33k cards → 100M checks
+    # New approach: pre-build color-legal pools per CI signature → O(1) lookup per commander
+    print("\nSampling negatives (ratio=2, fast)...")
+    import json as _json
+    rng = np.random.RandomState(42)
 
-    # Sample negatives (ratio=2 to keep training set manageable: ~3k cmdrs × 80 pos × 3 = ~720k pairs)
-    print("\nSampling negatives (ratio=2, 50% hard)...")
-    neg_pairs = sample_negatives(
-        pos_sets, all_card_oids, card_colors, card_colors, ratio=2,
-        hard_ratio=0.5, card_strats=card_strats, card_subtypes=card_subtypes,
-    )
+    # Group cards by frozen color identity set
+    ci_to_cards = {}
+    for oid in all_card_oids:
+        ci = frozenset(card_colors.get(oid, set()))
+        ci_to_cards.setdefault(ci, []).append(oid)
+
+    # For each commander CI, pre-compute which CI groups are legal (subset)
+    # There are only ~32 possible CI combinations (2^5 colors), not 33k cards
+    all_cis = list(ci_to_cards.keys())
+
+    pos_sets = {cmdr: {oid for oid, _ in pairs} for cmdr, pairs in positives_by_cmdr.items()}
+    neg_pairs = []
+    for cmdr_oid, pos_cards in pos_sets.items():
+        cmdr_ci = frozenset(card_colors.get(cmdr_oid, set()))
+        n_neg = min(2 * len(pos_cards), 200)
+
+        # Collect color-legal cards (check CI subsets — only ~32 checks, not 33k)
+        legal_pool = []
+        for ci in all_cis:
+            if ci <= cmdr_ci:  # subset check on frozensets
+                legal_pool.extend(ci_to_cards[ci])
+
+        # Remove positives and self
+        legal_pool = [oid for oid in legal_pool if oid not in pos_cards and oid != cmdr_oid]
+        if not legal_pool:
+            continue
+
+        # 50% hard negatives (strategy/subtype overlap)
+        n_hard = n_neg // 2
+        hard_chosen = set()
+        if n_hard > 0:
+            cmdr_strats_set = card_strats.get(cmdr_oid, set())
+            cmdr_subs = card_subtypes.get(cmdr_oid, set())
+            hard_pool = [oid for oid in legal_pool
+                         if (cmdr_strats_set & card_strats.get(oid, set())) or
+                            (cmdr_subs & card_subtypes.get(oid, set()))]
+            if hard_pool:
+                n_pick = min(n_hard, len(hard_pool))
+                for idx in rng.choice(len(hard_pool), size=n_pick, replace=False):
+                    hard_chosen.add(hard_pool[idx])
+                    neg_pairs.append((cmdr_oid, hard_pool[idx], 0))
+
+        # 50% random
+        n_random = n_neg - len(hard_chosen)
+        if n_random > 0:
+            random_pool = [oid for oid in legal_pool if oid not in hard_chosen]
+            if random_pool:
+                n_pick = min(n_random, len(random_pool))
+                for idx in rng.choice(len(random_pool), size=n_pick, replace=False):
+                    neg_pairs.append((cmdr_oid, random_pool[idx], 0))
+
     print(f"  Negative pairs: {len(neg_pairs)}")
 
     # Combine: graded positives + grade-0 negatives

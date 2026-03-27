@@ -201,42 +201,60 @@ class ForgeFeatureContext:
     def _build_edge_index(self, conn):
         """Pre-load edge adjacency into memory for fast deck_edge_count computation.
 
-        Eliminates per-commander deck edge DB queries (~0.5s each × 1355 cmds = 743s).
-        Replaced by a single scan + fast numpy set intersections.
-        Commander strength/events still use fast indexed DB queries (~1ms each).
+        Caches raw numpy arrays to data/edge_index_cache.npz (~2s reload vs ~40s DB scan).
+        Cache key: interaction_edges row count + card count.
         """
+        import os
+        from mtg_synergy.config import DATA_DIR
+
         print("  Building in-memory edge index...", flush=True)
         t0 = time.time()
 
-        # Load edges into flat arrays (only need source, target, precision)
-        src_list = []
-        tgt_list = []
-        exact_list = []
+        cache_path = os.path.join(DATA_DIR, "edge_index_cache.npz")
+        edge_count = conn.execute("SELECT COUNT(*) FROM interaction_edges").fetchone()[0]
+        card_count = len(self.oid_to_idx)
 
-        # Use materialized column if available, fall back to json_extract
-        has_col = any(
-            r[1] == "filter_precision"
-            for r in conn.execute("PRAGMA table_info(interaction_edges)")
-        )
-        prec_expr = "filter_precision" if has_col else "json_extract(detail, '$.filter_precision')"
+        # Try loading from cache (numpy arrays only, no pickle)
+        src = tgt = exact = None
+        if os.path.exists(cache_path):
+            try:
+                cached = np.load(cache_path)
+                if (int(cached['edge_count']) == edge_count and
+                    int(cached['card_count']) == card_count):
+                    src = cached['src']
+                    tgt = cached['tgt']
+                    exact = cached['exact']
+                    print(f"    Loaded {len(src):,} edges from cache ({time.time()-t0:.1f}s)")
+            except Exception:
+                pass
 
-        for row in conn.execute(
-            f"SELECT source_id, target_id, {prec_expr} FROM interaction_edges"
-        ):
-            s = self.oid_to_idx.get(row[0])
-            t = self.oid_to_idx.get(row[1])
-            if s is not None and t is not None:
-                src_list.append(s)
-                tgt_list.append(t)
-                exact_list.append(row[2] == "exact")
-
-        n_edges = len(src_list)
-        print(f"    Loaded {n_edges:,} edges ({time.time()-t0:.1f}s)")
-
-        src = np.array(src_list, dtype=np.int32)
-        tgt = np.array(tgt_list, dtype=np.int32)
-        exact = np.array(exact_list, dtype=np.bool_)
-        del src_list, tgt_list, exact_list
+        if src is None:
+            src_list, tgt_list, exact_list = [], [], []
+            has_col = any(
+                r[1] == "filter_precision"
+                for r in conn.execute("PRAGMA table_info(interaction_edges)")
+            )
+            prec_expr = "filter_precision" if has_col else "json_extract(detail, '$.filter_precision')"
+            for row in conn.execute(
+                f"SELECT source_id, target_id, {prec_expr} FROM interaction_edges"
+            ):
+                s = self.oid_to_idx.get(row[0])
+                t = self.oid_to_idx.get(row[1])
+                if s is not None and t is not None:
+                    src_list.append(s)
+                    tgt_list.append(t)
+                    exact_list.append(row[2] == "exact")
+            print(f"    Loaded {len(src_list):,} edges from DB ({time.time()-t0:.1f}s)")
+            src = np.array(src_list, dtype=np.int32)
+            tgt = np.array(tgt_list, dtype=np.int32)
+            exact = np.array(exact_list, dtype=np.bool_)
+            del src_list, tgt_list, exact_list
+            try:
+                np.savez(cache_path, src=src, tgt=tgt, exact=exact,
+                         edge_count=np.array(edge_count), card_count=np.array(card_count))
+                print(f"    Cached to {cache_path}")
+            except Exception as e:
+                print(f"    Cache write failed: {e}")
 
         # Build outgoing/incoming adjacency: card_idx → numpy array of unique neighbors
         self._adj_out = self._build_adj_arrays(src, tgt)
