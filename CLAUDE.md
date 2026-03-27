@@ -24,10 +24,12 @@ FORGE-ONLY (--recommend --forge): Zero EDHREC dependency, mechanical synergy
   4. Works for any of 3,141+ commanders (not just 1,361 with EDHREC)
 
 CAUSAL GRAPH (shared by both modes):
-  - 11.5M edges across 30 event types (verb_event_map extracted from Forge Java source)
+  - 17.1M edges across 30 event types (verb_event_map extracted from Forge Java source)
   - SubAbility chains followed: 72k abilities (12.7k from secondary effects)
   - IDF weighting, chain scoring, anti-synergy detection
-  - Synthetic producers for SpellCast, Attacks, LandPlayed
+  - Synthetic edges (6.3M): SpellCast (all non-land spells), Attacks, LandPlayed,
+    ChangesZone+Battlefield (creatures, artifacts, enchantments, planeswalkers entering)
+  - Exact (subtype match, 0.3) and broad (card_type match, 0.15) precision levels
 ```
 
 ### Current Performance
@@ -57,7 +59,7 @@ Average EDHREC alignment: **14.9/30** (up from 2.8/30 baseline, 5.3x improvement
 # === DATA PIPELINE ===
 python3 download_cards.py                  # Refresh Scryfall data (~150MB)
 python3 import_forge.py --download --import  # Update Forge ability data
-python3 build_graph.py --forge --rebuild   # Build causal interaction graph from Forge (~9.2M edges)
+python3 build_graph.py --forge --rebuild   # Build causal interaction graph from Forge (~17M edges)
 python3 build_graph.py --stats             # Graph stats
 python3 strategy_detector.py --populate    # Assign strategies
 python3 fetch_spellbook.py                 # Fetch 82k combos
@@ -101,7 +103,7 @@ Scryfall API → download_cards.py → data/oracle_cards.json (36k cards)
                                         ↓
                     import_forge.py → forge_abilities + forge_name_map tables
                                         ↓
-                    build_graph.py --forge → interaction_edges table (11.5M causal edges, 30 event types)
+                    build_graph.py --forge → interaction_edges table (17.1M causal edges, 30 event types)
                                         ↓
                     strategy_detector.py → card_strategies table
                                         ↓
@@ -136,7 +138,7 @@ python3 train_fusion_model.py                           # 7. Retrain fusion mode
 | card_strategies | ~88k | Strategy assignments |
 | spellbook_combos | ~82k | Commander Spellbook combos |
 | spellbook_combo_cards | ~289k | Combo ↔ card junction |
-| interaction_edges | ~11.5M | Causal edges from Forge: 30 event types (verb_event_map from Java source) |
+| interaction_edges | ~17.1M | Causal edges from Forge: 30 event types + 6.3M synthetic ETB/SpellCast edges |
 | commander_profiles | ~3.4k | Auto-inferred commander archetypes (strategies, tribal, events) |
 | edhrec_card_synergy | ~132k | EDHREC synergy scores for 502 commanders |
 | forge_abilities | ~72k | Raw Forge ability data + SubAbility chain expansions (verb, trigger_mode, cost, raw_line) |
@@ -155,7 +157,7 @@ python3 train_fusion_model.py                           # 7. Retrain fusion mode
   causal scores (directional + event diversity), phase_match, card types, tribal, cmc
 - Zero EDHREC dependency — works for any commander
 - Training: `python3 train_fusion_model.py --forge-tower` then `--forge-only`
-- Feature importance: tower_forge 19%, oracle_similarity 16%, embedding_cosine 16%, cmc 12%
+- Feature importance: tower_forge 19%, embedding_cosine 16%, oracle_similarity 15%, cmc 11%, deck_edge_count 10%
 
 Both towers share architecture: 768→128 projection, MLP 140→128→64→32→1, sigmoid output
 
