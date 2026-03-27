@@ -18,8 +18,9 @@ BASELINE (--recommend): EDHREC-trained, optimized for known commanders
 
 FORGE-ONLY (--recommend --forge): Zero EDHREC dependency, mechanical synergy
   1. Color-identity filter → all legal cards scored directly by GBM (no tower pre-filter)
-  2. Forge LambdaRank GBM: 38 features with 10-grade synergy relevance labels
-     100% Forge-native: no oracle text, no embeddings, no neural network
+  2. Forge LambdaRank GBM: 38 features, self-supervised training
+     100% Forge-native: no oracle text, no embeddings, no neural network, no EDHREC
+     Trained on 3,237 commanders using causal graph graded labels (not EDHREC)
      Top features: strategy_cosine 12%, card_hub_score 12%, deck_edge_count 10%,
      cmc 9%, forge_ability_cosine 9%, forge_ability_depth 6%
   3. Forge mechanics vectors: 107-dim shared concept space encoding ALL mechanical
@@ -170,7 +171,8 @@ python3 train_fusion_model.py                           # 7. Retrain fusion mode
 - Mechanics vectors (`mtg_synergy/recommend/mechanics_vectors.py`): 107-dim shared
   concept space (27 game concepts + 80 subtypes). Effects and triggers map to same
   dimensions. Dot product = mechanical synergy score.
-- EDHREC-free features, trained on EDHREC deck membership with 10-grade synergy labels
+- Self-supervised: trained on causal graph edge grades (strength, diversity, precision)
+  across 3,237 commanders — zero EDHREC dependency in training or inference
 - Training: `python3 train_fusion_model.py --forge-only --rebuild-features`
 - Feature importance: strategy_cosine 12%, card_hub_score 12%, deck_edge_count 10%,
   cmc 9%, forge_ability_cosine 9%, forge_ability_depth 6%, forge_mech_fwd 4%
