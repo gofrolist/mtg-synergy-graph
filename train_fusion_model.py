@@ -70,14 +70,21 @@ FORGE_FEATURE_NAMES = [
     "causal_composite",      # [22] combined causal signal (strength × events × exact)
     "card_hub_score",        # [23] total unique causal neighbors (connectedness)
     "deck_exact_count",      # [24] absolute count of exact-precision deck connections
-    "text_mentions_cmdr_type",  # [25] card oracle mentions commander's creature type
-    "cmdr_text_mentions_card_type",  # [26] commander oracle mentions card's type
-    "shared_keyword_count",  # [27] MTG keywords shared between card and commander
+    "forge_type_synergy",    # [25] card's Forge trigger_filter/target references cmdr's creature type
+    "cmdr_forge_type_match", # [26] commander's Forge trigger_filter/target references card's type
+    "shared_forge_mechanics", # [27] shared Forge verbs/trigger_modes/keywords count
     "cmdr_keyword_match",   # [28] commander-specific oracle keywords found in card text
-    "anti_tribal_text",     # [29] card says "non-[commander_type]" — anti-synergy
-    "mechanic_match",       # [30] card produces commander's specific mechanic
+    "forge_anti_tribal",    # [29] card's Forge trigger_filter requires conflicting creature subtype
+    "forge_verb_alignment", # [30] card's verbs produce events that commander's triggers consume
     "forge_mech_fwd",       # [31] card produces what commander consumes (mechanics vector dot)
     "forge_mech_rev",       # [32] commander produces what card consumes (mechanics vector dot)
+    "counter_type_match",   # [33] card uses same counter type as commander
+    "ability_type_ratio_T", # [34] fraction of card's abilities that are Triggered
+    "ability_type_ratio_A", # [35] fraction of card's abilities that are Activated
+    "zone_alignment",       # [36] card's trigger zones match commander's zones
+    "target_alignment",     # [37] card targets what commander produces
+    "forge_keyword_synergy", # [38] card keywords synergize with cmdr mechanics
+    "activated_ability_count", # [39] number of activated abilities
 ]
 
 def sigmoid(x):

@@ -1,6 +1,6 @@
 """Shared forge feature computation for training and inference.
 
-Extracts the 22-feature forge GBM feature vector computation into a
+Extracts the 40-feature forge GBM feature vector computation into a
 single module used by both train_fusion_model.py and scoring.py.
 """
 import math
@@ -9,6 +9,8 @@ import time
 from collections import Counter
 
 import numpy as np
+
+from mtg_synergy.recommend.mechanics_vectors import _concept_idx
 
 
 # Phase timing: position in the turn cycle (0=start, 1=end).
@@ -130,6 +132,54 @@ class ForgeFeatureContext:
                     main = part.split(".")[0].strip()
                     if main and main != "Card" and main[0].isupper():
                         p['trigger_filters'].add(main.lower())
+
+        # Pre-load trigger zones per card (for F36)
+        self._card_zones = {}
+        for row in conn.execute(
+            "SELECT fnm.oracle_id, fa.trigger_zones FROM forge_abilities fa "
+            "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+            "WHERE fa.trigger_zones IS NOT NULL"
+        ):
+            oid, zones = row
+            zset = self._card_zones.setdefault(oid, set())
+            for z in zones.split(","):
+                z = z.strip()
+                if z:
+                    zset.add(z)
+
+        # Pre-load activated ability counts per card (for F39)
+        self._activated_counts = {}
+        for row in conn.execute(
+            "SELECT fnm.oracle_id, COUNT(*) FROM forge_abilities fa "
+            "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+            "WHERE fa.ability_type = 'A' "
+            "GROUP BY fnm.oracle_id"
+        ):
+            self._activated_counts[row[0]] = row[1]
+
+        # Verb→trigger alignment mapping for F30
+        self._verb_triggers = {
+            "Token": {"ChangesZone", "ChangesZoneAll", "TokenCreated"},
+            "ChangeZone": {"ChangesZone", "ChangesZoneAll"},
+            "ChangeZoneAll": {"ChangesZone", "ChangesZoneAll"},
+            "DealDamage": {"DamageDone", "DamageDoneOnce", "LifeLost"},
+            "DamageAll": {"DamageDone", "DamageDoneOnce"},
+            "Draw": {"Drawn"},
+            "Dig": {"Drawn"},
+            "PutCounter": {"CounterAdded", "CounterAddedOnce"},
+            "Proliferate": {"CounterAdded", "CounterAddedOnce"},
+            "GainLife": {"LifeGained"},
+            "LoseLife": {"LifeLost"},
+            "Destroy": {"ChangesZone"},
+            "DestroyAll": {"ChangesZone"},
+            "Sacrifice": {"Sacrificed", "ChangesZone"},
+            "Discard": {"Discarded"},
+            "Mill": {"Milled", "ChangesZone"},
+            "Tap": {"Taps", "TapsForMana"},
+            "Untap": {"Untaps"},
+            "Counter": {"SpellCast"},
+            "Mana": {"TapsForMana"},
+        }
 
         # Forge mechanics vectors: encode each card's full mechanical profile
         from mtg_synergy.recommend.mechanics_vectors import build_mechanics_vectors
@@ -261,6 +311,14 @@ class CmdrFeatureContext:
         # Commander mechanics vectors
         self.cmdr_produces = ctx._mech_produces.get(cmdr_oid)
         self.cmdr_consumes = ctx._mech_consumes.get(cmdr_oid)
+
+        # Commander zones and profile for new features F33-F39
+        self.cmdr_zones = ctx._card_zones.get(cmdr_oid, set())
+        self.cmdr_profile = ctx._forge_profiles.get(cmdr_oid, {
+            'verbs': set(), 'triggers': set(), 'keywords': set(),
+            'counter_types': set(), 'targets': set(), 'ability_types': set(),
+            'trigger_filters': set(),
+        })
 
         # Commander-specific keywords: top TF-IDF words from commander oracle
         cmdr_oracle = ctx._card_oracle.get(cmdr_oid, "")
@@ -456,9 +514,9 @@ class CmdrFeatureContext:
 def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
                           tower_prob: float,
                           ctx: ForgeFeatureContext, cmdr: CmdrFeatureContext) -> list:
-    """Compute the 25-feature vector for a single (commander, card) pair.
+    """Compute the 40-feature vector for a single (commander, card) pair.
 
-    Returns a list of 25 floats matching FORGE_FEATURE_NAMES order.
+    Returns a list of 40 floats matching FORGE_FEATURE_NAMES order.
     """
     out_s = cmdr.cmdr_out.get(card_oid, 0.0)
     in_s = cmdr.cmdr_in.get(card_oid, 0.0)
@@ -536,44 +594,51 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
     # F24: deck_exact_edge_count — absolute count of exact-precision deck connections
     deck_exact_abs = float(min(n_exact, 20))
 
-    # F25: text_mentions_cmdr_type — card oracle mentions commander's creature type
-    # Captures "Whenever you tap a Goblin" for Krenko, "each Vampire" for Edgar, etc.
+    # F25: forge_type_synergy — card's Forge trigger_filter or target references
+    # commander's creature subtypes. Replaces oracle text substring matching.
     card_oracle = ctx._card_oracle.get(card_oid, "")
-    cmdr_type_mentions = 0.0
-    if cmdr.cmdr_subtypes and card_oracle:
+    card_profile = ctx._forge_profiles.get(card_oid, {})
+    card_trigger_types = card_profile.get('trigger_filters', set())
+    card_targets = card_profile.get('targets', set())
+    forge_type_syn = 0.0
+    if cmdr.cmdr_subtypes:
         for subtype in cmdr.cmdr_subtypes:
-            if subtype in card_oracle:
-                cmdr_type_mentions += 1.0
+            if subtype in card_trigger_types:
+                forge_type_syn += 1.0
+            if subtype.title() in card_targets:
+                forge_type_syn += 0.5
 
-    # F26: cmdr_text_mentions_card_type — commander oracle mentions card's types
-    # Captures Sram's "Aura, Equipment, or Vehicle" for equipment/aura cards
+    # F26: cmdr_forge_type_match — commander's Forge trigger_filter or target
+    # references card's subtypes.
     cmdr_oracle = ctx._card_oracle.get(cmdr.cmdr_oid, "")
-    card_type_in_cmdr = 0.0
-    if cmdr_oracle and "\u2014" in tl:
+    cmdr_profile = ctx._forge_profiles.get(cmdr.cmdr_oid, {})
+    cmdr_trigger_types = cmdr_profile.get('trigger_filters', set())
+    cmdr_targets = cmdr_profile.get('targets', set())
+    cmdr_type_match = 0.0
+    if "\u2014" in tl:
         try:
             card_subs = {s.lower() for s in tl.split("\u2014")[1].strip().split()}
             for sub in card_subs:
-                if len(sub) >= 3 and sub in cmdr_oracle:
-                    card_type_in_cmdr += 1.0
+                if sub in cmdr_trigger_types:
+                    cmdr_type_match += 1.0
+                if sub.title() in cmdr_targets:
+                    cmdr_type_match += 0.5
         except (IndexError, AttributeError):
             pass
-    # Also check card type categories mentioned in commander text
-    for ctype in ["creature", "artifact", "enchantment", "instant", "sorcery",
-                  "equipment", "aura", "vehicle", "planeswalker"]:
-        if ctype in tl.lower() and ctype in cmdr_oracle:
-            card_type_in_cmdr += 0.5
+    for ctype in ["Creature", "Artifact", "Enchantment", "Instant", "Sorcery",
+                  "Equipment", "Aura", "Vehicle", "Planeswalker"]:
+        if ctype in tl and ctype.lower() in cmdr_trigger_types:
+            cmdr_type_match += 0.5
 
-    # F27: shared_keyword_count — count of specific MTG keywords shared
-    # between commander and card oracle texts
-    shared_kw = 0.0
-    if card_oracle and cmdr_oracle:
-        for kw in ["token", "counter", "sacrifice", "draw", "damage", "life",
-                   "graveyard", "exile", "destroy", "discard", "mill",
-                   "flying", "trample", "haste", "deathtouch", "lifelink",
-                   "enter", "die", "attack", "block", "tap", "untap",
-                   "mana", "cast", "copy", "proliferate", "transform"]:
-            if kw in card_oracle and kw in cmdr_oracle:
-                shared_kw += 1.0
+    # F27: shared_forge_mechanics — count of shared Forge verbs, trigger_modes,
+    # and keywords between commander and card.
+    cmdr_mechs = (cmdr_profile.get('verbs', set()) |
+                  cmdr_profile.get('triggers', set()) |
+                  cmdr_profile.get('keywords', set()))
+    card_mechs = (card_profile.get('verbs', set()) |
+                  card_profile.get('triggers', set()) |
+                  card_profile.get('keywords', set()))
+    shared_forge = float(len(cmdr_mechs & card_mechs))
 
     # F28: cmdr_keyword_match — how many commander-specific keywords appear in card text
     cmdr_kw_match = 0.0
@@ -581,47 +646,30 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         card_words = set(re.findall(r"[a-z]{3,}", card_oracle))
         cmdr_kw_match = float(len(cmdr.cmdr_keywords & card_words))
 
-    # F29: anti_tribal_text — card has tribal restrictions that conflict with deck
-    # Catches: "non-Human", "whenever you cast a Knight spell" in a Human deck
+    # F29: forge_anti_tribal — card's Forge trigger_filter requires a creature
+    # subtype that conflicts with the commander's type.
     anti_tribal = 0.0
-    if cmdr.cmdr_subtypes and card_oracle:
-        for subtype in cmdr.cmdr_subtypes:
-            if f"non-{subtype}" in card_oracle or f"non{subtype}" in card_oracle:
-                anti_tribal = 1.0
-                break
-        # Check if card's trigger condition requires a DIFFERENT type
-        # e.g., "whenever you cast a Knight spell" in a Human deck
-        trigger_patterns = re.findall(
-            r"whenever you cast (?:a|an) (\w+) spell", card_oracle)
-        trigger_patterns += re.findall(
-            r"whenever (?:a|an|another) (\w+) (?:enters|dies|attacks)", card_oracle)
-        for trigger_type in trigger_patterns:
-            trigger_type = trigger_type.lower()
-            # If trigger requires a specific creature type and it's NOT our type
-            if (len(trigger_type) > 2 and trigger_type not in cmdr.cmdr_subtypes
-                    and trigger_type not in {"creature", "permanent", "nontoken",
-                                             "token", "artifact", "enchantment",
-                                             "land", "spell", "card"}):
+    if cmdr.cmdr_subtypes and card_trigger_types:
+        generic_types = {"card", "creature", "permanent", "nontoken",
+                        "token", "artifact", "enchantment", "land",
+                        "spell", "self", "other", "any"}
+        for tf in card_trigger_types:
+            if tf not in generic_types and tf not in cmdr.cmdr_subtypes:
                 anti_tribal = 1.0
                 break
 
-    # F30: mechanic_match — does card produce the commander's SPECIFIC mechanic?
-    # Distinguishes "+1/+1 counter" from "gets +1/+1 until end of turn"
-    mech_match = 0.0
-    if cmdr_oracle and card_oracle:
-        # Extract key mechanic phrases from commander text (plain string match)
-        cmdr_mechs = set()
-        for phrase in ["+1/+1 counter", "token", "draw a card", "lose life",
-                       "gain life", "deals damage", "mill", "exile",
-                       "destroy", "sacrifice", "discard", "proliferate",
-                       "enters the battlefield", "dies", "graveyard",
-                       "counter target"]:
-            if phrase in cmdr_oracle:
-                cmdr_mechs.add(phrase)
-        if cmdr_mechs:
-            for phrase in cmdr_mechs:
-                if phrase in card_oracle:
-                    mech_match += 1.0
+    # F30: forge_verb_alignment — card's verbs → cmdr triggers + cmdr verbs → card triggers
+    verb_align = 0.0
+    card_verbs = card_profile.get('verbs', set())
+    card_trigs = card_profile.get('triggers', set())
+    cmdr_trigs = cmdr_profile.get('triggers', set())
+    cmdr_verbs = cmdr_profile.get('verbs', set())
+    for v in card_verbs:
+        matching_trigs = ctx._verb_triggers.get(v, set())
+        verb_align += len(matching_trigs & cmdr_trigs)
+    for v in cmdr_verbs:
+        matching_trigs = ctx._verb_triggers.get(v, set())
+        verb_align += len(matching_trigs & card_trigs)
 
     # F31: forge_mech_synergy — does this card PRODUCE what the commander CONSUMES?
     # Captures ALL mechanical interactions at once via dense vector dot product
@@ -633,6 +681,60 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         mech_fwd = float(np.dot(cmdr.cmdr_consumes, card_prod))
     if cmdr.cmdr_produces is not None and card_cons is not None:
         mech_rev = float(np.dot(cmdr.cmdr_produces, card_cons))
+
+    # F33: counter_type_match — card uses same counter type as commander
+    cmdr_counters = cmdr.cmdr_profile.get('counter_types', set())
+    card_counters = card_profile.get('counter_types', set())
+    counter_match = float(len(cmdr_counters & card_counters)) if cmdr_counters and card_counters else 0.0
+
+    # F34: ability_type_ratio_T — card has Triggered abilities
+    card_atypes = card_profile.get('ability_types', set())
+    ratio_T = 1.0 if 'T' in card_atypes else 0.0
+
+    # F35: ability_type_ratio_A — card has Activated abilities
+    ratio_A = 1.0 if 'A' in card_atypes else 0.0
+
+    # F36: zone_alignment — shared trigger zones between card and commander
+    card_zones = ctx._card_zones.get(card_oid, set())
+    zone_align = float(len(cmdr.cmdr_zones & card_zones)) if cmdr.cmdr_zones and card_zones else 0.0
+
+    # F37: target_alignment — card targets what the commander produces
+    cmdr_prod_types = set()
+    if cmdr.cmdr_produces is not None:
+        for concept, target_type in [("creature_enters", "Creature"),
+                                      ("artifact_enters", "Artifact"),
+                                      ("enchantment_enters", "Enchantment"),
+                                      ("token_created", "Creature"),
+                                      ("counter_added", "Creature")]:
+            idx = _concept_idx.get(concept)
+            if idx is not None and cmdr.cmdr_produces[idx] > 0:
+                cmdr_prod_types.add(target_type)
+    card_tgts = card_profile.get('targets', set())
+    target_align = float(len(cmdr_prod_types & card_tgts)) if cmdr_prod_types and card_tgts else 0.0
+
+    # F38: forge_keyword_synergy — card keywords that synergize with cmdr's mechanics
+    card_kws = card_profile.get('keywords', set())
+    cmdr_filter_kws = cmdr.cmdr_profile.get('trigger_filters', set())
+    kw_syn = 0.0
+    kw_to_filter = {
+        "Flying": "flying", "Trample": "trample", "Haste": "haste",
+        "Deathtouch": "deathtouch", "Lifelink": "lifelink", "Menace": "menace",
+        "First Strike": "firststrike", "Double Strike": "doublestrike",
+        "Hexproof": "hexproof", "Indestructible": "indestructible",
+        "Vigilance": "vigilance", "Reach": "reach",
+    }
+    for kw in card_kws:
+        filter_form = kw_to_filter.get(kw, kw.lower().replace(" ", ""))
+        if any(filter_form in f for f in cmdr_filter_kws):
+            kw_syn += 1.0
+    if cmdr.cmdr_produces is not None:
+        creature_idx = _concept_idx.get("creature_enters")
+        if creature_idx is not None and cmdr.cmdr_produces[creature_idx] > 0:
+            combat_kws = {"Flying", "Trample", "Haste", "Menace", "Double Strike", "First Strike"}
+            kw_syn += float(len(card_kws & combat_kws)) * 0.3
+
+    # F39: activated_ability_count
+    activated_count = float(min(ctx._activated_counts.get(card_oid, 0), 5))
 
     return [
         f0,                                              # F0 tower_forge
@@ -660,12 +762,19 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         causal_composite,                                # F22 causal_composite
         hub,                                             # F23 card_hub_score
         deck_exact_abs,                                  # F24 deck_exact_count
-        cmdr_type_mentions,                              # F25 text_mentions_cmdr_type
-        card_type_in_cmdr,                               # F26 cmdr_text_mentions_card_type
-        shared_kw,                                       # F27 shared_keyword_count
+        forge_type_syn,                                  # F25 forge_type_synergy
+        cmdr_type_match,                                 # F26 cmdr_forge_type_match
+        shared_forge,                                    # F27 shared_forge_mechanics
         cmdr_kw_match,                                   # F28 cmdr_keyword_match
-        anti_tribal,                                     # F29 anti_tribal_text
-        mech_match,                                      # F30 mechanic_match
+        anti_tribal,                                     # F29 forge_anti_tribal
+        verb_align,                                      # F30 forge_verb_alignment
         mech_fwd,                                        # F31 forge_mech_synergy_fwd
         mech_rev,                                        # F32 forge_mech_synergy_rev
+        counter_match,                                   # F33 counter_type_match
+        ratio_T,                                         # F34 ability_type_ratio_T
+        ratio_A,                                         # F35 ability_type_ratio_A
+        zone_align,                                      # F36 zone_alignment
+        target_align,                                    # F37 target_alignment
+        kw_syn,                                          # F38 forge_keyword_synergy
+        activated_count,                                 # F39 activated_ability_count
     ]

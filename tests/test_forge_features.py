@@ -1,4 +1,4 @@
-"""Tests for ForgeFeatureContext forge ability profiles."""
+"""Tests for ForgeFeatureContext forge ability profiles and Forge-native features."""
 
 import os
 import sqlite3
@@ -7,6 +7,9 @@ import numpy as np
 import pytest
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "tags.db")
+
+# Well-known oracle_ids for test cards
+KRENKO_OID = "68418069-f615-40ef-ae0d-764192acae00"  # Krenko, Mob Boss (Goblin)
 
 
 def _make_ctx():
@@ -58,7 +61,7 @@ def test_forge_profile_krenko():
     ctx, conn = _make_ctx()
     try:
         # Krenko, Mob Boss oracle_id
-        krenko_oid = "68418069-f615-40ef-ae0d-764192acae00"
+        krenko_oid = KRENKO_OID
         assert krenko_oid in ctx._forge_profiles, (
             "Krenko Mob Boss not found in forge profiles"
         )
@@ -72,3 +75,327 @@ def test_forge_profile_krenko():
         )
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Tests for Forge-native features F25-F30
+# ---------------------------------------------------------------------------
+
+def _make_cmdr(ctx, cmdr_oid, subtypes=None):
+    """Build a minimal CmdrFeatureContext for testing."""
+    from mtg_synergy.recommend.forge_features import CmdrFeatureContext
+    cmdr = CmdrFeatureContext(ctx, cmdr_oid, set())
+    if subtypes is not None:
+        cmdr.cmdr_subtypes = subtypes
+    return cmdr
+
+
+def _find_oid_by_name(conn, name):
+    """Look up oracle_id by exact card name."""
+    row = conn.execute(
+        "SELECT oracle_id FROM cards WHERE name = ?", (name,)
+    ).fetchone()
+    return row[0] if row else None
+
+
+def _compute_features(ctx, cmdr, card_oid, conn):
+    """Compute forge feature vector for a single card."""
+    from mtg_synergy.recommend.forge_features import compute_card_features
+    row = conn.execute(
+        "SELECT type_line, cmc FROM cards WHERE oracle_id = ?", (card_oid,)
+    ).fetchone()
+    tl = row[0] if row else ""
+    cmc = row[1] if row else 0.0
+    return compute_card_features(card_oid, tl, cmc, 0.0, ctx, cmdr)
+
+
+class TestF25ForgeTypeSynergy:
+    """F25: card's Forge trigger_filter/target references commander's creature subtypes."""
+
+    def test_goblin_trigger_for_goblin_commander(self):
+        """A card with Goblin trigger_filter should get >0 for a Goblin commander."""
+        ctx, conn = _make_ctx()
+        try:
+            cmdr = _make_cmdr(ctx, KRENKO_OID, subtypes={"goblin"})
+            # Find a card that references goblins in its trigger_filters
+            found_oid = None
+            for oid, profile in ctx._forge_profiles.items():
+                if "goblin" in profile.get("trigger_filters", set()):
+                    found_oid = oid
+                    break
+            if found_oid is None:
+                pytest.skip("No card with 'goblin' trigger_filter found in DB")
+            features = _compute_features(ctx, cmdr, found_oid, conn)
+            assert features[25] > 0.0, (
+                f"F25 should be >0 for a goblin-triggering card with Goblin commander, got {features[25]}"
+            )
+        finally:
+            conn.close()
+
+    def test_no_match_for_unrelated_type(self):
+        """A card without goblin references should get 0 for a Goblin commander."""
+        ctx, conn = _make_ctx()
+        try:
+            cmdr = _make_cmdr(ctx, KRENKO_OID, subtypes={"goblin"})
+            # Find a card that has trigger_filters but NOT goblin
+            found_oid = None
+            for oid, profile in ctx._forge_profiles.items():
+                tfs = profile.get("trigger_filters", set())
+                if tfs and "goblin" not in tfs:
+                    # Also check targets don't have Goblin
+                    targets = profile.get("targets", set())
+                    if "Goblin" not in targets:
+                        found_oid = oid
+                        break
+            if found_oid is None:
+                pytest.skip("No card with non-goblin trigger_filter found")
+            features = _compute_features(ctx, cmdr, found_oid, conn)
+            assert features[25] == 0.0, (
+                f"F25 should be 0 for non-goblin card with Goblin commander, got {features[25]}"
+            )
+        finally:
+            conn.close()
+
+
+class TestF26CmdrForgeTypeMatch:
+    """F26: commander's Forge trigger_filter/target references card's subtypes."""
+
+    def test_human_commander_human_card(self):
+        """Commander with Human trigger_filter → Human creature card gets >0."""
+        ctx, conn = _make_ctx()
+        try:
+            # Find a commander with 'human' in trigger_filters
+            cmdr_oid = None
+            for oid, profile in ctx._forge_profiles.items():
+                if "human" in profile.get("trigger_filters", set()):
+                    cmdr_oid = oid
+                    break
+            if cmdr_oid is None:
+                pytest.skip("No commander with 'human' trigger_filter found")
+            cmdr = _make_cmdr(ctx, cmdr_oid)
+            # Find a Human creature card
+            row = conn.execute(
+                "SELECT oracle_id FROM cards WHERE type_line LIKE '%Creature%' "
+                "AND type_line LIKE '%Human%' LIMIT 1"
+            ).fetchone()
+            if row is None:
+                pytest.skip("No Human creature card found")
+            features = _compute_features(ctx, cmdr, row[0], conn)
+            assert features[26] > 0.0, (
+                f"F26 should be >0 for Human card with Human-trigger commander, got {features[26]}"
+            )
+        finally:
+            conn.close()
+
+
+class TestF27SharedForgeMechanics:
+    """F27: count of shared Forge verbs, trigger_modes, and keywords."""
+
+    def test_shared_token_verb(self):
+        """Two cards sharing Token verb should get >0."""
+        ctx, conn = _make_ctx()
+        try:
+            # Find two cards that both have Token verb
+            token_cards = []
+            for oid, profile in ctx._forge_profiles.items():
+                if "Token" in profile.get("verbs", set()):
+                    token_cards.append(oid)
+                    if len(token_cards) >= 2:
+                        break
+            if len(token_cards) < 2:
+                pytest.skip("Need at least 2 cards with Token verb")
+            cmdr = _make_cmdr(ctx, token_cards[0])
+            features = _compute_features(ctx, cmdr, token_cards[1], conn)
+            assert features[27] > 0.0, (
+                f"F27 should be >0 for two cards sharing Token verb, got {features[27]}"
+            )
+        finally:
+            conn.close()
+
+
+class TestF29ForgeAntiTribal:
+    """F29: card's Forge trigger_filter requires conflicting creature subtype."""
+
+    def test_spirit_trigger_in_goblin_deck(self):
+        """A Spirit-triggering card in a Goblin deck should get >0 anti-tribal."""
+        ctx, conn = _make_ctx()
+        try:
+            cmdr = _make_cmdr(ctx, KRENKO_OID, subtypes={"goblin"})
+            # Find a card with a specific non-generic, non-goblin trigger_filter
+            generic = {"card", "creature", "permanent", "nontoken",
+                       "token", "artifact", "enchantment", "land",
+                       "spell", "self", "other", "any"}
+            found_oid = None
+            for oid, profile in ctx._forge_profiles.items():
+                tfs = profile.get("trigger_filters", set())
+                conflicting = tfs - generic - {"goblin"}
+                if conflicting:
+                    found_oid = oid
+                    break
+            if found_oid is None:
+                pytest.skip("No card with conflicting tribal trigger_filter found")
+            features = _compute_features(ctx, cmdr, found_oid, conn)
+            assert features[29] > 0.0, (
+                f"F29 should be >0 for conflicting-tribal card in Goblin deck, got {features[29]}"
+            )
+        finally:
+            conn.close()
+
+    def test_goblin_card_not_anti_tribal(self):
+        """A Goblin-triggering card should NOT be anti-tribal in a Goblin deck."""
+        ctx, conn = _make_ctx()
+        try:
+            cmdr = _make_cmdr(ctx, KRENKO_OID, subtypes={"goblin"})
+            # Find a card with ONLY goblin and/or generic trigger_filters
+            generic = {"card", "creature", "permanent", "nontoken",
+                       "token", "artifact", "enchantment", "land",
+                       "spell", "self", "other", "any"}
+            found_oid = None
+            for oid, profile in ctx._forge_profiles.items():
+                tfs = profile.get("trigger_filters", set())
+                if "goblin" in tfs and not (tfs - generic - {"goblin"}):
+                    found_oid = oid
+                    break
+            if found_oid is None:
+                pytest.skip("No card with goblin-only trigger_filter found")
+            features = _compute_features(ctx, cmdr, found_oid, conn)
+            assert features[29] == 0.0, (
+                f"F29 should be 0 for goblin card in Goblin deck, got {features[29]}"
+            )
+        finally:
+            conn.close()
+
+
+class TestF30ForgeVerbAlignment:
+    """F30: card's verbs produce events that commander's triggers consume."""
+
+    def test_token_creator_changeszone_trigger(self):
+        """Token-creating card + ChangesZone-triggering commander gets >0."""
+        ctx, conn = _make_ctx()
+        try:
+            # Find a commander with ChangesZone trigger
+            cmdr_oid = None
+            for oid, profile in ctx._forge_profiles.items():
+                if "ChangesZone" in profile.get("triggers", set()):
+                    cmdr_oid = oid
+                    break
+            if cmdr_oid is None:
+                pytest.skip("No commander with ChangesZone trigger found")
+            cmdr = _make_cmdr(ctx, cmdr_oid)
+            # Find a card with Token verb (Token → ChangesZone mapping)
+            token_oid = None
+            for oid, profile in ctx._forge_profiles.items():
+                if "Token" in profile.get("verbs", set()) and oid != cmdr_oid:
+                    token_oid = oid
+                    break
+            if token_oid is None:
+                pytest.skip("No card with Token verb found")
+            features = _compute_features(ctx, cmdr, token_oid, conn)
+            assert features[30] > 0.0, (
+                f"F30 should be >0 for Token card + ChangesZone commander, got {features[30]}"
+            )
+        finally:
+            conn.close()
+
+    def test_no_alignment_when_no_verb_match(self):
+        """Cards with no verb→trigger alignment should get 0."""
+        ctx, conn = _make_ctx()
+        try:
+            # Find a commander with no triggers at all
+            cmdr_oid = None
+            for oid, profile in ctx._forge_profiles.items():
+                if not profile.get("triggers", set()) and not profile.get("verbs", set()):
+                    cmdr_oid = oid
+                    break
+            if cmdr_oid is None:
+                pytest.skip("No commander with empty triggers and verbs found")
+            cmdr = _make_cmdr(ctx, cmdr_oid)
+            # Any card — with no commander triggers/verbs, alignment must be 0
+            card_oid = None
+            for oid in ctx._forge_profiles:
+                if oid != cmdr_oid:
+                    card_oid = oid
+                    break
+            if card_oid is None:
+                pytest.skip("No other card found")
+            features = _compute_features(ctx, cmdr, card_oid, conn)
+            assert features[30] == 0.0, (
+                f"F30 should be 0 when commander has no triggers/verbs, got {features[30]}"
+            )
+        finally:
+            conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Tests for new features F33-F39
+# ---------------------------------------------------------------------------
+
+KYLER_OID = "726cd041-5d0b-436c-bced-9335f56c0b0d"  # Kyler, Sigardian Emissary
+
+
+class TestF33CounterTypeMatch:
+    """F33: card uses same counter type as commander."""
+
+    def test_p1p1_counter_match_with_kyler(self):
+        """Kyler (P1P1 counters) + another P1P1 card → >0."""
+        ctx, conn = _make_ctx()
+        try:
+            cmdr = _make_cmdr(ctx, KYLER_OID, subtypes={"human"})
+            # Find a card with P1P1 counter_type that isn't Kyler
+            found_oid = None
+            for oid, profile in ctx._forge_profiles.items():
+                if "P1P1" in profile.get("counter_types", set()) and oid != KYLER_OID:
+                    found_oid = oid
+                    break
+            if found_oid is None:
+                pytest.skip("No card with P1P1 counter_type found")
+            features = _compute_features(ctx, cmdr, found_oid, conn)
+            assert features[33] > 0.0, (
+                f"F33 should be >0 for P1P1 card with Kyler, got {features[33]}"
+            )
+        finally:
+            conn.close()
+
+    def test_no_counter_match(self):
+        """Card without matching counter type → 0."""
+        ctx, conn = _make_ctx()
+        try:
+            cmdr = _make_cmdr(ctx, KYLER_OID, subtypes={"human"})
+            # Find a card with no counter_types at all
+            found_oid = None
+            for oid, profile in ctx._forge_profiles.items():
+                if not profile.get("counter_types", set()) and oid != KYLER_OID:
+                    found_oid = oid
+                    break
+            if found_oid is None:
+                pytest.skip("No card without counter_types found")
+            features = _compute_features(ctx, cmdr, found_oid, conn)
+            assert features[33] == 0.0, (
+                f"F33 should be 0 for card without counters, got {features[33]}"
+            )
+        finally:
+            conn.close()
+
+
+class TestFeatureCount:
+    """Verify compute_card_features returns exactly 40 elements."""
+
+    def test_feature_count_is_40(self):
+        """Feature vector length should be 40."""
+        ctx, conn = _make_ctx()
+        try:
+            cmdr = _make_cmdr(ctx, KRENKO_OID, subtypes={"goblin"})
+            # Pick any card
+            found_oid = None
+            for oid in ctx._forge_profiles:
+                if oid != KRENKO_OID:
+                    found_oid = oid
+                    break
+            if found_oid is None:
+                pytest.skip("No card found for feature count test")
+            features = _compute_features(ctx, cmdr, found_oid, conn)
+            assert len(features) == 40, (
+                f"Expected 40 features, got {len(features)}"
+            )
+        finally:
+            conn.close()
