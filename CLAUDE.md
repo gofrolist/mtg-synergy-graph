@@ -19,16 +19,15 @@ BASELINE (--recommend): EDHREC-trained, optimized for known commanders
 FORGE-ONLY (--recommend --forge): Zero EDHREC dependency, mechanical synergy
   1. ALL color-legal cards scored (no tower pre-filter cutoff)
   2. Forge LambdaRank GBM: 40 features with 10-grade synergy relevance labels
-     Forge-native: all features derived from Forge structured data except
-     F9 (TF-IDF semantic similarity) and F28 (cmdr keyword overlap)
-     Top features: embedding_cosine 17%, oracle_similarity 17%, card_hub_score 9%,
-     strategy_cosine 8%, deck_edge_count 7%, cmc 6%, forge_mech_fwd/rev 5% combined
+     100% Forge-native: zero oracle text parsing in feature pipeline
+     Top features: embedding_cosine 20%, strategy_cosine 10%, card_hub_score 10%,
+     deck_edge_count 8%, cmc 8%, forge_ability_cosine 6%, forge_ability_depth 6%
   3. Forge mechanics vectors: 107-dim shared concept space encoding ALL mechanical
      interactions (27 game concepts + 80 subtypes). Captures synergy through
      card produces → commander consumes dot product.
   4. Can evaluate new cards day-1 without playtesting data
   5. Works for any of 3,141+ commanders (not just 1,361 with EDHREC)
-  6. NDCG@30 = 0.55 on leave-commander-out CV
+  6. NDCG@30 = 0.53 on leave-commander-out CV
 
 CAUSAL GRAPH (shared by both modes):
   - 18.4M edges across 30+ event types (verb_event_map extracted from Forge Java source)
@@ -171,14 +170,14 @@ python3 train_fusion_model.py                           # 7. Retrain fusion mode
   forge_mech_fwd, forge_mech_rev,
   counter_type_match, ability_type_ratio_T/A, zone_alignment,
   target_alignment, forge_keyword_synergy, activated_ability_count
-- Only 2 features still use oracle text: F9 (TF-IDF similarity) and F28 (cmdr keywords)
+- 100% Forge-native: zero oracle text parsing in feature pipeline
 - Mechanics vectors (`mtg_synergy/recommend/mechanics_vectors.py`): 107-dim shared
   concept space (27 game concepts + 80 subtypes). Effects and triggers map to same
-  dimensions. Dot product = mechanical synergy score. No oracle text fallback.
+  dimensions. Dot product = mechanical synergy score.
 - EDHREC-free features, trained on EDHREC deck membership with 10-grade synergy labels
 - Training: `python3 train_fusion_model.py --forge-tower` then `--forge-only`
-- Feature importance: embedding_cosine 17%, oracle_similarity 17%, card_hub_score 9%,
-  strategy_cosine 8%, deck_edge_count 7%, cmc 6%, cmdr_keyword_match 4%,
+- Feature importance: embedding_cosine 20%, strategy_cosine 10%, card_hub_score 10%,
+  deck_edge_count 8%, cmc 8%, forge_ability_cosine 6%, forge_ability_depth 6%,
   forge_mech_fwd 3%, forge_mech_rev 3%, activated_ability_count 2%
 - Fast iteration: `--forge-only` uses cached features (~50s); `--rebuild-features` (~2 min)
 - Edge index pre-loaded: CmdrFeatureContext uses in-memory adjacency (6.8ms vs 549ms)
