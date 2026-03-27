@@ -426,8 +426,11 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
     """
     import warnings
     import joblib
-    import re as _re
-    from collections import Counter as _Counter
+    import numpy as np
+    from train_tower_model import load_embeddings
+    from mtg_synergy.recommend.forge_features import (
+        ForgeFeatureContext, CmdrFeatureContext, compute_card_features,
+    )
 
     forge_gbm_path = os.path.join(DATA_DIR, "fusion_model_forge.lgb")
     if not os.path.exists(forge_gbm_path):
@@ -460,163 +463,24 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
             cmdr_oid = c.get("oracle_id", "")
             break
 
-    # Load embeddings for cosine
-    import numpy as np
-    from train_tower_model import load_embeddings
+    # Load embeddings and build shared context
     normed_emb, _, oid_to_idx = load_embeddings()
+    ctx = ForgeFeatureContext(conn, normed_emb, oid_to_idx)
 
     # Card OID lookup
     card_oid = {c["name"]: c.get("oracle_id", "") for c in cards}
 
-    # Strategy data
-    card_strats = {}
-    for oid, strat in conn.execute(
-        "SELECT oracle_id, strategy FROM card_strategies WHERE confidence >= 0.3"):
-        card_strats.setdefault(oid, set()).add(strat)
-    cmdr_strats = card_strats.get(cmdr_oid, set())
-
-    # Strategy vector
-    all_strategies = sorted({s for strats in card_strats.values() for s in strats})
-    strat_idx_map = {s: i for i, s in enumerate(all_strategies)}
-    n_strats = len(all_strategies)
-
-    def _strat_vec(oid):
-        strats = card_strats.get(oid, set())
-        if not strats:
-            return None
-        v = np.zeros(n_strats, dtype=np.float32)
-        for s in strats:
-            v[strat_idx_map[s]] = 1.0
-        return v
-
-    cmdr_strat_vec = _strat_vec(cmdr_oid)
-
-    # Oracle TF-IDF
-    _tokenize = _re.compile(r'[a-z]{3,}')
-    doc_freq = _Counter()
-    card_tokens = {}
-    n_docs = 0
-    for row in conn.execute("SELECT oracle_id, oracle_text FROM cards WHERE oracle_text IS NOT NULL"):
-        tokens = _Counter(_tokenize.findall((row[1] or "").lower()))
-        if tokens:
-            card_tokens[row[0]] = tokens
-            for w in tokens:
-                doc_freq[w] += 1
-            n_docs += 1
-    vocab = [w for w, _ in doc_freq.most_common(2000)]
-    vocab_idx = {w: i for i, w in enumerate(vocab)}
-    n_vocab = len(vocab)
-
-    def _tfidf(oid):
-        tokens = card_tokens.get(oid)
-        if not tokens:
-            return None
-        v = np.zeros(n_vocab, dtype=np.float32)
-        total = sum(tokens.values())
-        for word, count in tokens.items():
-            idx = vocab_idx.get(word)
-            if idx is not None:
-                v[idx] = (count / total) * math.log(n_docs / max(doc_freq[word], 1))
-        norm = np.linalg.norm(v)
-        return v / norm if norm > 0 else None
-
-    cmdr_tfidf = _tfidf(cmdr_oid)
-
-    # Phase data
-    from train_fusion_model import _PHASE_ORDER, _normalize_phase
-    card_phase_order = {}
-    for row in conn.execute(
-        "SELECT fnm.oracle_id, fa.trigger_phase FROM forge_abilities fa "
-        "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
-        "WHERE fa.trigger_phase IS NOT NULL"):
-        oid, phase = row
-        phase = _normalize_phase(phase)
-        order = _PHASE_ORDER.get(phase)
-        if order is not None:
-            card_phase_order.setdefault(oid, set()).add(order)
-    cmdr_phases = card_phase_order.get(cmdr_oid, set())
-
-    # Causal edges + event diversity
-    cmdr_out = {}
-    cmdr_in = {}
-    cmdr_out_events = {}
-    cmdr_in_events = {}
-    try:
-        for row in conn.execute(
-            "SELECT target_id, SUM(strength), GROUP_CONCAT(DISTINCT json_extract(detail, '$.event')) "
-            "FROM interaction_edges WHERE source_id = ? GROUP BY target_id", (cmdr_oid,)):
-            cmdr_out[row[0]] = row[1]
-            cmdr_out_events[row[0]] = set(row[2].split(",")) if row[2] else set()
-        for row in conn.execute(
-            "SELECT source_id, SUM(strength), GROUP_CONCAT(DISTINCT json_extract(detail, '$.event')) "
-            "FROM interaction_edges WHERE target_id = ? GROUP BY source_id", (cmdr_oid,)):
-            cmdr_in[row[0]] = row[1]
-            cmdr_in_events[row[0]] = set(row[2].split(",")) if row[2] else set()
-    except Exception:
-        pass
-
-    # Deck edge counts
+    # Deck OIDs for CmdrFeatureContext
     deck_oids = {card_oid.get(n) for n in deck_cards if n in card_oid} - {None, ""}
-    deck_edge_counts = {}
-    if deck_oids:
-        dl = list(deck_oids)
-        for i in range(0, len(dl), 500):
-            chunk = dl[i:i + 500]
-            ph = ",".join("?" * len(chunk))
-            for row in conn.execute(
-                f"SELECT target_id, COUNT(DISTINCT source_id) FROM interaction_edges "
-                f"WHERE source_id IN ({ph}) GROUP BY target_id", chunk):
-                deck_edge_counts[row[0]] = deck_edge_counts.get(row[0], 0) + row[1]
-            for row in conn.execute(
-                f"SELECT source_id, COUNT(DISTINCT target_id) FROM interaction_edges "
-                f"WHERE target_id IN ({ph}) GROUP BY source_id", chunk):
-                deck_edge_counts[row[0]] = deck_edge_counts.get(row[0], 0) + row[1]
 
-    # Deck edge precision: exact vs broad per candidate
-    deck_exact_counts = {}
-    deck_broad_counts = {}
-    if deck_oids:
-        dl2 = list(deck_oids)
-        for i in range(0, len(dl2), 500):
-            chunk = dl2[i:i + 500]
-            ph = ",".join("?" * len(chunk))
-            for row in conn.execute(
-                f"SELECT target_id, json_extract(detail, '$.filter_precision'), COUNT(*) "
-                f"FROM interaction_edges WHERE source_id IN ({ph}) "
-                f"GROUP BY target_id, json_extract(detail, '$.filter_precision')", chunk):
-                if row[1] == "exact":
-                    deck_exact_counts[row[0]] = deck_exact_counts.get(row[0], 0) + row[2]
-                else:
-                    deck_broad_counts[row[0]] = deck_broad_counts.get(row[0], 0) + row[2]
-            for row in conn.execute(
-                f"SELECT source_id, json_extract(detail, '$.filter_precision'), COUNT(*) "
-                f"FROM interaction_edges WHERE target_id IN ({ph}) "
-                f"GROUP BY source_id, json_extract(detail, '$.filter_precision')", chunk):
-                if row[1] == "exact":
-                    deck_exact_counts[row[0]] = deck_exact_counts.get(row[0], 0) + row[2]
-                else:
-                    deck_broad_counts[row[0]] = deck_broad_counts.get(row[0], 0) + row[2]
+    # Per-commander context
+    cmdr_ctx = CmdrFeatureContext(ctx, cmdr_oid, deck_oids)
 
-    # Commander exact edges
-    cmdr_exact = set()
-    try:
-        for row in conn.execute(
-            "SELECT target_id FROM interaction_edges WHERE source_id = ? "
-            "AND json_extract(detail, '$.filter_precision') = 'exact'", (cmdr_oid,)):
-            cmdr_exact.add(row[0])
-        for row in conn.execute(
-            "SELECT source_id FROM interaction_edges WHERE target_id = ? "
-            "AND json_extract(detail, '$.filter_precision') = 'exact'", (cmdr_oid,)):
-            cmdr_exact.add(row[0])
-    except Exception:
-        pass
-
-    # Tribal subtypes
+    # Set commander subtypes for tribal matching
     cmdr_type = next((c.get("type_line", "") for c in cards if c.get("oracle_id") == cmdr_oid), "")
-    cmdr_subtypes = set()
     if "\u2014" in cmdr_type:
         try:
-            cmdr_subtypes = {s.lower() for s in cmdr_type.split("\u2014")[1].strip().split()}
+            cmdr_ctx.cmdr_subtypes = {s.lower() for s in cmdr_type.split("\u2014")[1].strip().split()}
         except (IndexError, AttributeError):
             pass
 
@@ -626,79 +490,9 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
     for name, cd in cand_list:
         oid = cd.get("oracle_id") or card_oid.get(name, "")
         tl = cd.get("type_line", "")
-        out_s = cmdr_out.get(oid, 0.0)
-        in_s = cmdr_in.get(oid, 0.0)
-
-        # F0: tower_forge
+        cmc = float(cd.get("cmc", 0))
         tp = (tower_probs or {}).get(name, 0.0)
-
-        # F1: embedding_cosine
-        ci_emb = oid_to_idx.get(cmdr_oid)
-        di_emb = oid_to_idx.get(oid)
-        emb_cos = float(np.dot(normed_emb[ci_emb].astype(np.float32),
-                                normed_emb[di_emb].astype(np.float32))) if ci_emb is not None and di_emb is not None else 0.0
-
-        # F5: event diversity
-        ev_out = cmdr_out_events.get(oid, set())
-        ev_in = cmdr_in_events.get(oid, set())
-
-        # F8: strategy_cosine
-        csv = _strat_vec(oid)
-        strat_cos = 0.0
-        if cmdr_strat_vec is not None and csv is not None:
-            d = float(np.dot(cmdr_strat_vec, csv))
-            nc = float(np.linalg.norm(cmdr_strat_vec))
-            nd = float(np.linalg.norm(csv))
-            strat_cos = d / (nc * nd) if nc > 0 and nd > 0 else 0.0
-
-        # F9: oracle_similarity
-        ct = _tfidf(oid)
-        oracle_sim = float(np.dot(cmdr_tfidf, ct)) if cmdr_tfidf is not None and ct is not None else 0.0
-
-        # F10: phase_match
-        cp = card_phase_order.get(oid, set())
-        phase_m = 0.0
-        if cmdr_phases and cp:
-            for p1 in cmdr_phases:
-                for p2 in cp:
-                    phase_m = max(phase_m, max(0.0, 1.0 - abs(p1 - p2) * 2.0))
-
-        # F12: tribal
-        tribal = 0.0
-        if cmdr_subtypes and "creature" in tl.lower() and "\u2014" in tl:
-            try:
-                card_sub = {s.lower() for s in tl.split("\u2014")[1].strip().split()}
-                if cmdr_subtypes & card_sub:
-                    tribal = 1.0
-            except (IndexError, AttributeError):
-                pass
-
-        features.append([
-            tp,                                          # F0 tower_forge
-            emb_cos,                                     # F1 embedding_cosine
-            min(out_s, 10.0),                            # F2 causal_cmdr_to_card
-            min(in_s, 10.0),                             # F3 causal_card_to_cmdr
-            1.0 if (out_s > 0 and in_s > 0) else 0.0,   # F4 causal_bidirectional
-            float(len(ev_out | ev_in)),                  # F5 causal_event_diversity
-            float(min(deck_edge_counts.get(oid, 0), 20)),# F6 deck_edge_count
-            float(len(cmdr_strats & card_strats.get(oid, set()))),  # F7 strategy_overlap
-            strat_cos,                                   # F8 strategy_cosine
-            oracle_sim,                                  # F9 oracle_similarity
-            phase_m,                                     # F10 phase_match
-            1.0 if cp else 0.0,                          # F11 has_phase_trigger
-            tribal,                                      # F12 tribal_match
-            1.0 if "Creature" in tl else 0.0,            # F13 type_creature
-            1.0 if ("Instant" in tl or "Sorcery" in tl) else 0.0,  # F14
-            1.0 if "Artifact" in tl else 0.0,            # F15
-            1.0 if "Enchantment" in tl else 0.0,         # F16
-            1.0 if "Land" in tl else 0.0,                # F17
-            1.0 if "Planeswalker" in tl else 0.0,        # F18
-            float(cd.get("cmc", 0)),                     # F19 cmc
-            # F20: deck_exact_edge_ratio
-            (lambda ne=deck_exact_counts.get(oid, 0), nb=deck_broad_counts.get(oid, 0):
-             ne / (ne + nb) if (ne + nb) > 0 else 0.0)(),
-            1.0 if oid in cmdr_exact else 0.0,           # F21 cmdr_exact_edge
-        ])
+        features.append(compute_card_features(oid, tl, cmc, tp, ctx, cmdr_ctx))
 
     if features:
         X = np.array(features, dtype=np.float64)
