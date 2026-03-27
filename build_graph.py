@@ -7,96 +7,110 @@ from mtg_synergy.causal import build_and_store_graph, ensure_causal_schema
 
 
 def _build_synthetic_edges(conn, idx, name_to_oid):
-    """Build edges for implicit game events (SpellCast, Attacks, LandPlayed).
+    """Build edges for implicit game events.
 
+    Existing: SpellCast (instants/sorceries), Attacks (creatures), LandPlayed (lands)
+    New: ChangesZone+Battlefield — permanents entering the battlefield implicitly
+         trigger cards that care about creature/artifact/enchantment ETB.
+
+    Creates "exact" edges for subtype matches (e.g., Human creature → Kyler)
+    and "broad" edges for card_type matches (e.g., any creature → Soul Warden).
     Streams edges to DB in chunks to avoid holding millions in memory.
-    Only creates "exact" filter matches (subtype-specific, e.g., "Goblin attacks").
     """
     import json as _json
     from mtg_synergy.parse.forge_filter_parser import parse_forge_filter
     from mtg_synergy.parse.forge_types import ForgeFilter
 
-    # Config: (trigger_mode, card_type_filter for SQL, synthetic_verb)
+    # (trigger_mode, card_type_sql, resp_dest_filter, include_broad)
+    # resp_dest_filter: only include responders matching this destination (None = any)
+    # include_broad: also include card_type-only responders (not just subtype)
     SYNTHETIC_EVENTS = [
-        ("SpellCast", "c.type_line LIKE '%Instant%' OR c.type_line LIKE '%Sorcery%'", "_SpellCast"),
-        ("Attacks", "c.type_line LIKE '%Creature%'", "_Attacks"),
-        ("LandPlayed", "c.type_line LIKE '%Land%'", "_LandPlayed"),
+        ("SpellCast", "c.type_line NOT LIKE '%Land%'", None, False),
+        ("Attacks", "c.type_line LIKE '%Creature%'", None, False),
+        ("LandPlayed", "c.type_line LIKE '%Land%'", None, False),
+        # Permanents entering battlefield
+        ("ChangesZone", "c.type_line LIKE '%Creature%'", "Battlefield", True),
+        ("ChangesZone", "c.type_line LIKE '%Artifact%'", "Battlefield", True),
+        ("ChangesZone", "c.type_line LIKE '%Enchantment%'", "Battlefield", True),
+        ("ChangesZone", "c.type_line LIKE '%Planeswalker%'", "Battlefield", True),
     ]
 
     total = 0
-    for mode, type_filter, synth_verb in SYNTHETIC_EVENTS:
+    for mode, type_filter, resp_dest, include_broad in SYNTHETIC_EVENTS:
         responders = idx.responders_for(mode)
         if not responders:
             continue
 
-        # Pre-parse responder filters, keep only those with subtypes (exact match potential)
-        parsed_resps = []
-        for resp_name, resp_idx, resp_filter_str, resp_origin, resp_dest in responders:
+        # Pre-parse responder filters into subtype (exact) and card_type (broad)
+        subtype_resps = []
+        broad_resps = []
+        for resp_name, resp_idx, resp_filter_str, resp_origin, resp_dest_r in responders:
+            # Skip Self-only triggers
             if resp_filter_str and "Self" in resp_filter_str and "Other" not in resp_filter_str:
                 continue
+            # Filter by destination if required (e.g., only Battlefield for ETB)
+            if resp_dest and resp_dest_r and resp_dest not in resp_dest_r:
+                continue
             resp_filter = parse_forge_filter(resp_filter_str) if resp_filter_str else ForgeFilter()
-            # Only keep responders that have subtype requirements (enables "exact" matching)
+            resp_id = name_to_oid.get(resp_name)
+            if not resp_id:
+                continue
             if resp_filter.subtypes:
-                resp_id = name_to_oid.get(resp_name)
-                if resp_id:
-                    parsed_resps.append((resp_name, resp_id, resp_idx, resp_filter))
+                subtype_resps.append((resp_name, resp_id, resp_idx, resp_filter))
+            elif include_broad and resp_filter.card_types:
+                broad_resps.append((resp_name, resp_id, resp_idx, resp_filter))
 
-        if not parsed_resps:
+        if not subtype_resps and not broad_resps:
             continue
 
-        # Build subtype lookup: which subtypes do responders care about?
+        # Build subtype lookup for fast filtering
         wanted_subtypes = set()
-        for _, _, _, rf in parsed_resps:
+        for _, _, _, rf in subtype_resps:
             for st in rf.subtypes:
                 wanted_subtypes.add(st.lower())
 
-        if not wanted_subtypes:
-            continue
+        # Build card_type lookup for broad responders
+        broad_card_types = set()
+        for _, _, _, rf in broad_resps:
+            for ct in rf.card_types:
+                broad_card_types.add(ct.lower())
 
-        # Stream through producer cards, only matching those with wanted subtypes
+        # Stream through producer cards
         batch = []
         for row in conn.execute(
             f"SELECT fnm.forge_name, c.oracle_id, c.type_line FROM cards c "
             f"JOIN forge_name_map fnm ON fnm.oracle_id = c.oracle_id "
-            f"WHERE {type_filter}"
+            f"WHERE ({type_filter}) AND c.type_line NOT LIKE '%Token%'"
         ):
             prod_name, prod_oid, prod_type = row
             if not prod_type:
                 continue
             prod_type_lower = prod_type.lower()
 
-            # Check if this card has any subtype that responders want
-            matching = False
-            for st in wanted_subtypes:
-                if st in prod_type_lower:
-                    matching = True
-                    break
-            if not matching:
-                continue
+            # Exact matches: producer has a subtype that a responder wants
+            if wanted_subtypes and any(st in prod_type_lower for st in wanted_subtypes):
+                for resp_name, resp_oid, resp_idx, resp_filter in subtype_resps:
+                    if prod_oid == resp_oid:
+                        continue
+                    if any(st.lower() in prod_type_lower for st in resp_filter.subtypes):
+                        detail = _json.dumps({"event": mode, "filter_precision": "exact"})
+                        batch.append((prod_oid, resp_oid, "triggers", -1, resp_idx, 0.3, detail))
 
-            # Match against each responder
-            for resp_name, resp_oid, resp_idx, resp_filter in parsed_resps:
-                if prod_oid == resp_oid:
-                    continue
-                # Check exact subtype match
-                matched = any(st.lower() in prod_type_lower for st in resp_filter.subtypes)
-                if not matched:
-                    continue
+            # Broad matches: producer's card type matches responder's required type
+            if broad_resps:
+                for resp_name, resp_oid, resp_idx, resp_filter in broad_resps:
+                    if prod_oid == resp_oid:
+                        continue
+                    if any(ct.lower() in prod_type_lower for ct in resp_filter.card_types):
+                        detail = _json.dumps({"event": mode, "filter_precision": "broad"})
+                        batch.append((prod_oid, resp_oid, "triggers", -1, resp_idx, 0.15, detail))
 
-                # Strength: low (0.3) since these are implicit events, IDF dampened
-                strength = 0.3
-                detail = _json.dumps({"event": mode, "filter_precision": "exact"})
-                batch.append((prod_oid, resp_oid, "triggers", -1, resp_idx, strength, detail))
-
-                if len(batch) >= 5000:
-                    conn.executemany(
-                        "INSERT OR IGNORE INTO interaction_edges VALUES (?,?,?,?,?,?,?)",
-                        batch)
-                    total += len(batch)
-                    batch.clear()
-
-            # Also check for responders without subtypes but with card_types
-            # (handled by the regular forge edges, skip here to keep synthetic tight)
+            if len(batch) >= 10000:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO interaction_edges VALUES (?,?,?,?,?,?,?)",
+                    batch)
+                total += len(batch)
+                batch.clear()
 
         if batch:
             conn.executemany(
@@ -134,7 +148,7 @@ def main():
         count = store_edges(conn, edges)
         print(f"  Forge edges: {count}")
 
-        # Synthetic edges: SpellCast, Attacks, LandPlayed
+        # Synthetic edges: SpellCast, Attacks, LandPlayed, ChangesZone+Battlefield
         # Streamed directly to DB to avoid holding millions of edges in memory
         syn_count = _build_synthetic_edges(conn, idx, name_to_oid)
         print(f"  Synthetic edges: {syn_count}")
