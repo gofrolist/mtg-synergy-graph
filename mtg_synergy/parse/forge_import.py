@@ -379,12 +379,22 @@ def build_name_mapping(conn):
     """)
     conn.execute("DELETE FROM forge_name_map")
 
-    # Exact match
+    # Exact match — prefer non-token versions (tokens have CMC 0, wrong type_line)
     conn.execute("""
         INSERT OR IGNORE INTO forge_name_map (forge_name, oracle_id)
         SELECT DISTINCT fa.card_name, c.oracle_id
         FROM forge_abilities fa
         JOIN cards c ON c.name = fa.card_name
+        WHERE c.type_line NOT LIKE '%Token%'
+    """)
+
+    # Fallback: token version if no real card exists
+    conn.execute("""
+        INSERT OR IGNORE INTO forge_name_map (forge_name, oracle_id)
+        SELECT DISTINCT fa.card_name, c.oracle_id
+        FROM forge_abilities fa
+        JOIN cards c ON c.name = fa.card_name
+        WHERE fa.card_name NOT IN (SELECT forge_name FROM forge_name_map)
     """)
 
     # DFC front face match

@@ -35,6 +35,8 @@ def run():
                         help="Show synergy network within the deck")
     parser.add_argument("--recommend", action="store_true",
                         help="Recommend cards based on synergy with the deck")
+    parser.add_argument("--forge", action="store_true",
+                        help="Use forge-only model (no EDHREC features) for --recommend")
     parser.add_argument("--combos", action="store_true",
                         help="Detect 3- and 4-card combos in the deck")
     parser.add_argument("--swaps", action="store_true",
@@ -170,7 +172,8 @@ def run():
             recommend_cards(graph, deck_set, cards, deck_types, args.top,
                             active_strategies=active_strategies, db_path=db_path,
                             color_identity=deck.COLOR_IDENTITY, commander=deck.COMMANDER,
-                            edhrec_slug=getattr(deck, 'EDHREC_SLUG', None))
+                            edhrec_slug=getattr(deck, 'EDHREC_SLUG', None),
+                            use_forge=args.forge)
     elif args.validate:
         validate_against_curated(graph, deck.SYNERGY_PAIRS)
     elif args.export:

@@ -8,12 +8,14 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                     deck_types: set[str] = None, top_n: int = 20,
                     active_strategies: set = None, db_path: str = None,
                     color_identity: set = None, commander: str = None,
-                    edhrec_slug: str = None):
+                    edhrec_slug: str = None, use_forge: bool = False):
     """Rank non-deck cards by total synergy with the current decklist.
 
     Uses tower pre-filter (CI + batch scoring) for candidate discovery,
     then full fusion model for final ranking. Graph edges used for
     partner display only.
+
+    If use_forge=True, uses the forge-only model (no EDHREC features).
     """
     import sqlite3 as _sql_dyn
     _shared_conn = None
@@ -29,7 +31,8 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
 
     if _shared_conn:
         from mtg_synergy.recommend.scoring import (
-            DeckContext, score_all_candidates, tower_prefilter)
+            DeckContext, score_all_candidates, tower_prefilter,
+            score_forge_candidates)
 
         # Get commander oracle_id
         cmdr_oid = ""
@@ -39,9 +42,20 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                 break
 
         # Tower pre-filter: score all color-legal cards, take top 3000
+        # Use forge tower when --forge flag is set
+        forge_tower_path = None
+        if use_forge:
+            import os
+            from mtg_synergy.config import DATA_DIR
+            fp = os.path.join(DATA_DIR, "tower_model_forge.npz")
+            if os.path.exists(fp):
+                forge_tower_path = fp
+                print("  Using forge-only model (no EDHREC)")
+
         prefiltered = tower_prefilter(
             _shared_conn, cmdr_oid, color_identity or set(),
-            top_n=3000, deck_cards=deck_cards)
+            top_n=3000, deck_cards=deck_cards,
+            tower_path=forge_tower_path)
 
         tower_probs_map = None
         if prefiltered:
@@ -68,16 +82,21 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                 graph, deck_cards, commander=commander, key_cards=key_cards)
             print("  Tower not available — using graph candidates (fallback)")
 
-        ctx = DeckContext(_shared_conn, commander, deck_cards, cards,
-                          deck_types=deck_types, active_strategies=active_strategies,
-                          edhrec_slug=edhrec_slug)
-
-        # Score all candidates with full fusion model (batch)
-        score_all_candidates(candidate_scores, cards, ctx, _shared_conn,
-                             tower_probs=tower_probs_map)
+        if use_forge:
+            # Forge-only scoring (20 features, no EDHREC)
+            score_forge_candidates(candidate_scores, cards, _shared_conn,
+                                   commander, deck_cards, deck_types,
+                                   active_strategies, tower_probs=tower_probs_map)
+        else:
+            ctx = DeckContext(_shared_conn, commander, deck_cards, cards,
+                              deck_types=deck_types, active_strategies=active_strategies,
+                              edhrec_slug=edhrec_slug)
+            score_all_candidates(candidate_scores, cards, ctx, _shared_conn,
+                                 tower_probs=tower_probs_map)
 
         # Enrich candidates with causal graph partner info (for display)
-        if ctx.causal_ctx:
+        ctx = ctx if not use_forge else None
+        if ctx and ctx.causal_ctx:
             # Build name→oid lookup for candidates
             _cand_oid = {}
             for c in cards:
@@ -135,13 +154,19 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
             graph, deck_cards, commander=commander, key_cards=key_cards)
 
     # Build card metadata (shared by both paths)
+    # Prefer non-token entries when a name has both (e.g., Eternalize tokens)
     for c in cards:
-        card_meta[c["name"]] = {
-            "type_line": c.get("type_line", ""), "cmc": c.get("cmc", 0),
+        name = c["name"]
+        tl = c.get("type_line", "")
+        existing = card_meta.get(name)
+        if existing and "Token" not in existing.get("type_line", "") and "Token" in tl:
+            continue  # don't overwrite real card with token version
+        card_meta[name] = {
+            "type_line": tl, "cmc": c.get("cmc", 0),
             "mana_cost": c.get("mana_cost", ""), "oracle_id": c.get("oracle_id", ""),
             "edhrec_rank": c.get("edhrec_rank"),
         }
-        card_oid_lookup[c["name"]] = c.get("oracle_id", "")
+        card_oid_lookup[name] = c.get("oracle_id", "")
 
     # Sort by total synergy
     ranked = sorted(candidate_scores.items(), key=lambda x: x[1]["total"], reverse=True)

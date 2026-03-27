@@ -134,10 +134,14 @@ def load_edhrec_membership(conn):
 
     Returns dict[cmdr_oracle_id -> set[card_oracle_ids]].
     """
-    # Map card_name -> oracle_id via cards table
+    # Map card_name -> oracle_id via cards table (prefer non-token versions)
     name_to_oid = {}
-    for row in conn.execute("SELECT name, oracle_id FROM cards"):
-        name_to_oid[row[0]] = row[1]
+    for row in conn.execute(
+        "SELECT name, oracle_id, type_line FROM cards ORDER BY "
+        "CASE WHEN type_line LIKE '%Token%' THEN 1 ELSE 0 END"
+    ):
+        if row[0] not in name_to_oid:
+            name_to_oid[row[0]] = row[1]
 
     # Map commander_slug -> commander oracle_id
     # Slugs look like "krenko-mob-boss" - match against card names
@@ -565,7 +569,8 @@ def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=Tru
     card_meta = {}
     name_to_oid = {}
     for row in conn.execute(
-        "SELECT oracle_id, name, type_line, cmc, edhrec_rank, oracle_text FROM cards"
+        "SELECT oracle_id, name, type_line, cmc, edhrec_rank, oracle_text FROM cards "
+        "ORDER BY CASE WHEN type_line LIKE '%Token%' THEN 1 ELSE 0 END"
     ):
         oid, name, type_line, cmc, edhrec_rank, oracle_text = row
         card_meta[oid] = {
@@ -574,7 +579,9 @@ def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=Tru
             "cmc": cmc or 0.0,
             "oracle_text": (oracle_text or "").lower(),
         }
-        name_to_oid[name] = oid
+        # Prefer non-token version for name→oid mapping
+        if name not in name_to_oid:
+            name_to_oid[name] = oid
 
     # Forge abilities: verbs and trigger modes per card (by oracle_id)
     forge_verbs = {}     # oid -> set of verbs + keywords
