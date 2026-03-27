@@ -4,34 +4,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MTG Synergy Graph — a tool for analyzing Magic: The Gathering EDH/Commander deck synergies. The system uses a two-stage fusion model (tower pre-filter + LightGBM) trained on EDHREC avg deck data, with a Forge-derived causal interaction graph as a scoring signal.
+MTG Synergy Graph — a tool for analyzing Magic: The Gathering EDH/Commander deck synergies. The system uses a two-stage fusion model (tower pre-filter + LightGBM) with two modes: a baseline trained on EDHREC data, and a forge-only model that reasons purely from card mechanics (zero EDHREC dependency). The forge model can evaluate new cards day-1 without community playtesting data.
 
 ### Signal Architecture (recommendation pipeline)
 
 ```
-For any commander, recommendations use 3 signal layers:
+Two modes available:
 
-1. TOWER PRE-FILTER (candidate discovery, <200ms)
-   - Two-tower neural net: commander_embedding × card_embedding → P(card in deck)
-   - Filters to color-legal cards, takes top 3000 by tower probability
-   - Trained on 871 EDHREC commanders × ~260k pairs (AUC=0.979)
-   - Replaces all tag-based candidate discovery
+BASELINE (--recommend): EDHREC-trained, optimized for known commanders
+  1. Tower pre-filter: EDHREC tower scores 13k cards, takes top 3000
+  2. Fusion GBM: 8 features including edhrec_synergy, edhrec_rank
+  3. AUC=0.999 on EDHREC commanders
 
-2. FUSION MODEL (final ranking, primary signal for 871 EDHREC commanders, $0 cost)
-   - LightGBM on 8 features: tower_prob, causal_score, forge_deck_overlap,
-     tribal_match, edhrec_synergy, edhrec_rank, cmc, is_creature
-   - 5-fold leave-commander-out CV, mean AUC=0.999
-   - Recall@100=89.4% on training commanders
-   - Held-out generalization: ~25% Recall@100 on unseen commanders
-   - train_fusion_model.py → data/tower_model_edhrec.npz + data/fusion_model.lgb
+FORGE-ONLY (--recommend --forge): Zero EDHREC dependency, mechanical synergy
+  1. Forge tower pre-filter: trained on causal graph connectivity (AUC=0.999)
+  2. Forge GBM: 20 features — tower_forge, embedding_cosine, oracle_similarity,
+     strategy_cosine, causal scores, phase_match, card types, tribal, cmc
+  3. Can evaluate new cards day-1 without playtesting data
+  4. Works for any of 3,141+ commanders (not just 1,361 with EDHREC)
 
-3. CAUSAL GRAPH (interaction scoring signal + fallback for non-EDHREC commanders)
-   - 9.2M causal edges derived from Forge ability data (forge_abilities table)
-   - Edge types: triggers, feeds, amplifies, enables, tribal
-   - IDF weighting: rare events score higher than common ones
-   - Chain scoring: commander → candidate → deck card paths get bonus
-   - Anti-synergy detection (e.g., Rest in Peace in graveyard decks)
-   - Recall@100=64.2% standalone
+CAUSAL GRAPH (shared by both modes):
+  - 11.5M edges across 30 event types (verb_event_map extracted from Forge Java source)
+  - SubAbility chains followed: 72k abilities (12.7k from secondary effects)
+  - IDF weighting, chain scoring, anti-synergy detection
+  - Synthetic producers for SpellCast, Attacks, LandPlayed
 ```
 
 ### Current Performance
@@ -71,14 +67,16 @@ python3 fetch_edhrec_decks.py --refresh    # Fetch EDHREC average decklists for 
 
 # === Fusion model (hybrid tower + LightGBM) ===
 python3 train_fusion_model.py                  # Full pipeline: tower + features + GBM (~5 min)
-python3 train_fusion_model.py --tower-only     # Stage 1 only: retrain tower (~2 min)
-python3 train_fusion_model.py --features-only  # Build + inspect 8-feature matrix
+python3 train_fusion_model.py --tower-only     # Stage 1 only: retrain EDHREC tower (~2 min)
+python3 train_fusion_model.py --forge-tower    # Train forge tower on causal graph (~6 min)
+python3 train_fusion_model.py --forge-only     # Train forge GBM + compare with baseline
+python3 train_fusion_model.py --features-only  # Build + inspect feature matrix
 python3 train_fusion_model.py --feature-importance  # Print GBM feature importance
 python3 train_fusion_model.py --holdout-eval   # True generalization (train 80% / test 20%)
-python3 train_fusion_model.py --holdout-eval --drop-feature edhrec_synergy  # Ablation
 
 # === Recommendations ===
-python3 synergy_graph.py --deck krenko --recommend   # Top 30 recommendations
+python3 synergy_graph.py --deck krenko --recommend          # Baseline (EDHREC model)
+python3 synergy_graph.py --deck krenko --recommend --forge  # Forge-only (no EDHREC)
 python3 synergy_graph.py --deck krenko --swaps       # Card swap suggestions
 python3 synergy_graph.py --deck krenko --combos      # 3-tier combo detection
 python3 synergy_graph.py --deck krenko --deck-view   # Deck analysis
@@ -103,7 +101,7 @@ Scryfall API → download_cards.py → data/oracle_cards.json (36k cards)
                                         ↓
                     import_forge.py → forge_abilities + forge_name_map tables
                                         ↓
-                    build_graph.py --forge → interaction_edges table (9.2M causal edges)
+                    build_graph.py --forge → interaction_edges table (11.5M causal edges, 30 event types)
                                         ↓
                     strategy_detector.py → card_strategies table
                                         ↓
@@ -138,41 +136,39 @@ python3 train_fusion_model.py                           # 7. Retrain fusion mode
 | card_strategies | ~88k | Strategy assignments |
 | spellbook_combos | ~82k | Commander Spellbook combos |
 | spellbook_combo_cards | ~289k | Combo ↔ card junction |
-| interaction_edges | ~9.2M | Causal edges from Forge: triggers, feeds, amplifies, enables, tribal |
+| interaction_edges | ~11.5M | Causal edges from Forge: 30 event types (verb_event_map from Java source) |
 | commander_profiles | ~3.4k | Auto-inferred commander archetypes (strategies, tribal, events) |
 | edhrec_card_synergy | ~132k | EDHREC synergy scores for 502 commanders |
-| forge_abilities | ~59k | Raw Forge ability data (verb, trigger_mode, cost, raw_line) |
-| forge_name_map | ~36k | Forge card name → oracle_id mapping |
+| forge_abilities | ~72k | Raw Forge ability data + SubAbility chain expansions (verb, trigger_mode, cost, raw_line) |
+| forge_name_map | ~31k | Forge card name → oracle_id mapping (prefers non-token versions) |
 
-### Fusion Model (data/tower_model_edhrec.npz + data/fusion_model.lgb)
+### Fusion Models
 
-Two-stage hybrid model trained on EDHREC avg deck membership:
-- **Stage 1 — Tower** (data/tower_model_edhrec.npz):
-  - Architecture: 768→128 projection, MLP 140→128→64→32→1, sigmoid output P(card in deck)
-  - Trained on 871 EDHREC commanders × ~260k pairs (65k positive + 195k negative)
-  - AUC=0.979, accuracy=93.4%
-- **Stage 2 — LightGBM** (data/fusion_model.lgb):
-  - 8 features: tower_prob, causal_score, forge_deck_overlap, tribal_match,
-    edhrec_synergy, edhrec_rank, cmc, is_creature
-  - 5-fold leave-commander-out CV, mean AUC=0.999
-  - Feature importance: edhrec_rank > tower_prob > edhrec_synergy > cmc
-- **Performance on EDHREC commanders**: Recall@100=89.4%
-- **Held-out generalization**: ~25% Recall@100 on unseen commanders
-- **Training**: `python3 train_fusion_model.py` (~5 min)
-- **Evaluation**: `python3 optimize_weights.py --fusion --evaluate`
-- **Holdout eval**: `python3 train_fusion_model.py --holdout-eval`
-- **Feature ablation**: `python3 train_fusion_model.py --holdout-eval --drop-feature edhrec_synergy`
+**Baseline** (data/tower_model_edhrec.npz + data/fusion_model.lgb):
+- Tower trained on EDHREC deck membership, GBM on 8 features with edhrec_synergy/rank
+- AUC=0.999 on training commanders, ~25% Recall@100 on unseen
+- Training: `python3 train_fusion_model.py`
 
-### Recommendation Pipeline (synergy_graph.py --recommend)
+**Forge-only** (data/tower_model_forge.npz + data/fusion_model_forge.lgb):
+- Tower trained on causal graph connectivity (AUC=0.999)
+- GBM on 20 features: tower_forge, embedding_cosine, oracle_similarity, strategy_cosine,
+  causal scores (directional + event diversity), phase_match, card types, tribal, cmc
+- Zero EDHREC dependency — works for any commander
+- Training: `python3 train_fusion_model.py --forge-tower` then `--forge-only`
+- Feature importance: tower_forge 19%, oracle_similarity 16%, embedding_cosine 16%, cmc 12%
+
+Both towers share architecture: 768→128 projection, MLP 140→128→64→32→1, sigmoid output
+
+### Recommendation Pipeline (synergy_graph.py --recommend [--forge])
 
 ```
 1. Tower pre-filter: score all color-legal cards, take top 3000 candidates
-2. Score all candidates with full fusion model:
-   a. Build 8-feature vector per candidate
-      (tower_prob, causal_score, forge_deck_overlap, tribal_match,
-       edhrec_synergy, edhrec_rank, cmc, is_creature)
-   b. GBM predict_proba → fusion score (PRIMARY signal)
+   (uses EDHREC tower by default, forge tower with --forge flag)
+2. Score all candidates with GBM (batch predict, ~0.5s for 3000 cards):
+   Baseline: 8 features (tower_prob, causal, edhrec_synergy, edhrec_rank, ...)
+   Forge:    20 features (tower_forge, embedding_cosine, oracle_similarity, ...)
 3. Sort and output top 30
+Total time: ~1.7s (was 16s before optimization)
 ```
 
 ### Swap System (synergy_graph.py --swaps)
@@ -238,7 +234,7 @@ Suggests card swaps with multi-layer protection:
 | `mtg_synergy/combos/display.py` | Combo output formatting and validation |
 | `mtg_synergy/analysis/deck.py` | Deck synergy display and analysis |
 | `mtg_synergy/analysis/strategy.py` | Strategy detection, candidate filtering, commander builds |
-| `mtg_synergy/analysis/visualization.py` | Interactive HTML/D3 visualization |
+| `mtg_synergy/causal/verb_event_map.py` | Forge verb → trigger event mapping (extracted from Java source) |
 
 ### Root-level scripts (pipelines + entry points)
 
@@ -264,6 +260,6 @@ Suggests card swaps with multi-layer protection:
 - Tribal tags auto-assigned from creature type_line (e.g., Human creature → tribal match)
 - Deck configs live in `decks/` (15 decks: kyler, krenko, yshtola, atraxa, edgar, kaalia, niv_mizzet, pantlaza, sram, syr_konrad, tatyova, ur_dragon, urza, sauron)
 - Fine-tuning uses `.venv` with unsloth + torch (Python 3.12, not system Python 3.14)
-- Tests: ~386 tests in `tests/`
+- Tests: 386 tests in `tests/`
 - Spellbook combo boosts must check color identity (fixed: 364 wrong-color boosts deleted)
 - The provides/wants tag tables are kept for backward compat but are not used by the hot path (--recommend, --swaps); they are populated by `derive_forge_tags.py` if needed
