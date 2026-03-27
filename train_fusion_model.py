@@ -1250,45 +1250,94 @@ def train_tower_binary():
 TOWER_FORGE_PATH = os.path.join(DATA_DIR, "tower_model_forge.npz")
 
 
-def load_forge_positives(conn, oid_to_idx, min_strength=0.3, max_per_cmdr=100):
-    """Load positive pairs from causal graph edges (forge-native).
+def load_forge_positives(conn, min_strength=0.1, max_per_cmdr=150):
+    """Load graded positive pairs from causal graph edges (forge-native).
 
-    Positive = card has a strong causal edge to/from a legendary creature.
-    Caps at max_per_cmdr cards per commander (keeps strongest edges).
-    Returns dict[cmdr_oid → set[card_oids]].
+    Grade criteria (1-9):
+      - Edge strength (sum of all edges between the pair)
+      - Edge count (number of distinct edges)
+      - Bidirectionality (edges in both directions)
+      - Exact precision (subtype-specific edges vs broad type edges)
+      - Event diversity (number of distinct event types)
+
+    Returns dict[cmdr_oid -> list[(card_oid, grade)]].
     """
     commanders = set()
     for row in conn.execute(
         "SELECT oracle_id FROM cards WHERE type_line LIKE '%Legendary%Creature%'"
     ):
-        if row[0] in oid_to_idx:
-            commanders.add(row[0])
+        commanders.add(row[0])
 
-    # Collect with strength for ranking
-    raw = {}  # cmdr_oid → {card_oid: max_strength}
+    print(f"  Loading causal edges for {len(commanders)} legendary creatures...")
+
+    # Collect per-pair edge properties
+    # pair_data[cmdr][card] = {strength, count, events, has_exact, directions}
+    pair_data = {}
+
     for row in conn.execute(
-        "SELECT source_id, target_id, strength FROM interaction_edges WHERE strength >= ?",
+        "SELECT source_id, target_id, strength, "
+        "json_extract(detail, '$.event'), "
+        "COALESCE(filter_precision, json_extract(detail, '$.filter_precision')) "
+        "FROM interaction_edges WHERE strength >= ?",
         (min_strength,)
     ):
-        src, tgt, strength = row[0], row[1], row[2]
-        if src in commanders and tgt in oid_to_idx and tgt != src:
-            raw.setdefault(src, {})
-            raw[src][tgt] = max(raw[src].get(tgt, 0), strength)
-        if tgt in commanders and src in oid_to_idx and src != tgt:
-            raw.setdefault(tgt, {})
-            raw[tgt][src] = max(raw[tgt].get(src, 0), strength)
+        src, tgt, strength, event, precision = row
 
-    # Keep top N strongest per commander
+        for cmdr, card in [(src, tgt), (tgt, src)]:
+            if cmdr not in commanders or card == cmdr:
+                continue
+            d = pair_data.setdefault(cmdr, {}).setdefault(card, {
+                'strength': 0.0, 'count': 0, 'events': set(),
+                'has_exact': False, 'directions': set(),
+            })
+            d['strength'] += strength
+            d['count'] += 1
+            if event:
+                d['events'].add(event)
+            if precision == 'exact':
+                d['has_exact'] = True
+            # Track which direction this edge goes
+            if src == cmdr:
+                d['directions'].add('out')
+            else:
+                d['directions'].add('in')
+
+    # Grade each pair
     positives = {}
-    for cmdr, cards in raw.items():
+    for cmdr, cards in pair_data.items():
         if len(cards) < 5:
             continue
-        top = sorted(cards.items(), key=lambda x: -x[1])[:max_per_cmdr]
-        positives[cmdr] = {oid for oid, _ in top}
+
+        graded = []
+        for card_oid, d in cards.items():
+            # Compute a raw score from edge properties
+            strength_score = min(d['strength'], 3.0) / 3.0  # 0-1, capped at 3.0
+            event_score = min(len(d['events']), 3) / 3.0    # 0-1, capped at 3 events
+            bidir_bonus = 1.0 if len(d['directions']) == 2 else 0.0
+            exact_bonus = 1.0 if d['has_exact'] else 0.0
+            count_score = min(d['count'], 5) / 5.0          # 0-1, capped at 5 edges
+
+            raw = (strength_score * 3 + event_score * 2 +
+                   bidir_bonus * 2 + exact_bonus * 1.5 + count_score * 1.5)
+            # raw range: 0 to 10
+            grade = min(9, max(1, int(raw)))
+            graded.append((card_oid, grade, raw))
+
+        # Keep top N by raw score
+        graded.sort(key=lambda x: -x[2])
+        positives[cmdr] = [(oid, grade) for oid, grade, _ in graded[:max_per_cmdr]]
 
     total = sum(len(v) for v in positives.values())
-    print(f"  Forge positives: {total:,} pairs across {len(positives)} commanders "
-          f"(strength >= {min_strength}, max {max_per_cmdr}/cmdr)")
+    grade_dist = {}
+    for pairs in positives.values():
+        for _, g in pairs:
+            grade_dist[g] = grade_dist.get(g, 0) + 1
+
+    print(f"  Forge positives: {total:,} pairs across {len(positives)} commanders")
+    print(f"  Grade distribution:")
+    for g in sorted(grade_dist.keys(), reverse=True):
+        print(f"    Grade {g}: {grade_dist[g]:,}")
+
     return positives
 
 
@@ -1330,9 +1379,18 @@ def train_tower_forge():
 
     print(f"\nCard pool: {len(all_card_oids)} cards")
 
-    # Load forge positives (causal graph edges)
+    # Load forge positives (causal graph edges, graded)
     print("\nLoading causal graph positives...")
-    positives_by_cmdr = load_forge_positives(conn, oid_to_idx)
+    graded_positives = load_forge_positives(conn)
+
+    # Filter to commanders/cards with embeddings and convert to sets for sampling
+    positives_by_cmdr = {}
+    for cmdr, pairs in graded_positives.items():
+        if cmdr not in oid_to_idx:
+            continue
+        card_set = {oid for oid, _ in pairs if oid in oid_to_idx}
+        if card_set:
+            positives_by_cmdr[cmdr] = card_set
 
     # Sample negatives (color-legal cards with no edge)
     print("\nSampling negatives (ratio=3)...")
@@ -1341,7 +1399,7 @@ def train_tower_forge():
     )
     print(f"  Negative pairs: {len(neg_pairs)}")
 
-    # Build training data
+    # Build training data (binary labels for tower)
     print("\nBuilding feature arrays...")
     all_pairs = []
     for cmdr_oid, card_oids in positives_by_cmdr.items():
@@ -1666,8 +1724,8 @@ def _load_pairs_for_features(conn, oid_to_idx):
     return pairs_by_cmdr
 
 
-def _load_forge_pairs_for_features(conn, oid_to_idx):
-    """Load causal graph positives + sample negatives. Zero EDHREC dependency.
+def _load_forge_pairs_for_features(conn):
+    """Load causal graph positives with graded labels + sample negatives. Zero EDHREC dependency.
 
     Returns dict[cmdr_oid -> list[(card_oid, label)]].
     """
@@ -1692,34 +1750,63 @@ def _load_forge_pairs_for_features(conn, oid_to_idx):
         type_lines[row[0]] = row[1] or ""
 
     all_card_oids = []
-    for oid in oid_to_idx:
+    for row in conn.execute("SELECT oracle_id FROM cards"):
+        oid = row[0]
         if oid in basic_land_oids:
             continue
         tl = type_lines.get(oid, "")
-        if "Token" in tl or "token" in tl:
+        if "Token" in tl:
             continue
         all_card_oids.append(oid)
 
-    # Load positives from causal graph (not EDHREC)
-    print("\nLoading causal graph positives...")
-    positives_by_cmdr = load_forge_positives(conn, oid_to_idx)
+    # Load graded positives from causal graph
+    print("\nLoading causal graph positives (graded)...")
+    positives_by_cmdr = load_forge_positives(conn)
 
     total_pos = sum(len(v) for v in positives_by_cmdr.values())
-    print(f"  Positive pairs with embeddings: {total_pos} across {len(positives_by_cmdr)} commanders")
+    print(f"  Total positive pairs: {total_pos} across {len(positives_by_cmdr)} commanders")
 
-    # Sample negatives (same 3:1 ratio, color-legal)
-    print("\nSampling negatives (ratio=3)...")
+    # Load strategies + subtypes for hard negative sampling
+    card_strats = {}
+    for oid, s in conn.execute("SELECT oracle_id, strategy FROM card_strategies WHERE confidence >= 0.3"):
+        card_strats.setdefault(oid, set()).add(s)
+
+    card_subtypes = {}
+    for row in conn.execute("SELECT oracle_id, type_line FROM cards WHERE type_line LIKE '%—%'"):
+        oid, tl = row
+        try:
+            subs = {s.lower() for s in tl.split("—")[1].strip().split()}
+            if subs:
+                card_subtypes[oid] = subs
+        except (IndexError, AttributeError):
+            pass
+
+    # Convert positives to the set format that sample_negatives expects
+    pos_sets = {cmdr: {oid for oid, _ in pairs} for cmdr, pairs in positives_by_cmdr.items()}
+
+    # Sample negatives
+    print("\nSampling negatives (ratio=3, 50% hard)...")
     neg_pairs = sample_negatives(
-        positives_by_cmdr, all_card_oids, card_colors, card_colors, ratio=3
+        pos_sets, all_card_oids, card_colors, card_colors, ratio=3,
+        hard_ratio=0.5, card_strats=card_strats, card_subtypes=card_subtypes,
     )
     print(f"  Negative pairs: {len(neg_pairs)}")
 
-    # Combine into pairs_by_cmdr
+    # Combine: graded positives + grade-0 negatives
     pairs_by_cmdr = {}
-    for cmdr_oid, card_oids in positives_by_cmdr.items():
-        pairs_by_cmdr[cmdr_oid] = [(oid, 1) for oid in card_oids]
+    for cmdr_oid, graded_pairs in positives_by_cmdr.items():
+        pairs_by_cmdr[cmdr_oid] = list(graded_pairs)  # already (oid, grade)
     for cmdr_oid, card_oid, label in neg_pairs:
-        pairs_by_cmdr.setdefault(cmdr_oid, []).append((card_oid, label))
+        pairs_by_cmdr.setdefault(cmdr_oid, []).append((card_oid, 0))
+
+    # Print grade distribution
+    grade_counts = {}
+    for pairs in pairs_by_cmdr.values():
+        for _, g in pairs:
+            grade_counts[g] = grade_counts.get(g, 0) + 1
+    print(f"\n  Grade distribution (including negatives):")
+    for g in sorted(grade_counts.keys(), reverse=True):
+        print(f"    Grade {g}: {grade_counts[g]:,}")
 
     return pairs_by_cmdr
 
@@ -1990,7 +2077,7 @@ def main():
 
     if args.forge_only:
         print("=" * 60)
-        print("FORGE-ONLY MODEL — EDHREC labels, forge features")
+        print("FORGE-ONLY MODEL — self-supervised causal graph labels")
         print("=" * 60)
 
         # Check for cached feature matrix (skip 3+ min rebuild)
@@ -2001,14 +2088,11 @@ def main():
             X_forge = cached["X"]
             y_forge = cached["y"]
             cmdr_ids_forge = cached["cmdr_ids"]
-            print(f"  Matrix: {X_forge.shape}, positives: {int(y_forge.sum())}, "
-                  f"negatives: {int(len(y_forge) - y_forge.sum())}")
+            print(f"  Matrix: {X_forge.shape}, positives: {int((y_forge > 0).sum())}, "
+                  f"negatives: {int((y_forge == 0).sum())}")
         else:
-            print("\nLoading embeddings...")
-            _, _, oid_to_idx = load_embeddings()
-
             conn = sqlite3.connect(DB_PATH)
-            pairs_by_cmdr = _load_pairs_for_features(conn, oid_to_idx)
+            pairs_by_cmdr = _load_forge_pairs_for_features(conn)
             conn.close()
 
             print("\n--- Building FORGE-ONLY feature matrix ---")
@@ -2020,7 +2104,7 @@ def main():
 
         # Train forge GBM only (no baseline)
         print("\n" + "=" * 60)
-        print("Training FORGE-ONLY model (20 features)")
+        print("Training FORGE-ONLY model (self-supervised, causal graph labels)")
         print("=" * 60)
         _, forge_scores = train_forge_gbm(X_forge, y_forge, cmdr_ids_forge)
 
