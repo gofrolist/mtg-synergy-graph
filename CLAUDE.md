@@ -71,7 +71,8 @@ python3 fetch_edhrec_decks.py --refresh    # Fetch EDHREC average decklists for 
 python3 train_fusion_model.py                  # Full pipeline: tower + features + GBM (~5 min)
 python3 train_fusion_model.py --tower-only     # Stage 1 only: retrain EDHREC tower (~2 min)
 python3 train_fusion_model.py --forge-tower    # Train forge tower on causal graph (~6 min)
-python3 train_fusion_model.py --forge-only     # Train forge GBM + compare with baseline
+python3 train_fusion_model.py --forge-only     # Train forge GBM (uses cached features, ~50s)
+python3 train_fusion_model.py --forge-only --rebuild-features  # Rebuild feature cache + train (~4 min)
 python3 train_fusion_model.py --features-only  # Build + inspect feature matrix
 python3 train_fusion_model.py --feature-importance  # Print GBM feature importance
 python3 train_fusion_model.py --holdout-eval   # True generalization (train 80% / test 20%)
@@ -155,17 +156,21 @@ python3 train_fusion_model.py                           # 7. Retrain fusion mode
 - Tower trained on causal graph connectivity (AUC=0.999)
 - GBM on 20 features: tower_forge, embedding_cosine, oracle_similarity, strategy_cosine,
   causal scores (directional + event diversity), phase_match, card types, tribal, cmc
-- Zero EDHREC dependency — works for any commander
+- EDHREC-free features but trained on EDHREC deck membership labels (staples filtered out)
 - Training: `python3 train_fusion_model.py --forge-tower` then `--forge-only`
-- Feature importance: tower_forge 19%, embedding_cosine 16%, oracle_similarity 15%, cmc 11%, deck_edge_count 10%
+- Feature importance: tower_forge 19%, embedding_cosine 17%, oracle_similarity 16%, cmc 10%, deck_edge_count 9%
+- Fast iteration: `--forge-only` uses cached features (~50s); `--rebuild-features` forces rebuild (~4 min)
+- Training data: generic staples (>30% deck frequency) filtered from positives
+- Hard negative sampling: 50% strategy/subtype overlap + 50% random
+- GBM: num_leaves=127, lr=0.02, n_estimators=1000, subsample/colsample=0.8
 
 Both towers share architecture: 768→128 projection, MLP 140→128→64→32→1, sigmoid output
 
 ### Recommendation Pipeline (synergy_graph.py --recommend [--forge])
 
 ```
-1. Tower pre-filter: score all color-legal cards, take top 3000 candidates
-   (uses EDHREC tower by default, forge tower with --forge flag)
+1. Tower pre-filter: score all color-legal cards, take top candidates
+   (EDHREC tower: top 3000, forge tower: top 8000 due to sparser coverage)
 2. Score all candidates with GBM (batch predict, ~0.5s for 3000 cards):
    Baseline: 8 features (tower_prob, causal, edhrec_synergy, edhrec_rank, ...)
    Forge:    20 features (tower_forge, embedding_cosine, oracle_similarity, ...)
