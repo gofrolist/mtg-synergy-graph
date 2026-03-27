@@ -107,20 +107,228 @@ def _build_synthetic_edges(conn, idx, name_to_oid):
 
             if len(batch) >= 10000:
                 conn.executemany(
-                    "INSERT OR IGNORE INTO interaction_edges VALUES (?,?,?,?,?,?,?)",
+                    "INSERT OR IGNORE INTO interaction_edges (source_id, target_id, edge_type, ability_a, ability_b, strength, detail) VALUES (?,?,?,?,?,?,?)",
                     batch)
                 total += len(batch)
                 batch.clear()
 
         if batch:
             conn.executemany(
-                "INSERT OR IGNORE INTO interaction_edges VALUES (?,?,?,?,?,?,?)",
+                "INSERT OR IGNORE INTO interaction_edges (source_id, target_id, edge_type, ability_a, ability_b, strength, detail) VALUES (?,?,?,?,?,?,?)",
                 batch)
             total += len(batch)
             batch.clear()
 
         conn.commit()
 
+    return total
+
+
+def _build_entity_presence_edges(conn, name_to_oid):
+    """Build edges for state-based entity presence synergies.
+
+    Connects cards that PRODUCE entities (tokens, creatures of specific types)
+    to cards that BENEFIT from those entities existing:
+    - "for each [Type]" scaling effects (Brightstone Ritual, Battle Hymn)
+    - "Sac<N/Type>" sacrifice outlets (Goblin Bombardment)
+    - "tap an untapped [Type]" tap abilities
+
+    These synergies are invisible to event-based trigger matching because
+    they scale with board STATE, not individual EVENTS.
+    """
+    import json as _json
+    import re
+
+    # ── Step 1: Build consumer index ────────────────────────────────────
+    # Cards that benefit from entities of specific types
+    # consumer_types[oid] = set of (type_lower, precision)
+    # precision: "exact" for specific subtypes, "broad" for card types
+
+    consumer_types = {}  # oid → {(type, precision)}
+
+    # 1a. Oracle text: "for each [Type]" patterns
+    card_types = {"creature", "artifact", "enchantment", "land", "planeswalker",
+                  "instant", "sorcery", "permanent", "spell", "nonland",
+                  "noncreature", "nontoken", "token"}
+    skip_words = {"card", "time", "point", "mana", "of", "the", "counter",
+                  "charge", "player", "opponent", "color", "life", "other",
+                  "coin", "die", "copy", "way", "them", "instance", "1",
+                  "additional", "that", "damage", "those"}
+
+    for row in conn.execute(
+        "SELECT oracle_id, oracle_text FROM cards WHERE oracle_text IS NOT NULL"
+    ):
+        oid, text = row[0], (row[1] or "").lower()
+        types_found = set()
+        for m in re.finditer(r"for each (\w+)", text):
+            t = m.group(1)
+            if t in skip_words:
+                continue
+            if t in card_types:
+                types_found.add((t, "broad"))
+            else:
+                types_found.add((t, "exact"))  # subtype like "goblin"
+
+        # "tap an untapped [Type]" — benefits from having that type
+        for m in re.finditer(r"tap (?:an|a|\d+) untapped (\w+)", text):
+            t = m.group(1)
+            if t in card_types:
+                types_found.add((t, "broad"))
+            elif t not in skip_words:
+                types_found.add((t, "exact"))
+
+        if types_found:
+            consumer_types[oid] = types_found
+
+    # 1b. Forge Sac<N/Type> costs
+    oid_to_forge = {}
+    for row in conn.execute("SELECT oracle_id, forge_name FROM forge_name_map"):
+        oid_to_forge[row[0]] = row[1]
+    forge_to_oid = {v: k for k, v in oid_to_forge.items()}
+
+    for row in conn.execute(
+        "SELECT card_name, raw_line FROM forge_abilities WHERE raw_line LIKE '%Sac<%'"
+    ):
+        oid = forge_to_oid.get(row[0])
+        if not oid:
+            continue
+        for m in re.findall(r"Sac<\d+/([^/>]+)", row[1]):
+            sac_type = m.split("/")[0].strip()
+            if sac_type == "CARDNAME":
+                continue
+            # Parse Forge type specs like "Creature.Other", "Goblin", "Artifact;Creature"
+            for part in sac_type.split(";"):
+                part = part.split(".")[0].strip()
+                if not part:
+                    continue
+                if part.lower() in card_types:
+                    consumer_types.setdefault(oid, set()).add((part.lower(), "broad"))
+                else:
+                    consumer_types.setdefault(oid, set()).add((part.lower(), "exact"))
+
+    print(f"  Entity consumers: {len(consumer_types)} cards")
+
+    # ── Step 2: Build producer index ────────────────────────────────────
+    # Cards that produce entities of specific types
+
+    # 2a. Token creators: parse token_script for creature types
+    token_types = {}  # oid → set of type strings
+    known_token_types = set()
+
+    for row in conn.execute(
+        "SELECT fnm.oracle_id, fa.token_script FROM forge_abilities fa "
+        "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+        "WHERE fa.verb = 'Token' AND fa.token_script IS NOT NULL"
+    ):
+        oid, script = row[0], row[1].lower()
+        # Parse token_script: "color_power_toughness_type[_keywords...]"
+        # e.g., "r_1_1_goblin", "w_1_1_spirit_flying", "c_a_treasure_sac"
+        parts = script.split("_")
+        if len(parts) >= 4:
+            # Types start at index 3, keywords follow
+            keywords = {"flying", "haste", "trample", "vigilance", "deathtouch",
+                        "lifelink", "menace", "reach", "defender", "first",
+                        "strike", "double", "indestructible", "hexproof",
+                        "sac", "unblockable"}
+            for part in parts[3:]:
+                if part and part not in keywords:
+                    token_types.setdefault(oid, set()).add(part)
+                    known_token_types.add(part)
+
+    # 2b. Creature cards produce their own subtypes (already in DB)
+    # We'll match them against consumers when building edges
+
+    print(f"  Token creators: {len(token_types)} cards, {len(known_token_types)} token types")
+
+    # ── Step 3: Build edges ─────────────────────────────────────────────
+    # Match producers → consumers by type
+
+    # Pre-build consumer lookups for fast matching
+    exact_consumers = {}  # type_lower → [(oid, ...)]
+    broad_consumers = {}  # card_type → [(oid, ...)]
+    for oid, types in consumer_types.items():
+        for t, prec in types:
+            if prec == "exact":
+                exact_consumers.setdefault(t, []).append(oid)
+            else:
+                broad_consumers.setdefault(t, []).append(oid)
+
+    total = 0
+    batch = []
+
+    # 3a. Token creators → consumers of that token type
+    for prod_oid, types in token_types.items():
+        for token_type in types:
+            # Exact: consumer wants this specific type
+            for cons_oid in exact_consumers.get(token_type, []):
+                if prod_oid == cons_oid:
+                    continue
+                detail = _json.dumps({"event": "EntityPresence",
+                                      "filter_precision": "exact"})
+                batch.append((prod_oid, cons_oid, "enables", -1, -1, 0.4, detail))
+
+            # Broad: consumer wants "creature" and token is a creature type
+            for cons_oid in broad_consumers.get("creature", []):
+                if prod_oid == cons_oid:
+                    continue
+                detail = _json.dumps({"event": "EntityPresence",
+                                      "filter_precision": "broad"})
+                batch.append((prod_oid, cons_oid, "enables", -1, -1, 0.2, detail))
+
+            if len(batch) >= 10000:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO interaction_edges "
+                    "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
+                    "VALUES (?,?,?,?,?,?,?)", batch)
+                total += len(batch)
+                batch.clear()
+
+    # 3b. Creature cards → consumers of their subtype
+    # Stream through all creatures and match subtypes
+    for row in conn.execute(
+        "SELECT c.oracle_id, c.type_line FROM cards c "
+        "WHERE c.type_line LIKE '%Creature%' AND c.type_line LIKE '%—%' "
+        "AND c.type_line NOT LIKE '%Token%'"
+    ):
+        prod_oid, type_line = row
+        if not type_line:
+            continue
+        try:
+            subtypes = {s.lower().strip() for s in type_line.split("—")[1].strip().split()}
+        except (IndexError, AttributeError):
+            continue
+
+        for subtype in subtypes:
+            # Exact: consumer wants this specific subtype
+            for cons_oid in exact_consumers.get(subtype, []):
+                if prod_oid == cons_oid:
+                    continue
+                detail = _json.dumps({"event": "EntityPresence",
+                                      "filter_precision": "exact"})
+                batch.append((prod_oid, cons_oid, "enables", -1, -1, 0.25, detail))
+
+            if len(batch) >= 10000:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO interaction_edges "
+                    "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
+                    "VALUES (?,?,?,?,?,?,?)", batch)
+                total += len(batch)
+                batch.clear()
+
+    # 3c. All creatures → broad consumers of "creature"
+    # (sacrifice outlets, "for each creature" effects)
+    # Skip this — would create too many edges (30k creatures × 300 consumers = 9M)
+    # The ChangesZone synthetic edges already cover broad creature-entering triggers
+
+    if batch:
+        conn.executemany(
+            "INSERT OR IGNORE INTO interaction_edges "
+            "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
+            "VALUES (?,?,?,?,?,?,?)", batch)
+        total += len(batch)
+        batch.clear()
+
+    conn.commit()
     return total
 
 
@@ -152,7 +360,11 @@ def main():
         # Streamed directly to DB to avoid holding millions of edges in memory
         syn_count = _build_synthetic_edges(conn, idx, name_to_oid)
         print(f"  Synthetic edges: {syn_count}")
-        print(f"Done: {count + syn_count} total edges")
+
+        # Entity presence edges: token creators → scaling/sacrifice/tap cards
+        ent_count = _build_entity_presence_edges(conn, name_to_oid)
+        print(f"  Entity presence edges: {ent_count}")
+        print(f"Done: {count + syn_count + ent_count} total edges")
     elif args.rebuild:
         rows = conn.execute("SELECT DISTINCT oracle_id FROM parsed_abilities").fetchall()
         cards = {}

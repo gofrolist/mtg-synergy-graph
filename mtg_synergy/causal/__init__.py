@@ -64,10 +64,14 @@ def store_edges(conn, edges: list[Edge]) -> int:
     """Store edges in interaction_edges table."""
     conn.execute("DELETE FROM interaction_edges")
     for e in edges:
+        detail_dict = e.detail.to_dict()
+        precision = detail_dict.get("filter_precision")
         conn.execute(
-            "INSERT OR REPLACE INTO interaction_edges VALUES (?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO interaction_edges "
+            "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail, filter_precision) "
+            "VALUES (?,?,?,?,?,?,?,?)",
             (e.source, e.target, e.edge_type, e.ability_a, e.ability_b,
-             e.strength, json.dumps(e.detail.to_dict())))
+             e.strength, json.dumps(detail_dict), precision))
     conn.commit()
     return len(edges)
 
