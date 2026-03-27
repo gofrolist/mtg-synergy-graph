@@ -415,6 +415,23 @@ class TestMechanicsVectorsNoOracleText:
         assert len(consumes) > 0
 
 
+def test_commander_profile_uses_forge():
+    """infer_profile should detect strategies from Forge verbs, not oracle text."""
+    from mtg_synergy.recommend.commander_profile import infer_profile
+
+    # Test with Forge verbs directly
+    profile = infer_profile(
+        oracle_text="",  # empty oracle text
+        type_line="Legendary Creature \u2014 Human",
+        forge_verbs={"PutCounter", "Token"},
+        forge_triggers={"ChangesZone"},
+    )
+    assert "+1/+1-counters" in profile.strategies
+    assert "tokens" in profile.strategies
+    assert "blink" in profile.strategies
+    assert "tribal-human" in profile.strategies
+
+
 class TestFeatureCount:
     """Verify compute_card_features returns exactly 40 elements."""
 

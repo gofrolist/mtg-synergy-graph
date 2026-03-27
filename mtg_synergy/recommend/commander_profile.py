@@ -45,6 +45,39 @@ STRATEGY_KEYWORDS = {
 }
 
 
+# Forge verb → strategy mapping (replaces STRATEGY_KEYWORDS oracle text matching)
+_FORGE_VERB_STRATEGIES = {
+    "Token": "tokens",
+    "PutCounter": "+1/+1-counters",
+    "PutCounterAll": "+1/+1-counters",
+    "Proliferate": "+1/+1-counters",
+    "Sacrifice": "aristocrats",
+    "CopySpellAbility": "spellslinger",
+    "GainLife": "lifegain",
+    "LoseLife": "lifedrain",
+    "DealDamage": "burn",
+    "DamageAll": "burn",
+    "Mill": "mill",
+    "Draw": "card-draw",
+    "Dig": "card-draw",
+    "Equip": "equipment",
+    "Enchant": "enchantress",
+    "PumpAll": "go-wide",
+    "Mana": "ramp",
+}
+
+_FORGE_TRIGGER_STRATEGIES = {
+    "Attacks": "voltron",
+    "AttackersDeclared": "go-wide",
+    "SpellCast": "spellslinger",
+    "Sacrificed": "aristocrats",
+    "LifeGained": "lifegain",
+    "Discarded": "wheels",
+    "Drawn": "card-draw",
+    "ChangesZone": "blink",
+}
+
+
 @dataclass
 class CommanderProfile:
     strategies: set = field(default_factory=set)
@@ -88,19 +121,39 @@ def infer_profile(
     parsed_events_produced: set[str] | None = None,
     parsed_events_consumed: set[str] | None = None,
     parsed_effects: set[str] | None = None,
+    forge_verbs: set[str] | None = None,
+    forge_triggers: set[str] | None = None,
 ) -> CommanderProfile:
-    """Infer commander archetype from text and parsed data."""
+    """Infer commander archetype from text and parsed data.
+
+    If forge_verbs / forge_triggers are provided, they are used as the PRIMARY
+    strategy detection mechanism.  Oracle-text keyword matching is only used as
+    a fallback when neither Forge parameter is supplied.
+    """
     strategies = set()
     events_produced = parsed_events_produced or set()
     events_consumed = parsed_events_consumed or set()
     effects = parsed_effects or set()
 
-    # 1. Strategy keywords from oracle text
-    oracle_lower = oracle_text.lower()
-    for strat, keywords in STRATEGY_KEYWORDS.items():
-        hits = sum(1 for kw in keywords if kw in oracle_lower)
-        if hits >= 2:
-            strategies.add(strat)
+    has_forge = forge_verbs is not None or forge_triggers is not None
+
+    # 1a. PRIMARY: Forge verb/trigger → strategy mapping
+    if forge_verbs:
+        for verb, strat in _FORGE_VERB_STRATEGIES.items():
+            if verb in forge_verbs:
+                strategies.add(strat)
+    if forge_triggers:
+        for trigger, strat in _FORGE_TRIGGER_STRATEGIES.items():
+            if trigger in forge_triggers:
+                strategies.add(strat)
+
+    # 1b. FALLBACK: Strategy keywords from oracle text (only when no Forge data)
+    if not has_forge:
+        oracle_lower = oracle_text.lower()
+        for strat, keywords in STRATEGY_KEYWORDS.items():
+            hits = sum(1 for kw in keywords if kw in oracle_lower)
+            if hits >= 2:
+                strategies.add(strat)
 
     # 2. Event-based strategy detection
     for event, strat in _EVENT_TO_STRATEGY.items():
@@ -126,6 +179,7 @@ def infer_profile(
 
     # Also check oracle text for tribal references
     if tribal_type is None:
+        oracle_lower = oracle_text.lower()
         for st in _TRIBAL_SUBTYPES:
             pattern = rf"\b{st}\b.*\b(you control|enters|dies|gets)\b"
             if re.search(pattern, oracle_lower):
