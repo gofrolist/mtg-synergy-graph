@@ -3,10 +3,7 @@
 Extracts the 40-feature forge GBM feature vector computation into a
 single module used by both train_fusion_model.py and scoring.py.
 """
-import math
-import re
 import time
-from collections import Counter
 
 import numpy as np
 
@@ -48,9 +45,6 @@ class ForgeFeatureContext:
         self.oid_to_idx = oid_to_idx
         self._has_edge_index = False
 
-        # _card_oracle removed — F25-F30 now use Forge profiles,
-        # F28 (cmdr_keyword_match) uses _card_tokens (loaded below for TF-IDF).
-
         # Card strategies
         self.card_strats = {}
         for oid, strat in conn.execute(
@@ -82,23 +76,6 @@ class ForgeFeatureContext:
                 if order is not None:
                     self.card_phase_order.setdefault(oid, set()).add(order)
 
-        # Oracle text TF-IDF
-        self._tokenize = re.compile(r'[a-z]{3,}')
-        doc_freq = Counter()
-        self._card_tokens = {}
-        self._n_docs = 0
-        for row in conn.execute("SELECT oracle_id, oracle_text FROM cards WHERE oracle_text IS NOT NULL"):
-            tokens = Counter(self._tokenize.findall((row[1] or "").lower()))
-            if tokens:
-                self._card_tokens[row[0]] = tokens
-                for w in tokens:
-                    doc_freq[w] += 1
-                self._n_docs += 1
-        self._vocab = [w for w, _ in doc_freq.most_common(2000)]
-        self._vocab_idx = {w: i for i, w in enumerate(self._vocab)}
-        self._n_vocab = len(self._vocab)
-        self._doc_freq = doc_freq
-
         # Forge ability profiles: per-card structured data from forge_abilities
         # Replaces oracle text regex matching for features F25-F30
         self._forge_profiles = {}
@@ -129,6 +106,34 @@ class ForgeFeatureContext:
                     main = part.split(".")[0].strip()
                     if main and main != "Card" and main[0].isupper():
                         p['trigger_filters'].add(main.lower())
+
+        # Forge ability vectors: binary encoding of verbs+triggers+keywords for cosine similarity
+        # Replaces oracle text TF-IDF (F9) with mechanical similarity
+        all_abilities = set()
+        for p in self._forge_profiles.values():
+            all_abilities.update(p['verbs'])
+            all_abilities.update(p['triggers'])
+            all_abilities.update(p['keywords'])
+        self._ability_vocab = sorted(all_abilities)
+        self._ability_idx = {a: i for i, a in enumerate(self._ability_vocab)}
+        self._n_abilities = len(self._ability_vocab)
+
+        # Pre-compute normalized ability vectors per card
+        self._ability_vectors = {}
+        for oid, p in self._forge_profiles.items():
+            v = np.zeros(self._n_abilities, dtype=np.float32)
+            for a in p['verbs']:
+                idx = self._ability_idx.get(a)
+                if idx is not None: v[idx] = 1.0
+            for a in p['triggers']:
+                idx = self._ability_idx.get(a)
+                if idx is not None: v[idx] = 1.0
+            for a in p['keywords']:
+                idx = self._ability_idx.get(a)
+                if idx is not None: v[idx] = 1.0
+            norm = np.linalg.norm(v)
+            if norm > 0:
+                self._ability_vectors[oid] = v / norm
 
         # Pre-load trigger zones per card (for F36)
         self._card_zones = {}
@@ -275,19 +280,6 @@ class ForgeFeatureContext:
             v[self._strat_idx[s]] = 1.0
         return v
 
-    def tfidf_vector(self, oid):
-        """Get L2-normalized TF-IDF vector for a card's oracle text."""
-        tokens = self._card_tokens.get(oid)
-        if not tokens:
-            return None
-        v = np.zeros(self._n_vocab, dtype=np.float32)
-        total = sum(tokens.values())
-        for word, count in tokens.items():
-            idx = self._vocab_idx.get(word)
-            if idx is not None:
-                v[idx] = (count / total) * math.log(self._n_docs / max(self._doc_freq[word], 1))
-        norm = np.linalg.norm(v)
-        return v / norm if norm > 0 else None
 
 
 class CmdrFeatureContext:
@@ -299,7 +291,7 @@ class CmdrFeatureContext:
         # Commander vectors
         self.cmdr_strats = ctx.card_strats.get(cmdr_oid, set())
         self.cmdr_strat_vec = ctx.strat_vector(cmdr_oid)
-        self.cmdr_tfidf = ctx.tfidf_vector(cmdr_oid)
+        self.cmdr_ability_vec = ctx._ability_vectors.get(cmdr_oid)
         self.cmdr_phases = ctx.card_phase_order.get(cmdr_oid, set())
 
         # Commander subtypes for tribal matching
@@ -316,35 +308,6 @@ class CmdrFeatureContext:
             'counter_types': set(), 'targets': set(), 'ability_types': set(),
             'trigger_filters': set(),
         })
-
-        # Commander-specific keywords: unique tokens from commander oracle text
-        # Uses _card_tokens (already loaded for TF-IDF) instead of _card_oracle
-        cmdr_tokens = ctx._card_tokens.get(cmdr_oid, {})
-        self.cmdr_keywords = set()
-        if cmdr_tokens:
-            # cmdr_tokens is a Counter, keys are 3+ letter lowercase words
-            # Exclude common MTG boilerplate
-            stop = {"the", "and", "for", "you", "your", "each", "that", "this",
-                    "its", "with", "from", "into", "than", "may", "can", "all",
-                    "are", "has", "have", "one", "any", "other", "whenever",
-                    "target", "card", "cards", "creature", "creatures", "spell",
-                    "player", "players", "control", "controller", "opponent",
-                    "opponents", "permanent", "permanents", "ability", "turn",
-                    "end", "beginning", "step", "phase", "until", "put", "get",
-                    "gets", "would", "instead", "also", "number", "choose",
-                    "chosen", "where", "another", "then", "there", "their",
-                    "they", "them", "already", "first", "give", "those", "been",
-                    "being", "does", "only", "when", "more", "less", "don",
-                    "among", "onto", "plus", "minus", "equal", "least", "many",
-                    "much", "nor", "not", "either", "both", "every", "most",
-                    "some", "such", "own", "over", "under", "before", "after"}
-            # Also filter commander's own name words
-            cmdr_name_row = ctx.conn.execute(
-                "SELECT name FROM cards WHERE oracle_id = ?", (cmdr_oid,)).fetchone()
-            cmdr_name_parts = set()
-            if cmdr_name_row:
-                cmdr_name_parts = set(re.findall(r"[a-z]{3,}", cmdr_name_row[0].lower()))
-            self.cmdr_keywords = {w for w in cmdr_tokens.keys() if w not in stop and w not in cmdr_name_parts}
 
         if ctx._has_edge_index:
             self._init_from_index(ctx, cmdr_oid, deck_oids)
@@ -545,9 +508,12 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         nd = float(np.linalg.norm(csv))
         strat_cos = d / (nc * nd) if nc > 0 and nd > 0 else 0.0
 
-    # F9: oracle similarity
-    ct = ctx.tfidf_vector(card_oid)
-    oracle_sim = float(np.dot(cmdr.cmdr_tfidf, ct)) if cmdr.cmdr_tfidf is not None and ct is not None else 0.0
+    # F9: forge_ability_cosine — cosine similarity of Forge ability vectors
+    # (verbs + triggers + keywords). Captures "cards that DO similar mechanical
+    # things" instead of "cards that SAY similar things" (old oracle TF-IDF).
+    card_ability_vec = ctx._ability_vectors.get(card_oid)
+    forge_ability_cos = float(np.dot(cmdr.cmdr_ability_vec, card_ability_vec)) \
+        if cmdr.cmdr_ability_vec is not None and card_ability_vec is not None else 0.0
 
     # F10: phase match
     cp = ctx.card_phase_order.get(card_oid, set())
@@ -635,11 +601,14 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
                   card_profile.get('keywords', set()))
     shared_forge = float(len(cmdr_mechs & card_mechs))
 
-    # F28: cmdr_keyword_match — how many commander-specific keywords appear in card text
-    cmdr_kw_match = 0.0
-    if cmdr.cmdr_keywords:
-        card_tokens_set = set(ctx._card_tokens.get(card_oid, {}).keys())
-        cmdr_kw_match = float(len(cmdr.cmdr_keywords & card_tokens_set))
+    # F28: forge_ability_depth — total distinct mechanical components
+    # (verbs + triggers + keywords + counter_types). Replaces oracle text
+    # keyword overlap with Forge ability richness.
+    card_depth = float(len(card_profile.get('verbs', set())) +
+                       len(card_profile.get('triggers', set())) +
+                       len(card_profile.get('keywords', set())) +
+                       len(card_profile.get('counter_types', set())))
+    forge_depth = min(card_depth, 10.0)  # cap at 10
 
     # F29: forge_anti_tribal — card's Forge trigger_filter requires a creature
     # subtype that conflicts with the commander's type.
@@ -741,7 +710,7 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         float(min(cmdr.deck_edge_counts.get(card_oid, 0), 20)),  # F6 deck_edge_count
         float(len(cmdr.cmdr_strats & c_strats)),         # F7 strategy_overlap
         strat_cos,                                       # F8 strategy_cosine
-        oracle_sim,                                      # F9 oracle_similarity
+        forge_ability_cos,                                   # F9 forge_ability_cosine
         phase_m,                                         # F10 phase_match
         1.0 if cp else 0.0,                              # F11 has_phase_trigger
         tribal,                                          # F12 tribal_match
@@ -760,7 +729,7 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         forge_type_syn,                                  # F25 forge_type_synergy
         cmdr_type_match,                                 # F26 cmdr_forge_type_match
         shared_forge,                                    # F27 shared_forge_mechanics
-        cmdr_kw_match,                                   # F28 cmdr_keyword_match
+        forge_depth,                                         # F28 forge_ability_depth
         anti_tribal,                                     # F29 forge_anti_tribal
         verb_align,                                      # F30 forge_verb_alignment
         mech_fwd,                                        # F31 forge_mech_synergy_fwd

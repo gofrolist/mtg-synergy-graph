@@ -432,6 +432,167 @@ def test_commander_profile_uses_forge():
     assert "tribal-human" in profile.strategies
 
 
+class TestF9ForgeAbilityCosine:
+    """F9: forge_ability_cosine — cosine similarity of Forge ability vectors."""
+
+    def test_shared_verbs_positive_cosine(self):
+        """Two cards sharing verbs should have >0 cosine similarity."""
+        ctx, conn = _make_ctx()
+        try:
+            # Find two cards that both have Token verb
+            token_cards = []
+            for oid, profile in ctx._forge_profiles.items():
+                if "Token" in profile.get("verbs", set()):
+                    token_cards.append(oid)
+                    if len(token_cards) >= 2:
+                        break
+            if len(token_cards) < 2:
+                pytest.skip("Need at least 2 cards with Token verb")
+            cmdr = _make_cmdr(ctx, token_cards[0])
+            features = _compute_features(ctx, cmdr, token_cards[1], conn)
+            assert features[9] > 0.0, (
+                f"F9 should be >0 for two cards sharing Token verb, got {features[9]}"
+            )
+        finally:
+            conn.close()
+
+    def test_no_profile_gives_zero(self):
+        """Card without a Forge profile should get 0 cosine similarity."""
+        ctx, conn = _make_ctx()
+        try:
+            cmdr = _make_cmdr(ctx, KRENKO_OID, subtypes={"goblin"})
+            # Find a card NOT in forge profiles (no ability vector)
+            found_oid = None
+            for (oid,) in conn.execute("SELECT DISTINCT oracle_id FROM cards"):
+                if oid not in ctx._forge_profiles and oid != KRENKO_OID:
+                    found_oid = oid
+                    break
+            if found_oid is None:
+                pytest.skip("All cards have forge profiles")
+            features = _compute_features(ctx, cmdr, found_oid, conn)
+            assert features[9] == 0.0, (
+                f"F9 should be 0 for card without forge profile, got {features[9]}"
+            )
+        finally:
+            conn.close()
+
+
+class TestF28ForgeAbilityDepth:
+    """F28: forge_ability_depth — total distinct mechanical components."""
+
+    def test_card_with_abilities_has_depth(self):
+        """Card with multiple verbs/triggers should have depth > 0."""
+        ctx, conn = _make_ctx()
+        try:
+            cmdr = _make_cmdr(ctx, KRENKO_OID, subtypes={"goblin"})
+            # Find a card with at least 2 verbs or triggers
+            found_oid = None
+            for oid, profile in ctx._forge_profiles.items():
+                total = (len(profile.get('verbs', set())) +
+                         len(profile.get('triggers', set())) +
+                         len(profile.get('keywords', set())) +
+                         len(profile.get('counter_types', set())))
+                if total >= 2 and oid != KRENKO_OID:
+                    found_oid = oid
+                    break
+            if found_oid is None:
+                pytest.skip("No card with 2+ mechanical components found")
+            features = _compute_features(ctx, cmdr, found_oid, conn)
+            assert features[28] >= 2.0, (
+                f"F28 should be >= 2.0 for card with 2+ components, got {features[28]}"
+            )
+        finally:
+            conn.close()
+
+    def test_no_profile_gives_zero(self):
+        """Card without a Forge profile should get 0 depth."""
+        ctx, conn = _make_ctx()
+        try:
+            cmdr = _make_cmdr(ctx, KRENKO_OID, subtypes={"goblin"})
+            # Find a card NOT in forge profiles
+            found_oid = None
+            for (oid,) in conn.execute("SELECT DISTINCT oracle_id FROM cards"):
+                if oid not in ctx._forge_profiles and oid != KRENKO_OID:
+                    found_oid = oid
+                    break
+            if found_oid is None:
+                pytest.skip("All cards have forge profiles")
+            features = _compute_features(ctx, cmdr, found_oid, conn)
+            assert features[28] == 0.0, (
+                f"F28 should be 0 for card without forge profile, got {features[28]}"
+            )
+        finally:
+            conn.close()
+
+    def test_depth_capped_at_10(self):
+        """F28 should be capped at 10.0."""
+        ctx, conn = _make_ctx()
+        try:
+            cmdr = _make_cmdr(ctx, KRENKO_OID, subtypes={"goblin"})
+            # Find any card to verify cap
+            for oid in ctx._forge_profiles:
+                if oid != KRENKO_OID:
+                    features = _compute_features(ctx, cmdr, oid, conn)
+                    assert features[28] <= 10.0, (
+                        f"F28 should be capped at 10.0, got {features[28]}"
+                    )
+                    break
+        finally:
+            conn.close()
+
+
+class TestAbilityVectorsLoaded:
+    """Verify _ability_vectors are built correctly from Forge profiles."""
+
+    def test_ability_vectors_exist(self):
+        """_ability_vectors dict should be non-empty."""
+        ctx, conn = _make_ctx()
+        try:
+            assert hasattr(ctx, "_ability_vectors")
+            assert isinstance(ctx._ability_vectors, dict)
+            assert len(ctx._ability_vectors) > 1000, (
+                f"Expected >1000 ability vectors, got {len(ctx._ability_vectors)}"
+            )
+        finally:
+            conn.close()
+
+    def test_ability_vectors_normalized(self):
+        """Each ability vector should be L2-normalized."""
+        ctx, conn = _make_ctx()
+        try:
+            for oid, vec in list(ctx._ability_vectors.items())[:10]:
+                norm = float(np.linalg.norm(vec))
+                assert abs(norm - 1.0) < 1e-5, (
+                    f"Ability vector for {oid} has norm {norm}, expected 1.0"
+                )
+        finally:
+            conn.close()
+
+
+class TestNoOracleTextInFeatures:
+    """Verify oracle text TF-IDF infrastructure has been fully removed."""
+
+    def test_no_card_tokens(self):
+        """ForgeFeatureContext should not have _card_tokens attribute."""
+        ctx, conn = _make_ctx()
+        try:
+            assert not hasattr(ctx, "_card_tokens"), (
+                "_card_tokens should be removed (oracle text TF-IDF replaced by Forge ability vectors)"
+            )
+        finally:
+            conn.close()
+
+    def test_no_tfidf_method(self):
+        """ForgeFeatureContext should not have tfidf_vector method."""
+        ctx, conn = _make_ctx()
+        try:
+            assert not hasattr(ctx, "tfidf_vector"), (
+                "tfidf_vector should be removed (replaced by _ability_vectors)"
+            )
+        finally:
+            conn.close()
+
+
 class TestFeatureCount:
     """Verify compute_card_features returns exactly 40 elements."""
 

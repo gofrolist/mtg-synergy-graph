@@ -54,7 +54,7 @@ FORGE_FEATURE_NAMES = [
     "deck_edge_count",       # [6] deck cards with causal edges to this card
     "strategy_overlap",      # [7] shared strategies count
     "strategy_cosine",       # [8] strategy vector cosine similarity
-    "oracle_similarity",     # [9] oracle text TF-IDF cosine similarity
+    "forge_ability_cosine",  # [9] Forge ability vector cosine similarity
     "phase_match",           # [10] cmdr and card trigger in same phase window
     "has_phase_trigger",     # [11] card has any phase-based trigger
     "tribal_match",          # [12] creature type match
@@ -73,7 +73,7 @@ FORGE_FEATURE_NAMES = [
     "forge_type_synergy",    # [25] card's Forge trigger_filter/target references cmdr's creature type
     "cmdr_forge_type_match", # [26] commander's Forge trigger_filter/target references card's type
     "shared_forge_mechanics", # [27] shared Forge verbs/trigger_modes/keywords count
-    "cmdr_keyword_match",   # [28] commander-specific oracle keywords found in card text
+    "forge_ability_depth",  # [28] total distinct mechanical components (verbs+triggers+keywords+counters)
     "forge_anti_tribal",    # [29] card's Forge trigger_filter requires conflicting creature subtype
     "forge_verb_alignment", # [30] card's verbs produce events that commander's triggers consume
     "forge_mech_fwd",       # [31] card produces what commander consumes (mechanics vector dot)
@@ -642,7 +642,7 @@ def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=Tru
 
     if verbose:
         print(f"  Strategy vector: {ctx._n_strats} strategies")
-        print(f"  Oracle TF-IDF: {ctx._n_vocab} vocab, {len(ctx._card_tokens)} cards with text")
+        print(f"  Forge ability vectors: {ctx._n_abilities} vocab, {len(ctx._ability_vectors)} cards with vectors")
 
     # ── Tower model (kept here for batch inference) ───────────────────
     sf_data = load_structural_features()
