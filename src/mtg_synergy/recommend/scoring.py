@@ -60,7 +60,7 @@ def color_identity_filter(conn, cmdr_oid: str, color_identity: set,
 
 
 def _score_commander(cmdr_oid, cmdr_name, color_identity, deck_cards,
-                     ctx, gbm, card_data, top_n=30):
+                     ctx, gbm, card_data, top_n=50):
     """Score all color-legal candidates for one commander. Returns ranked list of (name, score).
 
     Uses pre-loaded ctx and gbm to avoid re-initialization.

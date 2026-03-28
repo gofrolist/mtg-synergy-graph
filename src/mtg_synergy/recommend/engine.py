@@ -6,7 +6,7 @@ from mtg_synergy.combos.detector import find_partial_combos
 
 
 def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
-                    deck_types: set[str] = None, top_n: int = 20,
+                    deck_types: set[str] = None, top_n: int = 50,
                     active_strategies: set = None, db_path: str = None,
                     color_identity: set = None, commander: str = None,
                     edhrec_slug: str = None):

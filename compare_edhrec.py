@@ -126,12 +126,12 @@ def compare_commander(commander_name: str, slug: str, conn: sqlite3.Connection,
             print("  No recommendations generated")
         return None
 
-    our_recs_norm = {normalize(c) for c in our_recs[:30]}
+    our_recs_norm = {normalize(c) for c in our_recs[:50]}
 
     hi_syn_overlap = our_recs_norm & set(edhrec["high_syn"].keys())
     top_overlap = our_recs_norm & edhrec["top_cards"]
     on_page = our_recs_norm & set(edhrec["all_cards"].keys())
-    not_edh = [n for n in our_recs[:30] if normalize(n) not in edhrec["all_cards"]]
+    not_edh = [n for n in our_recs[:50] if normalize(n) not in edhrec["all_cards"]]
 
     if verbose:
         # Show EDHREC high synergy cards
@@ -143,8 +143,8 @@ def compare_commander(commander_name: str, slug: str, conn: sqlite3.Connection,
             print(f"    {i:2}. {c['name']:<40} syn={c['synergy']:.2f}  [{in_ours}]")
 
         # Show our recommendations
-        print(f"\n  OUR top 30 recommendations:")
-        for i, name in enumerate(our_recs[:30], 1):
+        print(f"\n  OUR top 50 recommendations:")
+        for i, name in enumerate(our_recs[:50], 1):
             edh = edhrec["all_cards"].get(normalize(name))
             if edh:
                 print(f"    {i:2}. {name:<40} EDHREC syn={edh['synergy']:.2f}  [{edh['section']}]")
@@ -153,10 +153,10 @@ def compare_commander(commander_name: str, slug: str, conn: sqlite3.Connection,
 
         # Summary
         print(f"\n  SUMMARY:")
-        print(f"    Hi-Syn (in High Synergy Cards):  {len(hi_syn_overlap)}/30")
-        print(f"    Top (in Top Cards):              {len(top_overlap)}/30")
-        print(f"    OnPage (anywhere on EDHREC):     {len(on_page)}/30")
-        print(f"    NotEDH (not on EDHREC at all):   {len(not_edh)}/30")
+        print(f"    Hi-Syn (in High Synergy Cards):  {len(hi_syn_overlap)}/50")
+        print(f"    Top (in Top Cards):              {len(top_overlap)}/50")
+        print(f"    OnPage (anywhere on EDHREC):     {len(on_page)}/50")
+        print(f"    NotEDH (not on EDHREC at all):   {len(not_edh)}/50")
 
         # Show missed high-syn cards
         missed_hi = set(edhrec["high_syn"].keys()) - our_recs_norm
@@ -207,7 +207,7 @@ def main():
         slug = name_to_slug(commander_name)
 
         t0 = time.time()
-        recs = batch_recommend(conn, [commander_name], top_n=30, verbose=True)
+        recs = batch_recommend(conn, [commander_name], top_n=50, verbose=True)
         our_recs = [name for name, _ in recs.get(commander_name, [])]
         print(f"  Scored in {time.time()-t0:.1f}s")
 
@@ -217,8 +217,8 @@ def main():
             print(f"{'Commander':<40} {'Hi-Syn':>7} {'Top':>5} {'OnPage':>7} {'NotEDH':>7}")
             print("-" * 70)
             r = result
-            print(f"{r['commander']:<40} {r['hi_syn']:>4}/30 {r['top']:>2}/30 "
-                  f"{r['on_page']:>4}/30 {r['not_edh']:>4}/30")
+            print(f"{r['commander']:<40} {r['hi_syn']:>4}/50 {r['top']:>2}/50 "
+                  f"{r['on_page']:>4}/50 {r['not_edh']:>4}/50")
 
     elif args.all:
         # All commanders — batch mode (load model once)
@@ -235,7 +235,7 @@ def main():
 
         print(f"\nScoring {len(commander_names)} commanders (batch mode)...")
         t0 = time.time()
-        all_recs = batch_recommend(conn, commander_names, top_n=30,
+        all_recs = batch_recommend(conn, commander_names, top_n=50,
                                    verbose=not args.quiet)
         elapsed = time.time() - t0
         print(f"Batch scoring done: {elapsed:.1f}s "
@@ -262,17 +262,17 @@ def main():
         totals = {"hi_syn": 0, "top": 0, "on_page": 0, "not_edh": 0}
         for slug in sorted(all_results):
             r = all_results[slug]
-            print(f"{r['commander']:<45} {r['hi_syn']:>4}/30 {r['top']:>2}/30 "
-                  f"{r['on_page']:>4}/30 {r['not_edh']:>4}/30")
+            print(f"{r['commander']:<45} {r['hi_syn']:>4}/50 {r['top']:>2}/50 "
+                  f"{r['on_page']:>4}/50 {r['not_edh']:>4}/50")
             for k in totals:
                 totals[k] += r[k]
 
         n = len(all_results)
         if n > 0:
             print("-" * 75)
-            print(f"{'AVERAGE':<45} {totals['hi_syn']/n:>4.1f}/30 "
-                  f"{totals['top']/n:>2.1f}/30 {totals['on_page']/n:>4.1f}/30 "
-                  f"{totals['not_edh']/n:>4.1f}/30")
+            print(f"{'AVERAGE':<45} {totals['hi_syn']/n:>4.1f}/50 "
+                  f"{totals['top']/n:>2.1f}/50 {totals['on_page']/n:>4.1f}/50 "
+                  f"{totals['not_edh']/n:>4.1f}/50")
             print(f"\nCommanders evaluated: {n}")
             print(f"Time: {elapsed:.0f}s ({elapsed/n:.2f}s/commander)")
 

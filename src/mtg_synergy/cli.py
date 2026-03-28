@@ -22,7 +22,7 @@ def run():
                         help="Recommend cards for this commander")
     parser.add_argument("--combos", action="store_true",
                         help="Detect combos for this commander's color identity")
-    parser.add_argument("--top", type=int, default=30, help="Top N results (default: 30)")
+    parser.add_argument("--top", type=int, default=50, help="Top N results (default: 50)")
     parser.add_argument("--strategies", default="auto",
                         help="Comma-separated strategies to focus (default: auto-detect)")
     parser.add_argument("--exclude-strategies", default=None,
