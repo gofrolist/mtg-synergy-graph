@@ -12,37 +12,11 @@ import argparse
 import json
 import re
 import sqlite3
-import subprocess
 import sys
+import time
 from pathlib import Path
 
 DB_PATH = Path("data/tags.db")
-RECOMMEND_CACHE_DIR = Path("data/recommend_cache")
-RECOMMEND_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def parse_recommend_output(output: str) -> list[str]:
-    """Parse card names from --recommend output."""
-    cards = []
-    for line in output.split("\n"):
-        line = line.strip()
-        if "%" in line and ("█" in line or "░" in line):
-            rest = re.sub(r'[█░]+', '', line)
-            match = re.match(r'[\d.]+%\s+(.*)', rest)
-            if match:
-                rest = match.group(1).strip()
-                # Strip OSC 8 hyperlink escape sequences
-                rest = re.sub(r'\033\]8;;[^\033]*\033\\', '', rest)
-                # Strip diagnostic tags: [brackets], T=x.x, EDH=x.xx, ⚠ HIGH CMC
-                if "[" in rest:
-                    rest = rest[:rest.index("[")].strip()
-                rest = re.sub(r'\s+T=[\d.]+', '', rest)
-                rest = re.sub(r'\s+EDH=[\d.-]+', '', rest)
-                rest = re.sub(r'\s+⚠.*$', '', rest)
-                card_name = rest.strip()
-                if card_name:
-                    cards.append(card_name)
-    return cards
 
 
 def normalize(name: str) -> str:
@@ -53,27 +27,6 @@ def normalize(name: str) -> str:
     return name
 
 
-def get_recommendations(commander_name: str, use_cache: bool = False) -> list[str]:
-    """Get recommendations for a commander, with caching."""
-    cache_key = commander_name.replace(" ", "_").replace(",", "").replace("'", "").lower()
-    cache_path = RECOMMEND_CACHE_DIR / f"{cache_key}.json"
-
-    if use_cache and cache_path.exists():
-        return json.loads(cache_path.read_text())
-
-    cmd = ["uv", "run", "python3", "synergy_graph.py", "--commander", commander_name,
-           "--recommend", "--top", "30"]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-        cards = parse_recommend_output(result.stdout)
-        if cards:
-            cache_path.write_text(json.dumps(cards, indent=2))
-        return cards
-    except Exception as e:
-        print(f"  ERROR running recommend for {commander_name}: {e}")
-        if cache_path.exists():
-            return json.loads(cache_path.read_text())
-        return []
 
 
 def get_edhrec_data(conn: sqlite3.Connection, slug: str) -> dict:
@@ -153,12 +106,14 @@ def name_to_slug(name: str) -> str:
 
 
 def compare_commander(commander_name: str, slug: str, conn: sqlite3.Connection,
-                      use_cache: bool = False, verbose: bool = True) -> dict | None:
-    """Compare our recommendations against EDHREC for one commander."""
+                      our_recs: list[str], verbose: bool = True) -> dict | None:
+    """Compare our recommendations against EDHREC for one commander.
+
+    Args:
+        our_recs: list of card names from our recommendations (pre-computed).
+    """
     edhrec = get_edhrec_data(conn, slug)
     if not edhrec["all_cards"]:
-        if verbose:
-            print(f"  No EDHREC data for {commander_name} (slug: {slug})")
         return None
 
     if verbose:
@@ -166,7 +121,6 @@ def compare_commander(commander_name: str, slug: str, conn: sqlite3.Connection,
         print(f"COMMANDER: {commander_name} (slug: {slug})")
         print(f"{'='*70}")
 
-    our_recs = get_recommendations(commander_name, use_cache=use_cache)
     if not our_recs:
         if verbose:
             print("  No recommendations generated")
@@ -230,78 +184,97 @@ def main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--commander", type=str, help="Commander name (e.g. 'Krenko, Mob Boss')")
     group.add_argument("--all", action="store_true", help="All commanders with EDHREC data")
-    parser.add_argument("--fast", action="store_true", help="Use cached recommend output")
     parser.add_argument("--quiet", action="store_true", help="Summary table only")
+    parser.add_argument("--limit", type=int, default=0,
+                        help="Limit number of commanders in --all mode (0=all)")
     args = parser.parse_args()
 
     conn = sqlite3.connect(str(DB_PATH))
 
+    from mtg_synergy.recommend.scoring import batch_recommend
+
     if args.commander:
-        # Single commander mode
-        slug = name_to_slug(args.commander)
-        # Verify commander exists in cards table
+        # Single commander
         cmdr_row = conn.execute(
             "SELECT name FROM cards WHERE LOWER(name) = LOWER(?)",
             (args.commander,)
         ).fetchone()
         if not cmdr_row:
-            print(f"Commander not found in cards DB: {args.commander}")
+            print(f"Commander not found: {args.commander}")
             conn.close()
             sys.exit(1)
-        commander_name = cmdr_row[0]  # canonical name
+        commander_name = cmdr_row[0]
+        slug = name_to_slug(commander_name)
 
-        result = compare_commander(commander_name, slug, conn,
-                                   use_cache=args.fast, verbose=not args.quiet)
-        if result:
-            if args.quiet:
-                print(f"{'Commander':<40} {'Hi-Syn':>7} {'Top':>5} {'OnPage':>7} {'NotEDH':>7}")
-                print("-" * 70)
-                r = result
-                print(f"{r['commander']:<40} {r['hi_syn']:>4}/30 {r['top']:>2}/30 {r['on_page']:>4}/30 {r['not_edh']:>4}/30")
+        t0 = time.time()
+        recs = batch_recommend(conn, [commander_name], top_n=30, verbose=True)
+        our_recs = [name for name, _ in recs.get(commander_name, [])]
+        print(f"  Scored in {time.time()-t0:.1f}s")
+
+        result = compare_commander(commander_name, slug, conn, our_recs,
+                                   verbose=not args.quiet)
+        if result and args.quiet:
+            print(f"{'Commander':<40} {'Hi-Syn':>7} {'Top':>5} {'OnPage':>7} {'NotEDH':>7}")
+            print("-" * 70)
+            r = result
+            print(f"{r['commander']:<40} {r['hi_syn']:>4}/30 {r['top']:>2}/30 "
+                  f"{r['on_page']:>4}/30 {r['not_edh']:>4}/30")
 
     elif args.all:
-        # All commanders mode
+        # All commanders — batch mode (load model once)
         print("Building slug-to-name mapping...")
         slug_to_name = build_slug_to_name(conn)
-        print(f"Resolved {len(slug_to_name)} of "
-              f"{conn.execute('SELECT COUNT(DISTINCT commander_slug) FROM edhrec_card_synergy').fetchone()[0]} slugs\n")
+        total_slugs = conn.execute(
+            "SELECT COUNT(DISTINCT commander_slug) FROM edhrec_card_synergy"
+        ).fetchone()[0]
+        print(f"Resolved {len(slug_to_name)} of {total_slugs} slugs")
 
+        commander_names = sorted(slug_to_name.values())
+        if args.limit > 0:
+            commander_names = commander_names[:args.limit]
+
+        print(f"\nScoring {len(commander_names)} commanders (batch mode)...")
+        t0 = time.time()
+        all_recs = batch_recommend(conn, commander_names, top_n=30,
+                                   verbose=not args.quiet)
+        elapsed = time.time() - t0
+        print(f"Batch scoring done: {elapsed:.1f}s "
+              f"({elapsed/len(commander_names):.2f}s/commander)\n")
+
+        # Compare each against EDHREC
+        name_to_slug_map = {v: k for k, v in slug_to_name.items()}
         all_results = {}
-        for i, (slug, name) in enumerate(sorted(slug_to_name.items()), 1):
-            if not args.quiet:
-                print(f"[{i}/{len(slug_to_name)}] {name}")
-            else:
-                # Progress indicator
-                if i % 50 == 0:
-                    print(f"  Progress: {i}/{len(slug_to_name)}...", file=sys.stderr)
-
-            result = compare_commander(name, slug, conn,
-                                       use_cache=args.fast, verbose=not args.quiet)
+        for name in commander_names:
+            slug = name_to_slug_map.get(name, name_to_slug(name))
+            our_recs = [n for n, _ in all_recs.get(name, [])]
+            result = compare_commander(name, slug, conn, our_recs,
+                                       verbose=not args.quiet)
             if result:
                 all_results[slug] = result
 
         # Summary table
-        print(f"\n\n{'='*80}")
+        print(f"\n{'='*95}")
         print("OVERALL SUMMARY")
-        print(f"{'='*80}")
-        print(f"{'Slug':<30} {'Commander':<35} {'Hi-Syn':>7} {'Top':>5} {'OnPage':>7} {'NotEDH':>7}")
-        print("-" * 95)
+        print(f"{'='*95}")
+        print(f"{'Commander':<45} {'Hi-Syn':>7} {'Top':>5} {'OnPage':>7} {'NotEDH':>7}")
+        print("-" * 75)
 
         totals = {"hi_syn": 0, "top": 0, "on_page": 0, "not_edh": 0}
         for slug in sorted(all_results):
             r = all_results[slug]
-            print(f"{slug:<30} {r['commander']:<35} {r['hi_syn']:>4}/30 {r['top']:>2}/30 "
+            print(f"{r['commander']:<45} {r['hi_syn']:>4}/30 {r['top']:>2}/30 "
                   f"{r['on_page']:>4}/30 {r['not_edh']:>4}/30")
             for k in totals:
                 totals[k] += r[k]
 
         n = len(all_results)
-        if n > 1:
-            print("-" * 95)
-            print(f"{'AVERAGE':<30} {'':<35} {totals['hi_syn']/n:>4.1f}/30 "
+        if n > 0:
+            print("-" * 75)
+            print(f"{'AVERAGE':<45} {totals['hi_syn']/n:>4.1f}/30 "
                   f"{totals['top']/n:>2.1f}/30 {totals['on_page']/n:>4.1f}/30 "
                   f"{totals['not_edh']/n:>4.1f}/30")
             print(f"\nCommanders evaluated: {n}")
+            print(f"Time: {elapsed:.0f}s ({elapsed/n:.2f}s/commander)")
 
     conn.close()
 

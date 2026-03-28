@@ -39,8 +39,6 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                 cmdr_oid = c.get("oracle_id", "")
                 break
 
-        # Forge mode: simple color-identity filter (no tower/embeddings)
-        print("  Using forge-only model (no EDHREC)")
         ci_results = color_identity_filter(
             _shared_conn, cmdr_oid, color_identity or set(),
             deck_cards=deck_cards)
