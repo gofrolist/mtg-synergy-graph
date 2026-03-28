@@ -90,7 +90,7 @@ class ForgeFeatureContext:
         for row in conn.execute(
             "SELECT fnm.oracle_id, fa.verb, fa.trigger_mode, fa.keyword, "
             "fa.counter_type, fa.target, fa.ability_type, fa.trigger_filter, "
-            "fa.cost, fa.defined "
+            "fa.cost, fa.defined, fa.raw_line "
             "FROM forge_abilities fa "
             "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name"
         ):
@@ -115,25 +115,38 @@ class ForgeFeatureContext:
                     main = part.split(".")[0].strip()
                     if main and main != "Card" and main[0].isupper():
                         p['trigger_filters'].add(main.lower())
-            # Extract subtype requirements from cost and defined fields
-            # e.g., tapXType<1/Cleric> → requires Cleric
-            # e.g., Sac<1/Human> → requires Human
-            # e.g., Defined$ TriggeredCardLKICopy.Spider → applies to Spider only
+            # Extract subtype requirements from cost, defined, and raw_line fields
             cost_str = row[8] or ""
             defined_str = row[9] or ""
+            raw_line = row[10] or ""
+            # Cost subtypes: tapXType<1/Cleric>, Sac<1/Human>
             for m in _re.findall(r'tapXType<\d+/(\w+)', cost_str):
                 if m not in ("CARDNAME",):
                     p['required_subtypes'].add(m.lower())
             for m in _re.findall(r'Sac<\d+/(\w+)', cost_str):
                 if m not in ("CARDNAME",) and m[0].isupper():
                     p['required_subtypes'].add(m.lower())
-            # Defined$ field with subtype filter (e.g., TriggeredCardLKICopy.Spider)
+            # Defined$ with subtype filter (e.g., TriggeredCardLKICopy.Spider)
             if "." in defined_str:
                 for part in defined_str.split(","):
                     if "." in part:
                         subtype = part.split(".")[-1].strip()
                         if subtype and subtype[0].isupper() and len(subtype) > 2:
                             p['required_subtypes'].add(subtype.lower())
+            # Effect target subtypes from ValidCards$ and Affected$ in raw_line
+            # e.g., ValidCards$ Creature.Orc → effect only benefits Orcs
+            # e.g., Affected$ Card.Human → static effect only applies to Humans
+            _generic = {"card", "creature", "permanent", "self", "other",
+                        "youctrl", "oppctrl", "strictlyother", "token", "nontoken"}
+            for field in ('ValidCards', 'Affected'):
+                m = _re.search(rf'{field}\$\s*(\S+)', raw_line)
+                if m:
+                    for part in m.group(1).split(","):
+                        for seg in part.split("."):
+                            seg = seg.split("+")[0].strip()
+                            if (seg and seg[0].isupper() and len(seg) > 2
+                                    and seg.lower() not in _generic):
+                                p['required_subtypes'].add(seg.lower())
 
         # Forge ability vectors: binary encoding of verbs+triggers+keywords for cosine similarity
         # Replaces oracle text TF-IDF (F9) with mechanical similarity
