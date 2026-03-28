@@ -40,6 +40,7 @@ def test_forge_profiles_loaded():
             "targets", "ability_types", "trigger_filters", "required_subtypes",
             "granted_keywords", "conditions", "duration",
             "effect_zones", "scales_with", "grants_types", "mana_colors",
+            "excluded_subtypes",
         }
         expected_bool_keys = {
             "combat_damage", "is_secondary", "gain_control",

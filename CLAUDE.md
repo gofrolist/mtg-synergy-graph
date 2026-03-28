@@ -30,8 +30,9 @@ FORGE MODEL (--recommend): Zero oracle text, pure Forge mechanical synergy
      Zone-aware concepts: enters_from_graveyard/exile/hand, goes_to_graveyard/exile
   4. Can evaluate new cards day-1 without playtesting data
   5. Works for any of 3,141+ commanders (not just 1,361 with EDHREC)
-  6. NDCG@30 = 0.52 on leave-commander-out CV
-     (was 0.54 before legality fix; old score inflated by easy illegal-card negatives)
+  6. NDCG@30 = 0.46 on leave-commander-out CV (section-based 6-grade labels)
+     Training labels: edhrec_card_synergy (367k rows, section-based grading)
+     Grade 5=High Synergy, 4=Top Cards, 3=synergy>0.1, 2=synergy 0-0.1, 1=negative, 0=not in table
 
 CAUSAL GRAPH:
   - 18.4M edges across 30+ event types (verb_event_map extracted from Forge Java source)
@@ -47,18 +48,10 @@ CAUSAL GRAPH:
 
 ### Current Performance
 
-Forge model EDHREC alignment: **4.8/30 On-EDHREC, 0.8/30 Hi-Syn** (mechanical synergy, by design finds different cards)
+Forge model finds mechanical synergies from Forge data alone (no EDHREC at inference).
+Evaluation: compare our top 30 recommendations against EDHREC's "High Synergy Cards" section.
 
-Note: "On-EDHREC" = our recs appear on EDHREC page. "Hi-Syn" = our recs have synergy >= 0.3.
-Forge model deliberately finds mechanical synergies OUTSIDE EDHREC (avg 25/30 NotEDH).
-
-| Commander | On-EDHREC | Hi-Syn |
-|---|---|---|
-| Krenko (goblin tribal) | 12/30 | 4/30 |
-| Kyler (human tribal) | 4/30 | 2/30 |
-| Y'shtola (draw/lifegain) | 4/30 | 3/30 |
-| Ur-Dragon (dragon tribal) | 9/30 | 0/30 |
-| Atraxa (counters/proliferate) | 5/30 | 0/30 |
+Use `compare_edhrec.py --commander "Name"` or `--all` to evaluate.
 
 ## Common Commands
 
@@ -79,16 +72,13 @@ python3 train_fusion_model.py --forge-only     # Train forge GBM (uses cached fe
 python3 train_fusion_model.py --forge-only --rebuild-features  # Rebuild feature cache + train (~4 min)
 
 # === Recommendations ===
-python3 synergy_graph.py --deck krenko --recommend          # Forge-only recommendations
-python3 synergy_graph.py --deck krenko --swaps       # Card swap suggestions
-python3 synergy_graph.py --deck krenko --combos      # 3-tier combo detection
-python3 synergy_graph.py --deck krenko --deck-view   # Deck analysis
+python3 synergy_graph.py --commander "Krenko, Mob Boss" --recommend     # Recommend cards
+python3 synergy_graph.py --commander "Krenko, Mob Boss" --recommend --top 10
+python3 synergy_graph.py --commander "Krenko, Mob Boss" --combos       # Combo detection
 
 # === Comparison & validation ===
-python3 compare_edhrec.py --refresh --quiet    # Compare all decks vs EDHREC
-python3 compare_edhrec.py --deck krenko --fast  # Single deck (cached)
-python3 compare_edhrec.py --fast --quiet        # Summary only (0.07s)
-python3 compare_edhrec.py --forge --quiet      # Compare forge model vs EDHREC
+python3 compare_edhrec.py --commander "Krenko, Mob Boss"  # Single commander vs EDHREC
+python3 compare_edhrec.py --all --quiet                    # All commanders summary
 
 # Tests
 uv run pytest tests/ -v                        # Run all tests
@@ -183,35 +173,27 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
 - Mechanics vectors (`src/mtg_synergy/recommend/mechanics_vectors.py`): 112-dim shared
   concept space (32 game concepts + 80 subtypes). Effects and triggers map to same
   dimensions. Dot product = mechanical synergy score.
-- Training: EDHREC labels (1,355 commanders), forge-native features
-  Self-supervised causal labels overfit (features ARE the causal graph)
+- Training data: edhrec_card_synergy (367k rows, 1,387 commanders), section-based grading
+  Grade 5=High Synergy, 4=Top Cards, 3=synergy>0.1, 2=synergy 0-0.1, 1=negative, 0=random neg
+  Generic staples (>30% frequency) demoted from grade 4/5 to 3
+  Commander-illegal cards filtered from negative pool
+  Hard negative sampling: 50% strategy/subtype overlap + 50% random, 1:1 ratio
 - Training: `python3 train_fusion_model.py --forge-only --rebuild-features` (~5 min)
-- Feature importance: card_hub_score 9%, strategy_cosine 9%, deck_edge_count 8%,
-  ability_density 8%, forge_ability_cosine 7%, cmc 5%, forge_ability_depth 4%
+- Feature importance: strategy_cosine 9%, card_hub_score 8%, ability_density 7%,
+  deck_edge_count 7%, forge_ability_cosine 6%, cmc 5%
 - Edge index cached to npz (~2s reload vs ~40s DB scan)
-- Edge index pre-loaded: CmdrFeatureContext uses in-memory adjacency
-- Training data: generic staples (>30% deck frequency) filtered from positives
-- Hard negative sampling: 50% strategy/subtype overlap + 50% random
-- GBM: LambdaRank, num_leaves=255, lr=0.05, n_estimators=1500, label_gain=[0,1,2,3,5,8,12,18,25,35]
+- Edge index pre-loaded at inference: CmdrFeatureContext uses in-memory adjacency (~7s total)
+- GBM: LambdaRank, num_leaves=255, lr=0.05, n_estimators=1500, label_gain=[0,1,3,6,15,30]
 
-### Recommendation Pipeline (synergy_graph.py --recommend)
+### Recommendation Pipeline (synergy_graph.py --commander "Name" --recommend)
 
 ```
 1. Candidate selection: Color-identity filter → ALL legal cards (no tower, no embeddings)
-2. Score all candidates with GBM (batch predict, ~0.5s for 8000 cards):
+2. Score all candidates with GBM (batch predict, ~0.5s for 13k cards):
    74 features (LambdaRank, 100% Forge-native, no oracle text)
 3. Sort and output top 30 with clickable Scryfall hyperlinks (OSC 8)
-Total time: ~1.5s (no neural net overhead)
+Total time: ~7s (including edge index load from cache)
 ```
-
-### Swap System (synergy_graph.py --swaps)
-
-Suggests card swaps with multi-layer protection:
-- **Infrastructure protection**: Cards providing removal/protection/ramp/draw → never cut
-- **Tribal protection**: Creatures matching deck's dominant type → never cut
-- **Changeling/Shapeshifter**: Always protected in tribal decks
-- **Commander synergy protection**: Top 20 cards by causal graph edge score → never cut
-- **Combo protection**: Cards in Spellbook combos with commander → never cut
 
 ### Combo Detection (3-tier)
 
@@ -277,7 +259,7 @@ Suggests card swaps with multi-layer protection:
 |---|---|
 | `synergy_graph.py` | Thin wrapper — re-exports from `mtg_synergy/`, CLI entry point |
 | `train_fusion_model.py` | Forge LambdaRank GBM training + feature cache rebuild |
-| `compare_edhrec.py` | Fast EDHREC comparison tool (parallel, cached) |
+| `compare_edhrec.py` | Compare recommendations vs EDHREC High Synergy section |
 | `ability_parser.py` | Deterministic oracle text parser |
 | `strategy_detector.py` | Rule-based strategy detection |
 | `tag_db.py` | SQLite DB card query utilities + Scryfall tagger integration |
@@ -292,9 +274,9 @@ Suggests card swaps with multi-layer protection:
 - `data/oracle_cards.json` is gitignored (~150MB); must run `download_cards.py` first
 - API calls use `urllib.request` (no `requests` dependency)
 - Tribal tags auto-assigned from creature type_line (e.g., Human creature → tribal match)
-- Deck configs live in `decks/` (15 decks: kyler, krenko, yshtola, atraxa, edgar, kaalia, niv_mizzet, pantlaza, sram, syr_konrad, tatyova, ur_dragon, urza, sauron)
+- CLI uses `--commander "Name"` (no deck config files)
 - Package uses `src/` layout (`src/mtg_synergy/`), built with `uv_build` backend
 - Fine-tuning uses `.venv` with unsloth + torch (Python 3.12, not system Python 3.14)
-- Tests: 422 tests in `tests/`, run with `uv run pytest tests/`
+- Tests: 424 tests in `tests/`, run with `uv run pytest tests/`
 - Spellbook combo boosts must check color identity (fixed: 364 wrong-color boosts deleted)
 - The provides/wants tag tables are kept for backward compat but are not used by the hot path (--recommend, --swaps); they are populated by `derive_forge_tags.py` if needed
