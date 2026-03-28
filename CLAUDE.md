@@ -11,7 +11,7 @@ MTG Synergy Graph — a tool for analyzing Magic: The Gathering EDH/Commander de
 ```
 FORGE MODEL (--recommend): Zero oracle text, pure Forge mechanical synergy
   1. Color-identity filter → all legal cards scored directly by GBM (no tower, no embeddings)
-  2. Forge LambdaRank GBM: 71 features, EDHREC labels, forge-native features
+  2. Forge LambdaRank GBM: 74 features, EDHREC labels, forge-native features
      100% Forge-native: no oracle text, no embeddings, no neural network
      25 profile fields per card extracted from forge_abilities (verbs, triggers, keywords,
      counter_types, targets, ability_types, trigger_filters, required_subtypes,
@@ -21,6 +21,7 @@ FORGE MODEL (--recommend): Zero oracle text, pure Forge mechanical synergy
      + forge_deck_tags (Forge's deck-building AI: has/hints/needs theme signals)
      + ability counts (total, triggered), token complexity (P/T, keywords),
        zone interaction (graveyard, exile), ability density, zone mechanics synergy
+     + deck tag expansion (cmdr_needs_to_card_has, card_needs_satisfied, needs_rarity)
      Top features: card_hub_score 9%, strategy_cosine 9%, deck_edge_count 8%,
      ability_density 8%, forge_ability_cosine 7%, cmc 5%
   3. Forge mechanics vectors: 112-dim shared concept space encoding ALL mechanical
@@ -29,7 +30,8 @@ FORGE MODEL (--recommend): Zero oracle text, pure Forge mechanical synergy
      Zone-aware concepts: enters_from_graveyard/exile/hand, goes_to_graveyard/exile
   4. Can evaluate new cards day-1 without playtesting data
   5. Works for any of 3,141+ commanders (not just 1,361 with EDHREC)
-  6. NDCG@30 = 0.54 on leave-commander-out CV
+  6. NDCG@30 = 0.52 on leave-commander-out CV
+     (was 0.54 before legality fix; old score inflated by easy illegal-card negatives)
 
 CAUSAL GRAPH:
   - 18.4M edges across 30+ event types (verb_event_map extracted from Forge Java source)
@@ -147,7 +149,7 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
 
 **Forge model** (data/fusion_model_forge.lgb):
 - No tower model, no embeddings, no neural network — pure LightGBM on Forge data
-- LambdaRank GBM on 71 features (shared via `src/mtg_synergy/recommend/forge_features.py`):
+- LambdaRank GBM on 74 features (shared via `src/mtg_synergy/recommend/forge_features.py`):
   100% Forge-native with 25 profile fields per card:
   causal scores (6), strategy (2), forge_ability_cosine, phase (2), tribal,
   card types (6), cmc, deck edges (3), causal_composite, card_hub_score,
@@ -166,7 +168,9 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
   produces_mana, counter_num_variable, grants_abilities, token_amount_variable,
   total_ability_count, triggered_ability_count, token_power_toughness,
   token_keyword_count, zone_graveyard_interact, zone_exile_interact,
-  ability_density, mech_zone_fwd
+  ability_density, mech_zone_fwd,
+  cmdr_needs_to_card_has, card_needs_satisfied, needs_rarity
+- Training data: commander-illegal cards filtered from negative pool
 - Forge profiles extract ALL raw_line fields: granted_keywords, conditions,
   duration, effect_zones, scales_with, grants_types, combat_damage, is_secondary,
   gain_control, damage_amount, cards_drawn, life_amount, required_subtypes,
@@ -195,7 +199,7 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
 ```
 1. Candidate selection: Color-identity filter → ALL legal cards (no tower, no embeddings)
 2. Score all candidates with GBM (batch predict, ~0.5s for 8000 cards):
-   71 features (LambdaRank, 100% Forge-native, no oracle text)
+   74 features (LambdaRank, 100% Forge-native, no oracle text)
 3. Sort and output top 30 with clickable Scryfall hyperlinks (OSC 8)
 Total time: ~1.5s (no neural net overhead)
 ```
@@ -256,7 +260,7 @@ Suggests card swaps with multi-layer protection:
 | `src/mtg_synergy/recommend/engine.py` | `recommend_cards()` — forge model recommendation pipeline |
 | `src/mtg_synergy/recommend/swaps.py` | `suggest_swaps()` — multi-layer card swap suggestions |
 | `src/mtg_synergy/recommend/scoring.py` | `color_identity_filter()`, `score_forge_candidates()` |
-| `src/mtg_synergy/recommend/forge_features.py` | Shared 71-feature computation: `ForgeFeatureContext` (25 profile fields, edge index, mechanics vectors, deck tags — no embeddings), `CmdrFeatureContext`, `compute_card_features()` |
+| `src/mtg_synergy/recommend/forge_features.py` | Shared 74-feature computation: `ForgeFeatureContext` (25 profile fields, edge index, mechanics vectors, deck tags — no embeddings), `CmdrFeatureContext`, `compute_card_features()` |
 | `src/mtg_synergy/recommend/mechanics_vectors.py` | 112-dim forge mechanics vectors: shared game concept space for effect→trigger synergy (32 concepts + 80 subtypes) |
 | `src/mtg_synergy/recommend/affinity.py` | Commander affinity scoring |
 | `src/mtg_synergy/recommend/commander_profile.py` | Auto-infer archetype for any of 3,141 commanders |
@@ -291,6 +295,6 @@ Suggests card swaps with multi-layer protection:
 - Deck configs live in `decks/` (15 decks: kyler, krenko, yshtola, atraxa, edgar, kaalia, niv_mizzet, pantlaza, sram, syr_konrad, tatyova, ur_dragon, urza, sauron)
 - Package uses `src/` layout (`src/mtg_synergy/`), built with `uv_build` backend
 - Fine-tuning uses `.venv` with unsloth + torch (Python 3.12, not system Python 3.14)
-- Tests: 425 tests in `tests/`, run with `uv run pytest tests/`
+- Tests: 422 tests in `tests/`, run with `uv run pytest tests/`
 - Spellbook combo boosts must check color identity (fixed: 364 wrong-color boosts deleted)
 - The provides/wants tag tables are kept for backward compat but are not used by the hot path (--recommend, --swaps); they are populated by `derive_forge_tags.py` if needed

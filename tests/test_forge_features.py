@@ -621,8 +621,8 @@ class TestFeatureCount:
             if found_oid is None:
                 pytest.skip("No card found for feature count test")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert len(features) == 71, (
-                f"Expected 71 features, got {len(features)}"
+            assert len(features) == 74, (
+                f"Expected 74 features, got {len(features)}"
             )
         finally:
             conn.close()
@@ -853,7 +853,7 @@ class TestEffectZones:
 
 
 def test_feature_count_71():
-    """compute_card_features should return 71 features."""
+    """compute_card_features should return 74 features."""
     ctx, conn = _make_ctx()
     try:
         from mtg_synergy.recommend.forge_features import (
@@ -869,7 +869,7 @@ def test_feature_count_71():
             card_oid, card_meta[0] or "", float(card_meta[1] or 0),
             ctx, cmdr_ctx,
         )
-        assert len(feats) == 71, f"Expected 71 features, got {len(feats)}"
+        assert len(feats) == 74, f"Expected 74 features, got {len(feats)}"
     finally:
         conn.close()
 
