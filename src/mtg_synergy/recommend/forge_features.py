@@ -496,7 +496,8 @@ class CmdrFeatureContext:
                            self.cmdr_profile.get('keywords', set()))
 
         if preloaded_cmdr_edges is not None:
-            assert ctx._has_edge_index, "preloaded_cmdr_edges requires preload_edges=True"
+            if not ctx._has_edge_index:
+                raise ValueError("preloaded_cmdr_edges requires preload_edges=True")
             self.cmdr_out, self.cmdr_in, self.cmdr_out_events, self.cmdr_in_events = preloaded_cmdr_edges
             self._init_cmdr_exact_and_deck_edges(ctx, cmdr_oid, deck_oids)
         elif ctx._has_edge_index:

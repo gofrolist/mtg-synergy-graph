@@ -126,8 +126,8 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
     Args:
         conn: SQLite connection
         preloaded_abilities: optional list of (oracle_id, verb, trigger_mode,
-            trigger_filter, cost, keyword, token_script, counter_type, raw_line)
-            tuples. When provided, skips the forge_abilities DB scan entirely.
+            trigger_filter, cost, keyword, token_script, counter_type, raw_line,
+            amount) tuples. When provided, skips the forge_abilities DB scan.
 
     Returns:
         produces: dict[oracle_id → numpy float32 vector]
@@ -242,56 +242,29 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
                         c[subtype_idx[sac_type]] += 1.0
 
     # Parse "for each [Type]" and "Tap" patterns from raw_line.
-    # When preloaded, scan the same abilities list; otherwise query DB.
-    if preloaded_abilities is not None:
-        # Scan preloaded data for "for each" and "Tap" patterns
-        # ab[9] = amount field (only process "for each" when amount='X', matching DB query)
-        for ab in abilities:
-            oid, raw_line = ab[0], (ab[8] or "").lower()
-            if not raw_line:
-                continue
+    # Build iterator of (oid, raw_line, amount) from preloaded data or DB.
+    def _scaling_tuples():
+        if preloaded_abilities is not None:
+            for ab in abilities:
+                raw = (ab[8] or "").lower()
+                if raw:
+                    yield ab[0], raw, (ab[9] if len(ab) > 9 else None)
+        else:
+            for row in conn.execute(
+                "SELECT fnm.oracle_id, fa.raw_line, fa.amount "
+                "FROM forge_abilities fa "
+                "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+                "WHERE fa.raw_line IS NOT NULL"
+            ):
+                raw = (row[1] or "").lower()
+                if raw:
+                    yield row[0], raw, row[2]
 
-            # "for each [Type]" scaling — only when amount='X' (matches DB WHERE clause)
-            amount = ab[9] if len(ab) > 9 else None
-            if amount == "X" and "for each" in raw_line:
-                idx = raw_line.find("for each")
-                snippet = raw_line[idx:]
-                for m in re.finditer(r"for each (\w+)", snippet):
-                    t = m.group(1)
-                    if t in subtype_idx:
-                        c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
-                        c[subtype_idx[t]] += 1.0
-                    elif t == "creature":
-                        c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
-                        c[_concept_idx["creature_available"]] += 1.0
-                    elif t == "artifact":
-                        c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
-                        c[_concept_idx["artifact_enters"]] += 0.5
-
-            # "Tap" cost patterns
-            if "tap<" in raw_line:
-                for m in re.finditer(r"tap<\d+/([^/>]+)", raw_line):
-                    t = m.group(1).split("/")[0].split(".")[0].lower()
-                    if t in subtype_idx:
-                        c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
-                        c[subtype_idx[t]] += 1.0
-                        c[_concept_idx["creature_tapped"]] += 0.5
-                    elif t == "creature":
-                        c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
-                        c[_concept_idx["creature_tapped"]] += 1.0
-                        c[_concept_idx["creature_available"]] += 0.5
-    else:
-        # DB query fallback for standalone use
-        for row in conn.execute(
-            "SELECT fnm.oracle_id, fa.raw_line FROM forge_abilities fa "
-            "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
-            "WHERE fa.amount = 'X' AND fa.raw_line LIKE '%for each%'"
-        ):
-            oid, raw = row[0], (row[1] or "").lower()
-            idx = raw.find("for each")
-            if idx < 0:
-                continue
-            snippet = raw[idx:]
+    for oid, raw_line, amount in _scaling_tuples():
+        # "for each [Type]" scaling — only when amount='X'
+        if amount == "X" and "for each" in raw_line:
+            idx = raw_line.find("for each")
+            snippet = raw_line[idx:]
             for m in re.finditer(r"for each (\w+)", snippet):
                 t = m.group(1)
                 if t in subtype_idx:
@@ -304,13 +277,9 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
                     c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
                     c[_concept_idx["artifact_enters"]] += 0.5
 
-        for row in conn.execute(
-            "SELECT fnm.oracle_id, fa.raw_line FROM forge_abilities fa "
-            "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
-            "WHERE fa.raw_line LIKE '%Tap<%'"
-        ):
-            oid, raw = row[0], (row[1] or "").lower()
-            for m in re.finditer(r"tap<\d+/([^/>]+)", raw):
+        # "Tap" cost patterns
+        if "tap<" in raw_line:
+            for m in re.finditer(r"tap<\d+/([^/>]+)", raw_line):
                 t = m.group(1).split("/")[0].split(".")[0].lower()
                 if t in subtype_idx:
                     c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
