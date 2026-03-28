@@ -85,10 +85,12 @@ class ForgeFeatureContext:
 
         # Forge ability profiles: per-card structured data from forge_abilities
         # Replaces oracle text regex matching for features F25-F30
+        import re as _re
         self._forge_profiles = {}
         for row in conn.execute(
             "SELECT fnm.oracle_id, fa.verb, fa.trigger_mode, fa.keyword, "
-            "fa.counter_type, fa.target, fa.ability_type, fa.trigger_filter "
+            "fa.counter_type, fa.target, fa.ability_type, fa.trigger_filter, "
+            "fa.cost, fa.defined "
             "FROM forge_abilities fa "
             "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name"
         ):
@@ -96,7 +98,7 @@ class ForgeFeatureContext:
             p = self._forge_profiles.setdefault(oid, {
                 'verbs': set(), 'triggers': set(), 'keywords': set(),
                 'counter_types': set(), 'targets': set(), 'ability_types': set(),
-                'trigger_filters': set(),
+                'trigger_filters': set(), 'required_subtypes': set(),
             })
             if row[1]: p['verbs'].add(row[1])
             if row[2]: p['triggers'].add(row[2])
@@ -113,6 +115,25 @@ class ForgeFeatureContext:
                     main = part.split(".")[0].strip()
                     if main and main != "Card" and main[0].isupper():
                         p['trigger_filters'].add(main.lower())
+            # Extract subtype requirements from cost and defined fields
+            # e.g., tapXType<1/Cleric> → requires Cleric
+            # e.g., Sac<1/Human> → requires Human
+            # e.g., Defined$ TriggeredCardLKICopy.Spider → applies to Spider only
+            cost_str = row[8] or ""
+            defined_str = row[9] or ""
+            for m in _re.findall(r'tapXType<\d+/(\w+)', cost_str):
+                if m not in ("CARDNAME",):
+                    p['required_subtypes'].add(m.lower())
+            for m in _re.findall(r'Sac<\d+/(\w+)', cost_str):
+                if m not in ("CARDNAME",) and m[0].isupper():
+                    p['required_subtypes'].add(m.lower())
+            # Defined$ field with subtype filter (e.g., TriggeredCardLKICopy.Spider)
+            if "." in defined_str:
+                for part in defined_str.split(","):
+                    if "." in part:
+                        subtype = part.split(".")[-1].strip()
+                        if subtype and subtype[0].isupper() and len(subtype) > 2:
+                            p['required_subtypes'].add(subtype.lower())
 
         # Forge ability vectors: binary encoding of verbs+triggers+keywords for cosine similarity
         # Replaces oracle text TF-IDF (F9) with mechanical similarity
@@ -628,17 +649,28 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
                        len(card_profile.get('counter_types', set())))
     forge_depth = min(card_depth, 10.0)  # cap at 10
 
-    # F29: forge_anti_tribal — card's Forge trigger_filter requires a creature
-    # subtype that conflicts with the commander's type.
+    # F29: forge_anti_tribal — card's abilities require a creature subtype
+    # that conflicts with the commander's type.
+    # Sources: trigger_filter (what triggers on), required_subtypes (costs, conditionals)
+    # e.g., Master Apothecary requires tapping Clerics → anti-tribal for non-Cleric commanders
+    # e.g., Aunt May puts counters on Spiders only → anti-tribal for non-Spider commanders
     anti_tribal = 0.0
-    if cmdr.cmdr_subtypes and card_trigger_types:
+    if cmdr.cmdr_subtypes:
         generic_types = {"card", "creature", "permanent", "nontoken",
                         "token", "artifact", "enchantment", "land",
                         "spell", "self", "other", "any"}
+        # Check trigger_filters
         for tf in card_trigger_types:
             if tf not in generic_types and tf not in cmdr.cmdr_subtypes:
                 anti_tribal = 1.0
                 break
+        # Check required_subtypes (from cost/defined fields)
+        if anti_tribal == 0.0:
+            req_subs = card_profile.get('required_subtypes', set())
+            for rs in req_subs:
+                if rs not in generic_types and rs not in cmdr.cmdr_subtypes:
+                    anti_tribal = 1.0
+                    break
 
     # F30: forge_verb_alignment — card's verbs → cmdr triggers + cmdr verbs → card triggers
     verb_align = 0.0

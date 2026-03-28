@@ -37,7 +37,7 @@ def test_forge_profiles_loaded():
         profile = ctx._forge_profiles[sample_oid]
         expected_keys = {
             "verbs", "triggers", "keywords", "counter_types",
-            "targets", "ability_types", "trigger_filters",
+            "targets", "ability_types", "trigger_filters", "required_subtypes",
         }
         assert set(profile.keys()) == expected_keys
         # All values should be sets
