@@ -117,6 +117,10 @@ TRIGGER_TO_CONCEPTS = {
 N_CONCEPTS = len(GAME_CONCEPTS)
 _concept_idx = {c: i for i, c in enumerate(GAME_CONCEPTS)}
 
+# Verbs that move permanents between zones (used for zone-aware concept population)
+_ZONE_VERBS = {"ChangeZone", "ChangeZoneAll", "Sacrifice", "Destroy",
+               "DestroyAll", "Mill", "Discard"}
+
 # Cost types → game concepts consumed
 COST_CONCEPTS = {
     "sac_creature":  "creature_sacrificed",
@@ -213,7 +217,7 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
                 p[_concept_idx[concept]] += 1.0
 
         # Zone-aware PRODUCES: verb + trigger_destination → zone concept
-        if verb and trig_dest:
+        if verb and verb in _ZONE_VERBS and trig_dest:
             p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
             if "Graveyard" in trig_dest:
                 p[_concept_idx["goes_to_graveyard"]] += 1.0
@@ -250,7 +254,7 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
                 c[_concept_idx["enters_from_graveyard"]] += 1.0
             if "Exile" in trig_origin:
                 c[_concept_idx["enters_from_exile"]] += 1.0
-            if trig_origin == "Hand":
+            if "Hand" in trig_origin:
                 c[_concept_idx["enters_from_hand"]] += 1.0
 
         # ChangeZone with origin → produces zone-specific entry
@@ -261,7 +265,7 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
                     p[_concept_idx["enters_from_graveyard"]] += 1.0
                 if "Exile" in trig_origin:
                     p[_concept_idx["enters_from_exile"]] += 1.0
-                if trig_origin == "Hand":
+                if "Hand" in trig_origin:
                     p[_concept_idx["enters_from_hand"]] += 1.0
 
         # Cost → consumes resources (check raw_line always, cost field often empty)
