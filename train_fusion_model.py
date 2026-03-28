@@ -83,6 +83,19 @@ FORGE_FEATURE_NAMES = [
     "target_alignment",     # [35] card targets what commander produces
     "forge_keyword_synergy", # [36] card keywords synergize with cmdr mechanics
     "activated_ability_count", # [37] number of activated abilities
+    "granted_keyword_synergy", # [38] card grants keywords cmdr cares about
+    "shared_conditions",     # [39] card and cmdr share conditions (need same board state)
+    "is_permanent_effect",   # [40] card produces permanent effects (counters, not pump)
+    "is_temporary_effect",   # [41] card effects are temporary (until EOT)
+    "duration_match",        # [42] card and cmdr share duration type
+    "combat_damage_flag",    # [43] card has combat damage triggers (voltron)
+    "effect_zone_match",     # [44] card works from zones cmdr cares about
+    "scales_with_board",     # [45] card P/T or effect scales with game state
+    "grants_types_match",    # [46] card creates types matching cmdr's subtypes
+    "is_secondary_trigger",  # [47] card triggers on multiple events
+    "gain_control",          # [48] card steals permanents
+    "granted_keyword_count", # [49] how many keywords card grants
+    "condition_count",       # [50] how many conditions card requires
 ]
 
 def sigmoid(x):

@@ -626,9 +626,9 @@ class CmdrFeatureContext:
 
 def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
                           ctx: ForgeFeatureContext, cmdr: CmdrFeatureContext) -> list:
-    """Compute the 38-feature vector for a single (commander, card) pair.
+    """Compute the 51-feature vector for a single (commander, card) pair.
 
-    Returns a list of 38 floats matching FORGE_FEATURE_NAMES order.
+    Returns a list of 51 floats matching FORGE_FEATURE_NAMES order.
     Pure Forge-native features — no tower model or oracle-text embeddings.
     """
     out_s = cmdr.cmdr_out.get(card_oid, 0.0)
@@ -857,6 +857,74 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
     # F39: activated_ability_count
     activated_count = float(min(ctx._activated_counts.get(card_oid, 0), 5))
 
+    # ── New features from comprehensive raw_line extraction ──
+
+    # F38: granted_keyword_synergy — card grants keywords that match commander's
+    # trigger_filters or existing keywords. "Grants flying" + "flying matters" cmdr
+    card_granted = card_profile.get('granted_keywords', set())
+    cmdr_granted = cmdr.cmdr_profile.get('granted_keywords', set())
+    granted_kw_syn = 0.0
+    if card_granted:
+        # Card grants keywords the commander cares about (in trigger_filters)
+        for gk in card_granted:
+            if gk in cmdr_filter_kws:
+                granted_kw_syn += 1.0
+        # Card grants keywords the commander also grants → redundancy signal
+        granted_kw_syn += float(len(card_granted & cmdr_granted)) * 0.5
+
+    # F39: shared_conditions — card and commander have overlapping conditions
+    # Both need "a black creature" to function → they want the same board state
+    card_conds = card_profile.get('conditions', set())
+    cmdr_conds = cmdr.cmdr_profile.get('conditions', set())
+    shared_conds = float(len(card_conds & cmdr_conds)) if card_conds and cmdr_conds else 0.0
+
+    # F40: is_permanent_effect — card produces permanent effects (counters) vs temporary (pump)
+    # Kyler wants permanent +1/+1 counters, not "until end of turn" pumps
+    card_dur = card_profile.get('duration', set())
+    is_permanent = 1.0 if 'permanent' in card_dur else 0.0
+
+    # F41: is_temporary_effect — card effects are temporary (until EOT)
+    is_temporary = 1.0 if 'temporary' in card_dur else 0.0
+
+    # F42: duration_match — card and commander share duration type
+    cmdr_dur = cmdr.cmdr_profile.get('duration', set())
+    duration_match = float(len(card_dur & cmdr_dur)) if card_dur and cmdr_dur else 0.0
+
+    # F43: combat_damage_flag — card has combat damage triggers (voltron signal)
+    combat_dmg = 1.0 if card_profile.get('combat_damage', False) else 0.0
+
+    # F44: effect_zone_match — card works from zones the commander cares about
+    # Cards working from graveyard + reanimator commander = synergy
+    card_ezones = card_profile.get('effect_zones', set())
+    cmdr_ezones = cmdr.cmdr_profile.get('effect_zones', set())
+    ezone_match = float(len(card_ezones & cmdr_ezones)) if card_ezones and cmdr_ezones else 0.0
+
+    # F45: scales_with_board — card P/T or effect scales with game state (X/Y)
+    # Tribal count, devotion, etc. — these are often synergy multipliers
+    scales = 1.0 if card_profile.get('scales_with', set()) else 0.0
+
+    # F46: grants_types_match — card creates/grants creature types matching commander's
+    card_gtypes = card_profile.get('grants_types', set())
+    gtypes_match = 0.0
+    if cmdr.cmdr_subtypes and card_gtypes:
+        for gt in card_gtypes:
+            if gt in cmdr.cmdr_subtypes:
+                gtypes_match += 1.0
+
+    # F47: is_secondary_trigger — card triggers on multiple events (ETB + attack)
+    # More triggers = more value in synergy-heavy decks
+    is_secondary = 1.0 if card_profile.get('is_secondary', False) else 0.0
+
+    # F48: gain_control — card steals permanents
+    gain_ctrl = 1.0 if card_profile.get('gain_control', False) else 0.0
+
+    # F49: granted_keyword_count — how many keywords this card grants total
+    granted_kw_count = float(min(len(card_granted), 5))
+
+    # F50: condition_count — how many conditions this card requires
+    # More conditions = more restrictive = harder to use
+    condition_count = float(min(len(card_conds), 5))
+
     return [
         min(out_s, 10.0),                                # F0 causal_cmdr_to_card
         min(in_s, 10.0),                                 # F1 causal_card_to_cmdr
@@ -896,4 +964,17 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         target_align,                                    # F35 target_alignment
         kw_syn,                                          # F36 forge_keyword_synergy
         activated_count,                                 # F37 activated_ability_count
+        granted_kw_syn,                                  # F38 granted_keyword_synergy
+        shared_conds,                                    # F39 shared_conditions
+        is_permanent,                                    # F40 is_permanent_effect
+        is_temporary,                                    # F41 is_temporary_effect
+        duration_match,                                  # F42 duration_match
+        combat_dmg,                                      # F43 combat_damage_flag
+        ezone_match,                                     # F44 effect_zone_match
+        scales,                                          # F45 scales_with_board
+        gtypes_match,                                    # F46 grants_types_match
+        is_secondary,                                    # F47 is_secondary_trigger
+        gain_ctrl,                                       # F48 gain_control
+        granted_kw_count,                                # F49 granted_keyword_count
+        condition_count,                                 # F50 condition_count
     ]

@@ -617,8 +617,8 @@ class TestFeatureCount:
             if found_oid is None:
                 pytest.skip("No card found for feature count test")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert len(features) == 38, (
-                f"Expected 38 features, got {len(features)}"
+            assert len(features) == 51, (
+                f"Expected 51 features, got {len(features)}"
             )
         finally:
             conn.close()
