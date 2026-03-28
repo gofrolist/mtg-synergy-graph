@@ -100,6 +100,9 @@ FORGE_FEATURE_NAMES = [
     "zone_exile_interact",     # [68] both card+cmdr interact with exile
     "ability_density",         # [69] abilities per mana cost (efficiency)
     "mech_zone_fwd",           # [70] zone-specific mechanics synergy
+    "cmdr_needs_to_card_has",  # [71] commander needs X, card has X
+    "card_needs_satisfied",    # [72] fraction of card's needs met by commander
+    "needs_rarity",            # [73] how rare/specific are card's needs
 ]
 
 

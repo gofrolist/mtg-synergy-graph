@@ -323,6 +323,12 @@ class ForgeFeatureContext:
             elif tag_type == "needs":
                 self._deck_needs.setdefault(oid, set()).update(tags)
 
+        # Reverse index: tag → set of oids that "has" it (for needs_rarity feature)
+        self._deck_has_providers = {}
+        for oid, tags in self._deck_has.items():
+            for tag in tags:
+                self._deck_has_providers.setdefault(tag, set()).add(oid)
+
         # Forge ability vectors: binary encoding of verbs+triggers+keywords for cosine similarity
         # Replaces oracle text TF-IDF (F9) with mechanical similarity
         all_abilities = set()
@@ -1249,6 +1255,28 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
     # F55: deck_hints_overlap — both want the same deck themes
     hints_overlap = float(len(cmdr.cmdr_hints & card_hints))
 
+    # F71: cmdr_needs_to_card_has — commander NEEDS X, card HAS X
+    # e.g., Atraxa needs Ability$Counters, card has Ability$Counters → card provides what cmdr requires
+    cmdr_needs_to_has = float(len(cmdr.cmdr_needs & card_has))
+
+    # F72: card_needs_satisfied — how many of card's needs are met by commander's has+hints?
+    # Card needs Type$Goblin, commander hints Type$Goblin → card will work in this deck
+    card_needs_met = 0.0
+    if card_needs:
+        met = len(card_needs & (cmdr.cmdr_has | cmdr.cmdr_hints))
+        card_needs_met = float(met) / float(len(card_needs))  # fraction satisfied (0-1)
+
+    # F73: needs_rarity — how rare/specific are the card's needs?
+    # Needing Type$Snow (20 providers) is much harder than Type$Creature (38 providers)
+    # Inverse of how many cards provide each needed tag → higher = harder requirement
+    needs_rarity = 0.0
+    if card_needs:
+        for need_tag in card_needs:
+            n_providers = len(ctx._deck_has_providers.get(need_tag, set()))
+            if n_providers > 0:
+                needs_rarity += 1.0 / min(n_providers, 100)  # cap denominator
+        needs_rarity = min(needs_rarity, 5.0)
+
     # ── Numeric effect scaling features ──
 
     # F56: damage_scales — card's damage amount is variable (X/Y)
@@ -1382,4 +1410,7 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         zone_ex,                                         # F68 zone_exile_interact
         ability_dens,                                    # F69 ability_density
         mech_zone_fwd,                                   # F70 mech_zone_fwd
+        cmdr_needs_to_has,                               # F71 cmdr_needs_to_card_has
+        card_needs_met,                                  # F72 card_needs_satisfied
+        needs_rarity,                                    # F73 needs_rarity
     ]
