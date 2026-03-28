@@ -168,64 +168,6 @@ def _resolve_slugs_to_oids(conn, table="edhrec_average_decks"):
     return slug_to_oid, name_to_oid
 
 
-def load_edhrec_membership(conn):
-    """Load positive pairs from edhrec_average_decks.
-
-    Returns dict[cmdr_oracle_id -> set[card_oracle_ids]].
-    """
-    slug_to_oid, name_to_oid = _resolve_slugs_to_oids(conn, "edhrec_average_decks")
-
-    print(f"  Matched {len(slug_to_oid)} commander slugs to oracle_ids")
-
-    # Build positives: commander_oid -> set of card oracle_ids
-    positives = {}
-    unmatched_cards = 0
-    for slug, cmdr_oid in slug_to_oid.items():
-        card_oids = set()
-        for row in conn.execute(
-            "SELECT card_name FROM edhrec_average_decks WHERE commander_slug = ?",
-            (slug,),
-        ):
-            card_oid = name_to_oid.get(row[0])
-            if card_oid and card_oid != cmdr_oid:
-                card_oids.add(card_oid)
-            elif not card_oid:
-                unmatched_cards += 1
-        if card_oids:
-            positives[cmdr_oid] = card_oids
-
-    # Filter out generic staples: cards in >30% of all EDHREC decks
-    # These are auto-includes (Sol Ring, Arcane Signet, etc.) with no
-    # commander-specific synergy — noise that teaches "popular = good"
-    n_cmdrs_total = len(slug_to_oid)
-    staple_threshold = n_cmdrs_total * 0.3
-    card_deck_count = {}
-    for row in conn.execute(
-        "SELECT card_name, COUNT(DISTINCT commander_slug) FROM edhrec_average_decks GROUP BY card_name"
-    ):
-        card_deck_count[row[0]] = row[1]
-
-    staple_oids = set()
-    for card_name, count in card_deck_count.items():
-        if count > staple_threshold:
-            oid = name_to_oid.get(card_name)
-            if oid:
-                staple_oids.add(oid)
-
-    n_before = sum(len(v) for v in positives.values())
-    for cmdr_oid in positives:
-        positives[cmdr_oid] -= staple_oids
-    positives = {k: v for k, v in positives.items() if v}
-    n_after = sum(len(v) for v in positives.values())
-
-    total_pos = n_after
-    print(f"  Positive pairs: {total_pos} across {len(positives)} commanders")
-    print(f"  Filtered {n_before - n_after} staple pairs ({len(staple_oids)} cards in >30% of decks)")
-    if unmatched_cards > 0:
-        print(f"  Unmatched card names: {unmatched_cards}")
-
-    return positives
-
 
 def sample_negatives(positives_by_cmdr, all_card_oids, card_colors, cmdr_colors,
                      ratio=3, hard_ratio=0.5, card_strats=None, card_subtypes=None):
@@ -463,7 +405,7 @@ def train_forge_gbm(X, y, cmdr_ids):
         "min_child_samples": 20,
         "min_data_in_bin": 5,
         "verbose": -1,
-        "label_gain": [0, 1, 2, 3, 5, 8, 12, 18, 25, 35],  # 10 grades (0-9)
+        "label_gain": [0, 1, 3, 6, 15, 30],  # 6 grades: neg, anti-syn, low, moderate, top, high-syn
     }
 
     splits = make_cv_splits(cmdr_ids, n_folds=3)
@@ -562,16 +504,90 @@ def make_cv_splits(cmdr_ids, n_folds=5, seed=42):
 
 
 def _load_pairs_for_features(conn):
-    """Load EDHREC membership + sample negatives, return pairs_by_cmdr for build_forge_feature_matrix.
+    """Load training pairs from edhrec_card_synergy with section-based grading.
 
-    Returns dict[cmdr_oid -> list[(card_oid, label)]].
+    Grades:
+        5: "High Synergy Cards" section
+        4: "Top Cards" section
+        3: Other sections, synergy > 0.1
+        2: Other sections, synergy 0-0.1
+        1: Any section, synergy < 0 (anti-synergy)
+        0: Not in table (random negatives)
+
+    Returns dict[cmdr_oid -> list[(card_oid, grade)]].
     """
-    # Load color identities
+    slug_to_oid, name_to_oid = _resolve_slugs_to_oids(conn, "edhrec_card_synergy")
+    oid_to_slug = {v: k for k, v in slug_to_oid.items()}
+
+    card_name_to_oid = {}
+    for row in conn.execute(
+        "SELECT name, oracle_id, type_line FROM cards "
+        "ORDER BY CASE WHEN type_line LIKE '%Token%' THEN 1 ELSE 0 END"
+    ):
+        if row[0] not in card_name_to_oid:
+            card_name_to_oid[row[0]] = row[1]
+
+    print("\nLoading EDHREC card synergy data...")
+    positives_by_cmdr = {}
+    n_by_grade = {5: 0, 4: 0, 3: 0, 2: 0, 1: 0}
+    card_cmdr_count = {}
+    cmdr_count = len(slug_to_oid)
+
+    for row in conn.execute(
+        "SELECT commander_slug, card_name, synergy, section FROM edhrec_card_synergy"
+    ):
+        slug, card_name, synergy, section = row
+        cmdr_oid = slug_to_oid.get(slug)
+        card_oid = card_name_to_oid.get(card_name)
+        if cmdr_oid is None or card_oid is None:
+            continue
+
+        card_cmdr_count[card_oid] = card_cmdr_count.get(card_oid, 0) + 1
+
+        if section == "High Synergy Cards":
+            grade = 5
+        elif section == "Top Cards":
+            grade = 4
+        elif synergy is not None and synergy < 0:
+            grade = 1
+        elif synergy is not None and synergy > 0.1:
+            grade = 3
+        else:
+            grade = 2
+
+        positives_by_cmdr.setdefault(cmdr_oid, []).append((card_oid, grade))
+        n_by_grade[grade] += 1
+
+    total_pairs = sum(len(v) for v in positives_by_cmdr.values())
+    print(f"  Synergy pairs: {total_pairs:,} across {len(positives_by_cmdr)} commanders")
+    for g in sorted(n_by_grade.keys(), reverse=True):
+        print(f"    Grade {g}: {n_by_grade[g]:,}")
+
+    # Filter staples from top grades
+    staple_threshold = 0.30
+    staple_oids = {oid for oid, cnt in card_cmdr_count.items()
+                   if cnt / cmdr_count > staple_threshold}
+    n_filtered = 0
+    for cmdr_oid in positives_by_cmdr:
+        filtered = []
+        for card_oid, grade in positives_by_cmdr[cmdr_oid]:
+            if card_oid in staple_oids and grade >= 4:
+                grade = 3
+                n_filtered += 1
+            filtered.append((card_oid, grade))
+        positives_by_cmdr[cmdr_oid] = filtered
+    if n_filtered:
+        print(f"  Filtered {n_filtered} staple pairs (demoted from grade 4/5 to 3)")
+
+    # Sample negatives
     card_colors = {}
-    for row in conn.execute("SELECT oracle_id, color_identity FROM cards"):
+    for row in conn.execute("SELECT oracle_id, color_identity FROM cards WHERE legal_commander = 1"):
         card_colors[row[0]] = set(json.loads(row[1] or "[]"))
 
-    # Get basic land oracle IDs to exclude
+    type_lines = {}
+    for row in conn.execute("SELECT oracle_id, type_line FROM cards"):
+        type_lines[row[0]] = row[1] or ""
+
     basic_land_names = {"Plains", "Island", "Swamp", "Mountain", "Forest",
                         "Snow-Covered Plains", "Snow-Covered Island",
                         "Snow-Covered Swamp", "Snow-Covered Mountain",
@@ -582,102 +598,52 @@ def _load_pairs_for_features(conn):
         if row:
             basic_land_oids.add(row[0])
 
-    # Pre-load type lines for token filtering
-    type_lines = {}
-    for row in conn.execute("SELECT oracle_id, type_line FROM cards"):
-        type_lines[row[0]] = row[1] or ""
-
-    # Build card pool (commander-legal cards only)
     card_pool = {r[0] for r in conn.execute(
         "SELECT oracle_id FROM cards WHERE legal_commander = 1")}
-    all_card_oids = []
-    for oid in card_pool:
-        if oid in basic_land_oids:
-            continue
-        tl = type_lines.get(oid, "")
-        if "Token" in tl or "token" in tl:
-            continue
-        all_card_oids.append(oid)
+    all_card_oids = [oid for oid in card_pool
+                     if oid not in basic_land_oids
+                     and "Token" not in type_lines.get(oid, "")]
 
-    # Load positives
-    print("\nLoading EDHREC membership data...")
-    positives_by_cmdr = load_edhrec_membership(conn)
-
-    total_pos = sum(len(v) for v in positives_by_cmdr.values())
-    print(f"  Positive pairs: {total_pos} across {len(positives_by_cmdr)} commanders")
-
-    # Load strategies + subtypes for hard negative sampling
     card_strats = {}
-    for oid, s in conn.execute("SELECT oracle_id, strategy FROM card_strategies WHERE confidence >= 0.3"):
+    for oid, s in conn.execute(
+        "SELECT oracle_id, strategy FROM card_strategies WHERE confidence >= 0.3"
+    ):
         card_strats.setdefault(oid, set()).add(s)
 
     card_subtypes = {}
-    for row in conn.execute("SELECT oracle_id, type_line FROM cards WHERE type_line LIKE '%\u2014%'"):
-        oid, tl = row
+    for row in conn.execute(
+        "SELECT oracle_id, type_line FROM cards WHERE type_line LIKE '%\u2014%'"
+    ):
         try:
-            subs = {s.lower() for s in tl.split("\u2014")[1].strip().split()}
+            subs = {s.lower() for s in row[1].split("\u2014")[1].strip().split()}
             if subs:
-                card_subtypes[oid] = subs
+                card_subtypes[row[0]] = subs
         except (IndexError, AttributeError):
             pass
 
-    # Sample negatives: 50% hard (strategy/subtype overlap) + 50% random
-    print("\nSampling negatives (ratio=3, 50% hard)...")
+    # Build positives set for negative exclusion
+    positives_for_neg = {cmdr: {oid for oid, _ in pairs}
+                         for cmdr, pairs in positives_by_cmdr.items()}
+
+    print("\nSampling negatives (ratio=1, 50% hard)...")
     neg_pairs = sample_negatives(
-        positives_by_cmdr, all_card_oids, card_colors, card_colors, ratio=3,
+        positives_for_neg, all_card_oids, card_colors, card_colors, ratio=1,
         hard_ratio=0.5, card_strats=card_strats, card_subtypes=card_subtypes,
     )
     print(f"  Negative pairs: {len(neg_pairs)}")
 
-    # Load synergy scores for graded relevance labels
-    # Reuse shared slug resolver (Python dict match, no SQL LIKE queries)
-    slug_to_oid_map, _ = _resolve_slugs_to_oids(conn, "edhrec_card_synergy")
-    oid_to_slug_map = {v: k for k, v in slug_to_oid_map.items()}
-
-    # Build (cmdr_slug, card_name) -> synergy lookup
-    syn_map = {}  # (slug, card_name) -> synergy
-    for slug, card_name, syn in conn.execute(
-        "SELECT commander_slug, card_name, synergy FROM edhrec_card_synergy"
-    ):
-        if syn is not None:
-            syn_map[(slug, card_name)] = syn
-
-    # oid -> card_name for synergy lookup
-    oid_to_name = {}
-    for row in conn.execute("SELECT oracle_id, name FROM cards"):
-        oid_to_name[row[0]] = row[1]
-
-    # Combine into pairs_by_cmdr with graded relevance labels:
-    # Use finer grades (0-9) quantized from synergy scores for better ranking
-    pairs_by_cmdr = {}
-    n_graded = 0
-    for cmdr_oid, card_oids in positives_by_cmdr.items():
-        slug = oid_to_slug_map.get(cmdr_oid, "")
-        pairs = []
-        for oid in card_oids:
-            card_name = oid_to_name.get(oid, "")
-            syn = syn_map.get((slug, card_name))
-            if syn is not None:
-                # Quantize synergy into 9 grades (1-9) for richer ranking signal
-                grade = min(9, max(1, int(1 + max(0, syn) * 16)))
-                n_graded += 1
-            else:
-                grade = 1  # in deck but no synergy data
-            pairs.append((oid, grade))
-        pairs_by_cmdr[cmdr_oid] = pairs
-
     for cmdr_oid, card_oid, label in neg_pairs:
-        pairs_by_cmdr.setdefault(cmdr_oid, []).append((card_oid, 0))
+        positives_by_cmdr.setdefault(cmdr_oid, []).append((card_oid, 0))
 
     grade_counts = {}
-    for pairs in pairs_by_cmdr.values():
+    for pairs in positives_by_cmdr.values():
         for _, g in pairs:
             grade_counts[g] = grade_counts.get(g, 0) + 1
-    print(f"  Graded relevance: {n_graded} cards with synergy scores")
+    print(f"\n  Final grade distribution:")
     for g in sorted(grade_counts.keys(), reverse=True):
         print(f"    Grade {g}: {grade_counts[g]:,}")
 
-    return pairs_by_cmdr
+    return positives_by_cmdr
 
 
 def main():
