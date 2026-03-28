@@ -31,7 +31,7 @@ def _load_all_cards(conn):
     card_data = {}
     for row in conn.execute(
         "SELECT oracle_id, name, type_line, mana_cost, cmc FROM cards "
-        "WHERE type_line NOT LIKE '%Token%'"
+        "WHERE type_line NOT LIKE '%Token%' AND legal_commander = 1"
     ):
         card_data[row[1]] = {
             "oracle_id": row[0], "name": row[1],
@@ -48,7 +48,7 @@ def color_identity_filter(conn, cmdr_oid: str, color_identity: set,
     deck_cards = deck_cards or set()
     for row in conn.execute(
         "SELECT oracle_id, name, color_identity FROM cards "
-        "WHERE type_line NOT LIKE '%Token%'"
+        "WHERE type_line NOT LIKE '%Token%' AND legal_commander = 1"
     ):
         oid, name, ci_json = row
         if name in deck_cards or oid == cmdr_oid:
