@@ -47,6 +47,12 @@ GAME_CONCEPTS = [
     "phase_trigger",        # Phase-based abilities
     "creature_available",   # Creature exists → can be tapped/sacrificed/counted
     "artifact_available",   # Artifact exists → can be sacrificed/tapped
+    # Zone-aware concepts (from trigger_origin/destination data)
+    "enters_from_graveyard",  # ChangesZone from Graveyard → Battlefield (reanimation)
+    "enters_from_exile",      # ChangesZone from Exile → Battlefield (blink return)
+    "enters_from_hand",       # ChangesZone from Hand → Battlefield (cheat into play)
+    "goes_to_graveyard",      # ChangesZone to Graveyard (death/discard/mill)
+    "goes_to_exile",          # ChangesZone to Exile (exile removal/blink)
 ]
 
 # Effect verb → game concepts it PRODUCES
@@ -127,7 +133,8 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
         conn: SQLite connection
         preloaded_abilities: optional list of (oracle_id, verb, trigger_mode,
             trigger_filter, cost, keyword, token_script, counter_type, raw_line,
-            amount) tuples. When provided, skips the forge_abilities DB scan.
+            amount, trigger_origin, trigger_destination) tuples.
+            When provided, skips the forge_abilities DB scan.
 
     Returns:
         produces: dict[oracle_id → numpy float32 vector]
@@ -158,13 +165,15 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
         abilities = []
         for row in conn.execute(
             "SELECT card_name, verb, trigger_mode, trigger_filter, cost, "
-            "keyword, token_script, counter_type, raw_line "
+            "keyword, token_script, counter_type, raw_line, amount, "
+            "trigger_origin, trigger_destination "
             "FROM forge_abilities"
         ):
             oid = forge_to_oid.get(row[0])
             if oid:
                 abilities.append((oid, row[1], row[2], row[3], row[4],
-                                  row[5], row[6], row[7], row[8]))
+                                  row[5], row[6], row[7], row[8], row[9],
+                                  row[10], row[11]))
 
     # Count subtypes from trigger_filter and token_script
     for ab in abilities:
@@ -194,12 +203,22 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
         verb, trig_mode, trig_filter = ab[1], ab[2], ab[3]
         cost, token_script = ab[4], ab[6]
         raw_line = ab[8] or ""
+        trig_origin = ab[10] if len(ab) > 10 else None
+        trig_dest = ab[11] if len(ab) > 11 else None
 
         # --- PRODUCES: effect verb → game concepts ---
         if verb and verb in VERB_TO_CONCEPTS:
             p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
             for concept in VERB_TO_CONCEPTS[verb]:
                 p[_concept_idx[concept]] += 1.0
+
+        # Zone-aware PRODUCES: verb + trigger_destination → zone concept
+        if verb and trig_dest:
+            p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
+            if "Graveyard" in trig_dest:
+                p[_concept_idx["goes_to_graveyard"]] += 1.0
+            if "Exile" in trig_dest:
+                p[_concept_idx["goes_to_exile"]] += 1.0
 
         # Token with subtype → produces that subtype
         if token_script:
@@ -223,6 +242,27 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
                 main = part.split(".")[0].strip().lower()
                 if main in subtype_idx:
                     c[subtype_idx[main]] += 1.0
+
+        # Zone-aware CONSUMES: trigger + trigger_origin → zone concept
+        if trig_mode and trig_origin:
+            c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
+            if "Graveyard" in trig_origin:
+                c[_concept_idx["enters_from_graveyard"]] += 1.0
+            if "Exile" in trig_origin:
+                c[_concept_idx["enters_from_exile"]] += 1.0
+            if trig_origin == "Hand":
+                c[_concept_idx["enters_from_hand"]] += 1.0
+
+        # ChangeZone with origin → produces zone-specific entry
+        if verb in ("ChangeZone", "ChangeZoneAll") and trig_dest and trig_origin:
+            if "Battlefield" in trig_dest:
+                p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
+                if "Graveyard" in trig_origin:
+                    p[_concept_idx["enters_from_graveyard"]] += 1.0
+                if "Exile" in trig_origin:
+                    p[_concept_idx["enters_from_exile"]] += 1.0
+                if trig_origin == "Hand":
+                    p[_concept_idx["enters_from_hand"]] += 1.0
 
         # Cost → consumes resources (check raw_line always, cost field often empty)
         if raw_line:

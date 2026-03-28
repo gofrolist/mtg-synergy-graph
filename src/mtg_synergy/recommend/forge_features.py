@@ -104,17 +104,18 @@ class ForgeFeatureContext:
         import re as _re
         self._forge_profiles = {}
         # Also collect raw abilities for build_mechanics_vectors (avoids redundant DB scan)
-        # Format: (oid, verb, trig_mode, trig_filter, cost, kw, token_script, counter, raw_line, amount)
+        # Format: (oid, verb, trig_mode, trig_filter, cost, kw, token_script, counter, raw_line, amount, trigger_origin, trigger_destination)
         self._raw_abilities = []
         for row in conn.execute(
             "SELECT fnm.oracle_id, fa.verb, fa.trigger_mode, fa.keyword, "
             "fa.counter_type, fa.target, fa.ability_type, fa.trigger_filter, "
-            "fa.cost, fa.defined, fa.raw_line, fa.token_script, fa.amount "
+            "fa.cost, fa.defined, fa.raw_line, fa.token_script, fa.amount, "
+            "fa.trigger_origin, fa.trigger_destination "
             "FROM forge_abilities fa "
             "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name"
         ):
-            # indices: 0=oid, 1=verb, 2=trig_mode, 3=trig_filter, 4=cost, 5=kw, 6=token_script, 7=counter, 8=raw_line, 9=amount
-            self._raw_abilities.append((row[0], row[1], row[2], row[7], row[8], row[3], row[11], row[4], row[10], row[12]))
+            # indices: 0=oid, 1=verb, 2=trig_mode, 3=trig_filter, 4=cost, 5=kw, 6=token_script, 7=counter, 8=raw_line, 9=amount, 10=trigger_origin, 11=trigger_destination
+            self._raw_abilities.append((row[0], row[1], row[2], row[7], row[8], row[3], row[11], row[4], row[10], row[12], row[13], row[14]))
             oid = row[0]
             p = self._forge_profiles.setdefault(oid, {
                 'verbs': set(), 'triggers': set(), 'keywords': set(),
