@@ -607,8 +607,8 @@ class TestNoOracleTextInFeatures:
 class TestFeatureCount:
     """Verify compute_card_features returns exactly 38 elements."""
 
-    def test_feature_count_is_38(self):
-        """Feature vector length should be 63."""
+    def test_feature_count_is_71(self):
+        """Feature vector length should be 71."""
         ctx, conn = _make_ctx()
         try:
             cmdr = _make_cmdr(ctx, KRENKO_OID, subtypes={"goblin"})
@@ -621,8 +621,8 @@ class TestFeatureCount:
             if found_oid is None:
                 pytest.skip("No card found for feature count test")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert len(features) == 63, (
-                f"Expected 63 features, got {len(features)}"
+            assert len(features) == 71, (
+                f"Expected 71 features, got {len(features)}"
             )
         finally:
             conn.close()
@@ -845,3 +845,69 @@ class TestEffectZones:
             assert count >= 1000, f"Expected >=1000 cards with effect_zones, got {count}"
         finally:
             conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Tests for new features F63-F70
+# ---------------------------------------------------------------------------
+
+
+def test_feature_count_71():
+    """compute_card_features should return 71 features."""
+    ctx, conn = _make_ctx()
+    try:
+        from mtg_synergy.recommend.forge_features import (
+            compute_card_features, CmdrFeatureContext,
+        )
+        krenko_oid = KRENKO_OID
+        cmdr_ctx = CmdrFeatureContext(ctx, krenko_oid, set())
+        card_oid = next(oid for oid in ctx._forge_profiles if oid != krenko_oid)
+        card_meta = conn.execute(
+            "SELECT type_line, cmc FROM cards WHERE oracle_id = ?", (card_oid,)
+        ).fetchone()
+        feats = compute_card_features(
+            card_oid, card_meta[0] or "", float(card_meta[1] or 0),
+            ctx, cmdr_ctx,
+        )
+        assert len(feats) == 71, f"Expected 71 features, got {len(feats)}"
+    finally:
+        conn.close()
+
+
+def test_total_ability_count_positive():
+    """Cards with forge abilities should have total_ability_count > 0."""
+    ctx, conn = _make_ctx()
+    try:
+        assert ctx._total_ability_counts.get(KRENKO_OID, 0) > 0
+    finally:
+        conn.close()
+
+
+def test_triggered_counts_loaded():
+    """Triggered ability counts should be loaded."""
+    ctx, conn = _make_ctx()
+    try:
+        assert hasattr(ctx, "_triggered_counts")
+        assert len(ctx._triggered_counts) > 0
+    finally:
+        conn.close()
+
+
+def test_token_stats_loaded():
+    """Token P/T and keyword counts should be loaded for token-creating cards."""
+    ctx, conn = _make_ctx()
+    try:
+        assert len(ctx._token_max_pt) > 0
+        assert ctx._token_max_pt.get(KRENKO_OID, 0) == 2  # 1/1 goblins
+    finally:
+        conn.close()
+
+
+def test_zone_interaction_sets():
+    """Zone interaction sets should be populated."""
+    ctx, conn = _make_ctx()
+    try:
+        assert len(ctx._zone_graveyard) > 100
+        assert len(ctx._zone_exile) > 10
+    finally:
+        conn.close()

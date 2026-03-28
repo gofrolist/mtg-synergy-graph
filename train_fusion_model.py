@@ -108,6 +108,14 @@ FORGE_FEATURE_NAMES = [
     "counter_num_variable",  # [60] card places X/Y counters (scales)
     "grants_abilities",      # [61] card grants abilities to other permanents
     "token_amount_variable", # [62] card creates X tokens (scales)
+    "total_ability_count",     # [63] total abilities per card (combo potential)
+    "triggered_ability_count", # [64] triggered ability count (ordinal)
+    "token_power_toughness",   # [65] max P+T of tokens created
+    "token_keyword_count",     # [66] max keywords on tokens created
+    "zone_graveyard_interact", # [67] both card+cmdr interact with graveyard
+    "zone_exile_interact",     # [68] both card+cmdr interact with exile
+    "ability_density",         # [69] abilities per mana cost (efficiency)
+    "mech_zone_fwd",           # [70] zone-specific mechanics synergy
 ]
 
 def sigmoid(x):

@@ -1,6 +1,6 @@
 """Shared forge feature computation for training and inference.
 
-Extracts the 63-feature forge GBM feature vector computation into a
+Extracts the 71-feature forge GBM feature vector computation into a
 single module used by both train_fusion_model.py and scoring.py.
 
 No oracle-text embeddings or tower model — pure Forge-native features.
@@ -9,7 +9,7 @@ import time
 
 import numpy as np
 
-from mtg_synergy.recommend.mechanics_vectors import _concept_idx
+from mtg_synergy.recommend.mechanics_vectors import _concept_idx, N_CONCEPTS
 
 
 def _decode_events(mask, bit_to_event):
@@ -374,6 +374,74 @@ class ForgeFeatureContext:
             "GROUP BY fnm.oracle_id"
         ):
             self._activated_counts[row[0]] = row[1]
+
+        # Pre-load total ability counts per card (for F63)
+        self._total_ability_counts = {}
+        for row in conn.execute(
+            "SELECT fnm.oracle_id, COUNT(*) FROM forge_abilities fa "
+            "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+            "GROUP BY fnm.oracle_id"
+        ):
+            self._total_ability_counts[row[0]] = row[1]
+
+        # Pre-load triggered ability counts per card (for F64)
+        self._triggered_counts = {}
+        for row in conn.execute(
+            "SELECT fnm.oracle_id, COUNT(*) FROM forge_abilities fa "
+            "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+            "WHERE fa.ability_type = 'T' "
+            "GROUP BY fnm.oracle_id"
+        ):
+            self._triggered_counts[row[0]] = row[1]
+
+        # Pre-load token stats per card (for F65, F66)
+        self._token_max_pt = {}      # oid -> max P+T across all token scripts
+        self._token_max_kw = {}      # oid -> max keyword count across all token scripts
+        _kw_skip = {"sac", "draw"}   # not real keywords in token scripts
+        for row in conn.execute(
+            "SELECT fnm.oracle_id, fa.token_script FROM forge_abilities fa "
+            "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+            "WHERE fa.token_script IS NOT NULL"
+        ):
+            oid, ts = row
+            parts = ts.lower().split("_")
+            if len(parts) >= 3:
+                try:
+                    p = int(parts[1]) if parts[1] not in ("x", "a") else 0
+                    t = int(parts[2]) if parts[2] not in ("x", "a") else 0
+                    pt = p + t
+                    self._token_max_pt[oid] = max(self._token_max_pt.get(oid, 0), pt)
+                except ValueError:
+                    pass
+                if len(parts) > 3:
+                    kws = [p for p in parts[3:] if p and p not in _kw_skip and len(p) > 1]
+                    kw_count = len(kws)
+                    self._token_max_kw[oid] = max(self._token_max_kw.get(oid, 0), kw_count)
+
+        # Pre-load zone interaction flags per card (for F67, F68)
+        self._zone_graveyard = set()
+        self._zone_exile = set()
+        for row in conn.execute(
+            "SELECT fnm.oracle_id, fa.trigger_origin, fa.trigger_destination "
+            "FROM forge_abilities fa "
+            "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+            "WHERE fa.trigger_origin IS NOT NULL OR fa.trigger_destination IS NOT NULL"
+        ):
+            oid, origin, dest = row
+            if origin and "Graveyard" in origin:
+                self._zone_graveyard.add(oid)
+            if dest and "Graveyard" in dest:
+                self._zone_graveyard.add(oid)
+            if origin and "Exile" in origin:
+                self._zone_exile.add(oid)
+            if dest and "Exile" in dest:
+                self._zone_exile.add(oid)
+        # Also mark cards with graveyard/exile-related verbs
+        for oid, p in self._forge_profiles.items():
+            if p['verbs'] & {"Mill", "Sacrifice", "Destroy", "DestroyAll", "Discard"}:
+                self._zone_graveyard.add(oid)
+            if "exile" in p.get('effect_zones', set()):
+                self._zone_exile.add(oid)
 
         # Verb→trigger alignment mapping for F30
         self._verb_triggers = {
@@ -779,6 +847,10 @@ class CmdrFeatureContext:
                         if bc > 0:
                             self.deck_broad_counts[oid] = bc
 
+        # Zone interaction flags
+        self.cmdr_zone_graveyard = self.cmdr_oid in ctx._zone_graveyard
+        self.cmdr_zone_exile = self.cmdr_oid in ctx._zone_exile
+
     def _init_from_db(self, ctx, conn, oid_to_idx, cmdr_oid, deck_oids):
         """Original DB query path (used for inference with small datasets)."""
         event_expr = "event" if ctx._has_event_col else "json_extract(detail, '$.event')"
@@ -849,12 +921,16 @@ class CmdrFeatureContext:
         except Exception:
             pass
 
+        # Zone interaction flags
+        self.cmdr_zone_graveyard = self.cmdr_oid in ctx._zone_graveyard
+        self.cmdr_zone_exile = self.cmdr_oid in ctx._zone_exile
+
 
 def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
                           ctx: ForgeFeatureContext, cmdr: CmdrFeatureContext) -> list:
-    """Compute the 63-feature vector for a single (commander, card) pair.
+    """Compute the 71-feature vector for a single (commander, card) pair.
 
-    Returns a list of 63 floats matching FORGE_FEATURE_NAMES order.
+    Returns a list of 71 floats matching FORGE_FEATURE_NAMES order.
     Pure Forge-native features — no tower model or oracle-text embeddings.
     """
     out_s = cmdr.cmdr_out.get(card_oid, 0.0)
@@ -1198,6 +1274,40 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
     # F62: token_amount_variable — card creates X tokens (scales with game state)
     token_amt_var = 1.0 if card_profile.get('token_amount_variable', False) else 0.0
 
+    # ── New features: ability counts, token complexity, zone interaction ──
+
+    # F63: total_ability_count
+    total_abilities = float(min(ctx._total_ability_counts.get(card_oid, 0), 15))
+
+    # F64: triggered_ability_count
+    triggered_count = float(min(ctx._triggered_counts.get(card_oid, 0), 10))
+
+    # F65: token_power_toughness
+    token_pt = float(min(ctx._token_max_pt.get(card_oid, 0), 20))
+
+    # F66: token_keyword_count
+    token_kw = float(min(ctx._token_max_kw.get(card_oid, 0), 5))
+
+    # F67: zone_graveyard_interact
+    zone_gy = 1.0 if (card_oid in ctx._zone_graveyard and cmdr.cmdr_zone_graveyard) else 0.0
+
+    # F68: zone_exile_interact
+    zone_ex = 1.0 if (card_oid in ctx._zone_exile and cmdr.cmdr_zone_exile) else 0.0
+
+    # F69: ability_density
+    raw_count = ctx._total_ability_counts.get(card_oid, 0)
+    ability_dens = float(raw_count) / max(card_cmc, 1.0) if raw_count > 0 else 0.0
+    ability_dens = min(ability_dens, 5.0)
+
+    # F70: mech_zone_fwd — zone-specific mechanics synergy
+    mech_zone_fwd = 0.0
+    if cmdr.cmdr_consumes is not None and card_prod is not None:
+        zone_start = N_CONCEPTS - 5
+        zone_end = N_CONCEPTS
+        zone_card = card_prod[zone_start:zone_end]
+        zone_cmdr = cmdr.cmdr_consumes[zone_start:zone_end]
+        mech_zone_fwd = float(np.dot(zone_cmdr, zone_card))
+
     return [
         min(out_s, 10.0),                                # F0 causal_cmdr_to_card
         min(in_s, 10.0),                                 # F1 causal_card_to_cmdr
@@ -1262,4 +1372,12 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         counter_num_var,                                 # F60 counter_num_variable
         grants_abilities,                                # F61 grants_abilities
         token_amt_var,                                   # F62 token_amount_variable
+        total_abilities,                                 # F63 total_ability_count
+        triggered_count,                                 # F64 triggered_ability_count
+        token_pt,                                        # F65 token_power_toughness
+        token_kw,                                        # F66 token_keyword_count
+        zone_gy,                                         # F67 zone_graveyard_interact
+        zone_ex,                                         # F68 zone_exile_interact
+        ability_dens,                                    # F69 ability_density
+        mech_zone_fwd,                                   # F70 mech_zone_fwd
     ]
