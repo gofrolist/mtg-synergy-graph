@@ -902,7 +902,6 @@ def train_forge_gbm(X, y, cmdr_ids):
         "eval_at": [10, 30],
         "num_leaves": 255,
         "learning_rate": 0.05,
-        "n_estimators": 1500,
         "subsample": 0.8,
         "colsample_bytree": 0.8,
         "min_child_samples": 20,
@@ -962,9 +961,10 @@ def train_forge_gbm(X, y, cmdr_ids):
 
         avg_ndcg = np.mean(ndcg30_scores) if ndcg30_scores else 0.0
         fold_ndcgs.append(avg_ndcg)
-        fold_best_iters.append(booster.best_iteration)
+        best_iter = booster.best_iteration or booster.current_iteration()
+        fold_best_iters.append(best_iter)
         print(f"  Fold {fold_i+1}: NDCG@30={avg_ndcg:.4f} "
-              f"({booster.best_iteration} rounds)")
+              f"({best_iter} rounds)")
 
     print(f"  Mean NDCG@30: {np.mean(fold_ndcgs):.4f}")
 
