@@ -9,7 +9,7 @@ import os
 
 # Re-export public symbols
 from mtg_synergy.constants import STAPLE_ROLES
-from mtg_synergy.recommend import recommend_cards, suggest_swaps, show_swaps
+from mtg_synergy.recommend import recommend_cards
 from mtg_synergy.combos import (
     find_combos, find_combos_tiered, find_partial_combos,
     compute_strategy_relevance, find_anti_synergy,

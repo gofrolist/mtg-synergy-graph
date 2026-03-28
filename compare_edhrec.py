@@ -17,7 +17,11 @@ import time
 import urllib.request
 from pathlib import Path
 
-from decks import list_decks, load_deck
+try:
+    from decks import list_decks, load_deck
+except ImportError:
+    list_decks = None
+    load_deck = None
 
 
 EDHREC_CACHE_DIR = Path("data/edhrec_commanders")

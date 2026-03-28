@@ -54,7 +54,11 @@ def normalize(name: str) -> str:
 
 def validate_deck(deck_name: str, verbose: bool = True) -> dict:
     """Validate one deck against curated synergy pairs."""
-    from decks import load_deck
+    try:
+        from decks import load_deck
+    except ImportError:
+        print("decks/ folder not found")
+        return {}
     deck = load_deck(deck_name)
 
     pairs = getattr(deck, 'SYNERGY_PAIRS', [])
@@ -103,7 +107,11 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true", help="Show missed cards")
     args = parser.parse_args()
 
-    from decks import list_decks
+    try:
+        from decks import list_decks
+    except ImportError:
+        print("decks/ folder not found")
+        return
     decks = [args.deck] if args.deck else list_decks()
 
     print(f"Validating {len(decks)} deck(s) against curated synergy pairs\n")

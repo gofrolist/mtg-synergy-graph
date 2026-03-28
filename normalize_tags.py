@@ -247,7 +247,11 @@ def print_unmapped(cards: list[dict]):
 
 
 def run():
-    from decks import list_decks
+    try:
+        from decks import list_decks
+    except ImportError:
+        print("decks/ folder not found; no decks available")
+        return
 
     parser = argparse.ArgumentParser(description="Normalize provides/wants tags")
     parser.add_argument("--input", type=str, default=os.path.join(DATA_DIR, "top10000_tags.json"),
