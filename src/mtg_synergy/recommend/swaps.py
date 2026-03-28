@@ -1,12 +1,11 @@
 """Card swap suggestion engine with multi-layer protection."""
 import sqlite3
 
-from mtg_synergy.recommend.scoring import (
-    DeckContext, score_all_candidates, compute_dynamic_score, tower_prefilter)
+from mtg_synergy.recommend.scoring import color_identity_filter, score_forge_candidates
 from mtg_synergy.combos.detector import compute_strategy_relevance
 
 # Provides tags that indicate synergy value (okay to keep as "spell").
-# Uses Forge-derived vocabulary (verb→provides mapping from derive_forge_tags.py).
+# Uses Forge-derived vocabulary (verb->provides mapping from derive_forge_tags.py).
 SYNERGY_PROVIDES = {
     "token", "token-treasure", "put-counter", "put-counter-all",
     "sacrifice-outlet", "pump", "pump-all", "deal-damage",
@@ -25,7 +24,7 @@ def _classify_card_slot(name: str, cards, deck_types: set = None) -> str:
     Protected from cuts: removal, protection, ramp, card draw, commander's tribe.
 
     Args:
-        cards: list[dict] or dict[str, dict] (name→card lookup for efficiency).
+        cards: list[dict] or dict[str, dict] (name->card lookup for efficiency).
     """
     from card_db import CARD_DB, NAME_INDEX
 
@@ -91,13 +90,13 @@ def _classify_card_slot(name: str, cards, deck_types: set = None) -> str:
 def suggest_swaps(graph: dict, deck_cards: set[str], commander: str,
                   cards: list[dict], top_n: int = 15,
                   active_strategies: set = None, db_path: str = None,
-                  deck_types: set = None, edhrec_slug: str = None,
+                  deck_types: set = None,
                   color_identity: set = None) -> list[dict]:
     """Suggest swaps: pair weak deck cards with strong non-deck candidates.
 
     Lands swap with lands, spells swap with spells. Commander and staple
     infrastructure (mana rocks, removal, protection) are never cut.
-    Uses tower pre-filter for candidates + fusion model for scoring.
+    Uses forge-only model for scoring.
     """
     if not commander or not db_path:
         return []
@@ -111,43 +110,45 @@ def suggest_swaps(graph: dict, deck_cards: set[str], commander: str,
             cmdr_oid = c.get("oracle_id", "")
             break
 
-    # Tower pre-filter: find swap-in candidates (same as recommend)
-    prefiltered = tower_prefilter(
-        conn, cmdr_oid, color_identity or set(),
-        top_n=3000, deck_cards=deck_cards)
-
+    # Color-identity filter: find swap-in candidates
+    ci_results = color_identity_filter(
+        conn, cmdr_oid, color_identity or set(), deck_cards=deck_cards)
     cand_scores = {}
-    if prefiltered:
-        for oid, name, tower_prob in prefiltered:
-            if name not in deck_cards:
-                cand_scores[name] = {
-                    "total": 0.0, "partners": [], "multi_sig": 0,
-                    "commander_synergy": 0.0, "key_synergy": 0.0,
-                }
+    for oid, name in ci_results:
+        if name not in deck_cards:
+            cand_scores[name] = {
+                "total": 0.0, "partners": [], "multi_sig": 0,
+                "commander_synergy": 0.0, "key_synergy": 0.0,
+            }
 
-    # Score candidates + deck cards with fusion model
-    ctx = DeckContext(conn, commander, deck_cards, cards,
-                      deck_types=deck_types, active_strategies=active_strategies,
-                      edhrec_slug=edhrec_slug)
-    score_all_candidates(cand_scores, cards, ctx, conn, verbose=False)
+    # Score candidates with forge model
+    score_forge_candidates(cand_scores, cards, conn, commander, deck_cards,
+                           deck_types=deck_types, active_strategies=active_strategies)
 
-    # Score deck cards on the same scale
-    card_by_name = {c["name"]: c for c in cards}
+    # Score deck cards with forge model (same scale)
+    deck_card_scores = {}
+    for card_name in deck_cards:
+        if card_name != commander:
+            deck_card_scores[card_name] = {
+                "total": 0.0, "partners": [], "multi_sig": 0,
+                "commander_synergy": 0.0, "key_synergy": 0.0,
+            }
+    if deck_card_scores:
+        score_forge_candidates(deck_card_scores, cards, conn, commander, deck_cards,
+                               deck_types=deck_types, active_strategies=active_strategies)
     deck_scores = {}
     for card_name in deck_cards:
         if card_name == commander:
             deck_scores[card_name] = {"total": 999.0, "partners": 0}
-            continue
-        cd = card_by_name.get(card_name)
-        if cd:
-            features = compute_dynamic_score(card_name, cd, ctx, conn)
-            deck_scores[card_name] = {"total": features["total"], "partners": 0}
+        elif card_name in deck_card_scores:
+            deck_scores[card_name] = {"total": deck_card_scores[card_name]["total"], "partners": 0}
         else:
             deck_scores[card_name] = {"total": 0.0, "partners": 0}
 
     # Build card metadata
     card_oid_lookup = {}
     card_meta = {}
+    card_by_name = {c["name"]: c for c in cards}
     for c in cards:
         card_oid_lookup[c["name"]] = c.get("oracle_id", "")
         card_meta[c["name"]] = {
@@ -186,20 +187,26 @@ def suggest_swaps(graph: dict, deck_cards: set[str], commander: str,
 
     # Protect cards with high causal graph synergy with commander
     commander_protected = set()
-    if ctx.causal_ctx:
+    try:
+        from mtg_synergy.causal import CausalContext
+        deck_oids = {card_oid_lookup.get(n) for n in deck_cards
+                     if n in card_oid_lookup} - {None, ""}
+        causal_ctx = CausalContext(conn, cmdr_oid, deck_oids)
         cmdr_scores = {}
         for card_name in deck_cards:
             if card_name == commander:
                 continue
             oid = card_oid_lookup.get(card_name, "")
             if oid:
-                score = ctx.causal_ctx.causal_score(oid)
+                score = causal_ctx.causal_score(oid)
                 if score > 0:
                     cmdr_scores[card_name] = score
         if cmdr_scores:
             n_protect = min(20, len(cmdr_scores))
             threshold = sorted(cmdr_scores.values(), reverse=True)[n_protect - 1]
             commander_protected = {name for name, score in cmdr_scores.items() if score >= threshold}
+    except Exception:
+        pass
 
     # Protect cards in known Spellbook combos with the commander.
     combo_protected = set()
@@ -230,9 +237,9 @@ def suggest_swaps(graph: dict, deck_cards: set[str], commander: str,
         if card == commander or slot == "staple":
             continue
         if card in commander_protected:
-            continue  # High commander synergy — don't cut
+            continue  # High commander synergy -- don't cut
         if card in combo_protected:
-            continue  # Part of a known combo — don't cut
+            continue  # Part of a known combo -- don't cut
         info["anti_synergy"] = card in anti_synergy_cards
         cuttable[slot].append((card, info))
 
@@ -277,8 +284,6 @@ def suggest_swaps(graph: dict, deck_cards: set[str], commander: str,
                     "add_multi_sig": add_info["multi_sig"],
                     "add_top_partners": top_partners[:5],
                     "add_strategy_rel": add_info.get("strategy_rel"),
-                    "add_tower": add_info.get("tower_score"),
-                    "add_edhrec_syn": add_info.get("edhrec_syn"),
                     "net_delta": round(net, 1),
                 })
                 break
@@ -289,9 +294,9 @@ def suggest_swaps(graph: dict, deck_cards: set[str], commander: str,
 
 def show_swaps(swaps: list[dict], top_n: int = 15):
     """Display suggested swaps with strategy annotations."""
-    print(f"\n{'═' * 70}")
-    print(f"SUGGESTED SWAPS — {len(swaps)} upgrades found")
-    print(f"{'═' * 70}")
+    print(f"\n{'=' * 70}")
+    print(f"SUGGESTED SWAPS -- {len(swaps)} upgrades found")
+    print(f"{'=' * 70}")
 
     if not swaps:
         print("  No beneficial swaps found.")
@@ -305,19 +310,17 @@ def show_swaps(swaps: list[dict], top_n: int = 15):
     for i, swap in enumerate(swaps[:top_n], 1):
         pct = round(swap["net_delta"] / max_delta * 100, 1)
         bar_len = round(pct / 5)
-        bar = "█" * bar_len + "░" * (20 - bar_len)
+        bar = "\u2588" * bar_len + "\u2591" * (20 - bar_len)
         slot_label = f" [land]" if swap.get("slot") == "land" else ""
-        anti = " ← no strategy match" if swap.get("cut_anti_synergy") else ""
+        anti = " <- no strategy match" if swap.get("cut_anti_synergy") else ""
         strat_rel = swap.get("add_strategy_rel")
-        strat_str = f" [strat×{strat_rel:.1f}]" if strat_rel and strat_rel != 1.0 else ""
+        strat_str = f" [strat*{strat_rel:.1f}]" if strat_rel and strat_rel != 1.0 else ""
 
-        tower_str = f" T={swap['add_tower']}" if swap.get("add_tower") else ""
-        edh_str = f" EDH={swap['add_edhrec_syn']:.2f}" if swap.get("add_edhrec_syn") else ""
         print(f"\n  {pct:5.1f}% {bar}{slot_label}")
         print(f"    OUT: {swap['cut']:<35} (score: {swap['cut_score']:>7.1f}, "
               f"{swap['cut_partners']} partners){anti}")
         print(f"     IN: {swap['add']:<35} (score: {swap['add_score']:>7.1f}, "
-              f"{swap['add_partners']} partners){strat_str}{tower_str}{edh_str}")
+              f"{swap['add_partners']} partners){strat_str}")
         if swap["add_top_partners"]:
             top = swap["add_top_partners"][:3]
             partners_str = ", ".join(
