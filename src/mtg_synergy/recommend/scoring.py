@@ -83,8 +83,8 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
             cmdr_oid = c.get("oracle_id", "")
             break
 
-    # Build shared context (no embeddings needed)
-    ctx = ForgeFeatureContext(conn)
+    # Build shared context with edge index (avoids 80s+ SQL queries for deck edges)
+    ctx = ForgeFeatureContext(conn, preload_edges=True)
 
     # Card OID lookup
     card_oid = {c["name"]: c.get("oracle_id", "") for c in cards}
