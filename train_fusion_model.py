@@ -584,8 +584,9 @@ def _load_pairs_for_features(conn):
     for row in conn.execute("SELECT oracle_id, type_line FROM cards"):
         type_lines[row[0]] = row[1] or ""
 
-    # Build card pool (all cards from DB)
-    card_pool = {r[0] for r in conn.execute("SELECT oracle_id FROM cards")}
+    # Build card pool (commander-legal cards only)
+    card_pool = {r[0] for r in conn.execute(
+        "SELECT oracle_id FROM cards WHERE legal_commander = 1")}
     all_card_oids = []
     for oid in card_pool:
         if oid in basic_land_oids:
