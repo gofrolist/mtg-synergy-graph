@@ -1,4 +1,4 @@
-"""Tests for the fusion model (Stage 1: tower on EDHREC membership)."""
+"""Tests for the forge fusion model."""
 
 import sqlite3
 import os
@@ -28,26 +28,6 @@ def test_edhrec_commander_count():
     assert count >= 800
 
 
-def test_tower_binary_output_range():
-    """Tower EDHREC model should save normalization params."""
-    import numpy as np
-    model_path = os.path.join(os.path.dirname(__file__), "..", "data", "tower_model_edhrec.npz")
-    if not os.path.exists(model_path):
-        pytest.skip("Tower EDHREC model not trained yet")
-    data = np.load(model_path)
-    assert "struct_means" in data.files
-    assert "struct_stds" in data.files
-
-
-def test_feature_names():
-    """Feature list should have exactly 8 named features."""
-    from train_fusion_model import FEATURE_NAMES
-    assert len(FEATURE_NAMES) == 8
-    assert FEATURE_NAMES[0] == "tower_prob"
-    assert "causal_score" in FEATURE_NAMES
-    assert "is_creature" in FEATURE_NAMES
-
-
 def test_leave_commander_out_split():
     """CV splits should separate commanders, not individual pairs."""
     import numpy as np
@@ -66,21 +46,10 @@ def test_leave_commander_out_split():
     assert all_test == set(range(len(cmdr_ids)))
 
 
-def test_load_fusion_model_returns_none_when_missing(tmp_path):
-    """Fusion model loader should return None gracefully when files missing."""
-    from mtg_synergy.recommend.scoring import _load_fusion_model
-    result = _load_fusion_model(tower_path=tmp_path / "nope.npz", gbm_path=tmp_path / "nope.lgb")
-    assert result is None
-
-
-def test_load_fusion_model_returns_dict_when_present():
-    """Fusion model loader should return dict with expected keys."""
-    from mtg_synergy.recommend.scoring import _load_fusion_model
-    tower_path = os.path.join("data", "tower_model_edhrec.npz")
-    gbm_path = os.path.join("data", "fusion_model.lgb")
-    if not os.path.exists(tower_path) or not os.path.exists(gbm_path):
-        pytest.skip("Fusion model not trained yet")
-    result = _load_fusion_model()
-    assert result is not None
-    assert "tower" in result
-    assert "gbm" in result
+def test_forge_feature_names():
+    """Forge feature list should have exactly 71 named features."""
+    from train_fusion_model import FORGE_FEATURE_NAMES
+    assert len(FORGE_FEATURE_NAMES) == 71
+    assert "causal_cmdr_to_card" in FORGE_FEATURE_NAMES
+    assert "ability_density" in FORGE_FEATURE_NAMES
+    assert "tower_prob" not in FORGE_FEATURE_NAMES
