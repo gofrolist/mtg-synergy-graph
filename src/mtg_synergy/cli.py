@@ -56,6 +56,45 @@ def run():
         build_from_commander(args.commander, args.top)
         return
 
+    # Commander-only recommend mode — no deck config needed
+    if args.commander and args.recommend and not args.deck:
+        from tag_db import get_cards_by_names, DB_PATH
+        import sqlite3 as _sql
+
+        conn = _sql.connect(DB_PATH)
+        cmdr_row = conn.execute(
+            "SELECT name, oracle_id, color_identity, type_line FROM cards "
+            "WHERE LOWER(name) = LOWER(?)", (args.commander,)
+        ).fetchone()
+        if not cmdr_row:
+            print(f"Commander not found: {args.commander}")
+            return
+        cmdr_name, cmdr_oid, ci_json, cmdr_type = cmdr_row
+        import json
+        color_identity = set(json.loads(ci_json or "[]"))
+        cards = get_cards_by_names([cmdr_name], DB_PATH)
+        deck_set = {cmdr_name}
+
+        # Detect strategies from commander
+        from strategy_detector import detect_strategies
+        detected = detect_strategies(cmdr_oid, DB_PATH)
+        active_strategies = {s["name"] for s in detected if s["confidence"] >= 0.3}
+
+        # Detect tribal from commander type
+        deck_types = set()
+        from mtg_synergy.analysis.strategy import _detect_deck_types
+        deck_types = _detect_deck_types(cards, deck_set)
+
+        if active_strategies:
+            print(f"Active strategies: {', '.join(sorted(active_strategies))}")
+
+        graph = {"adjacency": {}, "edges": [], "stats": {}}
+        recommend_cards(graph, deck_set, cards, deck_types, args.top,
+                        active_strategies=active_strategies, db_path=DB_PATH,
+                        color_identity=color_identity, commander=cmdr_name)
+        conn.close()
+        return
+
     if not args.deck:
         parser.error("--deck is required (or use --commander with --build)")
 
