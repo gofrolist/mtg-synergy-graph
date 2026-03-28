@@ -99,6 +99,12 @@ class ForgeFeatureContext:
                 'verbs': set(), 'triggers': set(), 'keywords': set(),
                 'counter_types': set(), 'targets': set(), 'ability_types': set(),
                 'trigger_filters': set(), 'required_subtypes': set(),
+                'granted_keywords': set(), 'conditions': set(),
+                'duration': set(), 'combat_damage': False,
+                'effect_zones': set(), 'scales_with': set(),
+                'grants_types': set(), 'damage_amount': None,
+                'cards_drawn': None, 'life_amount': None,
+                'is_secondary': False, 'gain_control': False,
             })
             if row[1]: p['verbs'].add(row[1])
             if row[2]: p['triggers'].add(row[2])
@@ -147,6 +153,88 @@ class ForgeFeatureContext:
                             if (seg and seg[0].isupper() and len(seg) > 2
                                     and seg.lower() not in _generic):
                                 p['required_subtypes'].add(seg.lower())
+            # --- Granted keywords: AddKeyword$, KW$, PumpKeywords$, Keywords$ ---
+            for kw_field in ('AddKeyword', 'KW', 'PumpKeywords', 'Keywords'):
+                m = _re.search(rf'{kw_field}\$\s*([^|]+)', raw_line)
+                if m:
+                    for kw in m.group(1).split("&"):
+                        kw = kw.strip()
+                        # Skip HIDDEN prefixed entries and empty
+                        if kw and not kw.startswith("HIDDEN"):
+                            # Strip modifiers like :CardManaCost:Spell.Creature
+                            kw = kw.split(":")[0].strip()
+                            if kw:
+                                p['granted_keywords'].add(kw.lower())
+            # --- Conditions: IsPresent$, ConditionPresent$ ---
+            for cond_field in ('IsPresent', 'ConditionPresent'):
+                m = _re.search(rf'{cond_field}\$\s*(\S+)', raw_line)
+                if m:
+                    for part in m.group(1).split(","):
+                        main = part.split(".")[0].split("+")[0].strip()
+                        if main and main[0].isupper() and len(main) > 2:
+                            p['conditions'].add(main.lower())
+            # --- Duration$ ---
+            m = _re.search(r'Duration\$\s*(\S+)', raw_line)
+            if m:
+                p['duration'].add(m.group(1).lower())
+            elif row[1] in ('Pump', 'PumpAll') and 'Duration$' not in raw_line:
+                # Pump without Duration → temporary buff
+                p['duration'].add('temporary')
+            # --- CombatDamage$ True ---
+            if 'CombatDamage$ True' in raw_line:
+                p['combat_damage'] = True
+            # --- Effect zones: ActiveZones$, EffectZone$, AffectedZone$ ---
+            for zone_field in ('ActiveZones', 'EffectZone', 'AffectedZone'):
+                m = _re.search(rf'{zone_field}\$\s*(\S+)', raw_line)
+                if m:
+                    for z in m.group(1).split(","):
+                        z = z.strip()
+                        if z:
+                            p['effect_zones'].add(z.lower())
+            # --- Scales with: SetPower$ X or AddPower$ X ---
+            for pw_field in ('SetPower', 'AddPower'):
+                m = _re.search(rf'{pw_field}\$\s*(\S+)', raw_line)
+                if m and m.group(1) in ('X', 'Y'):
+                    p['scales_with'].add('variable_pt')
+                    # Try to extract what it scales with from Description$
+                    desc_m = _re.search(r'Description\$\s*(.+?)(?:\||$)', raw_line)
+                    if desc_m:
+                        desc = desc_m.group(1).lower()
+                        if 'for each' in desc or 'equal to' in desc:
+                            p['scales_with'].add('count_based')
+            # --- Grants types: Types$, AddType$ ---
+            for type_field in ('Types', 'AddType'):
+                m = _re.search(rf'{type_field}\$\s*(\S+)', raw_line)
+                if m:
+                    for t in m.group(1).split(","):
+                        t = t.strip()
+                        if t and t[0].isupper():
+                            p['grants_types'].add(t.lower())
+            # --- Damage amount: NumDmg$ ---
+            m = _re.search(r'NumDmg\$\s*(\S+)', raw_line)
+            if m:
+                val = m.group(1)
+                # Keep the latest (most relevant) if multiple abilities
+                if p['damage_amount'] is None or val == 'X':
+                    p['damage_amount'] = val
+            # --- Cards drawn: NumCards$ ---
+            m = _re.search(r'NumCards\$\s*(\S+)', raw_line)
+            if m:
+                val = m.group(1)
+                if p['cards_drawn'] is None or val == 'X':
+                    p['cards_drawn'] = val
+            # --- Life amount: LifeAmount$ ---
+            m = _re.search(r'LifeAmount\$\s*(\S+)', raw_line)
+            if m:
+                val = m.group(1)
+                if p['life_amount'] is None or val == 'X':
+                    p['life_amount'] = val
+            # --- Secondary ability ---
+            if 'Secondary$ True' in raw_line:
+                p['is_secondary'] = True
+            # --- Gain control ---
+            if 'GainControl$ True' in raw_line:
+                p['gain_control'] = True
 
         # Forge ability vectors: binary encoding of verbs+triggers+keywords for cosine similarity
         # Replaces oracle text TF-IDF (F9) with mechanical similarity
@@ -365,7 +453,13 @@ class CmdrFeatureContext:
         self.cmdr_profile = ctx._forge_profiles.get(cmdr_oid, {
             'verbs': set(), 'triggers': set(), 'keywords': set(),
             'counter_types': set(), 'targets': set(), 'ability_types': set(),
-            'trigger_filters': set(),
+            'trigger_filters': set(), 'required_subtypes': set(),
+            'granted_keywords': set(), 'conditions': set(),
+            'duration': set(), 'combat_damage': False,
+            'effect_zones': set(), 'scales_with': set(),
+            'grants_types': set(), 'damage_amount': None,
+            'cards_drawn': None, 'life_amount': None,
+            'is_secondary': False, 'gain_control': False,
         })
 
         if ctx._has_edge_index:

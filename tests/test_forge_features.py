@@ -35,14 +35,30 @@ def test_forge_profiles_loaded():
         # Check structure of an arbitrary entry
         sample_oid = next(iter(ctx._forge_profiles))
         profile = ctx._forge_profiles[sample_oid]
-        expected_keys = {
+        expected_set_keys = {
             "verbs", "triggers", "keywords", "counter_types",
             "targets", "ability_types", "trigger_filters", "required_subtypes",
+            "granted_keywords", "conditions", "duration",
+            "effect_zones", "scales_with", "grants_types",
         }
-        assert set(profile.keys()) == expected_keys
-        # All values should be sets
-        for key in expected_keys:
+        expected_bool_keys = {"combat_damage", "is_secondary", "gain_control"}
+        expected_optional_str_keys = {"damage_amount", "cards_drawn", "life_amount"}
+        all_expected = expected_set_keys | expected_bool_keys | expected_optional_str_keys
+        assert set(profile.keys()) == all_expected, (
+            f"Profile keys mismatch.\n  Missing: {all_expected - set(profile.keys())}"
+            f"\n  Extra: {set(profile.keys()) - all_expected}"
+        )
+        # Set-valued fields should be sets
+        for key in expected_set_keys:
             assert isinstance(profile[key], set), f"{key} should be a set"
+        # Bool-valued fields should be bool
+        for key in expected_bool_keys:
+            assert isinstance(profile[key], bool), f"{key} should be a bool"
+        # Optional str fields should be str or None
+        for key in expected_optional_str_keys:
+            assert profile[key] is None or isinstance(profile[key], str), (
+                f"{key} should be str or None, got {type(profile[key])}"
+            )
     finally:
         conn.close()
 
@@ -604,5 +620,224 @@ class TestFeatureCount:
             assert len(features) == 38, (
                 f"Expected 38 features, got {len(features)}"
             )
+        finally:
+            conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Tests for raw_line extraction: granted_keywords, conditions, duration, etc.
+# ---------------------------------------------------------------------------
+
+
+class TestGrantedKeywords:
+    """Profile field: granted_keywords from AddKeyword$/KW$/PumpKeywords$/Keywords$."""
+
+    def test_embercleave_grants_trample_doublestrike(self):
+        """Embercleave should grant trample and double strike."""
+        ctx, conn = _make_ctx()
+        try:
+            oid = _find_oid_by_name(conn, "Embercleave")
+            if oid is None:
+                pytest.skip("Embercleave not found in DB")
+            p = ctx._forge_profiles.get(oid, {})
+            gk = p.get("granted_keywords", set())
+            assert "trample" in gk, f"Expected 'trample' in granted_keywords, got {gk}"
+            assert "double strike" in gk, f"Expected 'double strike' in granted_keywords, got {gk}"
+        finally:
+            conn.close()
+
+    def test_swiftfoot_boots_grants_hexproof_haste(self):
+        """Swiftfoot Boots should grant hexproof and haste."""
+        ctx, conn = _make_ctx()
+        try:
+            oid = _find_oid_by_name(conn, "Swiftfoot Boots")
+            if oid is None:
+                pytest.skip("Swiftfoot Boots not found in DB")
+            p = ctx._forge_profiles.get(oid, {})
+            gk = p.get("granted_keywords", set())
+            assert "hexproof" in gk, f"Expected 'hexproof' in granted_keywords, got {gk}"
+            assert "haste" in gk, f"Expected 'haste' in granted_keywords, got {gk}"
+        finally:
+            conn.close()
+
+    def test_coverage_above_threshold(self):
+        """At least 2000 cards should have granted_keywords."""
+        ctx, conn = _make_ctx()
+        try:
+            count = sum(1 for p in ctx._forge_profiles.values() if p.get("granted_keywords"))
+            assert count >= 2000, f"Expected >=2000 cards with granted_keywords, got {count}"
+        finally:
+            conn.close()
+
+
+class TestCombatDamage:
+    """Profile field: combat_damage from CombatDamage$ True."""
+
+    def test_combat_damage_card(self):
+        """A card with CombatDamage$ True in raw_line should have combat_damage=True."""
+        ctx, conn = _make_ctx()
+        try:
+            found = False
+            for _oid, p in ctx._forge_profiles.items():
+                if p.get("combat_damage"):
+                    found = True
+                    break
+            assert found, "No card with combat_damage=True found"
+        finally:
+            conn.close()
+
+    def test_coverage_hundreds(self):
+        """Hundreds of cards should have combat damage triggers."""
+        ctx, conn = _make_ctx()
+        try:
+            count = sum(1 for p in ctx._forge_profiles.values() if p.get("combat_damage"))
+            assert count >= 500, f"Expected >=500 combat_damage cards, got {count}"
+        finally:
+            conn.close()
+
+
+class TestConditions:
+    """Profile field: conditions from IsPresent$/ConditionPresent$."""
+
+    def test_conditions_extracted(self):
+        """At least 1000 cards should have conditions."""
+        ctx, conn = _make_ctx()
+        try:
+            count = sum(1 for p in ctx._forge_profiles.values() if p.get("conditions"))
+            assert count >= 1000, f"Expected >=1000 cards with conditions, got {count}"
+        finally:
+            conn.close()
+
+    def test_condition_values_are_lowercase(self):
+        """All condition values should be lowercase strings."""
+        ctx, conn = _make_ctx()
+        try:
+            for _oid, p in ctx._forge_profiles.items():
+                for c in p.get("conditions", set()):
+                    assert c == c.lower(), f"Condition '{c}' should be lowercase"
+                    assert isinstance(c, str), f"Condition should be str, got {type(c)}"
+        finally:
+            conn.close()
+
+
+class TestDuration:
+    """Profile field: duration from Duration$ and pump inference."""
+
+    def test_duration_extracted(self):
+        """At least 3000 cards should have duration info."""
+        ctx, conn = _make_ctx()
+        try:
+            count = sum(1 for p in ctx._forge_profiles.values() if p.get("duration"))
+            assert count >= 3000, f"Expected >=3000 cards with duration, got {count}"
+        finally:
+            conn.close()
+
+    def test_permanent_duration_exists(self):
+        """Some cards should have permanent duration."""
+        ctx, conn = _make_ctx()
+        try:
+            found = False
+            for _oid, p in ctx._forge_profiles.items():
+                if "permanent" in p.get("duration", set()):
+                    found = True
+                    break
+            assert found, "No card with 'permanent' duration found"
+        finally:
+            conn.close()
+
+
+class TestScalesWith:
+    """Profile field: scales_with from SetPower$/AddPower$ with X/Y values."""
+
+    def test_reckless_one_scales(self):
+        """Reckless One (P/T = number of Goblins) should have scales_with."""
+        ctx, conn = _make_ctx()
+        try:
+            oid = _find_oid_by_name(conn, "Reckless One")
+            if oid is None:
+                pytest.skip("Reckless One not found in DB")
+            p = ctx._forge_profiles.get(oid, {})
+            sw = p.get("scales_with", set())
+            assert "variable_pt" in sw, f"Expected 'variable_pt' in scales_with, got {sw}"
+            assert "count_based" in sw, f"Expected 'count_based' in scales_with, got {sw}"
+        finally:
+            conn.close()
+
+
+class TestGrantsTypes:
+    """Profile field: grants_types from Types$/AddType$."""
+
+    def test_restless_fortress_grants_nightmare(self):
+        """Restless Fortress animates into a Nightmare creature."""
+        ctx, conn = _make_ctx()
+        try:
+            oid = _find_oid_by_name(conn, "Restless Fortress")
+            if oid is None:
+                pytest.skip("Restless Fortress not found in DB")
+            p = ctx._forge_profiles.get(oid, {})
+            gt = p.get("grants_types", set())
+            assert "nightmare" in gt, f"Expected 'nightmare' in grants_types, got {gt}"
+            assert "creature" in gt, f"Expected 'creature' in grants_types, got {gt}"
+        finally:
+            conn.close()
+
+    def test_coverage(self):
+        """Hundreds of cards should have grants_types."""
+        ctx, conn = _make_ctx()
+        try:
+            count = sum(1 for p in ctx._forge_profiles.values() if p.get("grants_types"))
+            assert count >= 500, f"Expected >=500 cards with grants_types, got {count}"
+        finally:
+            conn.close()
+
+
+class TestGainControl:
+    """Profile field: gain_control from GainControl$ True."""
+
+    def test_gain_control_exists(self):
+        """Some cards should have gain_control=True."""
+        ctx, conn = _make_ctx()
+        try:
+            count = sum(1 for p in ctx._forge_profiles.values() if p.get("gain_control"))
+            assert count >= 50, f"Expected >=50 gain_control cards, got {count}"
+        finally:
+            conn.close()
+
+
+class TestDamageAmount:
+    """Profile field: damage_amount from NumDmg$."""
+
+    def test_damage_amount_extracted(self):
+        """Hundreds of cards should have damage_amount."""
+        ctx, conn = _make_ctx()
+        try:
+            count = sum(1 for p in ctx._forge_profiles.values() if p.get("damage_amount"))
+            assert count >= 1000, f"Expected >=1000 cards with damage_amount, got {count}"
+        finally:
+            conn.close()
+
+
+class TestCardsDrawn:
+    """Profile field: cards_drawn from NumCards$."""
+
+    def test_cards_drawn_extracted(self):
+        """At least 1000 cards should have cards_drawn."""
+        ctx, conn = _make_ctx()
+        try:
+            count = sum(1 for p in ctx._forge_profiles.values() if p.get("cards_drawn"))
+            assert count >= 1000, f"Expected >=1000 cards with cards_drawn, got {count}"
+        finally:
+            conn.close()
+
+
+class TestEffectZones:
+    """Profile field: effect_zones from ActiveZones$/EffectZone$/AffectedZone$."""
+
+    def test_effect_zones_extracted(self):
+        """Hundreds of cards should have effect_zones."""
+        ctx, conn = _make_ctx()
+        try:
+            count = sum(1 for p in ctx._forge_profiles.values() if p.get("effect_zones"))
+            assert count >= 1000, f"Expected >=1000 cards with effect_zones, got {count}"
         finally:
             conn.close()
