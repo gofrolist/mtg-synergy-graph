@@ -59,6 +59,52 @@ def color_identity_filter(conn, cmdr_oid: str, color_identity: set,
     return results
 
 
+_COLOR_NAME_TO_SYMBOL = {
+    "white": "W", "blue": "U", "black": "B", "red": "R", "green": "G",
+    "colorless": "C",
+}
+
+
+def _needs_wrong_colors(card_needs: set, color_identity: set) -> bool:
+    """Check if card needs colors outside the commander's color identity.
+
+    Forge tags like needs=Color$White, needs=Color$Red|Green are split and
+    mapped to MTG color symbols (W, U, B, R, G) for comparison.
+    """
+    for tag in card_needs:
+        if not tag.startswith("Color$"):
+            continue
+        colors_str = tag[6:]  # strip "Color$"
+        needed_symbols = set()
+        for color_name in colors_str.split("|"):
+            sym = _COLOR_NAME_TO_SYMBOL.get(color_name.lower().strip())
+            if sym and sym != "C":
+                needed_symbols.add(sym)
+        # If the card needs specific colors and NONE are in commander's identity
+        if needed_symbols and not (needed_symbols & color_identity):
+            return True
+    return False
+
+
+def _has_unmet_type_needs(card_needs: set, card_hints: set,
+                          cmdr_provides: set) -> bool:
+    """Check if card needs/hints at Type$ tags that the commander can't provide.
+
+    Only fires on Type$ tags (creature subtypes and card types like Enchantment,
+    Aura, Equipment). Ignores Ability$ and other tag prefixes.
+    Cards needing Type$Dinosaur in a Human deck, or Type$Enchantment in a
+    counters deck, are clear mismatches.
+    """
+    type_reqs = set()
+    for tag in (card_needs | card_hints):
+        if tag.startswith("Type$"):
+            type_reqs.add(tag)
+    if not type_reqs:
+        return False
+    # Check if ANY type requirement is met by commander's has+hints
+    return not bool(type_reqs & cmdr_provides)
+
+
 def _score_commander(cmdr_oid, cmdr_name, color_identity, deck_cards,
                      ctx, gbm, card_data, top_n=50):
     """Score all color-legal candidates for one commander. Returns ranked list of (name, score).
@@ -113,6 +159,7 @@ def _score_commander(cmdr_oid, cmdr_name, color_identity, deck_cards,
     _generic_req = {"card", "creature", "permanent", "self", "other",
                     "nontoken", "token", "artifact", "enchantment", "land",
                     "spell", "any"}
+
     for i, (name, cd) in enumerate(cand_list):
         profile = ctx._forge_profiles.get(cd["oracle_id"], {})
         if cmdr_is_tribal:
@@ -134,6 +181,24 @@ def _score_commander(cmdr_oid, cmdr_name, color_identity, deck_cards,
             dur = profile.get('duration', set())
             if 'temporary' in dur and 'permanent' not in dur:
                 scores[i] *= 0.5
+            # Static anthem (Continuous+AddPower, no PutCounter) for counter commander
+            if profile.get('has_static_anthem', False):
+                scores[i] *= 0.5
+            # Card puts counters on lands, not creatures
+            if profile.get('counters_on_lands', False):
+                scores[i] *= 0.4
+        # Card needs colors outside commander's color identity (e.g., Pearl Medallion in mono-G)
+        # Hard filter: these cards are guaranteed useless
+        card_needs = ctx._deck_needs.get(cd["oracle_id"], set())
+        if card_needs and _needs_wrong_colors(card_needs, color_identity):
+            scores[i] = -1e9
+            continue
+        # Card needs/hints at Type$ tags the commander can't provide
+        # e.g., needs=Type$Dinosaur in Human deck, hints=Type$Aura in counters deck
+        card_hints = ctx._deck_hints.get(cd["oracle_id"], set())
+        cmdr_prov = cmdr_ctx.cmdr_has | cmdr_ctx.cmdr_hints
+        if _has_unmet_type_needs(card_needs, card_hints, cmdr_prov):
+            scores[i] *= 0.3
 
     # Rank and return top N
     ranked = sorted(zip([n for n, _ in cand_list], scores),
@@ -192,7 +257,8 @@ def batch_recommend(conn, commander_names: list[str], top_n: int = 30,
 
 def score_forge_candidates(candidate_scores: dict, cards: list, conn,
                            commander: str, deck_cards: set,
-                           deck_types: set = None, active_strategies: set = None) -> None:
+                           deck_types: set = None, active_strategies: set = None,
+                           color_identity: set = None) -> None:
     """Score candidates for a single commander. Modifies candidate_scores in-place.
 
     For batch scoring of multiple commanders, use batch_recommend() instead.
@@ -257,6 +323,7 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
         _generic_req = {"card", "creature", "permanent", "self", "other",
                         "nontoken", "token", "artifact", "enchantment", "land",
                         "spell", "any"}
+    
         for i, (name, cd) in enumerate(cand_list):
             oid = cd.get("oracle_id") or card_oid.get(name, "")
             profile = ctx._forge_profiles.get(oid, {})
@@ -275,6 +342,21 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
                 dur = profile.get('duration', set())
                 if 'temporary' in dur and 'permanent' not in dur:
                     scores[i] *= 0.5
+                if profile.get('has_static_anthem', False):
+                    scores[i] *= 0.5
+                if profile.get('counters_on_lands', False):
+                    scores[i] *= 0.4
+            # Card needs colors outside commander's color identity
+            # Hard filter: these cards are guaranteed useless
+            card_needs = ctx._deck_needs.get(oid, set())
+            if color_identity is not None and card_needs and _needs_wrong_colors(card_needs, color_identity):
+                scores[i] = -1e9
+                continue
+            # Card needs/hints at Type$ tags the commander can't provide
+            card_hints = ctx._deck_hints.get(oid, set())
+            cmdr_prov = cmdr_ctx.cmdr_has | cmdr_ctx.cmdr_hints
+            if _has_unmet_type_needs(card_needs, card_hints, cmdr_prov):
+                scores[i] *= 0.3
 
         for i, (name, _) in enumerate(cand_list):
             info = candidate_scores[name]

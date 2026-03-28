@@ -123,7 +123,8 @@ def suggest_swaps(graph: dict, deck_cards: set[str], commander: str,
 
     # Score candidates with forge model
     score_forge_candidates(cand_scores, cards, conn, commander, deck_cards,
-                           deck_types=deck_types, active_strategies=active_strategies)
+                           deck_types=deck_types, active_strategies=active_strategies,
+                           color_identity=color_identity)
 
     # Score deck cards with forge model (same scale)
     deck_card_scores = {}
@@ -135,7 +136,8 @@ def suggest_swaps(graph: dict, deck_cards: set[str], commander: str,
             }
     if deck_card_scores:
         score_forge_candidates(deck_card_scores, cards, conn, commander, deck_cards,
-                               deck_types=deck_types, active_strategies=active_strategies)
+                               deck_types=deck_types, active_strategies=active_strategies,
+                               color_identity=color_identity)
     deck_scores = {}
     for card_name in deck_cards:
         if card_name == commander:

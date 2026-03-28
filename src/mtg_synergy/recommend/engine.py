@@ -57,7 +57,8 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
         # Forge-only scoring (63 features, no EDHREC)
         score_forge_candidates(candidate_scores, cards, _shared_conn,
                                commander, deck_cards, deck_types,
-                               active_strategies)
+                               active_strategies,
+                               color_identity=color_identity)
 
         # Find partial Spellbook combos for display
         deck_oids = {card_oid_lookup[n] for n in deck_cards if n in card_oid_lookup}

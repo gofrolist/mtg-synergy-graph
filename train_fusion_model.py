@@ -99,12 +99,14 @@ FORGE_FEATURE_NAMES = [
     "zone_graveyard_interact", # [67] both card+cmdr interact with graveyard
     "zone_exile_interact",     # [68] both card+cmdr interact with exile
     "ability_density",         # [69] abilities per mana cost (efficiency)
-    "mech_zone_fwd",           # [70] zone-specific mechanics synergy
-    "cmdr_needs_to_card_has",  # [71] commander needs X, card has X
-    "card_needs_satisfied",    # [72] fraction of card's needs met by commander
-    "needs_rarity",            # [73] how rare/specific are card's needs
-    "excluded_tribal_penalty", # [74] card is right type but excludes cmdr's type from effects
-    "temp_buff_counter_cmdr",  # [75] card gives temporary buffs, cmdr wants permanent counters
+    "cmdr_needs_to_card_has",  # [70] commander needs X, card has X
+    "card_needs_satisfied",    # [71] fraction of card's needs met by commander
+    "needs_rarity",            # [72] how rare/specific are card's needs
+    "temp_buff_counter_cmdr",  # [73] card gives temporary buffs, cmdr wants permanent counters
+    "put_counter_ratio",       # [74] fraction of buff verbs that are PutCounter (not Pump)
+    "cmdr_counter_x_put_counter", # [75] commander uses +1/+1 counters AND card places counters
+    "static_anthem_counter_cmdr", # [76] static anthem (not counters) but cmdr wants counters
+    "counters_on_lands",       # [77] card places counters on lands (earthbend etc.)
 ]
 
 
@@ -410,6 +412,12 @@ def train_forge_gbm(X, y, cmdr_ids):
         "label_gain": [0, 1, 3, 6, 15, 30],  # 6 grades: neg, anti-syn, low, moderate, top, high-syn
     }
 
+    # Per-grade sample weights: upweight rare high-synergy examples
+    # Grade 5 (High Synergy) and 4 (Top Cards) are ~12x rarer than grades 0-3
+    _grade_weights = {0: 1.0, 1: 1.0, 2: 1.0, 3: 1.0, 4: 2.0, 5: 3.0}
+    w = np.array([_grade_weights.get(int(g), 1.0) for g in y], dtype=np.float32)
+    print(f"  Sample weights: grade 4→{_grade_weights[4]}x, grade 5→{_grade_weights[5]}x")
+
     splits = make_cv_splits(cmdr_ids, n_folds=3)
     fold_ndcgs = []
     fold_best_iters = []
@@ -423,9 +431,9 @@ def train_forge_gbm(X, y, cmdr_ids):
         train_group = _build_group_array(cmdr_ids, ti)
         test_group = _build_group_array(cmdr_ids, vi)
 
-        train_data = lgb.Dataset(X[ti], label=y[ti], group=train_group,
+        train_data = lgb.Dataset(X[ti], label=y[ti], weight=w[ti], group=train_group,
                                  feature_name=FORGE_FEATURE_NAMES, free_raw_data=False)
-        eval_data = lgb.Dataset(X[vi], label=y[vi], group=test_group,
+        eval_data = lgb.Dataset(X[vi], label=y[vi], weight=w[vi], group=test_group,
                                 reference=train_data, feature_name=FORGE_FEATURE_NAMES,
                                 free_raw_data=False)
 
@@ -472,7 +480,7 @@ def train_forge_gbm(X, y, cmdr_ids):
     avg_best = int(np.mean(fold_best_iters) * 1.1)
     print(f"  Final model: {avg_best} rounds (avg CV best x 1.1)")
     all_group = _build_group_array(cmdr_ids, np.arange(len(cmdr_ids)))
-    all_data = lgb.Dataset(X, label=y, group=all_group,
+    all_data = lgb.Dataset(X, label=y, weight=w, group=all_group,
                            feature_name=FORGE_FEATURE_NAMES)
     final_booster = lgb.train(params, all_data, num_boost_round=avg_best)
 

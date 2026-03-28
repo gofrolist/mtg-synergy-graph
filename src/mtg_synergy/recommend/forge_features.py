@@ -131,6 +131,8 @@ class ForgeFeatureContext:
                 'counter_num_variable': False, 'grants_abilities': False,
                 'token_amount_variable': False,
                 'excluded_subtypes': set(),
+                'has_static_anthem': False, 'counters_on_lands': False,
+                'counter_trigger_themes': set(),
             })
             if row[1]: p['verbs'].add(row[1])
             if row[2]: p['triggers'].add(row[2])
@@ -300,6 +302,32 @@ class ForgeFeatureContext:
             m = _re.search(r'TokenAmount\$\s*(\S+)', raw_line)
             if m and m.group(1) in ('X', 'Y'):
                 p['token_amount_variable'] = True
+            # --- Static anthem: Continuous + AddPower (not actual counters) ---
+            if row[1] == 'Continuous' and 'AddPower$' in raw_line:
+                p['has_static_anthem'] = True
+            # --- Counters on lands: PutCounter targeting lands, or Earthbend ---
+            if row[1] in ('PutCounter', 'PutCounterAll'):
+                vtgt = _re.search(r'ValidTgts\$\s*(\S+)', raw_line)
+                if vtgt and 'Land' in vtgt.group(1) and 'Creature' not in vtgt.group(1):
+                    p['counters_on_lands'] = True
+            if row[1] == 'Earthbend':
+                p['counters_on_lands'] = True
+            # --- Counter trigger themes: what triggers this card's counter placement ---
+            if row[1] in ('PutCounter', 'PutCounterAll') and row[2]:
+                trig = row[2]
+                if trig == 'LifeGained':
+                    p['counter_trigger_themes'].add('lifegain')
+                elif trig == 'Sacrificed':
+                    p['counter_trigger_themes'].add('sacrifice')
+                elif trig == 'Discarded':
+                    p['counter_trigger_themes'].add('discard')
+                elif trig in ('SpellCast', 'SpellCopy'):
+                    p['counter_trigger_themes'].add('spellcast')
+
+        # Post-process: static anthem is only meaningful if card has NO PutCounter
+        for p in self._forge_profiles.values():
+            if p['has_static_anthem'] and ('PutCounter' in p['verbs'] or 'PutCounterAll' in p['verbs']):
+                p['has_static_anthem'] = False  # card also places real counters, not just anthem
 
         # Pre-compute card-level mechanical unions (avoid redundant set ops in inner loop)
         self._card_mechs = {}
@@ -963,9 +991,9 @@ class CmdrFeatureContext:
 
 def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
                           ctx: ForgeFeatureContext, cmdr: CmdrFeatureContext) -> list:
-    """Compute the 71-feature vector for a single (commander, card) pair.
+    """Compute the 78-feature vector for a single (commander, card) pair.
 
-    Returns a list of 71 floats matching FORGE_FEATURE_NAMES order.
+    Returns a list of 78 floats matching FORGE_FEATURE_NAMES order.
     Pure Forge-native features — no tower model or oracle-text embeddings.
     """
     out_s = cmdr.cmdr_out.get(card_oid, 0.0)
@@ -1028,14 +1056,14 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
     causal_composite = min(causal_str * (1.0 + event_div) * (1.0 + exact_edge), 20.0)
 
     # F23: card_hub_score — total unique causal neighbors (connectedness)
+    # Log-scaled to reduce older-card bias (Sol Ring 500 neighbors vs new card 50)
     hub = 0.0
     if ctx._has_edge_index and di is not None:
         n_out = len(ctx._adj_out.get(di, []))
         n_in = len(ctx._adj_in.get(di, []))
-        hub = float(min(n_out + n_in, 500)) / 100.0  # scaled 0-5
+        hub = np.log2(1.0 + min(n_out + n_in, 500))
     elif di is not None:
-        # Approximate from deck_edge_count when no index
-        hub = float(min(cmdr.deck_edge_counts.get(card_oid, 0), 20)) / 4.0
+        hub = np.log2(1.0 + min(cmdr.deck_edge_counts.get(card_oid, 0), 20))
 
     # F24: deck_exact_edge_count — absolute count of exact-precision deck connections
     deck_exact_abs = float(min(n_exact, 20))
@@ -1364,27 +1392,9 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
     ability_dens = float(raw_count) / max(card_cmc, 1.0) if raw_count > 0 else 0.0
     ability_dens = min(ability_dens, 5.0)
 
-    # F70: mech_zone_fwd — zone-specific mechanics synergy
-    mech_zone_fwd = 0.0
-    if cmdr.cmdr_consumes is not None and card_prod is not None:
-        zone_dims = [_concept_idx[c] for c in (
-            "enters_from_graveyard", "enters_from_exile", "enters_from_hand",
-            "goes_to_graveyard", "goes_to_exile")]
-        zone_card = card_prod[zone_dims]
-        zone_cmdr = cmdr.cmdr_consumes[zone_dims]
-        mech_zone_fwd = float(np.dot(zone_cmdr, zone_card))
-
     # ── Interaction features: cross anti-synergy with positive signals ──
 
-    # F74: excluded_tribal_penalty — card IS the right creature type but EXCLUDES
-    # that type from its effects. E.g., Keensight Mentor is Human but targets nonHuman.
-    # Only fires when commander is tribal (trigger_filters reference subtypes).
-    excl_subs = card_profile.get('excluded_subtypes', set())
-    cmdr_is_tribal = bool(cmdr.cmdr_profile.get('trigger_filters', set()) & (cmdr.cmdr_subtypes or set()))
-    excluded_tribal = 1.0 if (cmdr_is_tribal and excl_subs and
-                               excl_subs & (cmdr.cmdr_subtypes or set())) else 0.0
-
-    # F75: temp_buff_counter_cmdr — card gives temporary buffs but commander wants
+    # F73: temp_buff_counter_cmdr — card gives temporary buffs but commander wants
     # permanent +1/+1 counters. E.g., Dawnhart Disciple gives "until EOT" pump
     # but Kyler wants permanent counters.
     cmdr_counters = cmdr.cmdr_profile.get('counter_types', set())
@@ -1393,12 +1403,35 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
                                   'temporary' in card_dur and
                                   'permanent' not in card_dur) else 0.0
 
+    # F76: put_counter_ratio — fraction of card's buff verbs that place permanent
+    # counters (PutCounter/PutCounterAll) vs temporary pumps (Pump/PumpAll).
+    # 1.0 = all counter-based, 0.0 = all pump-based, 0.5 = no buff verbs.
+    card_verbs = card_profile.get('verbs', set())
+    n_counter = sum(1 for v in card_verbs if v in ('PutCounter', 'PutCounterAll'))
+    n_pump = sum(1 for v in card_verbs if v in ('Pump', 'PumpAll'))
+    n_buff = n_counter + n_pump
+    put_counter_ratio = float(n_counter) / n_buff if n_buff > 0 else 0.5
+
+    # F75: cmdr_counter_x_put_counter — commander uses +1/+1 counters AND card
+    # places counters (not just pumps). Captures Kyler + Hardened Scales type synergy.
+    cmdr_counter_x_put = 1.0 if ('P1P1' in cmdr_counters and n_counter > 0) else 0.0
+
+    # F76: static_anthem_counter_cmdr — card is a static anthem (Continuous+AddPower,
+    # no PutCounter) but commander uses +1/+1 counters. Anthems can't be proliferated
+    # or doubled — they're worse than actual counters for counter commanders.
+    static_anthem_clash = 1.0 if ('P1P1' in cmdr_counters and
+                                   card_profile.get('has_static_anthem', False)) else 0.0
+
+    # F77: counters_on_lands — card places counters on lands (Earthbend, PutCounter
+    # targeting lands). These counters don't benefit creature-based counter strategies.
+    counters_on_lands = 1.0 if card_profile.get('counters_on_lands', False) else 0.0
+
     return [
         min(out_s, 10.0),                                # F0 causal_cmdr_to_card
         min(in_s, 10.0),                                 # F1 causal_card_to_cmdr
         1.0 if (out_s > 0 and in_s > 0) else 0.0,       # F2 causal_bidirectional
         float(len(ev_out | ev_in)),                      # F3 causal_event_diversity
-        float(min(cmdr.deck_edge_counts.get(card_oid, 0), 20)),  # F4 deck_edge_count
+        np.log2(1.0 + min(cmdr.deck_edge_counts.get(card_oid, 0), 50)),  # F4 deck_edge_count
         float(len(cmdr.cmdr_strats & c_strats)),         # F5 strategy_overlap
         strat_cos,                                       # F6 strategy_cosine
         forge_ability_cos,                               # F7 forge_ability_cosine
@@ -1464,10 +1497,12 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         zone_gy,                                         # F67 zone_graveyard_interact
         zone_ex,                                         # F68 zone_exile_interact
         ability_dens,                                    # F69 ability_density
-        mech_zone_fwd,                                   # F70 mech_zone_fwd
-        cmdr_needs_to_has,                               # F71 cmdr_needs_to_card_has
-        card_needs_met,                                  # F72 card_needs_satisfied
-        needs_rarity,                                    # F73 needs_rarity
-        excluded_tribal,                                 # F74 excluded_tribal_penalty
-        temp_counter_clash,                              # F75 temp_buff_counter_cmdr
+        cmdr_needs_to_has,                               # F70 cmdr_needs_to_card_has
+        card_needs_met,                                  # F71 card_needs_satisfied
+        needs_rarity,                                    # F72 needs_rarity
+        temp_counter_clash,                              # F73 temp_buff_counter_cmdr
+        put_counter_ratio,                               # F74 put_counter_ratio
+        cmdr_counter_x_put,                              # F75 cmdr_counter_x_put_counter
+        static_anthem_clash,                             # F76 static_anthem_counter_cmdr
+        counters_on_lands,                               # F77 counters_on_lands
     ]
