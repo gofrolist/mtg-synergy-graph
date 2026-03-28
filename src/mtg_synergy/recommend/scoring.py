@@ -178,11 +178,15 @@ def _score_commander(cmdr_oid, cmdr_name, color_identity, deck_cards,
                 scores[i] *= 0.5
         # Temporary penalty: counter commanders + non-counter creatures
         # (kept until functional fingerprints gain enough importance)
-        if cmdr_has_counters and "Creature" in cd.get("type_line", ""):
-            if (not profile.get('has_p1p1', False) and
-                    not (profile.get('verbs', set()) &
-                         {'PutCounter', 'PutCounterAll', 'Proliferate', 'MoveCounter'})):
-                scores[i] *= 0.6
+        if cmdr_has_counters:
+            if "Creature" in cd.get("type_line", ""):
+                if (not profile.get('has_p1p1', False) and
+                        not (profile.get('verbs', set()) &
+                             {'PutCounter', 'PutCounterAll', 'Proliferate', 'MoveCounter'})):
+                    scores[i] *= 0.6
+            # Card places counters on lands, not creatures (earthbend etc.)
+            if profile.get('counters_on_lands', False):
+                scores[i] *= 0.4
         # Card needs colors outside commander's color identity (e.g., Pearl Medallion in mono-G)
         # Hard filter: these cards are guaranteed useless
         card_needs = ctx._deck_needs.get(cd["oracle_id"], set())
@@ -335,11 +339,14 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
                 if token_subs and not (token_subs & cmdr_subtypes):
                     scores[i] *= 0.5
             # Temporary penalty: counter commanders + non-counter creatures
-            if cmdr_has_counters and "Creature" in cd.get("type_line", ""):
-                profile_v = profile.get('verbs', set())
-                if (not profile.get('has_p1p1', False) and
-                        not (profile_v & {'PutCounter', 'PutCounterAll', 'Proliferate', 'MoveCounter'})):
-                    scores[i] *= 0.6
+            if cmdr_has_counters:
+                if "Creature" in cd.get("type_line", ""):
+                    profile_v = profile.get('verbs', set())
+                    if (not profile.get('has_p1p1', False) and
+                            not (profile_v & {'PutCounter', 'PutCounterAll', 'Proliferate', 'MoveCounter'})):
+                        scores[i] *= 0.6
+                if profile.get('counters_on_lands', False):
+                    scores[i] *= 0.4
             # Card needs colors outside commander's color identity
             # Hard filter: these cards are guaranteed useless
             card_needs = ctx._deck_needs.get(oid, set())
