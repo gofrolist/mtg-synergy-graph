@@ -130,6 +130,7 @@ class ForgeFeatureContext:
                 'produces_mana': False, 'mana_colors': set(),
                 'counter_num_variable': False, 'grants_abilities': False,
                 'token_amount_variable': False,
+                'excluded_subtypes': set(),
             })
             if row[1]: p['verbs'].add(row[1])
             if row[2]: p['triggers'].add(row[2])
@@ -164,20 +165,38 @@ class ForgeFeatureContext:
                         subtype = part.split(".")[-1].strip()
                         if subtype and subtype[0].isupper() and len(subtype) > 2:
                             p['required_subtypes'].add(subtype.lower())
-            # Effect target subtypes from ValidCards$ and Affected$ in raw_line
+            # Effect target subtypes from ValidCards$, Affected$, ValidTgts$,
+            # ValidCard$, ValidAttackers$, AddsCounters$ in raw_line
             # e.g., ValidCards$ Creature.Orc → effect only benefits Orcs
-            # e.g., Affected$ Card.Human → static effect only applies to Humans
+            # e.g., Affected$ Creature.nonHuman → EXCLUDES Humans
             _generic = {"card", "creature", "permanent", "self", "other",
                         "youctrl", "oppctrl", "strictlyother", "token", "nontoken"}
-            for field in ('ValidCards', 'Affected'):
+            for field in ('ValidCards', 'ValidCard', 'ValidTgts',
+                          'ValidAttackers', 'Affected', 'AddsCounters'):
                 m = _re.search(rf'{field}\$\s*(\S+)', raw_line)
                 if m:
                     for part in m.group(1).split(","):
                         for seg in part.split("."):
                             seg = seg.split("+")[0].strip()
-                            if (seg and seg[0].isupper() and len(seg) > 2
+                            if not seg or len(seg) <= 2:
+                                continue
+                            # Detect non-X exclusions (e.g., nonHuman, nonGoblin)
+                            if seg.startswith("non") and len(seg) > 3 and seg[3].isupper():
+                                excluded = seg[3:].lower()
+                                if excluded not in _generic:
+                                    p['excluded_subtypes'].add(excluded)
+                            elif (seg[0].isupper()
                                     and seg.lower() not in _generic):
                                 p['required_subtypes'].add(seg.lower())
+            # Also extract non-X from TriggerDescription$ and Description$
+            # Catches sub-ability targets like "non-Human creature"
+            for desc_field in ('TriggerDescription', 'Description', 'SpellDescription'):
+                dm = _re.search(rf'{desc_field}\$\s*(.+?)(?:\||$)', raw_line)
+                if dm:
+                    for nm in _re.finditer(r'non-(\w+)\s+creature', dm.group(1), _re.IGNORECASE):
+                        excl = nm.group(1).lower()
+                        if excl not in _generic and len(excl) > 2:
+                            p['excluded_subtypes'].add(excl)
             # --- Granted keywords: AddKeyword$, KW$, PumpKeywords$, Keywords$ ---
             for kw_field in ('AddKeyword', 'KW', 'PumpKeywords', 'Keywords'):
                 m = _re.search(rf'{kw_field}\$\s*([^|]+)', raw_line)
@@ -1082,6 +1101,14 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
             req_subs = card_profile.get('required_subtypes', set())
             for rs in req_subs:
                 if rs not in generic_types and rs not in cmdr.cmdr_subtypes:
+                    anti_tribal = 1.0
+                    break
+        # Check excluded_subtypes — card explicitly excludes commander's type
+        # e.g., Hornbash Mentor targets nonHuman → anti-tribal for Human commanders
+        if anti_tribal == 0.0:
+            excl_subs = card_profile.get('excluded_subtypes', set())
+            for es in excl_subs:
+                if es in cmdr.cmdr_subtypes:
                     anti_tribal = 1.0
                     break
 
