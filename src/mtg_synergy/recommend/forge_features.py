@@ -335,6 +335,12 @@ class ForgeFeatureContext:
             if p['has_static_anthem'] and ('PutCounter' in p['verbs'] or 'PutCounterAll' in p['verbs']):
                 p['has_static_anthem'] = False  # card also places real counters, not just anthem
 
+        # ── Functional fingerprints: semantic vectors for what each card does ──
+        # 33 dimensions across 4 sub-vectors: produces, requires, amplifies, targets
+        # Dot products between commander and card fingerprints capture synergy
+        # without hand-coded penalties.
+        self._func_fingerprints = self._build_func_fingerprints(conn)
+
         # Pre-compute card-level mechanical unions (avoid redundant set ops in inner loop)
         self._card_mechs = {}
         for oid, p in self._forge_profiles.items():
@@ -728,6 +734,141 @@ class ForgeFeatureContext:
 
         return agg_strength, agg_events
 
+    # ── Functional fingerprint dimension layout ──
+    # produces (12): tokens, p1p1_counters, other_counters, mana, cards_drawn,
+    #   damage, lifegain, removal, reanimate, pump_buff, proliferate, move_counter
+    # requires (11): creature_etb, creature_death, spell_cast, combat,
+    #   damage_dealt, lifegain_trigger, discard, cycling, sacrifice, landfall, counter_placed
+    # amplifies (4): counter_doubler, token_doubler, damage_doubler, lifegain_doubler
+    # targets (6): creatures, self_only, lands, players, artifacts, any_permanent
+    _FUNC_DIM = 33
+    _FUNC_PRODUCES_SLICE = slice(0, 12)
+    _FUNC_REQUIRES_SLICE = slice(12, 23)
+    _FUNC_AMPLIFIES_SLICE = slice(23, 27)
+    _FUNC_TARGETS_SLICE = slice(27, 33)
+
+    def _build_func_fingerprints(self, conn):
+        """Build functional fingerprint vectors from Forge ability data.
+
+        Each card gets a 33-dim vector encoding what it does semantically:
+        produces, requires (triggers), amplifies (doublers), targets.
+        """
+        import re as _re
+
+        fingerprints = {}
+
+        for row in conn.execute(
+            "SELECT fnm.oracle_id, fa.verb, fa.trigger_mode, fa.trigger_filter, "
+            "fa.raw_line, fa.counter_type "
+            "FROM forge_abilities fa "
+            "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name"
+        ):
+            oid, verb, trig_mode, trig_filter, raw_line, counter_type = row
+            raw_line = raw_line or ""
+
+            if oid not in fingerprints:
+                fingerprints[oid] = np.zeros(self._FUNC_DIM, dtype=np.float32)
+            fp = fingerprints[oid]
+
+            # ── PRODUCES (dims 0-11) ──
+            if verb == 'Token':
+                fp[0] = 1.0  # tokens
+            if verb in ('PutCounter', 'PutCounterAll'):
+                if counter_type == 'P1P1' or 'P1P1' in raw_line:
+                    fp[1] = 1.0  # p1p1_counters
+                else:
+                    fp[2] = 1.0  # other_counters
+            if verb == 'Mana':
+                fp[3] = 1.0  # mana
+            if verb in ('Draw', 'Dig'):
+                fp[4] = 1.0  # cards_drawn
+            if verb in ('DealDamage', 'DamageAll'):
+                fp[5] = 1.0  # damage
+            if verb == 'GainLife':
+                fp[6] = 1.0  # lifegain
+            if verb in ('Destroy', 'DestroyAll', 'Sacrifice'):
+                fp[7] = 1.0  # removal
+            if verb == 'ChangeZone':
+                # Reanimate: moves from graveyard to battlefield
+                orig = _re.search(r'Origin\$\s*(\S+)', raw_line)
+                dest = _re.search(r'Destination\$\s*(\S+)', raw_line)
+                if (orig and 'Graveyard' in orig.group(1) and
+                        dest and 'Battlefield' in dest.group(1)):
+                    fp[8] = 1.0  # reanimate
+            if verb in ('Pump', 'PumpAll') or (verb == 'Continuous' and 'AddPower$' in raw_line):
+                fp[9] = 1.0  # pump_buff
+            if verb == 'Proliferate':
+                fp[10] = 1.0  # proliferate
+            if verb == 'MoveCounter':
+                fp[11] = 1.0  # move_counter
+
+            # ── REQUIRES / triggers (dims 12-22) ──
+            if trig_mode == 'ChangesZone':
+                dest = _re.search(r'Destination\$\s*(\S+)', raw_line)
+                orig = _re.search(r'Origin\$\s*(\S+)', raw_line)
+                filt = trig_filter or ''
+                if dest and 'Battlefield' in dest.group(1):
+                    if 'Creature' in filt or 'Human' in filt or (not filt and 'Land' not in filt):
+                        fp[12] = 1.0  # creature_etb
+                    if 'Land' in filt:
+                        fp[21] = 1.0  # landfall
+                if dest and 'Graveyard' in dest.group(1):
+                    fp[13] = 1.0  # creature_death
+                if orig and 'Battlefield' in orig.group(1) and dest and 'Graveyard' in dest.group(1):
+                    fp[13] = 1.0  # creature_death (dies)
+            if trig_mode in ('SpellCast', 'SpellCopy'):
+                fp[14] = 1.0  # spell_cast
+            if trig_mode in ('Attacks', 'Blocks', 'AttackerBlocked',
+                             'DeclareAttackers', 'DeclareBlockers'):
+                fp[15] = 1.0  # combat
+            if trig_mode == 'DamageDone':
+                fp[16] = 1.0  # damage_dealt
+            if trig_mode == 'LifeGained':
+                fp[17] = 1.0  # lifegain_trigger
+            if trig_mode == 'Discarded':
+                fp[18] = 1.0  # discard
+            if trig_mode == 'Cycled':
+                fp[19] = 1.0  # cycling
+            if trig_mode == 'Sacrificed':
+                fp[20] = 1.0  # sacrifice
+            if trig_mode in ('CounterAdded', 'CounterAddedOnce'):
+                fp[22] = 1.0  # counter_placed
+
+            # ── AMPLIFIES / replacement effects (dims 23-26) ──
+            event_m = _re.search(r'Event\$\s*(\S+)', raw_line)
+            repl_m = _re.search(r'ReplaceWith\$\s*(\S+)', raw_line)
+            if event_m and repl_m:
+                event = event_m.group(1)
+                repl = repl_m.group(1)
+                if event == 'AddCounter' and ('Double' in repl or 'OneMore' in repl):
+                    fp[23] = 1.0  # counter_doubler
+                if event == 'CreateToken' and 'Double' in repl:
+                    fp[24] = 1.0  # token_doubler
+                if event == 'DamageDone' and 'Twice' in repl:
+                    fp[25] = 1.0  # damage_doubler
+                if event == 'GainLife' and 'Double' in repl:
+                    fp[26] = 1.0  # lifegain_doubler
+
+            # ── TARGETS (dims 27-32) ──
+            for field in ('ValidTgts', 'Affected'):
+                tgt_m = _re.search(rf'{field}\$\s*(\S+)', raw_line)
+                if tgt_m:
+                    tgt = tgt_m.group(1)
+                    if tgt.startswith('Card.Self') or tgt == 'Card.Self':
+                        fp[28] = 1.0  # self_only
+                    elif 'Creature' in tgt:
+                        fp[27] = 1.0  # targets_creatures
+                    if 'Land' in tgt and 'Creature' not in tgt:
+                        fp[29] = 1.0  # targets_lands
+                    if tgt.startswith('Player') or tgt.startswith('Opponent'):
+                        fp[30] = 1.0  # targets_players
+                    if 'Artifact' in tgt:
+                        fp[31] = 1.0  # targets_artifacts
+                    if tgt in ('Any', 'Permanent') or tgt.startswith('Permanent'):
+                        fp[32] = 1.0  # targets_any
+
+        return fingerprints
+
     def strat_vector(self, oid):
         """Get one-hot strategy vector for a card."""
         strats = self.card_strats.get(oid, set())
@@ -758,6 +899,9 @@ class CmdrFeatureContext:
         # Commander mechanics vectors
         self.cmdr_produces = ctx._mech_produces.get(cmdr_oid)
         self.cmdr_consumes = ctx._mech_consumes.get(cmdr_oid)
+
+        # Commander functional fingerprint
+        self.cmdr_func = ctx._func_fingerprints.get(cmdr_oid)
 
         # Commander deck tags (Forge's deck-building AI signals)
         self.cmdr_has = ctx._deck_has.get(cmdr_oid, set())
@@ -997,9 +1141,9 @@ class CmdrFeatureContext:
 
 def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
                           ctx: ForgeFeatureContext, cmdr: CmdrFeatureContext) -> list:
-    """Compute the 78-feature vector for a single (commander, card) pair.
+    """Compute the 83-feature vector for a single (commander, card) pair.
 
-    Returns a list of 78 floats matching FORGE_FEATURE_NAMES order.
+    Returns a list of 83 floats matching FORGE_FEATURE_NAMES order.
     Pure Forge-native features — no tower model or oracle-text embeddings.
     """
     out_s = cmdr.cmdr_out.get(card_oid, 0.0)
@@ -1434,12 +1578,53 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
 
     # F78: cmdr_p1p1_card_no_counters — commander uses +1/+1 counters but card has
     # NO interaction with P1P1 counters at all (no PutCounter, no P1P1 reference).
-    # Penalizes generic Humans that don't contribute to the counter strategy.
     card_has_p1p1 = card_profile.get('has_p1p1', False)
     card_counter_verbs = card_verbs & {'PutCounter', 'PutCounterAll', 'Proliferate', 'MoveCounter'}
     no_counter_for_cmdr = 1.0 if ('P1P1' in cmdr_counters and
                                    not card_has_p1p1 and
                                    not card_counter_verbs) else 0.0
+
+    # ── Functional fingerprint dot-product features ──
+    # These capture semantic synergy: "cmdr produces counters + card amplifies counters"
+    card_func = ctx._func_fingerprints.get(card_oid)
+    cmdr_func = cmdr.cmdr_func
+
+    func_produces_amp = 0.0   # F79: cmdr produces X, card amplifies X
+    func_requires_prod = 0.0  # F80: cmdr requires X trigger, card produces X
+    func_card_req_cmdr = 0.0  # F81: card requires X trigger, cmdr produces X
+    func_full_cosine = 0.0    # F82: overall functional similarity
+
+    if card_func is not None and cmdr_func is not None:
+        P = ForgeFeatureContext._FUNC_PRODUCES_SLICE
+        R = ForgeFeatureContext._FUNC_REQUIRES_SLICE
+        A = ForgeFeatureContext._FUNC_AMPLIFIES_SLICE
+
+        # Commander produces → card amplifies: project produces dims to amplifies dims
+        # amplifies[0]=counter_doubler ↔ produces[1]=p1p1_counters
+        # amplifies[1]=token_doubler ↔ produces[0]=tokens
+        # amplifies[2]=damage_doubler ↔ produces[5]=damage
+        # amplifies[3]=lifegain_doubler ↔ produces[6]=lifegain
+        _amp_to_prod = [1, 0, 5, 6]  # maps amplifies dim → produces dim
+        cmdr_prod_projected = np.array([cmdr_func[P.start + i] for i in _amp_to_prod])
+        func_produces_amp = float(np.dot(cmdr_prod_projected, card_func[A]))
+
+        # Requires ↔ Produces: both are 11/12 dims but different semantics
+        # Use element-wise min and sum: if cmdr requires creature_etb AND card produces tokens → match
+        # Map: requires[0]=creature_etb ↔ produces[0]=tokens (tokens ETB)
+        #       requires[4]=damage_dealt ↔ produces[5]=damage
+        #       requires[5]=lifegain_trigger ↔ produces[6]=lifegain
+        #       requires[8]=sacrifice ↔ produces[7]=removal (sacrifice is removal)
+        #       requires[10]=counter_placed ↔ produces[1]=p1p1_counters
+        _req_to_prod = {0: 0, 4: 5, 5: 6, 8: 7, 10: 1}  # req_dim → prod_dim
+        for req_dim, prod_dim in _req_to_prod.items():
+            func_requires_prod += cmdr_func[R.start + req_dim] * card_func[P.start + prod_dim]
+            func_card_req_cmdr += card_func[R.start + req_dim] * cmdr_func[P.start + prod_dim]
+
+        # Full cosine similarity across all 33 dimensions
+        norm_c = np.linalg.norm(cmdr_func)
+        norm_d = np.linalg.norm(card_func)
+        if norm_c > 0 and norm_d > 0:
+            func_full_cosine = float(np.dot(cmdr_func, card_func) / (norm_c * norm_d))
 
     return [
         min(out_s, 10.0),                                # F0 causal_cmdr_to_card
@@ -1521,4 +1706,8 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         static_anthem_clash,                             # F76 static_anthem_counter_cmdr
         counters_on_lands,                               # F77 counters_on_lands
         no_counter_for_cmdr,                             # F78 cmdr_p1p1_card_no_counters
+        func_produces_amp,                               # F79 func_produces_amplifies
+        func_requires_prod,                              # F80 func_requires_produces
+        func_card_req_cmdr,                              # F81 func_card_requires_cmdr
+        func_full_cosine,                                # F82 func_full_cosine
     ]

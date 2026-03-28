@@ -108,6 +108,10 @@ FORGE_FEATURE_NAMES = [
     "static_anthem_counter_cmdr", # [76] static anthem (not counters) but cmdr wants counters
     "counters_on_lands",       # [77] card places counters on lands (earthbend etc.)
     "cmdr_p1p1_card_no_counters", # [78] cmdr uses P1P1 but card has zero counter interaction
+    "func_produces_amplifies",    # [79] cmdr produces X, card amplifies X (dot product)
+    "func_requires_produces",     # [80] cmdr requires trigger X, card produces X
+    "func_card_requires_cmdr",    # [81] card requires trigger X, cmdr produces X
+    "func_full_cosine",           # [82] overall functional fingerprint similarity
 ]
 
 

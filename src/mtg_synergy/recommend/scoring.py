@@ -176,20 +176,10 @@ def _score_commander(cmdr_oid, cmdr_name, color_identity, deck_cards,
             token_subs = ctx._token_subtypes.get(cd["oracle_id"], set())
             if token_subs and not (token_subs & cmdr_subtypes):
                 scores[i] *= 0.5
-        # Card has only temporary buffs but commander uses +1/+1 counters
-        if cmdr_has_counters:
-            dur = profile.get('duration', set())
-            if 'temporary' in dur and 'permanent' not in dur:
-                scores[i] *= 0.5
-            # Static anthem (Continuous+AddPower, no PutCounter) for counter commander
-            if profile.get('has_static_anthem', False):
-                scores[i] *= 0.5
-            # Card puts counters on lands, not creatures
-            if profile.get('counters_on_lands', False):
-                scores[i] *= 0.4
-            # Card is a creature with zero P1P1 counter interaction — just a body
-            if ("Creature" in cd.get("type_line", "") and
-                    not profile.get('has_p1p1', False) and
+        # Temporary penalty: counter commanders + non-counter creatures
+        # (kept until functional fingerprints gain enough importance)
+        if cmdr_has_counters and "Creature" in cd.get("type_line", ""):
+            if (not profile.get('has_p1p1', False) and
                     not (profile.get('verbs', set()) &
                          {'PutCounter', 'PutCounterAll', 'Proliferate', 'MoveCounter'})):
                 scores[i] *= 0.6
@@ -329,7 +319,7 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
         _generic_req = {"card", "creature", "permanent", "self", "other",
                         "nontoken", "token", "artifact", "enchantment", "land",
                         "spell", "any"}
-    
+
         for i, (name, cd) in enumerate(cand_list):
             oid = cd.get("oracle_id") or card_oid.get(name, "")
             profile = ctx._forge_profiles.get(oid, {})
@@ -344,20 +334,11 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
                 token_subs = ctx._token_subtypes.get(oid, set())
                 if token_subs and not (token_subs & cmdr_subtypes):
                     scores[i] *= 0.5
-            if cmdr_has_counters:
-                dur = profile.get('duration', set())
-                if 'temporary' in dur and 'permanent' not in dur:
-                    scores[i] *= 0.5
-                if profile.get('has_static_anthem', False):
-                    scores[i] *= 0.5
-                if profile.get('counters_on_lands', False):
-                    scores[i] *= 0.4
-                # Creature with zero P1P1 interaction — just a body
-                tl = cd.get("type_line", "")
-                if ("Creature" in tl and
-                        not profile.get('has_p1p1', False) and
-                        not (profile.get('verbs', set()) &
-                             {'PutCounter', 'PutCounterAll', 'Proliferate', 'MoveCounter'})):
+            # Temporary penalty: counter commanders + non-counter creatures
+            if cmdr_has_counters and "Creature" in cd.get("type_line", ""):
+                profile_v = profile.get('verbs', set())
+                if (not profile.get('has_p1p1', False) and
+                        not (profile_v & {'PutCounter', 'PutCounterAll', 'Proliferate', 'MoveCounter'})):
                     scores[i] *= 0.6
             # Card needs colors outside commander's color identity
             # Hard filter: these cards are guaranteed useless
