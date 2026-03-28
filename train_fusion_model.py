@@ -666,67 +666,6 @@ def build_feature_matrix(pairs_by_cmdr, tower_model_path=TOWER_EDHREC_PATH, verb
     return X, y, cmdr_ids
 
 
-def _ensure_event_column(conn):
-    """Add materialized event column to interaction_edges if missing.
-
-    Eliminates expensive json_extract(detail, '$.event') from per-commander
-    queries. One-time migration (~2-3 min on 18M rows), then all future
-    queries use the fast column directly.
-    """
-    has_col = any(
-        r[1] == "event"
-        for r in conn.execute("PRAGMA table_info(interaction_edges)")
-    )
-    if has_col:
-        return
-    print("  Materializing event column (one-time migration)...", flush=True)
-    t0 = time.time()
-    conn.execute("ALTER TABLE interaction_edges ADD COLUMN event TEXT")
-    conn.execute("UPDATE interaction_edges SET event = json_extract(detail, '$.event')")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_ie_event ON interaction_edges(event)")
-    conn.commit()
-    print(f"    Done ({time.time()-t0:.1f}s)")
-
-
-def _bulk_load_commander_edges(conn, cmdr_oids, event_expr):
-    """Load commander causal edges in a single batch SQL per direction.
-
-    Returns (cmdr_out, cmdr_in, cmdr_out_events, cmdr_in_events) as nested dicts.
-    Memory: ~batch_size commanders × ~2000 edges × ~120 bytes per entry.
-    """
-    cmdr_out = {}
-    cmdr_in = {}
-    cmdr_out_events = {}
-    cmdr_in_events = {}
-
-    cmdr_list = list(cmdr_oids)
-    ph = ",".join("?" * len(cmdr_list))
-
-    for row in conn.execute(
-        f"SELECT source_id, target_id, SUM(strength), "
-        f"GROUP_CONCAT(DISTINCT {event_expr}) "
-        f"FROM interaction_edges WHERE source_id IN ({ph}) "
-        f"GROUP BY source_id, target_id", cmdr_list
-    ):
-        cmdr_out.setdefault(row[0], {})[row[1]] = row[2]
-        cmdr_out_events.setdefault(row[0], {})[row[1]] = (
-            set(row[3].split(",")) if row[3] else set()
-        )
-
-    for row in conn.execute(
-        f"SELECT source_id, target_id, SUM(strength), "
-        f"GROUP_CONCAT(DISTINCT {event_expr}) "
-        f"FROM interaction_edges WHERE target_id IN ({ph}) "
-        f"GROUP BY source_id, target_id", cmdr_list
-    ):
-        cmdr_in.setdefault(row[1], {})[row[0]] = row[2]
-        cmdr_in_events.setdefault(row[1], {})[row[0]] = (
-            set(row[3].split(",")) if row[3] else set()
-        )
-
-    return cmdr_out, cmdr_in, cmdr_out_events, cmdr_in_events
-
-
 def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=True):
     """Build forge-only feature matrix (no EDHREC, no tower, no embeddings).
 
@@ -737,9 +676,6 @@ def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=Tru
     (ForgeFeatureContext / CmdrFeatureContext / compute_card_features).
     """
     conn = sqlite3.connect(DB_PATH)
-
-    # ── One-time: materialize event column for fast queries ───────────
-    _ensure_event_column(conn)
 
     # ── Card metadata (needed for type_line, cmc lookups) ─────────────
     card_meta = {}
@@ -755,7 +691,7 @@ def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=Tru
         }
 
     # ── Shared forge feature context (strategies, phases, mechanics) ──
-    ctx = ForgeFeatureContext(conn, preload_edges=True)
+    ctx = ForgeFeatureContext(conn, preload_edges=True, preload_strength=True)
 
     if verbose:
         print(f"  Strategy vector: {ctx._n_strats} strategies")
@@ -773,64 +709,37 @@ def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=Tru
     n_cmdrs = len(cmdr_oids_ordered)
     row_idx = 0
 
-    # ── Process commanders in batches for memory-efficient edge loading ─
-    # Each batch: bulk SQL for ~100 commanders, process, free edge data.
-    # Memory per batch: ~100 cmdrs × ~2000 edges × ~120 bytes = ~24MB
-    CMDR_BATCH = 100
-    event_expr = "event" if ctx._has_event_col else "json_extract(detail, '$.event')"
+    for ci, cmdr_oid in enumerate(cmdr_oids_ordered):
+        if verbose and ((ci + 1) % 200 == 0 or ci == 0):
+            print(f"  Commander {ci+1}/{n_cmdrs}...", flush=True)
 
-    for batch_start in range(0, n_cmdrs, CMDR_BATCH):
-        batch_end = min(batch_start + CMDR_BATCH, n_cmdrs)
-        batch_cmdr_oids = cmdr_oids_ordered[batch_start:batch_end]
+        pairs = pairs_by_cmdr.get(cmdr_oid, [])
+        if not pairs:
+            continue
 
-        if verbose:
-            print(f"  Commanders {batch_start+1}-{batch_end}/{n_cmdrs}...", flush=True)
+        deck_oids_for_cmdr = {oid for oid, lbl in pairs if lbl > 0}
+        cmdr_ctx = CmdrFeatureContext(ctx, cmdr_oid, deck_oids_for_cmdr)
 
-        # Bulk-load edges for this batch (2 SQL queries instead of 2×batch_size)
-        batch_out, batch_in, batch_out_ev, batch_in_ev = \
-            _bulk_load_commander_edges(conn, batch_cmdr_oids, event_expr)
+        cmdr_type_line = card_meta.get(cmdr_oid, {}).get("type_line", "")
+        if "\u2014" in cmdr_type_line:
+            try:
+                cmdr_ctx.cmdr_subtypes = {
+                    s.lower() for s in cmdr_type_line.split("\u2014")[1].strip().split()
+                }
+            except (IndexError, AttributeError):
+                pass
 
-        for cmdr_oid in batch_cmdr_oids:
-            pairs = pairs_by_cmdr.get(cmdr_oid, [])
-            if not pairs:
-                continue
-
-            # --- Per-commander context with pre-loaded edges ---
-            deck_oids_for_cmdr = {oid for oid, lbl in pairs if lbl > 0}
-            preloaded = (
-                batch_out.get(cmdr_oid, {}),
-                batch_in.get(cmdr_oid, {}),
-                batch_out_ev.get(cmdr_oid, {}),
-                batch_in_ev.get(cmdr_oid, {}),
+        cmdr_idx = cmdr_to_idx[cmdr_oid]
+        for card_oid, label in pairs:
+            meta = card_meta.get(card_oid, {})
+            feats = compute_card_features(
+                card_oid, meta.get("type_line", ""), float(meta.get("cmc", 0.0)),
+                ctx, cmdr_ctx,
             )
-            cmdr_ctx = CmdrFeatureContext(ctx, cmdr_oid, deck_oids_for_cmdr,
-                                          preloaded_cmdr_edges=preloaded)
-
-            # --- Commander subtypes for tribal ---
-            cmdr_type_line = card_meta.get(cmdr_oid, {}).get("type_line", "")
-            if "\u2014" in cmdr_type_line:
-                try:
-                    cmdr_ctx.cmdr_subtypes = {
-                        s.lower() for s in cmdr_type_line.split("\u2014")[1].strip().split()
-                    }
-                except (IndexError, AttributeError):
-                    pass
-
-            # --- Fill feature rows via shared compute_card_features ---
-            ci = cmdr_to_idx[cmdr_oid]
-            for card_oid, label in pairs:
-                meta = card_meta.get(card_oid, {})
-                feats = compute_card_features(
-                    card_oid, meta.get("type_line", ""), float(meta.get("cmc", 0.0)),
-                    ctx, cmdr_ctx,
-                )
-                X[row_idx] = feats
-                y[row_idx] = float(label)
-                cmdr_ids[row_idx] = ci
-                row_idx += 1
-
-        # Free batch edge data to limit memory
-        del batch_out, batch_in, batch_out_ev, batch_in_ev
+            X[row_idx] = feats
+            y[row_idx] = float(label)
+            cmdr_ids[row_idx] = cmdr_idx
+            row_idx += 1
 
     X = X[:row_idx]
     y = y[:row_idx]

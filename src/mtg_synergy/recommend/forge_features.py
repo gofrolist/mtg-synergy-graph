@@ -12,6 +12,15 @@ import numpy as np
 from mtg_synergy.recommend.mechanics_vectors import _concept_idx
 
 
+def _decode_events(mask, bit_to_event):
+    """Decode a uint32 bitmask to a set of event name strings."""
+    result = set()
+    for bit, name in bit_to_event.items():
+        if mask & (1 << bit):
+            result.add(name)
+    return result
+
+
 # Phase timing: position in the turn cycle (0=start, 1=end).
 _PHASE_ORDER = {
     "Upkeep": 0.0, "Draw": 0.1, "Main1": 0.2, "BeginCombat": 0.3,
@@ -41,9 +50,10 @@ class ForgeFeatureContext:
     training (build_forge_feature_matrix) and inference (score_forge_candidates).
     """
 
-    def __init__(self, conn, preload_edges=False):
+    def __init__(self, conn, preload_edges=False, preload_strength=False):
         self.conn = conn
         self._has_edge_index = False
+        self._preload_strength = preload_strength
 
         # Check for materialized event column (speeds up commander edge queries)
         self._has_event_col = any(
@@ -342,10 +352,11 @@ class ForgeFeatureContext:
             self._build_edge_index(conn)
 
     def _build_edge_index(self, conn):
-        """Pre-load edge adjacency into memory for fast deck_edge_count computation.
+        """Pre-load edge adjacency + strength + events into memory.
 
         Caches raw numpy arrays to data/edge_index_cache.npz (~2s reload vs ~40s DB scan).
         Cache key: interaction_edges row count + card count.
+        Stores: src, tgt, exact, strength (float32), event_ids (uint8), event_names.
         """
         import os
         from mtg_synergy.config import DATA_DIR
@@ -358,20 +369,34 @@ class ForgeFeatureContext:
         card_count = len(self.oid_to_idx)
 
         # Try loading from cache (numpy arrays only, no pickle)
-        src = tgt = exact = None
+        src = tgt = exact = strength = event_ids = event_names = None
         if os.path.exists(cache_path):
             try:
                 cached = np.load(cache_path)
                 if (int(cached['edge_count']) == edge_count and
-                    int(cached['card_count']) == card_count):
+                    int(cached['card_count']) == card_count and
+                    'strength' in cached and 'event_ids' in cached
+                    and 'event_names' in cached):
                     src = cached['src']
                     tgt = cached['tgt']
                     exact = cached['exact']
+                    strength = cached['strength']
+                    event_ids = cached['event_ids']
+                    event_names = cached['event_names']
                     print(f"    Loaded {len(src):,} edges from cache ({time.time()-t0:.1f}s)")
             except Exception:
                 pass
 
         if src is None:
+            # Build event encoding from DB
+            event_name_list = sorted(
+                r[0] for r in conn.execute(
+                    "SELECT DISTINCT event FROM interaction_edges WHERE event IS NOT NULL"
+                ) if r[0]
+            )
+            event_to_id = {name: i for i, name in enumerate(event_name_list)}
+            event_names = np.array(event_name_list, dtype='U64')
+
             # Pre-allocate numpy arrays to avoid ~450MB Python list overhead.
             # edge_count is an upper bound (some edges may have unmapped oids).
             has_col = any(
@@ -379,12 +404,16 @@ class ForgeFeatureContext:
                 for r in conn.execute("PRAGMA table_info(interaction_edges)")
             )
             prec_expr = "filter_precision" if has_col else "json_extract(detail, '$.filter_precision')"
+            event_expr = "event" if self._has_event_col else "json_extract(detail, '$.event')"
             src = np.empty(edge_count, dtype=np.int32)
             tgt = np.empty(edge_count, dtype=np.int32)
             exact = np.empty(edge_count, dtype=np.bool_)
+            strength = np.empty(edge_count, dtype=np.float32)
+            event_ids = np.empty(edge_count, dtype=np.uint8)
             n = 0
             for row in conn.execute(
-                f"SELECT source_id, target_id, {prec_expr} FROM interaction_edges"
+                f"SELECT source_id, target_id, {prec_expr}, strength, {event_expr} "
+                "FROM interaction_edges"
             ):
                 s = self.oid_to_idx.get(row[0])
                 t = self.oid_to_idx.get(row[1])
@@ -392,20 +421,30 @@ class ForgeFeatureContext:
                     src[n] = s
                     tgt[n] = t
                     exact[n] = row[2] == "exact"
+                    strength[n] = float(row[3]) if row[3] is not None else 0.0
+                    event_ids[n] = event_to_id.get(row[4], 255) if row[4] else 255
                     n += 1
             # Trim to actual count
             src = src[:n]
             tgt = tgt[:n]
             exact = exact[:n]
+            strength = strength[:n]
+            event_ids = event_ids[:n]
             print(f"    Loaded {n:,} edges from DB ({time.time()-t0:.1f}s)")
             try:
                 np.savez(cache_path, src=src, tgt=tgt, exact=exact,
+                         strength=strength, event_ids=event_ids,
+                         event_names=event_names,
                          edge_count=np.array(edge_count), card_count=np.array(card_count))
                 print(f"    Cached to {cache_path}")
             except Exception as e:
                 print(f"    Cache write failed: {e}")
 
-        # Build outgoing/incoming adjacency: card_idx → numpy array of unique neighbors
+        # Build event lookup dicts
+        self._event_names = list(event_names)
+        self._bit_to_event = {i: str(name) for i, name in enumerate(event_names)}
+
+        # Build outgoing/incoming adjacency: card_idx -> numpy array of unique neighbors
         self._adj_out = self._build_adj_arrays(src, tgt)
         self._adj_in = self._build_adj_arrays(tgt, src)
 
@@ -417,7 +456,20 @@ class ForgeFeatureContext:
             self._exact_out = {}
             self._exact_in = {}
 
-        del src, tgt, exact
+        # Aggregated strength + event dicts for commander edge lookups (no SQL needed).
+        # Only built for training (preload_strength=True); inference uses SQL fallback.
+        if self._preload_strength:
+            self._agg_strength_out, self._agg_events_out = self._build_agg_arrays(
+                src, tgt, strength, event_ids)
+            self._agg_strength_in, self._agg_events_in = self._build_agg_arrays(
+                tgt, src, strength, event_ids)
+        else:
+            self._agg_strength_out = {}
+            self._agg_events_out = {}
+            self._agg_strength_in = {}
+            self._agg_events_in = {}
+
+        del src, tgt, exact, strength, event_ids
 
         self._idx_to_oid = {v: k for k, v in self.oid_to_idx.items()}
         self._n_cards_idx = len(self.oid_to_idx)
@@ -429,7 +481,7 @@ class ForgeFeatureContext:
 
     @staticmethod
     def _build_adj_arrays(keys, values):
-        """Build adjacency dict: key_idx → sorted numpy array of unique value indices."""
+        """Build adjacency dict: key_idx -> sorted numpy array of unique value indices."""
         if len(keys) == 0:
             return {}
         order = np.argsort(keys)
@@ -443,6 +495,42 @@ class ForgeFeatureContext:
             k = int(sk[start])
             result[k] = np.unique(sv[start:end])
         return result
+
+    @staticmethod
+    def _build_agg_arrays(keys, values, strengths, event_ids):
+        """Build aggregated strength + event dicts per (key, value) pair.
+
+        Returns:
+            agg_strength: {key_idx: {val_idx: sum_of_strength}}
+            agg_events:   {key_idx: {val_idx: uint32_bitmask_of_events}}
+        """
+        if len(keys) == 0:
+            return {}, {}
+        order = np.argsort(keys)
+        sk = keys[order]
+        sv = values[order]
+        ss = strengths[order]
+        se = event_ids[order]
+
+        agg_strength = {}
+        agg_events = {}
+
+        changes = np.concatenate([[0], np.where(sk[1:] != sk[:-1])[0] + 1, [len(sk)]])
+        for i in range(len(changes) - 1):
+            start, end = int(changes[i]), int(changes[i + 1])
+            k = int(sk[start])
+            str_dict = {}
+            evt_dict = {}
+            for j in range(start, end):
+                v = int(sv[j])
+                str_dict[v] = str_dict.get(v, 0.0) + float(ss[j])
+                eid = int(se[j])
+                if eid < 32:
+                    evt_dict[v] = evt_dict.get(v, 0) | (1 << eid)
+            agg_strength[k] = str_dict
+            agg_events[k] = evt_dict
+
+        return agg_strength, agg_events
 
     def strat_vector(self, oid):
         """Get one-hot strategy vector for a card."""
@@ -459,8 +547,7 @@ class ForgeFeatureContext:
 class CmdrFeatureContext:
     """Per-commander pre-loaded data for feature computation."""
 
-    def __init__(self, ctx: ForgeFeatureContext, cmdr_oid: str, deck_oids: set,
-                 preloaded_cmdr_edges=None):
+    def __init__(self, ctx: ForgeFeatureContext, cmdr_oid: str, deck_oids: set):
         self.cmdr_oid = cmdr_oid
 
         # Commander vectors
@@ -495,41 +582,71 @@ class CmdrFeatureContext:
                            self.cmdr_profile.get('triggers', set()) |
                            self.cmdr_profile.get('keywords', set()))
 
-        if preloaded_cmdr_edges is not None:
-            if not ctx._has_edge_index:
-                raise ValueError("preloaded_cmdr_edges requires preload_edges=True")
-            self.cmdr_out, self.cmdr_in, self.cmdr_out_events, self.cmdr_in_events = preloaded_cmdr_edges
-            self._init_cmdr_exact_and_deck_edges(ctx, cmdr_oid, deck_oids)
-        elif ctx._has_edge_index:
+        if ctx._has_edge_index:
             self._init_from_index(ctx, cmdr_oid, deck_oids)
         else:
             self._init_from_db(ctx, ctx.conn, ctx.oid_to_idx, cmdr_oid, deck_oids)
 
     def _init_from_index(self, ctx, cmdr_oid, deck_oids):
-        """Fast path: use pre-loaded edge index for deck edges, DB for commander edges."""
-        conn = ctx.conn
-        event_expr = "event" if ctx._has_event_col else "json_extract(detail, '$.event')"
+        """Fast path: use pre-loaded edge index for deck edges.
 
-        # Commander strength + events: indexed DB queries
+        Commander strength/event dicts use in-memory agg arrays when available
+        (training mode, preload_strength=True), otherwise fall back to SQL
+        (inference mode, saves ~5-6 GB memory).
+        """
         self.cmdr_out = {}
         self.cmdr_in = {}
         self.cmdr_out_events = {}
         self.cmdr_in_events = {}
+
+        if ctx._agg_strength_out:
+            # Training mode: in-memory aggregated dicts available
+            cmdr_idx = ctx.oid_to_idx.get(cmdr_oid)
+            idx_to_oid = ctx._idx_to_oid
+
+            if cmdr_idx is not None:
+                str_dict = ctx._agg_strength_out.get(cmdr_idx, {})
+                evt_dict = ctx._agg_events_out.get(cmdr_idx, {})
+                for tgt_idx, s in str_dict.items():
+                    oid = idx_to_oid.get(tgt_idx)
+                    if oid:
+                        self.cmdr_out[oid] = s
+                        mask = evt_dict.get(tgt_idx, 0)
+                        self.cmdr_out_events[oid] = _decode_events(mask, ctx._bit_to_event)
+
+                str_dict = ctx._agg_strength_in.get(cmdr_idx, {})
+                evt_dict = ctx._agg_events_in.get(cmdr_idx, {})
+                for src_idx, s in str_dict.items():
+                    oid = idx_to_oid.get(src_idx)
+                    if oid:
+                        self.cmdr_in[oid] = s
+                        mask = evt_dict.get(src_idx, 0)
+                        self.cmdr_in_events[oid] = _decode_events(mask, ctx._bit_to_event)
+        else:
+            # Inference mode: agg dicts not built; use SQL for commander edges only
+            self._init_cmdr_edges_from_db(ctx)
+
+        self._init_cmdr_exact_and_deck_edges(ctx, cmdr_oid, deck_oids)
+
+    def _init_cmdr_edges_from_db(self, ctx):
+        """SQL fallback for commander strength/event edges (inference mode)."""
+        conn = ctx.conn
+        event_expr = "event" if ctx._has_event_col else "json_extract(detail, '$.event')"
         try:
             for row in conn.execute(
                 f"SELECT target_id, SUM(strength), GROUP_CONCAT(DISTINCT {event_expr}) "
-                "FROM interaction_edges WHERE source_id = ? GROUP BY target_id", (cmdr_oid,)):
+                "FROM interaction_edges WHERE source_id = ? GROUP BY target_id",
+                (self.cmdr_oid,)):
                 self.cmdr_out[row[0]] = row[1]
                 self.cmdr_out_events[row[0]] = set(row[2].split(",")) if row[2] else set()
             for row in conn.execute(
                 f"SELECT source_id, SUM(strength), GROUP_CONCAT(DISTINCT {event_expr}) "
-                "FROM interaction_edges WHERE target_id = ? GROUP BY source_id", (cmdr_oid,)):
+                "FROM interaction_edges WHERE target_id = ? GROUP BY source_id",
+                (self.cmdr_oid,)):
                 self.cmdr_in[row[0]] = row[1]
                 self.cmdr_in_events[row[0]] = set(row[2].split(",")) if row[2] else set()
         except Exception:
             pass
-
-        self._init_cmdr_exact_and_deck_edges(ctx, cmdr_oid, deck_oids)
 
     def _init_cmdr_exact_and_deck_edges(self, ctx, cmdr_oid, deck_oids):
         """Compute commander exact edges and deck edge counts from in-memory index."""
