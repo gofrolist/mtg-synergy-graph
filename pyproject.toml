@@ -1,3 +1,7 @@
+[build-system]
+requires = ["uv_build>=0.11.2,<0.12"]
+build-backend = "uv_build"
+
 [project]
 name = "mtg-synergy-graph"
 version = "0.1.0"
@@ -16,10 +20,15 @@ dependencies = [
     "trl>=0.24; sys_platform == 'linux'",
     "peft>=0.18; sys_platform == 'linux'",
     "lightgbm>=4.6.0",
+    "requests>=2.33.0",  # transitive via datasets; pinned for CVE fix
 ]
 
 [tool.uv]
+package = true
 index-strategy = "unsafe-best-match"
+
+[tool.uv.build-backend]
+module-name = "mtg_synergy"
 required-environments = [
     "sys_platform == 'linux'",
     "sys_platform == 'darwin' and platform_machine == 'arm64'",
@@ -43,8 +52,10 @@ torchvision = [
     { index = "pypi", marker = "sys_platform == 'darwin'" },
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
+
 [project.scripts]
 mtg-synergy = "mtg_synergy.cli:run"
-
-[tool.setuptools]
-py-modules = []

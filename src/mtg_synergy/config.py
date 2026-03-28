@@ -6,7 +6,7 @@ from config instead of defining their own DATA_DIR / DB_PATH.
 from pathlib import Path
 
 # ── Paths ──────────────────────────────────────────────────────────────
-PROJECT_ROOT = Path(__file__).parent.parent
+PROJECT_ROOT = Path(__file__).parent.parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 DB_PATH = DATA_DIR / "tags.db"
 CARDS_JSON = DATA_DIR / "oracle_cards.json"

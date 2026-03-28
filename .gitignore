@@ -56,6 +56,15 @@ data/tower_model.npz
 data/tower_model_edhrec.npz
 data/tower_model_llm_backup.npz
 data/fusion_model.lgb
+data/fusion_model.lgb.bak
+data/fusion_model_forge.lgb
+data/fusion_model_forge.lgb.bak
+data/tower_model_forge.npz
+data/edge_index_cache.npz
+data/embeddings_normed_f16.npy
+data/forge_features_cache.npz
+data/forge_features_cache.npz.bak
+data/forge_features_cache.npz.bak2
 data/forge/
 data/recommender_training.json
 data/recommender_weights.json
@@ -67,3 +76,6 @@ data/spellbook_templates.json
 data/mtgjson_precons.json
 data/batch_*.jsonl
 data/*.backup*
+
+# SQLite database
+mtg_synergy.db

@@ -20,6 +20,7 @@ def ensure_causal_schema(conn):
             ability_b INTEGER NOT NULL,
             strength  REAL NOT NULL,
             detail    TEXT NOT NULL,
+            filter_precision TEXT,
             PRIMARY KEY (source_id, target_id, edge_type, ability_a, ability_b)
         )
     """)

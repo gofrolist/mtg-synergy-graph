@@ -51,6 +51,7 @@ def tmp_db(tmp_path):
             ability_b INTEGER NOT NULL,
             strength REAL NOT NULL,
             detail TEXT NOT NULL,
+            filter_precision TEXT,
             PRIMARY KEY (source_id, target_id, edge_type, ability_a, ability_b)
         );
         CREATE INDEX IF NOT EXISTS idx_edges_source ON interaction_edges(source_id);
