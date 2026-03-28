@@ -508,12 +508,19 @@ def make_cv_splits(cmdr_ids, n_folds=5, seed=42):
 def _load_pairs_for_features(conn):
     """Load training pairs from edhrec_card_synergy with section-based grading.
 
+    Combines two EDHREC data sources:
+    - edhrec_card_synergy: section labels + continuous synergy scores
+    - edhrec_average_decks: practical deck inclusion (grade boost)
+
+    Cards in the average deck get +1 grade boost (capped at 5), because
+    actual deck inclusion validates theoretical synergy.
+
     Grades:
-        5: "High Synergy Cards" section
-        4: "Top Cards" section
-        3: Other sections, synergy > 0.1
-        2: Other sections, synergy 0-0.1
-        1: Any section, synergy < 0 (anti-synergy)
+        5: "High Synergy Cards" section, or boosted Top Cards
+        4: "Top Cards" section, or boosted moderate-synergy in-deck cards
+        3: Other sections synergy > 0.1, or boosted low-synergy in-deck cards
+        2: Other sections synergy 0-0.1
+        1: Any section synergy < 0 (anti-synergy)
         0: Not in table (random negatives)
 
     Returns dict[cmdr_oid -> list[(card_oid, grade)]].
@@ -529,11 +536,17 @@ def _load_pairs_for_features(conn):
         if row[0] not in card_name_to_oid:
             card_name_to_oid[row[0]] = row[1]
 
+    # Load average deck membership for grade boost
+    avg_deck_set = set()
+    for row in conn.execute("SELECT commander_slug, card_name FROM edhrec_average_decks"):
+        avg_deck_set.add((row[0], row[1]))
+
     print("\nLoading EDHREC card synergy data...")
     positives_by_cmdr = {}
     n_by_grade = {5: 0, 4: 0, 3: 0, 2: 0, 1: 0}
     card_cmdr_count = {}
     cmdr_count = len(slug_to_oid)
+    n_boosted = 0
 
     for row in conn.execute(
         "SELECT commander_slug, card_name, synergy, section FROM edhrec_card_synergy"
@@ -557,11 +570,17 @@ def _load_pairs_for_features(conn):
         else:
             grade = 2
 
+        # Boost grade if card is in the average deck (practical validation)
+        if (slug, card_name) in avg_deck_set and grade < 5 and grade >= 2:
+            grade = min(grade + 1, 5)
+            n_boosted += 1
+
         positives_by_cmdr.setdefault(cmdr_oid, []).append((card_oid, grade))
         n_by_grade[grade] += 1
 
     total_pairs = sum(len(v) for v in positives_by_cmdr.values())
     print(f"  Synergy pairs: {total_pairs:,} across {len(positives_by_cmdr)} commanders")
+    print(f"  Boosted by avg deck membership: {n_boosted:,}")
     for g in sorted(n_by_grade.keys(), reverse=True):
         print(f"    Grade {g}: {n_by_grade[g]:,}")
 
