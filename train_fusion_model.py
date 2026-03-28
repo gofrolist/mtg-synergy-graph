@@ -123,12 +123,15 @@ def roc_auc_score(y_true, y_score):
     return u / (n_pos * n_neg)
 
 
-def load_edhrec_membership(conn):
-    """Load positive pairs from edhrec_average_decks.
+def _resolve_slugs_to_oids(conn, table="edhrec_average_decks"):
+    """Resolve EDHREC commander slugs to oracle_ids via Python string matching.
 
-    Returns dict[cmdr_oracle_id -> set[card_oracle_ids]].
+    Builds a normalized name→oid lookup once, then matches all slugs in-memory
+    instead of doing N separate SQL LIKE queries. ~100x faster for ~3000 slugs.
+
+    Returns (slug_to_oid, name_to_oid) dicts.
     """
-    # Map card_name -> oracle_id via cards table (prefer non-token versions)
+    # Map card_name -> oracle_id (prefer non-token versions)
     name_to_oid = {}
     for row in conn.execute(
         "SELECT name, oracle_id, type_line FROM cards ORDER BY "
@@ -137,29 +140,59 @@ def load_edhrec_membership(conn):
         if row[0] not in name_to_oid:
             name_to_oid[row[0]] = row[1]
 
-    # Map commander_slug -> commander oracle_id
-    # Slugs look like "krenko-mob-boss" - match against card names
-    slug_to_oid = {}
+    # Build normalized name → oracle_id for legendary cards only
+    # Normalized: lowercase, remove apostrophes and commas (matches old SQL REPLACE behavior)
+    norm_legendaries = {}  # normalized_name → oracle_id
+    for row in conn.execute(
+        "SELECT name, oracle_id FROM cards WHERE type_line LIKE '%Legendary%'"
+    ):
+        norm = row[0].lower().replace("'", "").replace(",", "")
+        if norm not in norm_legendaries:
+            norm_legendaries[norm] = row[1]
+
+    # Resolve slugs in Python (no SQL LIKE queries)
     all_slugs = set(
         r[0] for r in conn.execute(
-            "SELECT DISTINCT commander_slug FROM edhrec_average_decks"
+            f"SELECT DISTINCT commander_slug FROM {table}"
         )
     )
 
+    slug_to_oid = {}
     for slug in all_slugs:
-        # Convert slug to LIKE pattern: "krenko-mob-boss" -> "%krenko%mob%boss%"
         parts = slug.split("-")
-        pattern = "%" + "%".join(parts) + "%"
-        row = conn.execute(
-            "SELECT oracle_id FROM cards "
-            "WHERE LOWER(REPLACE(REPLACE(name, '''', ''), ',', '')) LIKE ? "
-            "AND type_line LIKE '%Legendary%' LIMIT 1",
-            (pattern,),
-        ).fetchone()
-        if row:
-            slug_to_oid[slug] = row[0]
+        slug_name = " ".join(parts)
 
-    print(f"  Matched {len(slug_to_oid)}/{len(all_slugs)} commander slugs to oracle_ids")
+        # O(1) exact match: "krenko-mob-boss" → "krenko mob boss"
+        oid = norm_legendaries.get(slug_name)
+        if oid is not None:
+            slug_to_oid[slug] = oid
+            continue
+
+        # Fallback: ordered substring match (matches old SQL LIKE '%a%b%c%' behavior)
+        for norm_name, oid in norm_legendaries.items():
+            pos = 0
+            matched = True
+            for p in parts:
+                idx = norm_name.find(p, pos)
+                if idx < 0:
+                    matched = False
+                    break
+                pos = idx + len(p)
+            if matched:
+                slug_to_oid[slug] = oid
+                break
+
+    return slug_to_oid, name_to_oid
+
+
+def load_edhrec_membership(conn):
+    """Load positive pairs from edhrec_average_decks.
+
+    Returns dict[cmdr_oracle_id -> set[card_oracle_ids]].
+    """
+    slug_to_oid, name_to_oid = _resolve_slugs_to_oids(conn, "edhrec_average_decks")
+
+    print(f"  Matched {len(slug_to_oid)} commander slugs to oracle_ids")
 
     # Build positives: commander_oid -> set of card oracle_ids
     positives = {}
@@ -226,20 +259,37 @@ def sample_negatives(positives_by_cmdr, all_card_oids, card_colors, cmdr_colors,
     """
     rng = np.random.RandomState(42)
 
+    # Pre-group cards by color identity signature for O(1) lookup per commander.
+    # Only ~32 unique color identity subsets exist (subsets of {W,U,B,R,G}).
+    # This replaces O(commanders × all_cards) nested loop with O(all_cards) once.
+    ci_to_cards = {}
+    for oid in all_card_oids:
+        ci_key = frozenset(card_colors.get(oid, set()))
+        ci_to_cards.setdefault(ci_key, []).append(oid)
+
+    # Pre-compute: for each possible commander CI, which CI keys are legal subsets
+    # A card is legal if card_ci ⊆ cmdr_ci
+    ci_key_subsets = {}  # frozenset(cmdr_ci) → list of legal ci_keys
+    all_ci_keys = list(ci_to_cards.keys())
+    # Cache unique commander CIs
+    unique_cmdr_cis = set()
+    for cmdr_oid in positives_by_cmdr:
+        unique_cmdr_cis.add(frozenset(cmdr_colors.get(cmdr_oid, set())))
+    for cmdr_ci_key in unique_cmdr_cis:
+        ci_key_subsets[cmdr_ci_key] = [k for k in all_ci_keys if k <= cmdr_ci_key]
+
     negatives = []
 
     for cmdr_oid, pos_cards in positives_by_cmdr.items():
-        cmdr_ci = cmdr_colors.get(cmdr_oid, set())
+        cmdr_ci = frozenset(cmdr_colors.get(cmdr_oid, set()))
 
-        # Candidate pool: color-legal, not in deck
+        # Candidate pool: color-legal, not in deck — via pre-grouped lookup
+        exclude = pos_cards | {cmdr_oid} if isinstance(pos_cards, set) else set(pos_cards) | {cmdr_oid}
         candidates = []
-        for oid in all_card_oids:
-            if oid in pos_cards or oid == cmdr_oid:
-                continue
-            card_ci = card_colors.get(oid, set())
-            if not card_ci.issubset(cmdr_ci):
-                continue
-            candidates.append(oid)
+        for ci_key in ci_key_subsets.get(cmdr_ci, []):
+            for oid in ci_to_cards[ci_key]:
+                if oid not in exclude:
+                    candidates.append(oid)
 
         n_neg = min(len(candidates), ratio * len(pos_cards))
         if n_neg == 0:
@@ -616,6 +666,67 @@ def build_feature_matrix(pairs_by_cmdr, tower_model_path=TOWER_EDHREC_PATH, verb
     return X, y, cmdr_ids
 
 
+def _ensure_event_column(conn):
+    """Add materialized event column to interaction_edges if missing.
+
+    Eliminates expensive json_extract(detail, '$.event') from per-commander
+    queries. One-time migration (~2-3 min on 18M rows), then all future
+    queries use the fast column directly.
+    """
+    has_col = any(
+        r[1] == "event"
+        for r in conn.execute("PRAGMA table_info(interaction_edges)")
+    )
+    if has_col:
+        return
+    print("  Materializing event column (one-time migration)...", flush=True)
+    t0 = time.time()
+    conn.execute("ALTER TABLE interaction_edges ADD COLUMN event TEXT")
+    conn.execute("UPDATE interaction_edges SET event = json_extract(detail, '$.event')")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ie_event ON interaction_edges(event)")
+    conn.commit()
+    print(f"    Done ({time.time()-t0:.1f}s)")
+
+
+def _bulk_load_commander_edges(conn, cmdr_oids, event_expr):
+    """Load commander causal edges in a single batch SQL per direction.
+
+    Returns (cmdr_out, cmdr_in, cmdr_out_events, cmdr_in_events) as nested dicts.
+    Memory: ~batch_size commanders × ~2000 edges × ~120 bytes per entry.
+    """
+    cmdr_out = {}
+    cmdr_in = {}
+    cmdr_out_events = {}
+    cmdr_in_events = {}
+
+    cmdr_list = list(cmdr_oids)
+    ph = ",".join("?" * len(cmdr_list))
+
+    for row in conn.execute(
+        f"SELECT source_id, target_id, SUM(strength), "
+        f"GROUP_CONCAT(DISTINCT {event_expr}) "
+        f"FROM interaction_edges WHERE source_id IN ({ph}) "
+        f"GROUP BY source_id, target_id", cmdr_list
+    ):
+        cmdr_out.setdefault(row[0], {})[row[1]] = row[2]
+        cmdr_out_events.setdefault(row[0], {})[row[1]] = (
+            set(row[3].split(",")) if row[3] else set()
+        )
+
+    for row in conn.execute(
+        f"SELECT source_id, target_id, SUM(strength), "
+        f"GROUP_CONCAT(DISTINCT {event_expr}) "
+        f"FROM interaction_edges WHERE target_id IN ({ph}) "
+        f"GROUP BY source_id, target_id", cmdr_list
+    ):
+        cmdr_in.setdefault(row[1], {})[row[0]] = row[2]
+        cmdr_in_events.setdefault(row[1], {})[row[0]] = (
+            set(row[3].split(",")) if row[3] else set()
+        )
+
+    return cmdr_out, cmdr_in, cmdr_out_events, cmdr_in_events
+
+
 def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=True):
     """Build forge-only feature matrix (no EDHREC, no tower, no embeddings).
 
@@ -626,6 +737,9 @@ def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=Tru
     (ForgeFeatureContext / CmdrFeatureContext / compute_card_features).
     """
     conn = sqlite3.connect(DB_PATH)
+
+    # ── One-time: materialize event column for fast queries ───────────
+    _ensure_event_column(conn)
 
     # ── Card metadata (needed for type_line, cmc lookups) ─────────────
     card_meta = {}
@@ -647,71 +761,76 @@ def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=Tru
         print(f"  Strategy vector: {ctx._n_strats} strategies")
         print(f"  Forge ability vectors: {ctx._n_abilities} vocab, {len(ctx._ability_vectors)} cards with vectors")
 
-    # ── Build pairs list ───────────────────────────────────────────────
+    # ── Pre-allocate output arrays (no intermediate all_rows list) ────
     cmdr_oids_ordered = sorted(pairs_by_cmdr.keys())
     cmdr_to_idx = {oid: i for i, oid in enumerate(cmdr_oids_ordered)}
 
-    all_rows = []
-    for cmdr_oid, pairs in pairs_by_cmdr.items():
-        for card_oid, label in pairs:
-            all_rows.append((cmdr_oid, card_oid, label))
-
-    N = len(all_rows)
+    N = sum(len(pairs_by_cmdr[c]) for c in cmdr_oids_ordered)
     X = np.zeros((N, len(FORGE_FEATURE_NAMES)), dtype=np.float32)
     y = np.zeros(N, dtype=np.float32)
     cmdr_ids = np.zeros(N, dtype=np.int32)
 
-    # Re-organise for commander-batch processing
-    cmdr_pair_map = {}
-    for cmdr_oid, card_oid, label in all_rows:
-        cmdr_pair_map.setdefault(cmdr_oid, []).append((card_oid, label))
-
     n_cmdrs = len(cmdr_oids_ordered)
     row_idx = 0
 
-    for ci, cmdr_oid in enumerate(cmdr_oids_ordered):
-        if (ci + 1) % 50 == 0 or ci == 0:
-            if verbose:
-                print(f"  Building forge features for commander {ci+1}/{n_cmdrs}...", flush=True)
+    # ── Process commanders in batches for memory-efficient edge loading ─
+    # Each batch: bulk SQL for ~100 commanders, process, free edge data.
+    # Memory per batch: ~100 cmdrs × ~2000 edges × ~120 bytes = ~24MB
+    CMDR_BATCH = 100
+    event_expr = "event" if ctx._has_event_col else "json_extract(detail, '$.event')"
 
-        pairs = cmdr_pair_map.get(cmdr_oid, [])
-        if not pairs:
-            continue
+    for batch_start in range(0, n_cmdrs, CMDR_BATCH):
+        batch_end = min(batch_start + CMDR_BATCH, n_cmdrs)
+        batch_cmdr_oids = cmdr_oids_ordered[batch_start:batch_end]
 
-        card_oids = [p[0] for p in pairs]
-        labels = [p[1] for p in pairs]
-        n_pairs = len(pairs)
+        if verbose:
+            print(f"  Commanders {batch_start+1}-{batch_end}/{n_cmdrs}...", flush=True)
 
-        # --- Per-commander context (causal edges, deck edges, precision) ---
-        deck_oids_for_cmdr = {oid for oid, lbl in pairs if lbl > 0}
-        cmdr_ctx = CmdrFeatureContext(ctx, cmdr_oid, deck_oids_for_cmdr)
+        # Bulk-load edges for this batch (2 SQL queries instead of 2×batch_size)
+        batch_out, batch_in, batch_out_ev, batch_in_ev = \
+            _bulk_load_commander_edges(conn, batch_cmdr_oids, event_expr)
 
-        # --- (c) Commander subtypes for tribal ---
-        cmdr_type_line = card_meta.get(cmdr_oid, {}).get("type_line", "")
-        if "\u2014" in cmdr_type_line:
-            try:
-                cmdr_ctx.cmdr_subtypes = {
-                    s.lower() for s in cmdr_type_line.split("\u2014")[1].strip().split()
-                }
-            except (IndexError, AttributeError):
-                pass
+        for cmdr_oid in batch_cmdr_oids:
+            pairs = pairs_by_cmdr.get(cmdr_oid, [])
+            if not pairs:
+                continue
 
-        # --- Fill feature rows via shared compute_card_features ---
-        for j in range(n_pairs):
-            card_oid = card_oids[j]
-            meta = card_meta.get(card_oid, {})
-            card_type_line = meta.get("type_line", "")
-            card_cmc = float(meta.get("cmc", 0.0))
-
-            feats = compute_card_features(
-                card_oid, card_type_line, card_cmc,
-                ctx, cmdr_ctx,
+            # --- Per-commander context with pre-loaded edges ---
+            deck_oids_for_cmdr = {oid for oid, lbl in pairs if lbl > 0}
+            preloaded = (
+                batch_out.get(cmdr_oid, {}),
+                batch_in.get(cmdr_oid, {}),
+                batch_out_ev.get(cmdr_oid, {}),
+                batch_in_ev.get(cmdr_oid, {}),
             )
-            X[row_idx] = feats
+            cmdr_ctx = CmdrFeatureContext(ctx, cmdr_oid, deck_oids_for_cmdr,
+                                          preloaded_cmdr_edges=preloaded)
 
-            y[row_idx] = float(labels[j])
-            cmdr_ids[row_idx] = cmdr_to_idx[cmdr_oid]
-            row_idx += 1
+            # --- Commander subtypes for tribal ---
+            cmdr_type_line = card_meta.get(cmdr_oid, {}).get("type_line", "")
+            if "\u2014" in cmdr_type_line:
+                try:
+                    cmdr_ctx.cmdr_subtypes = {
+                        s.lower() for s in cmdr_type_line.split("\u2014")[1].strip().split()
+                    }
+                except (IndexError, AttributeError):
+                    pass
+
+            # --- Fill feature rows via shared compute_card_features ---
+            ci = cmdr_to_idx[cmdr_oid]
+            for card_oid, label in pairs:
+                meta = card_meta.get(card_oid, {})
+                feats = compute_card_features(
+                    card_oid, meta.get("type_line", ""), float(meta.get("cmc", 0.0)),
+                    ctx, cmdr_ctx,
+                )
+                X[row_idx] = feats
+                y[row_idx] = float(label)
+                cmdr_ids[row_idx] = ci
+                row_idx += 1
+
+        # Free batch edge data to limit memory
+        del batch_out, batch_in, batch_out_ev, batch_in_ev
 
     X = X[:row_idx]
     y = y[:row_idx]
@@ -1668,19 +1787,8 @@ def _load_pairs_for_features(conn, oid_to_idx=None):
     print(f"  Negative pairs: {len(neg_pairs)}")
 
     # Load synergy scores for graded relevance labels
-    slug_to_oid_map = {}
-    for slug in set(r[0] for r in conn.execute(
-            "SELECT DISTINCT commander_slug FROM edhrec_card_synergy")):
-        parts = slug.split("-")
-        pattern = "%" + "%".join(parts) + "%"
-        row = conn.execute(
-            "SELECT oracle_id FROM cards "
-            "WHERE LOWER(REPLACE(REPLACE(name, '''', ''), ',', '')) LIKE ? "
-            "AND type_line LIKE '%Legendary%' LIMIT 1",
-            (pattern,),
-        ).fetchone()
-        if row:
-            slug_to_oid_map[slug] = row[0]
+    # Reuse shared slug resolver (Python dict match, no SQL LIKE queries)
+    slug_to_oid_map, _ = _resolve_slugs_to_oids(conn, "edhrec_card_synergy")
     oid_to_slug_map = {v: k for k, v in slug_to_oid_map.items()}
 
     # Build (cmdr_slug, card_name) -> synergy lookup

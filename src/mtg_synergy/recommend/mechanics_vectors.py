@@ -120,8 +120,14 @@ COST_CONCEPTS = {
 }
 
 
-def build_mechanics_vectors(conn):
+def build_mechanics_vectors(conn, preloaded_abilities=None):
     """Build dense mechanics vectors for all cards with Forge data.
+
+    Args:
+        conn: SQLite connection
+        preloaded_abilities: optional list of (oracle_id, verb, trigger_mode,
+            trigger_filter, cost, keyword, token_script, counter_type, raw_line,
+            amount) tuples. When provided, skips the forge_abilities DB scan.
 
     Returns:
         produces: dict[oracle_id → numpy float32 vector]
@@ -135,53 +141,59 @@ def build_mechanics_vectors(conn):
                       "instant", "sorcery", "permanent", "land",
                       "planeswalker", "spell", "tribal", "battle"}
 
-    for row in conn.execute(
-        "SELECT trigger_filter FROM forge_abilities WHERE trigger_filter IS NOT NULL"
-    ):
-        for part in row[0].split(","):
-            main = part.split(".")[0].strip()
-            if main and main[0].isupper() and main.lower() not in card_types_set:
-                subtype_counts[main.lower()] += 1
+    kw_skip = {"flying", "haste", "trample", "vigilance", "deathtouch",
+               "lifelink", "menace", "reach", "defender", "first",
+               "strike", "double", "indestructible", "hexproof",
+               "sac", "unblockable", "shroud", "wither", "persist"}
 
-    for row in conn.execute(
-        "SELECT token_script FROM forge_abilities WHERE token_script IS NOT NULL"
-    ):
-        parts = row[0].lower().split("_")
-        kw_skip = {"flying", "haste", "trample", "vigilance", "deathtouch",
-                   "lifelink", "menace", "reach", "defender", "first",
-                   "strike", "double", "indestructible", "hexproof",
-                   "sac", "unblockable", "shroud", "wither", "persist"}
-        if len(parts) >= 4:
-            for p in parts[3:]:
-                if p and p not in kw_skip and len(p) > 1:
-                    subtype_counts[p] += 1
+    if preloaded_abilities is not None:
+        # Use pre-loaded data — no DB scan needed
+        abilities = preloaded_abilities
+    else:
+        # Fall back to DB scan (for standalone use)
+        forge_to_oid = {}
+        for row in conn.execute("SELECT forge_name, oracle_id FROM forge_name_map"):
+            forge_to_oid[row[0]] = row[1]
+
+        abilities = []
+        for row in conn.execute(
+            "SELECT card_name, verb, trigger_mode, trigger_filter, cost, "
+            "keyword, token_script, counter_type, raw_line "
+            "FROM forge_abilities"
+        ):
+            oid = forge_to_oid.get(row[0])
+            if oid:
+                abilities.append((oid, row[1], row[2], row[3], row[4],
+                                  row[5], row[6], row[7], row[8]))
+
+    # Count subtypes from trigger_filter and token_script
+    for ab in abilities:
+        trig_filter, token_script = ab[3], ab[6]
+        if trig_filter:
+            for part in trig_filter.split(","):
+                main = part.split(".")[0].strip()
+                if main and main[0].isupper() and main.lower() not in card_types_set:
+                    subtype_counts[main.lower()] += 1
+        if token_script:
+            parts = token_script.lower().split("_")
+            if len(parts) >= 4:
+                for p in parts[3:]:
+                    if p and p not in kw_skip and len(p) > 1:
+                        subtype_counts[p] += 1
 
     # Take top 80 subtypes (covers goblin, human, vampire, etc.)
     top_subtypes = [st for st, _ in subtype_counts.most_common(80)]
     subtype_idx = {st: N_CONCEPTS + i for i, st in enumerate(top_subtypes)}
     dim = N_CONCEPTS + len(top_subtypes)
 
-    # Build name → oracle_id mapping
-    forge_to_oid = {}
-    for row in conn.execute("SELECT forge_name, oracle_id FROM forge_name_map"):
-        forge_to_oid[row[0]] = row[1]
-
     produces = {}  # oid → vector
     consumes = {}  # oid → vector
 
-    for row in conn.execute(
-        "SELECT card_name, verb, trigger_mode, trigger_filter, cost, "
-        "keyword, token_script, counter_type, raw_line "
-        "FROM forge_abilities"
-    ):
-        card_name = row[0]
-        oid = forge_to_oid.get(card_name)
-        if not oid:
-            continue
-
-        verb, trig_mode, trig_filter = row[1], row[2], row[3]
-        cost, token_script = row[4], row[6]
-        raw_line = row[8] or ""
+    for ab in abilities:
+        oid = ab[0]
+        verb, trig_mode, trig_filter = ab[1], ab[2], ab[3]
+        cost, token_script = ab[4], ab[6]
+        raw_line = ab[8] or ""
 
         # --- PRODUCES: effect verb → game concepts ---
         if verb and verb in VERB_TO_CONCEPTS:
@@ -192,10 +204,6 @@ def build_mechanics_vectors(conn):
         # Token with subtype → produces that subtype
         if token_script:
             parts = token_script.lower().split("_")
-            kw_skip = {"flying", "haste", "trample", "vigilance", "deathtouch",
-                       "lifelink", "menace", "reach", "defender", "first",
-                       "strike", "double", "indestructible", "hexproof",
-                       "sac", "unblockable", "shroud", "wither", "persist"}
             if len(parts) >= 4:
                 p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
                 for part in parts[3:]:
@@ -233,49 +241,54 @@ def build_mechanics_vectors(conn):
                     if sac_type in subtype_idx:
                         c[subtype_idx[sac_type]] += 1.0
 
-    # Parse "for each [Type]" scaling from Forge raw_line SpellDescription
-    # (replaces oracle text fallback). Amount=X abilities with "for each" in
-    # their SpellDescription encode entity-count scaling that Forge doesn't
-    # capture in structured fields.
-    for row in conn.execute(
-        "SELECT fnm.oracle_id, fa.raw_line FROM forge_abilities fa "
-        "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
-        "WHERE fa.amount = 'X' AND fa.raw_line LIKE '%for each%'"
-    ):
-        oid, raw = row[0], (row[1] or "").lower()
-        idx = raw.find("for each")
-        if idx < 0:
-            continue
-        snippet = raw[idx:]
-        for m in re.finditer(r"for each (\w+)", snippet):
-            t = m.group(1)
-            if t in subtype_idx:
-                c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
-                c[subtype_idx[t]] += 1.0
-            elif t == "creature":
-                c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
-                c[_concept_idx["creature_available"]] += 1.0
-            elif t == "artifact":
-                c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
-                c[_concept_idx["artifact_enters"]] += 0.5
+    # Parse "for each [Type]" and "Tap" patterns from raw_line.
+    # Build iterator of (oid, raw_line, amount) from preloaded data or DB.
+    def _scaling_tuples():
+        if preloaded_abilities is not None:
+            for ab in abilities:
+                raw = (ab[8] or "").lower()
+                if raw:
+                    yield ab[0], raw, (ab[9] if len(ab) > 9 else None)
+        else:
+            for row in conn.execute(
+                "SELECT fnm.oracle_id, fa.raw_line, fa.amount "
+                "FROM forge_abilities fa "
+                "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+                "WHERE fa.raw_line IS NOT NULL"
+            ):
+                raw = (row[1] or "").lower()
+                if raw:
+                    yield row[0], raw, row[2]
 
-    # Parse "tap an untapped [Type]" from Forge raw_line cost patterns
-    for row in conn.execute(
-        "SELECT fnm.oracle_id, fa.raw_line FROM forge_abilities fa "
-        "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
-        "WHERE fa.raw_line LIKE '%Tap<%'"
-    ):
-        oid, raw = row[0], (row[1] or "").lower()
-        for m in re.finditer(r"tap<\d+/([^/>]+)", raw):
-            t = m.group(1).split("/")[0].split(".")[0].lower()
-            if t in subtype_idx:
-                c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
-                c[subtype_idx[t]] += 1.0
-                c[_concept_idx["creature_tapped"]] += 0.5
-            elif t == "creature":
-                c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
-                c[_concept_idx["creature_tapped"]] += 1.0
-                c[_concept_idx["creature_available"]] += 0.5
+    for oid, raw_line, amount in _scaling_tuples():
+        # "for each [Type]" scaling — only when amount='X'
+        if amount == "X" and "for each" in raw_line:
+            idx = raw_line.find("for each")
+            snippet = raw_line[idx:]
+            for m in re.finditer(r"for each (\w+)", snippet):
+                t = m.group(1)
+                if t in subtype_idx:
+                    c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
+                    c[subtype_idx[t]] += 1.0
+                elif t == "creature":
+                    c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
+                    c[_concept_idx["creature_available"]] += 1.0
+                elif t == "artifact":
+                    c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
+                    c[_concept_idx["artifact_enters"]] += 0.5
+
+        # "Tap" cost patterns
+        if "tap<" in raw_line:
+            for m in re.finditer(r"tap<\d+/([^/>]+)", raw_line):
+                t = m.group(1).split("/")[0].split(".")[0].lower()
+                if t in subtype_idx:
+                    c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
+                    c[subtype_idx[t]] += 1.0
+                    c[_concept_idx["creature_tapped"]] += 0.5
+                elif t == "creature":
+                    c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
+                    c[_concept_idx["creature_tapped"]] += 1.0
+                    c[_concept_idx["creature_available"]] += 0.5
 
     # L2 normalize all vectors
     for oid in produces:

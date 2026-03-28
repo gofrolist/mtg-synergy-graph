@@ -45,6 +45,12 @@ class ForgeFeatureContext:
         self.conn = conn
         self._has_edge_index = False
 
+        # Check for materialized event column (speeds up commander edge queries)
+        self._has_event_col = any(
+            r[1] == "event"
+            for r in conn.execute("PRAGMA table_info(interaction_edges)")
+        )
+
         # Build oid_to_idx from cards table (replaces embedding-based index)
         self.oid_to_idx = {}
         for i, (oid,) in enumerate(
@@ -87,13 +93,18 @@ class ForgeFeatureContext:
         # Replaces oracle text regex matching for features F25-F30
         import re as _re
         self._forge_profiles = {}
+        # Also collect raw abilities for build_mechanics_vectors (avoids redundant DB scan)
+        # Format: (oid, verb, trig_mode, trig_filter, cost, kw, token_script, counter, raw_line, amount)
+        self._raw_abilities = []
         for row in conn.execute(
             "SELECT fnm.oracle_id, fa.verb, fa.trigger_mode, fa.keyword, "
             "fa.counter_type, fa.target, fa.ability_type, fa.trigger_filter, "
-            "fa.cost, fa.defined, fa.raw_line "
+            "fa.cost, fa.defined, fa.raw_line, fa.token_script, fa.amount "
             "FROM forge_abilities fa "
             "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name"
         ):
+            # indices: 0=oid, 1=verb, 2=trig_mode, 3=trig_filter, 4=cost, 5=kw, 6=token_script, 7=counter, 8=raw_line, 9=amount
+            self._raw_abilities.append((row[0], row[1], row[2], row[7], row[8], row[3], row[11], row[4], row[10], row[12]))
             oid = row[0]
             p = self._forge_profiles.setdefault(oid, {
                 'verbs': set(), 'triggers': set(), 'keywords': set(),
@@ -236,6 +247,13 @@ class ForgeFeatureContext:
             if 'GainControl$ True' in raw_line:
                 p['gain_control'] = True
 
+        # Pre-compute card-level mechanical unions (avoid redundant set ops in inner loop)
+        self._card_mechs = {}
+        for oid, p in self._forge_profiles.items():
+            mechs = p['verbs'] | p['triggers'] | p['keywords']
+            if mechs:
+                self._card_mechs[oid] = mechs
+
         # Forge ability vectors: binary encoding of verbs+triggers+keywords for cosine similarity
         # Replaces oracle text TF-IDF (F9) with mechanical similarity
         all_abilities = set()
@@ -313,9 +331,12 @@ class ForgeFeatureContext:
         }
 
         # Forge mechanics vectors: encode each card's full mechanical profile
+        # Pass pre-loaded abilities to avoid redundant forge_abilities DB scan
         from mtg_synergy.recommend.mechanics_vectors import build_mechanics_vectors
         self._mech_produces, self._mech_consumes, self._mech_dim, _ = \
-            build_mechanics_vectors(conn)
+            build_mechanics_vectors(conn, preloaded_abilities=self._raw_abilities)
+        # Free raw abilities list after mechanics vectors are built (~5MB)
+        del self._raw_abilities
 
         if preload_edges:
             self._build_edge_index(conn)
@@ -351,26 +372,32 @@ class ForgeFeatureContext:
                 pass
 
         if src is None:
-            src_list, tgt_list, exact_list = [], [], []
+            # Pre-allocate numpy arrays to avoid ~450MB Python list overhead.
+            # edge_count is an upper bound (some edges may have unmapped oids).
             has_col = any(
                 r[1] == "filter_precision"
                 for r in conn.execute("PRAGMA table_info(interaction_edges)")
             )
             prec_expr = "filter_precision" if has_col else "json_extract(detail, '$.filter_precision')"
+            src = np.empty(edge_count, dtype=np.int32)
+            tgt = np.empty(edge_count, dtype=np.int32)
+            exact = np.empty(edge_count, dtype=np.bool_)
+            n = 0
             for row in conn.execute(
                 f"SELECT source_id, target_id, {prec_expr} FROM interaction_edges"
             ):
                 s = self.oid_to_idx.get(row[0])
                 t = self.oid_to_idx.get(row[1])
                 if s is not None and t is not None:
-                    src_list.append(s)
-                    tgt_list.append(t)
-                    exact_list.append(row[2] == "exact")
-            print(f"    Loaded {len(src_list):,} edges from DB ({time.time()-t0:.1f}s)")
-            src = np.array(src_list, dtype=np.int32)
-            tgt = np.array(tgt_list, dtype=np.int32)
-            exact = np.array(exact_list, dtype=np.bool_)
-            del src_list, tgt_list, exact_list
+                    src[n] = s
+                    tgt[n] = t
+                    exact[n] = row[2] == "exact"
+                    n += 1
+            # Trim to actual count
+            src = src[:n]
+            tgt = tgt[:n]
+            exact = exact[:n]
+            print(f"    Loaded {n:,} edges from DB ({time.time()-t0:.1f}s)")
             try:
                 np.savez(cache_path, src=src, tgt=tgt, exact=exact,
                          edge_count=np.array(edge_count), card_count=np.array(card_count))
@@ -432,7 +459,8 @@ class ForgeFeatureContext:
 class CmdrFeatureContext:
     """Per-commander pre-loaded data for feature computation."""
 
-    def __init__(self, ctx: ForgeFeatureContext, cmdr_oid: str, deck_oids: set):
+    def __init__(self, ctx: ForgeFeatureContext, cmdr_oid: str, deck_oids: set,
+                 preloaded_cmdr_edges=None):
         self.cmdr_oid = cmdr_oid
 
         # Commander vectors
@@ -462,36 +490,52 @@ class CmdrFeatureContext:
             'is_secondary': False, 'gain_control': False,
         })
 
-        if ctx._has_edge_index:
+        # Pre-compute compound values used by compute_card_features (F27)
+        self.cmdr_mechs = (self.cmdr_profile.get('verbs', set()) |
+                           self.cmdr_profile.get('triggers', set()) |
+                           self.cmdr_profile.get('keywords', set()))
+
+        if preloaded_cmdr_edges is not None:
+            if not ctx._has_edge_index:
+                raise ValueError("preloaded_cmdr_edges requires preload_edges=True")
+            self.cmdr_out, self.cmdr_in, self.cmdr_out_events, self.cmdr_in_events = preloaded_cmdr_edges
+            self._init_cmdr_exact_and_deck_edges(ctx, cmdr_oid, deck_oids)
+        elif ctx._has_edge_index:
             self._init_from_index(ctx, cmdr_oid, deck_oids)
         else:
-            self._init_from_db(ctx.conn, ctx.oid_to_idx, cmdr_oid, deck_oids)
+            self._init_from_db(ctx, ctx.conn, ctx.oid_to_idx, cmdr_oid, deck_oids)
 
     def _init_from_index(self, ctx, cmdr_oid, deck_oids):
         """Fast path: use pre-loaded edge index for deck edges, DB for commander edges."""
         conn = ctx.conn
-        oid_to_idx = ctx.oid_to_idx
-        idx_to_oid = ctx._idx_to_oid
-        cmdr_idx = oid_to_idx.get(cmdr_oid)
+        event_expr = "event" if ctx._has_event_col else "json_extract(detail, '$.event')"
 
-        # Commander strength + events: fast indexed DB queries (~1ms each)
+        # Commander strength + events: indexed DB queries
         self.cmdr_out = {}
         self.cmdr_in = {}
         self.cmdr_out_events = {}
         self.cmdr_in_events = {}
         try:
             for row in conn.execute(
-                "SELECT target_id, SUM(strength), GROUP_CONCAT(DISTINCT json_extract(detail, '$.event')) "
+                f"SELECT target_id, SUM(strength), GROUP_CONCAT(DISTINCT {event_expr}) "
                 "FROM interaction_edges WHERE source_id = ? GROUP BY target_id", (cmdr_oid,)):
                 self.cmdr_out[row[0]] = row[1]
                 self.cmdr_out_events[row[0]] = set(row[2].split(",")) if row[2] else set()
             for row in conn.execute(
-                "SELECT source_id, SUM(strength), GROUP_CONCAT(DISTINCT json_extract(detail, '$.event')) "
+                f"SELECT source_id, SUM(strength), GROUP_CONCAT(DISTINCT {event_expr}) "
                 "FROM interaction_edges WHERE target_id = ? GROUP BY source_id", (cmdr_oid,)):
                 self.cmdr_in[row[0]] = row[1]
                 self.cmdr_in_events[row[0]] = set(row[2].split(",")) if row[2] else set()
         except Exception:
             pass
+
+        self._init_cmdr_exact_and_deck_edges(ctx, cmdr_oid, deck_oids)
+
+    def _init_cmdr_exact_and_deck_edges(self, ctx, cmdr_oid, deck_oids):
+        """Compute commander exact edges and deck edge counts from in-memory index."""
+        oid_to_idx = ctx.oid_to_idx
+        idx_to_oid = ctx._idx_to_oid
+        cmdr_idx = oid_to_idx.get(cmdr_oid)
 
         # Commander exact edges from adjacency index
         self.cmdr_exact = set()
@@ -554,8 +598,9 @@ class CmdrFeatureContext:
                         if bc > 0:
                             self.deck_broad_counts[oid] = bc
 
-    def _init_from_db(self, conn, oid_to_idx, cmdr_oid, deck_oids):
+    def _init_from_db(self, ctx, conn, oid_to_idx, cmdr_oid, deck_oids):
         """Original DB query path (used for inference with small datasets)."""
+        event_expr = "event" if ctx._has_event_col else "json_extract(detail, '$.event')"
         # Causal edges from/to commander
         self.cmdr_out = {}
         self.cmdr_in = {}
@@ -563,12 +608,12 @@ class CmdrFeatureContext:
         self.cmdr_in_events = {}
         try:
             for row in conn.execute(
-                "SELECT target_id, SUM(strength), GROUP_CONCAT(DISTINCT json_extract(detail, '$.event')) "
+                f"SELECT target_id, SUM(strength), GROUP_CONCAT(DISTINCT {event_expr}) "
                 "FROM interaction_edges WHERE source_id = ? GROUP BY target_id", (cmdr_oid,)):
                 self.cmdr_out[row[0]] = row[1]
                 self.cmdr_out_events[row[0]] = set(row[2].split(",")) if row[2] else set()
             for row in conn.execute(
-                "SELECT source_id, SUM(strength), GROUP_CONCAT(DISTINCT json_extract(detail, '$.event')) "
+                f"SELECT source_id, SUM(strength), GROUP_CONCAT(DISTINCT {event_expr}) "
                 "FROM interaction_edges WHERE target_id = ? GROUP BY source_id", (cmdr_oid,)):
                 self.cmdr_in[row[0]] = row[1]
                 self.cmdr_in_events[row[0]] = set(row[2].split(",")) if row[2] else set()
@@ -739,12 +784,9 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
 
     # F27: shared_forge_mechanics — count of shared Forge verbs, trigger_modes,
     # and keywords between commander and card.
-    cmdr_mechs = (cmdr_profile.get('verbs', set()) |
-                  cmdr_profile.get('triggers', set()) |
-                  cmdr_profile.get('keywords', set()))
-    card_mechs = (card_profile.get('verbs', set()) |
-                  card_profile.get('triggers', set()) |
-                  card_profile.get('keywords', set()))
+    # Uses pre-computed unions from ctx._card_mechs and cmdr.cmdr_mechs
+    cmdr_mechs = cmdr.cmdr_mechs
+    card_mechs = ctx._card_mechs.get(card_oid, set())
     shared_forge = float(len(cmdr_mechs & card_mechs))
 
     # F28: forge_ability_depth — total distinct mechanical components
