@@ -901,7 +901,7 @@ def train_forge_gbm(X, y, cmdr_ids):
         "metric": "ndcg",
         "eval_at": [10, 30],
         "num_leaves": 255,
-        "learning_rate": 0.03,
+        "learning_rate": 0.05,
         "n_estimators": 1500,
         "subsample": 0.8,
         "colsample_bytree": 0.8,
@@ -911,8 +911,9 @@ def train_forge_gbm(X, y, cmdr_ids):
         "label_gain": [0, 1, 2, 3, 5, 8, 12, 18, 25, 35],  # 10 grades (0-9)
     }
 
-    splits = make_cv_splits(cmdr_ids, n_folds=5)
+    splits = make_cv_splits(cmdr_ids, n_folds=3)
     fold_ndcgs = []
+    fold_best_iters = []
     for fold_i, (train_idx, test_idx) in enumerate(splits):
         # Ensure data within each fold is sorted by commander
         train_sort = np.argsort(cmdr_ids[train_idx])
@@ -961,16 +962,19 @@ def train_forge_gbm(X, y, cmdr_ids):
 
         avg_ndcg = np.mean(ndcg30_scores) if ndcg30_scores else 0.0
         fold_ndcgs.append(avg_ndcg)
+        fold_best_iters.append(booster.best_iteration)
         print(f"  Fold {fold_i+1}: NDCG@30={avg_ndcg:.4f} "
               f"({booster.best_iteration} rounds)")
 
     print(f"  Mean NDCG@30: {np.mean(fold_ndcgs):.4f}")
 
-    # Train final model on all data
+    # Train final model on all data, using CV-derived round count
+    avg_best = int(np.mean(fold_best_iters) * 1.1)
+    print(f"  Final model: {avg_best} rounds (avg CV best x 1.1)")
     all_group = _build_group_array(cmdr_ids, np.arange(len(cmdr_ids)))
     all_data = lgb.Dataset(X, label=y, group=all_group,
                            feature_name=FORGE_FEATURE_NAMES)
-    final_booster = lgb.train(params, all_data, num_boost_round=1000)
+    final_booster = lgb.train(params, all_data, num_boost_round=avg_best)
 
     model_path = os.path.join(DATA_DIR, "fusion_model_forge.lgb")
     final_booster.save_model(model_path)
