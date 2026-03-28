@@ -9,7 +9,7 @@ import time
 
 import numpy as np
 
-from mtg_synergy.recommend.mechanics_vectors import _concept_idx, N_CONCEPTS
+from mtg_synergy.recommend.mechanics_vectors import _concept_idx
 
 
 def _decode_events(mask, bit_to_event):
@@ -404,19 +404,20 @@ class ForgeFeatureContext:
             "WHERE fa.token_script IS NOT NULL"
         ):
             oid, ts = row
-            parts = ts.lower().split("_")
-            if len(parts) >= 3:
-                try:
-                    p = int(parts[1]) if parts[1] not in ("x", "a") else 0
-                    t = int(parts[2]) if parts[2] not in ("x", "a") else 0
-                    pt = p + t
-                    self._token_max_pt[oid] = max(self._token_max_pt.get(oid, 0), pt)
-                except ValueError:
-                    pass
-                if len(parts) > 3:
-                    kws = [p for p in parts[3:] if p and p not in _kw_skip and len(p) > 1]
-                    kw_count = len(kws)
-                    self._token_max_kw[oid] = max(self._token_max_kw.get(oid, 0), kw_count)
+            for raw_ts in ts.split(","):
+                parts = raw_ts.strip().lower().split("_")
+                if len(parts) >= 3:
+                    try:
+                        pw = int(parts[1]) if parts[1] not in ("x", "a") else 0
+                        th = int(parts[2]) if parts[2] not in ("x", "a") else 0
+                        pt = pw + th
+                        self._token_max_pt[oid] = max(self._token_max_pt.get(oid, 0), pt)
+                    except ValueError:
+                        pass
+                    if len(parts) > 3:
+                        kws = [tok for tok in parts[3:] if tok and tok not in _kw_skip and len(tok) > 1]
+                        kw_count = len(kws)
+                        self._token_max_kw[oid] = max(self._token_max_kw.get(oid, 0), kw_count)
 
         # Pre-load zone interaction flags per card (for F67, F68)
         self._zone_graveyard = set()
@@ -1302,10 +1303,11 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
     # F70: mech_zone_fwd — zone-specific mechanics synergy
     mech_zone_fwd = 0.0
     if cmdr.cmdr_consumes is not None and card_prod is not None:
-        zone_start = N_CONCEPTS - 5
-        zone_end = N_CONCEPTS
-        zone_card = card_prod[zone_start:zone_end]
-        zone_cmdr = cmdr.cmdr_consumes[zone_start:zone_end]
+        zone_dims = [_concept_idx[c] for c in (
+            "enters_from_graveyard", "enters_from_exile", "enters_from_hand",
+            "goes_to_graveyard", "goes_to_exile")]
+        zone_card = card_prod[zone_dims]
+        zone_cmdr = cmdr.cmdr_consumes[zone_dims]
         mech_zone_fwd = float(np.dot(zone_cmdr, zone_card))
 
     return [
