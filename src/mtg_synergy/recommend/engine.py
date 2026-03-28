@@ -1,4 +1,4 @@
-"""Card recommendation engine — scoring pipeline."""
+"""Card recommendation engine — forge-only scoring pipeline."""
 from collections import defaultdict
 from urllib.parse import quote
 
@@ -9,14 +9,12 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                     deck_types: set[str] = None, top_n: int = 20,
                     active_strategies: set = None, db_path: str = None,
                     color_identity: set = None, commander: str = None,
-                    edhrec_slug: str = None, use_forge: bool = False):
+                    edhrec_slug: str = None):
     """Rank non-deck cards by total synergy with the current decklist.
 
-    Uses tower pre-filter (CI + batch scoring) for candidate discovery,
-    then full fusion model for final ranking. Graph edges used for
-    partner display only.
-
-    If use_forge=True, uses the forge-only model (no EDHREC features).
+    Uses forge-only model: color-identity filter for candidate discovery,
+    then forge GBM (63 features) for final ranking. No tower model,
+    no embeddings, no EDHREC features.
     """
     import sqlite3 as _sql_dyn
     _shared_conn = None
@@ -32,7 +30,6 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
 
     if _shared_conn:
         from mtg_synergy.recommend.scoring import (
-            DeckContext, score_all_candidates, tower_prefilter,
             color_identity_filter, score_forge_candidates)
 
         # Get commander oracle_id
@@ -42,104 +39,32 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                 cmdr_oid = c.get("oracle_id", "")
                 break
 
-        if use_forge:
-            # Forge mode: simple color-identity filter (no tower/embeddings)
-            print("  Using forge-only model (no EDHREC)")
-            ci_results = color_identity_filter(
-                _shared_conn, cmdr_oid, color_identity or set(),
-                deck_cards=deck_cards)
+        # Forge mode: simple color-identity filter (no tower/embeddings)
+        print("  Using forge-only model (no EDHREC)")
+        ci_results = color_identity_filter(
+            _shared_conn, cmdr_oid, color_identity or set(),
+            deck_cards=deck_cards)
 
-            candidate_scores = {}
-            for oid, name in ci_results:
-                if name not in deck_cards:
-                    candidate_scores[name] = {
-                        "total": 0.0, "partners": [], "multi_sig": 0,
-                        "commander_synergy": 0.0, "key_synergy": 0.0,
-                    }
+        candidate_scores = {}
+        for oid, name in ci_results:
+            if name not in deck_cards:
+                candidate_scores[name] = {
+                    "total": 0.0, "partners": [], "multi_sig": 0,
+                    "commander_synergy": 0.0, "key_synergy": 0.0,
+                }
 
-            print(f"  Color-identity filter: {len(ci_results)} color-legal cards "
-                  f"({len(candidate_scores)} after excluding deck)")
-        else:
-            # Baseline mode: tower pre-filter, take top 3000
-            prefiltered = tower_prefilter(
-                _shared_conn, cmdr_oid, color_identity or set(),
-                top_n=3000, deck_cards=deck_cards)
+        print(f"  Color-identity filter: {len(ci_results)} color-legal cards "
+              f"({len(candidate_scores)} after excluding deck)")
 
-            tower_probs_map = None
-            if prefiltered:
-                # Build candidate pool from tower results + cache tower probs
-                candidate_scores = {}
-                tower_probs_map = {}
-                for oid, name, tower_prob in prefiltered:
-                    if name not in deck_cards:
-                        candidate_scores[name] = {
-                            "total": 0.0, "partners": [], "multi_sig": 0,
-                            "commander_synergy": 0.0, "key_synergy": 0.0,
-                        }
-                        tower_probs_map[name] = tower_prob
-
-                print(f"  Tower pre-filter: {len(prefiltered)} candidates "
-                      f"({len(candidate_scores)} after excluding deck)")
-            else:
-                # Fallback: use graph-based candidate discovery
-                deck_scores = _deck_card_scores(graph, deck_cards)
-                key_cards = {name for name, _ in sorted(
-                    [(n, i["total"]) for n, i in deck_scores.items() if n != commander],
-                    key=lambda x: -x[1])[:10]}
-                candidate_scores = _candidate_scores(
-                    graph, deck_cards, commander=commander, key_cards=key_cards)
-                print("  Tower not available — using graph candidates (fallback)")
-
-        if use_forge:
-            # Forge-only scoring (38 features, no EDHREC)
-            score_forge_candidates(candidate_scores, cards, _shared_conn,
-                                   commander, deck_cards, deck_types,
-                                   active_strategies)
-        else:
-            ctx = DeckContext(_shared_conn, commander, deck_cards, cards,
-                              deck_types=deck_types, active_strategies=active_strategies,
-                              edhrec_slug=edhrec_slug)
-            score_all_candidates(candidate_scores, cards, ctx, _shared_conn,
-                                 tower_probs=tower_probs_map)
-
-        # Enrich candidates with causal graph partner info (for display)
-        ctx = ctx if not use_forge else None
-        if ctx and ctx.causal_ctx:
-            # Build name→oid lookup for candidates
-            _cand_oid = {}
-            for c in cards:
-                if c["name"] in candidate_scores:
-                    _cand_oid[c["name"]] = c.get("oracle_id", "")
-            # Also check cards loaded by score_all_candidates
-            for name in candidate_scores:
-                if name not in _cand_oid:
-                    _cand_oid[name] = ctx.card_oid.get(name, "")
-
-            # Build oid→name reverse lookup for deck cards
-            _deck_oid_to_name = {}
-            for c in cards:
-                if c["name"] in deck_cards:
-                    _deck_oid_to_name[c.get("oracle_id", "")] = c["name"]
-
-            for card_name, info in candidate_scores.items():
-                card_oid = _cand_oid.get(card_name, "")
-                if not card_oid:
-                    continue
-                # Find causal edges from deck cards to this candidate
-                ctx.causal_ctx._ensure_loaded(card_oid)
-                for edge in ctx.causal_ctx._incoming.get(card_oid, []):
-                    deck_name = _deck_oid_to_name.get(edge.source)
-                    if deck_name:
-                        info["partners"].append((deck_name, edge.strength, 1))
-                for edge in ctx.causal_ctx._outgoing.get(card_oid, []):
-                    deck_name = _deck_oid_to_name.get(edge.target)
-                    if deck_name:
-                        info["partners"].append((deck_name, edge.strength, 1))
+        # Forge-only scoring (63 features, no EDHREC)
+        score_forge_candidates(candidate_scores, cards, _shared_conn,
+                               commander, deck_cards, deck_types,
+                               active_strategies)
 
         # Find partial Spellbook combos for display
         deck_oids = {card_oid_lookup[n] for n in deck_cards if n in card_oid_lookup}
         partial_combos = find_partial_combos(deck_oids, db_path, color_identity=color_identity)
-        # Build reverse lookup: oid → candidate name (O(n) instead of O(n×m×k))
+        # Build reverse lookup: oid -> candidate name (O(n) instead of O(n*m*k))
         _oid_to_cand = {}
         for cn in candidate_scores:
             coid = card_oid_lookup.get(cn)
@@ -187,14 +112,14 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
         info["pct"] = round(info["total"] / max_score * 100, 1)
 
     # --- Output ---
-    print(f"\n{'═' * 70}")
+    print(f"\n{'=' * 70}")
     header = f"TOP {top_n} RECOMMENDED CARDS (not in deck)"
     if active_strategies:
         header += f" | strategies: {', '.join(sorted(active_strategies))}"
     print(header)
     if deck_types:
         print(f"  Tribal boost: {', '.join(sorted(deck_types))} (+30%)")
-    print(f"{'═' * 70}")
+    print(f"{'=' * 70}")
 
     # Show combo completions first
     completions = [(c, i) for c, i in ranked if i.get("combo_completion")]
@@ -205,7 +130,7 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                         if card_oid_lookup.get(card) in pc.get("missing_oids", [])]
             for pc in matching[:2]:
                 print(f"    {' + '.join(pc['present_cards'])} + [{card}]")
-                print(f"      → {pc['result']}")
+                print(f"      -> {pc['result']}")
         print()
 
     for card, info in ranked[:top_n]:
@@ -217,23 +142,21 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
         tribal = " [tribal]" if info.get("tribal_match") else ""
         combo = " [COMBO]" if info.get("combo_completion") else ""
         strat_rel = info.get("strategy_rel")
-        strat_str = f" [strat×{strat_rel:.1f}]" if strat_rel and strat_rel != 1.0 else ""
+        strat_str = f" [strat*{strat_rel:.1f}]" if strat_rel and strat_rel != 1.0 else ""
         high_cmc = " [high CMC]" if info.get("high_cmc") else ""
         affinity = info.get("commander_affinity", 0)
         affinity_str = f" [cmdr:{affinity:.0f}]" if affinity > 0 else ""
         pct = info["pct"]
         bar_len = round(pct / 5)
-        bar = "█" * bar_len + "░" * (20 - bar_len)
-        tower_str = f" T={info['tower_score']}" if info.get("tower_score") else ""
-        edhrec_str = f" EDH={info['edhrec_syn']:.2f}" if info.get("edhrec_syn") else ""
+        bar = "\u2588" * bar_len + "\u2591" * (20 - bar_len)
         scryfall_url = f"https://scryfall.com/search?q=!%22{quote(card, safe='')}%22"
         osc_name = f"\033]8;;{scryfall_url}\033\\{card}\033]8;;\033\\"
-        print(f"\n  {pct:5.1f}% {bar} {osc_name}{tribal}{combo}{tower_str}{edhrec_str}{high_cmc}")
+        print(f"\n  {pct:5.1f}% {bar} {osc_name}{tribal}{combo}{high_cmc}")
         partner_str = f" | {len(partners)} partners{multi}" if partners else ""
         print(f"    {type_line} | CMC {cmc}{partner_str}")
         for partner, score, sigs in partners[:5]:
             sig = f"{sigs}sig" if sigs > 1 else "1sig"
-            print(f"    ↔ {partner:<30} ({score:.1f}, {sig})")
+            print(f"    <-> {partner:<30} ({score:.1f}, {sig})")
         if len(partners) > 5:
             print(f"    ... and {len(partners) - 5} more")
 
