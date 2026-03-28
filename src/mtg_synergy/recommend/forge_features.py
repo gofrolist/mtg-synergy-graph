@@ -1365,6 +1365,25 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         zone_cmdr = cmdr.cmdr_consumes[zone_dims]
         mech_zone_fwd = float(np.dot(zone_cmdr, zone_card))
 
+    # ── Interaction features: cross anti-synergy with positive signals ──
+
+    # F74: excluded_tribal_penalty — card IS the right creature type but EXCLUDES
+    # that type from its effects. E.g., Keensight Mentor is Human but targets nonHuman.
+    # Only fires when commander is tribal (trigger_filters reference subtypes).
+    excl_subs = card_profile.get('excluded_subtypes', set())
+    cmdr_is_tribal = bool(cmdr.cmdr_profile.get('trigger_filters', set()) & (cmdr.cmdr_subtypes or set()))
+    excluded_tribal = 1.0 if (cmdr_is_tribal and excl_subs and
+                               excl_subs & (cmdr.cmdr_subtypes or set())) else 0.0
+
+    # F75: temp_buff_counter_cmdr — card gives temporary buffs but commander wants
+    # permanent +1/+1 counters. E.g., Dawnhart Disciple gives "until EOT" pump
+    # but Kyler wants permanent counters.
+    cmdr_counters = cmdr.cmdr_profile.get('counter_types', set())
+    card_dur = card_profile.get('duration', set())
+    temp_counter_clash = 1.0 if ('P1P1' in cmdr_counters and
+                                  'temporary' in card_dur and
+                                  'permanent' not in card_dur) else 0.0
+
     return [
         min(out_s, 10.0),                                # F0 causal_cmdr_to_card
         min(in_s, 10.0),                                 # F1 causal_card_to_cmdr
@@ -1440,4 +1459,6 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         cmdr_needs_to_has,                               # F71 cmdr_needs_to_card_has
         card_needs_met,                                  # F72 card_needs_satisfied
         needs_rarity,                                    # F73 needs_rarity
+        excluded_tribal,                                 # F74 excluded_tribal_penalty
+        temp_counter_clash,                              # F75 temp_buff_counter_cmdr
     ]

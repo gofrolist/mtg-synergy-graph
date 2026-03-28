@@ -103,6 +103,8 @@ FORGE_FEATURE_NAMES = [
     "cmdr_needs_to_card_has",  # [71] commander needs X, card has X
     "card_needs_satisfied",    # [72] fraction of card's needs met by commander
     "needs_rarity",            # [73] how rare/specific are card's needs
+    "excluded_tribal_penalty", # [74] card is right type but excludes cmdr's type from effects
+    "temp_buff_counter_cmdr",  # [75] card gives temporary buffs, cmdr wants permanent counters
 ]
 
 

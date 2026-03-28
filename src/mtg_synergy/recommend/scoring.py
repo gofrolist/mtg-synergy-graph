@@ -105,6 +105,25 @@ def _score_commander(cmdr_oid, cmdr_name, color_identity, deck_cards,
         warnings.simplefilter("ignore")
         scores = gbm.predict(X, raw_score=True)
 
+    # Post-scoring penalties for clear anti-synergy patterns
+    cmdr_subtypes = cmdr_ctx.cmdr_subtypes or set()
+    cmdr_profile = ctx._forge_profiles.get(cmdr_oid, {})
+    cmdr_has_counters = 'P1P1' in cmdr_profile.get('counter_types', set())
+    # Commander is tribal if its trigger_filters reference specific creature types
+    cmdr_is_tribal = bool(cmdr_profile.get('trigger_filters', set()) & cmdr_subtypes)
+    for i, (name, cd) in enumerate(cand_list):
+        profile = ctx._forge_profiles.get(cd["oracle_id"], {})
+        # Card excludes commander's creature type — only penalize for tribal commanders
+        if cmdr_is_tribal:
+            excl = profile.get('excluded_subtypes', set())
+            if excl and (excl & cmdr_subtypes):
+                scores[i] *= 0.3
+        # Card has only temporary buffs but commander uses +1/+1 counters
+        if cmdr_has_counters:
+            dur = profile.get('duration', set())
+            if 'temporary' in dur and 'permanent' not in dur:
+                scores[i] *= 0.5
+
     # Rank and return top N
     ranked = sorted(zip([n for n, _ in cand_list], scores),
                     key=lambda x: -x[1])
@@ -218,6 +237,21 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             scores = gbm.predict(X, raw_score=True)
+
+        # Post-scoring penalties for clear anti-synergy patterns
+        cmdr_subtypes = cmdr_ctx.cmdr_subtypes or set()
+        cmdr_has_counters = 'P1P1' in (ctx._forge_profiles.get(cmdr_oid, {}).get('counter_types', set()))
+        if cmdr_subtypes or cmdr_has_counters:
+            for i, (name, cd) in enumerate(cand_list):
+                oid = cd.get("oracle_id") or card_oid.get(name, "")
+                profile = ctx._forge_profiles.get(oid, {})
+                excl = profile.get('excluded_subtypes', set())
+                if excl and (excl & cmdr_subtypes):
+                    scores[i] *= 0.3
+                dur = profile.get('duration', set())
+                if cmdr_has_counters and 'temporary' in dur and 'permanent' not in dur:
+                    scores[i] *= 0.5
+
         for i, (name, _) in enumerate(cand_list):
             info = candidate_scores[name]
             info["total"] = float(scores[i]) * 10.0
