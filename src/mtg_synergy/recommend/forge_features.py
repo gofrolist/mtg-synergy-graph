@@ -132,12 +132,18 @@ class ForgeFeatureContext:
                 'token_amount_variable': False,
                 'excluded_subtypes': set(),
                 'has_static_anthem': False, 'counters_on_lands': False,
-                'counter_trigger_themes': set(),
+                'counter_trigger_themes': set(), 'has_p1p1': False,
             })
             if row[1]: p['verbs'].add(row[1])
             if row[2]: p['triggers'].add(row[2])
             if row[3]: p['keywords'].add(row[3])
-            if row[4]: p['counter_types'].add(row[4])
+            if row[4]:
+                p['counter_types'].add(row[4])
+                if row[4] == 'P1P1':
+                    p['has_p1p1'] = True
+            # Also check raw_line for P1P1 references (replacement effects, etbCounter)
+            if not p['has_p1p1'] and row[10] and 'P1P1' in row[10]:
+                p['has_p1p1'] = True
             if row[5]:
                 for t in row[5].split(","):
                     main = t.split(".")[0].strip()
@@ -1426,6 +1432,15 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
     # targeting lands). These counters don't benefit creature-based counter strategies.
     counters_on_lands = 1.0 if card_profile.get('counters_on_lands', False) else 0.0
 
+    # F78: cmdr_p1p1_card_no_counters — commander uses +1/+1 counters but card has
+    # NO interaction with P1P1 counters at all (no PutCounter, no P1P1 reference).
+    # Penalizes generic Humans that don't contribute to the counter strategy.
+    card_has_p1p1 = card_profile.get('has_p1p1', False)
+    card_counter_verbs = card_verbs & {'PutCounter', 'PutCounterAll', 'Proliferate', 'MoveCounter'}
+    no_counter_for_cmdr = 1.0 if ('P1P1' in cmdr_counters and
+                                   not card_has_p1p1 and
+                                   not card_counter_verbs) else 0.0
+
     return [
         min(out_s, 10.0),                                # F0 causal_cmdr_to_card
         min(in_s, 10.0),                                 # F1 causal_card_to_cmdr
@@ -1505,4 +1520,5 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         cmdr_counter_x_put,                              # F75 cmdr_counter_x_put_counter
         static_anthem_clash,                             # F76 static_anthem_counter_cmdr
         counters_on_lands,                               # F77 counters_on_lands
+        no_counter_for_cmdr,                             # F78 cmdr_p1p1_card_no_counters
     ]

@@ -45,7 +45,7 @@ def test_forge_profiles_loaded():
         expected_bool_keys = {
             "combat_damage", "is_secondary", "gain_control",
             "produces_mana", "counter_num_variable", "grants_abilities",
-            "token_amount_variable", "has_static_anthem", "counters_on_lands",
+            "token_amount_variable", "has_static_anthem", "counters_on_lands", "has_p1p1",
         }
         expected_optional_str_keys = {"damage_amount", "cards_drawn", "life_amount"}
         all_expected = expected_set_keys | expected_bool_keys | expected_optional_str_keys
@@ -622,7 +622,7 @@ class TestFeatureCount:
             if found_oid is None:
                 pytest.skip("No card found for feature count test")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert len(features) == 78, (
+            assert len(features) == 79, (
                 f"Expected 74 features, got {len(features)}"
             )
         finally:
@@ -870,7 +870,7 @@ def test_feature_count_71():
             card_oid, card_meta[0] or "", float(card_meta[1] or 0),
             ctx, cmdr_ctx,
         )
-        assert len(feats) == 78, f"Expected 78 features, got {len(feats)}"
+        assert len(feats) == 79, f"Expected 78 features, got {len(feats)}"
     finally:
         conn.close()
 

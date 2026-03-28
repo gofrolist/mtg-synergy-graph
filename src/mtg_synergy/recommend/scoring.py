@@ -187,6 +187,12 @@ def _score_commander(cmdr_oid, cmdr_name, color_identity, deck_cards,
             # Card puts counters on lands, not creatures
             if profile.get('counters_on_lands', False):
                 scores[i] *= 0.4
+            # Card is a creature with zero P1P1 counter interaction — just a body
+            if ("Creature" in cd.get("type_line", "") and
+                    not profile.get('has_p1p1', False) and
+                    not (profile.get('verbs', set()) &
+                         {'PutCounter', 'PutCounterAll', 'Proliferate', 'MoveCounter'})):
+                scores[i] *= 0.6
         # Card needs colors outside commander's color identity (e.g., Pearl Medallion in mono-G)
         # Hard filter: these cards are guaranteed useless
         card_needs = ctx._deck_needs.get(cd["oracle_id"], set())
@@ -346,6 +352,13 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
                     scores[i] *= 0.5
                 if profile.get('counters_on_lands', False):
                     scores[i] *= 0.4
+                # Creature with zero P1P1 interaction — just a body
+                tl = cd.get("type_line", "")
+                if ("Creature" in tl and
+                        not profile.get('has_p1p1', False) and
+                        not (profile.get('verbs', set()) &
+                             {'PutCounter', 'PutCounterAll', 'Proliferate', 'MoveCounter'})):
+                    scores[i] *= 0.6
             # Card needs colors outside commander's color identity
             # Hard filter: these cards are guaranteed useless
             card_needs = ctx._deck_needs.get(oid, set())

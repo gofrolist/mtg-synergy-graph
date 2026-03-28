@@ -107,6 +107,7 @@ FORGE_FEATURE_NAMES = [
     "cmdr_counter_x_put_counter", # [75] commander uses +1/+1 counters AND card places counters
     "static_anthem_counter_cmdr", # [76] static anthem (not counters) but cmdr wants counters
     "counters_on_lands",       # [77] card places counters on lands (earthbend etc.)
+    "cmdr_p1p1_card_no_counters", # [78] cmdr uses P1P1 but card has zero counter interaction
 ]
 
 
