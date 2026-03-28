@@ -109,15 +109,26 @@ def _score_commander(cmdr_oid, cmdr_name, color_identity, deck_cards,
     cmdr_subtypes = cmdr_ctx.cmdr_subtypes or set()
     cmdr_profile = ctx._forge_profiles.get(cmdr_oid, {})
     cmdr_has_counters = 'P1P1' in cmdr_profile.get('counter_types', set())
-    # Commander is tribal if its trigger_filters reference specific creature types
     cmdr_is_tribal = bool(cmdr_profile.get('trigger_filters', set()) & cmdr_subtypes)
+    _generic_req = {"card", "creature", "permanent", "self", "other",
+                    "nontoken", "token", "artifact", "enchantment", "land",
+                    "spell", "any"}
     for i, (name, cd) in enumerate(cand_list):
         profile = ctx._forge_profiles.get(cd["oracle_id"], {})
-        # Card excludes commander's creature type — only penalize for tribal commanders
         if cmdr_is_tribal:
+            # Card excludes commander's creature type from effects
             excl = profile.get('excluded_subtypes', set())
             if excl and (excl & cmdr_subtypes):
                 scores[i] *= 0.3
+            # Card requires a specific subtype the commander doesn't have
+            req = profile.get('required_subtypes', set())
+            non_generic_req = req - _generic_req
+            if non_generic_req and not (non_generic_req & cmdr_subtypes):
+                scores[i] *= 0.4
+            # Card creates tokens of wrong creature type
+            token_subs = ctx._token_subtypes.get(cd["oracle_id"], set())
+            if token_subs and not (token_subs & cmdr_subtypes):
+                scores[i] *= 0.5
         # Card has only temporary buffs but commander uses +1/+1 counters
         if cmdr_has_counters:
             dur = profile.get('duration', set())
@@ -240,16 +251,29 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
 
         # Post-scoring penalties for clear anti-synergy patterns
         cmdr_subtypes = cmdr_ctx.cmdr_subtypes or set()
-        cmdr_has_counters = 'P1P1' in (ctx._forge_profiles.get(cmdr_oid, {}).get('counter_types', set()))
-        if cmdr_subtypes or cmdr_has_counters:
-            for i, (name, cd) in enumerate(cand_list):
-                oid = cd.get("oracle_id") or card_oid.get(name, "")
-                profile = ctx._forge_profiles.get(oid, {})
+        cmdr_profile = ctx._forge_profiles.get(cmdr_oid, {})
+        cmdr_has_counters = 'P1P1' in cmdr_profile.get('counter_types', set())
+        cmdr_is_tribal = bool(cmdr_profile.get('trigger_filters', set()) & cmdr_subtypes)
+        _generic_req = {"card", "creature", "permanent", "self", "other",
+                        "nontoken", "token", "artifact", "enchantment", "land",
+                        "spell", "any"}
+        for i, (name, cd) in enumerate(cand_list):
+            oid = cd.get("oracle_id") or card_oid.get(name, "")
+            profile = ctx._forge_profiles.get(oid, {})
+            if cmdr_is_tribal:
                 excl = profile.get('excluded_subtypes', set())
                 if excl and (excl & cmdr_subtypes):
                     scores[i] *= 0.3
+                req = profile.get('required_subtypes', set())
+                non_generic_req = req - _generic_req
+                if non_generic_req and not (non_generic_req & cmdr_subtypes):
+                    scores[i] *= 0.4
+                token_subs = ctx._token_subtypes.get(oid, set())
+                if token_subs and not (token_subs & cmdr_subtypes):
+                    scores[i] *= 0.5
+            if cmdr_has_counters:
                 dur = profile.get('duration', set())
-                if cmdr_has_counters and 'temporary' in dur and 'permanent' not in dur:
+                if 'temporary' in dur and 'permanent' not in dur:
                     scores[i] *= 0.5
 
         for i, (name, _) in enumerate(cand_list):

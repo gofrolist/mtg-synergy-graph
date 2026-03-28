@@ -419,10 +419,15 @@ class ForgeFeatureContext:
         ):
             self._triggered_counts[row[0]] = row[1]
 
-        # Pre-load token stats per card (for F65, F66)
+        # Pre-load token stats per card (for F65, F66) + token subtypes for penalties
         self._token_max_pt = {}      # oid -> max P+T across all token scripts
         self._token_max_kw = {}      # oid -> max keyword count across all token scripts
+        self._token_subtypes = {}    # oid -> set of creature subtypes from tokens
         _kw_skip = {"sac", "draw"}   # not real keywords in token scripts
+        _token_kw_skip = {"flying", "haste", "trample", "vigilance", "deathtouch",
+                          "lifelink", "menace", "reach", "defender", "sac", "draw",
+                          "unblockable", "first", "strike", "double", "indestructible",
+                          "hexproof", "shroud", "wither", "persist"}
         for row in conn.execute(
             "SELECT fnm.oracle_id, fa.token_script FROM forge_abilities fa "
             "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
@@ -443,6 +448,10 @@ class ForgeFeatureContext:
                         kws = [tok for tok in parts[3:] if tok and tok not in _kw_skip and len(tok) > 1]
                         kw_count = len(kws)
                         self._token_max_kw[oid] = max(self._token_max_kw.get(oid, 0), kw_count)
+                        # Extract token creature subtypes (not keywords)
+                        for tok in parts[3:]:
+                            if tok and tok not in _token_kw_skip and len(tok) > 1:
+                                self._token_subtypes.setdefault(oid, set()).add(tok)
 
         # Pre-load zone interaction flags per card (for F67, F68)
         self._zone_graveyard = set()
