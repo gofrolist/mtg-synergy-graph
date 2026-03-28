@@ -174,86 +174,102 @@ def _resolve_slugs_to_oids(conn, table="edhrec_average_decks"):
 
 
 def sample_negatives(positives_by_cmdr, all_card_oids, card_colors, cmdr_colors,
-                     ratio=3, hard_ratio=0.5, card_strats=None, card_subtypes=None):
-    """Sample negative pairs (cards NOT in a commander's avg deck).
+                     ratio=3, card_strats=None, card_subtypes=None,
+                     card_has_tags=None):
+    """Sample negative pairs (cards NOT in a commander's EDHREC page).
 
-    For each commander, samples ratio * |positives| negative cards:
-    - hard_ratio fraction are "hard" negatives (strategy/subtype overlap)
-    - remainder are random color-legal cards
+    For each commander, samples ratio * |positives| negative cards in 3 tiers:
+    - 1/3 strategy/subtype overlap (same tribe/archetype, wrong card)
+    - 1/3 tag overlap (same has-tags as commander, e.g., Ability$Counters)
+    - 1/3 random color-legal cards
+
+    The tag-overlap tier teaches the model that sharing a broad tag like
+    has=Ability$Counters isn't enough — the specific mechanics must match.
 
     Returns list of (cmdr_oid, card_oid, 0) tuples.
     """
     rng = np.random.RandomState(42)
 
     # Pre-group cards by color identity signature for O(1) lookup per commander.
-    # Only ~32 unique color identity subsets exist (subsets of {W,U,B,R,G}).
-    # This replaces O(commanders × all_cards) nested loop with O(all_cards) once.
     ci_to_cards = {}
     for oid in all_card_oids:
         ci_key = frozenset(card_colors.get(oid, set()))
         ci_to_cards.setdefault(ci_key, []).append(oid)
 
     # Pre-compute: for each possible commander CI, which CI keys are legal subsets
-    # A card is legal if card_ci ⊆ cmdr_ci
-    ci_key_subsets = {}  # frozenset(cmdr_ci) → list of legal ci_keys
+    ci_key_subsets = {}
     all_ci_keys = list(ci_to_cards.keys())
-    # Cache unique commander CIs
     unique_cmdr_cis = set()
     for cmdr_oid in positives_by_cmdr:
         unique_cmdr_cis.add(frozenset(cmdr_colors.get(cmdr_oid, set())))
     for cmdr_ci_key in unique_cmdr_cis:
         ci_key_subsets[cmdr_ci_key] = [k for k in all_ci_keys if k <= cmdr_ci_key]
 
+    # Reverse index: tag → set of oids that have it (for tag-overlap negatives)
+    tag_to_oids = {}
+    if card_has_tags:
+        for oid, tags in card_has_tags.items():
+            for tag in tags:
+                tag_to_oids.setdefault(tag, set()).add(oid)
+
     negatives = []
 
     for cmdr_oid, pos_cards in positives_by_cmdr.items():
         cmdr_ci = frozenset(cmdr_colors.get(cmdr_oid, set()))
 
-        # Candidate pool: color-legal, not in deck — via pre-grouped lookup
+        # Candidate pool: color-legal, not in deck
         exclude = pos_cards | {cmdr_oid} if isinstance(pos_cards, set) else set(pos_cards) | {cmdr_oid}
         candidates = []
+        cand_set = set()
         for ci_key in ci_key_subsets.get(cmdr_ci, []):
             for oid in ci_to_cards[ci_key]:
                 if oid not in exclude:
                     candidates.append(oid)
+                    cand_set.add(oid)
 
         n_neg = min(len(candidates), ratio * len(pos_cards))
         if n_neg == 0:
             continue
 
-        n_hard = int(n_neg * hard_ratio) if hard_ratio > 0 else 0
-        hard_chosen = set()
+        n_per_tier = n_neg // 3
+        all_chosen = set()
 
-        if n_hard > 0:
-            # Hard negatives: strategy/subtype overlap
-            if card_strats or card_subtypes:
-                cmdr_strats = card_strats.get(cmdr_oid, set()) if card_strats else set()
-                cmdr_subs = card_subtypes.get(cmdr_oid, set()) if card_subtypes else set()
+        # Tier 1: strategy/subtype overlap (same tribe but wrong card)
+        if n_per_tier > 0 and (card_strats or card_subtypes):
+            cmdr_strats = card_strats.get(cmdr_oid, set()) if card_strats else set()
+            cmdr_subs = card_subtypes.get(cmdr_oid, set()) if card_subtypes else set()
+            hard_pool = [oid for oid in candidates
+                         if (card_strats and bool(cmdr_strats & card_strats.get(oid, set()))) or
+                            (card_subtypes and bool(cmdr_subs & card_subtypes.get(oid, set())))]
+            if hard_pool:
+                n_pick = min(n_per_tier, len(hard_pool))
+                for idx in rng.choice(len(hard_pool), size=n_pick, replace=False):
+                    all_chosen.add(hard_pool[idx])
 
-                hard_pool = []
-                for oid in candidates:
-                    shared_strat = bool(cmdr_strats & card_strats.get(oid, set())) if card_strats else False
-                    shared_sub = bool(cmdr_subs & card_subtypes.get(oid, set())) if card_subtypes else False
-                    if shared_strat or shared_sub:
-                        hard_pool.append(oid)
+        # Tier 2: tag overlap (shares has-tags with commander, e.g., Ability$Counters)
+        if n_per_tier > 0 and card_has_tags:
+            cmdr_tags = card_has_tags.get(cmdr_oid, set())
+            if cmdr_tags:
+                tag_pool_set = set()
+                for tag in cmdr_tags:
+                    tag_pool_set.update(tag_to_oids.get(tag, set()))
+                tag_pool = [oid for oid in tag_pool_set
+                            if oid in cand_set and oid not in all_chosen]
+                if tag_pool:
+                    n_pick = min(n_per_tier, len(tag_pool))
+                    for idx in rng.choice(len(tag_pool), size=n_pick, replace=False):
+                        all_chosen.add(tag_pool[idx])
 
-                if hard_pool:
-                    n_pick = min(n_hard, len(hard_pool))
-                    chosen_idx = rng.choice(len(hard_pool), size=n_pick, replace=False)
-                    for idx in chosen_idx:
-                        hard_chosen.add(hard_pool[idx])
+        for oid in all_chosen:
+            negatives.append((cmdr_oid, oid, 0))
 
-            for oid in hard_chosen:
-                negatives.append((cmdr_oid, oid, 0))
-
-        # Fill remainder with random
-        n_random = n_neg - len(hard_chosen)
+        # Tier 3: random (fill remainder)
+        n_random = n_neg - len(all_chosen)
         if n_random > 0:
-            random_pool = [oid for oid in candidates if oid not in hard_chosen]
+            random_pool = [oid for oid in candidates if oid not in all_chosen]
             if random_pool:
                 n_random = min(n_random, len(random_pool))
-                chosen_idx = rng.choice(len(random_pool), size=n_random, replace=False)
-                for idx in chosen_idx:
+                for idx in rng.choice(len(random_pool), size=n_random, replace=False):
                     negatives.append((cmdr_oid, random_pool[idx], 0))
 
     return negatives
@@ -439,7 +455,7 @@ def train_forge_gbm(X, y, cmdr_ids):
 
         booster = lgb.train(
             params, train_data,
-            num_boost_round=1000,
+            num_boost_round=2000,
             valid_sets=[eval_data],
             callbacks=[lgb.early_stopping(50, verbose=False),
                        lgb.log_evaluation(0)],
@@ -650,14 +666,24 @@ def _load_pairs_for_features(conn):
         except (IndexError, AttributeError):
             pass
 
+    # Load card has-tags for tag-overlap hard negatives
+    card_has_tags = {}
+    for row in conn.execute(
+        "SELECT fnm.oracle_id, fdt.tag FROM forge_deck_tags fdt "
+        "JOIN forge_name_map fnm ON fnm.forge_name = fdt.card_name "
+        "WHERE fdt.tag_type = 'has'"
+    ):
+        card_has_tags.setdefault(row[0], set()).add(row[1])
+
     # Build positives set for negative exclusion
     positives_for_neg = {cmdr: {oid for oid, _ in pairs}
                          for cmdr, pairs in positives_by_cmdr.items()}
 
-    print("\nSampling negatives (ratio=1, 50% hard)...")
+    print("\nSampling negatives (ratio=3, 1/3 subtype + 1/3 tag + 1/3 random)...")
     neg_pairs = sample_negatives(
-        positives_for_neg, all_card_oids, card_colors, card_colors, ratio=1,
-        hard_ratio=0.5, card_strats=card_strats, card_subtypes=card_subtypes,
+        positives_for_neg, all_card_oids, card_colors, card_colors, ratio=3,
+        card_strats=card_strats, card_subtypes=card_subtypes,
+        card_has_tags=card_has_tags,
     )
     print(f"  Negative pairs: {len(neg_pairs)}")
 
