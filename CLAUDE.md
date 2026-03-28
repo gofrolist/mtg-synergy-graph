@@ -11,7 +11,7 @@ MTG Synergy Graph — a tool for analyzing Magic: The Gathering EDH/Commander de
 ```
 FORGE MODEL (--recommend): Zero oracle text, pure Forge mechanical synergy
   1. Color-identity filter → all legal cards scored directly by GBM (no tower, no embeddings)
-  2. Forge LambdaRank GBM: 74 features, EDHREC labels, forge-native features
+  2. Forge LambdaRank GBM: 76 features, EDHREC labels, forge-native features
      100% Forge-native: no oracle text, no embeddings, no neural network
      25 profile fields per card extracted from forge_abilities (verbs, triggers, keywords,
      counter_types, targets, ability_types, trigger_filters, required_subtypes,
@@ -139,7 +139,7 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
 
 **Forge model** (data/fusion_model_forge.lgb):
 - No tower model, no embeddings, no neural network — pure LightGBM on Forge data
-- LambdaRank GBM on 74 features (shared via `src/mtg_synergy/recommend/forge_features.py`):
+- LambdaRank GBM on 76 features (shared via `src/mtg_synergy/recommend/forge_features.py`):
   100% Forge-native with 25 profile fields per card:
   causal scores (6), strategy (2), forge_ability_cosine, phase (2), tribal,
   card types (6), cmc, deck edges (3), causal_composite, card_hub_score,
@@ -183,6 +183,8 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
   deck_edge_count 7%, forge_ability_cosine 6%, cmc 5%
 - Edge index cached to npz (~2s reload vs ~40s DB scan)
 - Edge index pre-loaded at inference: CmdrFeatureContext uses in-memory adjacency (~7s total)
+- Post-scoring penalties: excluded_tribal (×0.3), required_subtype mismatch (×0.4),
+  wrong token type (×0.5), temporary buffs for counter commanders (×0.5)
 - GBM: LambdaRank, num_leaves=255, lr=0.05, n_estimators=1500, label_gain=[0,1,3,6,15,30]
 
 ### Recommendation Pipeline (synergy_graph.py --commander "Name" --recommend)
@@ -190,7 +192,7 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
 ```
 1. Candidate selection: Color-identity filter → ALL legal cards (no tower, no embeddings)
 2. Score all candidates with GBM (batch predict, ~0.5s for 13k cards):
-   74 features (LambdaRank, 100% Forge-native, no oracle text)
+   76 features (LambdaRank, 100% Forge-native, no oracle text)
 3. Sort and output top 30 with clickable Scryfall hyperlinks (OSC 8)
 Total time: ~7s (including edge index load from cache)
 ```
