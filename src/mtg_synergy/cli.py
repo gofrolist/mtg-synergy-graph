@@ -36,7 +36,7 @@ def run():
     parser.add_argument("--recommend", action="store_true",
                         help="Recommend cards based on synergy with the deck")
     parser.add_argument("--forge", action="store_true",
-                        help="Use forge-only model (no EDHREC features) for --recommend")
+                        help="(deprecated, forge is now the default)")
     parser.add_argument("--combos", action="store_true",
                         help="Detect 3- and 4-card combos in the deck")
     parser.add_argument("--swaps", action="store_true",
@@ -73,7 +73,7 @@ def run():
         cards = get_cards_by_names(deck_names, DB_PATH)
         print(f"Loaded {len(cards)} deck cards from DB")
 
-        # For --recommend and --swaps, tower pre-filter handles candidate discovery.
+        # For --recommend and --swaps, forge model handles candidate discovery.
 
     # --- Strategy detection ---
     active_strategies = set()
@@ -134,7 +134,7 @@ def run():
             print(f"Active strategies: {', '.join(sorted(active_strategies))}")
 
     # The legacy provides/wants graph has been removed.
-    # --recommend and --swaps use the tower pre-filter + causal graph.
+    # --recommend and --swaps use the forge model + causal graph.
     graph = {"adjacency": {}, "edges": [], "stats": {}}
 
     # Ensure deck config is loaded (already set in DB path, need it for --input path)
