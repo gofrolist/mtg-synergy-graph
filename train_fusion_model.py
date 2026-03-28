@@ -1586,10 +1586,11 @@ def train_tower_forge():
     return best_model or model
 
 
-def _load_pairs_for_features(conn, oid_to_idx):
+def _load_pairs_for_features(conn, oid_to_idx=None):
     """Load EDHREC membership + sample negatives, return pairs_by_cmdr for build_feature_matrix.
 
     Returns dict[cmdr_oid -> list[(card_oid, label)]].
+    oid_to_idx is optional — if None, uses all cards from DB.
     """
     # Load color identities
     card_colors = {}
@@ -1612,9 +1613,10 @@ def _load_pairs_for_features(conn, oid_to_idx):
     for row in conn.execute("SELECT oracle_id, type_line FROM cards"):
         type_lines[row[0]] = row[1] or ""
 
-    # Build card pool
+    # Build card pool (all cards if no oid_to_idx filter)
+    card_pool = oid_to_idx if oid_to_idx else {r[0] for r in conn.execute("SELECT oracle_id FROM cards")}
     all_card_oids = []
-    for oid in oid_to_idx:
+    for oid in card_pool:
         if oid in basic_land_oids:
             continue
         tl = type_lines.get(oid, "")
@@ -1626,19 +1628,8 @@ def _load_pairs_for_features(conn, oid_to_idx):
     print("\nLoading EDHREC membership data...")
     positives_by_cmdr = load_edhrec_membership(conn)
 
-    # Filter to commanders with embeddings
-    positives_by_cmdr = {
-        k: v for k, v in positives_by_cmdr.items() if k in oid_to_idx
-    }
-    for cmdr_oid in list(positives_by_cmdr.keys()):
-        positives_by_cmdr[cmdr_oid] = {
-            oid for oid in positives_by_cmdr[cmdr_oid] if oid in oid_to_idx
-        }
-        if not positives_by_cmdr[cmdr_oid]:
-            del positives_by_cmdr[cmdr_oid]
-
     total_pos = sum(len(v) for v in positives_by_cmdr.values())
-    print(f"  Positive pairs with embeddings: {total_pos} across {len(positives_by_cmdr)} commanders")
+    print(f"  Positive pairs: {total_pos} across {len(positives_by_cmdr)} commanders")
 
     # Load strategies + subtypes for hard negative sampling
     card_strats = {}
@@ -2127,7 +2118,7 @@ def main():
 
     if args.forge_only:
         print("=" * 60)
-        print("FORGE-ONLY MODEL — self-supervised causal graph labels")
+        print("FORGE-ONLY MODEL — EDHREC labels, forge features")
         print("=" * 60)
 
         # Check for cached feature matrix (skip 3+ min rebuild)
@@ -2141,8 +2132,10 @@ def main():
             print(f"  Matrix: {X_forge.shape}, positives: {int((y_forge > 0).sum())}, "
                   f"negatives: {int((y_forge == 0).sum())}")
         else:
+            # Use EDHREC labels (external ground truth) with forge features
+            # Self-supervised causal labels overfit because features ARE the causal graph
             conn = sqlite3.connect(DB_PATH)
-            pairs_by_cmdr = _load_forge_pairs_for_features(conn)
+            pairs_by_cmdr = _load_pairs_for_features(conn)
             conn.close()
 
             print("\n--- Building FORGE-ONLY feature matrix ---")
@@ -2154,7 +2147,7 @@ def main():
 
         # Train forge GBM only (no baseline)
         print("\n" + "=" * 60)
-        print("Training FORGE-ONLY model (self-supervised, causal graph labels)")
+        print("Training FORGE-ONLY model (EDHREC labels, forge features)")
         print("=" * 60)
         _, forge_scores = train_forge_gbm(X_forge, y_forge, cmdr_ids_forge)
 
