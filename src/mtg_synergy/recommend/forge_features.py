@@ -1,6 +1,6 @@
 """Shared forge feature computation for training and inference.
 
-Extracts the 38-feature forge GBM feature vector computation into a
+Extracts the 63-feature forge GBM feature vector computation into a
 single module used by both train_fusion_model.py and scoring.py.
 
 No oracle-text embeddings or tower model — pure Forge-native features.
@@ -126,6 +126,9 @@ class ForgeFeatureContext:
                 'grants_types': set(), 'damage_amount': None,
                 'cards_drawn': None, 'life_amount': None,
                 'is_secondary': False, 'gain_control': False,
+                'produces_mana': False, 'mana_colors': set(),
+                'counter_num_variable': False, 'grants_abilities': False,
+                'token_amount_variable': False,
             })
             if row[1]: p['verbs'].add(row[1])
             if row[2]: p['triggers'].add(row[2])
@@ -256,6 +259,27 @@ class ForgeFeatureContext:
             # --- Gain control ---
             if 'GainControl$ True' in raw_line:
                 p['gain_control'] = True
+            # --- Mana production: Produced$ W/U/B/R/G/C/Any/Combo ---
+            m = _re.search(r'Produced\$\s*(\S+)', raw_line)
+            if m:
+                p['produces_mana'] = True
+                prod = m.group(1)
+                for c in ('W', 'U', 'B', 'R', 'G'):
+                    if c in prod:
+                        p['mana_colors'].add(c)
+                if prod in ('Any', 'Combo', 'Chosen'):
+                    p['mana_colors'].update({'W', 'U', 'B', 'R', 'G'})
+            # --- Counter quantity variable: CounterNum$ X/Y ---
+            m = _re.search(r'CounterNum\$\s*(\S+)', raw_line)
+            if m and m.group(1) in ('X', 'Y', 'All', 'Any'):
+                p['counter_num_variable'] = True
+            # --- Grants abilities: AddAbility$ ---
+            if 'AddAbility$' in raw_line:
+                p['grants_abilities'] = True
+            # --- Token amount variable: TokenAmount$ X ---
+            m = _re.search(r'TokenAmount\$\s*(\S+)', raw_line)
+            if m and m.group(1) in ('X', 'Y'):
+                p['token_amount_variable'] = True
 
         # Pre-compute card-level mechanical unions (avoid redundant set ops in inner loop)
         self._card_mechs = {}
@@ -263,6 +287,40 @@ class ForgeFeatureContext:
             mechs = p['verbs'] | p['triggers'] | p['keywords']
             if mechs:
                 self._card_mechs[oid] = mechs
+
+        # Forge deck tags: Forge's own deck-building AI signals
+        # has = what abilities/themes a card provides
+        # hints = what the card wants in the deck
+        # needs = what the card requires to function
+        self._deck_has = {}    # oracle_id -> set of tags
+        self._deck_hints = {}  # oracle_id -> set of tags
+        self._deck_needs = {}  # oracle_id -> set of tags
+        for row in conn.execute(
+            "SELECT fnm.oracle_id, fdt.tag_type, fdt.tag "
+            "FROM forge_deck_tags fdt "
+            "JOIN forge_name_map fnm ON fnm.forge_name = fdt.card_name"
+        ):
+            oid, tag_type, tag = row
+            # Normalize compound tags: "Ability$Token|Sacrifice" → {"Ability$Token", "Ability$Sacrifice"}
+            # Also keep the raw compound for exact matching
+            tags = set()
+            parts = tag.split("|")
+            tags.add(tag)
+            # Split compound tags like "Type$Goblin|Warrior" into individual tags
+            if "|" in tag:
+                prefix = ""
+                for part in parts:
+                    if "$" in part:
+                        prefix = part.split("$")[0] + "$"
+                        tags.add(part)
+                    elif prefix:
+                        tags.add(prefix + part)
+            if tag_type == "has":
+                self._deck_has.setdefault(oid, set()).update(tags)
+            elif tag_type == "hints":
+                self._deck_hints.setdefault(oid, set()).update(tags)
+            elif tag_type == "needs":
+                self._deck_needs.setdefault(oid, set()).update(tags)
 
         # Forge ability vectors: binary encoding of verbs+triggers+keywords for cosine similarity
         # Replaces oracle text TF-IDF (F9) with mechanical similarity
@@ -563,6 +621,11 @@ class CmdrFeatureContext:
         self.cmdr_produces = ctx._mech_produces.get(cmdr_oid)
         self.cmdr_consumes = ctx._mech_consumes.get(cmdr_oid)
 
+        # Commander deck tags (Forge's deck-building AI signals)
+        self.cmdr_has = ctx._deck_has.get(cmdr_oid, set())
+        self.cmdr_hints = ctx._deck_hints.get(cmdr_oid, set())
+        self.cmdr_needs = ctx._deck_needs.get(cmdr_oid, set())
+
         # Commander zones and profile for new features F33-F39
         self.cmdr_zones = ctx._card_zones.get(cmdr_oid, set())
         self.cmdr_profile = ctx._forge_profiles.get(cmdr_oid, {
@@ -788,9 +851,9 @@ class CmdrFeatureContext:
 
 def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
                           ctx: ForgeFeatureContext, cmdr: CmdrFeatureContext) -> list:
-    """Compute the 51-feature vector for a single (commander, card) pair.
+    """Compute the 63-feature vector for a single (commander, card) pair.
 
-    Returns a list of 51 floats matching FORGE_FEATURE_NAMES order.
+    Returns a list of 63 floats matching FORGE_FEATURE_NAMES order.
     Pure Forge-native features — no tower model or oracle-text embeddings.
     """
     out_s = cmdr.cmdr_out.get(card_oid, 0.0)
@@ -1084,6 +1147,56 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
     # More conditions = more restrictive = harder to use
     condition_count = float(min(len(card_conds), 5))
 
+    # ── Forge deck tags: Forge's deck-building AI signals ──
+
+    card_has = ctx._deck_has.get(card_oid, set())
+    card_hints = ctx._deck_hints.get(card_oid, set())
+    card_needs = ctx._deck_needs.get(card_oid, set())
+
+    # F51: deck_hints_to_has — commander hints X, card has X
+    # e.g., Krenko hints Type$Goblin, Chancellor of the Forge has Type$Goblin → strong match
+    hints_to_has = float(len(cmdr.cmdr_hints & card_has))
+
+    # F52: deck_has_to_hints — card hints X, commander has X
+    # e.g., Card hints Ability$Token, Krenko has Ability$Token → card wants this commander
+    has_to_hints = float(len(cmdr.cmdr_has & card_hints))
+
+    # F53: deck_needs_to_has — card needs X, commander has X
+    # e.g., Card needs Ability$Counters, Atraxa has Ability$Proliferate → card functions here
+    needs_to_has = float(len(cmdr.cmdr_has & card_needs))
+
+    # F54: deck_has_overlap — shared has tags (theme alignment)
+    has_overlap = float(len(cmdr.cmdr_has & card_has))
+
+    # F55: deck_hints_overlap — both want the same deck themes
+    hints_overlap = float(len(cmdr.cmdr_hints & card_hints))
+
+    # ── Numeric effect scaling features ──
+
+    # F56: damage_scales — card's damage amount is variable (X/Y)
+    dmg_amt = card_profile.get('damage_amount')
+    damage_scales = 1.0 if dmg_amt in ('X', 'Y') else 0.0
+
+    # F57: draw_scales — card's draw amount is variable (X/Y)
+    draw_amt = card_profile.get('cards_drawn')
+    draw_scales = 1.0 if draw_amt in ('X', 'Y') else 0.0
+
+    # F58: life_scales — card's life amount is variable (X/Y)
+    life_amt = card_profile.get('life_amount')
+    life_scales = 1.0 if life_amt in ('X', 'Y') else 0.0
+
+    # F59: produces_mana — card produces mana (mana rock/dork signal)
+    produces_mana = 1.0 if card_profile.get('produces_mana', False) else 0.0
+
+    # F60: counter_num_variable — card places X/Y counters (scales with commander)
+    counter_num_var = 1.0 if card_profile.get('counter_num_variable', False) else 0.0
+
+    # F61: grants_abilities — card grants abilities to other permanents
+    grants_abilities = 1.0 if card_profile.get('grants_abilities', False) else 0.0
+
+    # F62: token_amount_variable — card creates X tokens (scales with game state)
+    token_amt_var = 1.0 if card_profile.get('token_amount_variable', False) else 0.0
+
     return [
         min(out_s, 10.0),                                # F0 causal_cmdr_to_card
         min(in_s, 10.0),                                 # F1 causal_card_to_cmdr
@@ -1136,4 +1249,16 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         gain_ctrl,                                       # F48 gain_control
         granted_kw_count,                                # F49 granted_keyword_count
         condition_count,                                 # F50 condition_count
+        hints_to_has,                                    # F51 deck_hints_to_has
+        has_to_hints,                                    # F52 deck_has_to_hints
+        needs_to_has,                                    # F53 deck_needs_to_has
+        has_overlap,                                     # F54 deck_has_overlap
+        hints_overlap,                                   # F55 deck_hints_overlap
+        damage_scales,                                   # F56 damage_scales
+        draw_scales,                                     # F57 draw_scales
+        life_scales,                                     # F58 life_scales
+        produces_mana,                                   # F59 produces_mana
+        counter_num_var,                                 # F60 counter_num_variable
+        grants_abilities,                                # F61 grants_abilities
+        token_amt_var,                                   # F62 token_amount_variable
     ]

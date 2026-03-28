@@ -39,9 +39,13 @@ def test_forge_profiles_loaded():
             "verbs", "triggers", "keywords", "counter_types",
             "targets", "ability_types", "trigger_filters", "required_subtypes",
             "granted_keywords", "conditions", "duration",
-            "effect_zones", "scales_with", "grants_types",
+            "effect_zones", "scales_with", "grants_types", "mana_colors",
         }
-        expected_bool_keys = {"combat_damage", "is_secondary", "gain_control"}
+        expected_bool_keys = {
+            "combat_damage", "is_secondary", "gain_control",
+            "produces_mana", "counter_num_variable", "grants_abilities",
+            "token_amount_variable",
+        }
         expected_optional_str_keys = {"damage_amount", "cards_drawn", "life_amount"}
         all_expected = expected_set_keys | expected_bool_keys | expected_optional_str_keys
         assert set(profile.keys()) == all_expected, (
@@ -604,7 +608,7 @@ class TestFeatureCount:
     """Verify compute_card_features returns exactly 38 elements."""
 
     def test_feature_count_is_38(self):
-        """Feature vector length should be 38."""
+        """Feature vector length should be 63."""
         ctx, conn = _make_ctx()
         try:
             cmdr = _make_cmdr(ctx, KRENKO_OID, subtypes={"goblin"})
@@ -617,8 +621,8 @@ class TestFeatureCount:
             if found_oid is None:
                 pytest.skip("No card found for feature count test")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert len(features) == 51, (
-                f"Expected 51 features, got {len(features)}"
+            assert len(features) == 63, (
+                f"Expected 63 features, got {len(features)}"
             )
         finally:
             conn.close()

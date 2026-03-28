@@ -96,6 +96,18 @@ FORGE_FEATURE_NAMES = [
     "gain_control",          # [48] card steals permanents
     "granted_keyword_count", # [49] how many keywords card grants
     "condition_count",       # [50] how many conditions card requires
+    "deck_hints_to_has",     # [51] cmdr hints X, card has X (Forge deck-building AI)
+    "deck_has_to_hints",     # [52] card hints X, cmdr has X
+    "deck_needs_to_has",     # [53] card needs X, cmdr has X
+    "deck_has_overlap",      # [54] shared has tags (theme alignment)
+    "deck_hints_overlap",    # [55] both want same deck themes
+    "damage_scales",         # [56] card damage is X/Y (scales with game state)
+    "draw_scales",           # [57] card draw is X/Y (scales with game state)
+    "life_scales",           # [58] card life effect is X/Y
+    "produces_mana",         # [59] card produces mana (mana rock/dork)
+    "counter_num_variable",  # [60] card places X/Y counters (scales)
+    "grants_abilities",      # [61] card grants abilities to other permanents
+    "token_amount_variable", # [62] card creates X tokens (scales)
 ]
 
 def sigmoid(x):
