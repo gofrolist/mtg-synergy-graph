@@ -11,7 +11,7 @@ MTG Synergy Graph — a tool for analyzing Magic: The Gathering EDH/Commander de
 ```
 FORGE MODEL (--recommend): Zero oracle text, pure Forge mechanical synergy
   1. Color-identity filter → all legal cards scored directly by GBM (no tower, no embeddings)
-  2. Forge LambdaRank GBM: 98 features, EDHREC labels, forge-native features
+  2. Forge LambdaRank GBM: 101 features, EDHREC labels, forge-native features
      100% Forge-native: no oracle text, no embeddings, no neural network
      29 profile fields per card extracted from forge_abilities (verbs, triggers, keywords,
      counter_types, targets, ability_types, trigger_filters, required_subtypes,
@@ -31,21 +31,21 @@ FORGE MODEL (--recommend): Zero oracle text, pure Forge mechanical synergy
        amplifies (4): counter/token/damage/lifegain doublers
        targets (6): creatures, self, lands, players, artifacts, any
        4 dot-product features: produces·amplifies, requires·produces, full cosine
-     Top features: card_hub_score 8%, deck_edge_count 7.7%, strategy_cosine 6.7%,
-     ability_density 6.2%, cmc 4.7%, forge_ability_cosine 4.2%, func_full_cosine 2.6%
+     Top features: edhrec_deck_pct 11.3%, card_hub_score 7%, deck_edge_count 6%,
+     strategy_cosine 5%, ability_density 5%, cmc 4%, card_strategy_count 3.2%
   3. Forge mechanics vectors: 112-dim shared concept space encoding ALL mechanical
      interactions (32 game concepts + 80 subtypes). Captures synergy through
      card produces → commander consumes dot product.
      Zone-aware concepts: enters_from_graveyard/exile/hand, goes_to_graveyard/exile
   4. Can evaluate new cards day-1 without playtesting data
   5. Works for any of 3,141+ commanders (not just 1,361 with EDHREC)
-  6. NDCG@30 = 0.46 on leave-commander-out CV (3:1 negatives, sample-weighted)
+  6. NDCG@30 = 0.51 on leave-commander-out CV (3:1 negatives, sample-weighted)
      Training labels: edhrec_card_synergy (367k rows, section-based grading)
      Grade 5=High Synergy, 4=Top Cards, 3=synergy>0.1, 2=synergy 0-0.1, 1=negative, 0=not in table
      Training: 3:1 negative ratio (1.05M negatives), 3-tier sampling:
        1/3 strategy/subtype overlap, 1/3 tag overlap, 1/3 random
      Per-grade sample weights: grade 5→3x, grade 4→2x
-     compare_edhrec --limit 100: 2.8/50 HighSyn, 1.9/50 TopCards, 14.0/50 InDeck
+     compare_edhrec --limit 100: 3.4/50 HighSyn, 3.1/50 TopCards, 21.0/50 InDeck
 
 CAUSAL GRAPH:
   - 20.6M edges across 30+ event types (verb_event_map extracted from Forge Java source)
@@ -154,7 +154,7 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
 
 **Forge model** (data/fusion_model_forge.lgb):
 - No tower model, no embeddings, no neural network — pure LightGBM on Forge data
-- LambdaRank GBM on 98 features (shared via `src/mtg_synergy/recommend/forge_features.py`):
+- LambdaRank GBM on 101 features (shared via `src/mtg_synergy/recommend/forge_features.py`):
   100% Forge-native with 29 profile fields per card:
   causal scores (6), strategy (2), forge_ability_cosine, phase (2), tribal,
   card types (6), cmc, deck edges (3, log-scaled), causal_composite, card_hub_score (log-scaled),
@@ -177,6 +177,7 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
   temp_buff_counter_cmdr, put_counter_ratio, cmdr_counter_x_put_counter,
   static_anthem_counter_cmdr, counters_on_lands, cmdr_p1p1_card_no_counters,
   func_produces_amplifies, func_requires_produces, func_card_requires_cmdr, func_full_cosine
+     + card quality (3): edhrec_deck_pct (11.3% importance), card_in_forge, card_strategy_count
      + theme features (15): equipment (cmdr/card/match), enchantress (cmdr/card/match),
        defender (cmdr/card/match), ETB doubler (card/cmdr_density/match),
        tribal depth (lord/member/combined)
@@ -221,7 +222,7 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
 ```
 1. Candidate selection: Color-identity filter → ALL legal cards (no tower, no embeddings)
 2. Score all candidates with GBM (batch predict, ~0.5s for 13k cards):
-   98 features (LambdaRank, 100% Forge-native, no oracle text)
+   101 features (LambdaRank, 100% Forge-native, no oracle text)
 3. Sort and output top 30 with clickable Scryfall hyperlinks (OSC 8)
 Total time: ~7s (including edge index load from cache)
 ```

@@ -605,6 +605,35 @@ class ForgeFeatureContext:
         self._defender_theme_tags = {'Keyword$Defender'}
         self._enchantress_theme_tags = {'Type$Enchantment', 'Type$Aura'}
 
+        # ── Card quality / popularity signals ──
+        # EDHREC deck frequency: fraction of EDHREC commanders that include each card
+        self._edhrec_deck_pct = {}
+        try:
+            total_cmdrs = conn.execute(
+                "SELECT COUNT(DISTINCT commander_slug) FROM edhrec_card_synergy"
+            ).fetchone()[0]
+            if total_cmdrs > 0:
+                # Build name→oracle_id lookup (fast Python join instead of slow SQL LOWER)
+                name_to_oid = {}
+                for row in conn.execute("SELECT oracle_id, name FROM cards"):
+                    name_to_oid[row[1].lower()] = row[0]
+                # Count commanders per card_name
+                card_cmdr_counts = {}
+                for row in conn.execute(
+                    "SELECT card_name, COUNT(DISTINCT commander_slug) "
+                    "FROM edhrec_card_synergy GROUP BY card_name"
+                ):
+                    oid = name_to_oid.get(row[0].lower())
+                    if oid:
+                        card_cmdr_counts[oid] = card_cmdr_counts.get(oid, 0) + row[1]
+                for oid, count in card_cmdr_counts.items():
+                    self._edhrec_deck_pct[oid] = float(count) / total_cmdrs
+        except Exception:
+            pass
+
+        # Cards with Forge data (have any abilities parsed)
+        self._has_forge_data = set(self._forge_profiles.keys())
+
         # Verb→trigger alignment mapping for F30
         self._verb_triggers = {
             "Token": {"ChangesZone", "ChangesZoneAll", "TokenCreated"},
@@ -1290,9 +1319,9 @@ class CmdrFeatureContext:
 
 def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
                           ctx: ForgeFeatureContext, cmdr: CmdrFeatureContext) -> list:
-    """Compute the 98-feature vector for a single (commander, card) pair.
+    """Compute the 101-feature vector for a single (commander, card) pair.
 
-    Returns a list of 98 floats matching FORGE_FEATURE_NAMES order.
+    Returns a list of 101 floats matching FORGE_FEATURE_NAMES order.
     Pure Forge-native features — no tower model or oracle-text embeddings.
     """
     out_s = cmdr.cmdr_out.get(card_oid, 0.0)
@@ -1743,9 +1772,23 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
     func_card_req_cmdr = 0.0  # F81: card requires X trigger, cmdr produces X
     func_full_cosine = 0.0    # F82: overall functional similarity
 
-    # ── Theme-based features (F83-F97) ──
+    # ── Card quality / noise suppression features (F83-F85) ──
 
-    # Equipment theme features (F83-F85)
+    # F83: edhrec_deck_pct — fraction of EDHREC commanders including this card
+    # High = staple (Sol Ring ~1.0), Medium = synergy pick (~0.05), Low/0 = unpopular/noise
+    edhrec_pct = ctx._edhrec_deck_pct.get(card_oid, 0.0)
+
+    # F84: card_in_forge — does this card have ANY forge ability data?
+    # Cards without Forge data have all-zero mechanical features → "default" GBM score
+    in_forge = 1.0 if card_oid in ctx._has_forge_data else 0.0
+
+    # F85: card_strategy_count — number of strategies assigned to this card
+    # Cards with 0 strategies have no archetype signal
+    strat_count = float(min(len(c_strats), 5))
+
+    # ── Theme-based features (F86-F100) ──
+
+    # Equipment theme features (F86-F88)
     # F83: cmdr_equipment_theme — commander wants equipment
     cmdr_equip = 1.0 if cmdr.cmdr_equipment_theme else 0.0
     # F84: card_equipment_payoff — card is equipment or cares about equipment
@@ -1934,8 +1977,12 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         func_requires_prod,                              # F80 func_requires_produces
         func_card_req_cmdr,                              # F81 func_card_requires_cmdr
         func_full_cosine,                                # F82 func_full_cosine
+        # ── Card quality / noise suppression ──
+        edhrec_pct,                                      # F83 edhrec_deck_pct
+        in_forge,                                        # F84 card_in_forge
+        strat_count,                                     # F85 card_strategy_count
         # ── Theme-based features ──
-        cmdr_equip,                                      # F83 cmdr_equipment_theme
+        cmdr_equip,                                      # F86 cmdr_equipment_theme
         card_equip,                                      # F84 card_equipment_payoff
         equip_match,                                     # F85 equipment_theme_match
         cmdr_ench,                                       # F86 cmdr_enchantress_theme
