@@ -53,6 +53,11 @@ GAME_CONCEPTS = [
     "enters_from_hand",       # ChangesZone from Hand → Battlefield (cheat into play)
     "goes_to_graveyard",      # ChangesZone to Graveyard (death/discard/mill)
     "goes_to_exile",          # ChangesZone to Exile (exile removal/blink)
+    # Theme-specific concepts
+    "equipment_enters",       # Equipment ETB / being cast
+    "equipment_equipped",     # Equip action / attachment
+    "defender_available",     # Defender/Wall on battlefield
+    "etb_doubled",            # ETB trigger doubled (Panharmonicon-class)
 ]
 
 # Effect verb → game concepts it PRODUCES
@@ -79,7 +84,8 @@ VERB_TO_CONCEPTS = {
     "Mana":          ["mana_produced"],
     "Counter":       [],  # countering spells doesn't produce synergy events
     "Animate":       ["creature_enters"],
-    "Attach":        ["enchantment_enters"],
+    "Attach":        ["enchantment_enters", "equipment_equipped"],
+    "Equip":         ["equipment_equipped"],
     "CopyPermanent": ["permanent_enters"],
     "Fight":         ["damage_dealt"],
     "Proliferate":   ["counter_added"],
@@ -216,6 +222,23 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
             for concept in VERB_TO_CONCEPTS[verb]:
                 p[_concept_idx[concept]] += 1.0
 
+        # Theme-specific PRODUCES
+        keyword = ab[5]
+        if verb == 'Panharmonicon':
+            p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
+            p[_concept_idx["etb_doubled"]] += 1.0
+        if verb == 'CanAttackDefender':
+            # Defender-matters cards consume defenders
+            c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
+            c[_concept_idx["defender_available"]] += 1.0
+        if keyword == 'Equip':
+            p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
+            p[_concept_idx["equipment_enters"]] += 1.0
+            p[_concept_idx["equipment_equipped"]] += 1.0
+        if keyword == 'Defender':
+            p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
+            p[_concept_idx["defender_available"]] += 1.0
+
         # Zone-aware PRODUCES: verb + trigger_destination → zone concept
         if verb and verb in _ZONE_VERBS and trig_dest:
             p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
@@ -238,6 +261,15 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
             c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
             for concept in TRIGGER_TO_CONCEPTS[trig_mode]:
                 c[_concept_idx[concept]] += 1.0
+
+        # Equipment-related CONSUMES: triggers on Equipment entering/being attached
+        if trig_filter and 'Equipment' in trig_filter:
+            c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
+            c[_concept_idx["equipment_enters"]] += 1.0
+        # ETB-doubled CONSUMES: ETB triggers benefit from Panharmonicon
+        if trig_mode in ('ChangesZone', 'ChangesZoneAll') and trig_dest and 'Battlefield' in (trig_dest or ''):
+            c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
+            c[_concept_idx["etb_doubled"]] += 1.0
 
         # Trigger filter subtypes → consumes those subtypes
         if trig_filter:

@@ -473,6 +473,270 @@ def _build_continuous_pump_edges(conn, name_to_oid):
     return total
 
 
+def _build_theme_synergy_edges(conn, name_to_oid):
+    """Build edges for theme-based synergies invisible to event matching.
+
+    Equipment: equipment cards ↔ equipment payoffs (Sram, Puresteel Paladin)
+    Enchantress: enchantments ↔ enchantress triggers (Setessan Champion, Eidolon)
+    Defender: defender-matters cards ↔ Wall/Defender cards
+    ETB doubler: Panharmonicon-class ↔ ETB-heavy cards
+    """
+    import json as _json
+    import re as _re
+
+    forge_to_oid = {}
+    for row in conn.execute("SELECT forge_name, oracle_id FROM forge_name_map"):
+        forge_to_oid[row[0]] = row[1]
+
+    # ── Equipment edges ──
+    # Equipment cards → cards that care about equipment (and vice versa)
+    equipment_oids = set()  # cards that ARE equipment
+    equip_payoff_oids = set()  # cards that care about equipment
+
+    for row in conn.execute(
+        "SELECT DISTINCT fnm.oracle_id FROM forge_abilities fa "
+        "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+        "WHERE fa.keyword = 'Equip'"
+    ):
+        equipment_oids.add(row[0])
+
+    # Equipment payoffs from raw_line patterns
+    for row in conn.execute(
+        "SELECT DISTINCT fnm.oracle_id, fa.raw_line FROM forge_abilities fa "
+        "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+        "WHERE fa.raw_line LIKE '%Equipment%'"
+    ):
+        oid, raw = row
+        if raw and _re.search(r'(IsPresent|ValidCard|Affected|Condition)\$[^|]*Equipment', raw):
+            equip_payoff_oids.add(oid)
+
+    # Also from deck tags
+    for row in conn.execute(
+        "SELECT DISTINCT fnm.oracle_id FROM forge_deck_tags fdt "
+        "JOIN forge_name_map fnm ON fnm.forge_name = fdt.card_name "
+        "WHERE (fdt.tag_type = 'hints' OR fdt.tag_type = 'needs') "
+        "AND fdt.tag LIKE '%Equipment%'"
+    ):
+        equip_payoff_oids.add(row[0])
+
+    # Remove overlap (equipment that cares about equipment → skip self-referencing)
+    equip_payoff_only = equip_payoff_oids - equipment_oids
+
+    batch = []
+    total = 0
+
+    # Equipment → payoff (equipment enters/is cast → payoff triggers)
+    for equip_oid in equipment_oids:
+        for payoff_oid in equip_payoff_only:
+            if equip_oid == payoff_oid:
+                continue
+            detail = _json.dumps({"event": "EquipmentSynergy",
+                                  "filter_precision": "exact"})
+            batch.append((equip_oid, payoff_oid, "enables", -1, -1, 0.5, detail))
+        if len(batch) >= 10000:
+            conn.executemany(
+                "INSERT OR IGNORE INTO interaction_edges "
+                "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
+                "VALUES (?,?,?,?,?,?,?)", batch)
+            total += len(batch)
+            batch.clear()
+
+    if batch:
+        conn.executemany(
+            "INSERT OR IGNORE INTO interaction_edges "
+            "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
+            "VALUES (?,?,?,?,?,?,?)", batch)
+        total += len(batch)
+        batch.clear()
+    conn.commit()
+
+    equip_count = total
+    print(f"  Equipment synergy edges: {equip_count} "
+          f"({len(equipment_oids)} equipment × {len(equip_payoff_only)} payoffs)")
+
+    # ── Enchantress edges ──
+    # Enchantments → cards that trigger on enchantment ETBs/casts
+    enchantress_oids = set()
+
+    # Cards with SpellCast trigger + Enchantment filter
+    for row in conn.execute(
+        "SELECT DISTINCT fnm.oracle_id FROM forge_abilities fa "
+        "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+        "WHERE fa.trigger_mode = 'SpellCast' AND fa.trigger_filter LIKE '%Enchantment%'"
+    ):
+        enchantress_oids.add(row[0])
+    # Cards with ChangesZone trigger + Enchantment filter (constellation)
+    for row in conn.execute(
+        "SELECT DISTINCT fnm.oracle_id FROM forge_abilities fa "
+        "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+        "WHERE fa.trigger_mode IN ('ChangesZone', 'ChangesZoneAll') "
+        "AND fa.trigger_filter LIKE '%Enchantment%'"
+    ):
+        enchantress_oids.add(row[0])
+    # From deck tags
+    for row in conn.execute(
+        "SELECT DISTINCT fnm.oracle_id FROM forge_deck_tags fdt "
+        "JOIN forge_name_map fnm ON fnm.forge_name = fdt.card_name "
+        "WHERE (fdt.tag_type = 'hints' OR fdt.tag_type = 'needs') "
+        "AND fdt.tag LIKE '%Enchantment%'"
+    ):
+        enchantress_oids.add(row[0])
+
+    # Enchantment cards (non-creature enchantments for density)
+    enchantment_oids = set()
+    for row in conn.execute(
+        "SELECT oracle_id FROM cards "
+        "WHERE type_line LIKE '%Enchantment%' AND type_line NOT LIKE '%Token%'"
+    ):
+        enchantment_oids.add(row[0])
+
+    enchantress_only = enchantress_oids - enchantment_oids
+    batch = []
+    ench_count = 0
+
+    for ench_oid in enchantment_oids:
+        for payoff_oid in enchantress_only:
+            if ench_oid == payoff_oid:
+                continue
+            detail = _json.dumps({"event": "EnchantressSynergy",
+                                  "filter_precision": "exact"})
+            batch.append((ench_oid, payoff_oid, "enables", -1, -1, 0.35, detail))
+        if len(batch) >= 10000:
+            conn.executemany(
+                "INSERT OR IGNORE INTO interaction_edges "
+                "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
+                "VALUES (?,?,?,?,?,?,?)", batch)
+            ench_count += len(batch)
+            batch.clear()
+
+    if batch:
+        conn.executemany(
+            "INSERT OR IGNORE INTO interaction_edges "
+            "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
+            "VALUES (?,?,?,?,?,?,?)", batch)
+        ench_count += len(batch)
+        batch.clear()
+    conn.commit()
+
+    print(f"  Enchantress synergy edges: {ench_count} "
+          f"({len(enchantment_oids)} enchantments × {len(enchantress_only)} payoffs)")
+
+    # ── Defender edges ──
+    # Defender-matters cards ↔ Wall/Defender cards
+    defender_matters_oids = set()  # cards that CARE about defenders
+    defender_oids = set()  # cards that HAVE defender
+
+    for row in conn.execute(
+        "SELECT DISTINCT fnm.oracle_id FROM forge_abilities fa "
+        "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+        "WHERE fa.verb = 'CanAttackDefender'"
+    ):
+        defender_matters_oids.add(row[0])
+    for row in conn.execute(
+        "SELECT DISTINCT fnm.oracle_id FROM forge_deck_tags fdt "
+        "JOIN forge_name_map fnm ON fnm.forge_name = fdt.card_name "
+        "WHERE fdt.tag LIKE '%Defender%'"
+    ):
+        defender_matters_oids.add(row[0])
+
+    for row in conn.execute(
+        "SELECT DISTINCT fnm.oracle_id FROM forge_abilities fa "
+        "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+        "WHERE fa.keyword = 'Defender'"
+    ):
+        defender_oids.add(row[0])
+    # Also walls from type_line
+    for row in conn.execute(
+        "SELECT oracle_id FROM cards WHERE type_line LIKE '%Wall%'"
+    ):
+        defender_oids.add(row[0])
+
+    batch = []
+    def_count = 0
+
+    # Defender-matters → each defender card (bidirectional)
+    for matters_oid in defender_matters_oids:
+        for wall_oid in defender_oids:
+            if matters_oid == wall_oid:
+                continue
+            detail = _json.dumps({"event": "DefenderSynergy",
+                                  "filter_precision": "exact"})
+            batch.append((matters_oid, wall_oid, "enables", -1, -1, 0.6, detail))
+            batch.append((wall_oid, matters_oid, "enables", -1, -1, 0.6, detail))
+        if len(batch) >= 10000:
+            conn.executemany(
+                "INSERT OR IGNORE INTO interaction_edges "
+                "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
+                "VALUES (?,?,?,?,?,?,?)", batch)
+            def_count += len(batch)
+            batch.clear()
+
+    if batch:
+        conn.executemany(
+            "INSERT OR IGNORE INTO interaction_edges "
+            "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
+            "VALUES (?,?,?,?,?,?,?)", batch)
+        def_count += len(batch)
+        batch.clear()
+    conn.commit()
+
+    print(f"  Defender synergy edges: {def_count} "
+          f"({len(defender_matters_oids)} matters × {len(defender_oids)} defenders)")
+
+    # ── ETB doubler edges ──
+    # Panharmonicon-class → cards with ETB triggers
+    etb_doubler_oids = set()
+    for row in conn.execute(
+        "SELECT DISTINCT fnm.oracle_id FROM forge_abilities fa "
+        "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+        "WHERE fa.verb = 'Panharmonicon'"
+    ):
+        etb_doubler_oids.add(row[0])
+
+    # Cards with ETB triggers (ChangesZone to Battlefield)
+    etb_trigger_oids = set()
+    for row in conn.execute(
+        "SELECT DISTINCT fnm.oracle_id FROM forge_abilities fa "
+        "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+        "WHERE fa.trigger_mode IN ('ChangesZone', 'ChangesZoneAll') "
+        "AND fa.trigger_destination LIKE '%Battlefield%'"
+    ):
+        etb_trigger_oids.add(row[0])
+
+    batch = []
+    etb_count = 0
+
+    for doubler_oid in etb_doubler_oids:
+        for trigger_oid in etb_trigger_oids:
+            if doubler_oid == trigger_oid:
+                continue
+            detail = _json.dumps({"event": "ETBDoubler",
+                                  "filter_precision": "exact"})
+            batch.append((doubler_oid, trigger_oid, "amplifies", -1, -1, 0.7, detail))
+        if len(batch) >= 10000:
+            conn.executemany(
+                "INSERT OR IGNORE INTO interaction_edges "
+                "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
+                "VALUES (?,?,?,?,?,?,?)", batch)
+            etb_count += len(batch)
+            batch.clear()
+
+    if batch:
+        conn.executemany(
+            "INSERT OR IGNORE INTO interaction_edges "
+            "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
+            "VALUES (?,?,?,?,?,?,?)", batch)
+        etb_count += len(batch)
+        batch.clear()
+    conn.commit()
+
+    print(f"  ETB doubler edges: {etb_count} "
+          f"({len(etb_doubler_oids)} doublers × {len(etb_trigger_oids)} ETB triggers)")
+
+    total_theme = equip_count + ench_count + def_count + etb_count
+    return total_theme
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--rebuild", action="store_true")
@@ -509,7 +773,11 @@ def main():
         # Continuous pump edges: lord/anthem effects → creatures they buff
         pump_count = _build_continuous_pump_edges(conn, name_to_oid)
         print(f"  Continuous pump edges: {pump_count}")
-        print(f"Done: {count + syn_count + ent_count + pump_count} total edges")
+
+        # Theme synergy edges: equipment, enchantress, defender, ETB doubler
+        theme_count = _build_theme_synergy_edges(conn, name_to_oid)
+        print(f"  Theme synergy edges: {theme_count}")
+        print(f"Done: {count + syn_count + ent_count + pump_count + theme_count} total edges")
     elif args.rebuild:
         rows = conn.execute("SELECT DISTINCT oracle_id FROM parsed_abilities").fetchall()
         cards = {}

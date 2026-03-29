@@ -112,6 +112,22 @@ FORGE_FEATURE_NAMES = [
     "func_requires_produces",     # [80] cmdr requires trigger X, card produces X
     "func_card_requires_cmdr",    # [81] card requires trigger X, cmdr produces X
     "func_full_cosine",           # [82] overall functional fingerprint similarity
+    # ── Theme-based features ──
+    "cmdr_equipment_theme",       # [83] commander wants equipment
+    "card_equipment_payoff",      # [84] card is equipment or cares about equipment
+    "equipment_theme_match",      # [85] both align on equipment
+    "cmdr_enchantress_theme",     # [86] commander wants enchantments
+    "card_enchantress_payoff",    # [87] card triggers on or cares about enchantments
+    "enchantress_theme_match",    # [88] both align on enchantress
+    "cmdr_defender_theme",        # [89] commander cares about defenders/walls
+    "card_has_defender",          # [90] card has defender or is a Wall
+    "defender_theme_match",       # [91] both align on defender
+    "card_is_etb_doubler",       # [92] Panharmonicon-class ETB doubler
+    "cmdr_etb_density",          # [93] how many ETB-related verbs/triggers commander has
+    "etb_doubler_match",         # [94] doubler × commander ETB density
+    "tribal_lord_for_cmdr",      # [95] card is a lord/anthem for commander's creature type
+    "tribal_member_of_cmdr",     # [96] card IS the creature type commander cares about
+    "tribal_synergy_depth",      # [97] combined tribal signal (subtype + lord + token + filter)
 ]
 
 

@@ -1,6 +1,6 @@
 """Shared forge feature computation for training and inference.
 
-Extracts the 71-feature forge GBM feature vector computation into a
+Extracts the 98-feature forge GBM feature vector computation into a
 single module used by both train_fusion_model.py and scoring.py.
 
 No oracle-text embeddings or tower model — pure Forge-native features.
@@ -518,6 +518,93 @@ class ForgeFeatureContext:
             if "exile" in p.get('effect_zones', set()):
                 self._zone_exile.add(oid)
 
+        # ── Theme detection sets: identify cards by archetype relevance ──
+        # Equipment theme: cards that ARE equipment or CARE about equipment
+        self._equipment_cards = set()    # oids of Equipment type cards
+        self._equipment_payoffs = set()  # oids that trigger on/care about equipment
+        self._defender_cards = set()     # oids with Defender keyword
+        self._enchantress_payoffs = set()  # oids that trigger on enchantment ETBs
+        self._etb_doublers = set()       # oids with Panharmonicon-class effects
+
+        # Equipment: cards with Equip keyword or Type$Equipment in deck_has
+        for oid, p in self._forge_profiles.items():
+            if 'Equip' in p['keywords']:
+                self._equipment_cards.add(oid)
+            if p['verbs'] & {'Attach'}:
+                self._equipment_payoffs.add(oid)
+            if 'Defender' in p['keywords']:
+                self._defender_cards.add(oid)
+            if 'CanAttackDefender' in p['verbs']:
+                self._defender_cards.add(oid)
+            # Check conditions for equipment references (e.g., Balan "IsPresent$ Equipment")
+            if 'equipment' in p.get('conditions', set()):
+                self._equipment_payoffs.add(oid)
+
+        # Also detect equipment payoffs from raw_line patterns
+        import re as _re_equip
+        for row in conn.execute(
+            "SELECT DISTINCT fnm.oracle_id, fa.raw_line FROM forge_abilities fa "
+            "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+            "WHERE fa.raw_line LIKE '%Equipment%'"
+        ):
+            oid, raw = row
+            if raw and _re_equip.search(
+                r'(IsPresent|RepeatCards|Condition|ValidCards?|Affected)\$[^|]*Equipment', raw
+            ):
+                self._equipment_payoffs.add(oid)
+
+        # ETB doublers: cards with Panharmonicon verb
+        for row in conn.execute(
+            "SELECT DISTINCT fnm.oracle_id FROM forge_abilities fa "
+            "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+            "WHERE fa.verb = 'Panharmonicon'"
+        ):
+            self._etb_doublers.add(row[0])
+
+        # Equipment payoffs from deck tags: cards that hints/needs Type$Equipment
+        # Enchantress payoffs: cards that hints/needs Type$Enchantment (and trigger on it)
+        for oid, tags in self._deck_hints.items():
+            for tag in tags:
+                if 'Type$Equipment' in tag:
+                    self._equipment_payoffs.add(oid)
+                if 'Type$Enchantment' in tag:
+                    self._enchantress_payoffs.add(oid)
+        for oid, tags in self._deck_needs.items():
+            for tag in tags:
+                if 'Type$Equipment' in tag:
+                    self._equipment_payoffs.add(oid)
+                if 'Type$Enchantment' in tag:
+                    self._enchantress_payoffs.add(oid)
+                if 'Keyword$Defender' in tag:
+                    self._defender_cards.add(oid)
+        # Also mark equipment cards via deck_has (cards that provide equipment theme)
+        for oid, tags in self._deck_has.items():
+            for tag in tags:
+                if 'Type$Equipment' in tag:
+                    self._equipment_cards.add(oid)
+
+        # Enchantress payoffs from triggers: cards that trigger on SpellCast with
+        # enchantment filter (e.g., Setessan Champion, Eidolon of Blossoms)
+        for row in conn.execute(
+            "SELECT DISTINCT fnm.oracle_id FROM forge_abilities fa "
+            "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+            "WHERE fa.trigger_mode = 'SpellCast' AND fa.trigger_filter LIKE '%Enchantment%'"
+        ):
+            self._enchantress_payoffs.add(row[0])
+        # Also cards with ChangesZone trigger + Enchantment filter (constellation)
+        for row in conn.execute(
+            "SELECT DISTINCT fnm.oracle_id FROM forge_abilities fa "
+            "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+            "WHERE fa.trigger_mode IN ('ChangesZone', 'ChangesZoneAll') "
+            "AND fa.trigger_filter LIKE '%Enchantment%'"
+        ):
+            self._enchantress_payoffs.add(row[0])
+
+        # Commander theme detection helpers: which deck tags indicate themes
+        self._equipment_theme_tags = {'Type$Equipment', 'Ability$Equip'}
+        self._defender_theme_tags = {'Keyword$Defender'}
+        self._enchantress_theme_tags = {'Type$Enchantment', 'Type$Aura'}
+
         # Verb→trigger alignment mapping for F30
         self._verb_triggers = {
             "Token": {"ChangesZone", "ChangesZoneAll", "TokenCreated"},
@@ -893,8 +980,18 @@ class CmdrFeatureContext:
         self.cmdr_ability_vec = ctx._ability_vectors.get(cmdr_oid)
         self.cmdr_phases = ctx.card_phase_order.get(cmdr_oid, set())
 
-        # Commander subtypes for tribal matching
+        # Commander subtypes for tribal matching (populated from cards table)
         self.cmdr_subtypes = set()
+        cmdr_type_row = ctx.conn.execute(
+            "SELECT type_line FROM cards WHERE oracle_id = ?", (cmdr_oid,)
+        ).fetchone()
+        if cmdr_type_row and cmdr_type_row[0] and "\u2014" in cmdr_type_row[0]:
+            try:
+                self.cmdr_subtypes = {
+                    s.lower() for s in cmdr_type_row[0].split("\u2014")[1].strip().split()
+                }
+            except (IndexError, AttributeError):
+                pass
 
         # Commander mechanics vectors
         self.cmdr_produces = ctx._mech_produces.get(cmdr_oid)
@@ -926,6 +1023,58 @@ class CmdrFeatureContext:
         self.cmdr_mechs = (self.cmdr_profile.get('verbs', set()) |
                            self.cmdr_profile.get('triggers', set()) |
                            self.cmdr_profile.get('keywords', set()))
+
+        # ── Commander theme flags ──
+        # Equipment theme: commander hints/needs equipment, or has Equip/Attach verbs,
+        # or is detected as equipment payoff from raw_line patterns
+        cmdr_tags = self.cmdr_has | self.cmdr_hints | self.cmdr_needs
+        self.cmdr_equipment_theme = (
+            bool(cmdr_tags & ctx._equipment_theme_tags) or
+            bool(self.cmdr_profile.get('verbs', set()) & {'Equip', 'Attach'}) or
+            cmdr_oid in ctx._equipment_payoffs
+        )
+        # Defender theme: commander needs/hints Keyword$Defender or has CanAttackDefender
+        self.cmdr_defender_theme = (
+            bool(cmdr_tags & ctx._defender_theme_tags) or
+            'CanAttackDefender' in self.cmdr_profile.get('verbs', set()) or
+            'Defender' in self.cmdr_profile.get('trigger_filters', set())
+        )
+        # Enchantress theme: commander hints/needs enchantments or triggers on enchantment ETBs
+        self.cmdr_enchantress_theme = (
+            bool(cmdr_tags & ctx._enchantress_theme_tags) or
+            cmdr_oid in ctx._enchantress_payoffs or
+            'Enchant' in self.cmdr_profile.get('verbs', set())
+        )
+        # ETB density: how many ETB-producing verbs the commander has
+        # Token, ChangeZone (to battlefield), Animate, Manifest, etc.
+        etb_verbs = self.cmdr_profile.get('verbs', set()) & {
+            'Token', 'ChangeZone', 'ChangeZoneAll', 'Animate', 'Manifest', 'Flicker',
+        }
+        etb_triggers = self.cmdr_profile.get('triggers', set()) & {
+            'ChangesZone', 'ChangesZoneAll',
+        }
+        self.cmdr_etb_density = float(len(etb_verbs) + len(etb_triggers))
+        # Tribal depth data: commander's creature-type interests from multiple sources
+        # Combines trigger_filters, token subtypes, deck hints, and type_line subtypes
+        cmdr_tribal_filters = set()
+        generic = {"card", "creature", "permanent", "nontoken", "token",
+                   "artifact", "enchantment", "land", "spell", "self", "other", "any"}
+        for tf in self.cmdr_profile.get('trigger_filters', set()):
+            if tf not in generic:
+                cmdr_tribal_filters.add(tf)
+        # Add token subtypes (Krenko creates Goblins → wants Goblins)
+        cmdr_token_subs = ctx._token_subtypes.get(cmdr_oid, set())
+        cmdr_tribal_filters |= cmdr_token_subs
+        # Add Type$ hints from deck tags (e.g., hints Type$Goblin)
+        for tag in self.cmdr_hints | self.cmdr_needs:
+            if tag.startswith('Type$'):
+                sub = tag[5:].lower()
+                if sub not in generic and len(sub) > 2:
+                    cmdr_tribal_filters.add(sub)
+        # Fallback: if no specific tribal signals, use type_line subtypes
+        if not cmdr_tribal_filters:
+            cmdr_tribal_filters = self.cmdr_subtypes.copy()
+        self.cmdr_tribal_filters = cmdr_tribal_filters
 
         if ctx._has_edge_index:
             self._init_from_index(ctx, cmdr_oid, deck_oids)
@@ -1141,9 +1290,9 @@ class CmdrFeatureContext:
 
 def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
                           ctx: ForgeFeatureContext, cmdr: CmdrFeatureContext) -> list:
-    """Compute the 83-feature vector for a single (commander, card) pair.
+    """Compute the 98-feature vector for a single (commander, card) pair.
 
-    Returns a list of 83 floats matching FORGE_FEATURE_NAMES order.
+    Returns a list of 98 floats matching FORGE_FEATURE_NAMES order.
     Pure Forge-native features — no tower model or oracle-text embeddings.
     """
     out_s = cmdr.cmdr_out.get(card_oid, 0.0)
@@ -1594,6 +1743,81 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
     func_card_req_cmdr = 0.0  # F81: card requires X trigger, cmdr produces X
     func_full_cosine = 0.0    # F82: overall functional similarity
 
+    # ── Theme-based features (F83-F97) ──
+
+    # Equipment theme features (F83-F85)
+    # F83: cmdr_equipment_theme — commander wants equipment
+    cmdr_equip = 1.0 if cmdr.cmdr_equipment_theme else 0.0
+    # F84: card_equipment_payoff — card is equipment or cares about equipment
+    card_equip = 1.0 if (card_oid in ctx._equipment_cards or
+                          card_oid in ctx._equipment_payoffs) else 0.0
+    # F85: equipment_theme_match — both align on equipment
+    equip_match = cmdr_equip * card_equip
+
+    # Enchantress theme features (F86-F88)
+    # F86: cmdr_enchantress_theme — commander wants enchantments
+    cmdr_ench = 1.0 if cmdr.cmdr_enchantress_theme else 0.0
+    # F87: card_enchantress_payoff — card triggers on or cares about enchantments
+    card_ench = 0.0
+    if card_oid in ctx._enchantress_payoffs:
+        card_ench = 1.0
+    elif "Enchantment" in tl and "Creature" not in tl:
+        # Pure enchantment (not enchantment creature) — relevant for enchantress
+        card_ench = 0.5
+    # F88: enchantress_theme_match
+    ench_match = cmdr_ench * card_ench
+
+    # Defender theme features (F89-F91)
+    # F89: cmdr_defender_theme — commander cares about defenders/walls
+    cmdr_def = 1.0 if cmdr.cmdr_defender_theme else 0.0
+    # F90: card_has_defender — card has defender or is a Wall
+    card_def = 1.0 if (card_oid in ctx._defender_cards or
+                        "Wall" in tl) else 0.0
+    # F91: defender_theme_match
+    def_match = cmdr_def * card_def
+
+    # ETB doubler features (F92-F94)
+    # F92: card_is_etb_doubler — Panharmonicon-class card
+    card_etb_dbl = 1.0 if card_oid in ctx._etb_doublers else 0.0
+    # F93: cmdr_etb_density — how many ETB-related verbs/triggers commander has
+    cmdr_etb = min(cmdr.cmdr_etb_density, 5.0)
+    # F94: etb_doubler_match — doubler × commander ETB density
+    etb_match = card_etb_dbl * cmdr_etb
+
+    # Tribal depth features (F95-F97)
+    # F95: tribal_lord_for_cmdr — card gives bonuses to commander's creature type
+    # Check if card's trigger_filters or targets include commander's subtypes AND
+    # card has buff verbs (Pump/PumpAll/PutCounter/Continuous)
+    tribal_lord = 0.0
+    if cmdr.cmdr_subtypes:
+        buff_verbs = card_profile.get('verbs', set()) & {
+            'Pump', 'PumpAll', 'PutCounter', 'PutCounterAll', 'Continuous',
+        }
+        if buff_verbs:
+            card_tf = card_profile.get('trigger_filters', set())
+            card_req = card_profile.get('required_subtypes', set())
+            for sub in cmdr.cmdr_subtypes:
+                if sub in card_tf or sub in card_req:
+                    tribal_lord = 1.0
+                    break
+    # F96: tribal_member_of_cmdr — card IS the creature type the commander filters on
+    tribal_member = 0.0
+    if cmdr.cmdr_tribal_filters and "Creature" in tl and "\u2014" in tl:
+        try:
+            card_subs = {s.lower() for s in tl.split("\u2014")[1].strip().split()}
+            if cmdr.cmdr_tribal_filters & card_subs:
+                tribal_member = 1.0
+        except (IndexError, AttributeError):
+            pass
+    # F97: tribal_synergy_depth — combined tribal signal:
+    #   subtype match + lord bonus + token type match + trigger filter match
+    tribal_depth = tribal + tribal_lord + tribal_member
+    if cmdr.cmdr_subtypes:
+        # Token subtype matching
+        card_tok_subs = ctx._token_subtypes.get(card_oid, set())
+        if card_tok_subs & cmdr.cmdr_subtypes:
+            tribal_depth += 1.0
+
     if card_func is not None and cmdr_func is not None:
         P = ForgeFeatureContext._FUNC_PRODUCES_SLICE
         R = ForgeFeatureContext._FUNC_REQUIRES_SLICE
@@ -1710,4 +1934,20 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         func_requires_prod,                              # F80 func_requires_produces
         func_card_req_cmdr,                              # F81 func_card_requires_cmdr
         func_full_cosine,                                # F82 func_full_cosine
+        # ── Theme-based features ──
+        cmdr_equip,                                      # F83 cmdr_equipment_theme
+        card_equip,                                      # F84 card_equipment_payoff
+        equip_match,                                     # F85 equipment_theme_match
+        cmdr_ench,                                       # F86 cmdr_enchantress_theme
+        card_ench,                                       # F87 card_enchantress_payoff
+        ench_match,                                      # F88 enchantress_theme_match
+        cmdr_def,                                        # F89 cmdr_defender_theme
+        card_def,                                        # F90 card_has_defender
+        def_match,                                       # F91 defender_theme_match
+        card_etb_dbl,                                    # F92 card_is_etb_doubler
+        cmdr_etb,                                        # F93 cmdr_etb_density
+        etb_match,                                       # F94 etb_doubler_match
+        tribal_lord,                                     # F95 tribal_lord_for_cmdr
+        tribal_member,                                   # F96 tribal_member_of_cmdr
+        tribal_depth,                                    # F97 tribal_synergy_depth
     ]
