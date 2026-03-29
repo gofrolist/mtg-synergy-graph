@@ -85,7 +85,7 @@ python3 fetch_edhrec_decks.py --refresh    # Fetch EDHREC average decklists for 
 
 # === Forge model (LightGBM LambdaRank) ===
 python3 train_fusion_model.py --forge-only     # Train forge GBM (cached features, parallel folds, ~6 min)
-python3 train_fusion_model.py --forge-only --rebuild-features  # Rebuild features (8 workers) + train (~5 min)
+python3 train_fusion_model.py --forge-only --rebuild-features  # Rebuild features (shared ctx, 8 workers) + train (~7 min)
 python3 train_fusion_model.py --forge-only --quick             # Single-fold fast iteration (~4 min)
 python3 train_fusion_model.py --forge-only --tune              # HP search + train (~15 min, use after new features)
 

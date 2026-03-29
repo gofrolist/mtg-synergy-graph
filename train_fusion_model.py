@@ -141,6 +141,9 @@ FORGE_FEATURE_NAMES = [
 ]
 
 
+_ALLOWED_SLUG_TABLES = frozenset({"edhrec_average_decks", "edhrec_card_synergy"})
+
+
 def _resolve_slugs_to_oids(conn, table="edhrec_average_decks"):
     """Resolve EDHREC commander slugs to oracle_ids via Python string matching.
 
@@ -149,6 +152,9 @@ def _resolve_slugs_to_oids(conn, table="edhrec_average_decks"):
 
     Returns (slug_to_oid, name_to_oid) dicts.
     """
+    if table not in _ALLOWED_SLUG_TABLES:
+        raise ValueError(f"table must be one of {_ALLOWED_SLUG_TABLES}, got {table!r}")
+
     # Map card_name -> oracle_id (prefer non-token versions)
     name_to_oid = {}
     for row in conn.execute(
@@ -306,26 +312,20 @@ def sample_negatives(positives_by_cmdr, all_card_oids, card_colors, cmdr_colors,
     return negatives
 
 
-def _compute_chunk(args):
-    """Worker function for parallel feature building.
+# Module-level globals for fork-based workers (inherited, not serialized)
+_shared_ctx = None
+_shared_card_meta = None
 
-    Each worker creates its own ForgeFeatureContext + DB connection,
-    then computes features for its assigned commanders using batch computation.
+
+def _compute_chunk_shared(args):
+    """Worker function using shared ForgeFeatureContext (fork-inherited).
+
+    Uses module-level _shared_ctx instead of creating a new one per worker.
+    Eliminates ~20s edge index loading per worker.
     """
-    cmdr_chunk, pairs_by_cmdr, cmdr_to_idx, card_meta_list, n_features, db_path = args
-
-    # Reconstruct card_meta dict from list of tuples (pickling optimization)
-    card_meta = {oid: {"type_line": tl, "cmc": cmc}
-                 for oid, tl, cmc in card_meta_list}
-
-    conn = sqlite3.connect(db_path)
-    ctx = ForgeFeatureContext(conn, preload_edges=True, preload_strength=True)
-
-    # Fill CMC array in ctx for batch lookups
-    for oid, meta in card_meta.items():
-        i = ctx.oid_to_idx.get(oid)
-        if i is not None:
-            ctx._arr_cmc[i] = float(meta["cmc"])
+    cmdr_chunk, pairs_by_cmdr, cmdr_to_idx, n_features = args
+    ctx = _shared_ctx
+    card_meta = _shared_card_meta
 
     # Pre-allocate arrays for this chunk
     n_pairs = sum(len(pairs_by_cmdr[c]) for c in cmdr_chunk)
@@ -357,8 +357,14 @@ def _compute_chunk(args):
         cmdr_ids[row_idx:row_idx + n] = cmdr_idx
         row_idx += n
 
-    conn.close()
     return X[:row_idx], y[:row_idx], cmdr_ids[:row_idx]
+
+
+def _init_shared_pool(ctx, card_meta):
+    """Pool initializer: set module-level globals for fork-inherited context."""
+    global _shared_ctx, _shared_card_meta
+    _shared_ctx = ctx
+    _shared_card_meta = card_meta
 
 
 def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=True):
@@ -367,8 +373,8 @@ def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=Tru
     Pure Forge-native features: 105 features from causal graph, strategies,
     card mechanics, and Forge ability data.
 
-    Uses multiprocessing to parallelize per-commander feature computation.
-    Each worker creates its own ForgeFeatureContext with a separate DB connection.
+    Loads ForgeFeatureContext once in the parent process, then shares it
+    with fork-based worker processes to avoid redundant edge index loading.
     """
     import multiprocessing as mp
 
@@ -387,21 +393,24 @@ def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=Tru
             "cmc": cmc or 0.0,
         }
 
+    # ── Single shared forge feature context ──────────────────────────
+    ctx = ForgeFeatureContext(conn, preload_edges=True, preload_strength=True)
+    conn.close()
+    ctx.conn = None  # prevent accidental DB access in workers
+
+    # Fill CMC array for batch lookups
+    for oid, meta in card_meta.items():
+        i = ctx.oid_to_idx.get(oid)
+        if i is not None:
+            ctx._arr_cmc[i] = float(meta["cmc"])
+
     if verbose:
-        # Quick context init just for reporting
-        ctx = ForgeFeatureContext(conn, preload_edges=False, preload_strength=False)
         print(f"  Strategy vector: {ctx._n_strats} strategies")
         print(f"  Forge ability vectors: {ctx._n_abilities} vocab, {len(ctx._ability_vectors)} cards with vectors")
-        del ctx
-
-    conn.close()
 
     # ── Prepare for parallel workers ─────────────────────────────────
     cmdr_oids_ordered = sorted(pairs_by_cmdr.keys())
     cmdr_to_idx = {oid: i for i, oid in enumerate(cmdr_oids_ordered)}
-
-    # Pickle-friendly card_meta: list of (oid, type_line, cmc) tuples
-    card_meta_list = [(oid, m["type_line"], m["cmc"]) for oid, m in card_meta.items()]
 
     n_workers = min(mp.cpu_count(), len(cmdr_oids_ordered), 8)
     chunk_size = (len(cmdr_oids_ordered) + n_workers - 1) // n_workers
@@ -413,14 +422,16 @@ def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=Tru
               f"{len(cmdr_oids_ordered)} commanders", flush=True)
 
     worker_args = [
-        (chunk, pairs_by_cmdr, cmdr_to_idx, card_meta_list,
-         len(FORGE_FEATURE_NAMES), DB_PATH)
+        (chunk, pairs_by_cmdr, cmdr_to_idx, len(FORGE_FEATURE_NAMES))
         for chunk in chunks
     ]
 
     t0 = time.time()
-    with mp.Pool(n_workers) as pool:
-        results = pool.map(_compute_chunk, worker_args)
+    # Use fork context so workers inherit the shared ctx (no serialization)
+    fork_ctx = mp.get_context("fork")
+    with fork_ctx.Pool(n_workers, initializer=_init_shared_pool,
+                       initargs=(ctx, card_meta)) as pool:
+        results = pool.map(_compute_chunk_shared, worker_args)
 
     # ── Merge results from all workers ───────────────────────────────
     X = np.concatenate([r[0] for r in results], axis=0)
@@ -560,7 +571,6 @@ def train_forge_gbm(X, y, cmdr_ids, tune=False, quick=False):
     Saves to fusion_model_forge.lgb. Returns (model, cv_scores).
     """
     import lightgbm as lgb
-    import joblib
 
     # Sort data by commander ID (required for LambdaRank groups)
     sort_order = np.argsort(cmdr_ids)
