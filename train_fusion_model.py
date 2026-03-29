@@ -422,7 +422,7 @@ def _build_group_array(cmdr_ids, idx_array):
     return groups
 
 
-def train_forge_gbm(X, y, cmdr_ids):
+def train_forge_gbm(X, y, cmdr_ids, tune=False):
     """Train LightGBM LambdaRank on forge features with graded relevance.
 
     Uses synergy-based relevance grades (0-4) instead of binary labels.
@@ -451,7 +451,8 @@ def train_forge_gbm(X, y, cmdr_ids):
 
     splits = make_cv_splits(cmdr_ids, n_folds=3)
 
-    # Hyperparameter grid search (1 fold each for speed)
+    # Hyperparameter search: use known-best by default, search only with --tune
+    _hp_default = {"num_leaves": 767, "learning_rate": 0.025, "min_child_samples": 40}
     _hp_configs = [
         {"num_leaves": 511, "learning_rate": 0.03, "min_child_samples": 30},
         {"num_leaves": 511, "learning_rate": 0.02, "min_child_samples": 30},
@@ -472,49 +473,52 @@ def train_forge_gbm(X, y, cmdr_ids):
         "label_gain": [0, 1, 3, 6, 15, 30],  # 6 grades: neg, anti-syn, low, moderate, top, high-syn
     }
 
-    best_hp_ndcg = -1
-    best_hp_config = _hp_configs[0]
-    print(f"  Hyperparameter search ({len(_hp_configs)} configs)...")
-    for hp in _hp_configs:
-        test_params = {**base_params, **hp}
-        # Quick 1-fold test
-        train_idx, test_idx = splits[0]
-        train_sort = np.argsort(cmdr_ids[train_idx])
-        test_sort = np.argsort(cmdr_ids[test_idx])
-        ti = train_idx[train_sort]
-        vi = test_idx[test_sort]
-        train_group = _build_group_array(cmdr_ids, ti)
-        test_group = _build_group_array(cmdr_ids, vi)
-        _td = lgb.Dataset(X[ti], label=y[ti], weight=w[ti], group=train_group, free_raw_data=False)
-        _vd = lgb.Dataset(X[vi], label=y[vi], weight=w[vi], group=test_group,
-                          reference=_td, free_raw_data=False)
-        _b = lgb.train(test_params, _td, num_boost_round=2000,
-                       valid_sets=[_vd],
-                       callbacks=[lgb.early_stopping(50, verbose=False),
-                                  lgb.log_evaluation(0)])
-        _preds = _b.predict(X[vi])
-        _start = 0
-        _ndcgs = []
-        for g in test_group:
-            _end = _start + g
-            _ps = _preds[_start:_end]
-            _ls = y[vi][_start:_end]
-            k = min(30, g)
-            _tk = np.argsort(-_ps)[:k]
-            _dcg = sum(test_params["label_gain"][int(_ls[j])] / np.log2(i + 2) for i, j in enumerate(_tk))
-            _is = sorted(_ls, reverse=True)[:k]
-            _idcg = sum(test_params["label_gain"][int(_is[i])] / np.log2(i + 2) for i in range(len(_is)))
-            _ndcgs.append(_dcg / _idcg if _idcg > 0 else 0.0)
-            _start = _end
-        hp_ndcg = np.mean(_ndcgs)
-        print(f"    leaves={hp['num_leaves']} lr={hp['learning_rate']} "
-              f"min_child={hp['min_child_samples']}: NDCG@30={hp_ndcg:.4f}")
-        if hp_ndcg > best_hp_ndcg:
-            best_hp_ndcg = hp_ndcg
-            best_hp_config = hp
-
-    print(f"  Best: leaves={best_hp_config['num_leaves']} "
-          f"lr={best_hp_config['learning_rate']}")
+    if tune:
+        best_hp_ndcg = -1
+        best_hp_config = _hp_configs[0]
+        print(f"  Hyperparameter search ({len(_hp_configs)} configs)...")
+        for hp in _hp_configs:
+            test_params = {**base_params, **hp}
+            train_idx, test_idx = splits[0]
+            train_sort = np.argsort(cmdr_ids[train_idx])
+            test_sort = np.argsort(cmdr_ids[test_idx])
+            ti = train_idx[train_sort]
+            vi = test_idx[test_sort]
+            train_group = _build_group_array(cmdr_ids, ti)
+            test_group = _build_group_array(cmdr_ids, vi)
+            _td = lgb.Dataset(X[ti], label=y[ti], weight=w[ti], group=train_group, free_raw_data=False)
+            _vd = lgb.Dataset(X[vi], label=y[vi], weight=w[vi], group=test_group,
+                              reference=_td, free_raw_data=False)
+            _b = lgb.train(test_params, _td, num_boost_round=2000,
+                           valid_sets=[_vd],
+                           callbacks=[lgb.early_stopping(50, verbose=False),
+                                      lgb.log_evaluation(0)])
+            _preds = _b.predict(X[vi])
+            _start = 0
+            _ndcgs = []
+            for g in test_group:
+                _end = _start + g
+                _ps = _preds[_start:_end]
+                _ls = y[vi][_start:_end]
+                k = min(30, g)
+                _tk = np.argsort(-_ps)[:k]
+                _dcg = sum(test_params["label_gain"][int(_ls[j])] / np.log2(i + 2) for i, j in enumerate(_tk))
+                _is = sorted(_ls, reverse=True)[:k]
+                _idcg = sum(test_params["label_gain"][int(_is[i])] / np.log2(i + 2) for i in range(len(_is)))
+                _ndcgs.append(_dcg / _idcg if _idcg > 0 else 0.0)
+                _start = _end
+            hp_ndcg = np.mean(_ndcgs)
+            print(f"    leaves={hp['num_leaves']} lr={hp['learning_rate']} "
+                  f"min_child={hp['min_child_samples']}: NDCG@30={hp_ndcg:.4f}")
+            if hp_ndcg > best_hp_ndcg:
+                best_hp_ndcg = hp_ndcg
+                best_hp_config = hp
+        print(f"  Best: leaves={best_hp_config['num_leaves']} "
+              f"lr={best_hp_config['learning_rate']}")
+    else:
+        best_hp_config = _hp_default
+        print(f"  Using default HP: leaves={best_hp_config['num_leaves']} "
+              f"lr={best_hp_config['learning_rate']} (use --tune to search)")
 
     params = {**base_params, **best_hp_config}
 
@@ -797,6 +801,11 @@ def main():
         action="store_true",
         help="Force rebuild feature matrix (ignore cache)",
     )
+    parser.add_argument(
+        "--tune",
+        action="store_true",
+        help="Run hyperparameter search (6 configs, slower)",
+    )
     args = parser.parse_args()
 
     print("=" * 60)
@@ -831,7 +840,8 @@ def main():
     print("\n" + "=" * 60)
     print("Training FORGE-ONLY model (EDHREC labels, forge features)")
     print("=" * 60)
-    _, forge_scores = train_forge_gbm(X_forge, y_forge, cmdr_ids_forge)
+    _, forge_scores = train_forge_gbm(X_forge, y_forge, cmdr_ids_forge,
+                                      tune=args.tune)
 
     if "mean_ndcg30" in forge_scores:
         print(f"\n  Forge-only NDCG@30: {forge_scores['mean_ndcg30']:.4f}")
