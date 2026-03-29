@@ -23,6 +23,7 @@ from mtg_synergy.recommend.forge_features import (
     ForgeFeatureContext,
     CmdrFeatureContext,
     compute_card_features,
+    compute_batch_features,
 )
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "tags.db")
@@ -309,7 +310,7 @@ def _compute_chunk(args):
     """Worker function for parallel feature building.
 
     Each worker creates its own ForgeFeatureContext + DB connection,
-    then computes features for its assigned commanders.
+    then computes features for its assigned commanders using batch computation.
     """
     cmdr_chunk, pairs_by_cmdr, cmdr_to_idx, card_meta_list, n_features, db_path = args
 
@@ -319,6 +320,12 @@ def _compute_chunk(args):
 
     conn = sqlite3.connect(db_path)
     ctx = ForgeFeatureContext(conn, preload_edges=True, preload_strength=True)
+
+    # Fill CMC array in ctx for batch lookups
+    for oid, meta in card_meta.items():
+        i = ctx.oid_to_idx.get(oid)
+        if i is not None:
+            ctx._arr_cmc[i] = float(meta["cmc"])
 
     # Pre-allocate arrays for this chunk
     n_pairs = sum(len(pairs_by_cmdr[c]) for c in cmdr_chunk)
@@ -335,17 +342,20 @@ def _compute_chunk(args):
         deck_oids_for_cmdr = {oid for oid, lbl in pairs if lbl > 0}
         cmdr_ctx = CmdrFeatureContext(ctx, cmdr_oid, deck_oids_for_cmdr)
 
+        # Batch compute features for all cards of this commander
+        card_oids = [oid for oid, _ in pairs]
+        labels = np.array([float(lbl) for _, lbl in pairs], dtype=np.float32)
+        card_cmcs = np.array([float(card_meta.get(oid, {}).get("cmc", 0.0))
+                              for oid in card_oids], dtype=np.float32)
+
+        batch_X = compute_batch_features(card_oids, card_cmcs, ctx, cmdr_ctx)
+
+        n = len(card_oids)
         cmdr_idx = cmdr_to_idx[cmdr_oid]
-        for card_oid, label in pairs:
-            meta = card_meta.get(card_oid, {})
-            feats = compute_card_features(
-                card_oid, meta.get("type_line", ""), float(meta.get("cmc", 0.0)),
-                ctx, cmdr_ctx,
-            )
-            X[row_idx] = feats
-            y[row_idx] = float(label)
-            cmdr_ids[row_idx] = cmdr_idx
-            row_idx += 1
+        X[row_idx:row_idx + n] = batch_X
+        y[row_idx:row_idx + n] = labels
+        cmdr_ids[row_idx:row_idx + n] = cmdr_idx
+        row_idx += n
 
     conn.close()
     return X[:row_idx], y[:row_idx], cmdr_ids[:row_idx]

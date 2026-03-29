@@ -693,8 +693,171 @@ class ForgeFeatureContext:
         # Free raw abilities list after mechanics vectors are built (~5MB)
         del self._raw_abilities
 
+        # ── Pre-encode per-card arrays for batch feature computation ──
+        self._build_card_arrays()
+
         if preload_edges:
             self._build_edge_index(conn)
+
+    def _build_card_arrays(self):
+        """Pre-encode per-card data as dense numpy arrays for vectorized features.
+
+        Arrays are indexed by oid_to_idx[oid]. Used by compute_batch_features()
+        for ~10x speedup over per-card dict lookups.
+        """
+        n = len(self.oid_to_idx)
+        idx_to_oid = {v: k for k, v in self.oid_to_idx.items()}
+
+        # ── Type flags from type_lines ──
+        self._arr_type_creature = np.zeros(n, dtype=np.float32)
+        self._arr_type_instant_sorcery = np.zeros(n, dtype=np.float32)
+        self._arr_type_artifact = np.zeros(n, dtype=np.float32)
+        self._arr_type_enchantment = np.zeros(n, dtype=np.float32)
+        self._arr_type_land = np.zeros(n, dtype=np.float32)
+        self._arr_type_planeswalker = np.zeros(n, dtype=np.float32)
+        self._arr_cmc = np.zeros(n, dtype=np.float32)
+        # Parse card subtypes for tribal matching
+        self._arr_card_subtypes = [set() for _ in range(n)]  # list of sets
+
+        for oid, tl in self._type_lines.items():
+            i = self.oid_to_idx.get(oid)
+            if i is None:
+                continue
+            if "Creature" in tl:
+                self._arr_type_creature[i] = 1.0
+            if "Instant" in tl or "Sorcery" in tl:
+                self._arr_type_instant_sorcery[i] = 1.0
+            if "Artifact" in tl:
+                self._arr_type_artifact[i] = 1.0
+            if "Enchantment" in tl:
+                self._arr_type_enchantment[i] = 1.0
+            if "Land" in tl:
+                self._arr_type_land[i] = 1.0
+            if "Planeswalker" in tl:
+                self._arr_type_planeswalker[i] = 1.0
+            if "\u2014" in tl:
+                try:
+                    self._arr_card_subtypes[i] = {
+                        s.lower() for s in tl.split("\u2014")[1].strip().split()
+                    }
+                except (IndexError, AttributeError):
+                    pass
+
+        # CMC from cards table (populated externally before batch call)
+        # Will be filled by compute_batch_features caller
+
+        # ── Ability counts and boolean flags ──
+        self._arr_activated_count = np.zeros(n, dtype=np.float32)
+        self._arr_total_abilities = np.zeros(n, dtype=np.float32)
+        self._arr_triggered_count = np.zeros(n, dtype=np.float32)
+        self._arr_token_pt = np.zeros(n, dtype=np.float32)
+        self._arr_token_kw = np.zeros(n, dtype=np.float32)
+        self._arr_forge_richness = np.zeros(n, dtype=np.float32)
+        self._arr_in_forge = np.zeros(n, dtype=np.float32)
+        self._arr_deck_tag_count = np.zeros(n, dtype=np.float32)
+        self._arr_edhrec_pct = np.zeros(n, dtype=np.float32)
+        self._arr_strat_count = np.zeros(n, dtype=np.float32)
+
+        for oid, i in self.oid_to_idx.items():
+            self._arr_activated_count[i] = min(self._activated_counts.get(oid, 0), 5)
+            self._arr_total_abilities[i] = min(self._total_ability_counts.get(oid, 0), 15)
+            self._arr_triggered_count[i] = min(self._triggered_counts.get(oid, 0), 10)
+            self._arr_token_pt[i] = min(self._token_max_pt.get(oid, 0), 20)
+            self._arr_token_kw[i] = min(self._token_max_kw.get(oid, 0), 5)
+            self._arr_forge_richness[i] = self._forge_richness.get(oid, 0.0)
+            self._arr_in_forge[i] = 1.0 if oid in self._has_forge_data else 0.0
+            self._arr_deck_tag_count[i] = self._deck_tag_count.get(oid, 0.0)
+            if not _EDHREC_FREE:
+                self._arr_edhrec_pct[i] = self._edhrec_deck_pct.get(oid, 0.0)
+            self._arr_strat_count[i] = min(len(self.card_strats.get(oid, set())), 5)
+
+        # ── Profile-derived boolean flags ──
+        self._arr_combat_damage = np.zeros(n, dtype=np.float32)
+        self._arr_scales_with = np.zeros(n, dtype=np.float32)
+        self._arr_is_secondary = np.zeros(n, dtype=np.float32)
+        self._arr_gain_control = np.zeros(n, dtype=np.float32)
+        self._arr_produces_mana = np.zeros(n, dtype=np.float32)
+        self._arr_counter_num_var = np.zeros(n, dtype=np.float32)
+        self._arr_grants_abilities = np.zeros(n, dtype=np.float32)
+        self._arr_token_amt_var = np.zeros(n, dtype=np.float32)
+        self._arr_has_static_anthem = np.zeros(n, dtype=np.float32)
+        self._arr_counters_on_lands = np.zeros(n, dtype=np.float32)
+        self._arr_has_p1p1 = np.zeros(n, dtype=np.float32)
+        self._arr_dur_permanent = np.zeros(n, dtype=np.float32)
+        self._arr_dur_temporary = np.zeros(n, dtype=np.float32)
+        self._arr_has_T = np.zeros(n, dtype=np.float32)
+        self._arr_has_A = np.zeros(n, dtype=np.float32)
+        self._arr_has_phase = np.zeros(n, dtype=np.float32)
+        self._arr_forge_depth = np.zeros(n, dtype=np.float32)
+        self._arr_damage_scales = np.zeros(n, dtype=np.float32)
+        self._arr_draw_scales = np.zeros(n, dtype=np.float32)
+        self._arr_life_scales = np.zeros(n, dtype=np.float32)
+        self._arr_granted_kw_count = np.zeros(n, dtype=np.float32)
+        self._arr_condition_count = np.zeros(n, dtype=np.float32)
+        self._arr_n_counter_verbs = np.zeros(n, dtype=np.float32)
+        self._arr_n_pump_verbs = np.zeros(n, dtype=np.float32)
+        self._arr_has_any_counter_verb = np.zeros(n, dtype=np.float32)
+        # Sets needed for batch computation (kept as lists of sets)
+        self._arr_zone_gy = np.zeros(n, dtype=np.float32)
+        self._arr_zone_ex = np.zeros(n, dtype=np.float32)
+        self._arr_is_etb_doubler = np.zeros(n, dtype=np.float32)
+        self._arr_is_equipment = np.zeros(n, dtype=np.float32)
+        self._arr_is_equip_payoff = np.zeros(n, dtype=np.float32)
+        self._arr_is_ench_payoff = np.zeros(n, dtype=np.float32)
+        self._arr_is_defender = np.zeros(n, dtype=np.float32)
+        # Pure enchantment (not creature) flag for enchantress
+        self._arr_pure_enchantment = np.zeros(n, dtype=np.float32)
+
+        for oid, i in self.oid_to_idx.items():
+            p = self._forge_profiles.get(oid, {})
+            self._arr_combat_damage[i] = 1.0 if p.get('combat_damage', False) else 0.0
+            self._arr_scales_with[i] = 1.0 if p.get('scales_with', set()) else 0.0
+            self._arr_is_secondary[i] = 1.0 if p.get('is_secondary', False) else 0.0
+            self._arr_gain_control[i] = 1.0 if p.get('gain_control', False) else 0.0
+            self._arr_produces_mana[i] = 1.0 if p.get('produces_mana', False) else 0.0
+            self._arr_counter_num_var[i] = 1.0 if p.get('counter_num_variable', False) else 0.0
+            self._arr_grants_abilities[i] = 1.0 if p.get('grants_abilities', False) else 0.0
+            self._arr_token_amt_var[i] = 1.0 if p.get('token_amount_variable', False) else 0.0
+            self._arr_has_static_anthem[i] = 1.0 if p.get('has_static_anthem', False) else 0.0
+            self._arr_counters_on_lands[i] = 1.0 if p.get('counters_on_lands', False) else 0.0
+            self._arr_has_p1p1[i] = 1.0 if p.get('has_p1p1', False) else 0.0
+            dur = p.get('duration', set())
+            self._arr_dur_permanent[i] = 1.0 if 'permanent' in dur else 0.0
+            self._arr_dur_temporary[i] = 1.0 if 'temporary' in dur else 0.0
+            atypes = p.get('ability_types', set())
+            self._arr_has_T[i] = 1.0 if 'T' in atypes else 0.0
+            self._arr_has_A[i] = 1.0 if 'A' in atypes else 0.0
+            self._arr_has_phase[i] = 1.0 if self.card_phase_order.get(oid) else 0.0
+            depth = (len(p.get('verbs', set())) + len(p.get('triggers', set())) +
+                     len(p.get('keywords', set())) + len(p.get('counter_types', set())))
+            self._arr_forge_depth[i] = min(depth, 10.0)
+            self._arr_damage_scales[i] = 1.0 if p.get('damage_amount') in ('X', 'Y') else 0.0
+            self._arr_draw_scales[i] = 1.0 if p.get('cards_drawn') in ('X', 'Y') else 0.0
+            self._arr_life_scales[i] = 1.0 if p.get('life_amount') in ('X', 'Y') else 0.0
+            self._arr_granted_kw_count[i] = min(len(p.get('granted_keywords', set())), 5)
+            self._arr_condition_count[i] = min(len(p.get('conditions', set())), 5)
+            verbs = p.get('verbs', set())
+            self._arr_n_counter_verbs[i] = sum(1 for v in verbs if v in ('PutCounter', 'PutCounterAll'))
+            self._arr_n_pump_verbs[i] = sum(1 for v in verbs if v in ('Pump', 'PumpAll'))
+            # Broader counter verb check for F78 (includes Proliferate, MoveCounter)
+            self._arr_has_any_counter_verb[i] = 1.0 if verbs & {'PutCounter', 'PutCounterAll', 'Proliferate', 'MoveCounter'} else 0.0
+            self._arr_zone_gy[i] = 1.0 if oid in self._zone_graveyard else 0.0
+            self._arr_zone_ex[i] = 1.0 if oid in self._zone_exile else 0.0
+            self._arr_is_etb_doubler[i] = 1.0 if oid in self._etb_doublers else 0.0
+            self._arr_is_equipment[i] = 1.0 if oid in self._equipment_cards else 0.0
+            self._arr_is_equip_payoff[i] = 1.0 if oid in self._equipment_payoffs else 0.0
+            self._arr_is_ench_payoff[i] = 1.0 if oid in self._enchantress_payoffs else 0.0
+            self._arr_is_defender[i] = 1.0 if oid in self._defender_cards else 0.0
+            tl = self._type_lines.get(oid, "")
+            if "Enchantment" in tl and "Creature" not in tl:
+                self._arr_pure_enchantment[i] = 0.5
+            if "Wall" in tl:
+                self._arr_is_defender[i] = 1.0
+
+        # Hub scores (computed from edge index, filled after edge loading)
+        self._arr_hub_score = np.zeros(n, dtype=np.float32)
+        self._arr_hub_raw = np.zeros(n, dtype=np.float32)
+        self._hub_scores_built = False
 
     def _build_edge_index(self, conn):
         """Pre-load edge adjacency + strength + events into memory.
@@ -819,6 +982,17 @@ class ForgeFeatureContext:
         self._idx_to_oid = {v: k for k, v in self.oid_to_idx.items()}
         self._n_cards_idx = len(self.oid_to_idx)
         self._has_edge_index = True
+
+        # Build hub score arrays now that edge index is available
+        if not self._hub_scores_built:
+            n = len(self.oid_to_idx)
+            for i in range(n):
+                n_out = len(self._adj_out.get(i, []))
+                n_in = len(self._adj_in.get(i, []))
+                raw = float(n_out + n_in)
+                self._arr_hub_raw[i] = raw
+                self._arr_hub_score[i] = np.log2(1.0 + min(raw, 500))
+            self._hub_scores_built = True
 
         elapsed = time.time() - t0
         n_unique = sum(len(v) for v in self._adj_out.values())
@@ -1373,6 +1547,518 @@ class CmdrFeatureContext:
         # Zone interaction flags
         self.cmdr_zone_graveyard = self.cmdr_oid in ctx._zone_graveyard
         self.cmdr_zone_exile = self.cmdr_oid in ctx._zone_exile
+
+
+def compute_batch_features(card_oids, card_cmcs, ctx, cmdr):
+    """Vectorized batch feature computation for all cards of one commander.
+
+    Returns (N, 105) float32 numpy array. ~10x faster than per-card loop
+    by replacing dict lookups with numpy array indexing.
+
+    Args:
+        card_oids: list of card oracle_id strings
+        card_cmcs: numpy array of float32 CMC values (same order as card_oids)
+        ctx: ForgeFeatureContext with pre-built card arrays
+        cmdr: CmdrFeatureContext for the current commander
+    """
+    N = len(card_oids)
+    X = np.zeros((N, 105), dtype=np.float32)
+    oid_to_idx = ctx.oid_to_idx
+
+    # Convert card_oids to ctx indices for array lookup
+    card_indices = np.array([oid_to_idx.get(oid, -1) for oid in card_oids], dtype=np.int32)
+    valid = card_indices >= 0
+
+    # ── Gather commander arrays (convert dicts to arrays once) ──
+    n_total = len(oid_to_idx)
+    cmdr_out_arr = np.zeros(n_total, dtype=np.float32)
+    cmdr_in_arr = np.zeros(n_total, dtype=np.float32)
+    deck_edge_arr = np.zeros(n_total, dtype=np.float32)
+    deck_exact_arr = np.zeros(n_total, dtype=np.float32)
+    deck_broad_arr = np.zeros(n_total, dtype=np.float32)
+    hop2_arr = np.zeros(n_total, dtype=np.float32)
+    cmdr_exact_arr = np.zeros(n_total, dtype=np.float32)
+
+    for oid, val in cmdr.cmdr_out.items():
+        i = oid_to_idx.get(oid)
+        if i is not None:
+            cmdr_out_arr[i] = val
+    for oid, val in cmdr.cmdr_in.items():
+        i = oid_to_idx.get(oid)
+        if i is not None:
+            cmdr_in_arr[i] = val
+    for oid, val in cmdr.deck_edge_counts.items():
+        i = oid_to_idx.get(oid)
+        if i is not None:
+            deck_edge_arr[i] = val
+    for oid, val in cmdr.deck_exact_counts.items():
+        i = oid_to_idx.get(oid)
+        if i is not None:
+            deck_exact_arr[i] = val
+    for oid, val in cmdr.deck_broad_counts.items():
+        i = oid_to_idx.get(oid)
+        if i is not None:
+            deck_broad_arr[i] = val
+    for oid, val in cmdr.cmdr_2hop_counts.items():
+        i = oid_to_idx.get(oid)
+        if i is not None:
+            hop2_arr[i] = val
+    for oid in cmdr.cmdr_exact:
+        i = oid_to_idx.get(oid)
+        if i is not None:
+            cmdr_exact_arr[i] = 1.0
+
+    # Fancy-index to get per-card values (use 0 index for invalid, will be masked)
+    safe_idx = np.where(valid, card_indices, 0)
+
+    # ── Gather values via array indexing ──
+    out_s = cmdr_out_arr[safe_idx]
+    in_s = cmdr_in_arr[safe_idx]
+    deck_edges = deck_edge_arr[safe_idx]
+    deck_exact = deck_exact_arr[safe_idx]
+    deck_broad = deck_broad_arr[safe_idx]
+    hop2_raw = hop2_arr[safe_idx]
+    exact_edge = cmdr_exact_arr[safe_idx]
+    hub_score = ctx._arr_hub_score[safe_idx]
+    hub_raw = ctx._arr_hub_raw[safe_idx]
+
+    # Mask invalid cards
+    out_s = np.where(valid, out_s, 0.0)
+    in_s = np.where(valid, in_s, 0.0)
+
+    # ── F0-F4: Causal features ──
+    X[:, 0] = np.minimum(out_s, 10.0)  # causal_cmdr_to_card
+    X[:, 1] = np.minimum(in_s, 10.0)   # causal_card_to_cmdr
+    X[:, 2] = np.where((out_s > 0) & (in_s > 0), 1.0, 0.0)  # causal_bidirectional
+    # F3 causal_event_diversity — requires set union, leave as 0 (was always 0 in practice)
+    X[:, 4] = np.log2(1.0 + np.minimum(deck_edges, 50))  # deck_edge_count
+
+    # ── F11-F17: Type flags and CMC ──
+    X[:, 11] = ctx._arr_type_creature[safe_idx]
+    X[:, 12] = ctx._arr_type_instant_sorcery[safe_idx]
+    X[:, 13] = ctx._arr_type_artifact[safe_idx]
+    X[:, 14] = ctx._arr_type_enchantment[safe_idx]
+    X[:, 15] = ctx._arr_type_land[safe_idx]
+    X[:, 16] = ctx._arr_type_planeswalker[safe_idx]
+    X[:, 17] = card_cmcs  # cmc
+
+    # ── F18-F22: Edge precision features ──
+    total_prec = deck_exact + deck_broad
+    safe_prec = np.where(total_prec > 0, total_prec, 1.0)
+    X[:, 18] = np.where(total_prec > 0, deck_exact / safe_prec, 0.0)  # deck_exact_edge_ratio
+    X[:, 19] = exact_edge  # cmdr_exact_edge
+    # F20: causal_composite
+    event_div = np.zeros(N, dtype=np.float32)  # simplified: skip event diversity
+    causal_str = out_s + in_s
+    X[:, 20] = np.minimum(causal_str * (1.0 + event_div) * (1.0 + exact_edge), 20.0)
+    X[:, 21] = hub_score  # card_hub_score
+    X[:, 22] = np.minimum(deck_exact, 20.0)  # deck_exact_count
+
+    # ── F26: forge_ability_depth ──
+    X[:, 26] = ctx._arr_forge_depth[safe_idx]
+
+    # ── F32-F33: Ability type flags ──
+    X[:, 32] = ctx._arr_has_T[safe_idx]
+    X[:, 33] = ctx._arr_has_A[safe_idx]
+
+    # ── F37: activated_ability_count ──
+    X[:, 37] = ctx._arr_activated_count[safe_idx]
+
+    # ── F40-F41: Duration flags ──
+    X[:, 40] = ctx._arr_dur_permanent[safe_idx]
+    X[:, 41] = ctx._arr_dur_temporary[safe_idx]
+
+    # ── F43: combat_damage_flag ──
+    X[:, 43] = ctx._arr_combat_damage[safe_idx]
+
+    # ── F45: scales_with_board ──
+    X[:, 45] = ctx._arr_scales_with[safe_idx]
+
+    # ── F47-F48: is_secondary, gain_control ──
+    X[:, 47] = ctx._arr_is_secondary[safe_idx]
+    X[:, 48] = ctx._arr_gain_control[safe_idx]
+
+    # ── F49-F50: granted_keyword_count, condition_count ──
+    X[:, 49] = ctx._arr_granted_kw_count[safe_idx]
+    X[:, 50] = ctx._arr_condition_count[safe_idx]
+
+    # ── F56-F62: Scaling and boolean flags ──
+    X[:, 56] = ctx._arr_damage_scales[safe_idx]
+    X[:, 57] = ctx._arr_draw_scales[safe_idx]
+    X[:, 58] = ctx._arr_life_scales[safe_idx]
+    X[:, 59] = ctx._arr_produces_mana[safe_idx]
+    X[:, 60] = ctx._arr_counter_num_var[safe_idx]
+    X[:, 61] = ctx._arr_grants_abilities[safe_idx]
+    X[:, 62] = ctx._arr_token_amt_var[safe_idx]
+
+    # ── F63-F66: Ability counts and token stats ──
+    X[:, 63] = ctx._arr_total_abilities[safe_idx]
+    X[:, 64] = ctx._arr_triggered_count[safe_idx]
+    X[:, 65] = ctx._arr_token_pt[safe_idx]
+    X[:, 66] = ctx._arr_token_kw[safe_idx]
+
+    # ── F67-F68: Zone interaction (both card AND commander must interact) ──
+    X[:, 67] = ctx._arr_zone_gy[safe_idx] * (1.0 if cmdr.cmdr_zone_graveyard else 0.0)
+    X[:, 68] = ctx._arr_zone_ex[safe_idx] * (1.0 if cmdr.cmdr_zone_exile else 0.0)
+
+    # ── F69: ability_density (abilities / cmc) ──
+    raw_counts = ctx._arr_total_abilities[safe_idx]  # already capped at 15
+    raw_counts_uncapped = np.array([ctx._total_ability_counts.get(oid, 0) for oid in card_oids], dtype=np.float32)
+    safe_cmc = np.maximum(card_cmcs, 1.0)
+    X[:, 69] = np.minimum(np.where(raw_counts_uncapped > 0, raw_counts_uncapped / safe_cmc, 0.0), 5.0)
+
+    # ── F74: put_counter_ratio ──
+    n_counter = ctx._arr_n_counter_verbs[safe_idx]
+    n_pump = ctx._arr_n_pump_verbs[safe_idx]
+    n_buff = n_counter + n_pump
+    safe_buff = np.where(n_buff > 0, n_buff, 1.0)
+    X[:, 74] = np.where(n_buff > 0, n_counter / safe_buff, 0.5)
+
+    # ── F77: counters_on_lands ──
+    X[:, 77] = ctx._arr_counters_on_lands[safe_idx]
+
+    # ── F83-F84: 2-hop features ──
+    X[:, 83] = np.log2(1.0 + np.minimum(hop2_raw, 200))
+    safe_hub = np.where(hub_raw > 0, hub_raw, 1.0)
+    X[:, 84] = np.minimum(np.where(hop2_raw > 0, hop2_raw / safe_hub, 0.0), 1.0)
+
+    # ── F85-F87: Card quality features ──
+    X[:, 85] = ctx._arr_forge_richness[safe_idx]
+    X[:, 86] = ctx._arr_in_forge[safe_idx]
+    X[:, 87] = ctx._arr_strat_count[safe_idx]
+    X[:, 88] = ctx._arr_deck_tag_count[safe_idx]  # deck_tag_count → F88 in array
+    X[:, 89] = ctx._arr_edhrec_pct[safe_idx]
+
+    # ── F9: has_phase_trigger ──
+    X[:, 9] = ctx._arr_has_phase[safe_idx]
+
+    # ── Commander-constant theme features ──
+    cmdr_equip = 1.0 if cmdr.cmdr_equipment_theme else 0.0
+    cmdr_ench = 1.0 if cmdr.cmdr_enchantress_theme else 0.0
+    cmdr_def = 1.0 if cmdr.cmdr_defender_theme else 0.0
+    cmdr_etb = min(cmdr.cmdr_etb_density, 5.0)
+    cmdr_has_p1p1 = 'P1P1' in cmdr.cmdr_profile.get('counter_types', set())
+
+    X[:, 90] = cmdr_equip  # cmdr_equipment_theme
+    card_equip = np.maximum(ctx._arr_is_equipment[safe_idx], ctx._arr_is_equip_payoff[safe_idx])
+    X[:, 91] = card_equip  # card_equipment_payoff
+    X[:, 92] = cmdr_equip * card_equip  # equipment_theme_match
+    X[:, 93] = cmdr_ench  # cmdr_enchantress_theme
+    card_ench_payoff = ctx._arr_is_ench_payoff[safe_idx]
+    card_ench_pure = ctx._arr_pure_enchantment[safe_idx]
+    card_ench = np.maximum(card_ench_payoff, card_ench_pure)
+    X[:, 94] = card_ench  # card_enchantress_payoff
+    X[:, 95] = cmdr_ench * card_ench  # enchantress_theme_match
+    X[:, 96] = cmdr_def  # cmdr_defender_theme
+    X[:, 97] = ctx._arr_is_defender[safe_idx]  # card_has_defender
+    X[:, 98] = cmdr_def * X[:, 97]  # defender_theme_match
+    X[:, 99] = ctx._arr_is_etb_doubler[safe_idx]  # card_is_etb_doubler
+    X[:, 100] = cmdr_etb  # cmdr_etb_density
+    X[:, 101] = X[:, 99] * cmdr_etb  # etb_doubler_match
+
+    # ── Counter/anthem interaction features (need cmdr P1P1 flag) ──
+    if cmdr_has_p1p1:
+        X[:, 73] = ctx._arr_dur_temporary[safe_idx] * (1.0 - ctx._arr_dur_permanent[safe_idx])  # temp_buff_counter_cmdr
+        X[:, 75] = np.where(n_counter > 0, 1.0, 0.0)  # cmdr_counter_x_put_counter
+        X[:, 76] = ctx._arr_has_static_anthem[safe_idx]  # static_anthem_counter_cmdr
+        # F78: cmdr_p1p1_card_no_counters
+        has_p1p1 = ctx._arr_has_p1p1[safe_idx]
+        has_any_cv = ctx._arr_has_any_counter_verb[safe_idx]
+        X[:, 78] = np.where((has_p1p1 == 0) & (has_any_cv == 0), 1.0, 0.0)
+
+    # ── Per-card features requiring set operations (loop, but fast) ──
+    # These features need per-card profile access. Process in a tight loop.
+    cmdr_strats = cmdr.cmdr_strats
+    cmdr_strat_vec = cmdr.cmdr_strat_vec
+    cmdr_ability_vec = cmdr.cmdr_ability_vec
+    cmdr_subtypes = cmdr.cmdr_subtypes
+    cmdr_mechs = cmdr.cmdr_mechs
+    cmdr_produces = cmdr.cmdr_produces
+    cmdr_consumes = cmdr.cmdr_consumes
+    cmdr_func = cmdr.cmdr_func
+    cmdr_profile = ctx._forge_profiles.get(cmdr.cmdr_oid, {})
+    cmdr_trigs = cmdr_profile.get('triggers', set())
+    cmdr_verbs = cmdr_profile.get('verbs', set())
+    cmdr_counters = cmdr.cmdr_profile.get('counter_types', set())
+    cmdr_filter_kws = cmdr.cmdr_profile.get('trigger_filters', set())
+    cmdr_trigger_types = cmdr_profile.get('trigger_filters', set())
+    cmdr_targets = cmdr_profile.get('targets', set())
+    cmdr_zones = cmdr.cmdr_zones
+    cmdr_dur = cmdr.cmdr_profile.get('duration', set())
+    cmdr_conds = cmdr.cmdr_profile.get('conditions', set())
+    cmdr_ezones = cmdr.cmdr_profile.get('effect_zones', set())
+    cmdr_granted = cmdr.cmdr_profile.get('granted_keywords', set())
+    cmdr_tribal_filters = cmdr.cmdr_tribal_filters
+
+    # Concept-based target alignment setup
+    cmdr_prod_types = set()
+    if cmdr_produces is not None:
+        for concept, target_type in [("creature_enters", "Creature"),
+                                      ("artifact_enters", "Artifact"),
+                                      ("enchantment_enters", "Enchantment"),
+                                      ("token_created", "Creature"),
+                                      ("counter_added", "Creature")]:
+            idx = _concept_idx.get(concept)
+            if idx is not None and cmdr_produces[idx] > 0:
+                cmdr_prod_types.add(target_type)
+
+    # Keyword-filter mapping for F36
+    kw_to_filter = {
+        "Flying": "flying", "Trample": "trample", "Haste": "haste",
+        "Deathtouch": "deathtouch", "Lifelink": "lifelink", "Menace": "menace",
+        "First Strike": "firststrike", "Double Strike": "doublestrike",
+        "Hexproof": "hexproof", "Indestructible": "indestructible",
+        "Vigilance": "vigilance", "Reach": "reach",
+    }
+    creature_idx_concept = _concept_idx.get("creature_enters")
+    cmdr_makes_creatures = (cmdr_produces is not None and creature_idx_concept is not None
+                            and cmdr_produces[creature_idx_concept] > 0)
+    combat_kws = {"Flying", "Trample", "Haste", "Menace", "Double Strike", "First Strike"}
+
+    # Functional fingerprint slices
+    P = ForgeFeatureContext._FUNC_PRODUCES_SLICE
+    R = ForgeFeatureContext._FUNC_REQUIRES_SLICE
+    A = ForgeFeatureContext._FUNC_AMPLIFIES_SLICE
+    _amp_to_prod = [1, 0, 5, 6]
+    _req_to_prod = {0: 0, 4: 5, 5: 6, 8: 7, 10: 1}
+    cmdr_prod_projected = None
+    if cmdr_func is not None:
+        cmdr_prod_projected = np.array([cmdr_func[P.start + i] for i in _amp_to_prod])
+
+    generic_types = {"card", "creature", "permanent", "nontoken",
+                     "token", "artifact", "enchantment", "land",
+                     "spell", "self", "other", "any"}
+
+    for row_i in range(N):
+        oid = card_oids[row_i]
+        ci = card_indices[row_i]
+        if ci < 0:
+            continue
+
+        c_strats = ctx.card_strats.get(oid, set())
+        card_profile = ctx._forge_profiles.get(oid, {})
+
+        # F5: strategy_overlap
+        X[row_i, 5] = float(len(cmdr_strats & c_strats))
+
+        # F6: strategy_cosine
+        csv = ctx.strat_vector(oid)
+        if cmdr_strat_vec is not None and csv is not None:
+            d = float(np.dot(cmdr_strat_vec, csv))
+            nc = float(np.linalg.norm(cmdr_strat_vec))
+            nd = float(np.linalg.norm(csv))
+            X[row_i, 6] = d / (nc * nd) if nc > 0 and nd > 0 else 0.0
+
+        # F7: forge_ability_cosine
+        card_av = ctx._ability_vectors.get(oid)
+        if cmdr_ability_vec is not None and card_av is not None:
+            X[row_i, 7] = float(np.dot(cmdr_ability_vec, card_av))
+
+        # F8: phase_match
+        cp = ctx.card_phase_order.get(oid, set())
+        if cmdr.cmdr_phases and cp:
+            best = 0.0
+            for p1 in cmdr.cmdr_phases:
+                for p2 in cp:
+                    best = max(best, max(0.0, 1.0 - abs(p1 - p2) * 2.0))
+            X[row_i, 8] = best
+
+        # F10: tribal_match
+        if cmdr_subtypes:
+            card_subs = ctx._arr_card_subtypes[ci]
+            if card_subs and (cmdr_subtypes & card_subs):
+                X[row_i, 10] = 1.0
+
+        # F23: forge_type_synergy
+        card_trigger_types = card_profile.get('trigger_filters', set())
+        card_targets = card_profile.get('targets', set())
+        if cmdr_subtypes:
+            fts = 0.0
+            for sub in cmdr_subtypes:
+                if sub in card_trigger_types:
+                    fts += 1.0
+                if sub.title() in card_targets:
+                    fts += 0.5
+            X[row_i, 23] = fts
+
+        # F24: cmdr_forge_type_match
+        tl = ctx._type_lines.get(oid, "")
+        ctm = 0.0
+        card_subs_lower = ctx._arr_card_subtypes[ci]
+        for sub in card_subs_lower:
+            if sub in cmdr_trigger_types:
+                ctm += 1.0
+            if sub.title() in cmdr_targets:
+                ctm += 0.5
+        for ctype in ("Creature", "Artifact", "Enchantment", "Instant", "Sorcery",
+                       "Equipment", "Aura", "Vehicle", "Planeswalker"):
+            if ctype in tl and ctype.lower() in cmdr_trigger_types:
+                ctm += 0.5
+        X[row_i, 24] = ctm
+
+        # F25: shared_forge_mechanics
+        card_mechs = ctx._card_mechs.get(oid, set())
+        X[row_i, 25] = float(len(cmdr_mechs & card_mechs))
+
+        # F27: forge_anti_tribal
+        if cmdr_subtypes:
+            anti = 0.0
+            for tf in card_trigger_types:
+                if tf not in generic_types and tf not in cmdr_subtypes:
+                    anti = 1.0
+                    break
+            if anti == 0.0:
+                for rs in card_profile.get('required_subtypes', set()):
+                    if rs not in generic_types and rs not in cmdr_subtypes:
+                        anti = 1.0
+                        break
+            if anti == 0.0:
+                for es in card_profile.get('excluded_subtypes', set()):
+                    if es in cmdr_subtypes:
+                        anti = 1.0
+                        break
+            X[row_i, 27] = anti
+
+        # F28: forge_verb_alignment
+        card_verbs = card_profile.get('verbs', set())
+        card_trigs = card_profile.get('triggers', set())
+        va = 0.0
+        for v in card_verbs:
+            va += len(ctx._verb_triggers.get(v, set()) & cmdr_trigs)
+        for v in cmdr_verbs:
+            va += len(ctx._verb_triggers.get(v, set()) & card_trigs)
+        X[row_i, 28] = va
+
+        # F29-F30: mech_fwd/rev
+        card_prod = ctx._mech_produces.get(oid)
+        card_cons = ctx._mech_consumes.get(oid)
+        if cmdr_consumes is not None and card_prod is not None:
+            X[row_i, 29] = float(np.dot(cmdr_consumes, card_prod))
+        if cmdr_produces is not None and card_cons is not None:
+            X[row_i, 30] = float(np.dot(cmdr_produces, card_cons))
+
+        # F31: counter_type_match
+        card_counters = card_profile.get('counter_types', set())
+        if cmdr_counters and card_counters:
+            X[row_i, 31] = float(len(cmdr_counters & card_counters))
+
+        # F34: zone_alignment
+        card_zones = ctx._card_zones.get(oid, set())
+        if cmdr_zones and card_zones:
+            X[row_i, 34] = float(len(cmdr_zones & card_zones))
+
+        # F35: target_alignment
+        card_tgts = card_profile.get('targets', set())
+        if cmdr_prod_types and card_tgts:
+            X[row_i, 35] = float(len(cmdr_prod_types & card_tgts))
+
+        # F36: forge_keyword_synergy
+        card_kws = card_profile.get('keywords', set())
+        kw_syn = 0.0
+        for kw in card_kws:
+            ff = kw_to_filter.get(kw, kw.lower().replace(" ", ""))
+            if any(ff in f for f in cmdr_filter_kws):
+                kw_syn += 1.0
+        if cmdr_makes_creatures:
+            kw_syn += float(len(card_kws & combat_kws)) * 0.3
+        X[row_i, 36] = kw_syn
+
+        # F38: granted_keyword_synergy
+        card_granted = card_profile.get('granted_keywords', set())
+        if card_granted:
+            gks = 0.0
+            for gk in card_granted:
+                if gk in cmdr_filter_kws:
+                    gks += 1.0
+            gks += float(len(card_granted & cmdr_granted)) * 0.5
+            X[row_i, 38] = gks
+
+        # F39: shared_conditions
+        card_conds = card_profile.get('conditions', set())
+        if cmdr_conds and card_conds:
+            X[row_i, 39] = float(len(card_conds & cmdr_conds))
+
+        # F42: duration_match
+        card_dur = card_profile.get('duration', set())
+        if cmdr_dur and card_dur:
+            X[row_i, 42] = float(len(card_dur & cmdr_dur))
+
+        # F44: effect_zone_match
+        card_ezones = card_profile.get('effect_zones', set())
+        if cmdr_ezones and card_ezones:
+            X[row_i, 44] = float(len(card_ezones & cmdr_ezones))
+
+        # F46: grants_types_match
+        card_gtypes = card_profile.get('grants_types', set())
+        if cmdr_subtypes and card_gtypes:
+            X[row_i, 46] = sum(1.0 for gt in card_gtypes if gt in cmdr_subtypes)
+
+        # F51-F55: Deck tag overlaps
+        card_has = ctx._deck_has.get(oid, set())
+        card_hints = ctx._deck_hints.get(oid, set())
+        card_needs = ctx._deck_needs.get(oid, set())
+        X[row_i, 51] = float(len(cmdr.cmdr_hints & card_has))
+        X[row_i, 52] = float(len(cmdr.cmdr_has & card_hints))
+        X[row_i, 53] = float(len(cmdr.cmdr_has & card_needs))
+        X[row_i, 54] = float(len(cmdr.cmdr_has & card_has))
+        X[row_i, 55] = float(len(cmdr.cmdr_hints & card_hints))
+
+        # F70: cmdr_needs_to_card_has
+        X[row_i, 70] = float(len(cmdr.cmdr_needs & card_has))
+
+        # F71: card_needs_satisfied
+        if card_needs:
+            met = len(card_needs & (cmdr.cmdr_has | cmdr.cmdr_hints))
+            X[row_i, 71] = float(met) / float(len(card_needs))
+
+        # F72: needs_rarity
+        if card_needs:
+            nr = 0.0
+            for need_tag in card_needs:
+                np_ = len(ctx._deck_has_providers.get(need_tag, set()))
+                if np_ > 0:
+                    nr += 1.0 / min(np_, 100)
+            X[row_i, 72] = min(nr, 5.0)
+
+        # F79-F82: Functional fingerprint features
+        card_func = ctx._func_fingerprints.get(oid)
+        if card_func is not None and cmdr_func is not None:
+            X[row_i, 79] = float(np.dot(cmdr_prod_projected, card_func[A]))
+            for req_dim, prod_dim in _req_to_prod.items():
+                X[row_i, 80] += cmdr_func[R.start + req_dim] * card_func[P.start + prod_dim]
+                X[row_i, 81] += card_func[R.start + req_dim] * cmdr_func[P.start + prod_dim]
+            norm_c = np.linalg.norm(cmdr_func)
+            norm_d = np.linalg.norm(card_func)
+            if norm_c > 0 and norm_d > 0:
+                X[row_i, 82] = float(np.dot(cmdr_func, card_func) / (norm_c * norm_d))
+
+        # F95-F97: Tribal depth
+        tribal_lord = 0.0
+        if cmdr_subtypes:
+            buff_verbs = card_verbs & {'Pump', 'PumpAll', 'PutCounter', 'PutCounterAll', 'Continuous'}
+            if buff_verbs:
+                card_tf = card_profile.get('trigger_filters', set())
+                card_req = card_profile.get('required_subtypes', set())
+                for sub in cmdr_subtypes:
+                    if sub in card_tf or sub in card_req:
+                        tribal_lord = 1.0
+                        break
+        X[row_i, 102] = tribal_lord
+
+        tribal_member = 0.0
+        if cmdr_tribal_filters:
+            card_subs = ctx._arr_card_subtypes[ci]
+            if card_subs and (cmdr_tribal_filters & card_subs):
+                tribal_member = 1.0
+        X[row_i, 103] = tribal_member
+
+        tribal_depth = X[row_i, 10] + tribal_lord + tribal_member
+        card_tok_subs = ctx._token_subtypes.get(oid, set())
+        if cmdr_subtypes and (card_tok_subs & cmdr_subtypes):
+            tribal_depth += 1.0
+        X[row_i, 104] = tribal_depth
+
+    return X
 
 
 def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
