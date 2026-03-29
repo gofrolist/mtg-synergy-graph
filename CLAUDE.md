@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MTG Synergy Graph — a tool for analyzing Magic: The Gathering EDH/Commander deck synergies. The system uses a LightGBM LambdaRank model trained on EDHREC labels with 100% Forge-native features (zero EDHREC dependency at inference). The forge model can evaluate new cards day-1 without community playtesting data.
+MTG Synergy Graph — a tool for analyzing Magic: The Gathering EDH/Commander deck synergies. The system uses a LightGBM LambdaRank model trained on EDHREC labels. Production model uses edhrec_deck_pct as a feature (top importance); set EDHREC_FREE=1 for pure Forge-native inference (day-1 new card evaluation, ~7% lower NDCG).
 
 ### Signal Architecture (recommendation pipeline)
 
@@ -33,10 +33,11 @@ FORGE MODEL (--recommend): Zero oracle text, pure Forge mechanical synergy
        4 dot-product features: produces·amplifies, requires·produces, full cosine
      Top features: edhrec_deck_pct 10%, card_hub_score 7%, deck_edge_count 6%,
      ability_density 5%, cmdr_2hop_ratio 4.5%, strategy_cosine 5%, cmdr_2hop_count 3.1%
-  3. Forge mechanics vectors: 112-dim shared concept space encoding ALL mechanical
-     interactions (32 game concepts + 80 subtypes). Captures synergy through
+  3. Forge mechanics vectors: 116-dim shared concept space encoding ALL mechanical
+     interactions (36 game concepts + 80 subtypes). Captures synergy through
      card produces → commander consumes dot product.
      Zone-aware concepts: enters_from_graveyard/exile/hand, goes_to_graveyard/exile
+     Theme concepts: equipment_enters, equipment_equipped, defender_available, etb_doubled
   4. Can evaluate new cards day-1 without playtesting data
   5. Works for any of 3,141+ commanders (not just 1,361 with EDHREC)
   6. NDCG@30 = 0.52 on leave-commander-out CV (3:1 negatives, sample-weighted)
@@ -84,7 +85,8 @@ python3 fetch_edhrec_decks.py --refresh    # Fetch EDHREC average decklists for 
 
 # === Forge model (LightGBM LambdaRank) ===
 python3 train_fusion_model.py --forge-only     # Train forge GBM (uses cached features, ~50s)
-python3 train_fusion_model.py --forge-only --rebuild-features  # Rebuild feature cache + train (~4 min)
+python3 train_fusion_model.py --forge-only --rebuild-features  # Rebuild feature cache + train (~5 min)
+python3 train_fusion_model.py --forge-only --tune              # HP search + train (~15 min, use after new features)
 
 # === Recommendations ===
 python3 synergy_graph.py --commander "Krenko, Mob Boss" --recommend     # Recommend cards
@@ -197,17 +199,21 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
   AddAbility$, TokenAmount$, Event$, ReplaceWith$ fields)
 - forge_deck_tags: Forge's deck-building AI (has/hints/needs) for 9,868 cards
   Maps what a card provides, wants, and requires in a deck
-- Mechanics vectors (`src/mtg_synergy/recommend/mechanics_vectors.py`): 112-dim shared
-  concept space (32 game concepts + 80 subtypes). Effects and triggers map to same
+- Mechanics vectors (`src/mtg_synergy/recommend/mechanics_vectors.py`): 116-dim shared
+  concept space (36 game concepts + 80 subtypes). Effects and triggers map to same
   dimensions. Dot product = mechanical synergy score.
+  Theme concepts: equipment_enters, equipment_equipped, defender_available, etb_doubled
 - Training data: edhrec_card_synergy (367k rows, 1,387 commanders), section-based grading
   Grade 5=High Synergy, 4=Top Cards, 3=synergy>0.1, 2=synergy 0-0.1, 1=negative, 0=random neg
   Generic staples (>30% frequency) demoted from grade 4/5 to 3
   Commander-illegal cards filtered from negative pool
   3:1 negative ratio, 3-tier sampling: 1/3 strategy/subtype, 1/3 tag overlap, 1/3 random
-- Training: `python3 train_fusion_model.py --forge-only --rebuild-features` (~8 min)
-- Feature importance: card_hub_score 9%, strategy_cosine 8%, ability_density 7%,
-  deck_edge_count 7%, forge_ability_cosine 5%, func_full_cosine 2.5%, cmc 5%
+- Training: `python3 train_fusion_model.py --forge-only --rebuild-features` (~5 min)
+  Use `--tune` for HP search (~15 min). Default uses cached best HP.
+- Feature importance: edhrec_deck_pct 10%, card_hub_score 7%, deck_edge_count 6%,
+  ability_density 5%, cmdr_2hop_ratio 4.5%, strategy_cosine 5%, cmdr_2hop_count 3.1%
+- EDHREC_FREE=1 env var disables edhrec_deck_pct for pure Forge-native inference
+  (NDCG 0.479 vs 0.519 with EDHREC, ~7% lower but works for day-1 new cards)
 - Edge index cached to npz (~2s reload vs ~40s DB scan)
 - Edge index pre-loaded at inference: CmdrFeatureContext uses in-memory adjacency (~7s total)
 - Per-grade sample weights: grade 5 (High Synergy) ×3, grade 4 (Top Cards) ×2
