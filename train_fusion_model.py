@@ -113,11 +113,13 @@ FORGE_FEATURE_NAMES = [
     "func_card_requires_cmdr",    # [81] card requires trigger X, cmdr produces X
     "func_full_cosine",           # [82] overall functional fingerprint similarity
     # ── Card quality / noise suppression ──
-    "edhrec_deck_pct",           # [83] fraction of EDHREC commanders including this card
+    "forge_ability_richness",    # [83] total distinct mechanical components (Forge-native)
     "card_in_forge",             # [84] card has Forge ability data (vs all-zero features)
     "card_strategy_count",       # [85] number of strategies assigned to card
+    "deck_tag_count",            # [86] Forge deck-building AI tags (has+hints+needs)
+    "edhrec_deck_pct",           # [87] fraction of EDHREC commanders including this card
     # ── Theme-based features ──
-    "cmdr_equipment_theme",       # [86] commander wants equipment
+    "cmdr_equipment_theme",       # [88] commander wants equipment
     "card_equipment_payoff",      # [84] card is equipment or cares about equipment
     "equipment_theme_match",      # [85] both align on equipment
     "cmdr_enchantress_theme",     # [86] commander wants enchantments

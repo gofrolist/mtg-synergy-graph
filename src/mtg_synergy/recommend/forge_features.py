@@ -1,13 +1,17 @@
 """Shared forge feature computation for training and inference.
 
-Extracts the 98-feature forge GBM feature vector computation into a
+Extracts the 103-feature forge GBM feature vector computation into a
 single module used by both train_fusion_model.py and scoring.py.
 
 No oracle-text embeddings or tower model — pure Forge-native features.
 """
+import os
 import time
 
 import numpy as np
+
+# Set EDHREC_FREE=1 to disable edhrec_deck_pct feature (pure Forge-native mode)
+_EDHREC_FREE = os.environ.get("EDHREC_FREE", "") == "1"
 
 from mtg_synergy.recommend.mechanics_vectors import _concept_idx
 
@@ -633,6 +637,23 @@ class ForgeFeatureContext:
 
         # Cards with Forge data (have any abilities parsed)
         self._has_forge_data = set(self._forge_profiles.keys())
+
+        # Forge-native card quality proxies (EDHREC-independent noise suppression)
+        # forge_ability_richness: total distinct mechanical components per card
+        self._forge_richness = {}
+        for oid, p in self._forge_profiles.items():
+            richness = (len(p['verbs']) + len(p['triggers']) + len(p['keywords']) +
+                        len(p['counter_types']) + len(p['targets']))
+            self._forge_richness[oid] = float(min(richness, 15))
+
+        # deck_tag_count: how many deck tags (has+hints+needs) Forge's AI assigned
+        self._deck_tag_count = {}
+        for oid in set(list(self._deck_has.keys()) + list(self._deck_hints.keys()) +
+                       list(self._deck_needs.keys())):
+            count = (len(self._deck_has.get(oid, set())) +
+                     len(self._deck_hints.get(oid, set())) +
+                     len(self._deck_needs.get(oid, set())))
+            self._deck_tag_count[oid] = float(min(count, 10))
 
         # Verb→trigger alignment mapping for F30
         self._verb_triggers = {
@@ -1319,9 +1340,9 @@ class CmdrFeatureContext:
 
 def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
                           ctx: ForgeFeatureContext, cmdr: CmdrFeatureContext) -> list:
-    """Compute the 101-feature vector for a single (commander, card) pair.
+    """Compute the 103-feature vector for a single (commander, card) pair.
 
-    Returns a list of 101 floats matching FORGE_FEATURE_NAMES order.
+    Returns a list of 103 floats matching FORGE_FEATURE_NAMES order.
     Pure Forge-native features — no tower model or oracle-text embeddings.
     """
     out_s = cmdr.cmdr_out.get(card_oid, 0.0)
@@ -1772,19 +1793,28 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
     func_card_req_cmdr = 0.0  # F81: card requires X trigger, cmdr produces X
     func_full_cosine = 0.0    # F82: overall functional similarity
 
-    # ── Card quality / noise suppression features (F83-F85) ──
+    # ── Card quality / noise suppression features (F83-F87) ──
+    # Forge-native proxies that work for day-1 new card evaluation
 
-    # F83: edhrec_deck_pct — fraction of EDHREC commanders including this card
-    # High = staple (Sol Ring ~1.0), Medium = synergy pick (~0.05), Low/0 = unpopular/noise
-    edhrec_pct = ctx._edhrec_deck_pct.get(card_oid, 0.0)
+    # F83: forge_ability_richness — total distinct mechanical components
+    # (verbs + triggers + keywords + counter_types + targets)
+    # Scour from Existence ≈ 1, Goblin Chieftain ≈ 5+. Suppresses featureless cards.
+    forge_richness = ctx._forge_richness.get(card_oid, 0.0)
 
     # F84: card_in_forge — does this card have ANY forge ability data?
-    # Cards without Forge data have all-zero mechanical features → "default" GBM score
     in_forge = 1.0 if card_oid in ctx._has_forge_data else 0.0
 
     # F85: card_strategy_count — number of strategies assigned to this card
-    # Cards with 0 strategies have no archetype signal
     strat_count = float(min(len(c_strats), 5))
+
+    # F86: deck_tag_count — how many deck tags Forge's AI assigned (has+hints+needs)
+    # Cards with 0 tags have no deck-building signal from Forge
+    deck_tags = ctx._deck_tag_count.get(card_oid, 0.0)
+
+    # F87: edhrec_deck_pct — fraction of EDHREC commanders including this card
+    # Kept as complementary signal; for new cards this is 0 but other features compensate
+    # Set EDHREC_FREE=1 to train/evaluate without this feature (pure Forge-native mode)
+    edhrec_pct = 0.0 if _EDHREC_FREE else ctx._edhrec_deck_pct.get(card_oid, 0.0)
 
     # ── Theme-based features (F86-F100) ──
 
@@ -1978,11 +2008,13 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         func_card_req_cmdr,                              # F81 func_card_requires_cmdr
         func_full_cosine,                                # F82 func_full_cosine
         # ── Card quality / noise suppression ──
-        edhrec_pct,                                      # F83 edhrec_deck_pct
+        forge_richness,                                  # F83 forge_ability_richness
         in_forge,                                        # F84 card_in_forge
         strat_count,                                     # F85 card_strategy_count
+        deck_tags,                                       # F86 deck_tag_count
+        edhrec_pct,                                      # F87 edhrec_deck_pct
         # ── Theme-based features ──
-        cmdr_equip,                                      # F86 cmdr_equipment_theme
+        cmdr_equip,                                      # F88 cmdr_equipment_theme
         card_equip,                                      # F84 card_equipment_payoff
         equip_match,                                     # F85 equipment_theme_match
         cmdr_ench,                                       # F86 cmdr_enchantress_theme
