@@ -11,40 +11,52 @@ MTG Synergy Graph — a tool for analyzing Magic: The Gathering EDH/Commander de
 ```
 FORGE MODEL (--recommend): Zero oracle text, pure Forge mechanical synergy
   1. Color-identity filter → all legal cards scored directly by GBM (no tower, no embeddings)
-  2. Forge LambdaRank GBM: 78 features, EDHREC labels, forge-native features
+  2. Forge LambdaRank GBM: 83 features, EDHREC labels, forge-native features
      100% Forge-native: no oracle text, no embeddings, no neural network
-     28 profile fields per card extracted from forge_abilities (verbs, triggers, keywords,
+     29 profile fields per card extracted from forge_abilities (verbs, triggers, keywords,
      counter_types, targets, ability_types, trigger_filters, required_subtypes,
      granted_keywords, conditions, duration, effect_zones, scales_with, grants_types,
      combat_damage, is_secondary, gain_control, damage_amount, cards_drawn, life_amount,
      produces_mana, mana_colors, counter_num_variable, grants_abilities, token_amount_variable,
-     has_static_anthem, counters_on_lands, counter_trigger_themes)
+     has_static_anthem, counters_on_lands, counter_trigger_themes, has_p1p1)
      + forge_deck_tags (Forge's deck-building AI: has/hints/needs theme signals)
      + ability counts (total, triggered), token complexity (P/T, keywords),
        zone interaction (graveyard, exile), ability density
      + deck tag expansion (cmdr_needs_to_card_has, card_needs_satisfied, needs_rarity)
      + counter/anthem distinction (put_counter_ratio, cmdr_counter_x_put_counter,
-       static_anthem_counter_cmdr, counters_on_lands)
+       static_anthem_counter_cmdr, counters_on_lands, cmdr_p1p1_card_no_counters)
+     + functional fingerprints (33-dim semantic vectors):
+       produces (12): tokens, p1p1_counters, mana, cards, damage, life, etc.
+       requires (11): creature_etb, death, spell_cast, combat, lifegain, etc.
+       amplifies (4): counter/token/damage/lifegain doublers
+       targets (6): creatures, self, lands, players, artifacts, any
+       4 dot-product features: produces·amplifies, requires·produces, full cosine
      Top features: card_hub_score 9%, strategy_cosine 8%, ability_density 7%,
-     deck_edge_count 7%, forge_ability_cosine 5%, cmc 5%
+     deck_edge_count 7%, forge_ability_cosine 5%, func_full_cosine 2.5%, cmc 5%
   3. Forge mechanics vectors: 112-dim shared concept space encoding ALL mechanical
      interactions (32 game concepts + 80 subtypes). Captures synergy through
      card produces → commander consumes dot product.
      Zone-aware concepts: enters_from_graveyard/exile/hand, goes_to_graveyard/exile
   4. Can evaluate new cards day-1 without playtesting data
   5. Works for any of 3,141+ commanders (not just 1,361 with EDHREC)
-  6. NDCG@30 = 0.50 on leave-commander-out CV (section-based 6-grade labels, sample-weighted)
+  6. NDCG@30 = 0.46 on leave-commander-out CV (3:1 negatives, sample-weighted)
      Training labels: edhrec_card_synergy (367k rows, section-based grading)
      Grade 5=High Synergy, 4=Top Cards, 3=synergy>0.1, 2=synergy 0-0.1, 1=negative, 0=not in table
+     Training: 3:1 negative ratio (1.05M negatives), 3-tier sampling:
+       1/3 strategy/subtype overlap, 1/3 tag overlap, 1/3 random
+     Per-grade sample weights: grade 5→3x, grade 4→2x
+     compare_edhrec --limit 100: 2.6/50 HighSyn, 1.9/50 TopCards, 13.1/50 InDeck
 
 CAUSAL GRAPH:
-  - 18.4M edges across 30+ event types (verb_event_map extracted from Forge Java source)
+  - 19.7M edges across 30+ event types (verb_event_map extracted from Forge Java source)
   - SubAbility chains followed: 72k abilities (12.7k from secondary effects)
   - IDF weighting, chain scoring, anti-synergy detection
   - Synthetic edges (6.3M): SpellCast, Attacks, LandPlayed,
     ChangesZone+Battlefield (creatures, artifacts, enchantments, planeswalkers entering)
-  - Entity presence edges (1.8M): token creators → "for each [Type]" scaling,
+  - Entity presence edges (2.6M): token creators → "for each [Type]" scaling,
     sacrifice outlets, tap abilities. Connects Krenko → Brightstone Ritual.
+  - Continuous pump edges (54k): subtype-specific lord/anthem effects → matching creatures.
+    E.g., Kyler → all Humans (ContinuousPump event). Enables feedback loop detection.
   - Exact (subtype match, 0.3) and broad (card_type match, 0.15) precision levels
   - Materialized filter_precision column for fast queries
 ```
@@ -131,7 +143,7 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
 | card_strategies | ~88k | Strategy assignments |
 | spellbook_combos | ~82k | Commander Spellbook combos |
 | spellbook_combo_cards | ~289k | Combo ↔ card junction |
-| interaction_edges | ~18.4M | Causal edges from Forge: 30+ event types + 6.3M synthetic + 1.8M entity-presence edges |
+| interaction_edges | ~19.7M | Causal edges from Forge: 30+ event types + 6.3M synthetic + 2.6M entity-presence + 54k continuous pump edges |
 | commander_profiles | ~3.4k | Auto-inferred commander archetypes (strategies, tribal, events) |
 | edhrec_card_synergy | ~132k | EDHREC synergy scores for 502 commanders |
 | forge_abilities | ~72k | Raw Forge ability data + SubAbility chain expansions (12.7k expanded rows). 20 columns: 19 consumed in features or during import, 1 unused (unless_cost). sub_ability column is resolved during import by expanding chains into separate rows. |
@@ -142,10 +154,10 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
 
 **Forge model** (data/fusion_model_forge.lgb):
 - No tower model, no embeddings, no neural network — pure LightGBM on Forge data
-- LambdaRank GBM on 78 features (shared via `src/mtg_synergy/recommend/forge_features.py`):
-  100% Forge-native with 28 profile fields per card:
+- LambdaRank GBM on 83 features (shared via `src/mtg_synergy/recommend/forge_features.py`):
+  100% Forge-native with 29 profile fields per card:
   causal scores (6), strategy (2), forge_ability_cosine, phase (2), tribal,
-  card types (6), cmc, deck edges (3), causal_composite, card_hub_score (log-scaled),
+  card types (6), cmc, deck edges (3, log-scaled), causal_composite, card_hub_score (log-scaled),
   forge_type_synergy, cmdr_forge_type_match, shared_forge_mechanics,
   forge_ability_depth, forge_anti_tribal, forge_verb_alignment,
   forge_mech_fwd/rev, counter_type_match, ability_type_ratio_T/A,
@@ -163,15 +175,20 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
   token_keyword_count, zone_graveyard_interact, zone_exile_interact,
   ability_density, cmdr_needs_to_card_has, card_needs_satisfied, needs_rarity,
   temp_buff_counter_cmdr, put_counter_ratio, cmdr_counter_x_put_counter,
-  static_anthem_counter_cmdr, counters_on_lands
+  static_anthem_counter_cmdr, counters_on_lands, cmdr_p1p1_card_no_counters,
+  func_produces_amplifies, func_requires_produces, func_card_requires_cmdr, func_full_cosine
+- Functional fingerprints (`ForgeFeatureContext._func_fingerprints`): 33-dim semantic
+  vectors per card encoding produces/requires/amplifies/targets. Dot products between
+  commander and card fingerprints capture synergy without hand-coded rules.
 - Training data: commander-illegal cards filtered from negative pool
 - Forge profiles extract ALL raw_line fields: granted_keywords, conditions,
   duration, effect_zones, scales_with, grants_types, combat_damage, is_secondary,
   gain_control, damage_amount, cards_drawn, life_amount, required_subtypes,
   produces_mana, mana_colors, counter_num_variable, grants_abilities,
-  token_amount_variable
+  token_amount_variable, has_static_anthem, counters_on_lands,
+  counter_trigger_themes, has_p1p1
   (from cost, defined, ValidCards$, Affected$, Produced$, CounterNum$,
-  AddAbility$, TokenAmount$ fields)
+  AddAbility$, TokenAmount$, Event$, ReplaceWith$ fields)
 - forge_deck_tags: Forge's deck-building AI (has/hints/needs) for 9,868 cards
   Maps what a card provides, wants, and requires in a deck
 - Mechanics vectors (`src/mtg_synergy/recommend/mechanics_vectors.py`): 112-dim shared
@@ -181,28 +198,27 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
   Grade 5=High Synergy, 4=Top Cards, 3=synergy>0.1, 2=synergy 0-0.1, 1=negative, 0=random neg
   Generic staples (>30% frequency) demoted from grade 4/5 to 3
   Commander-illegal cards filtered from negative pool
-  Hard negative sampling: 50% strategy/subtype overlap + 50% random, 1:1 ratio
-- Training: `python3 train_fusion_model.py --forge-only --rebuild-features` (~5 min)
-- Feature importance: strategy_cosine 9%, card_hub_score 8%, ability_density 7%,
-  deck_edge_count 7%, forge_ability_cosine 6%, cmc 5%
+  3:1 negative ratio, 3-tier sampling: 1/3 strategy/subtype, 1/3 tag overlap, 1/3 random
+- Training: `python3 train_fusion_model.py --forge-only --rebuild-features` (~8 min)
+- Feature importance: card_hub_score 9%, strategy_cosine 8%, ability_density 7%,
+  deck_edge_count 7%, forge_ability_cosine 5%, func_full_cosine 2.5%, cmc 5%
 - Edge index cached to npz (~2s reload vs ~40s DB scan)
 - Edge index pre-loaded at inference: CmdrFeatureContext uses in-memory adjacency (~7s total)
 - Per-grade sample weights: grade 5 (High Synergy) ×3, grade 4 (Top Cards) ×2
-- Post-scoring penalties:
+- Post-scoring penalties (scoring.py):
   - excluded_tribal (×0.3), required_subtype mismatch (×0.4), wrong token type (×0.5)
-  - temporary buffs for counter commanders (×0.5)
-  - static anthems for counter commanders (×0.5): Continuous+AddPower without PutCounter
+  - non-counter creatures for counter commanders (×0.6): no has_p1p1 + no counter verbs
   - counters on lands for counter commanders (×0.4): Earthbend, land-targeting PutCounter
   - wrong-color needs hard filter (score=-1e9): e.g., Pearl Medallion in mono-G
   - unmet Type$ needs/hints (×0.3): e.g., needs=Type$Dinosaur in Human deck
-- GBM: LambdaRank, num_leaves=255, lr=0.05, n_estimators=1500, label_gain=[0,1,3,6,15,30]
+- GBM: LambdaRank, num_leaves=255, lr=0.05, n_estimators=2000, label_gain=[0,1,3,6,15,30]
 
 ### Recommendation Pipeline (synergy_graph.py --commander "Name" --recommend)
 
 ```
 1. Candidate selection: Color-identity filter → ALL legal cards (no tower, no embeddings)
 2. Score all candidates with GBM (batch predict, ~0.5s for 13k cards):
-   78 features (LambdaRank, 100% Forge-native, no oracle text)
+   83 features (LambdaRank, 100% Forge-native, no oracle text)
 3. Sort and output top 30 with clickable Scryfall hyperlinks (OSC 8)
 Total time: ~7s (including edge index load from cache)
 ```
