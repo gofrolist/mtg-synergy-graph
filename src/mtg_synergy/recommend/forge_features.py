@@ -1,6 +1,6 @@
 """Shared forge feature computation for training and inference.
 
-Extracts the 103-feature forge GBM feature vector computation into a
+Extracts the 105-feature forge GBM feature vector computation into a
 single module used by both train_fusion_model.py and scoring.py.
 
 No oracle-text embeddings or tower model — pure Forge-native features.
@@ -71,6 +71,12 @@ class ForgeFeatureContext:
             conn.execute("SELECT DISTINCT oracle_id FROM cards")
         ):
             self.oid_to_idx[oid] = i
+
+        # Pre-cache type_lines for CmdrFeatureContext (avoids per-commander SQL)
+        self._type_lines = {}
+        for oid, tl in conn.execute("SELECT oracle_id, type_line FROM cards"):
+            if tl:
+                self._type_lines[oid] = tl
 
         # Card strategies
         self.card_strats = {}
@@ -1030,15 +1036,13 @@ class CmdrFeatureContext:
         self.cmdr_ability_vec = ctx._ability_vectors.get(cmdr_oid)
         self.cmdr_phases = ctx.card_phase_order.get(cmdr_oid, set())
 
-        # Commander subtypes for tribal matching (populated from cards table)
+        # Commander subtypes for tribal matching (from pre-cached type_lines)
         self.cmdr_subtypes = set()
-        cmdr_type_row = ctx.conn.execute(
-            "SELECT type_line FROM cards WHERE oracle_id = ?", (cmdr_oid,)
-        ).fetchone()
-        if cmdr_type_row and cmdr_type_row[0] and "\u2014" in cmdr_type_row[0]:
+        cmdr_tl = ctx._type_lines.get(cmdr_oid, "")
+        if cmdr_tl and "\u2014" in cmdr_tl:
             try:
                 self.cmdr_subtypes = {
-                    s.lower() for s in cmdr_type_row[0].split("\u2014")[1].strip().split()
+                    s.lower() for s in cmdr_tl.split("\u2014")[1].strip().split()
                 }
             except (IndexError, AttributeError):
                 pass
@@ -1373,7 +1377,7 @@ class CmdrFeatureContext:
 
 def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
                           ctx: ForgeFeatureContext, cmdr: CmdrFeatureContext) -> list:
-    """Compute the 103-feature vector for a single (commander, card) pair.
+    """Compute the 105-feature vector for a single (commander, card) pair.
 
     Returns a list of 103 floats matching FORGE_FEATURE_NAMES order.
     Pure Forge-native features — no tower model or oracle-text embeddings.

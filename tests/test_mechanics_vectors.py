@@ -37,9 +37,9 @@ def test_zone_concepts_exist():
         assert concept in _concept_idx, f"Missing from _concept_idx: {concept}"
 
 
-def test_n_concepts_is_32():
-    """N_CONCEPTS should be 32 (27 original + 5 zone-aware)."""
-    assert N_CONCEPTS == 32, f"Expected N_CONCEPTS=32, got {N_CONCEPTS}"
+def test_n_concepts_is_36():
+    """N_CONCEPTS should be 36 (27 original + 5 zone-aware + 4 theme)."""
+    assert N_CONCEPTS == 36, f"Expected N_CONCEPTS=36, got {N_CONCEPTS}"
 
 
 def test_concept_indices_unique():

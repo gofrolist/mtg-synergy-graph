@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Train forge-only LightGBM model for card recommendation.
 
-LambdaRank GBM trained on EDHREC labels with 71 forge-native features.
+LambdaRank GBM trained on EDHREC labels with 105 forge-native features.
 No tower model, no embeddings, no neural network.
 
 Usage:
@@ -305,15 +305,63 @@ def sample_negatives(positives_by_cmdr, all_card_oids, card_colors, cmdr_colors,
     return negatives
 
 
+def _compute_chunk(args):
+    """Worker function for parallel feature building.
+
+    Each worker creates its own ForgeFeatureContext + DB connection,
+    then computes features for its assigned commanders.
+    """
+    cmdr_chunk, pairs_by_cmdr, cmdr_to_idx, card_meta_list, n_features, db_path = args
+
+    # Reconstruct card_meta dict from list of tuples (pickling optimization)
+    card_meta = {oid: {"type_line": tl, "cmc": cmc}
+                 for oid, tl, cmc in card_meta_list}
+
+    conn = sqlite3.connect(db_path)
+    ctx = ForgeFeatureContext(conn, preload_edges=True, preload_strength=True)
+
+    # Pre-allocate arrays for this chunk
+    n_pairs = sum(len(pairs_by_cmdr[c]) for c in cmdr_chunk)
+    X = np.zeros((n_pairs, n_features), dtype=np.float32)
+    y = np.zeros(n_pairs, dtype=np.float32)
+    cmdr_ids = np.zeros(n_pairs, dtype=np.int32)
+    row_idx = 0
+
+    for cmdr_oid in cmdr_chunk:
+        pairs = pairs_by_cmdr.get(cmdr_oid, [])
+        if not pairs:
+            continue
+
+        deck_oids_for_cmdr = {oid for oid, lbl in pairs if lbl > 0}
+        cmdr_ctx = CmdrFeatureContext(ctx, cmdr_oid, deck_oids_for_cmdr)
+
+        cmdr_idx = cmdr_to_idx[cmdr_oid]
+        for card_oid, label in pairs:
+            meta = card_meta.get(card_oid, {})
+            feats = compute_card_features(
+                card_oid, meta.get("type_line", ""), float(meta.get("cmc", 0.0)),
+                ctx, cmdr_ctx,
+            )
+            X[row_idx] = feats
+            y[row_idx] = float(label)
+            cmdr_ids[row_idx] = cmdr_idx
+            row_idx += 1
+
+    conn.close()
+    return X[:row_idx], y[:row_idx], cmdr_ids[:row_idx]
+
+
 def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=True):
     """Build forge-only feature matrix (no EDHREC, no tower, no embeddings).
 
-    Pure Forge-native features: 71 features from causal graph, strategies,
+    Pure Forge-native features: 105 features from causal graph, strategies,
     card mechanics, and Forge ability data.
 
-    Delegates per-card feature computation to the shared forge_features module
-    (ForgeFeatureContext / CmdrFeatureContext / compute_card_features).
+    Uses multiprocessing to parallelize per-commander feature computation.
+    Each worker creates its own ForgeFeatureContext with a separate DB connection.
     """
+    import multiprocessing as mp
+
     conn = sqlite3.connect(DB_PATH)
 
     # ── Card metadata (needed for type_line, cmc lookups) ─────────────
@@ -329,63 +377,48 @@ def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=Tru
             "cmc": cmc or 0.0,
         }
 
-    # ── Shared forge feature context (strategies, phases, mechanics) ──
-    ctx = ForgeFeatureContext(conn, preload_edges=True, preload_strength=True)
-
     if verbose:
+        # Quick context init just for reporting
+        ctx = ForgeFeatureContext(conn, preload_edges=False, preload_strength=False)
         print(f"  Strategy vector: {ctx._n_strats} strategies")
         print(f"  Forge ability vectors: {ctx._n_abilities} vocab, {len(ctx._ability_vectors)} cards with vectors")
+        del ctx
 
-    # ── Pre-allocate output arrays (no intermediate all_rows list) ────
+    conn.close()
+
+    # ── Prepare for parallel workers ─────────────────────────────────
     cmdr_oids_ordered = sorted(pairs_by_cmdr.keys())
     cmdr_to_idx = {oid: i for i, oid in enumerate(cmdr_oids_ordered)}
 
-    N = sum(len(pairs_by_cmdr[c]) for c in cmdr_oids_ordered)
-    X = np.zeros((N, len(FORGE_FEATURE_NAMES)), dtype=np.float32)
-    y = np.zeros(N, dtype=np.float32)
-    cmdr_ids = np.zeros(N, dtype=np.int32)
+    # Pickle-friendly card_meta: list of (oid, type_line, cmc) tuples
+    card_meta_list = [(oid, m["type_line"], m["cmc"]) for oid, m in card_meta.items()]
 
-    n_cmdrs = len(cmdr_oids_ordered)
-    row_idx = 0
-
-    for ci, cmdr_oid in enumerate(cmdr_oids_ordered):
-        if verbose and ((ci + 1) % 200 == 0 or ci == 0):
-            print(f"  Commander {ci+1}/{n_cmdrs}...", flush=True)
-
-        pairs = pairs_by_cmdr.get(cmdr_oid, [])
-        if not pairs:
-            continue
-
-        deck_oids_for_cmdr = {oid for oid, lbl in pairs if lbl > 0}
-        cmdr_ctx = CmdrFeatureContext(ctx, cmdr_oid, deck_oids_for_cmdr)
-
-        cmdr_type_line = card_meta.get(cmdr_oid, {}).get("type_line", "")
-        if "\u2014" in cmdr_type_line:
-            try:
-                cmdr_ctx.cmdr_subtypes = {
-                    s.lower() for s in cmdr_type_line.split("\u2014")[1].strip().split()
-                }
-            except (IndexError, AttributeError):
-                pass
-
-        cmdr_idx = cmdr_to_idx[cmdr_oid]
-        for card_oid, label in pairs:
-            meta = card_meta.get(card_oid, {})
-            feats = compute_card_features(
-                card_oid, meta.get("type_line", ""), float(meta.get("cmc", 0.0)),
-                ctx, cmdr_ctx,
-            )
-            X[row_idx] = feats
-            y[row_idx] = float(label)
-            cmdr_ids[row_idx] = cmdr_idx
-            row_idx += 1
-
-    X = X[:row_idx]
-    y = y[:row_idx]
-    cmdr_ids = cmdr_ids[:row_idx]
-    conn.close()
+    n_workers = min(mp.cpu_count(), len(cmdr_oids_ordered), 8)
+    chunk_size = (len(cmdr_oids_ordered) + n_workers - 1) // n_workers
+    chunks = [cmdr_oids_ordered[i:i + chunk_size]
+              for i in range(0, len(cmdr_oids_ordered), chunk_size)]
 
     if verbose:
+        print(f"  Parallel feature build: {n_workers} workers, "
+              f"{len(cmdr_oids_ordered)} commanders", flush=True)
+
+    worker_args = [
+        (chunk, pairs_by_cmdr, cmdr_to_idx, card_meta_list,
+         len(FORGE_FEATURE_NAMES), DB_PATH)
+        for chunk in chunks
+    ]
+
+    t0 = time.time()
+    with mp.Pool(n_workers) as pool:
+        results = pool.map(_compute_chunk, worker_args)
+
+    # ── Merge results from all workers ───────────────────────────────
+    X = np.concatenate([r[0] for r in results], axis=0)
+    y = np.concatenate([r[1] for r in results], axis=0)
+    cmdr_ids = np.concatenate([r[2] for r in results], axis=0)
+
+    if verbose:
+        print(f"  Feature build time: {time.time() - t0:.1f}s")
         print(f"\nForge feature matrix: {X.shape}")
         n_pos = int((y > 0).sum())
         print(f"  Positive (grade>0): {n_pos}, Negative (grade=0): {int(len(y) - n_pos)}")
@@ -422,13 +455,98 @@ def _build_group_array(cmdr_ids, idx_array):
     return groups
 
 
-def train_forge_gbm(X, y, cmdr_ids, tune=False):
+def _train_one_fold(args):
+    """Train a single CV fold. Used by both serial and parallel paths."""
+    import lightgbm as lgb
+
+    fold_i, train_idx, test_idx, X, y, w, cmdr_ids, params, feature_names = args
+
+    # Ensure data within each fold is sorted by commander
+    train_sort = np.argsort(cmdr_ids[train_idx])
+    test_sort = np.argsort(cmdr_ids[test_idx])
+    ti = train_idx[train_sort]
+    vi = test_idx[test_sort]
+
+    train_group = _build_group_array(cmdr_ids, ti)
+    test_group = _build_group_array(cmdr_ids, vi)
+
+    train_data = lgb.Dataset(X[ti], label=y[ti], weight=w[ti], group=train_group,
+                             feature_name=feature_names, free_raw_data=False)
+    eval_data = lgb.Dataset(X[vi], label=y[vi], weight=w[vi], group=test_group,
+                            reference=train_data, feature_name=feature_names,
+                            free_raw_data=False)
+
+    booster = lgb.train(
+        params, train_data,
+        num_boost_round=3000,
+        valid_sets=[eval_data],
+        callbacks=[lgb.early_stopping(80, verbose=False),
+                   lgb.log_evaluation(0)],
+    )
+
+    # Compute NDCG@30
+    preds = booster.predict(X[vi])
+    label_gain = params["label_gain"]
+    ndcg30_scores = []
+    start = 0
+    for g in test_group:
+        end = start + g
+        pred_slice = preds[start:end]
+        label_slice = y[vi][start:end]
+        k = min(30, g)
+        top_k = np.argsort(-pred_slice)[:k]
+        dcg = sum(label_gain[int(label_slice[j])] / np.log2(i + 2)
+                  for i, j in enumerate(top_k))
+        ideal_sorted = sorted(label_slice, reverse=True)[:k]
+        idcg = sum(label_gain[int(ideal_sorted[i])] / np.log2(i + 2)
+                   for i in range(len(ideal_sorted)))
+        ndcg30_scores.append(dcg / idcg if idcg > 0 else 0.0)
+        start = end
+
+    avg_ndcg = np.mean(ndcg30_scores) if ndcg30_scores else 0.0
+    best_iter = booster.best_iteration or booster.current_iteration()
+    return fold_i, avg_ndcg, best_iter
+
+
+def _run_cv_folds(splits, X, y, w, cmdr_ids, params, feature_names, quick):
+    """Run CV folds in parallel (or serial for single fold)."""
+    from concurrent.futures import ProcessPoolExecutor
+
+    fold_args = [
+        (fold_i, train_idx, test_idx, X, y, w, cmdr_ids, params, feature_names)
+        for fold_i, (train_idx, test_idx) in enumerate(splits)
+    ]
+
+    if quick or len(splits) == 1:
+        # Serial for single fold
+        results = [_train_one_fold(fold_args[0])]
+    else:
+        # Parallel CV folds
+        print(f"  Training {len(splits)} folds in parallel...", flush=True)
+        with ProcessPoolExecutor(max_workers=len(splits)) as executor:
+            results = list(executor.map(_train_one_fold, fold_args))
+
+    # Sort by fold index and report
+    results.sort(key=lambda x: x[0])
+    fold_ndcgs = []
+    fold_best_iters = []
+    for fold_i, avg_ndcg, best_iter in results:
+        fold_ndcgs.append(avg_ndcg)
+        fold_best_iters.append(best_iter)
+        print(f"  Fold {fold_i+1}: NDCG@30={avg_ndcg:.4f} "
+              f"({best_iter} rounds)")
+
+    return fold_ndcgs, fold_best_iters
+
+
+def train_forge_gbm(X, y, cmdr_ids, tune=False, quick=False):
     """Train LightGBM LambdaRank on forge features with graded relevance.
 
-    Uses synergy-based relevance grades (0-4) instead of binary labels.
+    Uses synergy-based relevance grades (0-5) instead of binary labels.
     LambdaRank optimizes NDCG, teaching the model to rank high-synergy
     cards above low-synergy ones.
 
+    quick=True runs single-fold validation only (faster iteration).
     Saves to fusion_model_forge.lgb. Returns (model, cv_scores).
     """
     import lightgbm as lgb
@@ -449,17 +567,37 @@ def train_forge_gbm(X, y, cmdr_ids, tune=False):
     w = np.array([_grade_weights.get(int(g), 1.0) for g in y], dtype=np.float32)
     print(f"  Sample weights: grade 4→{_grade_weights[4]}x, grade 5→{_grade_weights[5]}x")
 
-    splits = make_cv_splits(cmdr_ids, n_folds=3)
+    n_folds = 1 if quick else 3
+    splits = make_cv_splits(cmdr_ids, n_folds=3)  # always build 3 folds
+    if quick:
+        splits = splits[:1]  # use only fold 0 for quick validation
 
     # Hyperparameter search: use known-best by default, search only with --tune
-    _hp_default = {"num_leaves": 767, "learning_rate": 0.025, "min_child_samples": 40}
+    _hp_default = {
+        "num_leaves": 767,
+        "learning_rate": 0.025,
+        "min_child_samples": 40,
+        "bagging_freq": 5,
+        "colsample_bytree": 0.6,
+        "feature_fraction_bynode": 0.9,
+    }
     _hp_configs = [
-        {"num_leaves": 511, "learning_rate": 0.03, "min_child_samples": 30},
-        {"num_leaves": 511, "learning_rate": 0.02, "min_child_samples": 30},
-        {"num_leaves": 1023, "learning_rate": 0.02, "min_child_samples": 50},
-        {"num_leaves": 1023, "learning_rate": 0.01, "min_child_samples": 50},
-        {"num_leaves": 255, "learning_rate": 0.05, "min_child_samples": 20},
-        {"num_leaves": 767, "learning_rate": 0.025, "min_child_samples": 40},
+        # Vary tree structure
+        {"num_leaves": 511, "learning_rate": 0.03, "min_child_samples": 40,
+         "bagging_freq": 5, "colsample_bytree": 0.6, "feature_fraction_bynode": 0.9},
+        {"num_leaves": 1023, "learning_rate": 0.02, "min_child_samples": 40,
+         "bagging_freq": 5, "colsample_bytree": 0.6, "feature_fraction_bynode": 0.9},
+        # Vary regularization
+        {"num_leaves": 767, "learning_rate": 0.025, "min_child_samples": 80,
+         "bagging_freq": 5, "colsample_bytree": 0.6, "feature_fraction_bynode": 0.8},
+        {"num_leaves": 767, "learning_rate": 0.025, "min_child_samples": 40,
+         "bagging_freq": 5, "colsample_bytree": 0.7, "feature_fraction_bynode": 0.8},
+        # Vary learning rate
+        {"num_leaves": 767, "learning_rate": 0.02, "min_child_samples": 40,
+         "bagging_freq": 5, "colsample_bytree": 0.6, "feature_fraction_bynode": 0.9},
+        # Default (included in search for fair comparison)
+        {"num_leaves": 767, "learning_rate": 0.025, "min_child_samples": 40,
+         "bagging_freq": 5, "colsample_bytree": 0.6, "feature_fraction_bynode": 0.9},
     ]
 
     base_params = {
@@ -467,7 +605,6 @@ def train_forge_gbm(X, y, cmdr_ids, tune=False):
         "metric": "ndcg",
         "eval_at": [10, 30],
         "subsample": 0.8,
-        "colsample_bytree": 0.8,
         "min_data_in_bin": 5,
         "verbose": -1,
         "label_gain": [0, 1, 3, 6, 15, 30],  # 6 grades: neg, anti-syn, low, moderate, top, high-syn
@@ -489,9 +626,9 @@ def train_forge_gbm(X, y, cmdr_ids, tune=False):
             _td = lgb.Dataset(X[ti], label=y[ti], weight=w[ti], group=train_group, free_raw_data=False)
             _vd = lgb.Dataset(X[vi], label=y[vi], weight=w[vi], group=test_group,
                               reference=_td, free_raw_data=False)
-            _b = lgb.train(test_params, _td, num_boost_round=2000,
+            _b = lgb.train(test_params, _td, num_boost_round=3000,
                            valid_sets=[_vd],
-                           callbacks=[lgb.early_stopping(50, verbose=False),
+                           callbacks=[lgb.early_stopping(80, verbose=False),
                                       lgb.log_evaluation(0)])
             _preds = _b.predict(X[vi])
             _start = 0
@@ -522,60 +659,8 @@ def train_forge_gbm(X, y, cmdr_ids, tune=False):
 
     params = {**base_params, **best_hp_config}
 
-    fold_ndcgs = []
-    fold_best_iters = []
-    for fold_i, (train_idx, test_idx) in enumerate(splits):
-        # Ensure data within each fold is sorted by commander
-        train_sort = np.argsort(cmdr_ids[train_idx])
-        test_sort = np.argsort(cmdr_ids[test_idx])
-        ti = train_idx[train_sort]
-        vi = test_idx[test_sort]
-
-        train_group = _build_group_array(cmdr_ids, ti)
-        test_group = _build_group_array(cmdr_ids, vi)
-
-        train_data = lgb.Dataset(X[ti], label=y[ti], weight=w[ti], group=train_group,
-                                 feature_name=FORGE_FEATURE_NAMES, free_raw_data=False)
-        eval_data = lgb.Dataset(X[vi], label=y[vi], weight=w[vi], group=test_group,
-                                reference=train_data, feature_name=FORGE_FEATURE_NAMES,
-                                free_raw_data=False)
-
-        booster = lgb.train(
-            params, train_data,
-            num_boost_round=2000,
-            valid_sets=[eval_data],
-            callbacks=[lgb.early_stopping(50, verbose=False),
-                       lgb.log_evaluation(0)],
-        )
-
-        # Compute NDCG@30 manually for reporting
-        preds = booster.predict(X[vi])
-        test_cmdr_vals = cmdr_ids[vi]
-
-        ndcg30_scores = []
-        start = 0
-        for g in test_group:
-            end = start + g
-            pred_slice = preds[start:end]
-            label_slice = y[vi][start:end]
-            # Compute NDCG@30
-            k = min(30, g)
-            top_k = np.argsort(-pred_slice)[:k]
-            dcg = sum(params["label_gain"][int(label_slice[j])] / np.log2(i + 2)
-                      for i, j in enumerate(top_k))
-            ideal_sorted = sorted(label_slice, reverse=True)[:k]
-            idcg = sum(params["label_gain"][int(ideal_sorted[i])] / np.log2(i + 2)
-                       for i in range(len(ideal_sorted)))
-            ndcg = dcg / idcg if idcg > 0 else 0.0
-            ndcg30_scores.append(ndcg)
-            start = end
-
-        avg_ndcg = np.mean(ndcg30_scores) if ndcg30_scores else 0.0
-        fold_ndcgs.append(avg_ndcg)
-        best_iter = booster.best_iteration or booster.current_iteration()
-        fold_best_iters.append(best_iter)
-        print(f"  Fold {fold_i+1}: NDCG@30={avg_ndcg:.4f} "
-              f"({best_iter} rounds)")
+    fold_ndcgs, fold_best_iters = _run_cv_folds(
+        splits, X, y, w, cmdr_ids, params, FORGE_FEATURE_NAMES, quick)
 
     print(f"  Mean NDCG@30: {np.mean(fold_ndcgs):.4f}")
 
@@ -806,6 +891,11 @@ def main():
         action="store_true",
         help="Run hyperparameter search (6 configs, slower)",
     )
+    parser.add_argument(
+        "--quick",
+        action="store_true",
+        help="Single-fold validation only (faster iteration during development)",
+    )
     args = parser.parse_args()
 
     print("=" * 60)
@@ -841,7 +931,7 @@ def main():
     print("Training FORGE-ONLY model (EDHREC labels, forge features)")
     print("=" * 60)
     _, forge_scores = train_forge_gbm(X_forge, y_forge, cmdr_ids_forge,
-                                      tune=args.tune)
+                                      tune=args.tune, quick=args.quick)
 
     if "mean_ndcg30" in forge_scores:
         print(f"\n  Forge-only NDCG@30: {forge_scores['mean_ndcg30']:.4f}")

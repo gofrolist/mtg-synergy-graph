@@ -47,9 +47,9 @@ def test_leave_commander_out_split():
 
 
 def test_forge_feature_names():
-    """Forge feature list should have exactly 71 named features."""
+    """Forge feature list should have exactly 105 named features."""
     from train_fusion_model import FORGE_FEATURE_NAMES
-    assert len(FORGE_FEATURE_NAMES) == 83
+    assert len(FORGE_FEATURE_NAMES) == 105
     assert "causal_cmdr_to_card" in FORGE_FEATURE_NAMES
     assert "ability_density" in FORGE_FEATURE_NAMES
     assert "tower_prob" not in FORGE_FEATURE_NAMES

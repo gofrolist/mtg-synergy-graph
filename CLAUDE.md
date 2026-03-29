@@ -40,13 +40,13 @@ FORGE MODEL (--recommend): Zero oracle text, pure Forge mechanical synergy
      Theme concepts: equipment_enters, equipment_equipped, defender_available, etb_doubled
   4. Can evaluate new cards day-1 without playtesting data
   5. Works for any of 3,141+ commanders (not just 1,361 with EDHREC)
-  6. NDCG@30 = 0.52 on leave-commander-out CV (3:1 negatives, sample-weighted)
+  6. NDCG@30 = 0.52 on leave-commander-out CV (3:1 negatives, sample-weighted, early_stop=80)
      Training labels: edhrec_card_synergy (367k rows, section-based grading)
      Grade 5=High Synergy, 4=Top Cards, 3=synergy>0.1, 2=synergy 0-0.1, 1=negative, 0=not in table
      Training: 3:1 negative ratio (1.05M negatives), 3-tier sampling:
        1/3 strategy/subtype overlap, 1/3 tag overlap, 1/3 random
      Per-grade sample weights: grade 5→3x, grade 4→2x
-     compare_edhrec --limit 100: 4.0/50 HighSyn, 3.4/50 TopCards, 20.4/50 InDeck
+     compare_edhrec --limit 100: 4.2/50 HighSyn, 3.8/50 TopCards, 21.2/50 InDeck
 
 CAUSAL GRAPH:
   - 20.6M edges across 30+ event types (verb_event_map extracted from Forge Java source)
@@ -84,8 +84,9 @@ python3 fetch_spellbook.py                 # Fetch 82k combos
 python3 fetch_edhrec_decks.py --refresh    # Fetch EDHREC average decklists for top 1000 commanders
 
 # === Forge model (LightGBM LambdaRank) ===
-python3 train_fusion_model.py --forge-only     # Train forge GBM (uses cached features, ~50s)
-python3 train_fusion_model.py --forge-only --rebuild-features  # Rebuild feature cache + train (~5 min)
+python3 train_fusion_model.py --forge-only     # Train forge GBM (cached features, parallel folds, ~6 min)
+python3 train_fusion_model.py --forge-only --rebuild-features  # Rebuild features (8 workers) + train (~5 min)
+python3 train_fusion_model.py --forge-only --quick             # Single-fold fast iteration (~4 min)
 python3 train_fusion_model.py --forge-only --tune              # HP search + train (~15 min, use after new features)
 
 # === Recommendations ===
@@ -223,7 +224,8 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
   - counters on lands for counter commanders (×0.4): Earthbend, land-targeting PutCounter
   - wrong-color needs hard filter (score=-1e9): e.g., Pearl Medallion in mono-G
   - unmet Type$ needs/hints (×0.3): e.g., needs=Type$Dinosaur in Human deck
-- GBM: LambdaRank, num_leaves=767, lr=0.025, n_estimators=2000, label_gain=[0,1,3,6,15,30]
+- GBM: LambdaRank, num_leaves=767, lr=0.025, n_estimators=3000, label_gain=[0,1,3,6,15,30],
+    bagging_freq=5, colsample_bytree=0.6, feature_fraction_bynode=0.9
 
 ### Recommendation Pipeline (synergy_graph.py --commander "Name" --recommend)
 
