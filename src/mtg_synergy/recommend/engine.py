@@ -132,7 +132,7 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                 print(f"      -> {pc['result']}")
         print()
 
-    for card, info in ranked[:top_n]:
+    for rank_idx, (card, info) in enumerate(ranked[:top_n], 1):
         partners = sorted(info["partners"], key=lambda x: x[1], reverse=True)
         multi = f" ({info['multi_sig']} multi-signal)" if info["multi_sig"] else ""
         meta = card_meta.get(card, {})
@@ -150,7 +150,7 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
         bar = "\u2588" * bar_len + "\u2591" * (20 - bar_len)
         scryfall_url = f"https://scryfall.com/search?q=!%22{quote(card, safe='')}%22"
         osc_name = f"\033]8;;{scryfall_url}\033\\{card}\033]8;;\033\\"
-        print(f"\n  {pct:5.1f}% {bar} {osc_name}{tribal}{combo}{high_cmc}")
+        print(f"\n  {rank_idx:3d}. {pct:5.1f}% {bar} {osc_name}{tribal}{combo}{high_cmc}")
         partner_str = f" | {len(partners)} partners{multi}" if partners else ""
         print(f"    {type_line} | CMC {cmc}{partner_str}")
         for partner, score, sigs in partners[:5]:
