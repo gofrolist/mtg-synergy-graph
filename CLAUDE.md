@@ -39,13 +39,13 @@ FORGE MODEL (--recommend): Zero oracle text, pure Forge mechanical synergy
      Zone-aware concepts: enters_from_graveyard/exile/hand, goes_to_graveyard/exile
   4. Can evaluate new cards day-1 without playtesting data
   5. Works for any of 3,141+ commanders (not just 1,361 with EDHREC)
-  6. NDCG@30 = 0.51 on leave-commander-out CV (3:1 negatives, sample-weighted)
+  6. NDCG@30 = 0.52 on leave-commander-out CV (3:1 negatives, sample-weighted)
      Training labels: edhrec_card_synergy (367k rows, section-based grading)
      Grade 5=High Synergy, 4=Top Cards, 3=synergy>0.1, 2=synergy 0-0.1, 1=negative, 0=not in table
      Training: 3:1 negative ratio (1.05M negatives), 3-tier sampling:
        1/3 strategy/subtype overlap, 1/3 tag overlap, 1/3 random
      Per-grade sample weights: grade 5→3x, grade 4→2x
-     compare_edhrec --limit 100: 3.4/50 HighSyn, 3.1/50 TopCards, 21.0/50 InDeck
+     compare_edhrec --limit 100: 3.8/50 HighSyn, 3.4/50 TopCards, 21.0/50 InDeck
 
 CAUSAL GRAPH:
   - 20.6M edges across 30+ event types (verb_event_map extracted from Forge Java source)
@@ -215,7 +215,7 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
   - counters on lands for counter commanders (×0.4): Earthbend, land-targeting PutCounter
   - wrong-color needs hard filter (score=-1e9): e.g., Pearl Medallion in mono-G
   - unmet Type$ needs/hints (×0.3): e.g., needs=Type$Dinosaur in Human deck
-- GBM: LambdaRank, num_leaves=255, lr=0.05, n_estimators=2000, label_gain=[0,1,3,6,15,30]
+- GBM: LambdaRank, num_leaves=511, lr=0.03, n_estimators=2000, label_gain=[0,1,3,6,15,30]
 
 ### Recommendation Pipeline (synergy_graph.py --commander "Name" --recommend)
 

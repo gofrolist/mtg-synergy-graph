@@ -441,27 +441,77 @@ def train_forge_gbm(X, y, cmdr_ids):
     if not is_graded:
         print("  WARNING: Binary labels detected, using classification instead of ranking")
 
-    params = {
-        "objective": "lambdarank",
-        "metric": "ndcg",
-        "eval_at": [10, 30],
-        "num_leaves": 255,
-        "learning_rate": 0.05,
-        "subsample": 0.8,
-        "colsample_bytree": 0.8,
-        "min_child_samples": 20,
-        "min_data_in_bin": 5,
-        "verbose": -1,
-        "label_gain": [0, 1, 3, 6, 15, 30],  # 6 grades: neg, anti-syn, low, moderate, top, high-syn
-    }
-
     # Per-grade sample weights: upweight rare high-synergy examples
-    # Grade 5 (High Synergy) and 4 (Top Cards) are ~12x rarer than grades 0-3
     _grade_weights = {0: 1.0, 1: 1.0, 2: 1.0, 3: 1.0, 4: 2.0, 5: 3.0}
     w = np.array([_grade_weights.get(int(g), 1.0) for g in y], dtype=np.float32)
     print(f"  Sample weights: grade 4→{_grade_weights[4]}x, grade 5→{_grade_weights[5]}x")
 
     splits = make_cv_splits(cmdr_ids, n_folds=3)
+
+    # Hyperparameter grid search (quick: 3 configs × 1 fold each)
+    _hp_configs = [
+        {"num_leaves": 255, "learning_rate": 0.05, "min_child_samples": 20},
+        {"num_leaves": 511, "learning_rate": 0.03, "min_child_samples": 30},
+        {"num_leaves": 127, "learning_rate": 0.08, "min_child_samples": 15},
+    ]
+
+    base_params = {
+        "objective": "lambdarank",
+        "metric": "ndcg",
+        "eval_at": [10, 30],
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "min_data_in_bin": 5,
+        "verbose": -1,
+        "label_gain": [0, 1, 3, 6, 15, 30],  # 6 grades: neg, anti-syn, low, moderate, top, high-syn
+    }
+
+    best_hp_ndcg = -1
+    best_hp_config = _hp_configs[0]
+    print(f"  Hyperparameter search ({len(_hp_configs)} configs)...")
+    for hp in _hp_configs:
+        test_params = {**base_params, **hp}
+        # Quick 1-fold test
+        train_idx, test_idx = splits[0]
+        train_sort = np.argsort(cmdr_ids[train_idx])
+        test_sort = np.argsort(cmdr_ids[test_idx])
+        ti = train_idx[train_sort]
+        vi = test_idx[test_sort]
+        train_group = _build_group_array(cmdr_ids, ti)
+        test_group = _build_group_array(cmdr_ids, vi)
+        _td = lgb.Dataset(X[ti], label=y[ti], weight=w[ti], group=train_group, free_raw_data=False)
+        _vd = lgb.Dataset(X[vi], label=y[vi], weight=w[vi], group=test_group,
+                          reference=_td, free_raw_data=False)
+        _b = lgb.train(test_params, _td, num_boost_round=2000,
+                       valid_sets=[_vd],
+                       callbacks=[lgb.early_stopping(50, verbose=False),
+                                  lgb.log_evaluation(0)])
+        _preds = _b.predict(X[vi])
+        _start = 0
+        _ndcgs = []
+        for g in test_group:
+            _end = _start + g
+            _ps = _preds[_start:_end]
+            _ls = y[vi][_start:_end]
+            k = min(30, g)
+            _tk = np.argsort(-_ps)[:k]
+            _dcg = sum(test_params["label_gain"][int(_ls[j])] / np.log2(i + 2) for i, j in enumerate(_tk))
+            _is = sorted(_ls, reverse=True)[:k]
+            _idcg = sum(test_params["label_gain"][int(_is[i])] / np.log2(i + 2) for i in range(len(_is)))
+            _ndcgs.append(_dcg / _idcg if _idcg > 0 else 0.0)
+            _start = _end
+        hp_ndcg = np.mean(_ndcgs)
+        print(f"    leaves={hp['num_leaves']} lr={hp['learning_rate']} "
+              f"min_child={hp['min_child_samples']}: NDCG@30={hp_ndcg:.4f}")
+        if hp_ndcg > best_hp_ndcg:
+            best_hp_ndcg = hp_ndcg
+            best_hp_config = hp
+
+    print(f"  Best: leaves={best_hp_config['num_leaves']} "
+          f"lr={best_hp_config['learning_rate']}")
+
+    params = {**base_params, **best_hp_config}
+
     fold_ndcgs = []
     fold_best_iters = []
     for fold_i, (train_idx, test_idx) in enumerate(splits):
@@ -594,7 +644,7 @@ def _load_pairs_for_features(conn):
 
     print("\nLoading EDHREC card synergy data...")
     positives_by_cmdr = {}
-    n_by_grade = {5: 0, 4: 0, 3: 0, 2: 0, 1: 0}
+    n_by_grade = {}
     card_cmdr_count = {}
     cmdr_count = len(slug_to_oid)
     n_boosted = 0
@@ -627,7 +677,7 @@ def _load_pairs_for_features(conn):
             n_boosted += 1
 
         positives_by_cmdr.setdefault(cmdr_oid, []).append((card_oid, grade))
-        n_by_grade[grade] += 1
+        n_by_grade[grade] = n_by_grade.get(grade, 0) + 1
 
     total_pairs = sum(len(v) for v in positives_by_cmdr.values())
     print(f"  Synergy pairs: {total_pairs:,} across {len(positives_by_cmdr)} commanders")
