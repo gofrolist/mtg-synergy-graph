@@ -112,8 +112,11 @@ FORGE_FEATURE_NAMES = [
     "func_requires_produces",     # [80] cmdr requires trigger X, card produces X
     "func_card_requires_cmdr",    # [81] card requires trigger X, cmdr produces X
     "func_full_cosine",           # [82] overall functional fingerprint similarity
+    # ── 2-hop graph features ──
+    "cmdr_2hop_count",           # [83] commander's causal partners that connect to this card
+    "cmdr_2hop_ratio",           # [84] 2-hop count / hub score (transitive vs generic)
     # ── Card quality / noise suppression ──
-    "forge_ability_richness",    # [83] total distinct mechanical components (Forge-native)
+    "forge_ability_richness",    # [85] total distinct mechanical components (Forge-native)
     "card_in_forge",             # [84] card has Forge ability data (vs all-zero features)
     "card_strategy_count",       # [85] number of strategies assigned to card
     "deck_tag_count",            # [86] Forge deck-building AI tags (has+hints+needs)
@@ -448,11 +451,14 @@ def train_forge_gbm(X, y, cmdr_ids):
 
     splits = make_cv_splits(cmdr_ids, n_folds=3)
 
-    # Hyperparameter grid search (quick: 3 configs × 1 fold each)
+    # Hyperparameter grid search (1 fold each for speed)
     _hp_configs = [
-        {"num_leaves": 255, "learning_rate": 0.05, "min_child_samples": 20},
         {"num_leaves": 511, "learning_rate": 0.03, "min_child_samples": 30},
-        {"num_leaves": 127, "learning_rate": 0.08, "min_child_samples": 15},
+        {"num_leaves": 511, "learning_rate": 0.02, "min_child_samples": 30},
+        {"num_leaves": 1023, "learning_rate": 0.02, "min_child_samples": 50},
+        {"num_leaves": 1023, "learning_rate": 0.01, "min_child_samples": 50},
+        {"num_leaves": 255, "learning_rate": 0.05, "min_child_samples": 20},
+        {"num_leaves": 767, "learning_rate": 0.025, "min_child_samples": 40},
     ]
 
     base_params = {

@@ -1259,6 +1259,36 @@ class CmdrFeatureContext:
                         if bc > 0:
                             self.deck_broad_counts[oid] = bc
 
+        # ── 2-hop graph features: commander → intermediary → candidate ──
+        # Count how many of the commander's direct causal neighbors also connect
+        # to each candidate. Available during both training and inference.
+        self.cmdr_2hop_counts = {}
+        if ctx._has_edge_index and cmdr_idx is not None:
+            # Get commander's direct out-neighbors (indices)
+            cmdr_out_indices = set()
+            if ctx._agg_strength_out:
+                cmdr_out_indices = set(ctx._agg_strength_out.get(cmdr_idx, {}).keys())
+            else:
+                for oid in self.cmdr_out:
+                    idx = oid_to_idx.get(oid)
+                    if idx is not None:
+                        cmdr_out_indices.add(idx)
+
+            if cmdr_out_indices:
+                n_cards = ctx._n_cards_idx
+                hop2_counts = np.zeros(n_cards, dtype=np.int32)
+                for x_idx in cmdr_out_indices:
+                    out_neighbors = ctx._adj_out.get(x_idx)
+                    if out_neighbors is not None:
+                        hop2_counts[out_neighbors] += 1
+                nonzero = np.nonzero(hop2_counts)[0]
+                for i in nonzero:
+                    if i == cmdr_idx:
+                        continue
+                    oid = idx_to_oid.get(int(i))
+                    if oid:
+                        self.cmdr_2hop_counts[oid] = int(hop2_counts[i])
+
         # Zone interaction flags
         self.cmdr_zone_graveyard = self.cmdr_oid in ctx._zone_graveyard
         self.cmdr_zone_exile = self.cmdr_oid in ctx._zone_exile
@@ -1332,6 +1362,9 @@ class CmdrFeatureContext:
                 self.cmdr_exact.add(row[0])
         except Exception:
             pass
+
+        # 2-hop counts (DB path — skip, too expensive for SQL)
+        self.cmdr_2hop_counts = {}
 
         # Zone interaction flags
         self.cmdr_zone_graveyard = self.cmdr_oid in ctx._zone_graveyard
@@ -1793,7 +1826,23 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
     func_card_req_cmdr = 0.0  # F81: card requires X trigger, cmdr produces X
     func_full_cosine = 0.0    # F82: overall functional similarity
 
-    # ── Card quality / noise suppression features (F83-F87) ──
+    # ── 2-hop graph features (F83-F84) ──
+    # F83: cmdr_2hop_count — how many of commander's direct causal partners
+    # also have outgoing edges to this candidate. High count = strong transitive synergy.
+    hop2_raw = cmdr.cmdr_2hop_counts.get(card_oid, 0)
+    cmdr_2hop = np.log2(1.0 + min(hop2_raw, 200))  # log-scaled, cap at 200
+
+    # F84: cmdr_2hop_ratio — 2-hop count relative to hub score (transitive vs generic)
+    # High ratio = card specifically reached through commander's partners, not just well-connected
+    hub_raw = 0.0
+    if ctx._has_edge_index and di is not None:
+        n_out = len(ctx._adj_out.get(di, []))
+        n_in = len(ctx._adj_in.get(di, []))
+        hub_raw = float(n_out + n_in)
+    cmdr_2hop_ratio = float(hop2_raw) / max(hub_raw, 1.0) if hop2_raw > 0 else 0.0
+    cmdr_2hop_ratio = min(cmdr_2hop_ratio, 1.0)
+
+    # ── Card quality / noise suppression features (F85-F89) ──
     # Forge-native proxies that work for day-1 new card evaluation
 
     # F83: forge_ability_richness — total distinct mechanical components
@@ -2007,8 +2056,11 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         func_requires_prod,                              # F80 func_requires_produces
         func_card_req_cmdr,                              # F81 func_card_requires_cmdr
         func_full_cosine,                                # F82 func_full_cosine
+        # ── 2-hop graph features ──
+        cmdr_2hop,                                       # F83 cmdr_2hop_count
+        cmdr_2hop_ratio,                                 # F84 cmdr_2hop_ratio
         # ── Card quality / noise suppression ──
-        forge_richness,                                  # F83 forge_ability_richness
+        forge_richness,                                  # F85 forge_ability_richness
         in_forge,                                        # F84 card_in_forge
         strat_count,                                     # F85 card_strategy_count
         deck_tags,                                       # F86 deck_tag_count
