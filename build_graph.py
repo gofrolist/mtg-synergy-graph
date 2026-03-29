@@ -332,6 +332,147 @@ def _build_entity_presence_edges(conn, name_to_oid):
     return total
 
 
+def _build_continuous_pump_edges(conn, name_to_oid):
+    """Build synthetic edges from Continuous pump abilities to matching creatures.
+
+    Cards with Continuous mode + AddPower$ that Affect other creatures create
+    "pumps" edges. E.g., Kyler (Affected$ Card.Human+Other+YouCtrl) creates
+    edges to every Human creature.
+
+    This captures the feed-forward relationship: pump card → pumped creature,
+    which was previously invisible to the causal graph. Combined with existing
+    trigger edges (creature ETB → pump card), this enables the model to detect
+    feedback loops like Kyler + Maester Seymour.
+    """
+    import json as _json
+    import re as _re
+
+    # Load all Continuous pump abilities with their Affected$ filter
+    pump_cards = []
+    for row in conn.execute(
+        "SELECT fa.card_name, fa.raw_line "
+        "FROM forge_abilities fa "
+        "WHERE fa.verb = 'Continuous' AND fa.raw_line LIKE '%AddPower%'"
+    ):
+        card_name, raw = row
+        if not raw:
+            continue
+        # Parse Affected$ filter
+        m = _re.search(r'Affected\$\s*(\S+)', raw)
+        if not m:
+            continue
+        affected = m.group(1)
+        # Skip self-only effects — no cross-card synergy
+        if 'Self' in affected and 'Other' not in affected:
+            continue
+        if 'EnchantedBy' in affected or 'EquippedBy' in affected:
+            continue
+
+        # Resolve to oracle_id
+        oid = name_to_oid.get(card_name)
+        if not oid:
+            continue
+
+        # Parse what creatures the filter targets
+        # Format: Card.Human+Other+YouCtrl or Creature.Goblin+YouCtrl etc.
+        # Extract subtypes and card types
+        parts = affected.split('.')
+        base = parts[0]  # Card, Creature, Permanent
+        filters = parts[1].split('+') if len(parts) > 1 else []
+
+        # Extract creature subtypes from filters (capitalized words that aren't keywords)
+        _keywords = {'Other', 'YouCtrl', 'OppCtrl', 'attacking', 'blocking',
+                     'token', 'nontoken', 'enchanted', 'Legendary', 'tapped',
+                     'untapped', 'castSATrigger'}
+        _color_words = {'White', 'Blue', 'Black', 'Red', 'Green', 'Colorless'}
+        subtypes = set()
+        colors = set()
+        for f in filters:
+            if f in _keywords:
+                continue
+            if f in _color_words:
+                colors.add(f.lower())
+                continue
+            if f == 'ChosenType':
+                continue  # Can't resolve at build time
+            subtypes.add(f.lower())
+
+        # Only create edges for subtype-specific pumps (e.g., "Humans get +1/+1").
+        # Broad pumps ("all creatures get +1/+1") don't indicate specific synergy
+        # and create too many edges (319 × 18k = 5.7M).
+        if not subtypes:
+            continue
+
+        pump_cards.append((oid, card_name, subtypes, colors, base))
+
+    print(f"  Continuous pump cards: {len(pump_cards)}")
+
+    # Build lookup: creature oracle_id → subtypes (from type_line)
+    creature_subtypes = {}
+    creature_colors = {}
+    for row in conn.execute(
+        "SELECT c.oracle_id, c.type_line, c.color_identity "
+        "FROM cards c "
+        "WHERE c.type_line LIKE '%Creature%' AND c.type_line NOT LIKE '%Token%'"
+    ):
+        oid, type_line, ci_json = row
+        if not type_line:
+            continue
+        try:
+            subs = {s.lower().strip() for s in type_line.split("—")[1].strip().split()}
+        except (IndexError, AttributeError):
+            subs = set()
+        creature_subtypes[oid] = subs
+        try:
+            ci = set(_json.loads(ci_json or '[]'))
+            color_map = {'W': 'white', 'U': 'blue', 'B': 'black', 'R': 'red', 'G': 'green'}
+            creature_colors[oid] = {color_map.get(c, c.lower()) for c in ci}
+        except (ValueError, TypeError):
+            creature_colors[oid] = set()
+
+    # Create edges: pump_card → each matching creature
+    batch = []
+    total = 0
+    for pump_oid, pump_name, req_subtypes, req_colors, base in pump_cards:
+        for creature_oid, creature_subs in creature_subtypes.items():
+            if creature_oid == pump_oid:
+                continue
+
+            # Subtype filter: creature must share at least one subtype
+            if not (req_subtypes & creature_subs):
+                continue
+            precision = "exact"
+            strength = 0.3
+
+            # Color filter: if pump requires specific colors, creature must match
+            if req_colors:
+                c_colors = creature_colors.get(creature_oid, set())
+                if not (req_colors & c_colors):
+                    continue
+
+            detail = _json.dumps({"event": "ContinuousPump",
+                                  "filter_precision": precision})
+            batch.append((pump_oid, creature_oid, "pumps", -1, -1, strength, detail))
+
+            if len(batch) >= 10000:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO interaction_edges "
+                    "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
+                    "VALUES (?,?,?,?,?,?,?)", batch)
+                total += len(batch)
+                batch.clear()
+
+    if batch:
+        conn.executemany(
+            "INSERT OR IGNORE INTO interaction_edges "
+            "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
+            "VALUES (?,?,?,?,?,?,?)", batch)
+        total += len(batch)
+
+    conn.commit()
+    return total
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--rebuild", action="store_true")
@@ -364,7 +505,11 @@ def main():
         # Entity presence edges: token creators → scaling/sacrifice/tap cards
         ent_count = _build_entity_presence_edges(conn, name_to_oid)
         print(f"  Entity presence edges: {ent_count}")
-        print(f"Done: {count + syn_count + ent_count} total edges")
+
+        # Continuous pump edges: lord/anthem effects → creatures they buff
+        pump_count = _build_continuous_pump_edges(conn, name_to_oid)
+        print(f"  Continuous pump edges: {pump_count}")
+        print(f"Done: {count + syn_count + ent_count + pump_count} total edges")
     elif args.rebuild:
         rows = conn.execute("SELECT DISTINCT oracle_id FROM parsed_abilities").fetchall()
         cards = {}
