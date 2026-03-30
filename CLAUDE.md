@@ -46,7 +46,8 @@ FORGE MODEL (--recommend): Zero oracle text, pure Forge mechanical synergy
      Training: 3:1 negative ratio (1.05M negatives), 3-tier sampling:
        1/3 strategy/subtype overlap, 1/3 tag overlap, 1/3 random
      Per-grade sample weights: grade 5→3x, grade 4→2x
-     compare_edhrec --limit 100: 4.2/50 HighSyn, 3.8/50 TopCards, 21.2/50 InDeck
+     compare_edhrec --limit 100: ~4.1/50 HighSyn, ~3.6/50 TopCards, ~21.5/50 InDeck
+     (variance ±0.3 between runs due to GBM non-determinism)
 
 CAUSAL GRAPH:
   - 20.6M edges across 30+ event types (verb_event_map extracted from Forge Java source)
@@ -90,8 +91,9 @@ python3 train_fusion_model.py --forge-only --quick             # Single-fold fas
 python3 train_fusion_model.py --forge-only --tune              # HP search + train (~15 min, use after new features)
 
 # === Recommendations ===
-python3 synergy_graph.py --commander "Krenko, Mob Boss" --recommend     # Recommend cards
+python3 synergy_graph.py --commander "Krenko, Mob Boss" --recommend     # Recommend cards (GBM + mechanical bonus)
 python3 synergy_graph.py --commander "Krenko, Mob Boss" --recommend --top 10
+python3 synergy_graph.py --commander "Krenko, Mob Boss" --gems         # Hidden gems (pure mechanical, no popularity)
 python3 synergy_graph.py --commander "Krenko, Mob Boss" --combos       # Combo detection
 
 # === Comparison & validation ===
@@ -209,7 +211,10 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
   Generic staples (>30% frequency) demoted from grade 4/5 to 3
   Commander-illegal cards filtered from negative pool
   3:1 negative ratio, 3-tier sampling: 1/3 strategy/subtype, 1/3 tag overlap, 1/3 random
-- Training: `python3 train_fusion_model.py --forge-only --rebuild-features` (~5 min)
+- Training: `python3 train_fusion_model.py --forge-only --rebuild-features` (~7 min)
+  Feature build: shared ForgeFeatureContext via fork pool (8 workers, ~8s)
+  CV folds: 3 folds trained in parallel via ProcessPoolExecutor
+  Batch features: vectorized array indexing for ~50 features, loop for ~35
   Use `--tune` for HP search (~15 min). Default uses cached best HP.
 - Feature importance: edhrec_deck_pct 10%, card_hub_score 7%, deck_edge_count 6%,
   ability_density 5%, cmdr_2hop_ratio 4.5%, strategy_cosine 5%, cmdr_2hop_count 3.1%
@@ -233,9 +238,21 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
 1. Candidate selection: Color-identity filter → ALL legal cards (no tower, no embeddings)
 2. Score all candidates with GBM (batch predict, ~0.5s for 13k cards):
    105 features (LambdaRank, 100% Forge-native, no oracle text)
-3. Sort and output top 30 with clickable Scryfall hyperlinks (OSC 8)
+3. Post-scoring: anti-synergy penalties + mechanical synergy bonus (±15%)
+   Bonus: produces↔consumes dot product, verb→trigger alignment,
+   creature ETB / sacrifice outlet / spellcast pattern matches
+4. Sort and output top N with clickable Scryfall hyperlinks (OSC 8)
 Total time: ~7s (including edge index load from cache)
 ```
+
+### Hidden Gem Engine (synergy_graph.py --commander "Name" --gems)
+
+Pure mechanical reasoning — no GBM model, no popularity bias.
+Scores cards by: mechanics vector dot products (produces↔consumes),
+causal graph edge strength (direct + 2-hop), verb→trigger alignment,
+ETB/sacrifice/spellcast pattern matching, functional fingerprint cosine.
+Filters OUT cards appearing in >5% of EDHREC decks → surfaces
+mechanically-synergistic cards that nobody plays.
 
 ### Combo Detection (3-tier)
 
@@ -283,8 +300,9 @@ Total time: ~7s (including edge index load from cache)
 | `src/mtg_synergy/cli.py` | CLI dispatcher (argparse + command routing) |
 | `src/mtg_synergy/recommend/engine.py` | `recommend_cards()` — forge model recommendation pipeline |
 | `src/mtg_synergy/recommend/swaps.py` | `suggest_swaps()` — multi-layer card swap suggestions |
-| `src/mtg_synergy/recommend/scoring.py` | `color_identity_filter()`, `score_forge_candidates()` |
-| `src/mtg_synergy/recommend/forge_features.py` | Shared 74-feature computation: `ForgeFeatureContext` (25 profile fields, edge index, mechanics vectors, deck tags — no embeddings), `CmdrFeatureContext`, `compute_card_features()` |
+| `src/mtg_synergy/recommend/scoring.py` | `color_identity_filter()`, `score_forge_candidates()`, `_apply_mechanical_bonus()` |
+| `src/mtg_synergy/recommend/hidden_gems.py` | `find_hidden_gems()` — pure mechanical synergy engine, no popularity bias |
+| `src/mtg_synergy/recommend/forge_features.py` | Shared 105-feature computation: `ForgeFeatureContext` (29 profile fields, edge index, mechanics vectors, deck tags, pre-encoded card arrays), `CmdrFeatureContext`, `compute_card_features()`, `compute_batch_features()` |
 | `src/mtg_synergy/recommend/mechanics_vectors.py` | 112-dim forge mechanics vectors: shared game concept space for effect→trigger synergy (32 concepts + 80 subtypes) |
 | `src/mtg_synergy/recommend/affinity.py` | Commander affinity scoring |
 | `src/mtg_synergy/recommend/commander_profile.py` | Auto-infer archetype for any of 3,141 commanders |
