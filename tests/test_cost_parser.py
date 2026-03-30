@@ -81,14 +81,3 @@ def test_x_mana():
     assert c.mana.colors.get("X") == 1
     assert c.mana.total == 1
 
-def test_add_mana_production():
-    from mtg_synergy.parse.cost_parser import parse_mana_production
-    m = parse_mana_production("Add {R}.")
-    assert m.total == 1
-    assert m.colors == {"R": 1}
-
-def test_add_any_color():
-    from mtg_synergy.parse.cost_parser import parse_mana_production
-    m = parse_mana_production("Add one mana of any color.")
-    assert m.total == 1
-    assert m.is_any_color is True

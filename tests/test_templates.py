@@ -38,10 +38,3 @@ def test_additional_time():
     result = apply_templates("that ability triggers an additional time")
     assert result.kind == "trigger_modifier"
 
-def test_reminder_text_decomposition():
-    from mtg_synergy.parse.templates import decompose_reminder
-    effects = decompose_reminder("Draw a card, then discard a card. If you discarded a nonland card, put a +1/+1 counter on this creature.")
-    assert len(effects) >= 2
-    verbs = [e.verb for e in effects]
-    assert "draw" in verbs
-    assert "discard" in verbs

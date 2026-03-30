@@ -34,15 +34,6 @@ _EXILE_RE = re.compile(
 _LOYALTY_RE = re.compile(r"^([+\u2212\-])(\d+)$")
 _LOYALTY_ZERO_RE = re.compile(r"^0$")
 
-# Mana production patterns
-_ADD_MANA_RE = re.compile(r"[Aa]dd\s+(.*?)\.?$")
-_ANY_COLOR_RE = re.compile(
-    r"(?:one|two|three|\d+)\s+mana\s+of\s+any\s+color", re.IGNORECASE
-)
-_ANY_COLOR_COUNT_RE = re.compile(
-    r"(one|two|three|\d+)\s+mana\s+of\s+any\s+color", re.IGNORECASE
-)
-
 # Common creature types for sacrifice parsing
 _CARD_TYPES = {
     "creature", "artifact", "enchantment", "land", "planeswalker",
@@ -225,43 +216,3 @@ def parse_cost(cost_text: str, is_loyalty: bool = False) -> Cost:
     )
 
 
-def parse_mana_production(text: str) -> ManaAmount:
-    """Parse mana production text like 'Add {R}{R}' or 'Add one mana of any color'.
-
-    Args:
-        text: The production text.
-
-    Returns:
-        A ManaAmount describing what's produced.
-    """
-    text = text.strip()
-
-    # Check for "any color" pattern
-    any_m = _ANY_COLOR_RE.search(text)
-    if any_m:
-        # Extract count
-        count_m = _ANY_COLOR_COUNT_RE.search(text)
-        if count_m:
-            count_str = count_m.group(1).lower()
-            word_to_num = {"one": 1, "two": 2, "three": 3}
-            count = word_to_num.get(count_str)
-            if count is None:
-                count = int(count_str)
-        else:
-            count = 1
-        return ManaAmount(total=count, is_any_color=True)
-
-    # Check for mana symbols after "Add"
-    add_m = _ADD_MANA_RE.match(text)
-    if add_m:
-        remainder = add_m.group(1)
-        result = _parse_mana_symbols(remainder)
-        if result:
-            return result
-
-    # Fallback: try parsing the whole text for mana symbols
-    result = _parse_mana_symbols(text)
-    if result:
-        return result
-
-    return ManaAmount()

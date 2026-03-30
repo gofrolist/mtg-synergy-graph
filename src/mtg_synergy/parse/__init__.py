@@ -8,7 +8,7 @@ from mtg_synergy.parse.resolver import resolve_references
 from mtg_synergy.parse.templates import apply_templates
 
 
-def parse_card(oracle_text: str, type_line: str = "", mana_cost: str = "") -> list[Ability]:
+def parse_card(oracle_text: str, type_line: str = "") -> list[Ability]:
     if not oracle_text or not oracle_text.strip():
         return []
 

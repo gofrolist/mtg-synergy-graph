@@ -194,22 +194,9 @@ _VERB_EVENT_MAP = {
     ],
 }
 
-# Build reverse map: trigger_mode → set of verbs
-_EVENT_VERB_MAP = {}
-for verb, events in _VERB_EVENT_MAP.items():
-    for event in events:
-        mode = event["trigger_mode"]
-        _EVENT_VERB_MAP.setdefault(mode, set()).add(verb)
-
-
 def verb_to_events(verb: str) -> list[dict]:
     """Get the trigger events produced by a Forge effect verb.
 
     Returns list of dicts with trigger_mode and optional origin/destination.
     """
     return _VERB_EVENT_MAP.get(verb, [])
-
-
-def event_to_verbs(trigger_mode: str) -> set[str]:
-    """Get which Forge verbs can produce a given trigger mode."""
-    return _EVENT_VERB_MAP.get(trigger_mode, set())

@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from typing import Optional, List
 
 from mtg_synergy.parse.ast_types import Effect, ScalesWith
-from mtg_synergy.parse.effect_parser import parse_effects
 
 
 @dataclass
@@ -106,28 +105,3 @@ def apply_templates(text: str) -> Optional[TemplateResult]:
     return None
 
 
-def decompose_reminder(text: str) -> list[Effect]:
-    """Parse reminder/rules text by splitting on sentence boundaries and
-    running the effect parser on each clause.
-
-    Splits on '. ' (sentence boundary) and ', then ' (sequential effects).
-    """
-    # First split on sentence boundaries
-    sentences = re.split(r'\.\s+', text.strip().rstrip("."))
-
-    all_effects: list[Effect] = []
-    for sentence in sentences:
-        # Further split on ", then "
-        clauses = re.split(r',\s+then\s+', sentence)
-        for clause in clauses:
-            clause = clause.strip()
-            if not clause:
-                continue
-            # Strip leading "If ..." conditions — extract the effect part
-            cond_match = re.match(r'[Ii]f\s+.+?,\s+(.+)', clause)
-            if cond_match:
-                clause = cond_match.group(1)
-            effects = parse_effects(clause)
-            all_effects.extend(effects)
-
-    return all_effects

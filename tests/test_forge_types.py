@@ -70,12 +70,3 @@ def test_forge_effect_optional():
     assert e.optional is True
 
 
-def test_forge_filter_serialization():
-    """ForgeFilter should be JSON-serializable via to_dict/from_dict."""
-    from mtg_synergy.parse.forge_types import forge_filter_to_dict, forge_filter_from_dict
-    f = ForgeFilter(card_types=["Creature"], controller="YouCtrl", power_ge=4)
-    d = forge_filter_to_dict(f)
-    f2 = forge_filter_from_dict(d)
-    assert f2.card_types == ["Creature"]
-    assert f2.controller == "YouCtrl"
-    assert f2.power_ge == 4

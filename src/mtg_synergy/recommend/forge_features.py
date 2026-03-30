@@ -24,9 +24,6 @@ from mtg_synergy.recommend.mechanics_vectors import _concept_idx
 _EVENT_EXPR_COLUMN = "event"
 _EVENT_EXPR_JSON = "json_extract(detail, '$.event')"
 
-# Allowed table names for slug resolution
-_ALLOWED_SLUG_TABLES = frozenset({"edhrec_average_decks", "edhrec_card_synergy"})
-
 
 def _decode_events(mask, bit_to_event):
     """Decode a uint32 bitmask to a set of event name strings."""
@@ -77,6 +74,56 @@ class ForgeFeatureContext:
             for r in conn.execute("PRAGMA table_info(interaction_edges)")
         )
 
+        self._load_card_data(conn)
+        self._load_forge_profiles(conn)  # populates self._raw_abilities
+        # Note: _load_functional_fingerprints does its own DB query (independent
+        # of self._raw_abilities). Must stay BEFORE del self._raw_abilities below.
+        self._load_functional_fingerprints(conn)
+        self._load_deck_tags(conn)
+        self._load_ability_vectors(conn)
+        self._load_theme_sets(conn)
+        self._load_edhrec_stats(conn)
+
+        # Verb→trigger alignment mapping for F30
+        self._verb_triggers = {
+            "Token": {"ChangesZone", "ChangesZoneAll", "TokenCreated"},
+            "ChangeZone": {"ChangesZone", "ChangesZoneAll"},
+            "ChangeZoneAll": {"ChangesZone", "ChangesZoneAll"},
+            "DealDamage": {"DamageDone", "DamageDoneOnce", "LifeLost"},
+            "DamageAll": {"DamageDone", "DamageDoneOnce"},
+            "Draw": {"Drawn"},
+            "Dig": {"Drawn"},
+            "PutCounter": {"CounterAdded", "CounterAddedOnce"},
+            "Proliferate": {"CounterAdded", "CounterAddedOnce"},
+            "GainLife": {"LifeGained"},
+            "LoseLife": {"LifeLost"},
+            "Destroy": {"ChangesZone"},
+            "DestroyAll": {"ChangesZone"},
+            "Sacrifice": {"Sacrificed", "ChangesZone"},
+            "Discard": {"Discarded"},
+            "Mill": {"Milled", "ChangesZone"},
+            "Tap": {"Taps", "TapsForMana"},
+            "Untap": {"Untaps"},
+            "Counter": {"SpellCast"},
+            "Mana": {"TapsForMana"},
+        }
+
+        # Forge mechanics vectors: encode each card's full mechanical profile
+        # Pass pre-loaded abilities to avoid redundant forge_abilities DB scan
+        from mtg_synergy.recommend.mechanics_vectors import build_mechanics_vectors
+        self._mech_produces, self._mech_consumes, self._mech_dim, _ = \
+            build_mechanics_vectors(conn, preloaded_abilities=self._raw_abilities)
+        # Free raw abilities list after mechanics vectors are built (~5MB)
+        del self._raw_abilities
+
+        # ── Pre-encode per-card arrays for batch feature computation ──
+        self._build_card_arrays()
+
+        if preload_edges:
+            self._build_edge_index(conn)
+
+    def _load_card_data(self, conn):
+        """Load card index, type lines, strategies, and phase data."""
         # Build oid_to_idx from cards table (replaces embedding-based index)
         self.oid_to_idx = {}
         for i, (oid,) in enumerate(
@@ -121,6 +168,8 @@ class ForgeFeatureContext:
                 if order is not None:
                     self.card_phase_order.setdefault(oid, set()).add(order)
 
+    def _load_forge_profiles(self, conn):
+        """Load forge ability profiles and raw abilities from DB."""
         # Forge ability profiles: per-card structured data from forge_abilities
         # Replaces oracle text regex matching for features F25-F30
         self._forge_profiles = {}
@@ -139,244 +188,12 @@ class ForgeFeatureContext:
         ):
             # row[0..11] match the output tuple directly; row[12..14] used only for profiles below
             self._raw_abilities.append(row[:12])
-            # Named references for profile building (SELECT order matches tuple order)
-            oid = row[0]
-            verb = row[1]
-            trig_mode = row[2]
-            trig_filter = row[3]
-            cost = row[4]
-            keyword = row[5]
-            # row[6] = token_script (used by _raw_abilities only)
-            counter_type = row[7]
-            raw_line_val = row[8]
-            # row[9] = amount, row[10] = trigger_origin, row[11] = trigger_destination
-            target = row[12]
-            ability_type = row[13]
-            defined = row[14]
-
-            p = self._forge_profiles.setdefault(oid, {
-                'verbs': set(), 'triggers': set(), 'keywords': set(),
-                'counter_types': set(), 'targets': set(), 'ability_types': set(),
-                'trigger_filters': set(), 'required_subtypes': set(),
-                'granted_keywords': set(), 'conditions': set(),
-                'duration': set(), 'combat_damage': False,
-                'effect_zones': set(), 'scales_with': set(),
-                'grants_types': set(), 'damage_amount': None,
-                'cards_drawn': None, 'life_amount': None,
-                'is_secondary': False, 'gain_control': False,
-                'produces_mana': False, 'mana_colors': set(),
-                'counter_num_variable': False, 'grants_abilities': False,
-                'token_amount_variable': False,
-                'excluded_subtypes': set(),
-                'has_static_anthem': False, 'counters_on_lands': False,
-                'counter_trigger_themes': set(), 'has_p1p1': False,
-            })
-            if verb: p['verbs'].add(verb)
-            if trig_mode: p['triggers'].add(trig_mode)
-            if keyword: p['keywords'].add(keyword)
-            if counter_type:
-                p['counter_types'].add(counter_type)
-                if counter_type == 'P1P1':
-                    p['has_p1p1'] = True
-            # Also check raw_line for P1P1 references (replacement effects, etbCounter)
-            if not p['has_p1p1'] and raw_line_val and 'P1P1' in raw_line_val:
-                p['has_p1p1'] = True
-            if target:
-                for t in target.split(","):
-                    main = t.split(".")[0].strip()
-                    if main:
-                        p['targets'].add(main)
-            if ability_type: p['ability_types'].add(ability_type)
-            if trig_filter:
-                for part in trig_filter.split(","):
-                    main = part.split(".")[0].strip()
-                    if main and main != "Card" and main[0].isupper():
-                        p['trigger_filters'].add(main.lower())
-            # Extract subtype requirements from cost, defined, and raw_line fields
-            cost_str = cost or ""
-            defined_str = defined or ""
-            raw_line = raw_line_val or ""
-            # Cost subtypes: tapXType<1/Cleric>, Sac<1/Human>
-            for m in re.findall(r'tapXType<\d+/(\w+)', cost_str):
-                if m not in ("CARDNAME",):
-                    p['required_subtypes'].add(m.lower())
-            for m in re.findall(r'Sac<\d+/(\w+)', cost_str):
-                if m not in ("CARDNAME",) and m[0].isupper():
-                    p['required_subtypes'].add(m.lower())
-            # Defined$ with subtype filter (e.g., TriggeredCardLKICopy.Spider)
-            if "." in defined_str:
-                for part in defined_str.split(","):
-                    if "." in part:
-                        subtype = part.split(".")[-1].strip()
-                        if subtype and subtype[0].isupper() and len(subtype) > 2:
-                            p['required_subtypes'].add(subtype.lower())
-            # Effect target subtypes from ValidCards$, Affected$, ValidTgts$,
-            # ValidCard$, ValidAttackers$, AddsCounters$ in raw_line
-            # e.g., ValidCards$ Creature.Orc → effect only benefits Orcs
-            # e.g., Affected$ Creature.nonHuman → EXCLUDES Humans
-            _generic = {"card", "creature", "permanent", "self", "other",
-                        "youctrl", "oppctrl", "strictlyother", "token", "nontoken"}
-            for field in ('ValidCards', 'ValidCard', 'ValidTgts',
-                          'ValidAttackers', 'Affected', 'AddsCounters'):
-                m = re.search(rf'{field}\$\s*(\S+)', raw_line)
-                if m:
-                    for part in m.group(1).split(","):
-                        for seg in part.split("."):
-                            seg = seg.split("+")[0].strip()
-                            if not seg or len(seg) <= 2:
-                                continue
-                            # Detect non-X exclusions (e.g., nonHuman, nonGoblin)
-                            if seg.startswith("non") and len(seg) > 3 and seg[3].isupper():
-                                excluded = seg[3:].lower()
-                                if excluded not in _generic:
-                                    p['excluded_subtypes'].add(excluded)
-                            elif (seg[0].isupper()
-                                    and seg.lower() not in _generic):
-                                p['required_subtypes'].add(seg.lower())
-            # Also extract non-X from TriggerDescription$ and Description$
-            # Catches sub-ability targets like "non-Human creature"
-            for desc_field in ('TriggerDescription', 'Description', 'SpellDescription'):
-                dm = re.search(rf'{desc_field}\$\s*(.+?)(?:\||$)', raw_line)
-                if dm:
-                    for nm in re.finditer(r'non-(\w+)\s+creature', dm.group(1), re.IGNORECASE):
-                        excl = nm.group(1).lower()
-                        if excl not in _generic and len(excl) > 2:
-                            p['excluded_subtypes'].add(excl)
-            # --- Granted keywords: AddKeyword$, KW$, PumpKeywords$, Keywords$ ---
-            for kw_field in ('AddKeyword', 'KW', 'PumpKeywords', 'Keywords'):
-                m = re.search(rf'{kw_field}\$\s*([^|]+)', raw_line)
-                if m:
-                    for kw in m.group(1).split("&"):
-                        kw = kw.strip()
-                        # Skip HIDDEN prefixed entries and empty
-                        if kw and not kw.startswith("HIDDEN"):
-                            # Strip modifiers like :CardManaCost:Spell.Creature
-                            kw = kw.split(":")[0].strip()
-                            if kw:
-                                p['granted_keywords'].add(kw.lower())
-            # --- Conditions: IsPresent$, ConditionPresent$ ---
-            for cond_field in ('IsPresent', 'ConditionPresent'):
-                m = re.search(rf'{cond_field}\$\s*(\S+)', raw_line)
-                if m:
-                    for part in m.group(1).split(","):
-                        main = part.split(".")[0].split("+")[0].strip()
-                        if main and main[0].isupper() and len(main) > 2:
-                            p['conditions'].add(main.lower())
-            # --- Duration$ ---
-            m = re.search(r'Duration\$\s*(\S+)', raw_line)
-            if m:
-                p['duration'].add(m.group(1).lower())
-            elif verb in ('Pump', 'PumpAll') and 'Duration$' not in raw_line:
-                # Pump without Duration → temporary buff
-                p['duration'].add('temporary')
-            # --- CombatDamage$ True ---
-            if 'CombatDamage$ True' in raw_line:
-                p['combat_damage'] = True
-            # --- Effect zones: ActiveZones$, EffectZone$, AffectedZone$ ---
-            for zone_field in ('ActiveZones', 'EffectZone', 'AffectedZone'):
-                m = re.search(rf'{zone_field}\$\s*(\S+)', raw_line)
-                if m:
-                    for z in m.group(1).split(","):
-                        z = z.strip()
-                        if z:
-                            p['effect_zones'].add(z.lower())
-            # --- Scales with: SetPower$ X or AddPower$ X ---
-            for pw_field in ('SetPower', 'AddPower'):
-                m = re.search(rf'{pw_field}\$\s*(\S+)', raw_line)
-                if m and m.group(1) in ('X', 'Y'):
-                    p['scales_with'].add('variable_pt')
-                    # Try to extract what it scales with from Description$
-                    desc_m = re.search(r'Description\$\s*(.+?)(?:\||$)', raw_line)
-                    if desc_m:
-                        desc = desc_m.group(1).lower()
-                        if 'for each' in desc or 'equal to' in desc:
-                            p['scales_with'].add('count_based')
-            # --- Grants types: Types$, AddType$ ---
-            for type_field in ('Types', 'AddType'):
-                m = re.search(rf'{type_field}\$\s*(\S+)', raw_line)
-                if m:
-                    for t in m.group(1).split(","):
-                        t = t.strip()
-                        if t and t[0].isupper():
-                            p['grants_types'].add(t.lower())
-            # --- Damage amount: NumDmg$ ---
-            m = re.search(r'NumDmg\$\s*(\S+)', raw_line)
-            if m:
-                val = m.group(1)
-                # Keep the latest (most relevant) if multiple abilities
-                if p['damage_amount'] is None or val == 'X':
-                    p['damage_amount'] = val
-            # --- Cards drawn: NumCards$ ---
-            m = re.search(r'NumCards\$\s*(\S+)', raw_line)
-            if m:
-                val = m.group(1)
-                if p['cards_drawn'] is None or val == 'X':
-                    p['cards_drawn'] = val
-            # --- Life amount: LifeAmount$ ---
-            m = re.search(r'LifeAmount\$\s*(\S+)', raw_line)
-            if m:
-                val = m.group(1)
-                if p['life_amount'] is None or val == 'X':
-                    p['life_amount'] = val
-            # --- Secondary ability ---
-            if 'Secondary$ True' in raw_line:
-                p['is_secondary'] = True
-            # --- Gain control ---
-            if 'GainControl$ True' in raw_line:
-                p['gain_control'] = True
-            # --- Mana production: Produced$ W/U/B/R/G/C/Any/Combo ---
-            m = re.search(r'Produced\$\s*(\S+)', raw_line)
-            if m:
-                p['produces_mana'] = True
-                prod = m.group(1)
-                for c in ('W', 'U', 'B', 'R', 'G'):
-                    if c in prod:
-                        p['mana_colors'].add(c)
-                if prod in ('Any', 'Combo', 'Chosen'):
-                    p['mana_colors'].update({'W', 'U', 'B', 'R', 'G'})
-            # --- Counter quantity variable: CounterNum$ X/Y ---
-            m = re.search(r'CounterNum\$\s*(\S+)', raw_line)
-            if m and m.group(1) in ('X', 'Y', 'All', 'Any'):
-                p['counter_num_variable'] = True
-            # --- Grants abilities: AddAbility$ ---
-            if 'AddAbility$' in raw_line:
-                p['grants_abilities'] = True
-            # --- Token amount variable: TokenAmount$ X ---
-            m = re.search(r'TokenAmount\$\s*(\S+)', raw_line)
-            if m and m.group(1) in ('X', 'Y'):
-                p['token_amount_variable'] = True
-            # --- Static anthem: Continuous + AddPower (not actual counters) ---
-            if row[1] == 'Continuous' and 'AddPower$' in raw_line:
-                p['has_static_anthem'] = True
-            # --- Counters on lands: PutCounter targeting lands, or Earthbend ---
-            if row[1] in ('PutCounter', 'PutCounterAll'):
-                vtgt = re.search(r'ValidTgts\$\s*(\S+)', raw_line)
-                if vtgt and 'Land' in vtgt.group(1) and 'Creature' not in vtgt.group(1):
-                    p['counters_on_lands'] = True
-            if row[1] == 'Earthbend':
-                p['counters_on_lands'] = True
-            # --- Counter trigger themes: what triggers this card's counter placement ---
-            if row[1] in ('PutCounter', 'PutCounterAll') and row[2]:
-                trig = row[2]
-                if trig == 'LifeGained':
-                    p['counter_trigger_themes'].add('lifegain')
-                elif trig == 'Sacrificed':
-                    p['counter_trigger_themes'].add('sacrifice')
-                elif trig == 'Discarded':
-                    p['counter_trigger_themes'].add('discard')
-                elif trig in ('SpellCast', 'SpellCopy'):
-                    p['counter_trigger_themes'].add('spellcast')
+            self._process_forge_ability_row(row)
 
         # Post-process: static anthem is only meaningful if card has NO PutCounter
         for p in self._forge_profiles.values():
             if p['has_static_anthem'] and ('PutCounter' in p['verbs'] or 'PutCounterAll' in p['verbs']):
                 p['has_static_anthem'] = False  # card also places real counters, not just anthem
-
-        # ── Functional fingerprints: semantic vectors for what each card does ──
-        # 33 dimensions across 4 sub-vectors: produces, requires, amplifies, targets
-        # Dot products between commander and card fingerprints capture synergy
-        # without hand-coded penalties.
-        self._func_fingerprints = self._build_func_fingerprints(conn)
 
         # Pre-compute card-level mechanical unions (avoid redundant set ops in inner loop)
         self._card_mechs = {}
@@ -385,6 +202,254 @@ class ForgeFeatureContext:
             if mechs:
                 self._card_mechs[oid] = mechs
 
+    def _process_forge_ability_row(self, row):
+        """Process a single forge_abilities row into the profile dict."""
+        # Named references for profile building (SELECT order matches tuple order)
+        oid = row[0]
+        verb = row[1]
+        trig_mode = row[2]
+        trig_filter = row[3]
+        cost = row[4]
+        keyword = row[5]
+        # row[6] = token_script (used by _raw_abilities only)
+        counter_type = row[7]
+        raw_line_val = row[8]
+        # row[9] = amount, row[10] = trigger_origin, row[11] = trigger_destination
+        target = row[12]
+        ability_type = row[13]
+        defined = row[14]
+
+        p = self._forge_profiles.setdefault(oid, {
+            'verbs': set(), 'triggers': set(), 'keywords': set(),
+            'counter_types': set(), 'targets': set(), 'ability_types': set(),
+            'trigger_filters': set(), 'required_subtypes': set(),
+            'granted_keywords': set(), 'conditions': set(),
+            'duration': set(), 'combat_damage': False,
+            'effect_zones': set(), 'scales_with': set(),
+            'grants_types': set(), 'damage_amount': None,
+            'cards_drawn': None, 'life_amount': None,
+            'is_secondary': False, 'gain_control': False,
+            'produces_mana': False, 'mana_colors': set(),
+            'counter_num_variable': False, 'grants_abilities': False,
+            'token_amount_variable': False,
+            'excluded_subtypes': set(),
+            'has_static_anthem': False, 'counters_on_lands': False,
+            'counter_trigger_themes': set(), 'has_p1p1': False,
+        })
+        if verb: p['verbs'].add(verb)
+        if trig_mode: p['triggers'].add(trig_mode)
+        if keyword: p['keywords'].add(keyword)
+        if counter_type:
+            p['counter_types'].add(counter_type)
+            if counter_type == 'P1P1':
+                p['has_p1p1'] = True
+        # Also check raw_line for P1P1 references (replacement effects, etbCounter)
+        if not p['has_p1p1'] and raw_line_val and 'P1P1' in raw_line_val:
+            p['has_p1p1'] = True
+        if target:
+            for t in target.split(","):
+                main = t.split(".")[0].strip()
+                if main:
+                    p['targets'].add(main)
+        if ability_type: p['ability_types'].add(ability_type)
+        if trig_filter:
+            for part in trig_filter.split(","):
+                main = part.split(".")[0].strip()
+                if main and main != "Card" and main[0].isupper():
+                    p['trigger_filters'].add(main.lower())
+        # Extract subtype requirements from cost, defined, and raw_line fields
+        cost_str = cost or ""
+        defined_str = defined or ""
+        raw_line = raw_line_val or ""
+        # Cost subtypes: tapXType<1/Cleric>, Sac<1/Human>
+        for m in re.findall(r'tapXType<\d+/(\w+)', cost_str):
+            if m not in ("CARDNAME",):
+                p['required_subtypes'].add(m.lower())
+        for m in re.findall(r'Sac<\d+/(\w+)', cost_str):
+            if m not in ("CARDNAME",) and m[0].isupper():
+                p['required_subtypes'].add(m.lower())
+        # Defined$ with subtype filter (e.g., TriggeredCardLKICopy.Spider)
+        if "." in defined_str:
+            for part in defined_str.split(","):
+                if "." in part:
+                    subtype = part.split(".")[-1].strip()
+                    if subtype and subtype[0].isupper() and len(subtype) > 2:
+                        p['required_subtypes'].add(subtype.lower())
+        # Effect target subtypes from ValidCards$, Affected$, ValidTgts$,
+        # ValidCard$, ValidAttackers$, AddsCounters$ in raw_line
+        # e.g., ValidCards$ Creature.Orc → effect only benefits Orcs
+        # e.g., Affected$ Creature.nonHuman → EXCLUDES Humans
+        _generic = {"card", "creature", "permanent", "self", "other",
+                    "youctrl", "oppctrl", "strictlyother", "token", "nontoken"}
+        self._extract_subtypes_from_raw_line(p, raw_line, _generic)
+        self._extract_keywords_and_conditions(p, verb, raw_line)
+        self._extract_counters_and_special(p, row, raw_line)
+
+    @staticmethod
+    def _extract_subtypes_from_raw_line(p, raw_line, _generic):
+        """Extract required/excluded subtypes from raw_line fields."""
+        for field in ('ValidCards', 'ValidCard', 'ValidTgts',
+                      'ValidAttackers', 'Affected', 'AddsCounters'):
+            m = re.search(rf'{field}\$\s*(\S+)', raw_line)
+            if not m:
+                continue
+            for part in m.group(1).split(","):
+                for seg in part.split("."):
+                    seg = seg.split("+")[0].strip()
+                    if not seg or len(seg) <= 2:
+                        continue
+                    # Detect non-X exclusions (e.g., nonHuman, nonGoblin)
+                    if seg.startswith("non") and len(seg) > 3 and seg[3].isupper():
+                        excluded = seg[3:].lower()
+                        if excluded not in _generic:
+                            p['excluded_subtypes'].add(excluded)
+                    elif seg[0].isupper() and seg.lower() not in _generic:
+                        p['required_subtypes'].add(seg.lower())
+        # Also extract non-X from TriggerDescription$ and Description$
+        # Catches sub-ability targets like "non-Human creature"
+        for desc_field in ('TriggerDescription', 'Description', 'SpellDescription'):
+            dm = re.search(rf'{desc_field}\$\s*(.+?)(?:\||$)', raw_line)
+            if dm:
+                for nm in re.finditer(r'non-(\w+)\s+creature', dm.group(1), re.IGNORECASE):
+                    excl = nm.group(1).lower()
+                    if excl not in _generic and len(excl) > 2:
+                        p['excluded_subtypes'].add(excl)
+
+    @staticmethod
+    def _extract_keywords_and_conditions(p, verb, raw_line):
+        """Extract granted keywords, conditions, duration, zones, scaling, and types."""
+        # --- Granted keywords: AddKeyword$, KW$, PumpKeywords$, Keywords$ ---
+        for kw_field in ('AddKeyword', 'KW', 'PumpKeywords', 'Keywords'):
+            m = re.search(rf'{kw_field}\$\s*([^|]+)', raw_line)
+            if m:
+                for kw in m.group(1).split("&"):
+                    kw = kw.strip()
+                    # Skip HIDDEN prefixed entries and empty
+                    if kw and not kw.startswith("HIDDEN"):
+                        # Strip modifiers like :CardManaCost:Spell.Creature
+                        kw = kw.split(":")[0].strip()
+                        if kw:
+                            p['granted_keywords'].add(kw.lower())
+        # --- Conditions: IsPresent$, ConditionPresent$ ---
+        for cond_field in ('IsPresent', 'ConditionPresent'):
+            m = re.search(rf'{cond_field}\$\s*(\S+)', raw_line)
+            if m:
+                for part in m.group(1).split(","):
+                    main = part.split(".")[0].split("+")[0].strip()
+                    if main and main[0].isupper() and len(main) > 2:
+                        p['conditions'].add(main.lower())
+        # --- Duration$ ---
+        m = re.search(r'Duration\$\s*(\S+)', raw_line)
+        if m:
+            p['duration'].add(m.group(1).lower())
+        elif verb in ('Pump', 'PumpAll') and 'Duration$' not in raw_line:
+            # Pump without Duration → temporary buff
+            p['duration'].add('temporary')
+        # --- CombatDamage$ True ---
+        if 'CombatDamage$ True' in raw_line:
+            p['combat_damage'] = True
+        # --- Effect zones: ActiveZones$, EffectZone$, AffectedZone$ ---
+        for zone_field in ('ActiveZones', 'EffectZone', 'AffectedZone'):
+            m = re.search(rf'{zone_field}\$\s*(\S+)', raw_line)
+            if m:
+                for z in m.group(1).split(","):
+                    z = z.strip()
+                    if z:
+                        p['effect_zones'].add(z.lower())
+        # --- Scales with: SetPower$ X or AddPower$ X ---
+        for pw_field in ('SetPower', 'AddPower'):
+            m = re.search(rf'{pw_field}\$\s*(\S+)', raw_line)
+            if m and m.group(1) in ('X', 'Y'):
+                p['scales_with'].add('variable_pt')
+                # Try to extract what it scales with from Description$
+                desc_m = re.search(r'Description\$\s*(.+?)(?:\||$)', raw_line)
+                if desc_m:
+                    desc = desc_m.group(1).lower()
+                    if 'for each' in desc or 'equal to' in desc:
+                        p['scales_with'].add('count_based')
+        # --- Grants types: Types$, AddType$ ---
+        for type_field in ('Types', 'AddType'):
+            m = re.search(rf'{type_field}\$\s*(\S+)', raw_line)
+            if m:
+                for t in m.group(1).split(","):
+                    t = t.strip()
+                    if t and t[0].isupper():
+                        p['grants_types'].add(t.lower())
+
+    @staticmethod
+    def _extract_counters_and_special(p, row, raw_line):
+        """Extract damage/draw/life amounts, mana, counters, and special flags."""
+        verb = row[1]
+        # --- Damage amount: NumDmg$ ---
+        m = re.search(r'NumDmg\$\s*(\S+)', raw_line)
+        if m:
+            val = m.group(1)
+            # Keep the latest (most relevant) if multiple abilities
+            if p['damage_amount'] is None or val == 'X':
+                p['damage_amount'] = val
+        # --- Cards drawn: NumCards$ ---
+        m = re.search(r'NumCards\$\s*(\S+)', raw_line)
+        if m:
+            val = m.group(1)
+            if p['cards_drawn'] is None or val == 'X':
+                p['cards_drawn'] = val
+        # --- Life amount: LifeAmount$ ---
+        m = re.search(r'LifeAmount\$\s*(\S+)', raw_line)
+        if m:
+            val = m.group(1)
+            if p['life_amount'] is None or val == 'X':
+                p['life_amount'] = val
+        # --- Secondary ability ---
+        if 'Secondary$ True' in raw_line:
+            p['is_secondary'] = True
+        # --- Gain control ---
+        if 'GainControl$ True' in raw_line:
+            p['gain_control'] = True
+        # --- Mana production: Produced$ W/U/B/R/G/C/Any/Combo ---
+        m = re.search(r'Produced\$\s*(\S+)', raw_line)
+        if m:
+            p['produces_mana'] = True
+            prod = m.group(1)
+            for c in ('W', 'U', 'B', 'R', 'G'):
+                if c in prod:
+                    p['mana_colors'].add(c)
+            if prod in ('Any', 'Combo', 'Chosen'):
+                p['mana_colors'].update({'W', 'U', 'B', 'R', 'G'})
+        # --- Counter quantity variable: CounterNum$ X/Y ---
+        m = re.search(r'CounterNum\$\s*(\S+)', raw_line)
+        if m and m.group(1) in ('X', 'Y', 'All', 'Any'):
+            p['counter_num_variable'] = True
+        # --- Grants abilities: AddAbility$ ---
+        if 'AddAbility$' in raw_line:
+            p['grants_abilities'] = True
+        # --- Token amount variable: TokenAmount$ X ---
+        m = re.search(r'TokenAmount\$\s*(\S+)', raw_line)
+        if m and m.group(1) in ('X', 'Y'):
+            p['token_amount_variable'] = True
+        # --- Static anthem: Continuous + AddPower (not actual counters) ---
+        if verb == 'Continuous' and 'AddPower$' in raw_line:
+            p['has_static_anthem'] = True
+        # --- Counters on lands: PutCounter targeting lands, or Earthbend ---
+        if verb in ('PutCounter', 'PutCounterAll'):
+            vtgt = re.search(r'ValidTgts\$\s*(\S+)', raw_line)
+            if vtgt and 'Land' in vtgt.group(1) and 'Creature' not in vtgt.group(1):
+                p['counters_on_lands'] = True
+        if verb == 'Earthbend':
+            p['counters_on_lands'] = True
+        # --- Counter trigger themes: what triggers this card's counter placement ---
+        if verb in ('PutCounter', 'PutCounterAll') and row[2]:
+            trig = row[2]
+            if trig == 'LifeGained':
+                p['counter_trigger_themes'].add('lifegain')
+            elif trig == 'Sacrificed':
+                p['counter_trigger_themes'].add('sacrifice')
+            elif trig == 'Discarded':
+                p['counter_trigger_themes'].add('discard')
+            elif trig in ('SpellCast', 'SpellCopy'):
+                p['counter_trigger_themes'].add('spellcast')
+
+    def _load_deck_tags(self, conn):
+        """Load Forge deck-building AI tags (has/hints/needs)."""
         # Forge deck tags: Forge's own deck-building AI signals
         # has = what abilities/themes a card provides
         # hints = what the card wants in the deck
@@ -425,6 +490,8 @@ class ForgeFeatureContext:
             for tag in tags:
                 self._deck_has_providers.setdefault(tag, set()).add(oid)
 
+    def _load_ability_vectors(self, conn):
+        """Load ability vectors, trigger zones, ability counts, token/zone stats."""
         # Forge ability vectors: binary encoding of verbs+triggers+keywords for cosine similarity
         # Replaces oracle text TF-IDF (F9) with mechanical similarity
         all_abilities = set()
@@ -555,6 +622,8 @@ class ForgeFeatureContext:
             if "exile" in p.get('effect_zones', set()):
                 self._zone_exile.add(oid)
 
+    def _load_theme_sets(self, conn):
+        """Load theme detection sets for equipment, defender, enchantress, ETB."""
         # ── Theme detection sets: identify cards by archetype relevance ──
         # Equipment theme: cards that ARE equipment or CARE about equipment
         self._equipment_cards = set()    # oids of Equipment type cards
@@ -641,6 +710,8 @@ class ForgeFeatureContext:
         self._defender_theme_tags = {'Keyword$Defender'}
         self._enchantress_theme_tags = {'Type$Enchantment', 'Type$Aura'}
 
+    def _load_edhrec_stats(self, conn):
+        """Load EDHREC popularity stats and card quality proxies."""
         # ── Card quality / popularity signals ──
         # EDHREC deck frequency: fraction of EDHREC commanders that include each card
         self._edhrec_deck_pct = {}
@@ -687,43 +758,13 @@ class ForgeFeatureContext:
                      len(self._deck_needs.get(oid, set())))
             self._deck_tag_count[oid] = float(min(count, 10))
 
-        # Verb→trigger alignment mapping for F30
-        self._verb_triggers = {
-            "Token": {"ChangesZone", "ChangesZoneAll", "TokenCreated"},
-            "ChangeZone": {"ChangesZone", "ChangesZoneAll"},
-            "ChangeZoneAll": {"ChangesZone", "ChangesZoneAll"},
-            "DealDamage": {"DamageDone", "DamageDoneOnce", "LifeLost"},
-            "DamageAll": {"DamageDone", "DamageDoneOnce"},
-            "Draw": {"Drawn"},
-            "Dig": {"Drawn"},
-            "PutCounter": {"CounterAdded", "CounterAddedOnce"},
-            "Proliferate": {"CounterAdded", "CounterAddedOnce"},
-            "GainLife": {"LifeGained"},
-            "LoseLife": {"LifeLost"},
-            "Destroy": {"ChangesZone"},
-            "DestroyAll": {"ChangesZone"},
-            "Sacrifice": {"Sacrificed", "ChangesZone"},
-            "Discard": {"Discarded"},
-            "Mill": {"Milled", "ChangesZone"},
-            "Tap": {"Taps", "TapsForMana"},
-            "Untap": {"Untaps"},
-            "Counter": {"SpellCast"},
-            "Mana": {"TapsForMana"},
-        }
-
-        # Forge mechanics vectors: encode each card's full mechanical profile
-        # Pass pre-loaded abilities to avoid redundant forge_abilities DB scan
-        from mtg_synergy.recommend.mechanics_vectors import build_mechanics_vectors
-        self._mech_produces, self._mech_consumes, self._mech_dim, _ = \
-            build_mechanics_vectors(conn, preloaded_abilities=self._raw_abilities)
-        # Free raw abilities list after mechanics vectors are built (~5MB)
-        del self._raw_abilities
-
-        # ── Pre-encode per-card arrays for batch feature computation ──
-        self._build_card_arrays()
-
-        if preload_edges:
-            self._build_edge_index(conn)
+    def _load_functional_fingerprints(self, conn):
+        """Build functional fingerprint vectors from Forge ability data."""
+        # ── Functional fingerprints: semantic vectors for what each card does ──
+        # 33 dimensions across 4 sub-vectors: produces, requires, amplifies, targets
+        # Dot products between commander and card fingerprints capture synergy
+        # without hand-coded penalties.
+        self._func_fingerprints = self._build_func_fingerprints(conn)
 
     def _build_card_arrays(self):
         """Pre-encode per-card data as dense numpy arrays for vectorized features.
@@ -892,17 +933,16 @@ class ForgeFeatureContext:
         Cache key: interaction_edges row count + card count.
         Stores: src, tgt, exact, strength (float32), event_ids (uint8), event_names.
         """
-        import os
         from mtg_synergy.config import DATA_DIR
 
-        print("  Building in-memory edge index...", flush=True)
+        _log.info("Building in-memory edge index...")
         t0 = time.time()
 
         cache_path = os.path.join(DATA_DIR, "edge_index_cache.npz")
         edge_count = conn.execute("SELECT COUNT(*) FROM interaction_edges").fetchone()[0]
         card_count = len(self.oid_to_idx)
 
-        # Try loading from cache (numpy arrays only, no pickle)
+        # Try loading from cache (numpy arrays only)
         src = tgt = exact = strength = event_ids = event_names = None
         if os.path.exists(cache_path):
             try:
@@ -917,154 +957,34 @@ class ForgeFeatureContext:
                     strength = cached['strength']
                     event_ids = cached['event_ids']
                     event_names = cached['event_names']
-                    print(f"    Loaded {len(src):,} edges from cache ({time.time()-t0:.1f}s)")
+                    _log.info("Loaded %s edges from cache (%.1fs)", f"{len(src):,}", time.time()-t0)
             except (ValueError, KeyError, OSError) as e:
                 _log.warning("Edge index cache load failed, rebuilding: %s", e)
 
         if src is None:
-            # Build event encoding from DB
-            event_name_list = sorted(
-                r[0] for r in conn.execute(
-                    "SELECT DISTINCT event FROM interaction_edges WHERE event IS NOT NULL"
-                ) if r[0]
+            src, tgt, exact, strength, event_ids, event_names = (
+                self._load_edges_from_db(conn, edge_count, t0)
             )
-            event_to_id = {name: i for i, name in enumerate(event_name_list)}
-            event_names = np.array(event_name_list, dtype='U64')
-
-            # Pre-allocate numpy arrays to avoid ~450MB Python list overhead.
-            # edge_count is an upper bound (some edges may have unmapped oids).
-            has_col = any(
-                r[1] == "filter_precision"
-                for r in conn.execute("PRAGMA table_info(interaction_edges)")
-            )
-            prec_expr = "filter_precision" if has_col else "json_extract(detail, '$.filter_precision')"
-            event_expr = _EVENT_EXPR_COLUMN if self._has_event_col else _EVENT_EXPR_JSON
-            src = np.empty(edge_count, dtype=np.int32)
-            tgt = np.empty(edge_count, dtype=np.int32)
-            exact = np.empty(edge_count, dtype=np.bool_)
-            strength = np.empty(edge_count, dtype=np.float32)
-            event_ids = np.empty(edge_count, dtype=np.uint8)
-            n = 0
-            for row in conn.execute(
-                f"SELECT source_id, target_id, {prec_expr}, strength, {event_expr} "
-                "FROM interaction_edges"
-            ):
-                s = self.oid_to_idx.get(row[0])
-                t = self.oid_to_idx.get(row[1])
-                if s is not None and t is not None:
-                    src[n] = s
-                    tgt[n] = t
-                    exact[n] = row[2] == "exact"
-                    strength[n] = float(row[3]) if row[3] is not None else 0.0
-                    event_ids[n] = event_to_id.get(row[4], 255) if row[4] else 255
-                    n += 1
-            # Trim to actual count
-            src = src[:n]
-            tgt = tgt[:n]
-            exact = exact[:n]
-            strength = strength[:n]
-            event_ids = event_ids[:n]
-            print(f"    Loaded {n:,} edges from DB ({time.time()-t0:.1f}s)")
             try:
                 np.savez(cache_path, src=src, tgt=tgt, exact=exact,
                          strength=strength, event_ids=event_ids,
                          event_names=event_names,
                          edge_count=np.array(edge_count), card_count=np.array(card_count))
-                print(f"    Cached to {cache_path}")
+                _log.info("Cached to %s", cache_path)
             except Exception as e:
-                print(f"    Cache write failed: {e}")
+                _log.warning("Cache write failed: %s", e)
 
         # Build event lookup dicts
         self._event_names = list(event_names)
         self._bit_to_event = {i: str(name) for i, name in enumerate(event_names)}
 
-        # Try loading pre-built adjacency dicts from pickle cache.
-        # This is a LOCAL cache written by our own code — not external input.
-        import pickle  # noqa: S403
-        adj_cache_path = os.path.join(DATA_DIR, "edge_adj_cache.pkl")
-        adj_loaded = False
-        if os.path.exists(adj_cache_path):
-            try:
-                with open(adj_cache_path, "rb") as f:
-                    adj_data = pickle.load(f)  # noqa: S301
-                if (adj_data.get("edge_count") == edge_count
-                        and adj_data.get("card_count") == card_count
-                        and adj_data.get("has_strength") == self._preload_strength):
-                    self._adj_out = adj_data["adj_out"]
-                    self._adj_in = adj_data["adj_in"]
-                    self._exact_out = adj_data["exact_out"]
-                    self._exact_in = adj_data["exact_in"]
-                    self._agg_strength_out = adj_data.get("agg_strength_out", {})
-                    self._agg_events_out = adj_data.get("agg_events_out", {})
-                    self._agg_strength_in = adj_data.get("agg_strength_in", {})
-                    self._agg_events_in = adj_data.get("agg_events_in", {})
-                    self._arr_hub_raw = adj_data["hub_raw"]
-                    self._arr_hub_score = adj_data["hub_score"]
-                    self._hub_scores_built = True
-                    adj_loaded = True
-                    print(f"    Loaded adjacency dicts from cache ({time.time()-t0:.1f}s)")
-            except (pickle.UnpicklingError, KeyError, OSError, EOFError) as e:
-                _log.warning("Adjacency cache load failed, rebuilding: %s", e)
+        # Try loading pre-built adjacency dicts from CSR-style npz cache.
+        adj_cache_path = os.path.join(DATA_DIR, "edge_adj_cache.npz")
+        adj_loaded = self._load_adj_cache(adj_cache_path, edge_count, card_count, t0)
 
         if not adj_loaded:
-            # Build outgoing/incoming adjacency: card_idx -> numpy array of unique neighbors
-            self._adj_out = self._build_adj_arrays(src, tgt)
-            self._adj_in = self._build_adj_arrays(tgt, src)
-
-            # Exact-precision adjacency
-            if exact.any():
-                self._exact_out = self._build_adj_arrays(src[exact], tgt[exact])
-                self._exact_in = self._build_adj_arrays(tgt[exact], src[exact])
-            else:
-                self._exact_out = {}
-                self._exact_in = {}
-
-            # Aggregated strength + event dicts for commander edge lookups (no SQL needed).
-            # Only built for training (preload_strength=True); inference uses SQL fallback.
-            if self._preload_strength:
-                self._agg_strength_out, self._agg_events_out = self._build_agg_arrays(
-                    src, tgt, strength, event_ids)
-                self._agg_strength_in, self._agg_events_in = self._build_agg_arrays(
-                    tgt, src, strength, event_ids)
-            else:
-                self._agg_strength_out = {}
-                self._agg_events_out = {}
-                self._agg_strength_in = {}
-                self._agg_events_in = {}
-
-            # Build hub score arrays
-            n = len(self.oid_to_idx)
-            for i in range(n):
-                n_out = len(self._adj_out.get(i, []))
-                n_in = len(self._adj_in.get(i, []))
-                raw = float(n_out + n_in)
-                self._arr_hub_raw[i] = raw
-                self._arr_hub_score[i] = np.log2(1.0 + min(raw, 500))
-            self._hub_scores_built = True
-
-            # Save adjacency cache for next time
-            try:
-                adj_data = {
-                    "edge_count": edge_count,
-                    "card_count": card_count,
-                    "has_strength": self._preload_strength,
-                    "adj_out": self._adj_out,
-                    "adj_in": self._adj_in,
-                    "exact_out": self._exact_out,
-                    "exact_in": self._exact_in,
-                    "hub_raw": self._arr_hub_raw,
-                    "hub_score": self._arr_hub_score,
-                }
-                if self._preload_strength:
-                    adj_data["agg_strength_out"] = self._agg_strength_out
-                    adj_data["agg_events_out"] = self._agg_events_out
-                    adj_data["agg_strength_in"] = self._agg_strength_in
-                    adj_data["agg_events_in"] = self._agg_events_in
-                with open(adj_cache_path, "wb") as f:
-                    pickle.dump(adj_data, f, protocol=pickle.HIGHEST_PROTOCOL)
-                print(f"    Cached adjacency dicts to {adj_cache_path}")
-            except Exception as e:
-                print(f"    Adjacency cache write failed: {e}")
+            self._build_adj_from_arrays(src, tgt, exact, strength, event_ids)
+            self._save_adj_cache(adj_cache_path, edge_count, card_count)
 
         del src, tgt, exact, strength, event_ids
 
@@ -1074,7 +994,235 @@ class ForgeFeatureContext:
 
         elapsed = time.time() - t0
         n_unique = sum(len(v) for v in self._adj_out.values())
-        print(f"    Edge index built: {elapsed:.1f}s, {n_unique:,} unique outgoing pairs")
+        _log.info("Edge index built: %.1fs, %s unique outgoing pairs", elapsed, f"{n_unique:,}")
+
+    def _load_edges_from_db(self, conn, edge_count, t0):
+        """Load raw edge arrays from the database."""
+        event_name_list = sorted(
+            r[0] for r in conn.execute(
+                "SELECT DISTINCT event FROM interaction_edges WHERE event IS NOT NULL"
+            ) if r[0]
+        )
+        event_to_id = {name: i for i, name in enumerate(event_name_list)}
+        event_names = np.array(event_name_list, dtype='U64')
+
+        has_col = any(
+            r[1] == "filter_precision"
+            for r in conn.execute("PRAGMA table_info(interaction_edges)")
+        )
+        prec_expr = "filter_precision" if has_col else "json_extract(detail, '$.filter_precision')"
+        event_expr = _EVENT_EXPR_COLUMN if self._has_event_col else _EVENT_EXPR_JSON
+        src = np.empty(edge_count, dtype=np.int32)
+        tgt = np.empty(edge_count, dtype=np.int32)
+        exact = np.empty(edge_count, dtype=np.bool_)
+        strength = np.empty(edge_count, dtype=np.float32)
+        event_ids = np.empty(edge_count, dtype=np.uint8)
+        n = 0
+        for row in conn.execute(
+            f"SELECT source_id, target_id, {prec_expr}, strength, {event_expr} "
+            "FROM interaction_edges"
+        ):
+            s = self.oid_to_idx.get(row[0])
+            t = self.oid_to_idx.get(row[1])
+            if s is None or t is None:
+                continue
+            src[n] = s
+            tgt[n] = t
+            exact[n] = row[2] == "exact"
+            strength[n] = float(row[3]) if row[3] is not None else 0.0
+            event_ids[n] = event_to_id.get(row[4], 255) if row[4] else 255
+            n += 1
+        src = src[:n]
+        tgt = tgt[:n]
+        exact = exact[:n]
+        strength = strength[:n]
+        event_ids = event_ids[:n]
+        _log.info("Loaded %s edges from DB (%.1fs)", f"{n:,}", time.time()-t0)
+        return src, tgt, exact, strength, event_ids, event_names
+
+    @staticmethod
+    def _adj_dict_to_csr(adj):
+        """Convert adjacency dict {int: np.array(int32)} to CSR-like arrays."""
+        if not adj:
+            return np.array([], dtype=np.int32), np.array([0], dtype=np.int64), np.array([], dtype=np.int32)
+        sorted_keys = np.array(sorted(adj.keys()), dtype=np.int32)
+        lengths = np.array([len(adj[int(k)]) for k in sorted_keys], dtype=np.int64)
+        offsets = np.zeros(len(sorted_keys) + 1, dtype=np.int64)
+        np.cumsum(lengths, out=offsets[1:])
+        total = int(offsets[-1])
+        values = np.empty(total, dtype=np.int32)
+        for i, k in enumerate(sorted_keys):
+            start, end = int(offsets[i]), int(offsets[i + 1])
+            values[start:end] = adj[int(k)]
+        return sorted_keys, offsets, values
+
+    @staticmethod
+    def _csr_to_adj_dict(keys, offsets, values):
+        """Restore adjacency dict from CSR-like arrays."""
+        result = {}
+        for i, k in enumerate(keys):
+            start, end = int(offsets[i]), int(offsets[i + 1])
+            result[int(k)] = values[start:end].copy()
+        return result
+
+    def _load_adj_cache(self, adj_cache_path, edge_count, card_count, t0):
+        """Try loading adjacency dicts from CSR-style npz cache. Returns True if loaded."""
+        if not os.path.exists(adj_cache_path):
+            return False
+        try:
+            cached = np.load(adj_cache_path, allow_pickle=False)
+            if (int(cached['edge_count']) != edge_count
+                    or int(cached['card_count']) != card_count
+                    or bool(cached['has_strength']) != self._preload_strength):
+                return False
+            self._adj_out = self._csr_to_adj_dict(
+                cached['adj_out_keys'], cached['adj_out_offsets'], cached['adj_out_values'])
+            self._adj_in = self._csr_to_adj_dict(
+                cached['adj_in_keys'], cached['adj_in_offsets'], cached['adj_in_values'])
+            self._exact_out = self._csr_to_adj_dict(
+                cached['exact_out_keys'], cached['exact_out_offsets'], cached['exact_out_values'])
+            self._exact_in = self._csr_to_adj_dict(
+                cached['exact_in_keys'], cached['exact_in_offsets'], cached['exact_in_values'])
+            self._arr_hub_raw = cached['hub_raw']
+            self._arr_hub_score = cached['hub_score']
+            self._hub_scores_built = True
+            self._agg_strength_out = {}
+            self._agg_events_out = {}
+            self._agg_strength_in = {}
+            self._agg_events_in = {}
+            if self._preload_strength and 'agg_str_out_keys' in cached:
+                self._agg_strength_out, self._agg_events_out = self._load_agg_from_cache(
+                    cached, 'agg_str_out')
+                self._agg_strength_in, self._agg_events_in = self._load_agg_from_cache(
+                    cached, 'agg_str_in')
+            _log.info("Loaded adjacency dicts from cache (%.1fs)", time.time()-t0)
+            return True
+        except (ValueError, KeyError, OSError) as e:
+            _log.warning("Adjacency cache load failed, rebuilding: %s", e)
+            return False
+
+    @staticmethod
+    def _load_agg_from_cache(cached, prefix):
+        """Restore aggregated strength + event dicts from cache arrays."""
+        keys = cached[f'{prefix}_keys']
+        offsets = cached[f'{prefix}_offsets']
+        val_keys = cached[f'{prefix}_val_keys']
+        val_strengths = cached[f'{prefix}_val_strengths']
+        val_events = cached[f'{prefix}_val_events']
+        agg_strength = {}
+        agg_events = {}
+        for i, k in enumerate(keys):
+            start, end = int(offsets[i]), int(offsets[i + 1])
+            k_int = int(k)
+            str_dict = {}
+            evt_dict = {}
+            for j in range(start, end):
+                v = int(val_keys[j])
+                str_dict[v] = float(val_strengths[j])
+                evt_dict[v] = int(val_events[j])
+            agg_strength[k_int] = str_dict
+            agg_events[k_int] = evt_dict
+        return agg_strength, agg_events
+
+    @staticmethod
+    def _serialize_agg_dicts(agg_strength, agg_events):
+        """Convert aggregated strength + event nested dicts to flat arrays for npz."""
+        if not agg_strength:
+            empty_i = np.array([], dtype=np.int32)
+            empty_o = np.array([0], dtype=np.int64)
+            empty_f = np.array([], dtype=np.float32)
+            empty_u = np.array([], dtype=np.uint32)
+            return empty_i, empty_o, empty_i, empty_f, empty_u
+        sorted_keys = np.array(sorted(agg_strength.keys()), dtype=np.int32)
+        total = sum(len(agg_strength[int(k)]) for k in sorted_keys)
+        offsets = np.zeros(len(sorted_keys) + 1, dtype=np.int64)
+        val_keys = np.empty(total, dtype=np.int32)
+        val_strengths = np.empty(total, dtype=np.float32)
+        val_events = np.empty(total, dtype=np.uint32)
+        pos = 0
+        for i, k in enumerate(sorted_keys):
+            k_int = int(k)
+            str_dict = agg_strength[k_int]
+            evt_dict = agg_events.get(k_int, {})
+            for v, s in str_dict.items():
+                val_keys[pos] = v
+                val_strengths[pos] = s
+                val_events[pos] = evt_dict.get(v, 0)
+                pos += 1
+            offsets[i + 1] = pos
+        return sorted_keys, offsets, val_keys, val_strengths, val_events
+
+    def _save_adj_cache(self, adj_cache_path, edge_count, card_count):
+        """Save adjacency dicts to CSR-style npz cache."""
+        try:
+            ao_k, ao_o, ao_v = self._adj_dict_to_csr(self._adj_out)
+            ai_k, ai_o, ai_v = self._adj_dict_to_csr(self._adj_in)
+            eo_k, eo_o, eo_v = self._adj_dict_to_csr(self._exact_out)
+            ei_k, ei_o, ei_v = self._adj_dict_to_csr(self._exact_in)
+            save_dict = {
+                'edge_count': np.array(edge_count),
+                'card_count': np.array(card_count),
+                'has_strength': np.array(self._preload_strength),
+                'adj_out_keys': ao_k, 'adj_out_offsets': ao_o, 'adj_out_values': ao_v,
+                'adj_in_keys': ai_k, 'adj_in_offsets': ai_o, 'adj_in_values': ai_v,
+                'exact_out_keys': eo_k, 'exact_out_offsets': eo_o, 'exact_out_values': eo_v,
+                'exact_in_keys': ei_k, 'exact_in_offsets': ei_o, 'exact_in_values': ei_v,
+                'hub_raw': self._arr_hub_raw,
+                'hub_score': self._arr_hub_score,
+            }
+            if self._preload_strength:
+                so_k, so_o, so_vk, so_vs, so_ve = self._serialize_agg_dicts(
+                    self._agg_strength_out, self._agg_events_out)
+                si_k, si_o, si_vk, si_vs, si_ve = self._serialize_agg_dicts(
+                    self._agg_strength_in, self._agg_events_in)
+                save_dict.update({
+                    'agg_str_out_keys': so_k, 'agg_str_out_offsets': so_o,
+                    'agg_str_out_val_keys': so_vk, 'agg_str_out_val_strengths': so_vs,
+                    'agg_str_out_val_events': so_ve,
+                    'agg_str_in_keys': si_k, 'agg_str_in_offsets': si_o,
+                    'agg_str_in_val_keys': si_vk, 'agg_str_in_val_strengths': si_vs,
+                    'agg_str_in_val_events': si_ve,
+                })
+            np.savez(adj_cache_path, **save_dict)
+            _log.info("Cached adjacency dicts to %s", adj_cache_path)
+        except Exception as e:
+            _log.warning("Adjacency cache write failed: %s", e)
+
+    def _build_adj_from_arrays(self, src, tgt, exact, strength, event_ids):
+        """Build adjacency dicts from raw edge arrays."""
+        self._adj_out = self._build_adj_arrays(src, tgt)
+        self._adj_in = self._build_adj_arrays(tgt, src)
+
+        # Exact-precision adjacency
+        if exact.any():
+            self._exact_out = self._build_adj_arrays(src[exact], tgt[exact])
+            self._exact_in = self._build_adj_arrays(tgt[exact], src[exact])
+        else:
+            self._exact_out = {}
+            self._exact_in = {}
+
+        # Aggregated strength + event dicts for commander edge lookups (no SQL needed).
+        # Only built for training (preload_strength=True); inference uses SQL fallback.
+        if self._preload_strength:
+            self._agg_strength_out, self._agg_events_out = self._build_agg_arrays(
+                src, tgt, strength, event_ids)
+            self._agg_strength_in, self._agg_events_in = self._build_agg_arrays(
+                tgt, src, strength, event_ids)
+        else:
+            self._agg_strength_out = {}
+            self._agg_events_out = {}
+            self._agg_strength_in = {}
+            self._agg_events_in = {}
+
+        # Build hub score arrays
+        n = len(self.oid_to_idx)
+        for i in range(n):
+            n_out = len(self._adj_out.get(i, []))
+            n_in = len(self._adj_in.get(i, []))
+            raw = float(n_out + n_in)
+            self._arr_hub_raw[i] = raw
+            self._arr_hub_score[i] = np.log2(1.0 + min(raw, 500))
+        self._hub_scores_built = True
 
     @staticmethod
     def _build_adj_arrays(keys, values):
@@ -1092,6 +1240,19 @@ class ForgeFeatureContext:
             k = int(sk[start])
             result[k] = np.unique(sv[start:end])
         return result
+
+    @staticmethod
+    def _accumulate_group(sv, ss, se, start, end):
+        """Accumulate strength sums and event bitmasks for a key group."""
+        str_dict = {}
+        evt_dict = {}
+        for j in range(start, end):
+            v = int(sv[j])
+            str_dict[v] = str_dict.get(v, 0.0) + float(ss[j])
+            eid = int(se[j])
+            if eid < 32:
+                evt_dict[v] = evt_dict.get(v, 0) | (1 << eid)
+        return str_dict, evt_dict
 
     @staticmethod
     def _build_agg_arrays(keys, values, strengths, event_ids):
@@ -1116,14 +1277,7 @@ class ForgeFeatureContext:
         for i in range(len(changes) - 1):
             start, end = int(changes[i]), int(changes[i + 1])
             k = int(sk[start])
-            str_dict = {}
-            evt_dict = {}
-            for j in range(start, end):
-                v = int(sv[j])
-                str_dict[v] = str_dict.get(v, 0.0) + float(ss[j])
-                eid = int(se[j])
-                if eid < 32:
-                    evt_dict[v] = evt_dict.get(v, 0) | (1 << eid)
+            str_dict, evt_dict = ForgeFeatureContext._accumulate_group(sv, ss, se, start, end)
             agg_strength[k] = str_dict
             agg_events[k] = evt_dict
 
@@ -2139,52 +2293,52 @@ def compute_batch_features(card_oids, card_cmcs, ctx, cmdr):
     return X
 
 
-def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
-                          ctx: ForgeFeatureContext, cmdr: CmdrFeatureContext) -> list:
-    """Compute the 105-feature vector for a single (commander, card) pair.
-
-    Returns a list of 103 floats matching FORGE_FEATURE_NAMES order.
-    Pure Forge-native features — no tower model or oracle-text embeddings.
-    """
+def _compute_causal_features(card_oid, card_cmc, ctx, cmdr):
+    """Compute causal scores, deck edges, hub score, 2-hop features."""
     out_s = cmdr.cmdr_out.get(card_oid, 0.0)
     in_s = cmdr.cmdr_in.get(card_oid, 0.0)
-    tl = card_type_line
-
-    # Card index for hub score lookup
     di = ctx.oid_to_idx.get(card_oid)
 
-    # F0-F3: causal features
     ev_out = cmdr.cmdr_out_events.get(card_oid, set())
     ev_in = cmdr.cmdr_in_events.get(card_oid, set())
 
-    # F7: strategy overlap
-    c_strats = ctx.card_strats.get(card_oid, set())
+    n_exact = cmdr.deck_exact_counts.get(card_oid, 0)
+    n_broad = cmdr.deck_broad_counts.get(card_oid, 0)
+    deck_exact_ratio = n_exact / (n_exact + n_broad) if (n_exact + n_broad) > 0 else 0.0
 
-    # F8: strategy cosine
-    csv = ctx.strat_vector(card_oid)
-    strat_cos = 0.0
-    if cmdr.cmdr_strat_vec is not None and csv is not None:
-        d = float(np.dot(cmdr.cmdr_strat_vec, csv))
-        nc = float(np.linalg.norm(cmdr.cmdr_strat_vec))
-        nd = float(np.linalg.norm(csv))
-        strat_cos = d / (nc * nd) if nc > 0 and nd > 0 else 0.0
+    causal_str = out_s + in_s
+    event_div = float(len(ev_out | ev_in))
+    exact_edge = 1.0 if card_oid in cmdr.cmdr_exact else 0.0
+    causal_composite = min(causal_str * (1.0 + event_div) * (1.0 + exact_edge), 20.0)
 
-    # F9: forge_ability_cosine — cosine similarity of Forge ability vectors
-    # (verbs + triggers + keywords). Captures "cards that DO similar mechanical
-    # things" instead of "cards that SAY similar things" (old oracle TF-IDF).
-    card_ability_vec = ctx._ability_vectors.get(card_oid)
-    forge_ability_cos = float(np.dot(cmdr.cmdr_ability_vec, card_ability_vec)) \
-        if cmdr.cmdr_ability_vec is not None and card_ability_vec is not None else 0.0
+    hub = 0.0
+    if ctx._has_edge_index and di is not None:
+        n_out = len(ctx._adj_out.get(di, []))
+        n_in = len(ctx._adj_in.get(di, []))
+        hub = np.log2(1.0 + min(n_out + n_in, 500))
+    elif di is not None:
+        hub = np.log2(1.0 + min(cmdr.deck_edge_counts.get(card_oid, 0), 20))
 
-    # F10: phase match
-    cp = ctx.card_phase_order.get(card_oid, set())
-    phase_m = 0.0
-    if cmdr.cmdr_phases and cp:
-        for p1 in cmdr.cmdr_phases:
-            for p2 in cp:
-                phase_m = max(phase_m, max(0.0, 1.0 - abs(p1 - p2) * 2.0))
+    deck_exact_abs = float(min(n_exact, 20))
 
-    # F12: tribal match
+    hop2_raw = cmdr.cmdr_2hop_counts.get(card_oid, 0)
+    cmdr_2hop = np.log2(1.0 + min(hop2_raw, 200))
+
+    hub_raw = 0.0
+    if ctx._has_edge_index and di is not None:
+        n_out = len(ctx._adj_out.get(di, []))
+        n_in = len(ctx._adj_in.get(di, []))
+        hub_raw = float(n_out + n_in)
+    cmdr_2hop_ratio = float(hop2_raw) / max(hub_raw, 1.0) if hop2_raw > 0 else 0.0
+    cmdr_2hop_ratio = min(cmdr_2hop_ratio, 1.0)
+
+    return (out_s, in_s, event_div, deck_exact_ratio, exact_edge,
+            causal_composite, hub, deck_exact_abs, cmdr_2hop, cmdr_2hop_ratio)
+
+
+def _compute_tribal_features(card_oid, card_type_line, card_profile, ctx, cmdr):
+    """Compute tribal/subtype features."""
+    tl = card_type_line
     tribal = 0.0
     if cmdr.cmdr_subtypes and "creature" in tl.lower() and "\u2014" in tl:
         try:
@@ -2194,35 +2348,12 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         except (IndexError, AttributeError):
             pass
 
-    # F20: deck exact edge ratio
-    n_exact = cmdr.deck_exact_counts.get(card_oid, 0)
-    n_broad = cmdr.deck_broad_counts.get(card_oid, 0)
-    deck_exact_ratio = n_exact / (n_exact + n_broad) if (n_exact + n_broad) > 0 else 0.0
-
-    # F22: causal_composite — combined causal signal, denser than individual features
-    causal_str = out_s + in_s
-    event_div = float(len(ev_out | ev_in))
-    exact_edge = 1.0 if card_oid in cmdr.cmdr_exact else 0.0
-    causal_composite = min(causal_str * (1.0 + event_div) * (1.0 + exact_edge), 20.0)
-
-    # F23: card_hub_score — total unique causal neighbors (connectedness)
-    # Log-scaled to reduce older-card bias (Sol Ring 500 neighbors vs new card 50)
-    hub = 0.0
-    if ctx._has_edge_index and di is not None:
-        n_out = len(ctx._adj_out.get(di, []))
-        n_in = len(ctx._adj_in.get(di, []))
-        hub = np.log2(1.0 + min(n_out + n_in, 500))
-    elif di is not None:
-        hub = np.log2(1.0 + min(cmdr.deck_edge_counts.get(card_oid, 0), 20))
-
-    # F24: deck_exact_edge_count — absolute count of exact-precision deck connections
-    deck_exact_abs = float(min(n_exact, 20))
-
-    # F25: forge_type_synergy — card's Forge trigger_filter or target references
-    # commander's creature subtypes. Replaces oracle text substring matching.
-    card_profile = ctx._forge_profiles.get(card_oid, {})
+    cmdr_profile = ctx._forge_profiles.get(cmdr.cmdr_oid, {})
+    cmdr_trigger_types = cmdr_profile.get('trigger_filters', set())
+    cmdr_targets = cmdr_profile.get('targets', set())
     card_trigger_types = card_profile.get('trigger_filters', set())
     card_targets = card_profile.get('targets', set())
+
     forge_type_syn = 0.0
     if cmdr.cmdr_subtypes:
         for subtype in cmdr.cmdr_subtypes:
@@ -2231,11 +2362,6 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
             if subtype.title() in card_targets:
                 forge_type_syn += 0.5
 
-    # F26: cmdr_forge_type_match — commander's Forge trigger_filter or target
-    # references card's subtypes.
-    cmdr_profile = ctx._forge_profiles.get(cmdr.cmdr_oid, {})
-    cmdr_trigger_types = cmdr_profile.get('trigger_filters', set())
-    cmdr_targets = cmdr_profile.get('targets', set())
     cmdr_type_match = 0.0
     if "\u2014" in tl:
         try:
@@ -2252,46 +2378,21 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         if ctype in tl and ctype.lower() in cmdr_trigger_types:
             cmdr_type_match += 0.5
 
-    # F27: shared_forge_mechanics — count of shared Forge verbs, trigger_modes,
-    # and keywords between commander and card.
-    # Uses pre-computed unions from ctx._card_mechs and cmdr.cmdr_mechs
-    cmdr_mechs = cmdr.cmdr_mechs
-    card_mechs = ctx._card_mechs.get(card_oid, set())
-    shared_forge = float(len(cmdr_mechs & card_mechs))
-
-    # F28: forge_ability_depth — total distinct mechanical components
-    # (verbs + triggers + keywords + counter_types). Replaces oracle text
-    # keyword overlap with Forge ability richness.
-    card_depth = float(len(card_profile.get('verbs', set())) +
-                       len(card_profile.get('triggers', set())) +
-                       len(card_profile.get('keywords', set())) +
-                       len(card_profile.get('counter_types', set())))
-    forge_depth = min(card_depth, 10.0)  # cap at 10
-
-    # F29: forge_anti_tribal — card's abilities require a creature subtype
-    # that conflicts with the commander's type.
-    # Sources: trigger_filter (what triggers on), required_subtypes (costs, conditionals)
-    # e.g., Master Apothecary requires tapping Clerics → anti-tribal for non-Cleric commanders
-    # e.g., Aunt May puts counters on Spiders only → anti-tribal for non-Spider commanders
     anti_tribal = 0.0
     if cmdr.cmdr_subtypes:
         generic_types = {"card", "creature", "permanent", "nontoken",
                         "token", "artifact", "enchantment", "land",
                         "spell", "self", "other", "any"}
-        # Check trigger_filters
         for tf in card_trigger_types:
             if tf not in generic_types and tf not in cmdr.cmdr_subtypes:
                 anti_tribal = 1.0
                 break
-        # Check required_subtypes (from cost/defined fields)
         if anti_tribal == 0.0:
             req_subs = card_profile.get('required_subtypes', set())
             for rs in req_subs:
                 if rs not in generic_types and rs not in cmdr.cmdr_subtypes:
                     anti_tribal = 1.0
                     break
-        # Check excluded_subtypes — card explicitly excludes commander's type
-        # e.g., Hornbash Mentor targets nonHuman → anti-tribal for Human commanders
         if anti_tribal == 0.0:
             excl_subs = card_profile.get('excluded_subtypes', set())
             for es in excl_subs:
@@ -2299,23 +2400,83 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
                     anti_tribal = 1.0
                     break
 
-    # F30: forge_verb_alignment — card's verbs → cmdr triggers + cmdr verbs → card triggers
-    verb_align = 0.0
+    tribal_lord = 0.0
+    if cmdr.cmdr_subtypes:
+        buff_verbs = card_profile.get('verbs', set()) & {
+            'Pump', 'PumpAll', 'PutCounter', 'PutCounterAll', 'Continuous',
+        }
+        if buff_verbs:
+            card_tf = card_profile.get('trigger_filters', set())
+            card_req = card_profile.get('required_subtypes', set())
+            for sub in cmdr.cmdr_subtypes:
+                if sub in card_tf or sub in card_req:
+                    tribal_lord = 1.0
+                    break
+
+    tribal_member = 0.0
+    if cmdr.cmdr_tribal_filters and "Creature" in tl and "\u2014" in tl:
+        try:
+            card_subs = {s.lower() for s in tl.split("\u2014")[1].strip().split()}
+            if cmdr.cmdr_tribal_filters & card_subs:
+                tribal_member = 1.0
+        except (IndexError, AttributeError):
+            pass
+
+    tribal_depth = tribal + tribal_lord + tribal_member
+    if cmdr.cmdr_subtypes:
+        card_tok_subs = ctx._token_subtypes.get(card_oid, set())
+        if card_tok_subs & cmdr.cmdr_subtypes:
+            tribal_depth += 1.0
+
+    return (tribal, forge_type_syn, cmdr_type_match, anti_tribal,
+            tribal_lord, tribal_member, tribal_depth)
+
+
+def _compute_forge_profile_features(card_oid, card_cmc, card_profile, ctx, cmdr):
+    """Compute forge ability profile features."""
+    cmdr_profile = ctx._forge_profiles.get(cmdr.cmdr_oid, {})
     card_verbs = card_profile.get('verbs', set())
     card_trigs = card_profile.get('triggers', set())
     cmdr_trigs = cmdr_profile.get('triggers', set())
     cmdr_verbs = cmdr_profile.get('verbs', set())
-    for v in card_verbs:
-        matching_trigs = ctx._verb_triggers.get(v, set())
-        verb_align += len(matching_trigs & cmdr_trigs)
-    for v in cmdr_verbs:
-        matching_trigs = ctx._verb_triggers.get(v, set())
-        verb_align += len(matching_trigs & card_trigs)
 
-    # F31: forge_mech_synergy — does this card PRODUCE what the commander CONSUMES?
-    # Captures ALL mechanical interactions at once via dense vector dot product
-    mech_fwd = 0.0  # card produces → commander consumes
-    mech_rev = 0.0  # commander produces → card consumes
+    # F7: forge_ability_cosine
+    card_ability_vec = ctx._ability_vectors.get(card_oid)
+    forge_ability_cos = float(np.dot(cmdr.cmdr_ability_vec, card_ability_vec)) \
+        if cmdr.cmdr_ability_vec is not None and card_ability_vec is not None else 0.0
+
+    # F8: phase match
+    cp = ctx.card_phase_order.get(card_oid, set())
+    phase_m = 0.0
+    if cmdr.cmdr_phases and cp:
+        for p1 in cmdr.cmdr_phases:
+            for p2 in cp:
+                phase_m = max(phase_m, max(0.0, 1.0 - abs(p1 - p2) * 2.0))
+
+    # strategy cosine
+    csv = ctx.strat_vector(card_oid)
+    strat_cos = 0.0
+    if cmdr.cmdr_strat_vec is not None and csv is not None:
+        d = float(np.dot(cmdr.cmdr_strat_vec, csv))
+        nc = float(np.linalg.norm(cmdr.cmdr_strat_vec))
+        nd = float(np.linalg.norm(csv))
+        strat_cos = d / (nc * nd) if nc > 0 and nd > 0 else 0.0
+
+    shared_forge = float(len(cmdr.cmdr_mechs & ctx._card_mechs.get(card_oid, set())))
+
+    card_depth = float(len(card_verbs) + len(card_trigs) +
+                       len(card_profile.get('keywords', set())) +
+                       len(card_profile.get('counter_types', set())))
+    forge_depth = min(card_depth, 10.0)
+
+    verb_align = 0.0
+    for v in card_verbs:
+        verb_align += len(ctx._verb_triggers.get(v, set()) & cmdr_trigs)
+    for v in cmdr_verbs:
+        verb_align += len(ctx._verb_triggers.get(v, set()) & card_trigs)
+
+    mech_fwd = 0.0
+    mech_rev = 0.0
     card_prod = ctx._mech_produces.get(card_oid)
     card_cons = ctx._mech_consumes.get(card_oid)
     if cmdr.cmdr_consumes is not None and card_prod is not None:
@@ -2323,23 +2484,17 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
     if cmdr.cmdr_produces is not None and card_cons is not None:
         mech_rev = float(np.dot(cmdr.cmdr_produces, card_cons))
 
-    # F33: counter_type_match — card uses same counter type as commander
     cmdr_counters = cmdr.cmdr_profile.get('counter_types', set())
     card_counters = card_profile.get('counter_types', set())
     counter_match = float(len(cmdr_counters & card_counters)) if cmdr_counters and card_counters else 0.0
 
-    # F34: ability_type_ratio_T — card has Triggered abilities
     card_atypes = card_profile.get('ability_types', set())
     ratio_T = 1.0 if 'T' in card_atypes else 0.0
-
-    # F35: ability_type_ratio_A — card has Activated abilities
     ratio_A = 1.0 if 'A' in card_atypes else 0.0
 
-    # F36: zone_alignment — shared trigger zones between card and commander
     card_zones = ctx._card_zones.get(card_oid, set())
     zone_align = float(len(cmdr.cmdr_zones & card_zones)) if cmdr.cmdr_zones and card_zones else 0.0
 
-    # F37: target_alignment — card targets what the commander produces
     cmdr_prod_types = set()
     if cmdr.cmdr_produces is not None:
         for concept, target_type in [("creature_enters", "Creature"),
@@ -2353,7 +2508,6 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
     card_tgts = card_profile.get('targets', set())
     target_align = float(len(cmdr_prod_types & card_tgts)) if cmdr_prod_types and card_tgts else 0.0
 
-    # F38: forge_keyword_synergy — card keywords that synergize with cmdr's mechanics
     card_kws = card_profile.get('keywords', set())
     cmdr_filter_kws = cmdr.cmdr_profile.get('trigger_filters', set())
     kw_syn = 0.0
@@ -2374,56 +2528,33 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
             combat_kws = {"Flying", "Trample", "Haste", "Menace", "Double Strike", "First Strike"}
             kw_syn += float(len(card_kws & combat_kws)) * 0.3
 
-    # F39: activated_ability_count
     activated_count = float(min(ctx._activated_counts.get(card_oid, 0), 5))
 
-    # ── New features from comprehensive raw_line extraction ──
-
-    # F38: granted_keyword_synergy — card grants keywords that match commander's
-    # trigger_filters or existing keywords. "Grants flying" + "flying matters" cmdr
     card_granted = card_profile.get('granted_keywords', set())
     cmdr_granted = cmdr.cmdr_profile.get('granted_keywords', set())
     granted_kw_syn = 0.0
     if card_granted:
-        # Card grants keywords the commander cares about (in trigger_filters)
         for gk in card_granted:
             if gk in cmdr_filter_kws:
                 granted_kw_syn += 1.0
-        # Card grants keywords the commander also grants → redundancy signal
         granted_kw_syn += float(len(card_granted & cmdr_granted)) * 0.5
 
-    # F39: shared_conditions — card and commander have overlapping conditions
-    # Both need "a black creature" to function → they want the same board state
     card_conds = card_profile.get('conditions', set())
     cmdr_conds = cmdr.cmdr_profile.get('conditions', set())
     shared_conds = float(len(card_conds & cmdr_conds)) if card_conds and cmdr_conds else 0.0
 
-    # F40: is_permanent_effect — card produces permanent effects (counters) vs temporary (pump)
-    # Kyler wants permanent +1/+1 counters, not "until end of turn" pumps
     card_dur = card_profile.get('duration', set())
     is_permanent = 1.0 if 'permanent' in card_dur else 0.0
-
-    # F41: is_temporary_effect — card effects are temporary (until EOT)
     is_temporary = 1.0 if 'temporary' in card_dur else 0.0
-
-    # F42: duration_match — card and commander share duration type
     cmdr_dur = cmdr.cmdr_profile.get('duration', set())
     duration_match = float(len(card_dur & cmdr_dur)) if card_dur and cmdr_dur else 0.0
 
-    # F43: combat_damage_flag — card has combat damage triggers (voltron signal)
     combat_dmg = 1.0 if card_profile.get('combat_damage', False) else 0.0
-
-    # F44: effect_zone_match — card works from zones the commander cares about
-    # Cards working from graveyard + reanimator commander = synergy
     card_ezones = card_profile.get('effect_zones', set())
     cmdr_ezones = cmdr.cmdr_profile.get('effect_zones', set())
     ezone_match = float(len(card_ezones & cmdr_ezones)) if card_ezones and cmdr_ezones else 0.0
-
-    # F45: scales_with_board — card P/T or effect scales with game state (X/Y)
-    # Tribal count, devotion, etc. — these are often synergy multipliers
     scales = 1.0 if card_profile.get('scales_with', set()) else 0.0
 
-    # F46: grants_types_match — card creates/grants creature types matching commander's
     card_gtypes = card_profile.get('grants_types', set())
     gtypes_match = 0.0
     if cmdr.cmdr_subtypes and card_gtypes:
@@ -2431,314 +2562,215 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
             if gt in cmdr.cmdr_subtypes:
                 gtypes_match += 1.0
 
-    # F47: is_secondary_trigger — card triggers on multiple events (ETB + attack)
-    # More triggers = more value in synergy-heavy decks
     is_secondary = 1.0 if card_profile.get('is_secondary', False) else 0.0
-
-    # F48: gain_control — card steals permanents
     gain_ctrl = 1.0 if card_profile.get('gain_control', False) else 0.0
-
-    # F49: granted_keyword_count — how many keywords this card grants total
     granted_kw_count = float(min(len(card_granted), 5))
-
-    # F50: condition_count — how many conditions this card requires
-    # More conditions = more restrictive = harder to use
     condition_count = float(min(len(card_conds), 5))
 
-    # ── Forge deck tags: Forge's deck-building AI signals ──
-
-    card_has = ctx._deck_has.get(card_oid, set())
-    card_hints = ctx._deck_hints.get(card_oid, set())
-    card_needs = ctx._deck_needs.get(card_oid, set())
-
-    # F51: deck_hints_to_has — commander hints X, card has X
-    # e.g., Krenko hints Type$Goblin, Chancellor of the Forge has Type$Goblin → strong match
-    hints_to_has = float(len(cmdr.cmdr_hints & card_has))
-
-    # F52: deck_has_to_hints — card hints X, commander has X
-    # e.g., Card hints Ability$Token, Krenko has Ability$Token → card wants this commander
-    has_to_hints = float(len(cmdr.cmdr_has & card_hints))
-
-    # F53: deck_needs_to_has — card needs X, commander has X
-    # e.g., Card needs Ability$Counters, Atraxa has Ability$Proliferate → card functions here
-    needs_to_has = float(len(cmdr.cmdr_has & card_needs))
-
-    # F54: deck_has_overlap — shared has tags (theme alignment)
-    has_overlap = float(len(cmdr.cmdr_has & card_has))
-
-    # F55: deck_hints_overlap — both want the same deck themes
-    hints_overlap = float(len(cmdr.cmdr_hints & card_hints))
-
-    # F71: cmdr_needs_to_card_has — commander NEEDS X, card HAS X
-    # e.g., Atraxa needs Ability$Counters, card has Ability$Counters → card provides what cmdr requires
-    cmdr_needs_to_has = float(len(cmdr.cmdr_needs & card_has))
-
-    # F72: card_needs_satisfied — how many of card's needs are met by commander's has+hints?
-    # Card needs Type$Goblin, commander hints Type$Goblin → card will work in this deck
-    card_needs_met = 0.0
-    if card_needs:
-        met = len(card_needs & (cmdr.cmdr_has | cmdr.cmdr_hints))
-        card_needs_met = float(met) / float(len(card_needs))  # fraction satisfied (0-1)
-
-    # F73: needs_rarity — how rare/specific are the card's needs?
-    # Needing Type$Snow (20 providers) is much harder than Type$Creature (38 providers)
-    # Inverse of how many cards provide each needed tag → higher = harder requirement
-    needs_rarity = 0.0
-    if card_needs:
-        for need_tag in card_needs:
-            n_providers = len(ctx._deck_has_providers.get(need_tag, set()))
-            if n_providers > 0:
-                needs_rarity += 1.0 / min(n_providers, 100)  # cap denominator
-        needs_rarity = min(needs_rarity, 5.0)
-
-    # ── Numeric effect scaling features ──
-
-    # F56: damage_scales — card's damage amount is variable (X/Y)
     dmg_amt = card_profile.get('damage_amount')
     damage_scales = 1.0 if dmg_amt in ('X', 'Y') else 0.0
-
-    # F57: draw_scales — card's draw amount is variable (X/Y)
     draw_amt = card_profile.get('cards_drawn')
     draw_scales = 1.0 if draw_amt in ('X', 'Y') else 0.0
-
-    # F58: life_scales — card's life amount is variable (X/Y)
     life_amt = card_profile.get('life_amount')
     life_scales = 1.0 if life_amt in ('X', 'Y') else 0.0
-
-    # F59: produces_mana — card produces mana (mana rock/dork signal)
     produces_mana = 1.0 if card_profile.get('produces_mana', False) else 0.0
-
-    # F60: counter_num_variable — card places X/Y counters (scales with commander)
     counter_num_var = 1.0 if card_profile.get('counter_num_variable', False) else 0.0
-
-    # F61: grants_abilities — card grants abilities to other permanents
     grants_abilities = 1.0 if card_profile.get('grants_abilities', False) else 0.0
-
-    # F62: token_amount_variable — card creates X tokens (scales with game state)
     token_amt_var = 1.0 if card_profile.get('token_amount_variable', False) else 0.0
 
-    # ── New features: ability counts, token complexity, zone interaction ──
-
-    # F63: total_ability_count
     total_abilities = float(min(ctx._total_ability_counts.get(card_oid, 0), 15))
-
-    # F64: triggered_ability_count
     triggered_count = float(min(ctx._triggered_counts.get(card_oid, 0), 10))
-
-    # F65: token_power_toughness
     token_pt = float(min(ctx._token_max_pt.get(card_oid, 0), 20))
-
-    # F66: token_keyword_count
     token_kw = float(min(ctx._token_max_kw.get(card_oid, 0), 5))
 
-    # F67: zone_graveyard_interact
     zone_gy = 1.0 if (card_oid in ctx._zone_graveyard and cmdr.cmdr_zone_graveyard) else 0.0
-
-    # F68: zone_exile_interact
     zone_ex = 1.0 if (card_oid in ctx._zone_exile and cmdr.cmdr_zone_exile) else 0.0
 
-    # F69: ability_density
     raw_count = ctx._total_ability_counts.get(card_oid, 0)
     ability_dens = float(raw_count) / max(card_cmc, 1.0) if raw_count > 0 else 0.0
     ability_dens = min(ability_dens, 5.0)
 
-    # ── Interaction features: cross anti-synergy with positive signals ──
-
-    # F73: temp_buff_counter_cmdr — card gives temporary buffs but commander wants
-    # permanent +1/+1 counters. E.g., Dawnhart Disciple gives "until EOT" pump
-    # but Kyler wants permanent counters.
-    cmdr_counters = cmdr.cmdr_profile.get('counter_types', set())
-    card_dur = card_profile.get('duration', set())
-    temp_counter_clash = 1.0 if ('P1P1' in cmdr_counters and
-                                  'temporary' in card_dur and
-                                  'permanent' not in card_dur) else 0.0
-
-    # F76: put_counter_ratio — fraction of card's buff verbs that place permanent
-    # counters (PutCounter/PutCounterAll) vs temporary pumps (Pump/PumpAll).
-    # 1.0 = all counter-based, 0.0 = all pump-based, 0.5 = no buff verbs.
-    card_verbs = card_profile.get('verbs', set())
+    # Counter interaction features
     n_counter = sum(1 for v in card_verbs if v in ('PutCounter', 'PutCounterAll'))
     n_pump = sum(1 for v in card_verbs if v in ('Pump', 'PumpAll'))
     n_buff = n_counter + n_pump
     put_counter_ratio = float(n_counter) / n_buff if n_buff > 0 else 0.5
 
-    # F75: cmdr_counter_x_put_counter — commander uses +1/+1 counters AND card
-    # places counters (not just pumps). Captures Kyler + Hardened Scales type synergy.
     cmdr_counter_x_put = 1.0 if ('P1P1' in cmdr_counters and n_counter > 0) else 0.0
-
-    # F76: static_anthem_counter_cmdr — card is a static anthem (Continuous+AddPower,
-    # no PutCounter) but commander uses +1/+1 counters. Anthems can't be proliferated
-    # or doubled — they're worse than actual counters for counter commanders.
+    temp_counter_clash = 1.0 if ('P1P1' in cmdr_counters and
+                                  'temporary' in card_dur and
+                                  'permanent' not in card_dur) else 0.0
     static_anthem_clash = 1.0 if ('P1P1' in cmdr_counters and
                                    card_profile.get('has_static_anthem', False)) else 0.0
-
-    # F77: counters_on_lands — card places counters on lands (Earthbend, PutCounter
-    # targeting lands). These counters don't benefit creature-based counter strategies.
     counters_on_lands = 1.0 if card_profile.get('counters_on_lands', False) else 0.0
-
-    # F78: cmdr_p1p1_card_no_counters — commander uses +1/+1 counters but card has
-    # NO interaction with P1P1 counters at all (no PutCounter, no P1P1 reference).
     card_has_p1p1 = card_profile.get('has_p1p1', False)
     card_counter_verbs = card_verbs & {'PutCounter', 'PutCounterAll', 'Proliferate', 'MoveCounter'}
     no_counter_for_cmdr = 1.0 if ('P1P1' in cmdr_counters and
                                    not card_has_p1p1 and
                                    not card_counter_verbs) else 0.0
 
-    # ── Functional fingerprint dot-product features ──
-    # These capture semantic synergy: "cmdr produces counters + card amplifies counters"
-    card_func = ctx._func_fingerprints.get(card_oid)
-    cmdr_func = cmdr.cmdr_func
+    return (strat_cos, forge_ability_cos, phase_m, cp,
+            shared_forge, forge_depth, verb_align, mech_fwd, mech_rev,
+            counter_match, ratio_T, ratio_A, zone_align, target_align,
+            kw_syn, activated_count, granted_kw_syn, shared_conds,
+            is_permanent, is_temporary, duration_match, combat_dmg,
+            ezone_match, scales, gtypes_match, is_secondary, gain_ctrl,
+            granted_kw_count, condition_count,
+            damage_scales, draw_scales, life_scales, produces_mana,
+            counter_num_var, grants_abilities, token_amt_var,
+            total_abilities, triggered_count, token_pt, token_kw,
+            zone_gy, zone_ex, ability_dens,
+            temp_counter_clash, put_counter_ratio, cmdr_counter_x_put,
+            static_anthem_clash, counters_on_lands, no_counter_for_cmdr)
 
-    func_produces_amp = 0.0   # F79: cmdr produces X, card amplifies X
-    func_requires_prod = 0.0  # F80: cmdr requires X trigger, card produces X
-    func_card_req_cmdr = 0.0  # F81: card requires X trigger, cmdr produces X
-    func_full_cosine = 0.0    # F82: overall functional similarity
 
-    # ── 2-hop graph features (F83-F84) ──
-    # F83: cmdr_2hop_count — how many of commander's direct causal partners
-    # also have outgoing edges to this candidate. High count = strong transitive synergy.
-    hop2_raw = cmdr.cmdr_2hop_counts.get(card_oid, 0)
-    cmdr_2hop = np.log2(1.0 + min(hop2_raw, 200))  # log-scaled, cap at 200
+def _compute_deck_tag_features(card_oid, ctx, cmdr):
+    """Compute deck tag overlap features."""
+    card_has = ctx._deck_has.get(card_oid, set())
+    card_hints = ctx._deck_hints.get(card_oid, set())
+    card_needs = ctx._deck_needs.get(card_oid, set())
 
-    # F84: cmdr_2hop_ratio — 2-hop count relative to hub score (transitive vs generic)
-    # High ratio = card specifically reached through commander's partners, not just well-connected
-    hub_raw = 0.0
-    if ctx._has_edge_index and di is not None:
-        n_out = len(ctx._adj_out.get(di, []))
-        n_in = len(ctx._adj_in.get(di, []))
-        hub_raw = float(n_out + n_in)
-    cmdr_2hop_ratio = float(hop2_raw) / max(hub_raw, 1.0) if hop2_raw > 0 else 0.0
-    cmdr_2hop_ratio = min(cmdr_2hop_ratio, 1.0)
+    hints_to_has = float(len(cmdr.cmdr_hints & card_has))
+    has_to_hints = float(len(cmdr.cmdr_has & card_hints))
+    needs_to_has = float(len(cmdr.cmdr_has & card_needs))
+    has_overlap = float(len(cmdr.cmdr_has & card_has))
+    hints_overlap = float(len(cmdr.cmdr_hints & card_hints))
+    cmdr_needs_to_has = float(len(cmdr.cmdr_needs & card_has))
 
-    # ── Card quality / noise suppression features (F85-F89) ──
-    # Forge-native proxies that work for day-1 new card evaluation
+    card_needs_met = 0.0
+    if card_needs:
+        met = len(card_needs & (cmdr.cmdr_has | cmdr.cmdr_hints))
+        card_needs_met = float(met) / float(len(card_needs))
 
-    # F83: forge_ability_richness — total distinct mechanical components
-    # (verbs + triggers + keywords + counter_types + targets)
-    # Scour from Existence ≈ 1, Goblin Chieftain ≈ 5+. Suppresses featureless cards.
-    forge_richness = ctx._forge_richness.get(card_oid, 0.0)
+    needs_rarity = 0.0
+    if card_needs:
+        for need_tag in card_needs:
+            n_providers = len(ctx._deck_has_providers.get(need_tag, set()))
+            if n_providers > 0:
+                needs_rarity += 1.0 / min(n_providers, 100)
+        needs_rarity = min(needs_rarity, 5.0)
 
-    # F84: card_in_forge — does this card have ANY forge ability data?
-    in_forge = 1.0 if card_oid in ctx._has_forge_data else 0.0
+    return (hints_to_has, has_to_hints, needs_to_has, has_overlap,
+            hints_overlap, cmdr_needs_to_has, card_needs_met, needs_rarity)
 
-    # F85: card_strategy_count — number of strategies assigned to this card
-    strat_count = float(min(len(c_strats), 5))
 
-    # F86: deck_tag_count — how many deck tags Forge's AI assigned (has+hints+needs)
-    # Cards with 0 tags have no deck-building signal from Forge
-    deck_tags = ctx._deck_tag_count.get(card_oid, 0.0)
-
-    # F87: edhrec_deck_pct — fraction of EDHREC commanders including this card
-    # Kept as complementary signal; for new cards this is 0 but other features compensate
-    # Set EDHREC_FREE=1 to train/evaluate without this feature (pure Forge-native mode)
-    edhrec_pct = 0.0 if _EDHREC_FREE else ctx._edhrec_deck_pct.get(card_oid, 0.0)
-
-    # ── Theme-based features (F86-F100) ──
-
-    # Equipment theme features (F86-F88)
-    # F83: cmdr_equipment_theme — commander wants equipment
+def _compute_theme_features(card_oid, card_type_line, ctx, cmdr):
+    """Compute theme-related features (equipment, enchantress, defender, ETB)."""
+    tl = card_type_line
     cmdr_equip = 1.0 if cmdr.cmdr_equipment_theme else 0.0
-    # F84: card_equipment_payoff — card is equipment or cares about equipment
     card_equip = 1.0 if (card_oid in ctx._equipment_cards or
                           card_oid in ctx._equipment_payoffs) else 0.0
-    # F85: equipment_theme_match — both align on equipment
     equip_match = cmdr_equip * card_equip
 
-    # Enchantress theme features (F86-F88)
-    # F86: cmdr_enchantress_theme — commander wants enchantments
     cmdr_ench = 1.0 if cmdr.cmdr_enchantress_theme else 0.0
-    # F87: card_enchantress_payoff — card triggers on or cares about enchantments
     card_ench = 0.0
     if card_oid in ctx._enchantress_payoffs:
         card_ench = 1.0
     elif "Enchantment" in tl and "Creature" not in tl:
-        # Pure enchantment (not enchantment creature) — relevant for enchantress
         card_ench = 0.5
-    # F88: enchantress_theme_match
     ench_match = cmdr_ench * card_ench
 
-    # Defender theme features (F89-F91)
-    # F89: cmdr_defender_theme — commander cares about defenders/walls
     cmdr_def = 1.0 if cmdr.cmdr_defender_theme else 0.0
-    # F90: card_has_defender — card has defender or is a Wall
-    card_def = 1.0 if (card_oid in ctx._defender_cards or
-                        "Wall" in tl) else 0.0
-    # F91: defender_theme_match
+    card_def = 1.0 if (card_oid in ctx._defender_cards or "Wall" in tl) else 0.0
     def_match = cmdr_def * card_def
 
-    # ETB doubler features (F92-F94)
-    # F92: card_is_etb_doubler — Panharmonicon-class card
     card_etb_dbl = 1.0 if card_oid in ctx._etb_doublers else 0.0
-    # F93: cmdr_etb_density — how many ETB-related verbs/triggers commander has
     cmdr_etb = min(cmdr.cmdr_etb_density, 5.0)
-    # F94: etb_doubler_match — doubler × commander ETB density
     etb_match = card_etb_dbl * cmdr_etb
 
-    # Tribal depth features (F95-F97)
-    # F95: tribal_lord_for_cmdr — card gives bonuses to commander's creature type
-    # Check if card's trigger_filters or targets include commander's subtypes AND
-    # card has buff verbs (Pump/PumpAll/PutCounter/Continuous)
-    tribal_lord = 0.0
-    if cmdr.cmdr_subtypes:
-        buff_verbs = card_profile.get('verbs', set()) & {
-            'Pump', 'PumpAll', 'PutCounter', 'PutCounterAll', 'Continuous',
-        }
-        if buff_verbs:
-            card_tf = card_profile.get('trigger_filters', set())
-            card_req = card_profile.get('required_subtypes', set())
-            for sub in cmdr.cmdr_subtypes:
-                if sub in card_tf or sub in card_req:
-                    tribal_lord = 1.0
-                    break
-    # F96: tribal_member_of_cmdr — card IS the creature type the commander filters on
-    tribal_member = 0.0
-    if cmdr.cmdr_tribal_filters and "Creature" in tl and "\u2014" in tl:
-        try:
-            card_subs = {s.lower() for s in tl.split("\u2014")[1].strip().split()}
-            if cmdr.cmdr_tribal_filters & card_subs:
-                tribal_member = 1.0
-        except (IndexError, AttributeError):
-            pass
-    # F97: tribal_synergy_depth — combined tribal signal:
-    #   subtype match + lord bonus + token type match + trigger filter match
-    tribal_depth = tribal + tribal_lord + tribal_member
-    if cmdr.cmdr_subtypes:
-        # Token subtype matching
-        card_tok_subs = ctx._token_subtypes.get(card_oid, set())
-        if card_tok_subs & cmdr.cmdr_subtypes:
-            tribal_depth += 1.0
+    return (cmdr_equip, card_equip, equip_match,
+            cmdr_ench, card_ench, ench_match,
+            cmdr_def, card_def, def_match,
+            card_etb_dbl, cmdr_etb, etb_match)
+
+
+def _compute_fingerprint_features(card_oid, ctx, cmdr):
+    """Compute functional fingerprint dot product features."""
+    card_func = ctx._func_fingerprints.get(card_oid)
+    cmdr_func = cmdr.cmdr_func
+
+    func_produces_amp = 0.0
+    func_requires_prod = 0.0
+    func_card_req_cmdr = 0.0
+    func_full_cosine = 0.0
 
     if card_func is not None and cmdr_func is not None:
         P = ForgeFeatureContext._FUNC_PRODUCES_SLICE
         R = ForgeFeatureContext._FUNC_REQUIRES_SLICE
         A = ForgeFeatureContext._FUNC_AMPLIFIES_SLICE
 
-        # Commander produces → card amplifies: project produces dims to amplifies dims
-        # amplifies[0]=counter_doubler ↔ produces[1]=p1p1_counters
-        # amplifies[1]=token_doubler ↔ produces[0]=tokens
-        # amplifies[2]=damage_doubler ↔ produces[5]=damage
-        # amplifies[3]=lifegain_doubler ↔ produces[6]=lifegain
-        _amp_to_prod = [1, 0, 5, 6]  # maps amplifies dim → produces dim
+        _amp_to_prod = [1, 0, 5, 6]
         cmdr_prod_projected = np.array([cmdr_func[P.start + i] for i in _amp_to_prod])
         func_produces_amp = float(np.dot(cmdr_prod_projected, card_func[A]))
 
-        # Requires ↔ Produces: both are 11/12 dims but different semantics
-        # Use element-wise min and sum: if cmdr requires creature_etb AND card produces tokens → match
-        # Map: requires[0]=creature_etb ↔ produces[0]=tokens (tokens ETB)
-        #       requires[4]=damage_dealt ↔ produces[5]=damage
-        #       requires[5]=lifegain_trigger ↔ produces[6]=lifegain
-        #       requires[8]=sacrifice ↔ produces[7]=removal (sacrifice is removal)
-        #       requires[10]=counter_placed ↔ produces[1]=p1p1_counters
-        _req_to_prod = {0: 0, 4: 5, 5: 6, 8: 7, 10: 1}  # req_dim → prod_dim
+        _req_to_prod = {0: 0, 4: 5, 5: 6, 8: 7, 10: 1}
         for req_dim, prod_dim in _req_to_prod.items():
             func_requires_prod += cmdr_func[R.start + req_dim] * card_func[P.start + prod_dim]
             func_card_req_cmdr += card_func[R.start + req_dim] * cmdr_func[P.start + prod_dim]
 
-        # Full cosine similarity across all 33 dimensions
         norm_c = np.linalg.norm(cmdr_func)
         norm_d = np.linalg.norm(card_func)
         if norm_c > 0 and norm_d > 0:
             func_full_cosine = float(np.dot(cmdr_func, card_func) / (norm_c * norm_d))
+
+    return func_produces_amp, func_requires_prod, func_card_req_cmdr, func_full_cosine
+
+
+def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
+                          ctx: ForgeFeatureContext, cmdr: CmdrFeatureContext) -> list:
+    """Compute the 105-feature vector for a single (commander, card) pair.
+
+    Returns a list of 103 floats matching FORGE_FEATURE_NAMES order.
+    Pure Forge-native features — no tower model or oracle-text embeddings.
+    """
+    tl = card_type_line
+    card_profile = ctx._forge_profiles.get(card_oid, {})
+    c_strats = ctx.card_strats.get(card_oid, set())
+
+    (out_s, in_s, event_div, deck_exact_ratio, exact_edge,
+     causal_composite, hub, deck_exact_abs, cmdr_2hop, cmdr_2hop_ratio
+     ) = _compute_causal_features(card_oid, card_cmc, ctx, cmdr)
+
+    (tribal, forge_type_syn, cmdr_type_match, anti_tribal,
+     tribal_lord, tribal_member, tribal_depth
+     ) = _compute_tribal_features(card_oid, tl, card_profile, ctx, cmdr)
+
+    (strat_cos, forge_ability_cos, phase_m, cp,
+     shared_forge, forge_depth, verb_align, mech_fwd, mech_rev,
+     counter_match, ratio_T, ratio_A, zone_align, target_align,
+     kw_syn, activated_count, granted_kw_syn, shared_conds,
+     is_permanent, is_temporary, duration_match, combat_dmg,
+     ezone_match, scales, gtypes_match, is_secondary, gain_ctrl,
+     granted_kw_count, condition_count,
+     damage_scales, draw_scales, life_scales, produces_mana,
+     counter_num_var, grants_abilities, token_amt_var,
+     total_abilities, triggered_count, token_pt, token_kw,
+     zone_gy, zone_ex, ability_dens,
+     temp_counter_clash, put_counter_ratio, cmdr_counter_x_put,
+     static_anthem_clash, counters_on_lands, no_counter_for_cmdr
+     ) = _compute_forge_profile_features(card_oid, card_cmc, card_profile, ctx, cmdr)
+
+    (hints_to_has, has_to_hints, needs_to_has, has_overlap,
+     hints_overlap, cmdr_needs_to_has, card_needs_met, needs_rarity
+     ) = _compute_deck_tag_features(card_oid, ctx, cmdr)
+
+    (cmdr_equip, card_equip, equip_match,
+     cmdr_ench, card_ench, ench_match,
+     cmdr_def, card_def, def_match,
+     card_etb_dbl, cmdr_etb, etb_match
+     ) = _compute_theme_features(card_oid, tl, ctx, cmdr)
+
+    (func_produces_amp, func_requires_prod, func_card_req_cmdr, func_full_cosine
+     ) = _compute_fingerprint_features(card_oid, ctx, cmdr)
+
+    forge_richness = ctx._forge_richness.get(card_oid, 0.0)
+    in_forge = 1.0 if card_oid in ctx._has_forge_data else 0.0
+    strat_count = float(min(len(c_strats), 5))
+    deck_tags = ctx._deck_tag_count.get(card_oid, 0.0)
+    edhrec_pct = 0.0 if _EDHREC_FREE else ctx._edhrec_deck_pct.get(card_oid, 0.0)
+
+    ev_out = cmdr.cmdr_out_events.get(card_oid, set())
+    ev_in = cmdr.cmdr_in_events.get(card_oid, set())
 
     return [
         min(out_s, 10.0),                                # F0 causal_cmdr_to_card

@@ -17,18 +17,6 @@ class CardIndex:
     responder_counts: dict = field(default_factory=dict)  # {event: num_unique_cards}
     total_cards: int = 0
 
-    def events_produced_by(self, card_id: str) -> list:
-        return self._card_events.get(card_id, [])
-
-    def cards_producing(self, event_type: str) -> list[str]:
-        return list({cid for cid, _, _ in self._producers.get(event_type, [])})
-
-    def cards_responding_to(self, event_type: str) -> list[str]:
-        return list({cid for cid, _, _ in self._responders.get(event_type, [])})
-
-    def cards_consuming(self, resource_type: str) -> list[str]:
-        return list({cid for cid, _, _ in self._consumers.get(resource_type, [])})
-
     def producers_for(self, event_type: str):
         return self._producers.get(event_type, [])
 

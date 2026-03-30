@@ -9,7 +9,7 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                     deck_types: set[str] = None, top_n: int = 50,
                     active_strategies: set = None, db_path: str = None,
                     color_identity: set = None, commander: str = None,
-                    edhrec_slug: str = None):
+):
     """Rank non-deck cards by total synergy with the current decklist.
 
     Uses forge-only model: color-identity filter for candidate discovery,

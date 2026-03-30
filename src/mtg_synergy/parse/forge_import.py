@@ -1,10 +1,13 @@
 """Full Forge DSL import with shallow SVar resolution.
 
-Two-pass import:
-  Pass 1: Collect SVars per card
-  Pass 2: Parse ability lines, resolve Execute$ references via SVars
+Single-pass import with deferred resolution:
+  1. Collect SVars, metadata, and buffer ability lines in one pass
+  2. Resolve Execute$ references via SVars after all SVars are collected
 """
+import logging
 import os
+
+_log = logging.getLogger(__name__)
 
 CARDS_DIR_DEFAULT = os.path.join("data", "forge", "forge-gui", "res", "cardsfolder")
 
@@ -245,7 +248,8 @@ def parse_forge_card_file(text: str) -> dict:
     deck_tags = []
     ab_idx = 0
 
-    # Pass 1: collect SVars and metadata
+    # Single pass: collect SVars/metadata and remember ability lines
+    ability_lines: list[tuple[str, str]] = []  # (prefix, line_body)
     for line in text.strip().split("\n"):
         line = line.strip()
         if line.startswith("Name:"):
@@ -266,19 +270,14 @@ def parse_forge_card_file(text: str) -> dict:
         elif line.startswith("DeckNeeds:"):
             for tag in line[10:].strip().split(" & "):
                 deck_tags.append({"tag_type": "needs", "tag": tag.strip()})
+        else:
+            for p in ("A:", "T:", "S:", "K:", "R:"):
+                if line.startswith(p):
+                    ability_lines.append((p[0], line[len(p):]))
+                    break
 
-    # Pass 2: parse ability lines with SVar resolution
-    for line in text.strip().split("\n"):
-        line = line.strip()
-        prefix = None
-        for p in ("A:", "T:", "S:", "K:", "R:"):
-            if line.startswith(p):
-                prefix = p[0]
-                line_body = line[len(p):]
-                break
-        if prefix is None:
-            continue
-
+    # Resolve ability lines (SVars now fully collected)
+    for prefix, line_body in ability_lines:
         ab = extract_ability_fields(line_body, prefix, svars)
         ab["ability_index"] = ab_idx
         abilities.append(ab)
@@ -361,7 +360,8 @@ def import_all(conn, cards_dir=None):
                 if card["name"]:
                     import_card_to_db(conn, card)
                     imported += 1
-            except Exception:
+            except Exception as exc:
+                _log.warning("Failed to import %s: %s", fname, exc)
                 errors += 1
 
     conn.commit()
@@ -423,7 +423,7 @@ def build_name_mapping(conn):
 
 
 def show_stats(conn):
-    """Print import statistics."""
+    """Print Forge import statistics: card/ability/trigger counts, deck tags, and SVars."""
     ensure_forge_schema(conn)
     cards = conn.execute("SELECT COUNT(DISTINCT card_name) FROM forge_abilities").fetchone()[0]
     abilities = conn.execute("SELECT COUNT(*) FROM forge_abilities").fetchone()[0]

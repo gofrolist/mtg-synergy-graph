@@ -2,7 +2,7 @@
 import sqlite3
 import json
 import pytest
-from mtg_synergy.causal import build_and_store_graph, load_edges, causal_score
+from mtg_synergy.causal import build_and_store_graph, causal_score
 from mtg_synergy.parse import parse_card, save_parsed, ensure_parse_schema
 from mtg_synergy.parse.ast_types import Ability
 
@@ -28,16 +28,6 @@ def _setup_cards(conn):
     conn.commit()
     return {oid: parse_card(oracle, type_line) for oid, _, oracle, type_line in test_cards}
 
-
-def test_build_and_store(tmp_db):
-    conn = sqlite3.connect(tmp_db)
-    cards = _setup_cards(conn)
-    build_and_store_graph(conn, cards)
-    edges = load_edges(conn)
-    assert len(edges) > 0
-    kr_pu = [e for e in edges if e.source == "krenko" and e.target == "purphoros"]
-    assert len(kr_pu) >= 1
-    conn.close()
 
 
 def test_causal_score_direct_edge(tmp_db):

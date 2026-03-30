@@ -11,14 +11,14 @@ Usage:
 
 import argparse
 import json
+import math
 import os
 import sqlite3
 import time
 
 import numpy as np
 
-import math
-
+from mtg_synergy.config import ALLOWED_SLUG_TABLES
 from mtg_synergy.recommend.forge_features import (
     ForgeFeatureContext,
     CmdrFeatureContext,
@@ -29,119 +29,135 @@ from mtg_synergy.recommend.forge_features import (
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "tags.db")
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
+# ── Training constants ────────────────────────────────────────────────
+_NEGATIVE_RATIO = 3
+_STAPLE_THRESHOLD = 0.30
+_GRADE_BOUNDARIES = (0.40, 0.20, 0.05, 0.0)
+_FINAL_ROUND_MULTIPLIER = 1.1
+
 FORGE_FEATURE_NAMES = [
-    "causal_cmdr_to_card",   # [0] commander → card edge strength
-    "causal_card_to_cmdr",   # [1] card → commander edge strength
-    "causal_bidirectional",  # [2] 1.0 if both directions have edges
-    "causal_event_diversity", # [3] distinct event types connecting cmdr↔card
-    "deck_edge_count",       # [4] deck cards with causal edges to this card
-    "strategy_overlap",      # [5] shared strategies count
-    "strategy_cosine",       # [6] strategy vector cosine similarity
-    "forge_ability_cosine",  # [7] Forge ability vector cosine similarity
-    "phase_match",           # [8] cmdr and card trigger in same phase window
-    "has_phase_trigger",     # [9] card has any phase-based trigger
-    "tribal_match",          # [10] creature type match
-    "type_creature",         # [11] card is a Creature
-    "type_instant_sorcery",  # [12] card is Instant or Sorcery
-    "type_artifact",         # [13] card is an Artifact
-    "type_enchantment",      # [14] card is an Enchantment
-    "type_land",             # [15] card is a Land
-    "type_planeswalker",     # [16] card is a Planeswalker
-    "cmc",                   # [17] mana cost
-    "deck_exact_edge_ratio", # [18] fraction of deck edges with exact filter precision
-    "cmdr_exact_edge",       # [19] 1.0 if any exact-precision edge to commander
-    "causal_composite",      # [20] combined causal signal (strength × events × exact)
-    "card_hub_score",        # [21] total unique causal neighbors (connectedness)
-    "deck_exact_count",      # [22] absolute count of exact-precision deck connections
-    "forge_type_synergy",    # [23] card's Forge trigger_filter/target references cmdr's creature type
-    "cmdr_forge_type_match", # [24] commander's Forge trigger_filter/target references card's type
-    "shared_forge_mechanics", # [25] shared Forge verbs/trigger_modes/keywords count
-    "forge_ability_depth",  # [26] total distinct mechanical components (verbs+triggers+keywords+counters)
-    "forge_anti_tribal",    # [27] card's Forge trigger_filter requires conflicting creature subtype
-    "forge_verb_alignment", # [28] card's verbs produce events that commander's triggers consume
-    "forge_mech_fwd",       # [29] card produces what commander consumes (mechanics vector dot)
-    "forge_mech_rev",       # [30] commander produces what card consumes (mechanics vector dot)
-    "counter_type_match",   # [31] card uses same counter type as commander
-    "ability_type_ratio_T", # [32] fraction of card's abilities that are Triggered
-    "ability_type_ratio_A", # [33] fraction of card's abilities that are Activated
-    "zone_alignment",       # [34] card's trigger zones match commander's zones
-    "target_alignment",     # [35] card targets what commander produces
-    "forge_keyword_synergy", # [36] card keywords synergize with cmdr mechanics
-    "activated_ability_count", # [37] number of activated abilities
-    "granted_keyword_synergy", # [38] card grants keywords cmdr cares about
-    "shared_conditions",     # [39] card and cmdr share conditions (need same board state)
-    "is_permanent_effect",   # [40] card produces permanent effects (counters, not pump)
-    "is_temporary_effect",   # [41] card effects are temporary (until EOT)
-    "duration_match",        # [42] card and cmdr share duration type
-    "combat_damage_flag",    # [43] card has combat damage triggers (voltron)
-    "effect_zone_match",     # [44] card works from zones cmdr cares about
-    "scales_with_board",     # [45] card P/T or effect scales with game state
-    "grants_types_match",    # [46] card creates types matching cmdr's subtypes
-    "is_secondary_trigger",  # [47] card triggers on multiple events
-    "gain_control",          # [48] card steals permanents
-    "granted_keyword_count", # [49] how many keywords card grants
-    "condition_count",       # [50] how many conditions card requires
-    "deck_hints_to_has",     # [51] cmdr hints X, card has X (Forge deck-building AI)
-    "deck_has_to_hints",     # [52] card hints X, cmdr has X
-    "deck_needs_to_has",     # [53] card needs X, cmdr has X
-    "deck_has_overlap",      # [54] shared has tags (theme alignment)
-    "deck_hints_overlap",    # [55] both want same deck themes
-    "damage_scales",         # [56] card damage is X/Y (scales with game state)
-    "draw_scales",           # [57] card draw is X/Y (scales with game state)
-    "life_scales",           # [58] card life effect is X/Y
-    "produces_mana",         # [59] card produces mana (mana rock/dork)
-    "counter_num_variable",  # [60] card places X/Y counters (scales)
-    "grants_abilities",      # [61] card grants abilities to other permanents
-    "token_amount_variable", # [62] card creates X tokens (scales)
-    "total_ability_count",     # [63] total abilities per card (combo potential)
-    "triggered_ability_count", # [64] triggered ability count (ordinal)
-    "token_power_toughness",   # [65] max P+T of tokens created
-    "token_keyword_count",     # [66] max keywords on tokens created
-    "zone_graveyard_interact", # [67] both card+cmdr interact with graveyard
-    "zone_exile_interact",     # [68] both card+cmdr interact with exile
-    "ability_density",         # [69] abilities per mana cost (efficiency)
-    "cmdr_needs_to_card_has",  # [70] commander needs X, card has X
-    "card_needs_satisfied",    # [71] fraction of card's needs met by commander
-    "needs_rarity",            # [72] how rare/specific are card's needs
-    "temp_buff_counter_cmdr",  # [73] card gives temporary buffs, cmdr wants permanent counters
-    "put_counter_ratio",       # [74] fraction of buff verbs that are PutCounter (not Pump)
-    "cmdr_counter_x_put_counter", # [75] commander uses +1/+1 counters AND card places counters
-    "static_anthem_counter_cmdr", # [76] static anthem (not counters) but cmdr wants counters
-    "counters_on_lands",       # [77] card places counters on lands (earthbend etc.)
-    "cmdr_p1p1_card_no_counters", # [78] cmdr uses P1P1 but card has zero counter interaction
-    "func_produces_amplifies",    # [79] cmdr produces X, card amplifies X (dot product)
-    "func_requires_produces",     # [80] cmdr requires trigger X, card produces X
-    "func_card_requires_cmdr",    # [81] card requires trigger X, cmdr produces X
-    "func_full_cosine",           # [82] overall functional fingerprint similarity
+    # ── Causal graph features ──
+    "causal_cmdr_to_card",
+    "causal_card_to_cmdr",
+    "causal_bidirectional",
+    "causal_event_diversity",
+    "deck_edge_count",
+    # ── Strategy features ──
+    "strategy_overlap",
+    "strategy_cosine",
+    "forge_ability_cosine",
+    # ── Phase / trigger features ──
+    "phase_match",
+    "has_phase_trigger",
+    # ── Tribal / type features ──
+    "tribal_match",
+    "type_creature",
+    "type_instant_sorcery",
+    "type_artifact",
+    "type_enchantment",
+    "type_land",
+    "type_planeswalker",
+    "cmc",
+    # ── Edge precision features ──
+    "deck_exact_edge_ratio",
+    "cmdr_exact_edge",
+    "causal_composite",
+    "card_hub_score",
+    "deck_exact_count",
+    # ── Forge type / mechanics features ──
+    "forge_type_synergy",
+    "cmdr_forge_type_match",
+    "shared_forge_mechanics",
+    "forge_ability_depth",
+    "forge_anti_tribal",
+    "forge_verb_alignment",
+    "forge_mech_fwd",
+    "forge_mech_rev",
+    "counter_type_match",
+    "ability_type_ratio_T",
+    "ability_type_ratio_A",
+    "zone_alignment",
+    "target_alignment",
+    "forge_keyword_synergy",
+    "activated_ability_count",
+    "granted_keyword_synergy",
+    "shared_conditions",
+    "is_permanent_effect",
+    "is_temporary_effect",
+    "duration_match",
+    "combat_damage_flag",
+    "effect_zone_match",
+    "scales_with_board",
+    "grants_types_match",
+    "is_secondary_trigger",
+    "gain_control",
+    "granted_keyword_count",
+    "condition_count",
+    # ── Forge deck-building AI tag features ──
+    "deck_hints_to_has",
+    "deck_has_to_hints",
+    "deck_needs_to_has",
+    "deck_has_overlap",
+    "deck_hints_overlap",
+    # ── Scaling / variable features ──
+    "damage_scales",
+    "draw_scales",
+    "life_scales",
+    "produces_mana",
+    "counter_num_variable",
+    "grants_abilities",
+    "token_amount_variable",
+    # ── Ability / token complexity features ──
+    "total_ability_count",
+    "triggered_ability_count",
+    "token_power_toughness",
+    "token_keyword_count",
+    "zone_graveyard_interact",
+    "zone_exile_interact",
+    "ability_density",
+    # ── Needs / dependency features ──
+    "cmdr_needs_to_card_has",
+    "card_needs_satisfied",
+    "needs_rarity",
+    # ── Counter / anthem distinction features ──
+    "temp_buff_counter_cmdr",
+    "put_counter_ratio",
+    "cmdr_counter_x_put_counter",
+    "static_anthem_counter_cmdr",
+    "counters_on_lands",
+    "cmdr_p1p1_card_no_counters",
+    # ── Functional fingerprint features ──
+    "func_produces_amplifies",
+    "func_requires_produces",
+    "func_card_requires_cmdr",
+    "func_full_cosine",
     # ── 2-hop graph features ──
-    "cmdr_2hop_count",           # [83] commander's causal partners that connect to this card
-    "cmdr_2hop_ratio",           # [84] 2-hop count / hub score (transitive vs generic)
+    "cmdr_2hop_count",
+    "cmdr_2hop_ratio",
     # ── Card quality / noise suppression ──
-    "forge_ability_richness",    # [85] total distinct mechanical components (Forge-native)
-    "card_in_forge",             # [84] card has Forge ability data (vs all-zero features)
-    "card_strategy_count",       # [85] number of strategies assigned to card
-    "deck_tag_count",            # [86] Forge deck-building AI tags (has+hints+needs)
-    "edhrec_deck_pct",           # [87] fraction of EDHREC commanders including this card
+    "forge_ability_richness",
+    "card_in_forge",
+    "card_strategy_count",
+    "deck_tag_count",
+    "edhrec_deck_pct",
     # ── Theme-based features ──
-    "cmdr_equipment_theme",       # [88] commander wants equipment
-    "card_equipment_payoff",      # [84] card is equipment or cares about equipment
-    "equipment_theme_match",      # [85] both align on equipment
-    "cmdr_enchantress_theme",     # [86] commander wants enchantments
-    "card_enchantress_payoff",    # [87] card triggers on or cares about enchantments
-    "enchantress_theme_match",    # [88] both align on enchantress
-    "cmdr_defender_theme",        # [89] commander cares about defenders/walls
-    "card_has_defender",          # [90] card has defender or is a Wall
-    "defender_theme_match",       # [91] both align on defender
-    "card_is_etb_doubler",       # [92] Panharmonicon-class ETB doubler
-    "cmdr_etb_density",          # [93] how many ETB-related verbs/triggers commander has
-    "etb_doubler_match",         # [94] doubler × commander ETB density
-    "tribal_lord_for_cmdr",      # [95] card is a lord/anthem for commander's creature type
-    "tribal_member_of_cmdr",     # [96] card IS the creature type commander cares about
-    "tribal_synergy_depth",      # [97] combined tribal signal (subtype + lord + token + filter)
+    "cmdr_equipment_theme",
+    "card_equipment_payoff",
+    "equipment_theme_match",
+    "cmdr_enchantress_theme",
+    "card_enchantress_payoff",
+    "enchantress_theme_match",
+    "cmdr_defender_theme",
+    "card_has_defender",
+    "defender_theme_match",
+    "card_is_etb_doubler",
+    "cmdr_etb_density",
+    "etb_doubler_match",
+    # ── Tribal depth features ──
+    "tribal_lord_for_cmdr",
+    "tribal_member_of_cmdr",
+    "tribal_synergy_depth",
 ]
-
-
-_ALLOWED_SLUG_TABLES = frozenset({"edhrec_average_decks", "edhrec_card_synergy"})
 
 
 def _resolve_slugs_to_oids(conn, table="edhrec_average_decks"):
@@ -152,8 +168,8 @@ def _resolve_slugs_to_oids(conn, table="edhrec_average_decks"):
 
     Returns (slug_to_oid, name_to_oid) dicts.
     """
-    if table not in _ALLOWED_SLUG_TABLES:
-        raise ValueError(f"table must be one of {_ALLOWED_SLUG_TABLES}, got {table!r}")
+    if table not in ALLOWED_SLUG_TABLES:
+        raise ValueError(f"table must be one of {ALLOWED_SLUG_TABLES}, got {table!r}")
 
     # Map card_name -> oracle_id (prefer non-token versions)
     name_to_oid = {}
@@ -209,9 +225,8 @@ def _resolve_slugs_to_oids(conn, table="edhrec_average_decks"):
     return slug_to_oid, name_to_oid
 
 
-
 def sample_negatives(positives_by_cmdr, all_card_oids, card_colors, cmdr_colors,
-                     ratio=3, card_strats=None, card_subtypes=None,
+                     ratio=_NEGATIVE_RATIO, card_strats=None, card_subtypes=None,
                      card_has_tags=None):
     """Sample negative pairs (cards NOT in a commander's EDHREC page).
 
@@ -700,8 +715,8 @@ def train_forge_gbm(X, y, cmdr_ids, tune=False, quick=False):
     print(f"  Mean NDCG@30: {np.mean(fold_ndcgs):.4f}")
 
     # Train final model on all data, using CV-derived round count
-    avg_best = int(np.mean(fold_best_iters) * 1.1)
-    print(f"  Final model: {avg_best} rounds (avg CV best x 1.1)")
+    avg_best = int(np.mean(fold_best_iters) * _FINAL_ROUND_MULTIPLIER)
+    print(f"  Final model: {avg_best} rounds (avg CV best x {_FINAL_ROUND_MULTIPLIER})")
     all_group = _build_group_array(cmdr_ids, np.arange(len(cmdr_ids)))
     all_data = lgb.Dataset(X, label=y, weight=w, group=all_group,
                            feature_name=FORGE_FEATURE_NAMES)
@@ -804,13 +819,13 @@ def _load_pairs_for_features(conn):
         # This captures commander-specific synergy regardless of which section EDHREC
         # placed the card in. Previously we graded by section name which lost signal.
         syn = synergy if synergy is not None else 0.0
-        if syn >= 0.40:
+        if syn >= _GRADE_BOUNDARIES[0]:
             grade = 5
-        elif syn >= 0.20:
+        elif syn >= _GRADE_BOUNDARIES[1]:
             grade = 4
-        elif syn >= 0.05:
+        elif syn >= _GRADE_BOUNDARIES[2]:
             grade = 3
-        elif syn >= 0:
+        elif syn >= _GRADE_BOUNDARIES[3]:
             grade = 2
         else:
             grade = 1
@@ -830,9 +845,8 @@ def _load_pairs_for_features(conn):
         print(f"    Grade {g}: {n_by_grade[g]:,}")
 
     # Filter staples from top grades
-    staple_threshold = 0.30
     staple_oids = {oid for oid, cnt in card_cmdr_count.items()
-                   if cnt / cmdr_count > staple_threshold}
+                   if cnt / cmdr_count > _STAPLE_THRESHOLD}
     n_filtered = 0
     for cmdr_oid in positives_by_cmdr:
         filtered = []
@@ -900,9 +914,10 @@ def _load_pairs_for_features(conn):
     positives_for_neg = {cmdr: {oid for oid, _ in pairs}
                          for cmdr, pairs in positives_by_cmdr.items()}
 
-    print("\nSampling negatives (ratio=3, 1/3 subtype + 1/3 tag + 1/3 random)...")
+    print(f"\nSampling negatives (ratio={_NEGATIVE_RATIO}, 1/3 subtype + 1/3 tag + 1/3 random)...")
     neg_pairs = sample_negatives(
-        positives_for_neg, all_card_oids, card_colors, card_colors, ratio=3,
+        positives_for_neg, all_card_oids, card_colors, card_colors,
+        ratio=_NEGATIVE_RATIO,
         card_strats=card_strats, card_subtypes=card_subtypes,
         card_has_tags=card_has_tags,
     )

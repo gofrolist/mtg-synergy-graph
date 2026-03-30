@@ -81,22 +81,6 @@ def store_edges(conn, edges: list[Edge]) -> int:
     return len(edges)
 
 
-def load_edges(conn, source_id=None, target_id=None) -> list[Edge]:
-    query = "SELECT source_id, target_id, edge_type, ability_a, ability_b, strength, detail FROM interaction_edges"
-    params = []
-    conditions = []
-    if source_id:
-        conditions.append("source_id = ?")
-        params.append(source_id)
-    if target_id:
-        conditions.append("target_id = ?")
-        params.append(target_id)
-    if conditions:
-        query += " WHERE " + " AND ".join(conditions)
-    rows = conn.execute(query, params).fetchall()
-    return [Edge(r[0], r[1], r[2], r[3], r[4], r[5],
-                 EdgeDetail(**json.loads(r[6]))) for r in rows]
-
 
 def _parse_edge_rows(rows) -> list[Edge]:
     """Parse raw DB rows into full Edge objects (for storage/display)."""
@@ -224,7 +208,7 @@ class CausalContext:
         self.deck_oids = deck_oids
 
         # Load edges only for relevant cards (commander + deck), not all 7M+
-        # Candidate edges are loaded on demand via batch_load()
+        # Candidate edges are loaded on demand via _ensure_loaded()
         self._conn = conn
         self._loaded = {commander_id} | deck_oids
         relevant_ids = list({commander_id} | deck_oids)
@@ -336,43 +320,6 @@ class CausalContext:
             (card_id,)).fetchall()):
             self._outgoing[e.source].append(e)
             self._incoming[e.target].append(e)
-
-    def batch_load(self, card_ids: list[str]):
-        """Bulk-load edges between candidates and deck+commander cards.
-
-        Only loads edges relevant to scoring (candidate↔deck), not all edges.
-        This avoids parsing millions of irrelevant candidate↔candidate edges.
-        """
-        new_ids = [cid for cid in card_ids if cid not in self._loaded and cid not in self._outgoing]
-        if not new_ids:
-            return
-        for cid in new_ids:
-            self._loaded.add(cid)
-
-        # Only load edges connecting candidates to deck/commander cards
-        relevant_targets = list(self.deck_oids | {self.commander_id})
-        tgt_ph = ",".join("?" * len(relevant_targets))
-
-        chunk_size = 500
-        for i in range(0, len(new_ids), chunk_size):
-            chunk = new_ids[i:i + chunk_size]
-            src_ph = ",".join("?" * len(chunk))
-            # Edges FROM candidates TO deck cards
-            for e in _parse_light_edges(self._conn.execute(
-                f"SELECT {self._EDGE_COLS} FROM interaction_edges "
-                f"WHERE source_id IN ({src_ph}) AND target_id IN ({tgt_ph})",
-                chunk + relevant_targets
-            ).fetchall()):
-                self._outgoing[e.source].append(e)
-                self._incoming[e.target].append(e)
-            # Edges FROM deck cards TO candidates
-            for e in _parse_light_edges(self._conn.execute(
-                f"SELECT {self._EDGE_COLS} FROM interaction_edges "
-                f"WHERE source_id IN ({tgt_ph}) AND target_id IN ({src_ph})",
-                relevant_targets + chunk
-            ).fetchall()):
-                self._outgoing[e.source].append(e)
-                self._incoming[e.target].append(e)
 
     def _chain_bonus(self, candidate_id: str) -> float:
         """Score chain paths: commander → candidate → deck cards.

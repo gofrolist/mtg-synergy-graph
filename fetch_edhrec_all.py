@@ -16,7 +16,7 @@ Usage:
 import argparse
 import json
 import re
-import sqlite3
+import sys
 import time
 import unicodedata
 import urllib.request
@@ -150,7 +150,12 @@ def fetch_all(conn, max_new=500, refresh_top=0, refresh_all=False,
               synergy_only=False, workers=4):
     """Fetch synergy scores and average decklists.
 
+    Thread safety: worker threads only perform HTTP fetches via
+    ``_fetch_one_commander``.  All SQLite reads and writes happen in the
+    calling (main) thread, so ``conn`` is never shared across threads.
+
     Args:
+        conn: SQLite connection (used only from the main thread)
         max_new: max NEW commanders to fetch
         refresh_top: re-fetch top N commanders by rank (0 = no refresh)
         refresh_all: re-fetch ALL existing commanders
@@ -216,7 +221,8 @@ def fetch_all(conn, max_new=500, refresh_top=0, refresh_all=False,
                 slug, name, is_refresh = futures[future]
                 try:
                     _, syn_cards, avg_cards = future.result()
-                except Exception:
+                except Exception as exc:
+                    print(f"  ERROR fetching {slug}: {exc}", file=sys.stderr)
                     errors += 1
                     continue
 

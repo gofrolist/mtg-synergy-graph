@@ -1,6 +1,6 @@
 """Tests for Forge verb → trigger event mapping."""
 import pytest
-from mtg_synergy.causal.verb_event_map import verb_to_events, event_to_verbs
+from mtg_synergy.causal.verb_event_map import verb_to_events
 
 
 def test_token_produces_changes_zone():
@@ -36,13 +36,6 @@ def test_gain_life_produces_life_gained():
     events = verb_to_events("GainLife")
     assert any(e["trigger_mode"] == "LifeGained" for e in events)
 
-
-def test_reverse_lookup():
-    """Verbs that produce ChangesZone events."""
-    verbs = event_to_verbs("ChangesZone")
-    assert "Token" in verbs
-    assert "ChangeZone" in verbs
-    assert "Destroy" in verbs
 
 
 def test_unknown_verb():

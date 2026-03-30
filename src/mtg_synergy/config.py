@@ -18,3 +18,6 @@ DB_PRAGMAS = {
     "journal_mode": "WAL",
     "synchronous": "NORMAL",
 }
+
+# ── Allowed table names for slug resolution (avoids f-string injection) ──
+ALLOWED_SLUG_TABLES = frozenset({"edhrec_average_decks", "edhrec_card_synergy"})
