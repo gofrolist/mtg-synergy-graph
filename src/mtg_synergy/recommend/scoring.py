@@ -142,20 +142,30 @@ def _apply_penalties(scores, cand_list, ctx, cmdr_ctx, cmdr_oid,
             token_subs = ctx._token_subtypes.get(oid, set())
             if token_subs and not (token_subs & cmdr_subtypes):
                 scores[i] *= 0.5
-        # Penalty: counter commanders + creatures that don't produce P1P1 counters
+        # Penalty: counter commanders + cards with wrong counter types
         if cmdr_has_counters:
-            if "Creature" in cd.get("type_line", ""):
+            card_counters = profile.get('counter_types', set())
+            generic_counters = {'All', 'Any', 'EachFromSource', 'EachType'}
+            specific_counters = card_counters - generic_counters
+            # Card puts wrong counter type (e.g. M1M1, TIME instead of P1P1)
+            if specific_counters and 'P1P1' not in specific_counters:
+                scores[i] *= 0.4
+            # Creature without any P1P1 interaction
+            elif "Creature" in cd.get("type_line", ""):
                 card_has_p1p1 = profile.get('has_p1p1', False)
                 card_counter_verbs = profile.get('verbs', set()) & {
                     'PutCounter', 'PutCounterAll', 'Proliferate', 'MoveCounter'}
-                # Card has counter verbs but wrong counter type (e.g. TIME, not P1P1)
-                card_counters = profile.get('counter_types', set())
                 card_puts_p1p1 = 'P1P1' in card_counters or not card_counters
                 if not card_has_p1p1 and not (card_counter_verbs and card_puts_p1p1):
                     scores[i] *= 0.6
             # Card places counters on lands, not creatures (earthbend etc.)
             if profile.get('counters_on_lands', False):
                 scores[i] *= 0.4
+        # "Choose a Background" partner cards — useless without a Background commander
+        card_kws = profile.get('keywords', set())
+        if 'Choose a Background' in card_kws:
+            scores[i] = -1e9
+            continue
         # Card needs colors outside commander's color identity
         # Hard filter: these cards are guaranteed useless
         card_needs = ctx._deck_needs.get(oid, set())
