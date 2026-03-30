@@ -211,7 +211,7 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
     for ab in abilities:
         oid = ab[0]
         verb, trig_mode, trig_filter = ab[1], ab[2], ab[3]
-        cost, token_script = ab[4], ab[6]
+        token_script = ab[6]
         raw_line = ab[8] or ""
         trig_origin = ab[10] if len(ab) > 10 else None
         trig_dest = ab[11] if len(ab) > 11 else None

@@ -5,15 +5,27 @@ single module used by both train_fusion_model.py and scoring.py.
 
 No oracle-text embeddings or tower model — pure Forge-native features.
 """
+import logging
 import os
+import re
+import sqlite3
 import time
 
 import numpy as np
+
+_log = logging.getLogger(__name__)
 
 # Set EDHREC_FREE=1 to disable edhrec_deck_pct feature (pure Forge-native mode)
 _EDHREC_FREE = os.environ.get("EDHREC_FREE", "") == "1"
 
 from mtg_synergy.recommend.mechanics_vectors import _concept_idx
+
+# Known-safe SQL fragments for event column access (avoids f-string injection)
+_EVENT_EXPR_COLUMN = "event"
+_EVENT_EXPR_JSON = "json_extract(detail, '$.event')"
+
+# Allowed table names for slug resolution
+_ALLOWED_SLUG_TABLES = frozenset({"edhrec_average_decks", "edhrec_card_synergy"})
 
 
 def _decode_events(mask, bit_to_event):
@@ -111,22 +123,37 @@ class ForgeFeatureContext:
 
         # Forge ability profiles: per-card structured data from forge_abilities
         # Replaces oracle text regex matching for features F25-F30
-        import re as _re
         self._forge_profiles = {}
         # Also collect raw abilities for build_mechanics_vectors (avoids redundant DB scan)
-        # Format: (oid, verb, trig_mode, trig_filter, cost, kw, token_script, counter, raw_line, amount, trigger_origin, trigger_destination)
+        # Output format consumed by mechanics_vectors.py:
+        #   (oid, verb, trig_mode, trig_filter, cost, kw, token_script,
+        #    counter, raw_line, amount, trigger_origin, trigger_destination)
         self._raw_abilities = []
         for row in conn.execute(
-            "SELECT fnm.oracle_id, fa.verb, fa.trigger_mode, fa.keyword, "
-            "fa.counter_type, fa.target, fa.ability_type, fa.trigger_filter, "
-            "fa.cost, fa.defined, fa.raw_line, fa.token_script, fa.amount, "
-            "fa.trigger_origin, fa.trigger_destination "
+            "SELECT fnm.oracle_id, fa.verb, fa.trigger_mode, fa.trigger_filter, "
+            "fa.cost, fa.keyword, fa.token_script, fa.counter_type, fa.raw_line, "
+            "fa.amount, fa.trigger_origin, fa.trigger_destination, "
+            "fa.target, fa.ability_type, fa.defined "
             "FROM forge_abilities fa "
             "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name"
         ):
-            # indices: 0=oid, 1=verb, 2=trig_mode, 3=trig_filter, 4=cost, 5=kw, 6=token_script, 7=counter, 8=raw_line, 9=amount, 10=trigger_origin, 11=trigger_destination
-            self._raw_abilities.append((row[0], row[1], row[2], row[7], row[8], row[3], row[11], row[4], row[10], row[12], row[13], row[14]))
+            # row[0..11] match the output tuple directly; row[12..14] used only for profiles below
+            self._raw_abilities.append(row[:12])
+            # Named references for profile building (SELECT order matches tuple order)
             oid = row[0]
+            verb = row[1]
+            trig_mode = row[2]
+            trig_filter = row[3]
+            cost = row[4]
+            keyword = row[5]
+            # row[6] = token_script (used by _raw_abilities only)
+            counter_type = row[7]
+            raw_line_val = row[8]
+            # row[9] = amount, row[10] = trigger_origin, row[11] = trigger_destination
+            target = row[12]
+            ability_type = row[13]
+            defined = row[14]
+
             p = self._forge_profiles.setdefault(oid, {
                 'verbs': set(), 'triggers': set(), 'keywords': set(),
                 'counter_types': set(), 'targets': set(), 'ability_types': set(),
@@ -144,36 +171,36 @@ class ForgeFeatureContext:
                 'has_static_anthem': False, 'counters_on_lands': False,
                 'counter_trigger_themes': set(), 'has_p1p1': False,
             })
-            if row[1]: p['verbs'].add(row[1])
-            if row[2]: p['triggers'].add(row[2])
-            if row[3]: p['keywords'].add(row[3])
-            if row[4]:
-                p['counter_types'].add(row[4])
-                if row[4] == 'P1P1':
+            if verb: p['verbs'].add(verb)
+            if trig_mode: p['triggers'].add(trig_mode)
+            if keyword: p['keywords'].add(keyword)
+            if counter_type:
+                p['counter_types'].add(counter_type)
+                if counter_type == 'P1P1':
                     p['has_p1p1'] = True
             # Also check raw_line for P1P1 references (replacement effects, etbCounter)
-            if not p['has_p1p1'] and row[10] and 'P1P1' in row[10]:
+            if not p['has_p1p1'] and raw_line_val and 'P1P1' in raw_line_val:
                 p['has_p1p1'] = True
-            if row[5]:
-                for t in row[5].split(","):
+            if target:
+                for t in target.split(","):
                     main = t.split(".")[0].strip()
                     if main:
                         p['targets'].add(main)
-            if row[6]: p['ability_types'].add(row[6])
-            if row[7]:
-                for part in row[7].split(","):
+            if ability_type: p['ability_types'].add(ability_type)
+            if trig_filter:
+                for part in trig_filter.split(","):
                     main = part.split(".")[0].strip()
                     if main and main != "Card" and main[0].isupper():
                         p['trigger_filters'].add(main.lower())
             # Extract subtype requirements from cost, defined, and raw_line fields
-            cost_str = row[8] or ""
-            defined_str = row[9] or ""
-            raw_line = row[10] or ""
+            cost_str = cost or ""
+            defined_str = defined or ""
+            raw_line = raw_line_val or ""
             # Cost subtypes: tapXType<1/Cleric>, Sac<1/Human>
-            for m in _re.findall(r'tapXType<\d+/(\w+)', cost_str):
+            for m in re.findall(r'tapXType<\d+/(\w+)', cost_str):
                 if m not in ("CARDNAME",):
                     p['required_subtypes'].add(m.lower())
-            for m in _re.findall(r'Sac<\d+/(\w+)', cost_str):
+            for m in re.findall(r'Sac<\d+/(\w+)', cost_str):
                 if m not in ("CARDNAME",) and m[0].isupper():
                     p['required_subtypes'].add(m.lower())
             # Defined$ with subtype filter (e.g., TriggeredCardLKICopy.Spider)
@@ -191,7 +218,7 @@ class ForgeFeatureContext:
                         "youctrl", "oppctrl", "strictlyother", "token", "nontoken"}
             for field in ('ValidCards', 'ValidCard', 'ValidTgts',
                           'ValidAttackers', 'Affected', 'AddsCounters'):
-                m = _re.search(rf'{field}\$\s*(\S+)', raw_line)
+                m = re.search(rf'{field}\$\s*(\S+)', raw_line)
                 if m:
                     for part in m.group(1).split(","):
                         for seg in part.split("."):
@@ -209,15 +236,15 @@ class ForgeFeatureContext:
             # Also extract non-X from TriggerDescription$ and Description$
             # Catches sub-ability targets like "non-Human creature"
             for desc_field in ('TriggerDescription', 'Description', 'SpellDescription'):
-                dm = _re.search(rf'{desc_field}\$\s*(.+?)(?:\||$)', raw_line)
+                dm = re.search(rf'{desc_field}\$\s*(.+?)(?:\||$)', raw_line)
                 if dm:
-                    for nm in _re.finditer(r'non-(\w+)\s+creature', dm.group(1), _re.IGNORECASE):
+                    for nm in re.finditer(r'non-(\w+)\s+creature', dm.group(1), re.IGNORECASE):
                         excl = nm.group(1).lower()
                         if excl not in _generic and len(excl) > 2:
                             p['excluded_subtypes'].add(excl)
             # --- Granted keywords: AddKeyword$, KW$, PumpKeywords$, Keywords$ ---
             for kw_field in ('AddKeyword', 'KW', 'PumpKeywords', 'Keywords'):
-                m = _re.search(rf'{kw_field}\$\s*([^|]+)', raw_line)
+                m = re.search(rf'{kw_field}\$\s*([^|]+)', raw_line)
                 if m:
                     for kw in m.group(1).split("&"):
                         kw = kw.strip()
@@ -229,17 +256,17 @@ class ForgeFeatureContext:
                                 p['granted_keywords'].add(kw.lower())
             # --- Conditions: IsPresent$, ConditionPresent$ ---
             for cond_field in ('IsPresent', 'ConditionPresent'):
-                m = _re.search(rf'{cond_field}\$\s*(\S+)', raw_line)
+                m = re.search(rf'{cond_field}\$\s*(\S+)', raw_line)
                 if m:
                     for part in m.group(1).split(","):
                         main = part.split(".")[0].split("+")[0].strip()
                         if main and main[0].isupper() and len(main) > 2:
                             p['conditions'].add(main.lower())
             # --- Duration$ ---
-            m = _re.search(r'Duration\$\s*(\S+)', raw_line)
+            m = re.search(r'Duration\$\s*(\S+)', raw_line)
             if m:
                 p['duration'].add(m.group(1).lower())
-            elif row[1] in ('Pump', 'PumpAll') and 'Duration$' not in raw_line:
+            elif verb in ('Pump', 'PumpAll') and 'Duration$' not in raw_line:
                 # Pump without Duration → temporary buff
                 p['duration'].add('temporary')
             # --- CombatDamage$ True ---
@@ -247,7 +274,7 @@ class ForgeFeatureContext:
                 p['combat_damage'] = True
             # --- Effect zones: ActiveZones$, EffectZone$, AffectedZone$ ---
             for zone_field in ('ActiveZones', 'EffectZone', 'AffectedZone'):
-                m = _re.search(rf'{zone_field}\$\s*(\S+)', raw_line)
+                m = re.search(rf'{zone_field}\$\s*(\S+)', raw_line)
                 if m:
                     for z in m.group(1).split(","):
                         z = z.strip()
@@ -255,38 +282,38 @@ class ForgeFeatureContext:
                             p['effect_zones'].add(z.lower())
             # --- Scales with: SetPower$ X or AddPower$ X ---
             for pw_field in ('SetPower', 'AddPower'):
-                m = _re.search(rf'{pw_field}\$\s*(\S+)', raw_line)
+                m = re.search(rf'{pw_field}\$\s*(\S+)', raw_line)
                 if m and m.group(1) in ('X', 'Y'):
                     p['scales_with'].add('variable_pt')
                     # Try to extract what it scales with from Description$
-                    desc_m = _re.search(r'Description\$\s*(.+?)(?:\||$)', raw_line)
+                    desc_m = re.search(r'Description\$\s*(.+?)(?:\||$)', raw_line)
                     if desc_m:
                         desc = desc_m.group(1).lower()
                         if 'for each' in desc or 'equal to' in desc:
                             p['scales_with'].add('count_based')
             # --- Grants types: Types$, AddType$ ---
             for type_field in ('Types', 'AddType'):
-                m = _re.search(rf'{type_field}\$\s*(\S+)', raw_line)
+                m = re.search(rf'{type_field}\$\s*(\S+)', raw_line)
                 if m:
                     for t in m.group(1).split(","):
                         t = t.strip()
                         if t and t[0].isupper():
                             p['grants_types'].add(t.lower())
             # --- Damage amount: NumDmg$ ---
-            m = _re.search(r'NumDmg\$\s*(\S+)', raw_line)
+            m = re.search(r'NumDmg\$\s*(\S+)', raw_line)
             if m:
                 val = m.group(1)
                 # Keep the latest (most relevant) if multiple abilities
                 if p['damage_amount'] is None or val == 'X':
                     p['damage_amount'] = val
             # --- Cards drawn: NumCards$ ---
-            m = _re.search(r'NumCards\$\s*(\S+)', raw_line)
+            m = re.search(r'NumCards\$\s*(\S+)', raw_line)
             if m:
                 val = m.group(1)
                 if p['cards_drawn'] is None or val == 'X':
                     p['cards_drawn'] = val
             # --- Life amount: LifeAmount$ ---
-            m = _re.search(r'LifeAmount\$\s*(\S+)', raw_line)
+            m = re.search(r'LifeAmount\$\s*(\S+)', raw_line)
             if m:
                 val = m.group(1)
                 if p['life_amount'] is None or val == 'X':
@@ -298,7 +325,7 @@ class ForgeFeatureContext:
             if 'GainControl$ True' in raw_line:
                 p['gain_control'] = True
             # --- Mana production: Produced$ W/U/B/R/G/C/Any/Combo ---
-            m = _re.search(r'Produced\$\s*(\S+)', raw_line)
+            m = re.search(r'Produced\$\s*(\S+)', raw_line)
             if m:
                 p['produces_mana'] = True
                 prod = m.group(1)
@@ -308,14 +335,14 @@ class ForgeFeatureContext:
                 if prod in ('Any', 'Combo', 'Chosen'):
                     p['mana_colors'].update({'W', 'U', 'B', 'R', 'G'})
             # --- Counter quantity variable: CounterNum$ X/Y ---
-            m = _re.search(r'CounterNum\$\s*(\S+)', raw_line)
+            m = re.search(r'CounterNum\$\s*(\S+)', raw_line)
             if m and m.group(1) in ('X', 'Y', 'All', 'Any'):
                 p['counter_num_variable'] = True
             # --- Grants abilities: AddAbility$ ---
             if 'AddAbility$' in raw_line:
                 p['grants_abilities'] = True
             # --- Token amount variable: TokenAmount$ X ---
-            m = _re.search(r'TokenAmount\$\s*(\S+)', raw_line)
+            m = re.search(r'TokenAmount\$\s*(\S+)', raw_line)
             if m and m.group(1) in ('X', 'Y'):
                 p['token_amount_variable'] = True
             # --- Static anthem: Continuous + AddPower (not actual counters) ---
@@ -323,7 +350,7 @@ class ForgeFeatureContext:
                 p['has_static_anthem'] = True
             # --- Counters on lands: PutCounter targeting lands, or Earthbend ---
             if row[1] in ('PutCounter', 'PutCounterAll'):
-                vtgt = _re.search(r'ValidTgts\$\s*(\S+)', raw_line)
+                vtgt = re.search(r'ValidTgts\$\s*(\S+)', raw_line)
                 if vtgt and 'Land' in vtgt.group(1) and 'Creature' not in vtgt.group(1):
                     p['counters_on_lands'] = True
             if row[1] == 'Earthbend':
@@ -551,14 +578,13 @@ class ForgeFeatureContext:
                 self._equipment_payoffs.add(oid)
 
         # Also detect equipment payoffs from raw_line patterns
-        import re as _re_equip
         for row in conn.execute(
             "SELECT DISTINCT fnm.oracle_id, fa.raw_line FROM forge_abilities fa "
             "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
             "WHERE fa.raw_line LIKE '%Equipment%'"
         ):
             oid, raw = row
-            if raw and _re_equip.search(
+            if raw and re.search(
                 r'(IsPresent|RepeatCards|Condition|ValidCards?|Affected)\$[^|]*Equipment', raw
             ):
                 self._equipment_payoffs.add(oid)
@@ -638,8 +664,8 @@ class ForgeFeatureContext:
                         card_cmdr_counts[oid] = card_cmdr_counts.get(oid, 0) + row[1]
                 for oid, count in card_cmdr_counts.items():
                     self._edhrec_deck_pct[oid] = float(count) / total_cmdrs
-        except Exception:
-            pass
+        except sqlite3.OperationalError as e:
+            _log.warning("edhrec_deck_pct load failed (table may not exist): %s", e)
 
         # Cards with Forge data (have any abilities parsed)
         self._has_forge_data = set(self._forge_profiles.keys())
@@ -892,8 +918,8 @@ class ForgeFeatureContext:
                     event_ids = cached['event_ids']
                     event_names = cached['event_names']
                     print(f"    Loaded {len(src):,} edges from cache ({time.time()-t0:.1f}s)")
-            except Exception:
-                pass
+            except (ValueError, KeyError, OSError) as e:
+                _log.warning("Edge index cache load failed, rebuilding: %s", e)
 
         if src is None:
             # Build event encoding from DB
@@ -912,7 +938,7 @@ class ForgeFeatureContext:
                 for r in conn.execute("PRAGMA table_info(interaction_edges)")
             )
             prec_expr = "filter_precision" if has_col else "json_extract(detail, '$.filter_precision')"
-            event_expr = "event" if self._has_event_col else "json_extract(detail, '$.event')"
+            event_expr = _EVENT_EXPR_COLUMN if self._has_event_col else _EVENT_EXPR_JSON
             src = np.empty(edge_count, dtype=np.int32)
             tgt = np.empty(edge_count, dtype=np.int32)
             exact = np.empty(edge_count, dtype=np.bool_)
@@ -1107,8 +1133,8 @@ class ForgeFeatureContext:
                 fp[7] = 1.0  # removal
             if verb == 'ChangeZone':
                 # Reanimate: moves from graveyard to battlefield
-                orig = _re.search(r'Origin\$\s*(\S+)', raw_line)
-                dest = _re.search(r'Destination\$\s*(\S+)', raw_line)
+                orig = re.search(r'Origin\$\s*(\S+)', raw_line)
+                dest = re.search(r'Destination\$\s*(\S+)', raw_line)
                 if (orig and 'Graveyard' in orig.group(1) and
                         dest and 'Battlefield' in dest.group(1)):
                     fp[8] = 1.0  # reanimate
@@ -1121,8 +1147,8 @@ class ForgeFeatureContext:
 
             # ── REQUIRES / triggers (dims 12-22) ──
             if trig_mode == 'ChangesZone':
-                dest = _re.search(r'Destination\$\s*(\S+)', raw_line)
-                orig = _re.search(r'Origin\$\s*(\S+)', raw_line)
+                dest = re.search(r'Destination\$\s*(\S+)', raw_line)
+                orig = re.search(r'Origin\$\s*(\S+)', raw_line)
                 filt = trig_filter or ''
                 if dest and 'Battlefield' in dest.group(1):
                     if 'Creature' in filt or 'Human' in filt or (not filt and 'Land' not in filt):
@@ -1152,8 +1178,8 @@ class ForgeFeatureContext:
                 fp[22] = 1.0  # counter_placed
 
             # ── AMPLIFIES / replacement effects (dims 23-26) ──
-            event_m = _re.search(r'Event\$\s*(\S+)', raw_line)
-            repl_m = _re.search(r'ReplaceWith\$\s*(\S+)', raw_line)
+            event_m = re.search(r'Event\$\s*(\S+)', raw_line)
+            repl_m = re.search(r'ReplaceWith\$\s*(\S+)', raw_line)
             if event_m and repl_m:
                 event = event_m.group(1)
                 repl = repl_m.group(1)
@@ -1168,7 +1194,7 @@ class ForgeFeatureContext:
 
             # ── TARGETS (dims 27-32) ──
             for field in ('ValidTgts', 'Affected'):
-                tgt_m = _re.search(rf'{field}\$\s*(\S+)', raw_line)
+                tgt_m = re.search(rf'{field}\$\s*(\S+)', raw_line)
                 if tgt_m:
                     tgt = tgt_m.group(1)
                     if tgt.startswith('Card.Self') or tgt == 'Card.Self':
@@ -1353,7 +1379,7 @@ class CmdrFeatureContext:
     def _init_cmdr_edges_from_db(self, ctx):
         """SQL fallback for commander strength/event edges (inference mode)."""
         conn = ctx.conn
-        event_expr = "event" if ctx._has_event_col else "json_extract(detail, '$.event')"
+        event_expr = _EVENT_EXPR_COLUMN if ctx._has_event_col else _EVENT_EXPR_JSON
         try:
             for row in conn.execute(
                 f"SELECT target_id, SUM(strength), GROUP_CONCAT(DISTINCT {event_expr}) "
@@ -1367,8 +1393,8 @@ class CmdrFeatureContext:
                 (self.cmdr_oid,)):
                 self.cmdr_in[row[0]] = row[1]
                 self.cmdr_in_events[row[0]] = set(row[2].split(",")) if row[2] else set()
-        except Exception:
-            pass
+        except sqlite3.OperationalError as e:
+            _log.warning("Commander edge query failed for %s: %s", self.cmdr_oid, e)
 
     def _init_cmdr_exact_and_deck_edges(self, ctx, cmdr_oid, deck_oids):
         """Compute commander exact edges and deck edge counts from in-memory index."""
@@ -1473,7 +1499,7 @@ class CmdrFeatureContext:
 
     def _init_from_db(self, ctx, conn, oid_to_idx, cmdr_oid, deck_oids):
         """Original DB query path (used for inference with small datasets)."""
-        event_expr = "event" if ctx._has_event_col else "json_extract(detail, '$.event')"
+        event_expr = _EVENT_EXPR_COLUMN if ctx._has_event_col else _EVENT_EXPR_JSON
         # Causal edges from/to commander
         self.cmdr_out = {}
         self.cmdr_in = {}
@@ -1490,8 +1516,8 @@ class CmdrFeatureContext:
                 "FROM interaction_edges WHERE target_id = ? GROUP BY source_id", (cmdr_oid,)):
                 self.cmdr_in[row[0]] = row[1]
                 self.cmdr_in_events[row[0]] = set(row[2].split(",")) if row[2] else set()
-        except Exception:
-            pass
+        except sqlite3.OperationalError as e:
+            _log.warning("Commander edge query failed for %s: %s", cmdr_oid, e)
 
         # Deck edge counts + precision
         self.deck_edge_counts = {}
@@ -1538,8 +1564,8 @@ class CmdrFeatureContext:
                 "SELECT source_id FROM interaction_edges WHERE target_id = ? "
                 "AND COALESCE(filter_precision, json_extract(detail, '$.filter_precision')) = 'exact'", (cmdr_oid,)):
                 self.cmdr_exact.add(row[0])
-        except Exception:
-            pass
+        except sqlite3.OperationalError as e:
+            _log.warning("Commander exact edge query failed for %s: %s", cmdr_oid, e)
 
         # 2-hop counts (DB path — skip, too expensive for SQL)
         self.cmdr_2hop_counts = {}
