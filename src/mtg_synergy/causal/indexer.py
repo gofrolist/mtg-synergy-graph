@@ -1,6 +1,7 @@
 """Index parsed cards by what events they produce and respond to."""
 from collections import defaultdict
 from dataclasses import dataclass, field
+
 from mtg_synergy.causal.idf import compute_event_idf as _compute_event_idf
 from mtg_synergy.parse.ast_types import Ability
 from mtg_synergy.parse.verb_resolvers import resolve_effect

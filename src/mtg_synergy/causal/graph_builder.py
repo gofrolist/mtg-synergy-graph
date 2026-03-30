@@ -6,6 +6,7 @@ from collections import defaultdict
 
 from mtg_synergy.causal.indexer import build_index, CardIndex
 from mtg_synergy.causal.types import Edge, EdgeDetail
+from mtg_synergy.causal.idf import PRECISION_STRENGTH
 from mtg_synergy.parse.ast_types import Ability, ObjectFilter
 
 
@@ -50,7 +51,6 @@ def _compute_filter_precision(
 
 
 def _precision_to_strength(precision: str) -> float:
-    from mtg_synergy.causal.idf import PRECISION_STRENGTH
     return PRECISION_STRENGTH[precision]
 
 

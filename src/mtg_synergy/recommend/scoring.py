@@ -158,7 +158,7 @@ def _apply_penalties(scores, cand_list, ctx, cmdr_ctx, cmdr_oid,
         card_needs = ctx._deck_needs.get(oid, set())
         if color_identity is not None and card_needs and _needs_wrong_colors(card_needs, color_identity):
             scores[i] = -1e9
-            continue
+            continue  # hard-filtered; skip remaining penalties for this card
         # Card needs/hints at Type$ tags the commander can't provide
         card_hints = ctx._deck_hints.get(oid, set())
         cmdr_prov = cmdr_ctx.cmdr_has | cmdr_ctx.cmdr_hints
@@ -420,7 +420,7 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
         # Post-scoring penalties for clear anti-synergy patterns
         _apply_penalties(scores, cand_list, ctx, cmdr_ctx, cmdr_oid,
                          color_identity,
-                         oid_fn=lambda name, cd: cd.get("oracle_id") or card_oid.get(name, ""))
+                         oid_fn=lambda name, cd, _oid=card_oid: cd.get("oracle_id") or _oid.get(name, ""))
 
         # Mechanical synergy bonus (same as _score_commander path)
         _apply_mechanical_bonus(scores, cand_list, ctx, cmdr_ctx, cmdr_oid)
