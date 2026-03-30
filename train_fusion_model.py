@@ -462,18 +462,44 @@ def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=Tru
 def _build_group_array(cmdr_ids, idx_array):
     """Build LambdaRank group array from commander IDs for a subset of indices."""
     sub_cmdrs = cmdr_ids[idx_array]
-    groups = []
-    prev = sub_cmdrs[0]
-    count = 1
-    for i in range(1, len(sub_cmdrs)):
-        if sub_cmdrs[i] == prev:
-            count += 1
+    if len(sub_cmdrs) == 0:
+        return []
+    # Vectorized: find where commander ID changes, compute run lengths
+    breaks = np.where(np.diff(sub_cmdrs) != 0)[0] + 1
+    return np.diff(np.concatenate(([0], breaks, [len(sub_cmdrs)]))).tolist()
+
+
+def _compute_ndcg30(preds, labels, groups, label_gain):
+    """Vectorized NDCG@30 computation per commander group."""
+    label_gain = np.asarray(label_gain, dtype=np.float64)
+    # Pre-compute discount factors for positions 0..29
+    discounts = 1.0 / np.log2(np.arange(2, 32, dtype=np.float64))  # 30 positions
+
+    ndcg_scores = []
+    start = 0
+    for g in groups:
+        end = start + g
+        k = min(30, g)
+        pred_slice = preds[start:end]
+        label_slice = labels[start:end]
+
+        # DCG: top-k by predicted score
+        if k < g:
+            top_k = np.argpartition(-pred_slice, k)[:k]
+            top_k = top_k[np.argsort(-pred_slice[top_k])]
         else:
-            groups.append(count)
-            prev = sub_cmdrs[i]
-            count = 1
-    groups.append(count)
-    return groups
+            top_k = np.argsort(-pred_slice)[:k]
+        gains = label_gain[label_slice[top_k].astype(np.intp)]
+        dcg = np.dot(gains, discounts[:k])
+
+        # IDCG: top-k by true label
+        ideal_gains = np.sort(label_gain[label_slice.astype(np.intp)])[::-1][:k]
+        idcg = np.dot(ideal_gains, discounts[:k])
+
+        ndcg_scores.append(dcg / idcg if idcg > 0 else 0.0)
+        start = end
+
+    return np.mean(ndcg_scores) if ndcg_scores else 0.0
 
 
 def _train_one_fold(args):
@@ -491,6 +517,12 @@ def _train_one_fold(args):
     train_group = _build_group_array(cmdr_ids, ti)
     test_group = _build_group_array(cmdr_ids, vi)
 
+    # Limit threads per fold to avoid contention when running parallel folds
+    fold_params = {**params}
+    if "num_threads" not in fold_params:
+        import multiprocessing as mp
+        fold_params["num_threads"] = max(1, mp.cpu_count() // 3)
+
     train_data = lgb.Dataset(X[ti], label=y[ti], weight=w[ti], group=train_group,
                              feature_name=feature_names, free_raw_data=False)
     eval_data = lgb.Dataset(X[vi], label=y[vi], weight=w[vi], group=test_group,
@@ -498,33 +530,17 @@ def _train_one_fold(args):
                             free_raw_data=False)
 
     booster = lgb.train(
-        params, train_data,
-        num_boost_round=3000,
+        fold_params, train_data,
+        num_boost_round=1000,
         valid_sets=[eval_data],
-        callbacks=[lgb.early_stopping(80, verbose=False),
+        callbacks=[lgb.early_stopping(40, verbose=False),
                    lgb.log_evaluation(0)],
     )
 
-    # Compute NDCG@30
+    # Vectorized NDCG@30 computation
     preds = booster.predict(X[vi])
-    label_gain = params["label_gain"]
-    ndcg30_scores = []
-    start = 0
-    for g in test_group:
-        end = start + g
-        pred_slice = preds[start:end]
-        label_slice = y[vi][start:end]
-        k = min(30, g)
-        top_k = np.argsort(-pred_slice)[:k]
-        dcg = sum(label_gain[int(label_slice[j])] / np.log2(i + 2)
-                  for i, j in enumerate(top_k))
-        ideal_sorted = sorted(label_slice, reverse=True)[:k]
-        idcg = sum(label_gain[int(ideal_sorted[i])] / np.log2(i + 2)
-                   for i in range(len(ideal_sorted)))
-        ndcg30_scores.append(dcg / idcg if idcg > 0 else 0.0)
-        start = end
+    avg_ndcg = _compute_ndcg30(preds, y[vi], test_group, params["label_gain"])
 
-    avg_ndcg = np.mean(ndcg30_scores) if ndcg30_scores else 0.0
     best_iter = booster.best_iteration or booster.current_iteration()
     return fold_i, avg_ndcg, best_iter
 
@@ -583,9 +599,9 @@ def train_forge_gbm(X, y, cmdr_ids, tune=False, quick=False):
         print("  WARNING: Binary labels detected, using classification instead of ranking")
 
     # Per-grade sample weights: upweight rare high-synergy examples
-    _grade_weights = {0: 1.0, 1: 1.0, 2: 1.0, 3: 1.0, 4: 2.0, 5: 3.0}
-    w = np.array([_grade_weights.get(int(g), 1.0) for g in y], dtype=np.float32)
-    print(f"  Sample weights: grade 4→{_grade_weights[4]}x, grade 5→{_grade_weights[5]}x")
+    _grade_weight_arr = np.array([1.0, 1.0, 1.0, 1.0, 2.0, 3.0], dtype=np.float32)
+    w = _grade_weight_arr[y.astype(np.intp)]
+    print(f"  Sample weights: grade 4→{_grade_weight_arr[4]}x, grade 5→{_grade_weight_arr[5]}x")
 
     n_folds = 1 if quick else 3
     splits = make_cv_splits(cmdr_ids, n_folds=3)  # always build 3 folds
@@ -634,39 +650,30 @@ def train_forge_gbm(X, y, cmdr_ids, tune=False, quick=False):
         best_hp_ndcg = -1
         best_hp_config = _hp_configs[0]
         print(f"  Hyperparameter search ({len(_hp_configs)} configs)...")
+
+        # Pre-compute fold data once (shared across all HP configs)
+        train_idx, test_idx = splits[0]
+        train_sort = np.argsort(cmdr_ids[train_idx])
+        test_sort = np.argsort(cmdr_ids[test_idx])
+        ti = train_idx[train_sort]
+        vi = test_idx[test_sort]
+        train_group = _build_group_array(cmdr_ids, ti)
+        test_group = _build_group_array(cmdr_ids, vi)
+        _td = lgb.Dataset(X[ti], label=y[ti], weight=w[ti], group=train_group, free_raw_data=False)
+        _vd = lgb.Dataset(X[vi], label=y[vi], weight=w[vi], group=test_group,
+                          reference=_td, free_raw_data=False)
+
         for hp in _hp_configs:
             test_params = {**base_params, **hp}
-            train_idx, test_idx = splits[0]
-            train_sort = np.argsort(cmdr_ids[train_idx])
-            test_sort = np.argsort(cmdr_ids[test_idx])
-            ti = train_idx[train_sort]
-            vi = test_idx[test_sort]
-            train_group = _build_group_array(cmdr_ids, ti)
-            test_group = _build_group_array(cmdr_ids, vi)
-            _td = lgb.Dataset(X[ti], label=y[ti], weight=w[ti], group=train_group, free_raw_data=False)
-            _vd = lgb.Dataset(X[vi], label=y[vi], weight=w[vi], group=test_group,
-                              reference=_td, free_raw_data=False)
-            _b = lgb.train(test_params, _td, num_boost_round=3000,
+            _b = lgb.train(test_params, _td, num_boost_round=1000,
                            valid_sets=[_vd],
-                           callbacks=[lgb.early_stopping(80, verbose=False),
+                           callbacks=[lgb.early_stopping(40, verbose=False),
                                       lgb.log_evaluation(0)])
             _preds = _b.predict(X[vi])
-            _start = 0
-            _ndcgs = []
-            for g in test_group:
-                _end = _start + g
-                _ps = _preds[_start:_end]
-                _ls = y[vi][_start:_end]
-                k = min(30, g)
-                _tk = np.argsort(-_ps)[:k]
-                _dcg = sum(test_params["label_gain"][int(_ls[j])] / np.log2(i + 2) for i, j in enumerate(_tk))
-                _is = sorted(_ls, reverse=True)[:k]
-                _idcg = sum(test_params["label_gain"][int(_is[i])] / np.log2(i + 2) for i in range(len(_is)))
-                _ndcgs.append(_dcg / _idcg if _idcg > 0 else 0.0)
-                _start = _end
-            hp_ndcg = np.mean(_ndcgs)
+            hp_ndcg = _compute_ndcg30(_preds, y[vi], test_group, test_params["label_gain"])
             print(f"    leaves={hp['num_leaves']} lr={hp['learning_rate']} "
-                  f"min_child={hp['min_child_samples']}: NDCG@30={hp_ndcg:.4f}")
+                  f"min_child={hp['min_child_samples']}: NDCG@30={hp_ndcg:.4f} "
+                  f"({_b.best_iteration} rounds)")
             if hp_ndcg > best_hp_ndcg:
                 best_hp_ndcg = hp_ndcg
                 best_hp_config = hp
@@ -690,7 +697,9 @@ def train_forge_gbm(X, y, cmdr_ids, tune=False, quick=False):
     all_group = _build_group_array(cmdr_ids, np.arange(len(cmdr_ids)))
     all_data = lgb.Dataset(X, label=y, weight=w, group=all_group,
                            feature_name=FORGE_FEATURE_NAMES)
-    final_booster = lgb.train(params, all_data, num_boost_round=avg_best)
+    # Final model uses all cores (no parallel folds competing)
+    final_params = {k: v for k, v in params.items() if k != "num_threads"}
+    final_booster = lgb.train(final_params, all_data, num_boost_round=avg_best)
 
     model_path = os.path.join(DATA_DIR, "fusion_model_forge.lgb")
     final_booster.save_model(model_path)
@@ -710,14 +719,22 @@ def make_cv_splits(cmdr_ids, n_folds=5, seed=42):
     rng = np.random.RandomState(seed)
     rng.shuffle(unique_cmdrs)
     fold_size = len(unique_cmdrs) // n_folds
-    splits = []
+
+    # Build cmdr_id → fold assignment lookup (vectorized)
+    cmdr_fold = np.full(unique_cmdrs.max() + 1, -1, dtype=np.int8)
     for i in range(n_folds):
         start = i * fold_size
         end = (i + 1) * fold_size if i < n_folds - 1 else len(unique_cmdrs)
-        test_cmdrs = set(unique_cmdrs[start:end])
-        test_idx = np.array([j for j, c in enumerate(cmdr_ids) if c in test_cmdrs])
-        train_idx = np.array([j for j, c in enumerate(cmdr_ids) if c not in test_cmdrs])
-        splits.append((train_idx, test_idx))
+        cmdr_fold[unique_cmdrs[start:end]] = i
+
+    # Vectorized: assign each row to its fold
+    row_folds = cmdr_fold[cmdr_ids]
+    all_idx = np.arange(len(cmdr_ids))
+
+    splits = []
+    for i in range(n_folds):
+        mask = row_folds == i
+        splits.append((all_idx[~mask], all_idx[mask]))
     return splits
 
 
