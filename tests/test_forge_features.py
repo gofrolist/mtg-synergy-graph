@@ -12,15 +12,26 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "tags.db")
 KRENKO_OID = "68418069-f615-40ef-ae0d-764192acae00"  # Krenko, Mob Boss (Goblin)
 
 
-def _make_ctx():
-    """Build a minimal ForgeFeatureContext from the real DB."""
-    if not os.path.exists(DB_PATH):
-        pytest.skip("tags.db not found")
-    from mtg_synergy.recommend.forge_features import ForgeFeatureContext
+# ── Cached context: loaded once, shared across all tests ──
+_cached_ctx = None
+_cached_conn = None
 
-    conn = sqlite3.connect(DB_PATH)
-    ctx = ForgeFeatureContext(conn, preload_edges=False)
-    return ctx, conn
+
+def _make_ctx():
+    """Return a cached ForgeFeatureContext (loaded once per test session).
+
+    The connection must NOT be closed by callers — existing conn.close()
+    calls in try/finally blocks are harmless no-ops after the first test
+    since we reassign to a fresh connection if closed.
+    """
+    global _cached_ctx, _cached_conn
+    if _cached_ctx is None or _cached_conn is None:
+        if not os.path.exists(DB_PATH):
+            pytest.skip("tags.db not found")
+        from mtg_synergy.recommend.forge_features import ForgeFeatureContext
+        _cached_conn = sqlite3.connect(DB_PATH)
+        _cached_ctx = ForgeFeatureContext(_cached_conn, preload_edges=False)
+    return _cached_ctx, _cached_conn
 
 
 def test_forge_profiles_loaded():
@@ -65,7 +76,7 @@ def test_forge_profiles_loaded():
                 f"{key} should be str or None, got {type(profile[key])}"
             )
     finally:
-        conn.close()
+        pass  # conn is cached, do not close
 
 
 def test_forge_profile_krenko():
@@ -86,7 +97,7 @@ def test_forge_profile_krenko():
             f"Expected 'A' (activated) in Krenko ability_types, got {profile['ability_types']}"
         )
     finally:
-        conn.close()
+        pass  # conn is cached, do not close
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +153,7 @@ class TestF23ForgeTypeSynergy:
                 f"F23 should be >0 for a goblin-triggering card with Goblin commander, got {features[23]}"
             )
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
     def test_no_match_for_unrelated_type(self):
         """A card without goblin references should get 0 for a Goblin commander."""
@@ -166,7 +177,7 @@ class TestF23ForgeTypeSynergy:
                 f"F23 should be 0 for non-goblin card with Goblin commander, got {features[23]}"
             )
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
 
 class TestF24CmdrForgeTypeMatch:
@@ -197,7 +208,7 @@ class TestF24CmdrForgeTypeMatch:
                 f"F24 should be >0 for Human card with Human-trigger commander, got {features[24]}"
             )
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
 
 class TestF25SharedForgeMechanics:
@@ -222,7 +233,7 @@ class TestF25SharedForgeMechanics:
                 f"F25 should be >0 for two cards sharing Token verb, got {features[25]}"
             )
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
 
 class TestF27ForgeAntiTribal:
@@ -251,7 +262,7 @@ class TestF27ForgeAntiTribal:
                 f"F27 should be >0 for conflicting-tribal card in Goblin deck, got {features[27]}"
             )
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
     def test_goblin_card_not_anti_tribal(self):
         """A Goblin-triggering card should NOT be anti-tribal in a Goblin deck."""
@@ -275,7 +286,7 @@ class TestF27ForgeAntiTribal:
                 f"F27 should be 0 for goblin card in Goblin deck, got {features[27]}"
             )
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
 
 class TestF28ForgeVerbAlignment:
@@ -307,7 +318,7 @@ class TestF28ForgeVerbAlignment:
                 f"F28 should be >0 for Token card + ChangesZone commander, got {features[28]}"
             )
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
     def test_no_alignment_when_no_verb_match(self):
         """Cards with no verb→trigger alignment should get 0."""
@@ -335,7 +346,7 @@ class TestF28ForgeVerbAlignment:
                 f"F28 should be 0 when commander has no triggers/verbs, got {features[28]}"
             )
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +377,7 @@ class TestF31CounterTypeMatch:
                 f"F31 should be >0 for P1P1 card with Kyler, got {features[31]}"
             )
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
     def test_no_counter_match(self):
         """Card without matching counter type → 0."""
@@ -386,7 +397,7 @@ class TestF31CounterTypeMatch:
                 f"F31 should be 0 for card without counters, got {features[31]}"
             )
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
 
 class TestMechanicsVectorsNoOracleText:
@@ -466,7 +477,7 @@ class TestF7ForgeAbilityCosine:
                 f"F7 should be >0 for two cards sharing Token verb, got {features[7]}"
             )
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
     def test_no_profile_gives_zero(self):
         """Card without a Forge profile should get 0 cosine similarity."""
@@ -486,7 +497,7 @@ class TestF7ForgeAbilityCosine:
                 f"F7 should be 0 for card without forge profile, got {features[7]}"
             )
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
 
 class TestF26ForgeAbilityDepth:
@@ -514,7 +525,7 @@ class TestF26ForgeAbilityDepth:
                 f"F26 should be >= 2.0 for card with 2+ components, got {features[26]}"
             )
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
     def test_no_profile_gives_zero(self):
         """Card without a Forge profile should get 0 depth."""
@@ -534,7 +545,7 @@ class TestF26ForgeAbilityDepth:
                 f"F26 should be 0 for card without forge profile, got {features[26]}"
             )
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
     def test_depth_capped_at_10(self):
         """F26 should be capped at 10.0."""
@@ -550,7 +561,7 @@ class TestF26ForgeAbilityDepth:
                     )
                     break
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
 
 class TestAbilityVectorsLoaded:
@@ -566,7 +577,7 @@ class TestAbilityVectorsLoaded:
                 f"Expected >1000 ability vectors, got {len(ctx._ability_vectors)}"
             )
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
     def test_ability_vectors_normalized(self):
         """Each ability vector should be L2-normalized."""
@@ -578,7 +589,7 @@ class TestAbilityVectorsLoaded:
                     f"Ability vector for {oid} has norm {norm}, expected 1.0"
                 )
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
 
 class TestNoOracleTextInFeatures:
@@ -592,7 +603,7 @@ class TestNoOracleTextInFeatures:
                 "_card_tokens should be removed (oracle text TF-IDF replaced by Forge ability vectors)"
             )
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
     def test_no_tfidf_method(self):
         """ForgeFeatureContext should not have tfidf_vector method."""
@@ -602,7 +613,7 @@ class TestNoOracleTextInFeatures:
                 "tfidf_vector should be removed (replaced by _ability_vectors)"
             )
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
 
 class TestFeatureCount:
@@ -626,7 +637,7 @@ class TestFeatureCount:
                 f"Expected 105 features, got {len(features)}"
             )
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
 
 # ---------------------------------------------------------------------------
@@ -649,7 +660,7 @@ class TestGrantedKeywords:
             assert "trample" in gk, f"Expected 'trample' in granted_keywords, got {gk}"
             assert "double strike" in gk, f"Expected 'double strike' in granted_keywords, got {gk}"
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
     def test_swiftfoot_boots_grants_hexproof_haste(self):
         """Swiftfoot Boots should grant hexproof and haste."""
@@ -663,7 +674,7 @@ class TestGrantedKeywords:
             assert "hexproof" in gk, f"Expected 'hexproof' in granted_keywords, got {gk}"
             assert "haste" in gk, f"Expected 'haste' in granted_keywords, got {gk}"
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
     def test_coverage_above_threshold(self):
         """At least 2000 cards should have granted_keywords."""
@@ -672,7 +683,7 @@ class TestGrantedKeywords:
             count = sum(1 for p in ctx._forge_profiles.values() if p.get("granted_keywords"))
             assert count >= 2000, f"Expected >=2000 cards with granted_keywords, got {count}"
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
 
 class TestCombatDamage:
@@ -689,7 +700,7 @@ class TestCombatDamage:
                     break
             assert found, "No card with combat_damage=True found"
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
     def test_coverage_hundreds(self):
         """Hundreds of cards should have combat damage triggers."""
@@ -698,7 +709,7 @@ class TestCombatDamage:
             count = sum(1 for p in ctx._forge_profiles.values() if p.get("combat_damage"))
             assert count >= 500, f"Expected >=500 combat_damage cards, got {count}"
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
 
 class TestConditions:
@@ -711,7 +722,7 @@ class TestConditions:
             count = sum(1 for p in ctx._forge_profiles.values() if p.get("conditions"))
             assert count >= 1000, f"Expected >=1000 cards with conditions, got {count}"
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
     def test_condition_values_are_lowercase(self):
         """All condition values should be lowercase strings."""
@@ -722,7 +733,7 @@ class TestConditions:
                     assert c == c.lower(), f"Condition '{c}' should be lowercase"
                     assert isinstance(c, str), f"Condition should be str, got {type(c)}"
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
 
 class TestDuration:
@@ -735,7 +746,7 @@ class TestDuration:
             count = sum(1 for p in ctx._forge_profiles.values() if p.get("duration"))
             assert count >= 3000, f"Expected >=3000 cards with duration, got {count}"
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
     def test_permanent_duration_exists(self):
         """Some cards should have permanent duration."""
@@ -748,7 +759,7 @@ class TestDuration:
                     break
             assert found, "No card with 'permanent' duration found"
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
 
 class TestScalesWith:
@@ -766,7 +777,7 @@ class TestScalesWith:
             assert "variable_pt" in sw, f"Expected 'variable_pt' in scales_with, got {sw}"
             assert "count_based" in sw, f"Expected 'count_based' in scales_with, got {sw}"
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
 
 class TestGrantsTypes:
@@ -784,7 +795,7 @@ class TestGrantsTypes:
             assert "nightmare" in gt, f"Expected 'nightmare' in grants_types, got {gt}"
             assert "creature" in gt, f"Expected 'creature' in grants_types, got {gt}"
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
     def test_coverage(self):
         """Hundreds of cards should have grants_types."""
@@ -793,7 +804,7 @@ class TestGrantsTypes:
             count = sum(1 for p in ctx._forge_profiles.values() if p.get("grants_types"))
             assert count >= 500, f"Expected >=500 cards with grants_types, got {count}"
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
 
 class TestGainControl:
@@ -806,7 +817,7 @@ class TestGainControl:
             count = sum(1 for p in ctx._forge_profiles.values() if p.get("gain_control"))
             assert count >= 50, f"Expected >=50 gain_control cards, got {count}"
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
 
 class TestDamageAmount:
@@ -819,7 +830,7 @@ class TestDamageAmount:
             count = sum(1 for p in ctx._forge_profiles.values() if p.get("damage_amount"))
             assert count >= 1000, f"Expected >=1000 cards with damage_amount, got {count}"
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
 
 class TestCardsDrawn:
@@ -832,7 +843,7 @@ class TestCardsDrawn:
             count = sum(1 for p in ctx._forge_profiles.values() if p.get("cards_drawn"))
             assert count >= 1000, f"Expected >=1000 cards with cards_drawn, got {count}"
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
 
 class TestEffectZones:
@@ -845,7 +856,7 @@ class TestEffectZones:
             count = sum(1 for p in ctx._forge_profiles.values() if p.get("effect_zones"))
             assert count >= 1000, f"Expected >=1000 cards with effect_zones, got {count}"
         finally:
-            conn.close()
+            pass  # conn is cached, do not close
 
 
 # ---------------------------------------------------------------------------
@@ -872,7 +883,7 @@ def test_feature_count_71():
         )
         assert len(feats) == 105, f"Expected 105 features, got {len(feats)}"
     finally:
-        conn.close()
+        pass  # conn is cached, do not close
 
 
 def test_total_ability_count_positive():
@@ -881,7 +892,7 @@ def test_total_ability_count_positive():
     try:
         assert ctx._total_ability_counts.get(KRENKO_OID, 0) > 0
     finally:
-        conn.close()
+        pass  # conn is cached, do not close
 
 
 def test_triggered_counts_loaded():
@@ -891,7 +902,7 @@ def test_triggered_counts_loaded():
         assert hasattr(ctx, "_triggered_counts")
         assert len(ctx._triggered_counts) > 0
     finally:
-        conn.close()
+        pass  # conn is cached, do not close
 
 
 def test_token_stats_loaded():
@@ -901,7 +912,7 @@ def test_token_stats_loaded():
         assert len(ctx._token_max_pt) > 0
         assert ctx._token_max_pt.get(KRENKO_OID, 0) == 2  # 1/1 goblins
     finally:
-        conn.close()
+        pass  # conn is cached, do not close
 
 
 def test_zone_interaction_sets():
@@ -911,4 +922,4 @@ def test_zone_interaction_sets():
         assert len(ctx._zone_graveyard) > 100
         assert len(ctx._zone_exile) > 10
     finally:
-        conn.close()
+        pass  # conn is cached, do not close
