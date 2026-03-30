@@ -9,12 +9,8 @@ from mtg_synergy.recommend.swaps import _classify_card_slot
 
 
 def load_merged(path: str) -> list[dict]:
-    from normalize_tags import normalize_cards
-
     with open(path) as f:
         cards = json.load(f)
-    # Normalize provides/wants vocabulary + infer missing wants
-    normalize_cards(cards)
     return cards
 
 

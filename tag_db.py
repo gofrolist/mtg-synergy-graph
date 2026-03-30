@@ -125,12 +125,8 @@ def init_db(db_path: str = DB_PATH):
     conn.close()
 
 
-def import_cards(cards: list[dict], db_path: str = DB_PATH, normalize: bool = True):
+def import_cards(cards: list[dict], db_path: str = DB_PATH):
     """Import cards into the database. Upserts on oracle_id."""
-    if normalize:
-        from normalize_tags import normalize_cards
-        normalize_cards(cards)
-
     conn = get_connection(db_path)
     cur = conn.cursor()
 
