@@ -40,13 +40,14 @@ FORGE MODEL (--recommend): Zero oracle text, pure Forge mechanical synergy
      Theme concepts: equipment_enters, equipment_equipped, defender_available, etb_doubled
   4. Can evaluate new cards day-1 without playtesting data
   5. Works for any of 3,141+ commanders (not just 1,361 with EDHREC)
-  6. NDCG@30 = 0.52 on leave-commander-out CV (3:1 negatives, sample-weighted, early_stop=80)
-     Training labels: edhrec_card_synergy (367k rows, section-based grading)
-     Grade 5=High Synergy, 4=Top Cards, 3=synergy>0.1, 2=synergy 0-0.1, 1=negative, 0=not in table
-     Training: 3:1 negative ratio (1.05M negatives), 3-tier sampling:
+  6. NDCG@30 = 0.53 on leave-commander-out CV (3:1 negatives, sample-weighted, early_stop=40)
+     Training labels: edhrec_card_synergy (703k rows, continuous synergy grading)
+     Grade 5=synergy≥0.40, 4=synergy≥0.20, 3=synergy≥0.05, 2=synergy 0-0.05, 1=negative, 0=random neg
+     EDHREC synergy = deck_inclusion% - color_baseline% (commander-specific affinity)
+     Training: 3:1 negative ratio (2.1M negatives), 3-tier sampling:
        1/3 strategy/subtype overlap, 1/3 tag overlap, 1/3 random
      Per-grade sample weights: grade 5→3x, grade 4→2x
-     compare_edhrec --limit 100: ~4.1/50 HighSyn, ~3.6/50 TopCards, ~21.5/50 InDeck
+     2,724 commanders with EDHREC data (87% of legal commanders)
      (variance ±0.3 between runs due to GBM non-determinism)
 
 CAUSAL GRAPH:
@@ -82,13 +83,17 @@ python3 strategy_detector.py --populate    # Assign strategies
 python3 fetch_spellbook.py                 # Fetch 82k combos
 
 # === EDHREC data ===
-python3 fetch_edhrec_decks.py --refresh    # Fetch EDHREC average decklists for top 1000 commanders
+python3 fetch_edhrec_all.py                    # Fetch next 500 new commanders (synergy + avg decks)
+python3 fetch_edhrec_all.py --max 2000         # Fetch up to 2000 new commanders
+python3 fetch_edhrec_all.py --refresh-top 200  # Re-fetch top 200 popular commanders (stale data)
+python3 fetch_edhrec_all.py --refresh          # Re-fetch ALL existing commanders
+python3 fetch_edhrec_all.py --stats            # Show coverage stats
 
 # === Forge model (LightGBM LambdaRank) ===
-python3 train_fusion_model.py --forge-only     # Train forge GBM (cached features, parallel folds, ~6 min)
+python3 train_fusion_model.py --forge-only     # Train forge GBM (cached features, parallel folds, ~3 min)
 python3 train_fusion_model.py --forge-only --rebuild-features  # Rebuild features (shared ctx, 8 workers) + train (~7 min)
-python3 train_fusion_model.py --forge-only --quick             # Single-fold fast iteration (~4 min)
-python3 train_fusion_model.py --forge-only --tune              # HP search + train (~15 min, use after new features)
+python3 train_fusion_model.py --forge-only --quick             # Single-fold fast iteration (~2 min)
+python3 train_fusion_model.py --forge-only --tune              # Parallel HP search + train (~12 min)
 
 # === Recommendations ===
 python3 synergy_graph.py --commander "Krenko, Mob Boss" --recommend     # Recommend cards (GBM + mechanical bonus)
@@ -119,7 +124,7 @@ Scryfall API → download_cards.py → data/oracle_cards.json (36k cards)
                                         ↓
                     fetch_spellbook.py → spellbook_combos table (82k combos)
                                         ↓
-                    fetch_edhrec_decks.py → edhrec_card_synergy table (132k pairs)
+                    fetch_edhrec_all.py → edhrec_card_synergy table (733k pairs, 2,761 cmdrs)
                                         ↓
                     train_fusion_model.py → data/fusion_model_forge.lgb
                                         ↓
@@ -135,8 +140,8 @@ python3 import_forge.py --download --import             # 2. Update Forge data
 python3 build_graph.py --forge --rebuild                # 3. Rebuild causal graph
 python3 strategy_detector.py --populate                 # 4. Strategies
 python3 fetch_spellbook.py                              # 5. Refresh combos
-python3 fetch_edhrec_decks.py --refresh                 # 6. Refresh EDHREC data (if new set)
-python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forge model (~4 min, $0)
+python3 fetch_edhrec_all.py --max 2000 --refresh-top 200  # 6. Refresh EDHREC (new + top 200 stale)
+python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forge model (~7 min, $0)
 ```
 
 ### DB Schema (data/tags.db)
@@ -150,7 +155,7 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
 | spellbook_combo_cards | ~289k | Combo ↔ card junction |
 | interaction_edges | ~20.6M | Causal edges from Forge: 30+ event types + 6.3M synthetic + 2.6M entity-presence + 54k continuous pump + 896k theme synergy edges |
 | commander_profiles | ~3.4k | Auto-inferred commander archetypes (strategies, tribal, events) |
-| edhrec_card_synergy | ~132k | EDHREC synergy scores for 502 commanders |
+| edhrec_card_synergy | ~733k | EDHREC synergy scores for 2,761 commanders (87% coverage) |
 | forge_abilities | ~72k | Raw Forge ability data + SubAbility chain expansions (12.7k expanded rows). 20 columns: 19 consumed in features or during import, 1 unused (unless_cost). sub_ability column is resolved during import by expanding chains into separate rows. |
 | forge_deck_tags | ~14k | Forge deck-building AI: has (what card provides), hints (what card wants), needs (what card requires). 9,868 unique cards. |
 | forge_name_map | ~31k | Forge card name → oracle_id mapping (prefers non-token versions) |
@@ -206,31 +211,34 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
   concept space (36 game concepts + 80 subtypes). Effects and triggers map to same
   dimensions. Dot product = mechanical synergy score.
   Theme concepts: equipment_enters, equipment_equipped, defender_available, etb_doubled
-- Training data: edhrec_card_synergy (367k rows, 1,387 commanders), section-based grading
-  Grade 5=High Synergy, 4=Top Cards, 3=synergy>0.1, 2=synergy 0-0.1, 1=negative, 0=random neg
+- Training data: edhrec_card_synergy (703k rows, 2,724 commanders), continuous synergy grading
+  Grade 5=synergy>=0.40, 4=synergy>=0.20, 3=synergy>=0.05, 2=synergy 0-0.05, 1=negative, 0=random neg
+  EDHREC synergy = deck_inclusion% - color_baseline% (commander-specific affinity)
   Generic staples (>30% frequency) demoted from grade 4/5 to 3
   Commander-illegal cards filtered from negative pool
   3:1 negative ratio, 3-tier sampling: 1/3 strategy/subtype, 1/3 tag overlap, 1/3 random
 - Training: `python3 train_fusion_model.py --forge-only --rebuild-features` (~7 min)
-  Feature build: shared ForgeFeatureContext via fork pool (8 workers, ~8s)
-  CV folds: 3 folds trained in parallel via ProcessPoolExecutor
+  Feature build: shared ForgeFeatureContext via fork pool (8 workers, ~17s)
+  CV folds: 3 folds trained in parallel via ProcessPoolExecutor (thread-pinned)
   Batch features: vectorized array indexing for ~50 features, loop for ~35
-  Use `--tune` for HP search (~15 min). Default uses cached best HP.
-- Feature importance: edhrec_deck_pct 10%, card_hub_score 7%, deck_edge_count 6%,
-  ability_density 5%, cmdr_2hop_ratio 4.5%, strategy_cosine 5%, cmdr_2hop_count 3.1%
+  Vectorized NDCG@30, CV splits, weight arrays, group arrays
+  Use `--tune` for parallel HP search (~12 min). Default uses cached best HP.
+- Feature importance: edhrec_deck_pct 9%, deck_edge_count 6%, strategy_cosine 5%,
+  card_hub_score 5%, cmdr_2hop_ratio 4.5%, ability_density 4%, cmdr_2hop_count 3.3%
 - EDHREC_FREE=1 env var disables edhrec_deck_pct for pure Forge-native inference
-  (NDCG 0.479 vs 0.519 with EDHREC, ~7% lower but works for day-1 new cards)
-- Edge index cached to npz (~2s reload vs ~40s DB scan)
-- Edge index pre-loaded at inference: CmdrFeatureContext uses in-memory adjacency (~7s total)
-- Per-grade sample weights: grade 5 (High Synergy) ×3, grade 4 (Top Cards) ×2
+- Edge index: two-layer cache (npz raw edges + adjacency dict cache)
+  First run: npz ~0.1s + adj build ~11s. Subsequent: adj cache ~1.5s (train) / ~0.3s (inference)
+  Auto-invalidates on edge count, card count, or strength mode change
+- Edge index pre-loaded at inference: CmdrFeatureContext uses in-memory adjacency (~3s total)
+- Per-grade sample weights: grade 5 x3, grade 4 x2
 - Post-scoring penalties (scoring.py):
   - excluded_tribal (×0.3), required_subtype mismatch (×0.4), wrong token type (×0.5)
   - non-counter creatures for counter commanders (×0.6): no has_p1p1 + no counter verbs
   - counters on lands for counter commanders (×0.4): Earthbend, land-targeting PutCounter
   - wrong-color needs hard filter (score=-1e9): e.g., Pearl Medallion in mono-G
   - unmet Type$ needs/hints (×0.3): e.g., needs=Type$Dinosaur in Human deck
-- GBM: LambdaRank, num_leaves=767, lr=0.025, n_estimators=3000, label_gain=[0,1,3,6,15,30],
-    bagging_freq=5, colsample_bytree=0.6, feature_fraction_bynode=0.9
+- GBM: LambdaRank, num_leaves=767, lr=0.025, n_estimators=1000 (early_stop=40),
+    label_gain=[0,1,3,6,15,30], bagging_freq=5, colsample_bytree=0.6, feature_fraction_bynode=0.9
 
 ### Recommendation Pipeline (synergy_graph.py --commander "Name" --recommend)
 
@@ -242,7 +250,7 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
    Bonus: produces↔consumes dot product, verb→trigger alignment,
    creature ETB / sacrifice outlet / spellcast pattern matches
 4. Sort and output top N with clickable Scryfall hyperlinks (OSC 8)
-Total time: ~7s (including edge index load from cache)
+Total time: ~3s (with adjacency cache) / ~7s (first run, builds cache)
 ```
 
 ### Hidden Gem Engine (synergy_graph.py --commander "Name" --gems)
@@ -326,7 +334,8 @@ mechanically-synergistic cards that nobody plays.
 | `fetch_spellbook.py` | Commander Spellbook API fetcher |
 | `build_graph.py` | Causal interaction graph builder CLI (--forge --rebuild, --stats) |
 | `import_forge.py` | Forge ability data importer |
-| `fetch_edhrec_decks.py` | Fetch EDHREC average decklists for top 1000 commanders |
+| `fetch_edhrec_all.py` | Fetch EDHREC synergy + avg decks (concurrent, refresh support) |
+| `fetch_edhrec_decks.py` | Legacy: fetch EDHREC average decklists only (use fetch_edhrec_all.py) |
 
 ## Key Conventions
 
