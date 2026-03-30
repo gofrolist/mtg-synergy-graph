@@ -96,10 +96,10 @@ python3 scripts/train_fusion_model.py --forge-only --quick             # Single-
 python3 scripts/train_fusion_model.py --forge-only --tune              # Parallel HP search + train (~12 min)
 
 # === Recommendations ===
-python3 scripts/synergy_graph.py --commander "Krenko, Mob Boss" --recommend     # Recommend cards (GBM + mechanical bonus)
-python3 scripts/synergy_graph.py --commander "Krenko, Mob Boss" --recommend --top 10
-python3 scripts/synergy_graph.py --commander "Krenko, Mob Boss" --gems         # Hidden gems (pure mechanical, no popularity)
-python3 scripts/synergy_graph.py --commander "Krenko, Mob Boss" --combos       # Combo detection
+uv run mtg-synergy --commander "Krenko, Mob Boss" --recommend     # Recommend cards (GBM + mechanical bonus)
+uv run mtg-synergy --commander "Krenko, Mob Boss" --recommend --top 10
+uv run mtg-synergy --commander "Krenko, Mob Boss" --gems         # Hidden gems (pure mechanical, no popularity)
+uv run mtg-synergy --commander "Krenko, Mob Boss" --combos       # Combo detection
 
 # === Comparison & validation ===
 python3 scripts/compare_edhrec.py --commander "Krenko, Mob Boss"  # Single commander vs EDHREC
@@ -128,7 +128,7 @@ Scryfall API → scripts/download_cards.py → data/oracle_cards.json (36k cards
                                                 ↓
                     scripts/train_fusion_model.py → data/fusion_model_forge.lgb
                                                 ↓
-                              scripts/synergy_graph.py --deck <name>
+                              uv run mtg-synergy --commander "Name" <name>
                               (color filter → forge GBM → causal graph)
 ```
 

@@ -26,7 +26,7 @@ python3 scripts/fetch_edhrec_all.py --max 500
 python3 scripts/train_fusion_model.py --forge-only --rebuild-features
 
 # 7. Get recommendations
-python3 scripts/synergy_graph.py --commander "Krenko, Mob Boss" --recommend
+uv run mtg-synergy --commander "Krenko, Mob Boss" --recommend
 ```
 
 ## Requirements
@@ -93,10 +93,10 @@ python3 scripts/train_fusion_model.py --forge-only --tune              # Hyperpa
 ### Recommendations
 
 ```bash
-python3 scripts/synergy_graph.py --commander "Krenko, Mob Boss" --recommend       # Top 30 recommendations
-python3 scripts/synergy_graph.py --commander "Krenko, Mob Boss" --recommend --top 10
-python3 scripts/synergy_graph.py --commander "Krenko, Mob Boss" --gems            # Hidden gems (no popularity bias)
-python3 scripts/synergy_graph.py --commander "Krenko, Mob Boss" --combos          # Combo detection
+uv run mtg-synergy --commander "Krenko, Mob Boss" --recommend       # Top 30 recommendations
+uv run mtg-synergy --commander "Krenko, Mob Boss" --recommend --top 10
+uv run mtg-synergy --commander "Krenko, Mob Boss" --gems            # Hidden gems (no popularity bias)
+uv run mtg-synergy --commander "Krenko, Mob Boss" --combos          # Combo detection
 ```
 
 ### Evaluation
@@ -131,7 +131,7 @@ Scryfall API -> scripts/download_cards.py -> data/oracle_cards.json (36k cards)
                                                   |
                      scripts/train_fusion_model.py -> data/fusion_model_forge.lgb
                                                   |
-                               scripts/synergy_graph.py --commander "Name" --recommend
+                               uv run mtg-synergy --commander "Name" --recommend
 ```
 
 ### New-Set Update Workflow
