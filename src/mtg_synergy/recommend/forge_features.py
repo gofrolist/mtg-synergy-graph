@@ -978,39 +978,61 @@ class ForgeFeatureContext:
         self._event_names = list(event_names)
         self._bit_to_event = {i: str(name) for i, name in enumerate(event_names)}
 
-        # Build outgoing/incoming adjacency: card_idx -> numpy array of unique neighbors
-        self._adj_out = self._build_adj_arrays(src, tgt)
-        self._adj_in = self._build_adj_arrays(tgt, src)
+        # Try loading pre-built adjacency dicts from pickle cache.
+        # This is a LOCAL cache written by our own code — not external input.
+        import pickle  # noqa: S403
+        adj_cache_path = os.path.join(DATA_DIR, "edge_adj_cache.pkl")
+        adj_loaded = False
+        if os.path.exists(adj_cache_path):
+            try:
+                with open(adj_cache_path, "rb") as f:
+                    adj_data = pickle.load(f)  # noqa: S301
+                if (adj_data.get("edge_count") == edge_count
+                        and adj_data.get("card_count") == card_count
+                        and adj_data.get("has_strength") == self._preload_strength):
+                    self._adj_out = adj_data["adj_out"]
+                    self._adj_in = adj_data["adj_in"]
+                    self._exact_out = adj_data["exact_out"]
+                    self._exact_in = adj_data["exact_in"]
+                    self._agg_strength_out = adj_data.get("agg_strength_out", {})
+                    self._agg_events_out = adj_data.get("agg_events_out", {})
+                    self._agg_strength_in = adj_data.get("agg_strength_in", {})
+                    self._agg_events_in = adj_data.get("agg_events_in", {})
+                    self._arr_hub_raw = adj_data["hub_raw"]
+                    self._arr_hub_score = adj_data["hub_score"]
+                    self._hub_scores_built = True
+                    adj_loaded = True
+                    print(f"    Loaded adjacency dicts from cache ({time.time()-t0:.1f}s)")
+            except (pickle.UnpicklingError, KeyError, OSError, EOFError) as e:
+                _log.warning("Adjacency cache load failed, rebuilding: %s", e)
 
-        # Exact-precision adjacency
-        if exact.any():
-            self._exact_out = self._build_adj_arrays(src[exact], tgt[exact])
-            self._exact_in = self._build_adj_arrays(tgt[exact], src[exact])
-        else:
-            self._exact_out = {}
-            self._exact_in = {}
+        if not adj_loaded:
+            # Build outgoing/incoming adjacency: card_idx -> numpy array of unique neighbors
+            self._adj_out = self._build_adj_arrays(src, tgt)
+            self._adj_in = self._build_adj_arrays(tgt, src)
 
-        # Aggregated strength + event dicts for commander edge lookups (no SQL needed).
-        # Only built for training (preload_strength=True); inference uses SQL fallback.
-        if self._preload_strength:
-            self._agg_strength_out, self._agg_events_out = self._build_agg_arrays(
-                src, tgt, strength, event_ids)
-            self._agg_strength_in, self._agg_events_in = self._build_agg_arrays(
-                tgt, src, strength, event_ids)
-        else:
-            self._agg_strength_out = {}
-            self._agg_events_out = {}
-            self._agg_strength_in = {}
-            self._agg_events_in = {}
+            # Exact-precision adjacency
+            if exact.any():
+                self._exact_out = self._build_adj_arrays(src[exact], tgt[exact])
+                self._exact_in = self._build_adj_arrays(tgt[exact], src[exact])
+            else:
+                self._exact_out = {}
+                self._exact_in = {}
 
-        del src, tgt, exact, strength, event_ids
+            # Aggregated strength + event dicts for commander edge lookups (no SQL needed).
+            # Only built for training (preload_strength=True); inference uses SQL fallback.
+            if self._preload_strength:
+                self._agg_strength_out, self._agg_events_out = self._build_agg_arrays(
+                    src, tgt, strength, event_ids)
+                self._agg_strength_in, self._agg_events_in = self._build_agg_arrays(
+                    tgt, src, strength, event_ids)
+            else:
+                self._agg_strength_out = {}
+                self._agg_events_out = {}
+                self._agg_strength_in = {}
+                self._agg_events_in = {}
 
-        self._idx_to_oid = {v: k for k, v in self.oid_to_idx.items()}
-        self._n_cards_idx = len(self.oid_to_idx)
-        self._has_edge_index = True
-
-        # Build hub score arrays now that edge index is available
-        if not self._hub_scores_built:
+            # Build hub score arrays
             n = len(self.oid_to_idx)
             for i in range(n):
                 n_out = len(self._adj_out.get(i, []))
@@ -1019,6 +1041,36 @@ class ForgeFeatureContext:
                 self._arr_hub_raw[i] = raw
                 self._arr_hub_score[i] = np.log2(1.0 + min(raw, 500))
             self._hub_scores_built = True
+
+            # Save adjacency cache for next time
+            try:
+                adj_data = {
+                    "edge_count": edge_count,
+                    "card_count": card_count,
+                    "has_strength": self._preload_strength,
+                    "adj_out": self._adj_out,
+                    "adj_in": self._adj_in,
+                    "exact_out": self._exact_out,
+                    "exact_in": self._exact_in,
+                    "hub_raw": self._arr_hub_raw,
+                    "hub_score": self._arr_hub_score,
+                }
+                if self._preload_strength:
+                    adj_data["agg_strength_out"] = self._agg_strength_out
+                    adj_data["agg_events_out"] = self._agg_events_out
+                    adj_data["agg_strength_in"] = self._agg_strength_in
+                    adj_data["agg_events_in"] = self._agg_events_in
+                with open(adj_cache_path, "wb") as f:
+                    pickle.dump(adj_data, f, protocol=pickle.HIGHEST_PROTOCOL)
+                print(f"    Cached adjacency dicts to {adj_cache_path}")
+            except Exception as e:
+                print(f"    Adjacency cache write failed: {e}")
+
+        del src, tgt, exact, strength, event_ids
+
+        self._idx_to_oid = {v: k for k, v in self.oid_to_idx.items()}
+        self._n_cards_idx = len(self.oid_to_idx)
+        self._has_edge_index = True
 
         elapsed = time.time() - t0
         n_unique = sum(len(v) for v in self._adj_out.values())

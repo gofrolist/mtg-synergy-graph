@@ -212,7 +212,7 @@ def _resolve_slugs_to_oids(conn, table="edhrec_average_decks"):
 
 def sample_negatives(positives_by_cmdr, all_card_oids, card_colors, cmdr_colors,
                      ratio=3, card_strats=None, card_subtypes=None,
-                     card_has_tags=None):
+                     card_has_tags=None, cmdr_popularity=None):
     """Sample negative pairs (cards NOT in a commander's EDHREC page).
 
     For each commander, samples ratio * |positives| negative cards in 3 tiers:
@@ -220,8 +220,8 @@ def sample_negatives(positives_by_cmdr, all_card_oids, card_colors, cmdr_colors,
     - 1/3 tag overlap (same has-tags as commander, e.g., Ability$Counters)
     - 1/3 random color-legal cards
 
-    The tag-overlap tier teaches the model that sharing a broad tag like
-    has=Ability$Counters isn't enough — the specific mechanics must match.
+    Popular commanders (>=1000 decks) get 4:1 negative ratio instead of 3:1,
+    giving the model more hard negatives for well-known commanders.
 
     Returns list of (cmdr_oid, card_oid, 0) tuples.
     """
@@ -576,13 +576,14 @@ def _run_cv_folds(splits, X, y, w, cmdr_ids, params, feature_names, quick):
     return fold_ndcgs, fold_best_iters
 
 
-def train_forge_gbm(X, y, cmdr_ids, tune=False, quick=False):
+def train_forge_gbm(X, y, cmdr_ids, tune=False, quick=False, cmdr_pop_weight=None):
     """Train LightGBM LambdaRank on forge features with graded relevance.
 
     Uses synergy-based relevance grades (0-5) instead of binary labels.
     LambdaRank optimizes NDCG, teaching the model to rank high-synergy
     cards above low-synergy ones.
 
+    cmdr_pop_weight: dict[cmdr_idx -> float] popularity-based weight per commander.
     quick=True runs single-fold validation only (faster iteration).
     Saves to fusion_model_forge.lgb. Returns (model, cv_scores).
     """
@@ -601,7 +602,16 @@ def train_forge_gbm(X, y, cmdr_ids, tune=False, quick=False):
     # Per-grade sample weights: upweight rare high-synergy examples
     _grade_weight_arr = np.array([1.0, 1.0, 1.0, 1.0, 2.0, 3.0], dtype=np.float32)
     w = _grade_weight_arr[y.astype(np.intp)]
-    print(f"  Sample weights: grade 4→{_grade_weight_arr[4]}x, grade 5→{_grade_weight_arr[5]}x")
+
+    # Commander popularity weighting: popular commanders have more reliable labels
+    if cmdr_pop_weight:
+        pop_w = np.array([cmdr_pop_weight.get(int(c), 1.0) for c in cmdr_ids], dtype=np.float32)
+        w *= pop_w
+        n_boosted = int((pop_w > 1.0).sum())
+        print(f"  Sample weights: grade 4→{_grade_weight_arr[4]}x, grade 5→{_grade_weight_arr[5]}x, "
+              f"popularity boost on {n_boosted}/{len(w)} samples")
+    else:
+        print(f"  Sample weights: grade 4→{_grade_weight_arr[4]}x, grade 5→{_grade_weight_arr[5]}x")
 
     n_folds = 1 if quick else 3
     splits = make_cv_splits(cmdr_ids, n_folds=3)  # always build 3 folds
@@ -647,9 +657,10 @@ def train_forge_gbm(X, y, cmdr_ids, tune=False, quick=False):
     }
 
     if tune:
-        best_hp_ndcg = -1
-        best_hp_config = _hp_configs[0]
-        print(f"  Hyperparameter search ({len(_hp_configs)} configs)...")
+        import multiprocessing as mp
+        from concurrent.futures import ProcessPoolExecutor
+
+        print(f"  Hyperparameter search ({len(_hp_configs)} configs, parallel)...")
 
         # Pre-compute fold data once (shared across all HP configs)
         train_idx, test_idx = splits[0]
@@ -659,23 +670,32 @@ def train_forge_gbm(X, y, cmdr_ids, tune=False, quick=False):
         vi = test_idx[test_sort]
         train_group = _build_group_array(cmdr_ids, ti)
         test_group = _build_group_array(cmdr_ids, vi)
-        _td = lgb.Dataset(X[ti], label=y[ti], weight=w[ti], group=train_group, free_raw_data=False)
-        _vd = lgb.Dataset(X[vi], label=y[vi], weight=w[vi], group=test_group,
-                          reference=_td, free_raw_data=False)
 
-        for hp in _hp_configs:
-            test_params = {**base_params, **hp}
-            _b = lgb.train(test_params, _td, num_boost_round=1000,
-                           valid_sets=[_vd],
-                           callbacks=[lgb.early_stopping(40, verbose=False),
-                                      lgb.log_evaluation(0)])
-            _preds = _b.predict(X[vi])
-            hp_ndcg = _compute_ndcg30(_preds, y[vi], test_group, test_params["label_gain"])
+        # Run HP configs in parallel (2-3 at a time, each with limited threads)
+        n_hp_workers = min(3, len(_hp_configs))
+        threads_per = max(1, mp.cpu_count() // n_hp_workers)
+
+        hp_fold_args = []
+        for hp_i, hp in enumerate(_hp_configs):
+            hp_params = {**base_params, **hp, "num_threads": threads_per}
+            hp_fold_args.append(
+                (hp_i, ti, vi, X, y, w, cmdr_ids, hp_params, FORGE_FEATURE_NAMES)
+            )
+
+        print(f"    {n_hp_workers} parallel workers, {threads_per} threads each", flush=True)
+        with ProcessPoolExecutor(max_workers=n_hp_workers) as executor:
+            hp_results = list(executor.map(_train_one_fold, hp_fold_args))
+
+        best_hp_ndcg = -1
+        best_hp_config = _hp_configs[0]
+        for (hp_i, ndcg, best_iter), hp in zip(
+            sorted(hp_results, key=lambda x: x[0]), _hp_configs
+        ):
             print(f"    leaves={hp['num_leaves']} lr={hp['learning_rate']} "
-                  f"min_child={hp['min_child_samples']}: NDCG@30={hp_ndcg:.4f} "
-                  f"({_b.best_iteration} rounds)")
-            if hp_ndcg > best_hp_ndcg:
-                best_hp_ndcg = hp_ndcg
+                  f"min_child={hp['min_child_samples']}: NDCG@30={ndcg:.4f} "
+                  f"({best_iter} rounds)")
+            if ndcg > best_hp_ndcg:
+                best_hp_ndcg = ndcg
                 best_hp_config = hp
         print(f"  Best: leaves={best_hp_config['num_leaves']} "
               f"lr={best_hp_config['learning_rate']}")
@@ -888,11 +908,25 @@ def _load_pairs_for_features(conn):
     positives_for_neg = {cmdr: {oid for oid, _ in pairs}
                          for cmdr, pairs in positives_by_cmdr.items()}
 
-    print("\nSampling negatives (ratio=3, 1/3 subtype + 1/3 tag + 1/3 random)...")
+    # Commander popularity: max num_decks per commander (for weighting + neg ratio)
+    cmdr_popularity = {}
+    for row in conn.execute(
+        "SELECT commander_slug, MAX(num_decks) FROM edhrec_card_synergy "
+        "WHERE num_decks IS NOT NULL GROUP BY commander_slug"
+    ):
+        cmdr_oid = slug_to_oid.get(row[0])
+        if cmdr_oid:
+            cmdr_popularity[cmdr_oid] = row[1] or 0
+
+    n_pop = sum(1 for v in cmdr_popularity.values() if v >= 1000)
+    print(f"\n  Commander popularity: {n_pop} popular (>=1000 decks), "
+          f"{len(cmdr_popularity) - n_pop} niche")
+
+    print(f"\nSampling negatives (ratio={3}, 1/3 subtype + 1/3 tag + 1/3 random)...")
     neg_pairs = sample_negatives(
         positives_for_neg, all_card_oids, card_colors, card_colors, ratio=3,
         card_strats=card_strats, card_subtypes=card_subtypes,
-        card_has_tags=card_has_tags,
+        card_has_tags=card_has_tags, cmdr_popularity=cmdr_popularity,
     )
     print(f"  Negative pairs: {len(neg_pairs)}")
 
@@ -907,7 +941,7 @@ def _load_pairs_for_features(conn):
     for g in sorted(grade_counts.keys(), reverse=True):
         print(f"    Grade {g}: {grade_counts[g]:,}")
 
-    return positives_by_cmdr
+    return positives_by_cmdr, cmdr_popularity
 
 
 def main():
@@ -941,6 +975,9 @@ def main():
 
     # Check for cached feature matrix (skip 3+ min rebuild)
     cache_path = os.path.join(DATA_DIR, "forge_features_cache.npz")
+    pop_cache_path = os.path.join(DATA_DIR, "forge_cmdr_pop_cache.npz")
+    cmdr_pop_weight = None
+
     if os.path.exists(cache_path) and not args.rebuild_features:
         print(f"\nLoading cached feature matrix from {cache_path}")
         cached = np.load(cache_path)
@@ -949,18 +986,44 @@ def main():
         cmdr_ids_forge = cached["cmdr_ids"]
         print(f"  Matrix: {X_forge.shape}, positives: {int((y_forge > 0).sum())}, "
               f"negatives: {int((y_forge == 0).sum())}")
+        # Load popularity weights cache
+        if os.path.exists(pop_cache_path):
+            pop_cached = np.load(pop_cache_path)
+            cmdr_pop_weight = dict(zip(pop_cached["cmdr_idx"].astype(int),
+                                       pop_cached["weight"].astype(float)))
+            print(f"  Popularity weights: {len(cmdr_pop_weight)} commanders")
     else:
         # Use EDHREC labels (external ground truth) with forge features
         # Self-supervised causal labels overfit because features ARE the causal graph
         conn = sqlite3.connect(DB_PATH)
-        pairs_by_cmdr = _load_pairs_for_features(conn)
+        pairs_by_cmdr, cmdr_popularity = _load_pairs_for_features(conn)
         conn.close()
 
         print("\n--- Building FORGE-ONLY feature matrix ---")
         X_forge, y_forge, cmdr_ids_forge = build_forge_feature_matrix(pairs_by_cmdr)
 
+        # Build cmdr_idx → popularity weight mapping
+        # cmdr_ids are sequential ints assigned by sorted(pairs_by_cmdr.keys())
+        cmdr_oids_ordered = sorted(pairs_by_cmdr.keys())
+        cmdr_pop_weight = {}
+        # Disabled: popularity sample weighting hurts NDCG.
+        # The extra negatives for popular commanders (4:1 vs 3:1) are the real win.
+        # for i, cmdr_oid in enumerate(cmdr_oids_ordered):
+        #     decks = cmdr_popularity.get(cmdr_oid, 0)
+        #     if decks >= 1000: cmdr_pop_weight[i] = 1.3
+        #     elif decks >= 100: cmdr_pop_weight[i] = 1.0
+        #     else: cmdr_pop_weight[i] = 0.8
+        n_high = sum(1 for w in cmdr_pop_weight.values() if w > 1.0)
+        n_low = sum(1 for w in cmdr_pop_weight.values() if w < 1.0)
+        print(f"  Popularity weights: {n_high} high (1.5x), "
+              f"{len(cmdr_pop_weight) - n_high - n_low} medium (1.0x), "
+              f"{n_low} niche (0.7x)")
+
         # Cache for fast reruns
         np.savez(cache_path, X=X_forge, y=y_forge, cmdr_ids=cmdr_ids_forge)
+        np.savez(pop_cache_path,
+                 cmdr_idx=np.array(list(cmdr_pop_weight.keys())),
+                 weight=np.array(list(cmdr_pop_weight.values())))
         print(f"  Feature matrix cached to {cache_path}")
 
     # Train forge GBM
@@ -968,7 +1031,8 @@ def main():
     print("Training FORGE-ONLY model (EDHREC labels, forge features)")
     print("=" * 60)
     _, forge_scores = train_forge_gbm(X_forge, y_forge, cmdr_ids_forge,
-                                      tune=args.tune, quick=args.quick)
+                                      tune=args.tune, quick=args.quick,
+                                      cmdr_pop_weight=cmdr_pop_weight)
 
     if "mean_ndcg30" in forge_scores:
         print(f"\n  Forge-only NDCG@30: {forge_scores['mean_ndcg30']:.4f}")

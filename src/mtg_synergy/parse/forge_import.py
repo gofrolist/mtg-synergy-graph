@@ -406,6 +406,15 @@ def build_name_mapping(conn):
         WHERE fa.card_name NOT IN (SELECT forge_name FROM forge_name_map)
     """)
 
+    # DFC/MDFC back face match (e.g., 'Harnfel, Horn of Bounty' → 'Birgi, God of Storytelling // Harnfel, Horn of Bounty')
+    conn.execute("""
+        INSERT OR IGNORE INTO forge_name_map (forge_name, oracle_id)
+        SELECT DISTINCT fa.card_name, c.oracle_id
+        FROM forge_abilities fa
+        JOIN cards c ON c.name LIKE '%// ' || fa.card_name
+        WHERE fa.card_name NOT IN (SELECT forge_name FROM forge_name_map)
+    """)
+
     conn.commit()
     matched = conn.execute("SELECT COUNT(*) FROM forge_name_map").fetchone()[0]
     total = conn.execute("SELECT COUNT(DISTINCT card_name) FROM forge_abilities").fetchone()[0]
