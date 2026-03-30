@@ -22,6 +22,8 @@ def run():
                         help="Recommend cards for this commander")
     parser.add_argument("--combos", action="store_true",
                         help="Detect combos for this commander's color identity")
+    parser.add_argument("--gems", action="store_true",
+                        help="Find hidden gems — rare cards with strong mechanical synergy")
     parser.add_argument("--top", type=int, default=50, help="Top N results (default: 50)")
     parser.add_argument("--strategies", default="auto",
                         help="Comma-separated strategies to focus (default: auto-detect)")
@@ -29,8 +31,8 @@ def run():
                         help="Comma-separated strategies to exclude")
     args = parser.parse_args()
 
-    if not args.recommend and not args.combos:
-        parser.error("Must specify --recommend or --combos")
+    if not args.recommend and not args.combos and not args.gems:
+        parser.error("Must specify --recommend, --combos, or --gems")
 
     from tag_db import get_cards_by_names, DB_PATH
 
@@ -76,5 +78,9 @@ def run():
         from mtg_synergy.combos.display import show_combos_tiered
         deck_oids = {c["oracle_id"] for c in cards if c["name"] in deck_set}
         show_combos_tiered(deck_oids, cmdr_name, DB_PATH, color_identity=color_identity)
+
+    if args.gems:
+        from mtg_synergy.recommend.hidden_gems import show_hidden_gems
+        show_hidden_gems(cmdr_oid, conn, top_n=args.top)
 
     conn.close()
