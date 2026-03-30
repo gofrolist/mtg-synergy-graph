@@ -800,16 +800,20 @@ def _load_pairs_for_features(conn):
 
         card_cmdr_count[card_oid] = card_cmdr_count.get(card_oid, 0) + 1
 
-        if section == "High Synergy Cards":
+        # Grade by continuous synergy score (EDHREC synergy = deck% - color_baseline%)
+        # This captures commander-specific synergy regardless of which section EDHREC
+        # placed the card in. Previously we graded by section name which lost signal.
+        syn = synergy if synergy is not None else 0.0
+        if syn >= 0.40:
             grade = 5
-        elif section == "Top Cards":
+        elif syn >= 0.20:
             grade = 4
-        elif synergy is not None and synergy < 0:
-            grade = 1
-        elif synergy is not None and synergy > 0.1:
+        elif syn >= 0.05:
             grade = 3
-        else:
+        elif syn >= 0:
             grade = 2
+        else:
+            grade = 1
 
         # Boost grade if card is in the average deck (practical validation)
         if (slug, card_name) in avg_deck_set and grade < 5 and grade >= 2:
