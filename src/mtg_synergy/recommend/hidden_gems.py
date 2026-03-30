@@ -13,6 +13,7 @@ from urllib.parse import quote
 
 import numpy as np
 
+from mtg_synergy.recommend.cmdr_patterns import detect_cmdr_patterns
 from mtg_synergy.recommend.forge_features import (
     ForgeFeatureContext, CmdrFeatureContext,
 )
@@ -91,6 +92,9 @@ def find_hidden_gems(cmdr_oid, conn, top_n=30, popularity_cap=0.05, verbose=True
     if verbose:
         print(f"  Color-legal candidates: {len(candidates)}")
 
+    # Pre-compute commander mechanical flags (once, outside loop)
+    cmdr_flags = detect_cmdr_patterns(cmdr_verbs, cmdr_triggers, cmdr_trigger_filters)
+
     # Score each candidate by mechanical interaction
     scored = []
     for oid, card in candidates.items():
@@ -155,32 +159,24 @@ def find_hidden_gems(cmdr_oid, conn, top_n=30, popularity_cap=0.05, verbose=True
                 reasons.append(f"cmdr:{v}→trigger:{','.join(hits)}")
 
         # ── 5. Creature ETB synergy (bidirectional) ──
-        cmdr_makes_creatures = bool(cmdr_verbs & {'Token', 'Animate', 'Manifest'})
         card_triggers_etb = ('ChangesZone' in card_triggers and
                              bool(card_trigger_filters & {'creature', 'permanent', 'nontoken'}))
         card_makes_creatures = bool(card_verbs & {'Token', 'Animate', 'Manifest'})
-        cmdr_triggers_etb = ('ChangesZone' in cmdr_triggers and
-                             bool(cmdr_trigger_filters & {'creature', 'permanent', 'nontoken'}))
 
-        if cmdr_makes_creatures and card_triggers_etb:
+        if cmdr_flags.makes_creatures and card_triggers_etb:
             score += 3.0
             reasons.append("cmdr_makes_creatures→card_triggers_ETB")
-        if cmdr_triggers_etb and card_makes_creatures:
+        if cmdr_flags.triggers_etb and card_makes_creatures:
             score += 3.0
             reasons.append("card_makes_creatures→cmdr_triggers_ETB")
 
         # ── 6. Sacrifice outlet for death-trigger commanders ──
-        cmdr_death_trigger = (
-            ('ChangesZone' in cmdr_triggers and 'creature' in cmdr_trigger_filters) or
-            'Sacrificed' in cmdr_triggers or 'Destroyed' in cmdr_triggers
-        )
-        if cmdr_death_trigger and profile.get('_has_sac_cost', False):
+        if cmdr_flags.death_trigger and profile.get('_has_sac_cost', False):
             score += 2.5
             reasons.append("sac_outlet→cmdr_death_trigger")
 
         # ── 7. Spellcast trigger match ──
-        cmdr_spellcast = 'SpellCast' in cmdr_triggers
-        if cmdr_spellcast and ("Instant" in tl or "Sorcery" in tl):
+        if cmdr_flags.spellcast and ("Instant" in tl or "Sorcery" in tl):
             # Check if card type matches the trigger filter
             if not cmdr_trigger_filters or bool(
                 cmdr_trigger_filters & {t.lower() for t in tl.replace("\u2014", " ").split()}

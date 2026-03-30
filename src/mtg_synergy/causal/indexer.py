@@ -1,7 +1,7 @@
 """Index parsed cards by what events they produce and respond to."""
-import math
 from collections import defaultdict
 from dataclasses import dataclass, field
+from mtg_synergy.causal.idf import compute_event_idf as _compute_event_idf
 from mtg_synergy.parse.ast_types import Ability
 from mtg_synergy.parse.verb_resolvers import resolve_effect
 
@@ -28,19 +28,8 @@ class CardIndex:
 
         Rare events get higher weight (up to 3.0x), common events get lower (down to 0.3x).
         """
-        result = {"producer": {}, "responder": {}}
-        n = max(self.total_cards, 1)
-        max_idf = math.log(n) if n > 1 else 1.0
-        min_idf = math.log(2) if n > 2 else 0.1
-        span = max_idf - min_idf if max_idf > min_idf else 1.0
-
-        for side, counts in [("producer", self.producer_counts),
-                             ("responder", self.responder_counts)]:
-            for event, count in counts.items():
-                raw = math.log(max(n / max(count, 1), 1))
-                normalized = 0.3 + 2.7 * (raw - min_idf) / span
-                result[side][event] = round(max(0.3, min(3.0, normalized)), 3)
-        return result
+        return _compute_event_idf(self.total_cards, self.producer_counts,
+                                  self.responder_counts)
 
 
 def build_index(cards: dict[str, list[Ability]]) -> CardIndex:

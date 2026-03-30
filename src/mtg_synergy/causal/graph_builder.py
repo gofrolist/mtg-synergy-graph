@@ -50,7 +50,8 @@ def _compute_filter_precision(
 
 
 def _precision_to_strength(precision: str) -> float:
-    return {"exact": 1.0, "broad": 0.6, "unfiltered": 0.3, "none": 0.0}[precision]
+    from mtg_synergy.causal.idf import PRECISION_STRENGTH
+    return PRECISION_STRENGTH[precision]
 
 
 # ---------------------------------------------------------------------------

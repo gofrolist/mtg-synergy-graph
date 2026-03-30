@@ -4,10 +4,10 @@ Replaces the old indexer.py which used parsed AST abilities + verb_resolvers.
 This version reads directly from forge_abilities table and uses the
 verb->event mapping to determine what events each card produces.
 """
-import math
 from collections import defaultdict
 from dataclasses import dataclass, field
 
+from mtg_synergy.causal.idf import compute_event_idf as _compute_event_idf
 from mtg_synergy.causal.verb_event_map import verb_to_events
 
 
@@ -30,19 +30,8 @@ class ForgeIndex:
 
     def compute_event_idf(self) -> dict:
         """Compute IDF multipliers for producer and responder events."""
-        result = {"producer": {}, "responder": {}}
-        n = max(self.total_cards, 1)
-        max_idf = math.log(n) if n > 1 else 1.0
-        min_idf = math.log(2) if n > 2 else 0.1
-        span = max_idf - min_idf if max_idf > min_idf else 1.0
-
-        for side, counts in [("producer", self.producer_counts),
-                             ("responder", self.responder_counts)]:
-            for event, count in counts.items():
-                raw = math.log(max(n / max(count, 1), 1))
-                normalized = 0.3 + 2.7 * (raw - min_idf) / span
-                result[side][event] = round(max(0.3, min(3.0, normalized)), 3)
-        return result
+        return _compute_event_idf(self.total_cards, self.producer_counts,
+                                  self.responder_counts)
 
 
 def build_forge_index(conn) -> ForgeIndex:

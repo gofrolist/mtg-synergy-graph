@@ -4,6 +4,7 @@ Matches effect producers against trigger responders using ForgeFilter
 matching and IDF weighting. Replaces the old graph_builder.py.
 """
 from mtg_synergy.causal.forge_indexer import ForgeIndex
+from mtg_synergy.causal.idf import PRECISION_STRENGTH
 from mtg_synergy.causal.types import Edge, EdgeDetail
 from mtg_synergy.parse.forge_filter_parser import parse_forge_filter
 from mtg_synergy.parse.forge_types import ForgeFilter
@@ -40,9 +41,6 @@ def compute_filter_match(responder_filter: ForgeFilter, producer_detail: dict,
         return "broad"
 
     return "unfiltered"
-
-
-_PRECISION_STRENGTH = {"exact": 1.0, "broad": 0.6, "unfiltered": 0.3, "none": 0.0}
 
 
 def build_forge_edges(idx: ForgeIndex, name_to_oid: dict | None = None) -> list[Edge]:
@@ -107,7 +105,7 @@ def build_forge_edges(idx: ForgeIndex, name_to_oid: dict | None = None) -> list[
 
                 # Filter matching
                 precision = compute_filter_match(resp_filter, prod_detail, mode)
-                strength = _PRECISION_STRENGTH.get(precision, 0.0)
+                strength = PRECISION_STRENGTH.get(precision, 0.0)
                 if strength <= 0:
                     continue
 

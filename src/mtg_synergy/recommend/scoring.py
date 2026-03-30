@@ -13,6 +13,7 @@ import numpy as np
 import lightgbm as lgb
 
 from mtg_synergy.config import DATA_DIR
+from mtg_synergy.recommend.cmdr_patterns import detect_cmdr_patterns
 from mtg_synergy.recommend.forge_features import (
     ForgeFeatureContext, CmdrFeatureContext, compute_card_features,
 )
@@ -58,6 +59,10 @@ def color_identity_filter(conn, cmdr_oid: str, color_identity: set,
             results.append((oid, name))
     return results
 
+
+_GENERIC_REQ = {"card", "creature", "permanent", "self", "other",
+                "nontoken", "token", "artifact", "enchantment", "land",
+                "spell", "any"}
 
 _COLOR_NAME_TO_SYMBOL = {
     "white": "W", "blue": "U", "black": "B", "red": "R", "green": "G",
@@ -105,6 +110,62 @@ def _has_unmet_type_needs(card_needs: set, card_hints: set,
     return not bool(type_reqs & cmdr_provides)
 
 
+def _apply_penalties(scores, cand_list, ctx, cmdr_ctx, cmdr_oid,
+                     color_identity, oid_fn=None):
+    """Apply post-scoring penalties for clear anti-synergy patterns.
+
+    Modifies ``scores`` in-place. ``oid_fn`` resolves a (name, card_dict) pair
+    to an oracle_id; defaults to ``cd["oracle_id"]``.
+    """
+    if oid_fn is None:
+        oid_fn = lambda _name, cd: cd["oracle_id"]
+
+    cmdr_subtypes = cmdr_ctx.cmdr_subtypes or set()
+    cmdr_profile = ctx._forge_profiles.get(cmdr_oid, {})
+    cmdr_has_counters = 'P1P1' in cmdr_profile.get('counter_types', set())
+    cmdr_is_tribal = bool(cmdr_profile.get('trigger_filters', set()) & cmdr_subtypes)
+
+    for i, (name, cd) in enumerate(cand_list):
+        oid = oid_fn(name, cd)
+        profile = ctx._forge_profiles.get(oid, {})
+        if cmdr_is_tribal:
+            # Card excludes commander's creature type from effects
+            excl = profile.get('excluded_subtypes', set())
+            if excl and (excl & cmdr_subtypes):
+                scores[i] *= 0.3
+            # Card requires a specific subtype the commander doesn't have
+            req = profile.get('required_subtypes', set())
+            non_generic_req = req - _GENERIC_REQ
+            if non_generic_req and not (non_generic_req & cmdr_subtypes):
+                scores[i] *= 0.4
+            # Card creates tokens of wrong creature type
+            token_subs = ctx._token_subtypes.get(oid, set())
+            if token_subs and not (token_subs & cmdr_subtypes):
+                scores[i] *= 0.5
+        # Temporary penalty: counter commanders + non-counter creatures
+        # (kept until functional fingerprints gain enough importance)
+        if cmdr_has_counters:
+            if "Creature" in cd.get("type_line", ""):
+                if (not profile.get('has_p1p1', False) and
+                        not (profile.get('verbs', set()) &
+                             {'PutCounter', 'PutCounterAll', 'Proliferate', 'MoveCounter'})):
+                    scores[i] *= 0.6
+            # Card places counters on lands, not creatures (earthbend etc.)
+            if profile.get('counters_on_lands', False):
+                scores[i] *= 0.4
+        # Card needs colors outside commander's color identity
+        # Hard filter: these cards are guaranteed useless
+        card_needs = ctx._deck_needs.get(oid, set())
+        if color_identity is not None and card_needs and _needs_wrong_colors(card_needs, color_identity):
+            scores[i] = -1e9
+            continue
+        # Card needs/hints at Type$ tags the commander can't provide
+        card_hints = ctx._deck_hints.get(oid, set())
+        cmdr_prov = cmdr_ctx.cmdr_has | cmdr_ctx.cmdr_hints
+        if _has_unmet_type_needs(card_needs, card_hints, cmdr_prov):
+            scores[i] *= 0.3
+
+
 def _apply_mechanical_bonus(scores, cand_list, ctx, cmdr_ctx, cmdr_oid):
     """Boost cards with strong mechanical interaction the GBM may underweight.
 
@@ -121,14 +182,7 @@ def _apply_mechanical_bonus(scores, cand_list, ctx, cmdr_ctx, cmdr_oid):
     cmdr_trigger_filters = cmdr_profile.get('trigger_filters', set())
 
     # Pre-compute commander flags
-    cmdr_makes_creatures = bool(cmdr_verbs & {'Token', 'Animate', 'Manifest'})
-    cmdr_triggers_etb = ('ChangesZone' in cmdr_triggers and
-                         bool(cmdr_trigger_filters & {'creature', 'permanent', 'nontoken'}))
-    cmdr_death_trigger = (
-        ('ChangesZone' in cmdr_triggers and 'creature' in cmdr_trigger_filters) or
-        'Sacrificed' in cmdr_triggers or 'Destroyed' in cmdr_triggers
-    )
-    cmdr_spellcast = 'SpellCast' in cmdr_triggers
+    cmdr_flags = detect_cmdr_patterns(cmdr_verbs, cmdr_triggers, cmdr_trigger_filters)
 
     for i, (name, cd) in enumerate(cand_list):
         if scores[i] <= 0:
@@ -174,16 +228,16 @@ def _apply_mechanical_bonus(scores, cand_list, ctx, cmdr_ctx, cmdr_oid):
         card_triggers_etb = ('ChangesZone' in card_triggers and
                              bool(card_trigger_filters & {'creature', 'permanent', 'nontoken'}))
         card_makes_creatures = bool(card_verbs & {'Token', 'Animate', 'Manifest'})
-        if (cmdr_makes_creatures and card_triggers_etb) or \
-           (cmdr_triggers_etb and card_makes_creatures):
+        if (cmdr_flags.makes_creatures and card_triggers_etb) or \
+           (cmdr_flags.triggers_etb and card_makes_creatures):
             bonus += 0.05
 
         # Sacrifice outlet for death-trigger commanders
-        if cmdr_death_trigger and profile.get('_has_sac_cost', False):
+        if cmdr_flags.death_trigger and profile.get('_has_sac_cost', False):
             bonus += 0.05
 
         # Spellcast trigger match
-        if cmdr_spellcast and ("Instant" in tl or "Sorcery" in tl):
+        if cmdr_flags.spellcast and ("Instant" in tl or "Sorcery" in tl):
             if not cmdr_trigger_filters or bool(
                 cmdr_trigger_filters & {t.lower() for t in tl.replace("\u2014", " ").split()}
             ):
@@ -241,53 +295,7 @@ def _score_commander(cmdr_oid, cmdr_name, color_identity, deck_cards,
         scores = gbm.predict(X, raw_score=True)
 
     # Post-scoring penalties for clear anti-synergy patterns
-    cmdr_subtypes = cmdr_ctx.cmdr_subtypes or set()
-    cmdr_profile = ctx._forge_profiles.get(cmdr_oid, {})
-    cmdr_has_counters = 'P1P1' in cmdr_profile.get('counter_types', set())
-    cmdr_is_tribal = bool(cmdr_profile.get('trigger_filters', set()) & cmdr_subtypes)
-    _generic_req = {"card", "creature", "permanent", "self", "other",
-                    "nontoken", "token", "artifact", "enchantment", "land",
-                    "spell", "any"}
-
-    for i, (name, cd) in enumerate(cand_list):
-        profile = ctx._forge_profiles.get(cd["oracle_id"], {})
-        if cmdr_is_tribal:
-            # Card excludes commander's creature type from effects
-            excl = profile.get('excluded_subtypes', set())
-            if excl and (excl & cmdr_subtypes):
-                scores[i] *= 0.3
-            # Card requires a specific subtype the commander doesn't have
-            req = profile.get('required_subtypes', set())
-            non_generic_req = req - _generic_req
-            if non_generic_req and not (non_generic_req & cmdr_subtypes):
-                scores[i] *= 0.4
-            # Card creates tokens of wrong creature type
-            token_subs = ctx._token_subtypes.get(cd["oracle_id"], set())
-            if token_subs and not (token_subs & cmdr_subtypes):
-                scores[i] *= 0.5
-        # Temporary penalty: counter commanders + non-counter creatures
-        # (kept until functional fingerprints gain enough importance)
-        if cmdr_has_counters:
-            if "Creature" in cd.get("type_line", ""):
-                if (not profile.get('has_p1p1', False) and
-                        not (profile.get('verbs', set()) &
-                             {'PutCounter', 'PutCounterAll', 'Proliferate', 'MoveCounter'})):
-                    scores[i] *= 0.6
-            # Card places counters on lands, not creatures (earthbend etc.)
-            if profile.get('counters_on_lands', False):
-                scores[i] *= 0.4
-        # Card needs colors outside commander's color identity (e.g., Pearl Medallion in mono-G)
-        # Hard filter: these cards are guaranteed useless
-        card_needs = ctx._deck_needs.get(cd["oracle_id"], set())
-        if card_needs and _needs_wrong_colors(card_needs, color_identity):
-            scores[i] = -1e9
-            continue
-        # Card needs/hints at Type$ tags the commander can't provide
-        # e.g., needs=Type$Dinosaur in Human deck, hints=Type$Aura in counters deck
-        card_hints = ctx._deck_hints.get(cd["oracle_id"], set())
-        cmdr_prov = cmdr_ctx.cmdr_has | cmdr_ctx.cmdr_hints
-        if _has_unmet_type_needs(card_needs, card_hints, cmdr_prov):
-            scores[i] *= 0.3
+    _apply_penalties(scores, cand_list, ctx, cmdr_ctx, cmdr_oid, color_identity)
 
     # Mechanical synergy bonus: boost cards with strong forge-mechanical
     # interaction that the GBM may underweight. Uses the same signals as
@@ -410,48 +418,9 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
             scores = gbm.predict(X, raw_score=True)
 
         # Post-scoring penalties for clear anti-synergy patterns
-        cmdr_subtypes = cmdr_ctx.cmdr_subtypes or set()
-        cmdr_profile = ctx._forge_profiles.get(cmdr_oid, {})
-        cmdr_has_counters = 'P1P1' in cmdr_profile.get('counter_types', set())
-        cmdr_is_tribal = bool(cmdr_profile.get('trigger_filters', set()) & cmdr_subtypes)
-        _generic_req = {"card", "creature", "permanent", "self", "other",
-                        "nontoken", "token", "artifact", "enchantment", "land",
-                        "spell", "any"}
-
-        for i, (name, cd) in enumerate(cand_list):
-            oid = cd.get("oracle_id") or card_oid.get(name, "")
-            profile = ctx._forge_profiles.get(oid, {})
-            if cmdr_is_tribal:
-                excl = profile.get('excluded_subtypes', set())
-                if excl and (excl & cmdr_subtypes):
-                    scores[i] *= 0.3
-                req = profile.get('required_subtypes', set())
-                non_generic_req = req - _generic_req
-                if non_generic_req and not (non_generic_req & cmdr_subtypes):
-                    scores[i] *= 0.4
-                token_subs = ctx._token_subtypes.get(oid, set())
-                if token_subs and not (token_subs & cmdr_subtypes):
-                    scores[i] *= 0.5
-            # Temporary penalty: counter commanders + non-counter creatures
-            if cmdr_has_counters:
-                if "Creature" in cd.get("type_line", ""):
-                    profile_v = profile.get('verbs', set())
-                    if (not profile.get('has_p1p1', False) and
-                            not (profile_v & {'PutCounter', 'PutCounterAll', 'Proliferate', 'MoveCounter'})):
-                        scores[i] *= 0.6
-                if profile.get('counters_on_lands', False):
-                    scores[i] *= 0.4
-            # Card needs colors outside commander's color identity
-            # Hard filter: these cards are guaranteed useless
-            card_needs = ctx._deck_needs.get(oid, set())
-            if color_identity is not None and card_needs and _needs_wrong_colors(card_needs, color_identity):
-                scores[i] = -1e9
-                continue
-            # Card needs/hints at Type$ tags the commander can't provide
-            card_hints = ctx._deck_hints.get(oid, set())
-            cmdr_prov = cmdr_ctx.cmdr_has | cmdr_ctx.cmdr_hints
-            if _has_unmet_type_needs(card_needs, card_hints, cmdr_prov):
-                scores[i] *= 0.3
+        _apply_penalties(scores, cand_list, ctx, cmdr_ctx, cmdr_oid,
+                         color_identity,
+                         oid_fn=lambda name, cd: cd.get("oracle_id") or card_oid.get(name, ""))
 
         # Mechanical synergy bonus (same as _score_commander path)
         _apply_mechanical_bonus(scores, cand_list, ctx, cmdr_ctx, cmdr_oid)
