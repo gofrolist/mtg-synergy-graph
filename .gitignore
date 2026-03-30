@@ -6,7 +6,7 @@ data/tags.db
 data/*_candidates.json
 data/*_synergy_viz.html
 
-# Forge data (downloaded by import_forge.py)
+# Forge data (downloaded by scripts/import_forge.py)
 data/forge/
 
 # Commander Spellbook cache
@@ -26,7 +26,7 @@ data/edge_adj_cache.npz
 data/edge_adj_cache.pkl
 data/recommend_cache/
 
-# EDHREC data (fetched by fetch_edhrec_all.py)
+# EDHREC data (fetched by scripts/fetch_edhrec_all.py)
 data/edhrec_commanders/
 
 # Legacy artifacts (no longer generated)

@@ -56,7 +56,7 @@ def build_from_commander(commander_name: str, top_n: int = 30):
     5. Group and display by strategy
     """
     import sqlite3
-    from tag_db import DB_PATH
+    from mtg_synergy.tag_db import DB_PATH
 
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row

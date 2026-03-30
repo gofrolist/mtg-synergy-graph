@@ -3,7 +3,7 @@ import json
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-import tag_db
+from mtg_synergy import tag_db
 
 
 def test_tribal_cleanup_removes_false_positives(tmp_db):

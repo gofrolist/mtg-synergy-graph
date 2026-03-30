@@ -4,12 +4,14 @@ import os
 import pytest
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+_project_root = os.path.dirname(os.path.dirname(__file__))
+sys.path.insert(0, _project_root)
+sys.path.insert(0, os.path.join(_project_root, "scripts"))
 
 @pytest.fixture
 def tmp_db(tmp_path):
     """Create a temporary SQLite DB with the full schema for testing."""
-    import tag_db
+    from mtg_synergy import tag_db
     db_path = str(tmp_path / "test_tags.db")
     conn = sqlite3.connect(db_path)
     conn.executescript(tag_db.SCHEMA)

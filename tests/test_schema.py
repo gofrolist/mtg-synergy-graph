@@ -2,7 +2,7 @@ import sqlite3
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-import tag_db
+from mtg_synergy import tag_db
 
 
 def test_new_tables_exist(tmp_db):

@@ -15,7 +15,7 @@ import json
 import os
 import sqlite3
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
 DB_PATH = os.path.join(DATA_DIR, "tags.db")
 
 SCHEMA = """

@@ -12,7 +12,7 @@ import os
 import sys
 
 
-DATA_FILE = os.path.join(os.path.dirname(__file__), "data", "oracle_cards.json")
+DATA_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "oracle_cards.json")
 
 
 def _load_cards():

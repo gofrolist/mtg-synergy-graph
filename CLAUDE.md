@@ -69,41 +69,41 @@ CAUSAL GRAPH:
 Forge model finds mechanical synergies from Forge data alone (no EDHREC at inference).
 Evaluation: compare our top 30 recommendations against EDHREC's "High Synergy Cards" section.
 
-Use `compare_edhrec.py --commander "Name"` or `--all` to evaluate.
+Use `scripts/compare_edhrec.py --commander "Name"` or `--all` to evaluate.
 
 ## Common Commands
 
 ```bash
 # === DATA PIPELINE ===
-python3 download_cards.py                  # Refresh Scryfall data (~150MB)
-python3 import_forge.py --download --import  # Update Forge ability data
-python3 build_graph.py --rebuild   # Build causal interaction graph from Forge (~17M edges)
-python3 build_graph.py --stats             # Graph stats
-python3 strategy_detector.py --populate    # Assign strategies
-python3 fetch_spellbook.py                 # Fetch 82k combos
+python3 scripts/download_cards.py                  # Refresh Scryfall data (~150MB)
+python3 scripts/import_forge.py --download --import  # Update Forge ability data
+python3 scripts/build_graph.py --rebuild   # Build causal interaction graph from Forge (~17M edges)
+python3 scripts/build_graph.py --stats             # Graph stats
+python3 scripts/strategy_detector.py --populate    # Assign strategies
+python3 scripts/fetch_spellbook.py                 # Fetch 82k combos
 
 # === EDHREC data ===
-python3 fetch_edhrec_all.py                    # Fetch next 500 new commanders (synergy + avg decks)
-python3 fetch_edhrec_all.py --max 2000         # Fetch up to 2000 new commanders
-python3 fetch_edhrec_all.py --refresh-top 200  # Re-fetch top 200 popular commanders (stale data)
-python3 fetch_edhrec_all.py --refresh          # Re-fetch ALL existing commanders
-python3 fetch_edhrec_all.py --stats            # Show coverage stats
+python3 scripts/fetch_edhrec_all.py                    # Fetch next 500 new commanders (synergy + avg decks)
+python3 scripts/fetch_edhrec_all.py --max 2000         # Fetch up to 2000 new commanders
+python3 scripts/fetch_edhrec_all.py --refresh-top 200  # Re-fetch top 200 popular commanders (stale data)
+python3 scripts/fetch_edhrec_all.py --refresh          # Re-fetch ALL existing commanders
+python3 scripts/fetch_edhrec_all.py --stats            # Show coverage stats
 
 # === Forge model (LightGBM LambdaRank) ===
-python3 train_fusion_model.py --forge-only     # Train forge GBM (cached features, parallel folds, ~3 min)
-python3 train_fusion_model.py --forge-only --rebuild-features  # Rebuild features (shared ctx, 8 workers) + train (~7 min)
-python3 train_fusion_model.py --forge-only --quick             # Single-fold fast iteration (~2 min)
-python3 train_fusion_model.py --forge-only --tune              # Parallel HP search + train (~12 min)
+python3 scripts/train_fusion_model.py --forge-only     # Train forge GBM (cached features, parallel folds, ~3 min)
+python3 scripts/train_fusion_model.py --forge-only --rebuild-features  # Rebuild features (shared ctx, 8 workers) + train (~7 min)
+python3 scripts/train_fusion_model.py --forge-only --quick             # Single-fold fast iteration (~2 min)
+python3 scripts/train_fusion_model.py --forge-only --tune              # Parallel HP search + train (~12 min)
 
 # === Recommendations ===
-python3 synergy_graph.py --commander "Krenko, Mob Boss" --recommend     # Recommend cards (GBM + mechanical bonus)
-python3 synergy_graph.py --commander "Krenko, Mob Boss" --recommend --top 10
-python3 synergy_graph.py --commander "Krenko, Mob Boss" --gems         # Hidden gems (pure mechanical, no popularity)
-python3 synergy_graph.py --commander "Krenko, Mob Boss" --combos       # Combo detection
+python3 scripts/synergy_graph.py --commander "Krenko, Mob Boss" --recommend     # Recommend cards (GBM + mechanical bonus)
+python3 scripts/synergy_graph.py --commander "Krenko, Mob Boss" --recommend --top 10
+python3 scripts/synergy_graph.py --commander "Krenko, Mob Boss" --gems         # Hidden gems (pure mechanical, no popularity)
+python3 scripts/synergy_graph.py --commander "Krenko, Mob Boss" --combos       # Combo detection
 
 # === Comparison & validation ===
-python3 compare_edhrec.py --commander "Krenko, Mob Boss"  # Single commander vs EDHREC
-python3 compare_edhrec.py --all --quiet                    # All commanders summary
+python3 scripts/compare_edhrec.py --commander "Krenko, Mob Boss"  # Single commander vs EDHREC
+python3 scripts/compare_edhrec.py --all --quiet                    # All commanders summary
 
 # Tests
 uv run pytest tests/ -v                        # Run all tests
@@ -114,34 +114,34 @@ uv run pytest tests/ -v                        # Run all tests
 ### Enrichment Pipeline
 
 ```
-Scryfall API → download_cards.py → data/oracle_cards.json (36k cards)
-                                        ↓
-                    import_forge.py → forge_abilities + forge_name_map tables
-                                        ↓
-                    build_graph.py --rebuild → interaction_edges table (17.1M causal edges, 30 event types)
-                                        ↓
-                    strategy_detector.py → card_strategies table
-                                        ↓
-                    fetch_spellbook.py → spellbook_combos table (82k combos)
-                                        ↓
-                    fetch_edhrec_all.py → edhrec_card_synergy table (733k pairs, 2,761 cmdrs)
-                                        ↓
-                    train_fusion_model.py → data/fusion_model_forge.lgb
-                                        ↓
-                              synergy_graph.py --deck <name>
+Scryfall API → scripts/download_cards.py → data/oracle_cards.json (36k cards)
+                                                ↓
+                    scripts/import_forge.py → forge_abilities + forge_name_map tables
+                                                ↓
+                    scripts/build_graph.py --rebuild → interaction_edges table (17.1M causal edges, 30 event types)
+                                                ↓
+                    scripts/strategy_detector.py → card_strategies table
+                                                ↓
+                    scripts/fetch_spellbook.py → spellbook_combos table (82k combos)
+                                                ↓
+                    scripts/fetch_edhrec_all.py → edhrec_card_synergy table (733k pairs, 2,761 cmdrs)
+                                                ↓
+                    scripts/train_fusion_model.py → data/fusion_model_forge.lgb
+                                                ↓
+                              scripts/synergy_graph.py --deck <name>
                               (color filter → forge GBM → causal graph)
 ```
 
 ### New-set update workflow
 
 ```bash
-python3 download_cards.py                               # 1. Refresh Scryfall
-python3 import_forge.py --download --import             # 2. Update Forge data
-python3 build_graph.py --rebuild                # 3. Rebuild causal graph
-python3 strategy_detector.py --populate                 # 4. Strategies
-python3 fetch_spellbook.py                              # 5. Refresh combos
-python3 fetch_edhrec_all.py --max 2000 --refresh-top 200  # 6. Refresh EDHREC (new + top 200 stale)
-python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forge model (~7 min, $0)
+python3 scripts/download_cards.py                               # 1. Refresh Scryfall
+python3 scripts/import_forge.py --download --import             # 2. Update Forge data
+python3 scripts/build_graph.py --rebuild                # 3. Rebuild causal graph
+python3 scripts/strategy_detector.py --populate                 # 4. Strategies
+python3 scripts/fetch_spellbook.py                              # 5. Refresh combos
+python3 scripts/fetch_edhrec_all.py --max 2000 --refresh-top 200  # 6. Refresh EDHREC (new + top 200 stale)
+python3 scripts/train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forge model (~7 min, $0)
 ```
 
 ### DB Schema (data/tags.db)
@@ -217,7 +217,7 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
   Generic staples (>30% frequency) demoted from grade 4/5 to 3
   Commander-illegal cards filtered from negative pool
   3:1 negative ratio, 3-tier sampling: 1/3 strategy/subtype, 1/3 tag overlap, 1/3 random
-- Training: `python3 train_fusion_model.py --forge-only --rebuild-features` (~7 min)
+- Training: `python3 scripts/train_fusion_model.py --forge-only --rebuild-features` (~7 min)
   Feature build: shared ForgeFeatureContext via fork pool (8 workers, ~17s)
   CV folds: 3 folds trained in parallel via ProcessPoolExecutor (thread-pinned)
   Batch features: vectorized array indexing for ~50 features, loop for ~35
@@ -240,7 +240,7 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
 - GBM: LambdaRank, num_leaves=767, lr=0.025, n_estimators=1000 (early_stop=40),
     label_gain=[0,1,3,6,15,30], bagging_freq=5, colsample_bytree=0.6, feature_fraction_bynode=0.9
 
-### Recommendation Pipeline (synergy_graph.py --commander "Name" --recommend)
+### Recommendation Pipeline (scripts/synergy_graph.py --commander "Name" --recommend)
 
 ```
 1. Candidate selection: Color-identity filter → ALL legal cards (no tower, no embeddings)
@@ -253,7 +253,7 @@ python3 train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forg
 Total time: ~3s (with adjacency cache) / ~7s (first run, builds cache)
 ```
 
-### Hidden Gem Engine (synergy_graph.py --commander "Name" --gems)
+### Hidden Gem Engine (scripts/synergy_graph.py --commander "Name" --gems)
 
 Pure mechanical reasoning — no GBM model, no popularity bias.
 Scores cards by: mechanics vector dot products (produces↔consumes),
@@ -321,24 +321,24 @@ mechanically-synergistic cards that nobody plays.
 | `src/mtg_synergy/analysis/strategy.py` | Strategy detection, candidate filtering, commander builds |
 | `src/mtg_synergy/causal/verb_event_map.py` | Forge verb → trigger event mapping (extracted from Java source) |
 
-### Root-level scripts (pipelines + entry points)
+### `scripts/` directory (pipelines + entry points)
 
 | File | Purpose |
 |---|---|
-| `synergy_graph.py` | Thin wrapper — re-exports from `mtg_synergy/`, CLI entry point |
-| `train_fusion_model.py` | Forge LambdaRank GBM training + feature cache rebuild |
-| `compare_edhrec.py` | Compare recommendations vs EDHREC High Synergy section |
-| `strategy_detector.py` | Rule-based strategy detection |
-| `tag_db.py` | SQLite DB card query utilities + Scryfall tagger integration |
-| `fetch_spellbook.py` | Commander Spellbook API fetcher |
-| `build_graph.py` | Causal interaction graph builder CLI (--forge --rebuild, --stats) |
-| `import_forge.py` | Forge ability data importer |
-| `fetch_edhrec_all.py` | Fetch EDHREC synergy + avg decks (concurrent, refresh support) |
+| `scripts/synergy_graph.py` | Thin wrapper — re-exports from `mtg_synergy/`, CLI entry point |
+| `scripts/train_fusion_model.py` | Forge LambdaRank GBM training + feature cache rebuild |
+| `scripts/compare_edhrec.py` | Compare recommendations vs EDHREC High Synergy section |
+| `scripts/strategy_detector.py` | Rule-based strategy detection |
+| `scripts/fetch_spellbook.py` | Commander Spellbook API fetcher |
+| `scripts/build_graph.py` | Causal interaction graph builder CLI (--forge --rebuild, --stats) |
+| `scripts/import_forge.py` | Forge ability data importer |
+| `scripts/fetch_edhrec_all.py` | Fetch EDHREC synergy + avg decks (concurrent, refresh support) |
+| `scripts/download_cards.py` | Scryfall bulk data downloader |
 
 ## Key Conventions
 
 - Cards keyed by `oracle_id` (Scryfall UUID) for dedup across reprints
-- `data/oracle_cards.json` is gitignored (~150MB); must run `download_cards.py` first
+- `data/oracle_cards.json` is gitignored (~150MB); must run `scripts/download_cards.py` first
 - API calls use `urllib.request` (no `requests` dependency)
 - Tribal tags auto-assigned from creature type_line (e.g., Human creature → tribal match)
 - CLI uses `--commander "Name"` (no deck config files)

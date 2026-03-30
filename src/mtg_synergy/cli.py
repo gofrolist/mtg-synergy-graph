@@ -1,9 +1,9 @@
 """CLI dispatcher for the MTG Synergy Graph toolkit.
 
 Usage:
-    python3 synergy_graph.py --commander "Krenko, Mob Boss" --recommend
-    python3 synergy_graph.py --commander "Krenko, Mob Boss" --recommend --top 10
-    python3 synergy_graph.py --commander "Krenko, Mob Boss" --combos
+    python3 scripts/synergy_graph.py --commander "Krenko, Mob Boss" --recommend
+    python3 scripts/synergy_graph.py --commander "Krenko, Mob Boss" --recommend --top 10
+    python3 scripts/synergy_graph.py --commander "Krenko, Mob Boss" --combos
 """
 
 import argparse
@@ -34,7 +34,7 @@ def run():
     if not args.recommend and not args.combos and not args.gems:
         parser.error("Must specify --recommend, --combos, or --gems")
 
-    from tag_db import get_cards_by_names, DB_PATH
+    from mtg_synergy.tag_db import get_cards_by_names, DB_PATH
 
     conn = sqlite3.connect(DB_PATH)
     cmdr_row = conn.execute(
@@ -51,6 +51,10 @@ def run():
     deck_set = {cmdr_name}
 
     # Detect strategies from commander
+    import sys as _sys, pathlib as _pathlib
+    _scripts_dir = str(_pathlib.Path(__file__).resolve().parent.parent.parent / "scripts")
+    if _scripts_dir not in _sys.path:
+        _sys.path.insert(0, _scripts_dir)
     from strategy_detector import detect_strategies
     active_strategies = set()
     if args.strategies == "auto":

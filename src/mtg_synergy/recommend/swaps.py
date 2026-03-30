@@ -26,7 +26,7 @@ def _classify_card_slot(name: str, cards, deck_types: set = None) -> str:
     Args:
         cards: list[dict] or dict[str, dict] (name->card lookup for efficiency).
     """
-    from card_db import CARD_DB, NAME_INDEX
+    from mtg_synergy.card_db import CARD_DB, NAME_INDEX
 
     INFRASTRUCTURE_ROLES = {"removal", "ramp", "protection", "draw", "tutor"}
 
