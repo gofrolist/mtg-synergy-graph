@@ -142,13 +142,16 @@ def _apply_penalties(scores, cand_list, ctx, cmdr_ctx, cmdr_oid,
             token_subs = ctx._token_subtypes.get(oid, set())
             if token_subs and not (token_subs & cmdr_subtypes):
                 scores[i] *= 0.5
-        # Temporary penalty: counter commanders + non-counter creatures
-        # (kept until functional fingerprints gain enough importance)
+        # Penalty: counter commanders + creatures that don't produce P1P1 counters
         if cmdr_has_counters:
             if "Creature" in cd.get("type_line", ""):
-                if (not profile.get('has_p1p1', False) and
-                        not (profile.get('verbs', set()) &
-                             {'PutCounter', 'PutCounterAll', 'Proliferate', 'MoveCounter'})):
+                card_has_p1p1 = profile.get('has_p1p1', False)
+                card_counter_verbs = profile.get('verbs', set()) & {
+                    'PutCounter', 'PutCounterAll', 'Proliferate', 'MoveCounter'}
+                # Card has counter verbs but wrong counter type (e.g. TIME, not P1P1)
+                card_counters = profile.get('counter_types', set())
+                card_puts_p1p1 = 'P1P1' in card_counters or not card_counters
+                if not card_has_p1p1 and not (card_counter_verbs and card_puts_p1p1):
                     scores[i] *= 0.6
             # Card places counters on lands, not creatures (earthbend etc.)
             if profile.get('counters_on_lands', False):
