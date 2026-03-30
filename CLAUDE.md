@@ -77,7 +77,7 @@ Use `compare_edhrec.py --commander "Name"` or `--all` to evaluate.
 # === DATA PIPELINE ===
 python3 download_cards.py                  # Refresh Scryfall data (~150MB)
 python3 import_forge.py --download --import  # Update Forge ability data
-python3 build_graph.py --forge --rebuild   # Build causal interaction graph from Forge (~17M edges)
+python3 build_graph.py --rebuild   # Build causal interaction graph from Forge (~17M edges)
 python3 build_graph.py --stats             # Graph stats
 python3 strategy_detector.py --populate    # Assign strategies
 python3 fetch_spellbook.py                 # Fetch 82k combos
@@ -118,7 +118,7 @@ Scryfall API → download_cards.py → data/oracle_cards.json (36k cards)
                                         ↓
                     import_forge.py → forge_abilities + forge_name_map tables
                                         ↓
-                    build_graph.py --forge → interaction_edges table (17.1M causal edges, 30 event types)
+                    build_graph.py --rebuild → interaction_edges table (17.1M causal edges, 30 event types)
                                         ↓
                     strategy_detector.py → card_strategies table
                                         ↓
@@ -137,7 +137,7 @@ Scryfall API → download_cards.py → data/oracle_cards.json (36k cards)
 ```bash
 python3 download_cards.py                               # 1. Refresh Scryfall
 python3 import_forge.py --download --import             # 2. Update Forge data
-python3 build_graph.py --forge --rebuild                # 3. Rebuild causal graph
+python3 build_graph.py --rebuild                # 3. Rebuild causal graph
 python3 strategy_detector.py --populate                 # 4. Strategies
 python3 fetch_spellbook.py                              # 5. Refresh combos
 python3 fetch_edhrec_all.py --max 2000 --refresh-top 200  # 6. Refresh EDHREC (new + top 200 stale)

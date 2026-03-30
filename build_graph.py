@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Build the causal interaction graph from parsed abilities."""
+"""Build the Forge-native causal interaction graph."""
 import argparse
 from mtg_synergy.db import get_connection
-from mtg_synergy.parse import load_parsed, ensure_parse_schema
-from mtg_synergy.causal import build_and_store_graph, ensure_causal_schema
+from mtg_synergy.parse import ensure_parse_schema
+from mtg_synergy.causal import ensure_causal_schema
 
 
 def _build_synthetic_edges(conn, idx, name_to_oid):
@@ -737,55 +737,44 @@ def _build_theme_synergy_edges(conn, name_to_oid):
     return total_theme
 
 
+def _build_forge_graph(conn):
+    """Build the full Forge-native causal interaction graph."""
+    from mtg_synergy.causal.forge_indexer import build_forge_index
+    from mtg_synergy.causal.forge_graph_builder import build_forge_edges
+    from mtg_synergy.causal import store_edges
+    print("Building Forge-native graph...")
+    name_to_oid = {}
+    for row in conn.execute("SELECT forge_name, oracle_id FROM forge_name_map"):
+        name_to_oid[row[0]] = row[1]
+    print(f"  Name mapping: {len(name_to_oid)} cards")
+    idx = build_forge_index(conn)
+    edges = build_forge_edges(idx, name_to_oid=name_to_oid)
+    count = store_edges(conn, edges)
+    print(f"  Forge edges: {count}")
+    syn_count = _build_synthetic_edges(conn, idx, name_to_oid)
+    print(f"  Synthetic edges: {syn_count}")
+    ent_count = _build_entity_presence_edges(conn, name_to_oid)
+    print(f"  Entity presence edges: {ent_count}")
+    pump_count = _build_continuous_pump_edges(conn, name_to_oid)
+    print(f"  Continuous pump edges: {pump_count}")
+    theme_count = _build_theme_synergy_edges(conn, name_to_oid)
+    print(f"  Theme synergy edges: {theme_count}")
+    print(f"Done: {count + syn_count + ent_count + pump_count + theme_count} total edges")
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--rebuild", action="store_true")
-    parser.add_argument("--forge", action="store_true", help="Build from Forge data (new system)")
+    parser.add_argument("--rebuild", action="store_true",
+                        help="Rebuild Forge-native causal graph")
+    parser.add_argument("--forge", action="store_true",
+                        help="(deprecated, same as --rebuild)")
     parser.add_argument("--stats", action="store_true")
     args = parser.parse_args()
     conn = get_connection()
     ensure_parse_schema(conn)
     ensure_causal_schema(conn)
-    if args.forge:
-        from mtg_synergy.causal.forge_indexer import build_forge_index
-        from mtg_synergy.causal.forge_graph_builder import build_forge_edges
-        from mtg_synergy.causal import store_edges
-        print("Building Forge-native graph...")
-        # Load name→oracle_id mapping so edges use oracle_ids
-        name_to_oid = {}
-        for row in conn.execute("SELECT forge_name, oracle_id FROM forge_name_map"):
-            name_to_oid[row[0]] = row[1]
-        print(f"  Name mapping: {len(name_to_oid)} cards")
-        idx = build_forge_index(conn)
-        edges = build_forge_edges(idx, name_to_oid=name_to_oid)
-        count = store_edges(conn, edges)
-        print(f"  Forge edges: {count}")
-
-        # Synthetic edges: SpellCast, Attacks, LandPlayed, ChangesZone+Battlefield
-        # Streamed directly to DB to avoid holding millions of edges in memory
-        syn_count = _build_synthetic_edges(conn, idx, name_to_oid)
-        print(f"  Synthetic edges: {syn_count}")
-
-        # Entity presence edges: token creators → scaling/sacrifice/tap cards
-        ent_count = _build_entity_presence_edges(conn, name_to_oid)
-        print(f"  Entity presence edges: {ent_count}")
-
-        # Continuous pump edges: lord/anthem effects → creatures they buff
-        pump_count = _build_continuous_pump_edges(conn, name_to_oid)
-        print(f"  Continuous pump edges: {pump_count}")
-
-        # Theme synergy edges: equipment, enchantress, defender, ETB doubler
-        theme_count = _build_theme_synergy_edges(conn, name_to_oid)
-        print(f"  Theme synergy edges: {theme_count}")
-        print(f"Done: {count + syn_count + ent_count + pump_count + theme_count} total edges")
-    elif args.rebuild:
-        rows = conn.execute("SELECT DISTINCT oracle_id FROM parsed_abilities").fetchall()
-        cards = {}
-        for (oid,) in rows:
-            cards[oid] = load_parsed(conn, oid)
-        print(f"Building graph from {len(cards)} cards...")
-        n_edges = build_and_store_graph(conn, cards)
-        print(f"Done: {n_edges} edges built")
+    if args.forge or args.rebuild:
+        _build_forge_graph(conn)
     elif args.stats:
         n_edges = conn.execute("SELECT COUNT(*) FROM interaction_edges").fetchone()[0]
         n_cards = conn.execute("SELECT COUNT(DISTINCT source_id) FROM interaction_edges").fetchone()[0]
