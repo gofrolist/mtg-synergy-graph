@@ -196,7 +196,6 @@ Total: ~3s (cached) / ~7s (first run)
 │
 ├── tag_db.py                  # SQLite DB query utilities
 ├── card_db.py                 # In-memory card lookup
-├── normalize_tags.py          # Tag vocabulary normalization
 │
 ├── src/mtg_synergy/
 │   ├── cli.py                 # CLI dispatcher
@@ -225,8 +224,7 @@ Total: ~3s (cached) / ~7s (first run)
 │   └── analysis/              # Deck analysis + strategy detection
 │
 ├── tests/                     # 363 tests
-├── data/                      # DB, models, caches (mostly gitignored)
-└── tag_registry.json          # Canonical tag vocabulary
+└── data/                      # DB, models, caches (mostly gitignored)
 ```
 
 ## Key Design Decisions

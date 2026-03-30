@@ -18,7 +18,7 @@ data/scryfall_function_tags.json
 # Update workflow temp files
 data/pending_*.json
 
-# Embeddings (regenerable via card_embeddings.py)
+# Legacy embeddings (no longer regenerated)
 data/embeddings.npy
 data/embeddings_index.json
 

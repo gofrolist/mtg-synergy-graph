@@ -328,14 +328,12 @@ mechanically-synergistic cards that nobody plays.
 | `synergy_graph.py` | Thin wrapper — re-exports from `mtg_synergy/`, CLI entry point |
 | `train_fusion_model.py` | Forge LambdaRank GBM training + feature cache rebuild |
 | `compare_edhrec.py` | Compare recommendations vs EDHREC High Synergy section |
-| `ability_parser.py` | Deterministic oracle text parser |
 | `strategy_detector.py` | Rule-based strategy detection |
 | `tag_db.py` | SQLite DB card query utilities + Scryfall tagger integration |
 | `fetch_spellbook.py` | Commander Spellbook API fetcher |
 | `build_graph.py` | Causal interaction graph builder CLI (--forge --rebuild, --stats) |
 | `import_forge.py` | Forge ability data importer |
 | `fetch_edhrec_all.py` | Fetch EDHREC synergy + avg decks (concurrent, refresh support) |
-| `fetch_edhrec_decks.py` | Legacy: fetch EDHREC average decklists only (use fetch_edhrec_all.py) |
 
 ## Key Conventions
 

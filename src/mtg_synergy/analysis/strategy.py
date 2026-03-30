@@ -46,74 +46,10 @@ def _detect_deck_types(cards: list[dict], deck_cards: set[str],
 
 
 
-def _find_embedding_candidates(deck_cards: list[dict], deck_oids: set[str],
-                               db_path: str, top_per_card: int = 3,
-                               min_similarity: float = 0.70) -> list[dict]:
-    """Find recommendation candidates via embedding similarity.
-
-    For each deck card, finds top-N most similar cards not already in the deck.
-    Returns deduplicated list of candidate cards loaded from DB.
-    """
-    try:
-        from card_embeddings import load_embeddings
-        import numpy as np
-    except ImportError:
-        return []
-
-    import os
-    emb_path = os.path.join(DATA_DIR, "embeddings.npy")
-    if not os.path.exists(emb_path):
-        return []
-
-    embeddings, oracle_ids = load_embeddings()
-    oid_to_idx = {oid: i for i, oid in enumerate(oracle_ids)}
-
-    # Get indices for deck cards
-    deck_indices = []
-    for card in deck_cards:
-        idx = oid_to_idx.get(card["oracle_id"])
-        if idx is not None:
-            deck_indices.append(idx)
-
-    if not deck_indices:
-        return []
-
-    # Compute average deck embedding for centroid-based search
-    deck_matrix = embeddings[np.array(deck_indices)]
-    deck_centroid = deck_matrix.mean(axis=0)
-    deck_centroid = deck_centroid / np.linalg.norm(deck_centroid)
-
-    # Find cards similar to the deck centroid
-    all_sims = embeddings @ deck_centroid
-
-    # Also find per-card similar cards (catches specific synergies)
-    candidate_oids = set()
-    for deck_idx in deck_indices:
-        card_sims = embeddings[deck_idx] @ embeddings.T
-        top_idx = np.argpartition(-card_sims, top_per_card + 1)[:top_per_card + 1]
-        for idx in top_idx:
-            oid = oracle_ids[idx]
-            if oid not in deck_oids and card_sims[idx] >= min_similarity:
-                candidate_oids.add(oid)
-
-    # Also add top centroid-similar cards
-    centroid_top = np.argpartition(-all_sims, 100)[:100]
-    for idx in centroid_top:
-        oid = oracle_ids[idx]
-        if oid not in deck_oids and all_sims[idx] >= min_similarity:
-            candidate_oids.add(oid)
-
-    if not candidate_oids:
-        return []
-
-    from tag_db import get_cards_by_oids
-    return get_cards_by_oids(list(candidate_oids), db_path)
-
-
 def build_from_commander(commander_name: str, top_n: int = 30):
     """Build a deck recommendation from scratch based on commander card alone.
 
-    1. Load commander from DB, read its provides/wants
+    1. Load commander from DB
     2. Extract creature types from commander's type_line
     3. Find all commander-legal cards in the commander's color identity
     4. Score each card by how well it connects to the commander's strategy

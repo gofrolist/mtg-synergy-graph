@@ -5,7 +5,7 @@ build-backend = "uv_build"
 [project]
 name = "mtg-synergy-graph"
 version = "0.1.0"
-description = "MTG EDH/Commander deck synergy analysis using LLM tags and card embeddings"
+description = "MTG EDH/Commander deck synergy analysis using Forge mechanics and LightGBM LambdaRank"
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "numpy>=2.4.3",
