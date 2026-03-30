@@ -1,416 +1,241 @@
 # MTG Synergy Graph
 
-Analyze Magic: The Gathering EDH/Commander deck synergies using LLM-generated card tags and a graph-based scoring engine.
+Analyze Magic: The Gathering EDH/Commander deck synergies using a LightGBM LambdaRank model trained on EDHREC data, powered by Forge game engine mechanics.
 
-The system tags cards with semantic roles (`provides`/`wants`) via local LLMs, stores them in a SQLite database, and builds synergy graphs to find combos, recommend cards, suggest swaps, and visualize deck relationships.
+The system extracts card abilities from MTG Forge's game engine, builds a 20M+ edge causal interaction graph, and trains a learning-to-rank model to recommend synergistic cards for any of 3,141+ commanders.
 
 ## Quick Start
 
 ```bash
-# 1. Download Scryfall bulk data (~150MB, required)
+# 1. Download Scryfall bulk data (~150MB)
 python3 download_cards.py
 
-# 2. Extract top cards by EDHREC popularity
-python3 top_cards_filter.py --top 10000
+# 2. Import Forge ability data
+python3 import_forge.py --download --import
 
-# 3. Tag cards with a local LLM (requires Ollama running)
-python3 batch_tagger.py --candidates data/top10000_candidates.json \
-    --provider ollama --model phi4:14b
+# 3. Build causal interaction graph (~20M edges)
+python3 build_graph.py --forge --rebuild
 
-# 4. Import tags into SQLite database
-python3 tag_db.py import data/top10000_tags.json
+# 4. Assign strategies
+python3 strategy_detector.py --populate
 
-# 5. Analyze a deck
-python3 synergy_graph.py --deck kyler --validate
-python3 synergy_graph.py --deck kyler --deck-view
-python3 synergy_graph.py --deck kyler --recommend
+# 5. Fetch EDHREC synergy data (training labels)
+python3 fetch_edhrec_all.py --max 500
+
+# 6. Train the model (~7 min)
+python3 train_fusion_model.py --forge-only --rebuild-features
+
+# 7. Get recommendations
+python3 synergy_graph.py --commander "Krenko, Mob Boss" --recommend
 ```
 
 ## Requirements
 
 - Python 3.10+
-- [Ollama](https://ollama.ai) with `phi4:14b` model (recommended for local tagging)
-- No pip dependencies required (stdlib only)
+- [uv](https://docs.astral.sh/uv/) (package manager)
+- No external API keys required (100% local)
 
 ```bash
-# Install Ollama model
-ollama pull phi4:14b
+# Install dependencies
+uv sync
+```
+
+## How It Works
+
+```
+FORGE MODEL (--recommend): Zero oracle text, pure mechanical synergy
+
+  1. Color-identity filter -> all legal cards for this commander
+  2. LightGBM LambdaRank scores every candidate (105 features):
+     - 29 profile fields per card from Forge abilities
+     - Causal graph features (edge counts, hub scores, 2-hop paths)
+     - Strategy cosine similarity
+     - Forge deck tag overlap (has/hints/needs)
+     - 33-dim functional fingerprints (produces/requires/amplifies/targets)
+     - 116-dim mechanics vectors (shared concept space)
+     - Counter/anthem/tribal distinction features
+  3. Post-scoring: anti-synergy penalties + mechanical synergy bonus
+  4. Top N results with clickable Scryfall links
+
+  NDCG@30 = 0.53 | Works for 3,141+ commanders | Day-1 new card evaluation
+```
+
+## Commands
+
+### Data Pipeline
+
+```bash
+python3 download_cards.py                    # Refresh Scryfall data (~150MB)
+python3 import_forge.py --download --import  # Update Forge ability data
+python3 build_graph.py --forge --rebuild     # Build causal graph (~20M edges)
+python3 strategy_detector.py --populate      # Assign strategies
+python3 fetch_spellbook.py                   # Fetch 82k combos
+```
+
+### EDHREC Data
+
+```bash
+python3 fetch_edhrec_all.py                    # Fetch next 500 new commanders
+python3 fetch_edhrec_all.py --max 2000         # Fetch up to 2000 new commanders
+python3 fetch_edhrec_all.py --refresh-top 200  # Re-fetch top 200 popular commanders
+python3 fetch_edhrec_all.py --stats            # Show coverage stats
+```
+
+### Model Training
+
+```bash
+python3 train_fusion_model.py --forge-only                     # Train (~3 min, cached features)
+python3 train_fusion_model.py --forge-only --rebuild-features  # Rebuild features + train (~7 min)
+python3 train_fusion_model.py --forge-only --quick             # Single-fold fast iteration (~2 min)
+python3 train_fusion_model.py --forge-only --tune              # Hyperparameter search (~12 min)
+```
+
+### Recommendations
+
+```bash
+python3 synergy_graph.py --commander "Krenko, Mob Boss" --recommend       # Top 30 recommendations
+python3 synergy_graph.py --commander "Krenko, Mob Boss" --recommend --top 10
+python3 synergy_graph.py --commander "Krenko, Mob Boss" --gems            # Hidden gems (no popularity bias)
+python3 synergy_graph.py --commander "Krenko, Mob Boss" --combos          # Combo detection
+```
+
+### Evaluation
+
+```bash
+python3 compare_edhrec.py --commander "Krenko, Mob Boss"  # Single commander vs EDHREC
+python3 compare_edhrec.py --all --quiet                    # All commanders summary
+```
+
+### Tests
+
+```bash
+uv run pytest tests/ -v    # Run all 363 tests
 ```
 
 ## Architecture
 
+### Enrichment Pipeline
+
 ```
-Scryfall API
-    |
-    v
-download_cards.py --> data/oracle_cards.json (bulk card data)
-    |
-    v
-top_cards_filter.py --> data/top10000_candidates.json (top EDH cards)
-    |
-    v
-batch_tagger.py --> data/top10000_tags.json (LLM-generated tags)
-    |
-    v
-tag_db.py import --> data/tags.db (SQLite, single source of truth)
-    |
-    v
-synergy_graph.py --deck <name>
-    |
-    +---> --deck-view     (synergy network within the deck)
-    +---> --recommend     (recommend cards from the 10k pool)
-    +---> --combos        (detect 3-4 card combos)
-    +---> --swaps         (suggest card swaps)
-    +---> --visualize     (interactive HTML graph)
-    +---> --validate      (test against curated synergy pairs)
+Scryfall API -> download_cards.py -> data/oracle_cards.json (36k cards)
+                                         |
+                     import_forge.py -> forge_abilities + forge_name_map tables
+                                         |
+                     build_graph.py --forge -> interaction_edges (20.6M causal edges)
+                                         |
+                     strategy_detector.py -> card_strategies table
+                                         |
+                     fetch_spellbook.py -> spellbook_combos (82k combos)
+                                         |
+                     fetch_edhrec_all.py -> edhrec_card_synergy (733k pairs, 2,724 cmdrs)
+                                         |
+                     train_fusion_model.py -> data/fusion_model_forge.lgb
+                                         |
+                               synergy_graph.py --commander "Name" --recommend
 ```
 
-## Commands Reference
-
-### Data Pipeline
-
-#### `download_cards.py` -- Download Scryfall Data
-
-Downloads the complete Scryfall oracle card database (~150MB).
+### New-Set Update Workflow
 
 ```bash
-python3 download_cards.py
+python3 download_cards.py                                          # 1. Refresh Scryfall
+python3 import_forge.py --download --import                        # 2. Update Forge data
+python3 build_graph.py --forge --rebuild                           # 3. Rebuild causal graph
+python3 strategy_detector.py --populate                            # 4. Strategies
+python3 fetch_spellbook.py                                         # 5. Refresh combos
+python3 fetch_edhrec_all.py --max 2000 --refresh-top 200          # 6. Refresh EDHREC
+python3 train_fusion_model.py --forge-only --rebuild-features     # 7. Retrain (~7 min, $0)
 ```
 
-#### `top_cards_filter.py` -- Extract Top Cards
+### DB Schema (data/tags.db)
 
-Extracts the top N cards by EDHREC rank from Scryfall data. Produces a candidates file for batch tagging.
+| Table | Rows | Purpose |
+|---|---|---|
+| cards | ~36k | Card metadata from Scryfall |
+| abilities | ~76k | Parsed oracle text abilities |
+| card_strategies | ~88k | Strategy assignments |
+| spellbook_combos | ~82k | Commander Spellbook combos |
+| spellbook_combo_cards | ~289k | Combo <-> card junction |
+| interaction_edges | ~20.6M | Causal edges: 30+ event types, synthetic, entity-presence, continuous pump, theme synergy |
+| commander_profiles | ~3.4k | Auto-inferred commander archetypes |
+| edhrec_card_synergy | ~733k | EDHREC synergy scores (2,724 commanders, 87% coverage) |
+| forge_abilities | ~72k | Forge ability data + SubAbility chain expansions |
+| forge_deck_tags | ~14k | Forge deck-building AI: has/hints/needs tags |
+| forge_name_map | ~31k | Forge card name -> oracle_id mapping |
 
-```bash
-python3 top_cards_filter.py --top 10000
-python3 top_cards_filter.py --top 5000 --output data/custom_candidates.json
+### Recommendation Pipeline
+
+```
+1. Candidate selection: color-identity filter -> all legal cards
+2. Score all candidates with GBM (batch predict, ~0.5s for 13k cards)
+3. Post-scoring: anti-synergy penalties + mechanical synergy bonus
+4. Sort and output top N with Scryfall hyperlinks
+Total: ~3s (cached) / ~7s (first run)
 ```
 
-#### `batch_tagger.py` -- LLM Card Tagger
-
-Tags cards with semantic roles using LLM APIs. Supports Ollama (local), OpenAI, and Anthropic. Crash-safe with resume support.
-
-```bash
-# Tag from candidates file (preferred)
-python3 batch_tagger.py --candidates data/top10000_candidates.json \
-    --provider ollama --model phi4:14b
-
-# Tag deck-specific candidates
-python3 batch_tagger.py --deck kyler --provider ollama --model phi4:14b
-
-# Cost estimate without calling API
-python3 batch_tagger.py --candidates data/top10000_candidates.json --dry-run
-
-# Use cloud API
-python3 batch_tagger.py --candidates data/top10000_candidates.json \
-    --provider openai --model gpt-4o
-```
-
-Each card gets tagged with:
-- **role**: enabler, threat, removal, ramp, draw, protection, utility
-- **provides**: what the card offers (e.g., `token-generation`, `counter-placement`)
-- **wants**: what board state benefits the card (e.g., `creature-etb`, `sacrifice-events`)
-
-#### `tag_db.py` -- SQLite Tag Database
-
-Imports tags into SQLite for fast querying. This is the single source of truth used by `synergy_graph.py`.
-
-```bash
-# Import tags
-python3 tag_db.py import data/top10000_tags.json
-
-# Show database stats
-python3 tag_db.py stats
-
-# Query cards by tag
-python3 tag_db.py query --provides token-generation
-python3 tag_db.py query --wants creature-etb
-```
-
-### Synergy Analysis
-
-#### `synergy_graph.py` -- Build and Query Synergy Graphs
-
-The main analysis tool. Loads deck cards from the SQLite DB and builds a synergy graph based on `provides`/`wants` relationships.
-
-```bash
-# Show top synergy edges
-python3 synergy_graph.py --deck kyler
-
-# Show synergies for a specific card
-python3 synergy_graph.py --deck kyler --card "Hardened Scales"
-
-# Synergy network within the deck
-python3 synergy_graph.py --deck kyler --deck-view
-
-# Recommend cards to add from the 10k pool
-python3 synergy_graph.py --deck krenko --recommend
-
-# Detect 3- and 4-card combos
-python3 synergy_graph.py --deck kyler --combos
-
-# Suggest card swaps
-python3 synergy_graph.py --deck kyler --swaps
-
-# Interactive HTML visualization (D3.js force graph)
-python3 synergy_graph.py --deck kyler --visualize
-
-# Validate against hand-curated synergy pairs
-python3 synergy_graph.py --deck kyler --validate
-
-# Export graph as JSON
-python3 synergy_graph.py --deck kyler --export
-
-# Combine flags
-python3 synergy_graph.py --deck krenko --deck-view --recommend --top 10
-
-# Override: use a JSON file instead of DB
-python3 synergy_graph.py --deck kyler --input data/custom_merged.json
-```
-
-### Tag Vocabulary
-
-#### `tags.py` -- Tag Registry CLI
-
-Manage the canonical tag vocabulary in `tag_registry.json`.
-
-```bash
-# List all tags by usage count
-python3 tags.py list
-
-# Search for tags
-python3 tags.py search protection
-
-# Show full details for a tag
-python3 tags.py show board-protection
-
-# Find similar/duplicate tags
-python3 tags.py similar protection
-
-# Rebuild counts from the 10k tags file
-python3 tags.py sync
-
-# Add a new tag
-python3 tags.py add flash-grant "Gives flash to spells or permanents"
-```
-
-#### `normalize_tags.py` -- Tag Normalization
-
-Maps freeform LLM tags to canonical vocabulary. Runs automatically during DB import.
-
-```bash
-# Show normalization stats
-python3 normalize_tags.py --stats
-
-# Show unmapped tags
-python3 normalize_tags.py --unmapped
-
-# Normalize a specific file
-python3 normalize_tags.py --input data/top10000_tags.json --stats
-```
-
-### New Set Updates
-
-#### `update_cards.py` -- New-Set Update Workflow
-
-Detects new cards from set releases and oracle text changes (errata), tags them, and updates the database. Run this whenever a new MTG set is released.
-
-```bash
-# Check what changed (dry run)
-python3 update_cards.py --check
-
-# Check with verbose errata diff
-python3 update_cards.py --check --verbose
-
-# Full pipeline: download fresh data, diff, tag new cards, import
-python3 update_cards.py --update
-
-# Expand the DB to top 15k cards
-python3 update_cards.py --update --top 15000
-
-# Skip download if you already updated oracle_cards.json
-python3 update_cards.py --update --skip-download
-
-# Show only errata changes
-python3 update_cards.py --errata-only
-
-# Resume tagging after a crash
-python3 update_cards.py --tag-only
-
-# Merge an external tags file into the DB
-python3 update_cards.py --merge data/custom_tags.json
-```
-
-**Typical new-set workflow:**
-```bash
-# 1. Download fresh Scryfall data (includes new set)
-python3 download_cards.py
-
-# 2. Check what's new
-python3 update_cards.py --check -v
-
-# 3. Run the full update
-python3 update_cards.py --update --skip-download
-
-# 4. Verify decks still work
-python3 synergy_graph.py --deck kyler --validate
-```
-
-### Optional Tools
-
-#### `scryfall_tagger.py` -- Scryfall Community Tags
-
-Fetches community-curated function tags from tagger.scryfall.com via GraphQL.
-
-```bash
-python3 scryfall_tagger.py              # fetch tags for candidates
-python3 scryfall_tagger.py --dry-run    # preview without fetching
-```
-
-#### `rules_fetcher.py` / `rules_index.py` -- RAG Pipeline
-
-Downloads MTG rules, chunks them, and builds an embedding index for rule-aware tagging.
-
-```bash
-python3 rules_fetcher.py    # download + chunk MTG rules
-python3 rules_index.py      # embed chunks via Ollama
-```
-
-#### `llm_compare.py` -- Model Comparison
-
-Benchmark local LLM models against each other on tagging quality.
-
-```bash
-python3 llm_compare.py --models qwen3:8b gemma3:12b phi4:14b
-```
-
-#### `regression_test.py` -- Regression Tests
-
-Validate tag quality against a golden dataset of manually verified cards.
-
-```bash
-python3 regression_test.py --mode static    # validate tags file vs golden
-python3 regression_test.py --mode scryfall  # validate Scryfall tags vs golden
-python3 regression_test.py --mode live      # call API + validate
-```
-
-## Adding a New Deck
-
-1. Create a deck config in `decks/`:
-
-```python
-# decks/newdeck.py
-COMMANDER = "Commander Name"
-EDHREC_SLUG = "commander-name"
-COLOR_IDENTITY = {"W", "U"}
-
-DECKLIST = [
-    "Card Name 1",
-    "Card Name 2",
-    # ... 99 cards
-]
-
-SYNERGY_PAIRS = [
-    ("Card A", "Card B", "why they synergize"),
-    # 20-25 pairs for validation
-]
-
-SUPPLEMENT_FILTERS = []
-```
-
-2. Register it in `decks/__init__.py`
-
-3. Ensure deck cards are in the DB (check and tag missing ones):
-
-```bash
-# Check coverage
-python3 -c "
-from decks import load_deck
-from tag_db import get_cards_by_names
-deck = load_deck('newdeck')
-cards = get_cards_by_names(deck.DECKLIST + [deck.COMMANDER])
-print(f'{len(cards)}/{len(deck.DECKLIST)+1} cards in DB')
-"
-
-# Tag any missing cards, then re-import
-python3 tag_db.py import data/top10000_tags.json
-```
-
-4. Run analysis:
-
-```bash
-python3 synergy_graph.py --deck newdeck --validate
-python3 synergy_graph.py --deck newdeck --deck-view
-python3 synergy_graph.py --deck newdeck --recommend
-```
-
-## Growing the Card Database
-
-The 10k card database covers the most popular EDH cards. To expand:
-
-```bash
-# Extract more candidates
-python3 top_cards_filter.py --top 15000
-
-# Tag the new cards (resume-safe, skips already-tagged)
-python3 batch_tagger.py --candidates data/top15000_candidates.json \
-    --provider ollama --model phi4:14b
-
-# Re-import (upserts, safe to run multiple times)
-python3 tag_db.py import data/top15000_tags.json
-```
+### Combo Detection (3-tier)
+
+| Tier | Label | Detection |
+|------|-------|-----------|
+| Confirmed Infinite | `infinite-confirmed` | All combo cards match a Commander Spellbook entry |
+| Likely Combo | `combo-likely` | Circular trigger chain |
+| Synergy | `synergy` | Interaction without confirmed loop |
 
 ## Project Structure
 
 ```
 .
-├── README.md
-├── CLAUDE.md                  # AI assistant instructions
-├── .gitignore
-│
+├── synergy_graph.py           # CLI entry point (recommend, gems, combos)
+├── train_fusion_model.py      # LightGBM LambdaRank training
+├── compare_edhrec.py          # Evaluate recommendations vs EDHREC
+├── build_graph.py             # Causal interaction graph builder
+├── strategy_detector.py       # Rule-based strategy detection
 ├── download_cards.py          # Scryfall bulk data downloader
-├── top_cards_filter.py        # Extract top N cards by EDHREC rank
-├── batch_tagger.py            # LLM batch card tagger
-├── tag_db.py                  # SQLite tag database
-├── synergy_graph.py           # Synergy graph engine + CLI
+├── import_forge.py            # Forge ability data importer
+├── fetch_edhrec_all.py        # EDHREC synergy + avg deck fetcher
+├── fetch_spellbook.py         # Commander Spellbook API fetcher
 │
-├── update_cards.py            # New-set update workflow
-├── card_db.py                 # Scryfall card lookup (oracle_cards.json)
-├── prompt_builder.py          # LLM prompt construction
+├── tag_db.py                  # SQLite DB query utilities
+├── card_db.py                 # In-memory card lookup
 ├── normalize_tags.py          # Tag vocabulary normalization
-├── tags.py                    # Tag registry CLI
 │
-├── scryfall_tagger.py         # Scryfall community tag fetcher
-├── rules_fetcher.py           # MTG rules downloader + chunker
-├── rules_index.py             # Rules embedding index builder
-├── rules_retriever.py         # Rules RAG retrieval
-├── llm_compare.py             # LLM model benchmarking
-├── regression_test.py         # Tag quality regression tests
+├── src/mtg_synergy/
+│   ├── cli.py                 # CLI dispatcher
+│   ├── config.py              # Paths, thresholds, DB settings
+│   ├── db.py                  # DB connection factory
+│   ├── recommend/
+│   │   ├── engine.py          # recommend_cards() pipeline
+│   │   ├── scoring.py         # Color filter, GBM scoring, mechanical bonus
+│   │   ├── forge_features.py  # 105-feature computation (ForgeFeatureContext)
+│   │   ├── mechanics_vectors.py  # 116-dim shared concept space
+│   │   ├── hidden_gems.py     # Pure mechanical synergy (no popularity)
+│   │   ├── swaps.py           # Card swap suggestions
+│   │   ├── affinity.py        # Commander affinity scoring
+│   │   └── commander_profile.py  # Auto-infer commander archetype
+│   ├── causal/
+│   │   ├── __init__.py        # DB storage, CausalContext, anti-synergy
+│   │   ├── graph_builder.py   # Build causal edges from parsed abilities
+│   │   ├── forge_graph_builder.py  # Build edges from Forge data
+│   │   ├── indexer.py         # Index cards by events produced/consumed
+│   │   └── verb_event_map.py  # Forge verb -> trigger event mapping
+│   ├── parse/
+│   │   ├── __init__.py        # parse_card() pipeline
+│   │   ├── forge_import.py    # Forge DSL import with SVar resolution
+│   │   └── ...                # AST types, parsers, resolvers
+│   ├── combos/                # Combo detection + anti-synergy
+│   └── analysis/              # Deck analysis + strategy detection
 │
-├── corrections.json           # LLM prompt corrections for known errors
-├── golden_cards.json          # Golden dataset for validation
-├── tag_registry.json          # Canonical tag vocabulary
-│
-├── data/
-│   ├── top10000_tags.json     # Canonical tagged cards (tracked in git)
-│   ├── tags.db                # SQLite database (gitignored, regenerable)
-│   ├── oracle_cards.json      # Scryfall bulk data (gitignored, ~150MB)
-│   └── ...                    # Other generated data files
-│
-└── decks/
-    ├── __init__.py            # Deck loader
-    ├── kyler.py               # Kyler GW Humans/Counters
-    ├── krenko.py              # Krenko mono-R Goblins/Combo
-    └── yshtola.py             # Y'Shtola WUB Spellslinger/Drain
+├── tests/                     # 363 tests
+├── data/                      # DB, models, caches (mostly gitignored)
+└── tag_registry.json          # Canonical tag vocabulary
 ```
 
-## Current Validation Scores
+## Key Design Decisions
 
-| Deck | Score | Archetype |
-|------|-------|-----------|
-| Kyler | 24/25 (96%) | GW Humans / +1/+1 Counters |
-| Krenko | 24/25 (96%) | Mono-R Goblins / Combo |
-| Y'Shtola | 20/25 (80%) | WUB Spellslinger / Drain |
+- **100% Forge-native**: No oracle text parsing, no embeddings, no neural networks. All features derived from Forge game engine data.
+- **LambdaRank**: Learning-to-rank optimizes directly for recommendation ordering (NDCG), not classification.
+- **EDHREC as training signal only**: Model learns from EDHREC synergy scores but can evaluate any commander, including those without EDHREC data.
+- **Day-1 new cards**: Set `EDHREC_FREE=1` for pure mechanical inference (~7% lower NDCG but works for cards with zero play data).
+- **Cards keyed by `oracle_id`**: Scryfall UUID deduplicates across reprints.
 
 ## License
 
