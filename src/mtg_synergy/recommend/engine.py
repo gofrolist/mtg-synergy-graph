@@ -111,53 +111,51 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
         info["pct"] = round(info["total"] / max_score * 100, 1)
 
     # --- Output ---
-    print(f"\n{'=' * 70}")
-    header = f"TOP {top_n} RECOMMENDED CARDS (not in deck)"
+    print(f"\n{'=' * 80}")
+    header = f"TOP {top_n} RECOMMENDED CARDS"
     if active_strategies:
-        header += f" | strategies: {', '.join(sorted(active_strategies))}"
+        header += f" | {', '.join(sorted(active_strategies))}"
     print(header)
-    if deck_types:
-        print(f"  Tribal boost: {', '.join(sorted(deck_types))} (+30%)")
-    print(f"{'=' * 70}")
+    print(f"{'=' * 80}")
 
-    # Show combo completions first
+    # Combo completions banner
     completions = [(c, i) for c, i in ranked if i.get("combo_completion")]
     if completions:
-        print(f"\n  COMBO COMPLETIONS (1 card away from confirmed infinite):")
-        for card, info in completions[:5]:
+        print(f"\n  COMBO COMPLETIONS:")
+        for card, info in completions[:3]:
             matching = [pc for pc in partial_combos
                         if card_oid_lookup.get(card) in pc.get("missing_oids", [])]
-            for pc in matching[:2]:
-                print(f"    {' + '.join(pc['present_cards'])} + [{card}]")
-                print(f"      -> {pc['result']}")
+            for pc in matching[:1]:
+                print(f"    {' + '.join(pc['present_cards'])} + [{card}] → {pc['result']}")
         print()
 
+    # Column header
+    print(f"  {'#':>3s}  {'Name':<35s}  {'Type':<28s}  {'CMC':>3s}  {'Score':>6s}")
+    print(f"  {'─' * 3}  {'─' * 35}  {'─' * 28}  {'─' * 3}  {'─' * 6}")
+
     for rank_idx, (card, info) in enumerate(ranked[:top_n], 1):
-        partners = sorted(info["partners"], key=lambda x: x[1], reverse=True)
-        multi = f" ({info['multi_sig']} multi-signal)" if info["multi_sig"] else ""
         meta = card_meta.get(card, {})
         type_line = meta.get("type_line", "")
         cmc = meta.get("cmc", 0)
-        tribal = " [tribal]" if info.get("tribal_match") else ""
-        combo = " [COMBO]" if info.get("combo_completion") else ""
-        strat_rel = info.get("strategy_rel")
-        strat_str = f" [strat*{strat_rel:.1f}]" if strat_rel and strat_rel != 1.0 else ""
-        high_cmc = " [high CMC]" if info.get("high_cmc") else ""
-        affinity = info.get("commander_affinity", 0)
-        affinity_str = f" [cmdr:{affinity:.0f}]" if affinity > 0 else ""
-        pct = info["pct"]
-        bar_len = round(pct / 5)
-        bar = "\u2588" * bar_len + "\u2591" * (20 - bar_len)
+        score = info["total"]
+        tags = ""
+        if info.get("combo_completion"):
+            tags += " *"
+
+        # Shorten type_line: remove "Legendary " prefix, truncate
+        short_type = type_line.replace("Legendary ", "L ")
+        if len(short_type) > 28:
+            short_type = short_type[:27] + "…"
+
+        # OSC 8 clickable Scryfall link
         scryfall_url = f"https://scryfall.com/search?q=!%22{quote(card, safe='')}%22"
         osc_name = f"\033]8;;{scryfall_url}\033\\{card}\033]8;;\033\\"
-        print(f"\n  {rank_idx:3d}. {pct:5.1f}% {bar} {osc_name}{tribal}{combo}{high_cmc}")
-        partner_str = f" | {len(partners)} partners{multi}" if partners else ""
-        print(f"    {type_line} | CMC {cmc}{partner_str}")
-        for partner, score, sigs in partners[:5]:
-            sig = f"{sigs}sig" if sigs > 1 else "1sig"
-            print(f"    <-> {partner:<30} ({score:.1f}, {sig})")
-        if len(partners) > 5:
-            print(f"    ... and {len(partners) - 5} more")
+        # Pad the visible name to 35 chars (link escape chars are invisible)
+        pad = max(0, 35 - len(card))
+        padded_name = osc_name + " " * pad
+
+        cmc_str = f"{cmc:3.0f}" if cmc == int(cmc) else f"{cmc:3.1f}"
+        print(f"  {rank_idx:3d}  {padded_name}  {short_type:<28s}  {cmc_str}  {score:6.1f}{tags}")
 
 
 def _deck_card_scores(graph: dict, deck_cards: set[str]) -> dict:
