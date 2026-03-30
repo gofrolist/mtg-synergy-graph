@@ -64,7 +64,6 @@ data/edge_index_cache.npz
 data/edge_adj_cache.pkl
 data/embeddings_normed_f16.npy
 data/forge_features_cache.npz
-data/forge_cmdr_pop_cache.npz
 data/forge_features_cache.npz.bak
 data/forge_features_cache.npz.bak2
 data/forge/
