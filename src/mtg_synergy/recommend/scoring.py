@@ -105,6 +105,95 @@ def _has_unmet_type_needs(card_needs: set, card_hints: set,
     return not bool(type_reqs & cmdr_provides)
 
 
+def _apply_mechanical_bonus(scores, cand_list, ctx, cmdr_ctx, cmdr_oid):
+    """Boost cards with strong mechanical interaction the GBM may underweight.
+
+    Applies a multiplicative bonus (1.0-1.15) based on:
+    - Mechanics vector produces↔consumes alignment
+    - Verb→trigger alignment (card produces events commander triggers on)
+    - Creature ETB / sacrifice / spellcast pattern matches
+    """
+    cmdr_profile = ctx._forge_profiles.get(cmdr_oid, {})
+    cmdr_produces = ctx._mech_produces.get(cmdr_oid)
+    cmdr_consumes = ctx._mech_consumes.get(cmdr_oid)
+    cmdr_verbs = cmdr_profile.get('verbs', set())
+    cmdr_triggers = cmdr_profile.get('triggers', set())
+    cmdr_trigger_filters = cmdr_profile.get('trigger_filters', set())
+
+    # Pre-compute commander flags
+    cmdr_makes_creatures = bool(cmdr_verbs & {'Token', 'Animate', 'Manifest'})
+    cmdr_triggers_etb = ('ChangesZone' in cmdr_triggers and
+                         bool(cmdr_trigger_filters & {'creature', 'permanent', 'nontoken'}))
+    cmdr_death_trigger = (
+        ('ChangesZone' in cmdr_triggers and 'creature' in cmdr_trigger_filters) or
+        'Sacrificed' in cmdr_triggers or 'Destroyed' in cmdr_triggers
+    )
+    cmdr_spellcast = 'SpellCast' in cmdr_triggers
+
+    for i, (name, cd) in enumerate(cand_list):
+        if scores[i] <= 0:
+            continue
+
+        oid = cd.get("oracle_id", "")
+        profile = ctx._forge_profiles.get(oid, {})
+        if not profile:
+            continue
+
+        bonus = 0.0
+        card_verbs = profile.get('verbs', set())
+        card_triggers = profile.get('triggers', set())
+        card_trigger_filters = profile.get('trigger_filters', set())
+        tl = cd.get("type_line", "")
+
+        # Mechanics vector alignment
+        card_prod = ctx._mech_produces.get(oid)
+        card_cons = ctx._mech_consumes.get(oid)
+        if cmdr_consumes is not None and card_prod is not None:
+            fwd = float(np.dot(cmdr_consumes, card_prod))
+            if fwd > 0.2:
+                bonus += fwd * 0.05
+
+        if cmdr_produces is not None and card_cons is not None:
+            rev = float(np.dot(cmdr_produces, card_cons))
+            if rev > 0.2:
+                bonus += rev * 0.05
+
+        # Verb→trigger alignment
+        for v in card_verbs:
+            matching = ctx._verb_triggers.get(v, set())
+            if matching & cmdr_triggers:
+                bonus += 0.02
+                break
+        for v in cmdr_verbs:
+            matching = ctx._verb_triggers.get(v, set())
+            if matching & card_triggers:
+                bonus += 0.02
+                break
+
+        # Creature ETB synergy (bidirectional)
+        card_triggers_etb = ('ChangesZone' in card_triggers and
+                             bool(card_trigger_filters & {'creature', 'permanent', 'nontoken'}))
+        card_makes_creatures = bool(card_verbs & {'Token', 'Animate', 'Manifest'})
+        if (cmdr_makes_creatures and card_triggers_etb) or \
+           (cmdr_triggers_etb and card_makes_creatures):
+            bonus += 0.05
+
+        # Sacrifice outlet for death-trigger commanders
+        if cmdr_death_trigger and profile.get('_has_sac_cost', False):
+            bonus += 0.05
+
+        # Spellcast trigger match
+        if cmdr_spellcast and ("Instant" in tl or "Sorcery" in tl):
+            if not cmdr_trigger_filters or bool(
+                cmdr_trigger_filters & {t.lower() for t in tl.replace("\u2014", " ").split()}
+            ):
+                bonus += 0.03
+
+        # Apply as multiplicative bonus (capped at 15%)
+        if bonus > 0:
+            scores[i] *= (1.0 + min(bonus, 0.15))
+
+
 def _score_commander(cmdr_oid, cmdr_name, color_identity, deck_cards,
                      ctx, gbm, card_data, top_n=50):
     """Score all color-legal candidates for one commander. Returns ranked list of (name, score).
@@ -199,6 +288,11 @@ def _score_commander(cmdr_oid, cmdr_name, color_identity, deck_cards,
         cmdr_prov = cmdr_ctx.cmdr_has | cmdr_ctx.cmdr_hints
         if _has_unmet_type_needs(card_needs, card_hints, cmdr_prov):
             scores[i] *= 0.3
+
+    # Mechanical synergy bonus: boost cards with strong forge-mechanical
+    # interaction that the GBM may underweight. Uses the same signals as
+    # the hidden gem engine but as a mild re-ranking bonus (~5-15% of score).
+    _apply_mechanical_bonus(scores, cand_list, ctx, cmdr_ctx, cmdr_oid)
 
     # Rank and return top N
     ranked = sorted(zip([n for n, _ in cand_list], scores),
@@ -358,6 +452,9 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
             cmdr_prov = cmdr_ctx.cmdr_has | cmdr_ctx.cmdr_hints
             if _has_unmet_type_needs(card_needs, card_hints, cmdr_prov):
                 scores[i] *= 0.3
+
+        # Mechanical synergy bonus (same as _score_commander path)
+        _apply_mechanical_bonus(scores, cand_list, ctx, cmdr_ctx, cmdr_oid)
 
         for i, (name, _) in enumerate(cand_list):
             info = candidate_scores[name]
