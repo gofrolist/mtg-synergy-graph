@@ -702,10 +702,75 @@ class ForgeFeatureContext:
         ):
             self._enchantress_payoffs.add(row[0])
 
+        # ── Spellslinger theme sets ──
+        self._spell_payoff_cards = set()     # trigger on instant/sorcery casts
+        self._cost_reduction_cards = set()   # ReduceCost verb
+        self._spell_copy_cards = set()       # CopySpellAbility verb
+        self._graveyard_cast_cards = set()   # MayPlay + AffectedZone$ Graveyard
+
+        # Spell payoffs: SpellCast/SpellCastOrCopy triggers filtered to Instant/Sorcery
+        for row in conn.execute(
+            "SELECT DISTINCT fnm.oracle_id FROM forge_abilities fa "
+            "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+            "WHERE fa.trigger_mode IN ('SpellCast', 'SpellCastOrCopy') "
+            "AND (fa.trigger_filter LIKE '%Instant%' OR fa.trigger_filter LIKE '%Sorcery%')"
+        ):
+            self._spell_payoff_cards.add(row[0])
+
+        # Cost reduction cards
+        for row in conn.execute(
+            "SELECT DISTINCT fnm.oracle_id FROM forge_abilities fa "
+            "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+            "WHERE fa.verb = 'ReduceCost'"
+        ):
+            self._cost_reduction_cards.add(row[0])
+
+        # Spell copy cards
+        for row in conn.execute(
+            "SELECT DISTINCT fnm.oracle_id FROM forge_abilities fa "
+            "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+            "WHERE fa.verb = 'CopySpellAbility'"
+        ):
+            self._spell_copy_cards.add(row[0])
+
+        # Graveyard cast: MayPlay from graveyard
+        for row in conn.execute(
+            "SELECT DISTINCT fnm.oracle_id FROM forge_abilities fa "
+            "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+            "WHERE fa.raw_line LIKE '%MayPlay$ True%' "
+            "AND fa.raw_line LIKE '%AffectedZone$ Graveyard%'"
+        ):
+            self._graveyard_cast_cards.add(row[0])
+
+        # Cards with Affected$ Instant/Sorcery (grants abilities to spells,
+        # e.g., Kess gives flashback to instants/sorceries in graveyard)
+        self._affects_spells_cards = set()
+        for row in conn.execute(
+            "SELECT DISTINCT fnm.oracle_id FROM forge_abilities fa "
+            "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name "
+            "WHERE fa.raw_line LIKE '%Affected$ Instant%' "
+            "OR fa.raw_line LIKE '%Affected$ Sorcery%'"
+        ):
+            self._affects_spells_cards.add(row[0])
+            # Cards that affect instants/sorceries are also spell payoffs
+            self._spell_payoff_cards.add(row[0])
+
+        # Spellslinger payoffs from deck tags
+        for oid, tags in self._deck_hints.items():
+            for tag in tags:
+                if 'Type$Instant' in tag or 'Type$Sorcery' in tag:
+                    self._spell_payoff_cards.add(oid)
+        for oid, tags in self._deck_needs.items():
+            for tag in tags:
+                if 'Type$Instant' in tag or 'Type$Sorcery' in tag:
+                    self._spell_payoff_cards.add(oid)
+
         # Commander theme detection helpers: which deck tags indicate themes
         self._equipment_theme_tags = {'Type$Equipment', 'Ability$Equip'}
         self._defender_theme_tags = {'Keyword$Defender'}
         self._enchantress_theme_tags = {'Type$Enchantment', 'Type$Aura'}
+        self._spellslinger_theme_tags = {'Type$Instant', 'Type$Sorcery',
+                                         'Type$Instant|Sorcery'}
 
     def _load_edhrec_stats(self, conn):
         """Load EDHREC popularity stats and card quality proxies."""
@@ -871,6 +936,8 @@ class ForgeFeatureContext:
         self._arr_is_defender = np.zeros(n, dtype=np.float32)
         # Pure enchantment (not creature) flag for enchantress
         self._arr_pure_enchantment = np.zeros(n, dtype=np.float32)
+        self._arr_spell_payoff = np.zeros(n, dtype=np.float32)
+        self._arr_cost_reduction = np.zeros(n, dtype=np.float32)
 
         for oid, i in self.oid_to_idx.items():
             p = self._forge_profiles.get(oid, {})
@@ -912,6 +979,9 @@ class ForgeFeatureContext:
             self._arr_is_equip_payoff[i] = 1.0 if oid in self._equipment_payoffs else 0.0
             self._arr_is_ench_payoff[i] = 1.0 if oid in self._enchantress_payoffs else 0.0
             self._arr_is_defender[i] = 1.0 if oid in self._defender_cards else 0.0
+            self._arr_spell_payoff[i] = 1.0 if (oid in self._spell_payoff_cards or
+                                                  oid in self._spell_copy_cards) else 0.0
+            self._arr_cost_reduction[i] = 1.0 if oid in self._cost_reduction_cards else 0.0
             tl = self._type_lines.get(oid, "")
             if "Enchantment" in tl and "Creature" not in tl:
                 self._arr_pure_enchantment[i] = 0.5
@@ -1504,6 +1574,19 @@ class CmdrFeatureContext:
             'ChangesZone', 'ChangesZoneAll',
         }
         self.cmdr_etb_density = float(len(etb_verbs) + len(etb_triggers))
+        # Spellslinger theme: commander cares about instants/sorceries
+        # Includes: SpellCast triggers, Affected$ Instant/Sorcery, graveyard cast,
+        # cost reduction, spell copy, or deck tags mentioning instants/sorceries
+        self.cmdr_wants_spells = (
+            bool(cmdr_tags & ctx._spellslinger_theme_tags) or
+            cmdr_oid in ctx._spell_payoff_cards or
+            cmdr_oid in ctx._cost_reduction_cards or
+            cmdr_oid in ctx._spell_copy_cards or
+            cmdr_oid in ctx._affects_spells_cards or
+            cmdr_oid in ctx._graveyard_cast_cards
+        )
+        # Graveyard cast: commander enables casting from graveyard
+        self.cmdr_graveyard_cast = (cmdr_oid in ctx._graveyard_cast_cards)
         # Tribal depth data: commander's creature-type interests from multiple sources
         # Combines trigger_filters, token subtypes, deck hints, and type_line subtypes
         cmdr_tribal_filters = set()
@@ -1784,7 +1867,7 @@ def compute_batch_features(card_oids, card_cmcs, ctx, cmdr):
         cmdr: CmdrFeatureContext for the current commander
     """
     N = len(card_oids)
-    X = np.zeros((N, 105), dtype=np.float32)
+    X = np.zeros((N, 111), dtype=np.float32)
     oid_to_idx = ctx.oid_to_idx
 
     # Convert card_oids to ctx indices for array lookup
@@ -2280,6 +2363,17 @@ def compute_batch_features(card_oids, card_cmcs, ctx, cmdr):
             tribal_depth += 1.0
         X[row_i, 104] = tribal_depth
 
+    # ── F105-F110: Spellslinger features (vectorized) ──
+    cmdr_wants_spells = 1.0 if cmdr.cmdr_wants_spells else 0.0
+    cmdr_gy_cast = 1.0 if cmdr.cmdr_graveyard_cast else 0.0
+    X[:, 105] = cmdr_wants_spells                                     # cmdr_wants_spells
+    X[:, 106] = ctx._arr_spell_payoff[safe_idx]                       # card_is_spell_payoff
+    X[:, 107] = cmdr_wants_spells * ctx._arr_type_instant_sorcery[safe_idx]  # spellslinger_match
+    X[:, 108] = cmdr_gy_cast                                          # cmdr_graveyard_cast
+    X[:, 109] = ctx._arr_cost_reduction[safe_idx]                     # card_cost_reduction
+    X[:, 110] = (ctx._arr_spell_payoff[safe_idx] +                    # card_spell_synergy_score
+                 ctx._arr_cost_reduction[safe_idx])
+
     return X
 
 
@@ -2668,10 +2762,22 @@ def _compute_theme_features(card_oid, card_type_line, ctx, cmdr):
     cmdr_etb = min(cmdr.cmdr_etb_density, 5.0)
     etb_match = card_etb_dbl * cmdr_etb
 
+    # Spellslinger features
+    cmdr_wants_spells = 1.0 if cmdr.cmdr_wants_spells else 0.0
+    card_spell_payoff = 1.0 if (card_oid in ctx._spell_payoff_cards or
+                                 card_oid in ctx._spell_copy_cards) else 0.0
+    is_instant_sorcery = 1.0 if ("Instant" in tl or "Sorcery" in tl) else 0.0
+    spellslinger_match = cmdr_wants_spells * is_instant_sorcery
+    cmdr_gy_cast = 1.0 if cmdr.cmdr_graveyard_cast else 0.0
+    card_cost_red = 1.0 if card_oid in ctx._cost_reduction_cards else 0.0
+    spell_synergy_score = card_spell_payoff + card_cost_red
+
     return (cmdr_equip, card_equip, equip_match,
             cmdr_ench, card_ench, ench_match,
             cmdr_def, card_def, def_match,
-            card_etb_dbl, cmdr_etb, etb_match)
+            card_etb_dbl, cmdr_etb, etb_match,
+            cmdr_wants_spells, card_spell_payoff, spellslinger_match,
+            cmdr_gy_cast, card_cost_red, spell_synergy_score)
 
 
 def _compute_fingerprint_features(card_oid, ctx, cmdr):
@@ -2746,7 +2852,9 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
     (cmdr_equip, card_equip, equip_match,
      cmdr_ench, card_ench, ench_match,
      cmdr_def, card_def, def_match,
-     card_etb_dbl, cmdr_etb, etb_match
+     card_etb_dbl, cmdr_etb, etb_match,
+     cmdr_wants_spells, card_spell_payoff, spellslinger_match,
+     cmdr_gy_cast, card_cost_red, spell_synergy_score
      ) = _compute_theme_features(card_oid, tl, ctx, cmdr)
 
     (func_produces_amp, func_requires_prod, func_card_req_cmdr, func_full_cosine
@@ -2870,4 +2978,11 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         tribal_lord,                                     # F95 tribal_lord_for_cmdr
         tribal_member,                                   # F96 tribal_member_of_cmdr
         tribal_depth,                                    # F97 tribal_synergy_depth
+        # ── Spellslinger features ──
+        cmdr_wants_spells,                               # F105 cmdr_wants_spells
+        card_spell_payoff,                               # F106 card_is_spell_payoff
+        spellslinger_match,                              # F107 spellslinger_match
+        cmdr_gy_cast,                                    # F108 cmdr_graveyard_cast
+        card_cost_red,                                   # F109 card_cost_reduction
+        spell_synergy_score,                             # F110 card_spell_synergy_score
     ]

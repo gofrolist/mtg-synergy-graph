@@ -155,6 +155,13 @@ FORGE_FEATURE_NAMES = [
     "tribal_lord_for_cmdr",
     "tribal_member_of_cmdr",
     "tribal_synergy_depth",
+    # ── Spellslinger features ──
+    "cmdr_wants_spells",
+    "card_is_spell_payoff",
+    "spellslinger_match",
+    "cmdr_graveyard_cast",
+    "card_cost_reduction",
+    "card_spell_synergy_score",
 ]
 
 
