@@ -11,32 +11,27 @@ MTG Synergy Graph — a tool for analyzing Magic: The Gathering EDH/Commander de
 ```
 FORGE MODEL (--recommend): Pure Forge mechanical synergy
   1. Color-identity filter → all legal cards scored directly by GBM
-  2. Forge LambdaRank GBM: 116 features, EDHREC labels, forge-native features
-     29 profile fields per card extracted from forge_abilities (verbs, triggers, keywords,
-     counter_types, targets, ability_types, trigger_filters, required_subtypes,
-     granted_keywords, conditions, duration, effect_zones, scales_with, grants_types,
-     combat_damage, is_secondary, gain_control, damage_amount, cards_drawn, life_amount,
-     produces_mana, mana_colors, counter_num_variable, grants_abilities, token_amount_variable,
-     has_static_anthem, counters_on_lands, counter_trigger_themes, has_p1p1)
+  2. Forge LambdaRank GBM: 89 features, EDHREC labels, fully general (no archetype names)
+     29 profile fields per card extracted from forge_abilities
      + forge_deck_tags (Forge's deck-building AI: has/hints/needs theme signals)
-     + ability counts (total, triggered), token complexity (P/T, keywords),
-       zone interaction (graveyard, exile), ability density
+     + ability counts, token complexity, zone interaction, ability density
      + deck tag expansion (cmdr_needs_to_card_has, card_needs_satisfied, needs_rarity)
      + counter/anthem distinction (put_counter_ratio, cmdr_counter_x_put_counter,
-       static_anthem_counter_cmdr, counters_on_lands, cmdr_p1p1_card_no_counters)
-     + functional fingerprints (33-dim semantic vectors):
-       produces (12): tokens, p1p1_counters, mana, cards, damage, life, etc.
-       requires (11): creature_etb, death, spell_cast, combat, lifegain, etc.
-       amplifies (4): counter/token/damage/lifegain doublers
-       targets (6): creatures, self, lands, players, artifacts, any
-       4 dot-product features: produces·amplifies, requires·produces, full cosine
-     + spellslinger features (7): cmdr_wants_spells, card_is_spell_payoff,
-       spellslinger_match, cmdr_graveyard_cast, card_cost_reduction,
-       card_spell_synergy_score, spellslinger_cmc_value
-     + graveyard features (4): cmdr_graveyard_theme (1.0% importance),
-       card_self_sacrifice, graveyard_sac_match, graveyard_replay_value
-     Top features: edhrec_deck_pct 9%, deck_edge_count 6%, strategy_cosine 6%,
-     card_hub_score 5%, cmdr_2hop_ratio 4.6%, ability_density 4%, cmdr_2hop_count 3.7%
+       cmdr_p1p1_card_no_counters)
+     + functional fingerprints (33-dim semantic vectors, 4 dot-product features)
+     + general demand features (2): verb_demand_match, type_demand_match
+     + per-category mech sub-products (16 features, 8 categories × fwd/rev):
+       board (creature/permanent events), resource (counters/draw/life/damage),
+       disruption (discard/mill/target), tempo (spell_cast/attacks/blocks),
+       utility (tap/untap/pump/mana), zones (graveyard/exile/hand),
+       themes (equipment/defender/etb), tribal (80 subtypes)
+       Replaced 16 archetype-specific features (equipment, enchantress, defender,
+       ETB, spellslinger, graveyard) + 2 scalar mech dot products with general
+       per-category produce/consume sub-products from mechanics_vectors.
+     Top features: edhrec_deck_pct 9.0%, deck_edge_count 5.7%, card_hub_score 5.5%,
+     cmdr_2hop_ratio 5.1%, strategy_cosine 4.4%, ability_density 4.4%,
+     forge_ability_cosine 3.9%, cmdr_2hop_count 3.9%, cmc 3.3%,
+     mech_tempo_fwd 2.6%, mech_board_rev 2.5%
   3. Forge mechanics vectors: 116-dim shared concept space encoding ALL mechanical
      interactions (36 game concepts + 80 subtypes). Captures synergy through
      card produces → commander consumes dot product.
@@ -44,7 +39,7 @@ FORGE MODEL (--recommend): Pure Forge mechanical synergy
      Theme concepts: equipment_enters, equipment_equipped, defender_available, etb_doubled
   4. Can evaluate new cards day-1 without playtesting data
   5. Works for any of 3,141+ commanders (not just 1,361 with EDHREC)
-  6. NDCG@30 = 0.595 on leave-commander-out CV (2:1 negatives, sample-weighted, early_stop=40)
+  6. NDCG@30 = 0.592 on leave-commander-out CV (2:1 negatives, sample-weighted, early_stop=40)
      Training labels: edhrec_card_synergy (703k rows, continuous synergy grading)
      Grade 5=synergy≥0.30, 4=synergy≥0.15, 3=synergy≥0.05, 2=synergy 0-0.05, 1=negative, 0=random neg
      label_gain=[0, 1, 3, 8, 20, 30] (less steep curve between mid/high grades)
@@ -113,7 +108,7 @@ python3 scripts/validate_recommendations.py --top 100              # Pipeline va
 python3 scripts/train_fusion_model.py --validate      # Train + validate in one step
 
 # Tests
-uv run pytest tests/ -v                        # Run all 154 tests
+uv run pytest tests/ -v                        # Run all 153 tests
 uv run pytest tests/test_recommendation_quality.py -v              # Pipeline quality tests only
 ```
 
@@ -169,35 +164,16 @@ python3 scripts/train_fusion_model.py --rebuild-features --validate  # 7. Retrai
 ### Forge Model
 
 **Forge model** (data/fusion_model_forge.lgb):
-- LambdaRank GBM on 116 features (shared via `src/mtg_synergy/recommend/forge_features.py`):
-  100% Forge-native with 29 profile fields per card:
-  causal scores (6), strategy (2), forge_ability_cosine, phase (2), tribal,
-  card types (6), cmc, deck edges (3, log-scaled), causal_composite, card_hub_score (log-scaled),
-  forge_type_synergy, cmdr_forge_type_match, shared_forge_mechanics,
-  forge_ability_depth, forge_anti_tribal, forge_verb_alignment,
-  forge_mech_fwd/rev, counter_type_match, ability_type_ratio_T/A,
-  zone_alignment, target_alignment, forge_keyword_synergy,
-  activated_ability_count, granted_keyword_synergy, shared_conditions,
-  is_permanent_effect, is_temporary_effect, duration_match,
-  combat_damage_flag, effect_zone_match, scales_with_board,
-  grants_types_match, is_secondary_trigger, gain_control,
-  granted_keyword_count, condition_count,
-  deck_hints_to_has, deck_has_to_hints, deck_needs_to_has,
-  deck_has_overlap, deck_hints_overlap (Forge deck-building AI tags),
-  damage_scales, draw_scales, life_scales,
-  produces_mana, counter_num_variable, grants_abilities, token_amount_variable,
-  total_ability_count, triggered_ability_count, token_power_toughness,
-  token_keyword_count, zone_graveyard_interact, zone_exile_interact,
-  ability_density, cmdr_needs_to_card_has, card_needs_satisfied, needs_rarity,
-  temp_buff_counter_cmdr, put_counter_ratio, cmdr_counter_x_put_counter,
-  static_anthem_counter_cmdr, counters_on_lands, cmdr_p1p1_card_no_counters,
-  func_produces_amplifies, func_requires_produces, func_card_requires_cmdr, func_full_cosine
-     + 2-hop graph (2): cmdr_2hop_count (3.1%), cmdr_2hop_ratio (4.5%)
-     + card quality (5): edhrec_deck_pct (10%), forge_ability_richness, card_in_forge,
-       card_strategy_count, deck_tag_count
-     + theme features (15): equipment (cmdr/card/match), enchantress (cmdr/card/match),
-       defender (cmdr/card/match), ETB doubler (card/cmdr_density/match),
-       tribal depth (lord/member/combined)
+- LambdaRank GBM on 89 features (shared via `forge_features.py` + `forge_compute.py`):
+  100% Forge-native, fully general (no archetype-specific features):
+  causal (2), strategy_cosine, forge_ability_cosine, phase (2), tribal, cmc,
+  deck edges (3), causal_composite, card_hub_score,
+  forge type/mechanics (6), counter/zone/target/keyword matching (6),
+  ability profile flags (8), deck tag overlaps (5+3 needs),
+  scaling flags (6), ability/token stats (6), counter/anthem (3),
+  functional fingerprints (4), 2-hop graph (2), card quality (4),
+  tribal depth (3), general demand (2),
+  per-category mech sub-products (16): 8 categories × fwd/rev
 - Functional fingerprints (`ForgeFeatureContext._func_fingerprints`): 33-dim semantic
   vectors per card encoding produces/requires/amplifies/targets. Dot products between
   commander and card fingerprints capture synergy without hand-coded rules.
@@ -214,7 +190,9 @@ python3 scripts/train_fusion_model.py --rebuild-features --validate  # 7. Retrai
   Maps what a card provides, wants, and requires in a deck
 - Mechanics vectors (`src/mtg_synergy/recommend/mechanics_vectors.py`): 116-dim shared
   concept space (36 game concepts + 80 subtypes). Effects and triggers map to same
-  dimensions. Dot product = mechanical synergy score.
+  dimensions. Per-category dot products = mechanical synergy features.
+  Type-based produces: non-land cards produce spell_cast, creatures produce creature_attacks.
+  Zone-aware: raw_line fallback for Origin$/Destination$ when column values are empty.
   Theme concepts: equipment_enters, equipment_equipped, defender_available, etb_doubled
 - Training data: edhrec_card_synergy (703k rows, 2,724 commanders), continuous synergy grading
   Grade 5=synergy>=0.30, 4=synergy>=0.15, 3=synergy>=0.05, 2=synergy 0-0.05, 1=negative, 0=random neg
@@ -229,9 +207,10 @@ python3 scripts/train_fusion_model.py --rebuild-features --validate  # 7. Retrai
   Batch features: vectorized array indexing for ~50 features, loop for ~35
   Vectorized NDCG@30, CV splits, weight arrays, group arrays
   Use `--tune` for parallel HP search (~12 min). Default uses cached best HP.
-- Feature importance: edhrec_deck_pct 9%, deck_edge_count 6%, strategy_cosine 6%,
-  card_hub_score 5%, cmdr_2hop_ratio 4.6%, ability_density 4%, cmdr_2hop_count 3.7%
-  cmdr_graveyard_theme 1.0%, cmdr_wants_spells 0.7%
+- Feature importance: edhrec_deck_pct 9.0%, deck_edge_count 5.7%, card_hub_score 5.5%,
+  cmdr_2hop_ratio 5.1%, strategy_cosine 4.4%, ability_density 4.4%,
+  forge_ability_cosine 3.9%, cmdr_2hop_count 3.9%, cmc 3.3%,
+  mech_tempo_fwd 2.6%, mech_board_rev 2.5%, mech_board_fwd 2.3%
 - EDHREC_FREE=1 env var disables edhrec_deck_pct for pure Forge-native inference
 - Edge index: two-layer cache (npz raw edges + adjacency dict cache)
   First run: npz ~0.1s + adj build ~11s. Subsequent: adj cache ~1.5s (train) / ~0.3s (inference)
@@ -260,7 +239,7 @@ python3 scripts/train_fusion_model.py --rebuild-features --validate  # 7. Retrai
 ```
 1. Candidate selection: Color-identity filter → ALL legal cards
 2. Score all candidates with GBM (batch predict, ~0.5s for 13k cards):
-   105 Forge-native features (LambdaRank)
+   89 Forge-native features (LambdaRank)
 3. Post-scoring: anti-synergy penalties + mechanical synergy bonus (±15%)
    Bonus: produces↔consumes dot product, verb→trigger alignment,
    creature ETB / sacrifice outlet / spellcast pattern matches
@@ -318,7 +297,8 @@ mechanically-synergistic cards that nobody plays.
 | `src/mtg_synergy/recommend/engine.py` | `recommend_cards()` — forge model recommendation pipeline |
 | `src/mtg_synergy/recommend/scoring.py` | `color_identity_filter()`, `score_forge_candidates()`, `_apply_penalties()`, `_apply_mechanical_bonus()` |
 | `src/mtg_synergy/recommend/hidden_gems.py` | `find_hidden_gems()` — pure mechanical synergy engine, no popularity bias |
-| `src/mtg_synergy/recommend/forge_features.py` | Shared 105-feature computation: `ForgeFeatureContext` (7 `_load_*` methods), `CmdrFeatureContext`, `compute_card_features()` (6 grouped helpers), `compute_batch_features()` |
+| `src/mtg_synergy/recommend/forge_features.py` | `ForgeFeatureContext` (data loading, pre-computation: profiles, vectors, demand data, card arrays) |
+| `src/mtg_synergy/recommend/forge_compute.py` | `CmdrFeatureContext`, `compute_batch_features()`, `compute_card_features()` — 89-feature computation |
 | `src/mtg_synergy/recommend/mechanics_vectors.py` | 116-dim forge mechanics vectors: shared game concept space (36 concepts + 80 subtypes) |
 | `src/mtg_synergy/recommend/cmdr_patterns.py` | `detect_cmdr_patterns()` — shared commander mechanical flag detection |
 | `src/mtg_synergy/recommend/affinity.py` | Commander affinity scoring |
