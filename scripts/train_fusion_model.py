@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Train forge-only LightGBM model for card recommendation.
+"""Train LightGBM LambdaRank model for card recommendation.
 
-LambdaRank GBM trained on EDHREC labels with 105 forge-native features.
-No tower model, no embeddings, no neural network.
+Trained on EDHREC labels with 105 Forge-native features.
 
 Usage:
     python3 train_fusion_model.py                          # Train forge GBM (default)
@@ -26,8 +25,7 @@ from mtg_synergy.recommend.forge_features import (
     compute_batch_features,
 )
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "data", "tags.db")
-DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+from mtg_synergy.config import DATA_DIR, DB_PATH
 
 # ── Training constants ────────────────────────────────────────────────
 _NEGATIVE_RATIO = 3
@@ -379,11 +377,8 @@ def _init_shared_pool(ctx, card_meta):
     _shared_card_meta = card_meta
 
 
-def build_forge_feature_matrix(pairs_by_cmdr, tower_model_path=None, verbose=True):
-    """Build forge-only feature matrix (no EDHREC, no tower, no embeddings).
-
-    Pure Forge-native features: 105 features from causal graph, strategies,
-    card mechanics, and Forge ability data.
+def build_forge_feature_matrix(pairs_by_cmdr, verbose=True):
+    """Build 105-feature matrix from causal graph, strategies, and Forge ability data.
 
     Loads ForgeFeatureContext once in the parent process, then shares it
     with fork-based worker processes to avoid redundant edge index loading.

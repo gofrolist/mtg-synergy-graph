@@ -1,8 +1,6 @@
-"""Forge-native AST types for structured card data.
+"""Forge data types for structured card filter parsing.
 
-Aligned with Forge's 20-year battle-tested DSL vocabulary.
-These replace the original ast_types.py Effect/Trigger/ObjectFilter
-with Forge-compatible equivalents.
+Aligned with Forge's DSL vocabulary (ValidCard$ filter expressions).
 """
 from __future__ import annotations
 from dataclasses import dataclass, field

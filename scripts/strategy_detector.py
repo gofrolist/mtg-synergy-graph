@@ -8,13 +8,13 @@ Usage:
 """
 
 import json
+import os
 import re
 import sqlite3
-import os
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
-DB_PATH = os.path.join(DATA_DIR, "tags.db")
-EDHREC_PATH = os.path.join(DATA_DIR, "edhrec_theme_cards.json")
+from mtg_synergy.config import DATA_DIR, DB_PATH
+
+EDHREC_PATH = DATA_DIR / "edhrec_theme_cards.json"
 
 # Strategy mapping rules: (forge_verb_or_keyword_set, strategy_name, base_confidence)
 # A card with any of these Forge verbs/keywords/triggers maps to the strategy.

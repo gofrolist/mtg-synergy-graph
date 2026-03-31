@@ -108,7 +108,7 @@ python3 scripts/validate_recommendations.py --top 100              # Pipeline va
 python3 scripts/train_fusion_model.py --forge-only --validate      # Train + validate in one step
 
 # Tests
-uv run pytest tests/ -v                        # Run all 370 tests
+uv run pytest tests/ -v                        # Run all 163 tests
 uv run pytest tests/test_recommendation_quality.py -v              # Pipeline quality tests only
 ```
 
@@ -152,12 +152,10 @@ python3 scripts/train_fusion_model.py --forge-only --rebuild-features --validate
 | Table | Rows | Purpose |
 |---|---|---|
 | cards | ~36k | Card metadata from Scryfall |
-| abilities | ~76k | Parsed oracle text abilities |
 | card_strategies | ~88k | Strategy assignments |
 | spellbook_combos | ~82k | Commander Spellbook combos |
 | spellbook_combo_cards | ~289k | Combo ↔ card junction |
 | interaction_edges | ~20.6M | Causal edges from Forge: 30+ event types + 6.3M synthetic + 2.6M entity-presence + 54k continuous pump + 896k theme synergy edges |
-| commander_profiles | ~3.4k | Auto-inferred commander archetypes (strategies, tribal, events) |
 | edhrec_card_synergy | ~733k | EDHREC synergy scores for 2,761 commanders (87% coverage) |
 | forge_abilities | ~72k | Raw Forge ability data + SubAbility chain expansions (12.7k expanded rows). 20 columns: 19 consumed in features or during import, 1 unused (unless_cost). sub_ability column is resolved during import by expanding chains into separate rows. |
 | forge_deck_tags | ~14k | Forge deck-building AI: has (what card provides), hints (what card wants), needs (what card requires). 9,868 unique cards. |
@@ -282,30 +280,21 @@ mechanically-synergistic cards that nobody plays.
 
 ## Key Files
 
-### `src/mtg_synergy/parse/` package (deterministic oracle text parser)
+### `src/mtg_synergy/parse/` package (Forge data import)
 
 | Module | Purpose |
 |---|---|
-| `src/mtg_synergy/parse/__init__.py` | `parse_card()` pipeline + DB save/load |
-| `src/mtg_synergy/parse/ast_types.py` | AST dataclasses: Ability, Effect, Trigger, Cost, ObjectFilter, etc. |
-| `src/mtg_synergy/parse/splitter.py` | Pass 1-2: split oracle text into abilities, classify kind |
-| `src/mtg_synergy/parse/trigger_parser.py` | Pass 3a: extract trigger events + subject filters (~25 patterns) |
-| `src/mtg_synergy/parse/effect_parser.py` | Pass 3b: extract effect verbs + targets + amounts (~20 verbs) |
-| `src/mtg_synergy/parse/cost_parser.py` | Pass 3c: parse mana/tap/sacrifice/life/loyalty costs |
-| `src/mtg_synergy/parse/resolver.py` | Pass 4: resolve cross-references ("it", "that creature") |
-| `src/mtg_synergy/parse/templates.py` | Template library for complex patterns (scaling, modal) |
-| `src/mtg_synergy/parse/verb_resolvers.py` | Rules engine: Effect → StateChange (what game events occur) |
 | `src/mtg_synergy/parse/forge_import.py` | Import Forge ability data into DB |
+| `src/mtg_synergy/parse/forge_filter_parser.py` | Parse Forge ValidCard$ filter expressions |
+| `src/mtg_synergy/parse/forge_types.py` | ForgeFilter dataclass for parsed filters |
 
 ### `src/mtg_synergy/causal/` package (interaction graph)
 
 | Module | Purpose |
 |---|---|
 | `src/mtg_synergy/causal/__init__.py` | DB storage, CausalContext (pre-loaded scoring), anti-synergy detection |
-| `src/mtg_synergy/causal/types.py` | Edge, EdgeDetail, Chain, ResourceDelta, LoopAnalysis dataclasses |
-| `src/mtg_synergy/causal/indexer.py` | Index cards by events produced/consumed (AST-based) |
+| `src/mtg_synergy/causal/types.py` | Edge, EdgeDetail dataclasses |
 | `src/mtg_synergy/causal/forge_indexer.py` | Index cards by events from Forge data |
-| `src/mtg_synergy/causal/graph_builder.py` | Build causal edges from parsed abilities (AST) |
 | `src/mtg_synergy/causal/forge_graph_builder.py` | Build causal edges from Forge data |
 | `src/mtg_synergy/causal/idf.py` | Shared IDF computation + PRECISION_STRENGTH constant |
 | `src/mtg_synergy/causal/verb_event_map.py` | Forge verb → trigger event mapping (extracted from Java source) |
@@ -315,24 +304,20 @@ mechanically-synergistic cards that nobody plays.
 | Module | Purpose |
 |---|---|
 | `src/mtg_synergy/config.py` | Centralized paths, thresholds, DB settings, `extract_subtypes()` (DFC-aware) |
-| `src/mtg_synergy/constants.py` | ACTION_EVENT_BRIDGES, TRIGGER_EFFECT_BRIDGES, STAPLE_ROLES |
+| `src/mtg_synergy/constants.py` | STAPLE_ROLES |
 | `src/mtg_synergy/db.py` | Centralized DB connection factory |
 | `src/mtg_synergy/tag_db.py` | SQLite tag DB utilities (schema, queries, import) |
-| `src/mtg_synergy/card_db.py` | In-memory card lookup from Scryfall JSON |
 | `src/mtg_synergy/cli.py` | CLI dispatcher (argparse + command routing) |
 | `src/mtg_synergy/recommend/engine.py` | `recommend_cards()` — forge model recommendation pipeline |
-| `src/mtg_synergy/recommend/swaps.py` | `suggest_swaps()` — multi-layer card swap suggestions |
 | `src/mtg_synergy/recommend/scoring.py` | `color_identity_filter()`, `score_forge_candidates()`, `_apply_penalties()`, `_apply_mechanical_bonus()` |
 | `src/mtg_synergy/recommend/hidden_gems.py` | `find_hidden_gems()` — pure mechanical synergy engine, no popularity bias |
 | `src/mtg_synergy/recommend/forge_features.py` | Shared 105-feature computation: `ForgeFeatureContext` (7 `_load_*` methods), `CmdrFeatureContext`, `compute_card_features()` (6 grouped helpers), `compute_batch_features()` |
 | `src/mtg_synergy/recommend/mechanics_vectors.py` | 116-dim forge mechanics vectors: shared game concept space (36 concepts + 80 subtypes) |
 | `src/mtg_synergy/recommend/cmdr_patterns.py` | `detect_cmdr_patterns()` — shared commander mechanical flag detection |
 | `src/mtg_synergy/recommend/affinity.py` | Commander affinity scoring |
-| `src/mtg_synergy/recommend/commander_profile.py` | `CommanderProfile` dataclass for commander archetypes |
 | `src/mtg_synergy/combos/detector.py` | `find_combos()`, `find_combos_tiered()`, `find_partial_combos()` |
 | `src/mtg_synergy/combos/anti_synergy.py` | Anti-synergy detection |
 | `src/mtg_synergy/combos/display.py` | Combo output formatting and validation |
-| `src/mtg_synergy/analysis/deck.py` | Deck synergy display and analysis |
 | `src/mtg_synergy/analysis/strategy.py` | Strategy detection, candidate filtering, commander builds |
 
 ### `scripts/` directory (pipelines + entry points)
@@ -359,7 +344,7 @@ mechanically-synergistic cards that nobody plays.
 - CLI uses `--commander "Name"` or `uv run mtg-synergy --commander "Name"`
 - Package uses `src/` layout (`src/mtg_synergy/`), built with `uv_build` backend
 - Pipeline scripts live in `scripts/`, library modules in `src/mtg_synergy/`
-- Tests: 370 tests in `tests/`, run with `uv run pytest tests/`
+- Tests: 163 tests in `tests/`, run with `uv run pytest tests/`
   - 7 end-to-end pipeline quality tests (`test_recommendation_quality.py`)
   - Requires trained model + populated DB (auto-skipped if missing)
 - After training, always run `--validate` to check full pipeline (not just NDCG):

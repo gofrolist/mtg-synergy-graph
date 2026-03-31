@@ -16,7 +16,7 @@ import sys
 import time
 from pathlib import Path
 
-DB_PATH = Path("data/tags.db")
+from mtg_synergy.config import DB_PATH
 
 
 def normalize(name: str) -> str:

@@ -16,11 +16,11 @@ import time
 import urllib.request
 import urllib.error
 
+from mtg_synergy.config import DATA_DIR, DB_PATH
+
 BASE_URL = "https://backend.commanderspellbook.com"
-DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
-CACHE_PATH = os.path.join(DATA_DIR, "commander_spellbook.json")
-DB_PATH = os.path.join(DATA_DIR, "tags.db")
-UNRESOLVED_PATH = os.path.join(DATA_DIR, "spellbook_unresolved.txt")
+CACHE_PATH = DATA_DIR / "commander_spellbook.json"
+UNRESOLVED_PATH = DATA_DIR / "spellbook_unresolved.txt"
 
 
 def parse_combo_response(raw):

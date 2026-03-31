@@ -99,5 +99,4 @@ def test_schema_creation(tmp_db):
     ).fetchall()]
     assert "forge_abilities" in tables
     assert "forge_deck_tags" in tables
-    assert "forge_svars" in tables
     conn.close()

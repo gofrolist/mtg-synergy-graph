@@ -16,7 +16,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "tags.db")
+from mtg_synergy.config import DB_PATH
 
 
 def get_top_commanders(conn, n=10):

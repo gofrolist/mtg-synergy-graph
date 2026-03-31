@@ -1,7 +1,6 @@
 """Shared IDF computation and precision constants for event weighting.
 
-Used by both CardIndex (indexer.py) and ForgeIndex (forge_indexer.py).
-PRECISION_STRENGTH used by graph_builder.py and forge_graph_builder.py.
+Used by ForgeIndex (forge_indexer.py) and forge_graph_builder.py.
 """
 import math
 

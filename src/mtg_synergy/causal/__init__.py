@@ -2,8 +2,6 @@
 import json
 from collections import defaultdict, namedtuple
 from mtg_synergy.causal.types import Edge, EdgeDetail
-from mtg_synergy.causal.graph_builder import build_causal_edges
-from mtg_synergy.parse.ast_types import Ability
 
 # Lightweight edge for CausalContext scoring — uses 5 fields instead of 7 + full EdgeDetail.
 # Saves ~20MB by avoiding json.loads of full detail dict for 60k+ edges.
@@ -29,41 +27,6 @@ def ensure_causal_schema(conn):
     conn.commit()
 
 
-def _batch_load_card_column(conn, card_ids: set[str], column: str,
-                            chunk_size: int = 500) -> dict[str, str]:
-    """Batch-load a single column from cards table for the given oracle_ids."""
-    if not card_ids:
-        return {}
-    result = {}
-    card_list = list(card_ids)
-    for i in range(0, len(card_list), chunk_size):
-        chunk = card_list[i:i + chunk_size]
-        ph = ",".join("?" * len(chunk))
-        for oid, val in conn.execute(
-            f"SELECT oracle_id, {column} FROM cards WHERE oracle_id IN ({ph})", chunk
-        ).fetchall():
-            if val:
-                result[oid] = val
-    return result
-
-
-def build_and_store_graph(conn, cards: dict[str, list[Ability]]):
-    oracle_texts = _batch_load_card_column(conn, set(cards.keys()), "oracle_text")
-    type_lines = _batch_load_card_column(conn, set(cards.keys()), "type_line")
-    edges = build_causal_edges(cards, oracle_texts=oracle_texts, type_lines=type_lines)
-    conn.execute("DELETE FROM interaction_edges")
-    for e in edges:
-        detail_dict = e.detail.to_dict()
-        precision = detail_dict.get("filter_precision")
-        conn.execute(
-            "INSERT OR REPLACE INTO interaction_edges "
-            "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail, filter_precision) "
-            "VALUES (?,?,?,?,?,?,?,?)",
-            (e.source, e.target, e.edge_type, e.ability_a, e.ability_b,
-             e.strength, json.dumps(detail_dict), precision))
-    conn.commit()
-    return len(edges)
-
 
 def store_edges(conn, edges: list[Edge]) -> int:
     """Store edges in interaction_edges table."""
@@ -80,12 +43,6 @@ def store_edges(conn, edges: list[Edge]) -> int:
     conn.commit()
     return len(edges)
 
-
-
-def _parse_edge_rows(rows) -> list[Edge]:
-    """Parse raw DB rows into full Edge objects (for storage/display)."""
-    return [Edge(r[0], r[1], r[2], r[3], r[4], r[5],
-                 EdgeDetail(**json.loads(r[6]))) for r in rows]
 
 
 def _parse_light_edges(rows) -> list:
@@ -410,8 +367,3 @@ class CausalContext:
         return max(min(score, 10.0), -5.0)  # allow negative for strong anti-synergy
 
 
-def causal_score(candidate_id: str, commander_id: str,
-                 deck_cards: set[str], conn) -> float:
-    """Single-candidate scoring. For batch use, create CausalContext instead."""
-    ctx = CausalContext(conn, commander_id, deck_cards)
-    return ctx.causal_score(candidate_id)

@@ -9,9 +9,9 @@ import json
 import os
 import urllib.request
 
+from mtg_synergy.config import DATA_DIR, CARDS_JSON
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
-OUTPUT_FILE = os.path.join(DATA_DIR, "oracle_cards.json")
+OUTPUT_FILE = str(CARDS_JSON)
 BULK_DATA_URL = "https://api.scryfall.com/bulk-data"
 
 

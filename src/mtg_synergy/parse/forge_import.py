@@ -47,14 +47,6 @@ def ensure_forge_schema(conn):
             PRIMARY KEY (card_name, tag_type, tag)
         )
     """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS forge_svars (
-            card_name TEXT NOT NULL,
-            svar_name TEXT NOT NULL,
-            svar_value TEXT NOT NULL,
-            PRIMARY KEY (card_name, svar_name)
-        )
-    """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_forge_ab_name ON forge_abilities(card_name)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_forge_tags_name ON forge_deck_tags(card_name)")
     conn.commit()
@@ -326,11 +318,6 @@ def import_card_to_db(conn, card: dict):
             (name, tag["tag_type"], tag["tag"]),
         )
 
-    for svar_name, svar_value in card["svars"].items():
-        conn.execute(
-            "INSERT OR REPLACE INTO forge_svars VALUES (?,?,?)",
-            (name, svar_name, svar_value),
-        )
 
 
 def import_all(conn, cards_dir=None):
@@ -341,7 +328,6 @@ def import_all(conn, cards_dir=None):
     ensure_forge_schema(conn)
     conn.execute("DELETE FROM forge_abilities")
     conn.execute("DELETE FROM forge_deck_tags")
-    conn.execute("DELETE FROM forge_svars")
 
     if not os.path.exists(cards_dir):
         print(f"Forge cards not found at {cards_dir}")
@@ -434,7 +420,6 @@ def show_stats(conn):
     ).fetchone()[0]
     deck_has = conn.execute("SELECT COUNT(*) FROM forge_deck_tags WHERE tag_type = 'has'").fetchone()[0]
     deck_hints = conn.execute("SELECT COUNT(*) FROM forge_deck_tags WHERE tag_type = 'hints'").fetchone()[0]
-    svars = conn.execute("SELECT COUNT(*) FROM forge_svars").fetchone()[0]
 
     print(f"Forge import stats:")
     print(f"  Cards: {cards}")
@@ -442,4 +427,3 @@ def show_stats(conn):
     print(f"  Triggers: {triggers} ({trig_with_verb} with resolved verb via SVar)")
     print(f"  DeckHas tags: {deck_has}")
     print(f"  DeckHints tags: {deck_hints}")
-    print(f"  SVars: {svars}")

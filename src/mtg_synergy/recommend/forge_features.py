@@ -1,9 +1,6 @@
 """Shared forge feature computation for training and inference.
 
-Extracts the 105-feature forge GBM feature vector computation into a
-single module used by both train_fusion_model.py and scoring.py.
-
-No oracle-text embeddings or tower model — pure Forge-native features.
+105-feature GBM vector used by both train_fusion_model.py and scoring.py.
 """
 import logging
 import os
@@ -124,7 +121,7 @@ class ForgeFeatureContext:
 
     def _load_card_data(self, conn):
         """Load card index, type lines, strategies, and phase data."""
-        # Build oid_to_idx from cards table (replaces embedding-based index)
+        # Build oid_to_idx from cards table
         self.oid_to_idx = {}
         for i, (oid,) in enumerate(
             conn.execute("SELECT DISTINCT oracle_id FROM cards")
@@ -2714,7 +2711,6 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
     """Compute the 105-feature vector for a single (commander, card) pair.
 
     Returns a list of 103 floats matching FORGE_FEATURE_NAMES order.
-    Pure Forge-native features — no tower model or oracle-text embeddings.
     """
     tl = card_type_line
     card_profile = ctx._forge_profiles.get(card_oid, {})

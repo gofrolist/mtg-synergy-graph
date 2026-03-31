@@ -1,7 +1,7 @@
 """Build causal edges between cards using Forge vocabulary.
 
 Matches effect producers against trigger responders using ForgeFilter
-matching and IDF weighting. Replaces the old graph_builder.py.
+matching and IDF weighting.
 """
 from mtg_synergy.causal.forge_indexer import ForgeIndex
 from mtg_synergy.causal.idf import PRECISION_STRENGTH

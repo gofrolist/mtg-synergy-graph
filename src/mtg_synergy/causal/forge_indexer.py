@@ -1,8 +1,7 @@
-"""Forge-native causal indexer -- indexes forge_abilities by events produced/consumed.
+"""Causal indexer — indexes forge_abilities by events produced/consumed.
 
-Replaces the old indexer.py which used parsed AST abilities + verb_resolvers.
-This version reads directly from forge_abilities table and uses the
-verb->event mapping to determine what events each card produces.
+Reads from forge_abilities table and uses verb→event mapping to determine
+what events each card produces.
 """
 from collections import defaultdict
 from dataclasses import dataclass, field

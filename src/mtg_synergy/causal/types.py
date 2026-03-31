@@ -1,5 +1,5 @@
 """Causal graph dataclasses for the interaction graph."""
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -28,36 +28,3 @@ class Edge:
         d = {k: v for k, v in self.__dict__.items() if k != "detail"}
         d["detail"] = self.detail.to_dict()
         return d
-
-
-@dataclass
-class ResourceDelta:
-    mana: int = 0
-    creatures: int = 0
-    cards: int = 0
-    life: int = 0
-
-    @property
-    def is_positive(self) -> bool:
-        resources = [self.mana, self.creatures, self.cards]
-        return any(r > 0 for r in resources) and all(r >= 0 for r in resources)
-
-
-@dataclass
-class LoopAnalysis:
-    is_infinite: str
-    min_board_requirement: str | None = None
-    resource_deltas: dict = field(default_factory=dict)
-    growth_pattern: str = "fixed"
-
-
-@dataclass
-class Chain:
-    cards: list[str]
-    edges: list[Edge]
-    chain_type: str
-    output: str = ""
-    resource_delta: ResourceDelta = field(default_factory=ResourceDelta)
-    loop_analysis: LoopAnalysis | None = None
-    bottleneck: str | None = None
-    score: float = 0.0

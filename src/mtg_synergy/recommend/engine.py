@@ -12,9 +12,8 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
 ):
     """Rank non-deck cards by total synergy with the current decklist.
 
-    Uses forge-only model: color-identity filter for candidate discovery,
-    then forge GBM (63 features) for final ranking. No tower model,
-    no embeddings, no EDHREC features.
+    Uses color-identity filter for candidate discovery, then Forge GBM
+    (105 features) for final ranking.
     """
     import sqlite3 as _sql_dyn
     _shared_conn = None

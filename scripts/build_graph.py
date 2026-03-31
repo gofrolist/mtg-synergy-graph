@@ -2,7 +2,6 @@
 """Build the Forge-native causal interaction graph."""
 import argparse
 from mtg_synergy.db import get_connection
-from mtg_synergy.parse import ensure_parse_schema
 from mtg_synergy.causal import ensure_causal_schema
 
 
@@ -771,7 +770,6 @@ def main():
     parser.add_argument("--stats", action="store_true")
     args = parser.parse_args()
     conn = get_connection()
-    ensure_parse_schema(conn)
     ensure_causal_schema(conn)
     if args.forge or args.rebuild:
         _build_forge_graph(conn)
