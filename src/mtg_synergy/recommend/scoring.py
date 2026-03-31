@@ -134,11 +134,12 @@ def _apply_penalties(scores, cand_list, ctx, cmdr_ctx, cmdr_oid,
         non_generic_req = req - _GENERIC_REQ
         if non_generic_req and cmdr_subtypes and not (non_generic_req & cmdr_subtypes):
             scores[i] *= 0.4
+        # Card excludes commander's creature type from effects
+        # (e.g. Restoration Angel excludes Angel, Mikaeus excludes Human)
+        excl = profile.get('excluded_subtypes', set())
+        if excl and cmdr_subtypes and (excl & cmdr_subtypes):
+            scores[i] *= 0.3
         if cmdr_is_tribal:
-            # Card excludes commander's creature type from effects
-            excl = profile.get('excluded_subtypes', set())
-            if excl and (excl & cmdr_subtypes):
-                scores[i] *= 0.3
             # Card creates tokens of wrong creature type
             token_subs = ctx._token_subtypes.get(oid, set())
             if token_subs and not (token_subs & cmdr_subtypes):
