@@ -147,7 +147,7 @@ def _apply_penalties(scores, cand_list, ctx, cmdr_ctx, cmdr_oid,
         # that the commander doesn't use — penalize unless commander shares it
         card_counters = profile.get('counter_types', set())
         cmdr_counter_types = cmdr_profile.get('counter_types', set())
-        niche_only = {'TIME', 'EXPERIENCE'}
+        niche_only = {'TIME', 'EXPERIENCE', 'ENERGY'}
         card_niche = card_counters & niche_only
         if card_niche and not (card_niche & cmdr_counter_types):
             # Only penalize if card has NO other counter types (niche is the core)
@@ -173,9 +173,12 @@ def _apply_penalties(scores, cand_list, ctx, cmdr_ctx, cmdr_oid,
             # Card places counters on lands, not creatures (earthbend etc.)
             if profile.get('counters_on_lands', False):
                 scores[i] *= 0.4
-        # "Choose a Background" partner cards — useless without a Background commander
+        # Partner-type cards useless without matching partner commander
         card_kws = profile.get('keywords', set())
         if 'Choose a Background' in card_kws:
+            scores[i] = -1e9
+            continue
+        if "Doctor's companion" in card_kws:
             scores[i] = -1e9
             continue
         # Card needs colors outside commander's color identity
@@ -295,14 +298,9 @@ def _score_commander(cmdr_oid, cmdr_name, color_identity, deck_cards,
     # Commander context
     deck_oids = set()
     cmdr_ctx = CmdrFeatureContext(ctx, cmdr_oid, deck_oids)
+    from mtg_synergy.config import extract_subtypes
     cmdr_type = card_data.get(cmdr_name, {}).get("type_line", "")
-    if "\u2014" in cmdr_type:
-        try:
-            cmdr_ctx.cmdr_subtypes = {
-                s.lower() for s in cmdr_type.split("\u2014")[1].strip().split()
-            }
-        except (IndexError, AttributeError):
-            pass
+    cmdr_ctx.cmdr_subtypes = extract_subtypes(cmdr_type)
 
     # Compute features
     cand_list = list(candidates.items())
@@ -422,12 +420,9 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
     deck_oids = {card_oid.get(n) for n in deck_cards if n in card_oid} - {None, ""}
     cmdr_ctx = CmdrFeatureContext(ctx, cmdr_oid, deck_oids)
 
+    from mtg_synergy.config import extract_subtypes
     cmdr_type = next((c.get("type_line", "") for c in cards if c.get("oracle_id") == cmdr_oid), "")
-    if "\u2014" in cmdr_type:
-        try:
-            cmdr_ctx.cmdr_subtypes = {s.lower() for s in cmdr_type.split("\u2014")[1].strip().split()}
-        except (IndexError, AttributeError):
-            pass
+    cmdr_ctx.cmdr_subtypes = extract_subtypes(cmdr_type)
 
     cand_list = [(n, card_data[n]) for n in candidate_scores if n in card_data]
     features = []

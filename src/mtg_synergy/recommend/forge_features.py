@@ -1443,15 +1443,8 @@ class CmdrFeatureContext:
         self.cmdr_phases = ctx.card_phase_order.get(cmdr_oid, set())
 
         # Commander subtypes for tribal matching (from pre-cached type_lines)
-        self.cmdr_subtypes = set()
-        cmdr_tl = ctx._type_lines.get(cmdr_oid, "")
-        if cmdr_tl and "\u2014" in cmdr_tl:
-            try:
-                self.cmdr_subtypes = {
-                    s.lower() for s in cmdr_tl.split("\u2014")[1].strip().split()
-                }
-            except (IndexError, AttributeError):
-                pass
+        from mtg_synergy.config import extract_subtypes
+        self.cmdr_subtypes = extract_subtypes(ctx._type_lines.get(cmdr_oid, ""))
 
         # Commander mechanics vectors
         self.cmdr_produces = ctx._mech_produces.get(cmdr_oid)

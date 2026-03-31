@@ -81,7 +81,7 @@ def check_card(card_name, card_oid, card_type, card_text, card_profile,
                   "emblem", "iscommander", "isremembered", "istriggerremembered",
                   "hascounters", "hascardsinhand_card_eq0", "thisturnentered",
                   "equippedby", "enchantedby", "attachedby", "pairedwith",
-                  "notdefinedtargeted", "triggereddefender", "toplibrary",
+                  "controlledby", "notdefinedtargeted", "triggereddefender", "toplibrary",
                   "blue", "black", "red", "green", "white",
                   "swamp", "island", "mountain", "forest", "plains",
                   "outlaw"}
@@ -142,10 +142,9 @@ def validate_commanders(conn, commanders, ctx, all_recs, top_n=30, quiet=False):
         cmdr_oid = cmdr_row[0]
 
         cmdr_profile = ctx._forge_profiles.get(cmdr_oid, {})
-        cmdr_subtypes = set()
+        from mtg_synergy.config import extract_subtypes
         cmdr_type = cmdr_row[1] or ""
-        if "\u2014" in cmdr_type:
-            cmdr_subtypes = {s.strip() for s in cmdr_type.split("\u2014")[1].split()}
+        cmdr_subtypes = extract_subtypes(cmdr_type)
 
         cmdr_strats = ctx.card_strats.get(cmdr_oid, set())
 
