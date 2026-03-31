@@ -163,6 +163,11 @@ FORGE_FEATURE_NAMES = [
     "card_cost_reduction",
     "card_spell_synergy_score",
     "spellslinger_cmc_value",
+    # ── Graveyard / self-sacrifice features ──
+    "cmdr_graveyard_theme",
+    "card_self_sacrifice",
+    "graveyard_sac_match",
+    "graveyard_replay_value",
 ]
 
 
