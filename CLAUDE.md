@@ -104,9 +104,12 @@ uv run mtg-synergy --commander "Krenko, Mob Boss" --combos       # Combo detecti
 # === Comparison & validation ===
 python3 scripts/compare_edhrec.py --commander "Krenko, Mob Boss"  # Single commander vs EDHREC
 python3 scripts/compare_edhrec.py --all --quiet                    # All commanders summary
+python3 scripts/validate_recommendations.py --top 100              # Pipeline validation (model + scoring)
+python3 scripts/train_fusion_model.py --forge-only --validate      # Train + validate in one step
 
 # Tests
-uv run pytest tests/ -v                        # Run all tests
+uv run pytest tests/ -v                        # Run all 370 tests
+uv run pytest tests/test_recommendation_quality.py -v              # Pipeline quality tests only
 ```
 
 ## Architecture
@@ -141,7 +144,7 @@ python3 scripts/build_graph.py --rebuild                # 3. Rebuild causal grap
 python3 scripts/strategy_detector.py --populate                 # 4. Strategies
 python3 scripts/fetch_spellbook.py                              # 5. Refresh combos
 python3 scripts/fetch_edhrec_all.py --max 2000 --refresh-top 200  # 6. Refresh EDHREC (new + top 200 stale)
-python3 scripts/train_fusion_model.py --forge-only --rebuild-features  # 7. Retrain forge model (~7 min, $0)
+python3 scripts/train_fusion_model.py --forge-only --rebuild-features --validate  # 7. Retrain + validate (~8 min, $0)
 ```
 
 ### DB Schema (data/tags.db)
@@ -231,12 +234,19 @@ python3 scripts/train_fusion_model.py --forge-only --rebuild-features  # 7. Retr
   Auto-invalidates on edge count, card count, or strength mode change
 - Edge index pre-loaded at inference: CmdrFeatureContext uses in-memory adjacency (~3s total)
 - Per-grade sample weights: grade 5 x3, grade 4 x2
-- Post-scoring penalties (scoring.py):
-  - excluded_tribal (×0.3), required_subtype mismatch (×0.4), wrong token type (×0.5)
-  - non-counter creatures for counter commanders (×0.6): no has_p1p1 + no counter verbs
+- Post-scoring penalties (scoring.py `_apply_penalties()`):
+  - required_subtype mismatch (×0.4): card requires creature types the commander doesn't have
+  - excluded_subtypes (×0.3): card excludes commander's creature type from effects
+  - wrong token type (×0.5): tribal commander, card creates wrong token type
+  - wrong counter type (×0.4): card puts non-P1P1 counters (M1M1, TIME) for P1P1 commander
+  - non-counter creatures for counter commanders (×0.6): no has_p1p1 + no P1P1 counter verbs
+  - niche counter penalty (×0.4): TIME/EXPERIENCE/ENERGY-only cards when commander doesn't use them
   - counters on lands for counter commanders (×0.4): Earthbend, land-targeting PutCounter
+  - "Choose a Background" / "Doctor's companion" hard filter (score=-1e9)
   - wrong-color needs hard filter (score=-1e9): e.g., Pearl Medallion in mono-G
   - unmet Type$ needs/hints (×0.3): e.g., needs=Type$Dinosaur in Human deck
+- DFC-aware subtype extraction: `config.extract_subtypes()` parses both faces
+- Pipeline validation: `--validate` flag or `test_recommendation_quality.py` (7 tests)
 - GBM: LambdaRank, num_leaves=767, lr=0.025, n_estimators=1000 (early_stop=40),
     label_gain=[0,1,3,6,15,30], bagging_freq=5, colsample_bytree=0.6, feature_fraction_bynode=0.9
 
@@ -287,50 +297,55 @@ mechanically-synergistic cards that nobody plays.
 | `src/mtg_synergy/parse/verb_resolvers.py` | Rules engine: Effect → StateChange (what game events occur) |
 | `src/mtg_synergy/parse/forge_import.py` | Import Forge ability data into DB |
 
-### `src/mtg_synergy/causal/` package (interaction graph + chain discovery)
+### `src/mtg_synergy/causal/` package (interaction graph)
 
 | Module | Purpose |
 |---|---|
 | `src/mtg_synergy/causal/__init__.py` | DB storage, CausalContext (pre-loaded scoring), anti-synergy detection |
 | `src/mtg_synergy/causal/types.py` | Edge, EdgeDetail, Chain, ResourceDelta, LoopAnalysis dataclasses |
-| `src/mtg_synergy/causal/indexer.py` | Index cards by events produced/consumed for fast edge building |
-| `src/mtg_synergy/causal/graph_builder.py` | Build trigger/feeds/amplifies/enables/tribal edges |
-| `src/mtg_synergy/causal/chain_finder.py` | DFS chain discovery + infinite loop detection |
-| `src/mtg_synergy/causal/resource_flow.py` | Cost/production tracking for loop validation |
+| `src/mtg_synergy/causal/indexer.py` | Index cards by events produced/consumed (AST-based) |
+| `src/mtg_synergy/causal/forge_indexer.py` | Index cards by events from Forge data |
+| `src/mtg_synergy/causal/graph_builder.py` | Build causal edges from parsed abilities (AST) |
+| `src/mtg_synergy/causal/forge_graph_builder.py` | Build causal edges from Forge data |
+| `src/mtg_synergy/causal/idf.py` | Shared IDF computation + PRECISION_STRENGTH constant |
+| `src/mtg_synergy/causal/verb_event_map.py` | Forge verb → trigger event mapping (extracted from Java source) |
 
 ### `src/mtg_synergy/` package (core logic)
 
 | Module | Purpose |
 |---|---|
-| `src/mtg_synergy/config.py` | Centralized paths, thresholds, and DB settings |
+| `src/mtg_synergy/config.py` | Centralized paths, thresholds, DB settings, `extract_subtypes()` (DFC-aware) |
 | `src/mtg_synergy/constants.py` | ACTION_EVENT_BRIDGES, TRIGGER_EFFECT_BRIDGES, STAPLE_ROLES |
 | `src/mtg_synergy/db.py` | Centralized DB connection factory |
+| `src/mtg_synergy/tag_db.py` | SQLite tag DB utilities (schema, queries, import) |
+| `src/mtg_synergy/card_db.py` | In-memory card lookup from Scryfall JSON |
 | `src/mtg_synergy/cli.py` | CLI dispatcher (argparse + command routing) |
 | `src/mtg_synergy/recommend/engine.py` | `recommend_cards()` — forge model recommendation pipeline |
 | `src/mtg_synergy/recommend/swaps.py` | `suggest_swaps()` — multi-layer card swap suggestions |
-| `src/mtg_synergy/recommend/scoring.py` | `color_identity_filter()`, `score_forge_candidates()`, `_apply_mechanical_bonus()` |
+| `src/mtg_synergy/recommend/scoring.py` | `color_identity_filter()`, `score_forge_candidates()`, `_apply_penalties()`, `_apply_mechanical_bonus()` |
 | `src/mtg_synergy/recommend/hidden_gems.py` | `find_hidden_gems()` — pure mechanical synergy engine, no popularity bias |
-| `src/mtg_synergy/recommend/forge_features.py` | Shared 105-feature computation: `ForgeFeatureContext` (29 profile fields, edge index, mechanics vectors, deck tags, pre-encoded card arrays), `CmdrFeatureContext`, `compute_card_features()`, `compute_batch_features()` |
-| `src/mtg_synergy/recommend/mechanics_vectors.py` | 112-dim forge mechanics vectors: shared game concept space for effect→trigger synergy (32 concepts + 80 subtypes) |
+| `src/mtg_synergy/recommend/forge_features.py` | Shared 105-feature computation: `ForgeFeatureContext` (7 `_load_*` methods), `CmdrFeatureContext`, `compute_card_features()` (6 grouped helpers), `compute_batch_features()` |
+| `src/mtg_synergy/recommend/mechanics_vectors.py` | 116-dim forge mechanics vectors: shared game concept space (36 concepts + 80 subtypes) |
+| `src/mtg_synergy/recommend/cmdr_patterns.py` | `detect_cmdr_patterns()` — shared commander mechanical flag detection |
 | `src/mtg_synergy/recommend/affinity.py` | Commander affinity scoring |
-| `src/mtg_synergy/recommend/commander_profile.py` | Auto-infer archetype for any of 3,141 commanders |
+| `src/mtg_synergy/recommend/commander_profile.py` | `CommanderProfile` dataclass for commander archetypes |
 | `src/mtg_synergy/combos/detector.py` | `find_combos()`, `find_combos_tiered()`, `find_partial_combos()` |
 | `src/mtg_synergy/combos/anti_synergy.py` | Anti-synergy detection |
 | `src/mtg_synergy/combos/display.py` | Combo output formatting and validation |
 | `src/mtg_synergy/analysis/deck.py` | Deck synergy display and analysis |
 | `src/mtg_synergy/analysis/strategy.py` | Strategy detection, candidate filtering, commander builds |
-| `src/mtg_synergy/causal/verb_event_map.py` | Forge verb → trigger event mapping (extracted from Java source) |
 
 ### `scripts/` directory (pipelines + entry points)
 
 | File | Purpose |
 |---|---|
 | `scripts/synergy_graph.py` | Thin wrapper — re-exports from `mtg_synergy/`, CLI entry point |
-| `scripts/train_fusion_model.py` | Forge LambdaRank GBM training + feature cache rebuild |
+| `scripts/train_fusion_model.py` | Forge LambdaRank GBM training + feature cache rebuild + `--validate` |
 | `scripts/compare_edhrec.py` | Compare recommendations vs EDHREC High Synergy section |
+| `scripts/validate_recommendations.py` | End-to-end pipeline validation (model + scoring + penalties) |
 | `scripts/strategy_detector.py` | Rule-based strategy detection |
 | `scripts/fetch_spellbook.py` | Commander Spellbook API fetcher |
-| `scripts/build_graph.py` | Causal interaction graph builder CLI (--forge --rebuild, --stats) |
+| `scripts/build_graph.py` | Causal interaction graph builder CLI (--rebuild, --stats) |
 | `scripts/import_forge.py` | Forge ability data importer |
 | `scripts/fetch_edhrec_all.py` | Fetch EDHREC synergy + avg decks (concurrent, refresh support) |
 | `scripts/download_cards.py` | Scryfall bulk data downloader |
@@ -340,10 +355,16 @@ mechanically-synergistic cards that nobody plays.
 - Cards keyed by `oracle_id` (Scryfall UUID) for dedup across reprints
 - `data/oracle_cards.json` is gitignored (~150MB); must run `scripts/download_cards.py` first
 - API calls use `urllib.request` (no `requests` dependency)
-- Tribal tags auto-assigned from creature type_line (e.g., Human creature → tribal match)
-- CLI uses `--commander "Name"` (no deck config files)
+- Tribal subtypes extracted via `config.extract_subtypes()` (DFC-aware, both faces)
+- CLI uses `--commander "Name"` or `uv run mtg-synergy --commander "Name"`
 - Package uses `src/` layout (`src/mtg_synergy/`), built with `uv_build` backend
-- Fine-tuning uses `.venv` with unsloth + torch (Python 3.12, not system Python 3.14)
-- Tests: 424 tests in `tests/`, run with `uv run pytest tests/`
-- Spellbook combo boosts must check color identity (fixed: 364 wrong-color boosts deleted)
-- The provides/wants tag tables are kept for backward compat but are not used by the hot path (--recommend, --swaps); they are populated by `derive_forge_tags.py` if needed
+- Pipeline scripts live in `scripts/`, library modules in `src/mtg_synergy/`
+- Tests: 370 tests in `tests/`, run with `uv run pytest tests/`
+  - 7 end-to-end pipeline quality tests (`test_recommendation_quality.py`)
+  - Requires trained model + populated DB (auto-skipped if missing)
+- After training, always run `--validate` to check full pipeline (not just NDCG):
+  `python3 scripts/train_fusion_model.py --forge-only --validate`
+- Adjacency cache uses np.savez (not legacy serialization) for security
+- Shared helpers: `causal/idf.py` (IDF + precision strength), `recommend/cmdr_patterns.py` (commander mechanical flags)
+- Scoring penalties in `_apply_penalties()` apply to ALL commanders (not just tribal)
+- Spellbook combo boosts must check color identity
