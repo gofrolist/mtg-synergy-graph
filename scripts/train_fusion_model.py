@@ -968,8 +968,8 @@ def main():
     parser.add_argument(
         "--validate-top",
         type=int,
-        default=50,
-        help="Number of commanders to validate (default: 50)",
+        default=100,
+        help="Number of commanders to validate (default: 100)",
     )
     args = parser.parse_args()
 
