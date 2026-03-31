@@ -89,10 +89,10 @@ python3 scripts/fetch_edhrec_all.py --refresh          # Re-fetch ALL existing c
 python3 scripts/fetch_edhrec_all.py --stats            # Show coverage stats
 
 # === Forge model (LightGBM LambdaRank) ===
-python3 scripts/train_fusion_model.py --forge-only     # Train forge GBM (cached features, parallel folds, ~3 min)
-python3 scripts/train_fusion_model.py --forge-only --rebuild-features  # Rebuild features (shared ctx, 8 workers) + train (~7 min)
-python3 scripts/train_fusion_model.py --forge-only --quick             # Single-fold fast iteration (~2 min)
-python3 scripts/train_fusion_model.py --forge-only --tune              # Parallel HP search + train (~12 min)
+python3 scripts/train_fusion_model.py    # Train forge GBM (cached features, parallel folds, ~3 min)
+python3 scripts/train_fusion_model.py --rebuild-features  # Rebuild features (shared ctx, 8 workers) + train (~7 min)
+python3 scripts/train_fusion_model.py --quick             # Single-fold fast iteration (~2 min)
+python3 scripts/train_fusion_model.py --tune              # Parallel HP search + train (~12 min)
 
 # === Recommendations ===
 uv run mtg-synergy --commander "Krenko, Mob Boss" --recommend     # Recommend cards (GBM + mechanical bonus)
@@ -104,7 +104,7 @@ uv run mtg-synergy --commander "Krenko, Mob Boss" --combos       # Combo detecti
 python3 scripts/compare_edhrec.py --commander "Krenko, Mob Boss"  # Single commander vs EDHREC
 python3 scripts/compare_edhrec.py --all --quiet                    # All commanders summary
 python3 scripts/validate_recommendations.py --top 100              # Pipeline validation (model + scoring)
-python3 scripts/train_fusion_model.py --forge-only --validate      # Train + validate in one step
+python3 scripts/train_fusion_model.py --validate      # Train + validate in one step
 
 # Tests
 uv run pytest tests/ -v                        # Run all 154 tests
@@ -143,7 +143,7 @@ python3 scripts/build_graph.py --rebuild                # 3. Rebuild causal grap
 python3 scripts/strategy_detector.py --populate                 # 4. Strategies
 python3 scripts/fetch_spellbook.py                              # 5. Refresh combos
 python3 scripts/fetch_edhrec_all.py --max 2000 --refresh-top 200  # 6. Refresh EDHREC (new + top 200 stale)
-python3 scripts/train_fusion_model.py --forge-only --rebuild-features --validate  # 7. Retrain + validate (~8 min, $0)
+python3 scripts/train_fusion_model.py --rebuild-features --validate  # 7. Retrain + validate (~8 min, $0)
 ```
 
 ### DB Schema (data/tags.db)
@@ -216,7 +216,7 @@ python3 scripts/train_fusion_model.py --forge-only --rebuild-features --validate
   Generic staples (>30% frequency) demoted from grade 4/5 to 3
   Commander-illegal cards filtered from negative pool
   3:1 negative ratio, 3-tier sampling: 1/3 strategy/subtype, 1/3 tag overlap, 1/3 random
-- Training: `python3 scripts/train_fusion_model.py --forge-only --rebuild-features` (~7 min)
+- Training: `python3 scripts/train_fusion_model.py --rebuild-features` (~7 min)
   Feature build: shared ForgeFeatureContext via fork pool (8 workers, ~17s)
   CV folds: 3 folds trained in parallel via ProcessPoolExecutor (thread-pinned)
   Batch features: vectorized array indexing for ~50 features, loop for ~35
@@ -348,7 +348,7 @@ mechanically-synergistic cards that nobody plays.
   - 7 end-to-end pipeline quality tests (`test_recommendation_quality.py`)
   - Requires trained model + populated DB (auto-skipped if missing)
 - After training, always run `--validate` to check full pipeline (not just NDCG):
-  `python3 scripts/train_fusion_model.py --forge-only --validate`
+  `python3 scripts/train_fusion_model.py --validate`
 - Adjacency cache uses np.savez (not legacy serialization) for security
 - Shared helpers: `causal/idf.py` (IDF + precision strength), `recommend/cmdr_patterns.py` (commander mechanical flags)
 - Scoring penalties in `_apply_penalties()` apply to ALL commanders (not just tribal)

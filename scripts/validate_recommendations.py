@@ -21,12 +21,12 @@ from mtg_synergy.config import DB_PATH
 
 def get_top_commanders(conn, n=10):
     """Get top N commanders by EDHREC deck count."""
-    # Build slug→name mapping from cards table
+    from fetch_edhrec_all import name_to_slug
+
+    # Build slug→name mapping from all legendary cards (creatures, planeswalkers, vehicles, etc.)
     slug_map = {}
-    for row in conn.execute("SELECT name FROM cards WHERE type_line LIKE '%Legendary Creature%'"):
-        name = row[0]
-        import re
-        slug = re.sub(r"[^a-z0-9]+", "-", name.lower().split(" // ")[0]).strip("-")
+    for (name,) in conn.execute("SELECT name FROM cards WHERE type_line LIKE '%Legendary%'"):
+        slug = name_to_slug(name)
         slug_map[slug] = name
 
     rows = conn.execute("""

@@ -23,7 +23,7 @@ python3 scripts/strategy_detector.py --populate
 python3 scripts/fetch_edhrec_all.py --max 500
 
 # 6. Train the model (~7 min)
-python3 scripts/train_fusion_model.py --forge-only --rebuild-features
+python3 scripts/train_fusion_model.py --rebuild-features
 
 # 7. Get recommendations
 uv run mtg-synergy --commander "Krenko, Mob Boss" --recommend
@@ -84,10 +84,10 @@ python3 scripts/fetch_edhrec_all.py --stats            # Show coverage stats
 ### Model Training
 
 ```bash
-python3 scripts/train_fusion_model.py --forge-only                     # Train (~3 min, cached features)
-python3 scripts/train_fusion_model.py --forge-only --rebuild-features  # Rebuild features + train (~7 min)
-python3 scripts/train_fusion_model.py --forge-only --quick             # Single-fold fast iteration (~2 min)
-python3 scripts/train_fusion_model.py --forge-only --tune              # Hyperparameter search (~12 min)
+python3 scripts/train_fusion_model.py                     # Train (~3 min, cached features)
+python3 scripts/train_fusion_model.py --rebuild-features  # Rebuild features + train (~7 min)
+python3 scripts/train_fusion_model.py --quick             # Single-fold fast iteration (~2 min)
+python3 scripts/train_fusion_model.py --tune              # Hyperparameter search (~12 min)
 ```
 
 ### Recommendations
@@ -143,7 +143,7 @@ python3 scripts/build_graph.py --rebuild                           # 3. Rebuild 
 python3 scripts/strategy_detector.py --populate                            # 4. Strategies
 python3 scripts/fetch_spellbook.py                                         # 5. Refresh combos
 python3 scripts/fetch_edhrec_all.py --max 2000 --refresh-top 200          # 6. Refresh EDHREC
-python3 scripts/train_fusion_model.py --forge-only --rebuild-features     # 7. Retrain (~7 min, $0)
+python3 scripts/train_fusion_model.py --rebuild-features     # 7. Retrain (~7 min, $0)
 ```
 
 ### DB Schema (data/tags.db)

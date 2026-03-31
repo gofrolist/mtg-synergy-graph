@@ -28,9 +28,9 @@ from mtg_synergy.recommend.forge_features import (
 from mtg_synergy.config import DATA_DIR, DB_PATH
 
 # ── Training constants ────────────────────────────────────────────────
-_NEGATIVE_RATIO = 3
+_NEGATIVE_RATIO = 2
 _STAPLE_THRESHOLD = 0.30
-_GRADE_BOUNDARIES = (0.40, 0.20, 0.05, 0.0)
+_GRADE_BOUNDARIES = (0.30, 0.15, 0.05, 0.0)
 _FINAL_ROUND_MULTIPLIER = 1.1
 
 FORGE_FEATURE_NAMES = [
@@ -651,7 +651,7 @@ def train_forge_gbm(X, y, cmdr_ids, tune=False, quick=False):
         "subsample": 0.8,
         "min_data_in_bin": 5,
         "verbose": -1,
-        "label_gain": [0, 1, 3, 6, 15, 30],  # 6 grades: neg, anti-syn, low, moderate, top, high-syn
+        "label_gain": [0, 1, 3, 8, 20, 30],  # 6 grades: neg, anti-syn, low, moderate, top, high-syn
     }
 
     if tune:
@@ -934,12 +934,6 @@ def _load_pairs_for_features(conn):
 
 def main():
     parser = argparse.ArgumentParser(description="Train forge LightGBM model")
-    parser.add_argument(
-        "--forge-only",
-        action="store_true",
-        default=True,
-        help="(default) Train forge-only GBM on EDHREC labels with forge features",
-    )
     parser.add_argument(
         "--rebuild-features",
         action="store_true",

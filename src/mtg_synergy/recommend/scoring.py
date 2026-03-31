@@ -341,7 +341,7 @@ def batch_recommend(conn, commander_names: list[str], top_n: int = 30,
     """
     gbm = _load_gbm()
     if gbm is None:
-        print("ERROR: forge model not found. Run: python3 train_fusion_model.py --forge-only")
+        print("ERROR: forge model not found. Run: python3 train_fusion_model.py")
         return {}
 
     if verbose:
@@ -391,7 +391,7 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
     """
     gbm = _load_gbm()
     if gbm is None:
-        print("  ERROR: forge model not found. Run: python3 train_fusion_model.py --forge-only")
+        print("  ERROR: forge model not found. Run: python3 train_fusion_model.py")
         return
 
     # Build card data lookup
