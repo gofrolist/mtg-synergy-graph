@@ -960,6 +960,17 @@ def main():
         action="store_true",
         help="Single-fold validation only (faster iteration during development)",
     )
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="Run full pipeline validation after training (checks scoring + penalties)",
+    )
+    parser.add_argument(
+        "--validate-top",
+        type=int,
+        default=50,
+        help="Number of commanders to validate (default: 50)",
+    )
     args = parser.parse_args()
 
     print("=" * 60)
@@ -1018,6 +1029,58 @@ def main():
     total_imp = sum(importances)
     for name, imp in sorted(zip(names, importances), key=lambda x: -x[1]):
         print(f"    {name:25s} {imp:6d} ({imp/total_imp*100:5.1f}%)")
+
+    # ── Post-training pipeline validation ──
+    if args.validate:
+        print("\n" + "=" * 60)
+        print("POST-TRAINING VALIDATION — full pipeline (model + scoring)")
+        print("=" * 60)
+        _run_pipeline_validation(args.validate_top)
+
+
+def _run_pipeline_validation(top_n=50):
+    """Run full recommendation pipeline validation after training.
+
+    Tests the COMPLETE pipeline: model scoring → penalties → mechanical bonus.
+    NDCG only tests model quality; this catches scoring/penalty bugs.
+    """
+    import re
+    from validate_recommendations import (
+        get_top_commanders, validate_commanders
+    )
+    from mtg_synergy.recommend.scoring import batch_recommend
+    from mtg_synergy.recommend.forge_features import ForgeFeatureContext
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+
+    commanders = get_top_commanders(conn, top_n)
+    print(f"  Validating {len(commanders)} commanders, 30 recs each...")
+
+    all_recs = batch_recommend(conn, commanders, top_n=30, verbose=False)
+    ctx = ForgeFeatureContext(conn, preload_edges=False)
+
+    results = validate_commanders(conn, commanders, ctx, all_recs)
+
+    total_issues = 0
+    for cmdr, issues in results:
+        total_issues += len(issues)
+        for rank, name, score, warnings in issues:
+            print(f"  WARNING: {cmdr} #{rank}: {name} — {'; '.join(warnings)}")
+
+    total_recs = len(commanders) * 30
+    rate = total_issues / max(total_recs, 1) * 100
+    print(f"\n  Validation: {total_issues}/{total_recs} flags ({rate:.1f}%)")
+
+    if total_issues == 0:
+        print("  PASS — no suspicious recommendations")
+    else:
+        print(f"  FAIL — {total_issues} suspicious card(s) found")
+        print("  Run: python3 scripts/validate_recommendations.py --top 50")
+        print("  to investigate and fix scoring penalties")
+
+    conn.close()
+    return total_issues
 
 
 if __name__ == "__main__":
