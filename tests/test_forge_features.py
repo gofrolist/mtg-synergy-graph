@@ -149,8 +149,8 @@ class TestF23ForgeTypeSynergy:
             if found_oid is None:
                 pytest.skip("No card with 'goblin' trigger_filter found in DB")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert features[23] > 0.0, (
-                f"F23 should be >0 for a goblin-triggering card with Goblin commander, got {features[23]}"
+            assert features[13] > 0.0, (
+                f"F13 should be >0 for a goblin-triggering card with Goblin commander, got {features[13]}"
             )
         finally:
             pass  # conn is cached, do not close
@@ -173,8 +173,8 @@ class TestF23ForgeTypeSynergy:
             if found_oid is None:
                 pytest.skip("No card with non-goblin trigger_filter found")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert features[23] == 0.0, (
-                f"F23 should be 0 for non-goblin card with Goblin commander, got {features[23]}"
+            assert features[13] == 0.0, (
+                f"F13 should be 0 for non-goblin card with Goblin commander, got {features[13]}"
             )
         finally:
             pass  # conn is cached, do not close
@@ -204,36 +204,12 @@ class TestF24CmdrForgeTypeMatch:
             if row is None:
                 pytest.skip("No Human creature card found")
             features = _compute_features(ctx, cmdr, row[0], conn)
-            assert features[24] > 0.0, (
-                f"F24 should be >0 for Human card with Human-trigger commander, got {features[24]}"
+            assert features[14] > 0.0, (
+                f"F14 should be >0 for Human card with Human-trigger commander, got {features[14]}"
             )
         finally:
             pass  # conn is cached, do not close
 
-
-class TestF25SharedForgeMechanics:
-    """F25: count of shared Forge verbs, trigger_modes, and keywords."""
-
-    def test_shared_token_verb(self):
-        """Two cards sharing Token verb should get >0."""
-        ctx, conn = _make_ctx()
-        try:
-            # Find two cards that both have Token verb
-            token_cards = []
-            for oid, profile in ctx._forge_profiles.items():
-                if "Token" in profile.get("verbs", set()):
-                    token_cards.append(oid)
-                    if len(token_cards) >= 2:
-                        break
-            if len(token_cards) < 2:
-                pytest.skip("Need at least 2 cards with Token verb")
-            cmdr = _make_cmdr(ctx, token_cards[0])
-            features = _compute_features(ctx, cmdr, token_cards[1], conn)
-            assert features[25] > 0.0, (
-                f"F25 should be >0 for two cards sharing Token verb, got {features[25]}"
-            )
-        finally:
-            pass  # conn is cached, do not close
 
 
 class TestF27ForgeAntiTribal:
@@ -258,8 +234,8 @@ class TestF27ForgeAntiTribal:
             if found_oid is None:
                 pytest.skip("No card with conflicting tribal trigger_filter found")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert features[27] > 0.0, (
-                f"F27 should be >0 for conflicting-tribal card in Goblin deck, got {features[27]}"
+            assert features[16] > 0.0, (
+                f"F16 should be >0 for conflicting-tribal card in Goblin deck, got {features[16]}"
             )
         finally:
             pass  # conn is cached, do not close
@@ -282,8 +258,8 @@ class TestF27ForgeAntiTribal:
             if found_oid is None:
                 pytest.skip("No card with goblin-only trigger_filter found")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert features[27] == 0.0, (
-                f"F27 should be 0 for goblin card in Goblin deck, got {features[27]}"
+            assert features[16] == 0.0, (
+                f"F16 should be 0 for goblin card in Goblin deck, got {features[16]}"
             )
         finally:
             pass  # conn is cached, do not close
@@ -314,8 +290,8 @@ class TestF28ForgeVerbAlignment:
             if token_oid is None:
                 pytest.skip("No card with Token verb found")
             features = _compute_features(ctx, cmdr, token_oid, conn)
-            assert features[28] > 0.0, (
-                f"F28 should be >0 for Token card + ChangesZone commander, got {features[28]}"
+            assert features[17] > 0.0, (
+                f"F17 should be >0 for Token card + ChangesZone commander, got {features[17]}"
             )
         finally:
             pass  # conn is cached, do not close
@@ -342,8 +318,8 @@ class TestF28ForgeVerbAlignment:
             if card_oid is None:
                 pytest.skip("No other card found")
             features = _compute_features(ctx, cmdr, card_oid, conn)
-            assert features[28] == 0.0, (
-                f"F28 should be 0 when commander has no triggers/verbs, got {features[28]}"
+            assert features[17] == 0.0, (
+                f"F17 should be 0 when commander has no triggers/verbs, got {features[17]}"
             )
         finally:
             pass  # conn is cached, do not close
@@ -373,8 +349,8 @@ class TestF31CounterTypeMatch:
             if found_oid is None:
                 pytest.skip("No card with P1P1 counter_type found")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert features[31] > 0.0, (
-                f"F31 should be >0 for P1P1 card with Kyler, got {features[31]}"
+            assert features[18] > 0.0, (
+                f"F18 should be >0 for P1P1 card with Kyler, got {features[18]}"
             )
         finally:
             pass  # conn is cached, do not close
@@ -393,8 +369,8 @@ class TestF31CounterTypeMatch:
             if found_oid is None:
                 pytest.skip("No card without counter_types found")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert features[31] == 0.0, (
-                f"F31 should be 0 for card without counters, got {features[31]}"
+            assert features[18] == 0.0, (
+                f"F18 should be 0 for card without counters, got {features[18]}"
             )
         finally:
             pass  # conn is cached, do not close
@@ -457,8 +433,8 @@ class TestF7ForgeAbilityCosine:
                 pytest.skip("Need at least 2 cards with Token verb")
             cmdr = _make_cmdr(ctx, token_cards[0])
             features = _compute_features(ctx, cmdr, token_cards[1], conn)
-            assert features[7] > 0.0, (
-                f"F7 should be >0 for two cards sharing Token verb, got {features[7]}"
+            assert features[4] > 0.0, (
+                f"F4 should be >0 for two cards sharing Token verb, got {features[4]}"
             )
         finally:
             pass  # conn is cached, do not close
@@ -477,8 +453,8 @@ class TestF7ForgeAbilityCosine:
             if found_oid is None:
                 pytest.skip("All cards have forge profiles")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert features[7] == 0.0, (
-                f"F7 should be 0 for card without forge profile, got {features[7]}"
+            assert features[4] == 0.0, (
+                f"F4 should be 0 for card without forge profile, got {features[4]}"
             )
         finally:
             pass  # conn is cached, do not close
@@ -505,8 +481,8 @@ class TestF26ForgeAbilityDepth:
             if found_oid is None:
                 pytest.skip("No card with 2+ mechanical components found")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert features[26] >= 2.0, (
-                f"F26 should be >= 2.0 for card with 2+ components, got {features[26]}"
+            assert features[15] >= 2.0, (
+                f"F26 should be >= 2.0 for card with 2+ components, got {features[15]}"
             )
         finally:
             pass  # conn is cached, do not close
@@ -525,8 +501,8 @@ class TestF26ForgeAbilityDepth:
             if found_oid is None:
                 pytest.skip("All cards have forge profiles")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert features[26] == 0.0, (
-                f"F26 should be 0 for card without forge profile, got {features[26]}"
+            assert features[15] == 0.0, (
+                f"F26 should be 0 for card without forge profile, got {features[15]}"
             )
         finally:
             pass  # conn is cached, do not close
@@ -540,8 +516,8 @@ class TestF26ForgeAbilityDepth:
             for oid in ctx._forge_profiles:
                 if oid != KRENKO_OID:
                     features = _compute_features(ctx, cmdr, oid, conn)
-                    assert features[26] <= 10.0, (
-                        f"F26 should be capped at 10.0, got {features[26]}"
+                    assert features[15] <= 10.0, (
+                        f"F26 should be capped at 10.0, got {features[15]}"
                     )
                     break
         finally:
@@ -617,8 +593,8 @@ class TestFeatureCount:
             if found_oid is None:
                 pytest.skip("No card found for feature count test")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert len(features) == 116, (
-                f"Expected 111 features, got {len(features)}"
+            assert len(features) == 89, (
+                f"Expected 107 features, got {len(features)}"
             )
         finally:
             pass  # conn is cached, do not close
@@ -865,7 +841,7 @@ def test_feature_count_71():
             card_oid, card_meta[0] or "", float(card_meta[1] or 0),
             ctx, cmdr_ctx,
         )
-        assert len(feats) == 116, f"Expected 105 features, got {len(feats)}"
+        assert len(feats) == 89, f"Expected 107 features, got {len(feats)}"
     finally:
         pass  # conn is cached, do not close
 

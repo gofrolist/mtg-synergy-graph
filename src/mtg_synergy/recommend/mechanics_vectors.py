@@ -136,6 +136,58 @@ COST_CONCEPTS = {
 }
 
 
+def _collect_subtypes(abilities):
+    """Count subtypes from trigger_filter and token_script, return top 80 with indices."""
+    subtype_counts = Counter()
+    card_types_set = {"card", "creature", "artifact", "enchantment",
+                      "instant", "sorcery", "permanent", "land",
+                      "planeswalker", "spell", "tribal", "battle"}
+
+    kw_skip = {"flying", "haste", "trample", "vigilance", "deathtouch",
+               "lifelink", "menace", "reach", "defender", "first",
+               "strike", "double", "indestructible", "hexproof",
+               "sac", "unblockable", "shroud", "wither", "persist"}
+
+    for ab in abilities:
+        trig_filter, token_script = ab[3], ab[6]
+        if trig_filter:
+            for part in trig_filter.split(","):
+                main = part.split(".")[0].strip()
+                if main and main[0].isupper() and main.lower() not in card_types_set:
+                    subtype_counts[main.lower()] += 1
+        if token_script:
+            parts = token_script.lower().split("_")
+            if len(parts) >= 4:
+                for p in parts[3:]:
+                    if p and p not in kw_skip and len(p) > 1:
+                        subtype_counts[p] += 1
+
+    top_subtypes = [st for st, _ in subtype_counts.most_common(80)]
+    subtype_idx = {st: N_CONCEPTS + i for i, st in enumerate(top_subtypes)}
+    dim = N_CONCEPTS + len(top_subtypes)
+    return top_subtypes, subtype_idx, dim
+
+
+def _add_type_based_produces(conn, produces, consumes, dim):
+    """Add type-based produces: non-land cards produce spell_cast, creatures produce attacks."""
+    type_lines = {}
+    for row in conn.execute("SELECT oracle_id, type_line FROM cards"):
+        type_lines[row[0]] = row[1] or ""
+    for oid in set(produces.keys()) | set(consumes.keys()):
+        tl = type_lines.get(oid, "")
+        if not tl:
+            continue
+        # Non-land cards produce spell_cast (they are spells when cast)
+        if "Land" not in tl:
+            p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
+            p[_concept_idx["spell_cast"]] += 1.0
+        # Creatures produce creature_attacks and creature_available
+        if "Creature" in tl:
+            p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
+            p[_concept_idx["creature_attacks"]] += 1.0
+            p[_concept_idx["creature_available"]] += 0.5
+
+
 def build_mechanics_vectors(conn, preloaded_abilities=None):
     """Build dense mechanics vectors for all cards with Forge data.
 
@@ -152,17 +204,6 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
         dim: total vector dimension
         subtype_idx: dict[subtype → dimension index]
     """
-    # Discover subtypes from trigger_filter and token_script
-    subtype_counts = Counter()
-    card_types_set = {"card", "creature", "artifact", "enchantment",
-                      "instant", "sorcery", "permanent", "land",
-                      "planeswalker", "spell", "tribal", "battle"}
-
-    kw_skip = {"flying", "haste", "trample", "vigilance", "deathtouch",
-               "lifelink", "menace", "reach", "defender", "first",
-               "strike", "double", "indestructible", "hexproof",
-               "sac", "unblockable", "shroud", "wither", "persist"}
-
     if preloaded_abilities is not None:
         # Use pre-loaded data — no DB scan needed
         abilities = preloaded_abilities
@@ -185,25 +226,8 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
                                   row[5], row[6], row[7], row[8], row[9],
                                   row[10], row[11]))
 
-    # Count subtypes from trigger_filter and token_script
-    for ab in abilities:
-        trig_filter, token_script = ab[3], ab[6]
-        if trig_filter:
-            for part in trig_filter.split(","):
-                main = part.split(".")[0].strip()
-                if main and main[0].isupper() and main.lower() not in card_types_set:
-                    subtype_counts[main.lower()] += 1
-        if token_script:
-            parts = token_script.lower().split("_")
-            if len(parts) >= 4:
-                for p in parts[3:]:
-                    if p and p not in kw_skip and len(p) > 1:
-                        subtype_counts[p] += 1
 
-    # Take top 80 subtypes (covers goblin, human, vampire, etc.)
-    top_subtypes = [st for st, _ in subtype_counts.most_common(80)]
-    subtype_idx = {st: N_CONCEPTS + i for i, st in enumerate(top_subtypes)}
-    dim = N_CONCEPTS + len(top_subtypes)
+    top_subtypes, subtype_idx, dim = _collect_subtypes(abilities)
 
     produces = {}  # oid → vector
     consumes = {}  # oid → vector
@@ -239,12 +263,18 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
             p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
             p[_concept_idx["defender_available"]] += 1.0
 
-        # Zone-aware PRODUCES: verb + trigger_destination → zone concept
-        if verb and verb in _ZONE_VERBS and trig_dest:
+        # Zone-aware PRODUCES: verb + destination → zone concept
+        # Use trigger_destination column if available, fall back to raw_line
+        dest_str = trig_dest or ""
+        if not dest_str and verb and verb in _ZONE_VERBS and raw_line:
+            m = re.search(r'Destination\$\s*(\S+)', raw_line)
+            if m:
+                dest_str = m.group(1)
+        if verb and verb in _ZONE_VERBS and dest_str:
             p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
-            if "Graveyard" in trig_dest:
+            if "Graveyard" in dest_str:
                 p[_concept_idx["goes_to_graveyard"]] += 1.0
-            if "Exile" in trig_dest:
+            if "Exile" in dest_str:
                 p[_concept_idx["goes_to_exile"]] += 1.0
 
         # Token with subtype → produces that subtype
@@ -267,7 +297,12 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
             c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
             c[_concept_idx["equipment_enters"]] += 1.0
         # ETB-doubled CONSUMES: ETB triggers benefit from Panharmonicon
-        if trig_mode in ('ChangesZone', 'ChangesZoneAll') and trig_dest and 'Battlefield' in (trig_dest or ''):
+        etb_dest = trig_dest or ""
+        if not etb_dest and trig_mode in ('ChangesZone', 'ChangesZoneAll') and raw_line:
+            m = re.search(r'Destination\$\s*(\S+)', raw_line)
+            if m:
+                etb_dest = m.group(1)
+        if trig_mode in ('ChangesZone', 'ChangesZoneAll') and 'Battlefield' in etb_dest:
             c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
             c[_concept_idx["etb_doubled"]] += 1.0
 
@@ -279,25 +314,52 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
                 if main in subtype_idx:
                     c[subtype_idx[main]] += 1.0
 
-        # Zone-aware CONSUMES: trigger + trigger_origin → zone concept
-        if trig_mode and trig_origin:
+        # Zone-aware CONSUMES: trigger + origin → zone concept
+        # Use trigger_origin column if available, fall back to raw_line
+        orig_str = trig_origin or ""
+        if not orig_str and trig_mode and raw_line:
+            m = re.search(r'Origin\$\s*(\S+)', raw_line)
+            if m:
+                orig_str = m.group(1)
+        if trig_mode and orig_str:
             c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
-            if "Graveyard" in trig_origin:
+            if "Graveyard" in orig_str:
                 c[_concept_idx["enters_from_graveyard"]] += 1.0
-            if "Exile" in trig_origin:
+            if "Exile" in orig_str:
                 c[_concept_idx["enters_from_exile"]] += 1.0
-            if "Hand" in trig_origin:
+            if "Hand" in orig_str:
                 c[_concept_idx["enters_from_hand"]] += 1.0
+        # Trigger with Destination=Graveyard → consumes goes_to_graveyard (death triggers)
+        trig_dest_str = trig_dest or ""
+        if not trig_dest_str and trig_mode and raw_line:
+            m = re.search(r'Destination\$\s*(\S+)', raw_line)
+            if m:
+                trig_dest_str = m.group(1)
+        if trig_mode and "Graveyard" in trig_dest_str:
+            c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
+            c[_concept_idx["goes_to_graveyard"]] += 1.0
 
-        # ChangeZone with origin → produces zone-specific entry
-        if verb in ("ChangeZone", "ChangeZoneAll") and trig_dest and trig_origin:
-            if "Battlefield" in trig_dest:
+        # ChangeZone with origin → produces zone-specific entry (reanimate, blink return)
+        # Use column values first, fall back to raw_line
+        verb_orig = trig_origin or ""
+        verb_dest = trig_dest or ""
+        if verb in ("ChangeZone", "ChangeZoneAll") and raw_line:
+            if not verb_orig:
+                m = re.search(r'Origin\$\s*(\S+)', raw_line)
+                if m:
+                    verb_orig = m.group(1)
+            if not verb_dest:
+                m = re.search(r'Destination\$\s*(\S+)', raw_line)
+                if m:
+                    verb_dest = m.group(1)
+        if verb in ("ChangeZone", "ChangeZoneAll") and verb_dest and verb_orig:
+            if "Battlefield" in verb_dest:
                 p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
-                if "Graveyard" in trig_origin:
+                if "Graveyard" in verb_orig:
                     p[_concept_idx["enters_from_graveyard"]] += 1.0
-                if "Exile" in trig_origin:
+                if "Exile" in verb_orig:
                     p[_concept_idx["enters_from_exile"]] += 1.0
-                if "Hand" in trig_origin:
+                if "Hand" in verb_orig:
                     p[_concept_idx["enters_from_hand"]] += 1.0
 
         # Cost → consumes resources (check raw_line always, cost field often empty)
@@ -365,6 +427,8 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
                     c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
                     c[_concept_idx["creature_tapped"]] += 1.0
                     c[_concept_idx["creature_available"]] += 0.5
+
+    _add_type_based_produces(conn, produces, consumes, dim)
 
     # L2 normalize all vectors
     for oid in produces:

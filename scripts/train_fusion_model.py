@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Train LightGBM LambdaRank model for card recommendation.
 
-Trained on EDHREC labels with 105 Forge-native features.
+Trained on EDHREC labels with 89 Forge-native features.
 
 Usage:
     python3 train_fusion_model.py                          # Train forge GBM (default)
@@ -35,42 +35,29 @@ _FINAL_ROUND_MULTIPLIER = 1.1
 
 FORGE_FEATURE_NAMES = [
     # ── Causal graph features ──
-    "causal_cmdr_to_card",
-    "causal_card_to_cmdr",
-    "causal_bidirectional",
-    "causal_event_diversity",
-    "deck_edge_count",
+    "causal_cmdr_to_card",          # F0
+    "causal_card_to_cmdr",          # F1
+    "deck_edge_count",              # F2
     # ── Strategy features ──
-    "strategy_overlap",
-    "strategy_cosine",
-    "forge_ability_cosine",
+    "strategy_cosine",              # F3
+    "forge_ability_cosine",         # F4
     # ── Phase / trigger features ──
-    "phase_match",
-    "has_phase_trigger",
-    # ── Tribal / type features ──
-    "tribal_match",
-    "type_creature",
-    "type_instant_sorcery",
-    "type_artifact",
-    "type_enchantment",
-    "type_land",
-    "type_planeswalker",
-    "cmc",
+    "phase_match",                  # F5
+    "has_phase_trigger",            # F6
+    # ── Tribal / CMC features ──
+    "tribal_match",                 # F7
+    "cmc",                          # F8
     # ── Edge precision features ──
-    "deck_exact_edge_ratio",
-    "cmdr_exact_edge",
-    "causal_composite",
-    "card_hub_score",
-    "deck_exact_count",
+    "deck_exact_edge_ratio",        # F9
+    "causal_composite",             # F10
+    "card_hub_score",               # F11
+    "deck_exact_count",             # F12
     # ── Forge type / mechanics features ──
     "forge_type_synergy",
     "cmdr_forge_type_match",
-    "shared_forge_mechanics",
     "forge_ability_depth",
     "forge_anti_tribal",
     "forge_verb_alignment",
-    "forge_mech_fwd",
-    "forge_mech_rev",
     "counter_type_match",
     "ability_type_ratio_T",
     "ability_type_ratio_A",
@@ -78,15 +65,12 @@ FORGE_FEATURE_NAMES = [
     "target_alignment",
     "forge_keyword_synergy",
     "activated_ability_count",
-    "granted_keyword_synergy",
-    "shared_conditions",
     "is_permanent_effect",
     "is_temporary_effect",
     "duration_match",
     "combat_damage_flag",
     "effect_zone_match",
     "scales_with_board",
-    "grants_types_match",
     "is_secondary_trigger",
     "gain_control",
     "granted_keyword_count",
@@ -102,7 +86,6 @@ FORGE_FEATURE_NAMES = [
     "draw_scales",
     "life_scales",
     "produces_mana",
-    "counter_num_variable",
     "grants_abilities",
     "token_amount_variable",
     # ── Ability / token complexity features ──
@@ -111,18 +94,14 @@ FORGE_FEATURE_NAMES = [
     "token_power_toughness",
     "token_keyword_count",
     "zone_graveyard_interact",
-    "zone_exile_interact",
     "ability_density",
     # ── Needs / dependency features ──
     "cmdr_needs_to_card_has",
     "card_needs_satisfied",
     "needs_rarity",
     # ── Counter / anthem distinction features ──
-    "temp_buff_counter_cmdr",
     "put_counter_ratio",
     "cmdr_counter_x_put_counter",
-    "static_anthem_counter_cmdr",
-    "counters_on_lands",
     "cmdr_p1p1_card_no_counters",
     # ── Functional fingerprint features ──
     "func_produces_amplifies",
@@ -134,40 +113,33 @@ FORGE_FEATURE_NAMES = [
     "cmdr_2hop_ratio",
     # ── Card quality / noise suppression ──
     "forge_ability_richness",
-    "card_in_forge",
     "card_strategy_count",
     "deck_tag_count",
     "edhrec_deck_pct",
-    # ── Theme-based features ──
-    "cmdr_equipment_theme",
-    "card_equipment_payoff",
-    "equipment_theme_match",
-    "cmdr_enchantress_theme",
-    "card_enchantress_payoff",
-    "enchantress_theme_match",
-    "cmdr_defender_theme",
-    "card_has_defender",
-    "defender_theme_match",
-    "card_is_etb_doubler",
-    "cmdr_etb_density",
-    "etb_doubler_match",
     # ── Tribal depth features ──
     "tribal_lord_for_cmdr",
     "tribal_member_of_cmdr",
     "tribal_synergy_depth",
-    # ── Spellslinger features ──
-    "cmdr_wants_spells",
-    "card_is_spell_payoff",
-    "spellslinger_match",
-    "cmdr_graveyard_cast",
-    "card_cost_reduction",
-    "card_spell_synergy_score",
-    "spellslinger_cmc_value",
-    # ── Graveyard / self-sacrifice features ──
-    "cmdr_graveyard_theme",
-    "card_self_sacrifice",
-    "graveyard_sac_match",
-    "graveyard_replay_value",
+    # ── General commander demand features ──
+    "verb_demand_match",
+    "type_demand_match",
+    # ── Per-category mechanics sub-products (produce/consume) ──
+    "mech_board_fwd",               # creature/permanent events
+    "mech_board_rev",
+    "mech_resource_fwd",            # counters/draw/life/damage
+    "mech_resource_rev",
+    "mech_disruption_fwd",          # discard/mill/target
+    "mech_disruption_rev",
+    "mech_tempo_fwd",               # spell_cast/attacks/blocks
+    "mech_tempo_rev",
+    "mech_utility_fwd",             # tap/untap/pump/mana/phase
+    "mech_utility_rev",
+    "mech_zones_fwd",               # graveyard/exile/hand
+    "mech_zones_rev",
+    "mech_themes_fwd",              # equipment/defender/etb
+    "mech_themes_rev",
+    "mech_tribal_fwd",              # 80 subtypes
+    "mech_tribal_rev",
 ]
 
 
