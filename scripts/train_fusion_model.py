@@ -162,6 +162,7 @@ FORGE_FEATURE_NAMES = [
     "cmdr_graveyard_cast",
     "card_cost_reduction",
     "card_spell_synergy_score",
+    "spellslinger_cmc_value",
 ]
 
 

@@ -1867,7 +1867,7 @@ def compute_batch_features(card_oids, card_cmcs, ctx, cmdr):
         cmdr: CmdrFeatureContext for the current commander
     """
     N = len(card_oids)
-    X = np.zeros((N, 111), dtype=np.float32)
+    X = np.zeros((N, 112), dtype=np.float32)
     oid_to_idx = ctx.oid_to_idx
 
     # Convert card_oids to ctx indices for array lookup
@@ -2373,6 +2373,10 @@ def compute_batch_features(card_oids, card_cmcs, ctx, cmdr):
     X[:, 109] = ctx._arr_cost_reduction[safe_idx]                     # card_cost_reduction
     X[:, 110] = (ctx._arr_spell_payoff[safe_idx] +                    # card_spell_synergy_score
                  ctx._arr_cost_reduction[safe_idx])
+    # F111: spellslinger_cmc_value — cheap spells get higher score for spell commanders
+    X[:, 111] = (cmdr_wants_spells *
+                 ctx._arr_type_instant_sorcery[safe_idx] *
+                 np.maximum(0.0, 4.0 - ctx._arr_cmc[safe_idx]))       # spellslinger_cmc_value
 
     return X
 
@@ -2738,7 +2742,7 @@ def _compute_deck_tag_features(card_oid, ctx, cmdr):
             hints_overlap, cmdr_needs_to_has, card_needs_met, needs_rarity)
 
 
-def _compute_theme_features(card_oid, card_type_line, ctx, cmdr):
+def _compute_theme_features(card_oid, card_type_line, card_cmc, ctx, cmdr):
     """Compute theme-related features (equipment, enchantress, defender, ETB)."""
     tl = card_type_line
     cmdr_equip = 1.0 if cmdr.cmdr_equipment_theme else 0.0
@@ -2771,13 +2775,14 @@ def _compute_theme_features(card_oid, card_type_line, ctx, cmdr):
     cmdr_gy_cast = 1.0 if cmdr.cmdr_graveyard_cast else 0.0
     card_cost_red = 1.0 if card_oid in ctx._cost_reduction_cards else 0.0
     spell_synergy_score = card_spell_payoff + card_cost_red
+    spell_cmc_value = cmdr_wants_spells * is_instant_sorcery * max(0.0, 4.0 - card_cmc)
 
     return (cmdr_equip, card_equip, equip_match,
             cmdr_ench, card_ench, ench_match,
             cmdr_def, card_def, def_match,
             card_etb_dbl, cmdr_etb, etb_match,
             cmdr_wants_spells, card_spell_payoff, spellslinger_match,
-            cmdr_gy_cast, card_cost_red, spell_synergy_score)
+            cmdr_gy_cast, card_cost_red, spell_synergy_score, spell_cmc_value)
 
 
 def _compute_fingerprint_features(card_oid, ctx, cmdr):
@@ -2854,8 +2859,8 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
      cmdr_def, card_def, def_match,
      card_etb_dbl, cmdr_etb, etb_match,
      cmdr_wants_spells, card_spell_payoff, spellslinger_match,
-     cmdr_gy_cast, card_cost_red, spell_synergy_score
-     ) = _compute_theme_features(card_oid, tl, ctx, cmdr)
+     cmdr_gy_cast, card_cost_red, spell_synergy_score, spell_cmc_value
+     ) = _compute_theme_features(card_oid, tl, card_cmc, ctx, cmdr)
 
     (func_produces_amp, func_requires_prod, func_card_req_cmdr, func_full_cosine
      ) = _compute_fingerprint_features(card_oid, ctx, cmdr)
@@ -2985,4 +2990,5 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         cmdr_gy_cast,                                    # F108 cmdr_graveyard_cast
         card_cost_red,                                   # F109 card_cost_reduction
         spell_synergy_score,                             # F110 card_spell_synergy_score
+        spell_cmc_value,                                 # F111 spellslinger_cmc_value
     ]
