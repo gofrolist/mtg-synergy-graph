@@ -1,4 +1,6 @@
 __pycache__/
+.DS_Store
+.claude/
 
 # Large/regenerable data files
 data/oracle_cards.json
