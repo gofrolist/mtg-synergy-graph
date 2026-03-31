@@ -9,10 +9,9 @@ MTG Synergy Graph — a tool for analyzing Magic: The Gathering EDH/Commander de
 ### Signal Architecture (recommendation pipeline)
 
 ```
-FORGE MODEL (--recommend): Zero oracle text, pure Forge mechanical synergy
-  1. Color-identity filter → all legal cards scored directly by GBM (no tower, no embeddings)
+FORGE MODEL (--recommend): Pure Forge mechanical synergy
+  1. Color-identity filter → all legal cards scored directly by GBM
   2. Forge LambdaRank GBM: 105 features, EDHREC labels, forge-native features
-     100% Forge-native: no oracle text, no embeddings, no neural network
      29 profile fields per card extracted from forge_abilities (verbs, triggers, keywords,
      counter_types, targets, ability_types, trigger_filters, required_subtypes,
      granted_keywords, conditions, duration, effect_zones, scales_with, grants_types,
@@ -108,7 +107,7 @@ python3 scripts/validate_recommendations.py --top 100              # Pipeline va
 python3 scripts/train_fusion_model.py --forge-only --validate      # Train + validate in one step
 
 # Tests
-uv run pytest tests/ -v                        # Run all 163 tests
+uv run pytest tests/ -v                        # Run all 154 tests
 uv run pytest tests/test_recommendation_quality.py -v              # Pipeline quality tests only
 ```
 
@@ -164,7 +163,6 @@ python3 scripts/train_fusion_model.py --forge-only --rebuild-features --validate
 ### Forge Model
 
 **Forge model** (data/fusion_model_forge.lgb):
-- No tower model, no embeddings, no neural network — pure LightGBM on Forge data
 - LambdaRank GBM on 105 features (shared via `src/mtg_synergy/recommend/forge_features.py`):
   100% Forge-native with 29 profile fields per card:
   causal scores (6), strategy (2), forge_ability_cosine, phase (2), tribal,
@@ -251,9 +249,9 @@ python3 scripts/train_fusion_model.py --forge-only --rebuild-features --validate
 ### Recommendation Pipeline (scripts/synergy_graph.py --commander "Name" --recommend)
 
 ```
-1. Candidate selection: Color-identity filter → ALL legal cards (no tower, no embeddings)
+1. Candidate selection: Color-identity filter → ALL legal cards
 2. Score all candidates with GBM (batch predict, ~0.5s for 13k cards):
-   105 features (LambdaRank, 100% Forge-native, no oracle text)
+   105 Forge-native features (LambdaRank)
 3. Post-scoring: anti-synergy penalties + mechanical synergy bonus (±15%)
    Bonus: produces↔consumes dot product, verb→trigger alignment,
    creature ETB / sacrifice outlet / spellcast pattern matches
@@ -315,10 +313,10 @@ mechanically-synergistic cards that nobody plays.
 | `src/mtg_synergy/recommend/mechanics_vectors.py` | 116-dim forge mechanics vectors: shared game concept space (36 concepts + 80 subtypes) |
 | `src/mtg_synergy/recommend/cmdr_patterns.py` | `detect_cmdr_patterns()` — shared commander mechanical flag detection |
 | `src/mtg_synergy/recommend/affinity.py` | Commander affinity scoring |
-| `src/mtg_synergy/combos/detector.py` | `find_combos()`, `find_combos_tiered()`, `find_partial_combos()` |
+| `src/mtg_synergy/combos/detector.py` | `find_combos_tiered()`, `find_partial_combos()`, `compute_strategy_relevance()` |
 | `src/mtg_synergy/combos/anti_synergy.py` | Anti-synergy detection |
-| `src/mtg_synergy/combos/display.py` | Combo output formatting and validation |
-| `src/mtg_synergy/analysis/strategy.py` | Strategy detection, candidate filtering, commander builds |
+| `src/mtg_synergy/combos/display.py` | `show_combos_tiered()` — combo output formatting |
+| `src/mtg_synergy/analysis/strategy.py` | `_detect_deck_types()` — tribal type detection |
 
 ### `scripts/` directory (pipelines + entry points)
 
@@ -339,12 +337,14 @@ mechanically-synergistic cards that nobody plays.
 
 - Cards keyed by `oracle_id` (Scryfall UUID) for dedup across reprints
 - `data/oracle_cards.json` is gitignored (~150MB); must run `scripts/download_cards.py` first
-- API calls use `urllib.request` (no `requests` dependency)
+- API calls use `urllib.request` (stdlib only, no external HTTP dependency)
+- Dependencies: only `numpy` + `lightgbm` (pyproject.toml)
+- All scripts use `from mtg_synergy.config import DB_PATH, DATA_DIR` for paths
 - Tribal subtypes extracted via `config.extract_subtypes()` (DFC-aware, both faces)
 - CLI uses `--commander "Name"` or `uv run mtg-synergy --commander "Name"`
 - Package uses `src/` layout (`src/mtg_synergy/`), built with `uv_build` backend
 - Pipeline scripts live in `scripts/`, library modules in `src/mtg_synergy/`
-- Tests: 163 tests in `tests/`, run with `uv run pytest tests/`
+- Tests: 154 tests in `tests/`, run with `uv run pytest tests/`
   - 7 end-to-end pipeline quality tests (`test_recommendation_quality.py`)
   - Requires trained model + populated DB (auto-skipped if missing)
 - After training, always run `--validate` to check full pipeline (not just NDCG):
