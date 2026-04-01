@@ -62,35 +62,41 @@ def get_edhrec_data(conn: sqlite3.Connection, slug: str) -> dict:
 
 def build_slug_to_name(conn: sqlite3.Connection) -> dict[str, str]:
     """Build mapping from edhrec slug -> card name using the cards table."""
-    slug_to_name = {}
     slugs = [r[0] for r in conn.execute(
         "SELECT DISTINCT commander_slug FROM edhrec_card_synergy"
     ).fetchall()]
 
+    # Load ALL cards once (1 query) instead of 2 queries per slug
+    all_cards = conn.execute(
+        "SELECT name, type_line FROM cards"
+    ).fetchall()
+
+    # Build lookup: normalized name (no commas/apostrophes/hyphens, lowered) -> original name
+    norm_lookup: dict[str, str] = {}
+    # Build legendary cards list for fuzzy fallback
+    legendary_cards: list[tuple[str, str]] = []  # (name, normalized_name)
+    for name, type_line in all_cards:
+        norm_key = name.lower().replace(",", "").replace("'", "").replace("-", "")
+        norm_lookup[norm_key] = name
+        if type_line and "Legendary" in type_line:
+            legendary_cards.append((name, name.lower().replace(",", "").replace("'", "")))
+
+    slug_to_name = {}
     for slug in slugs:
         # Convert slug to approximate name for matching
         # "krenko-mob-boss" -> "krenko mob boss"
         name_approx = slug.replace("-", " ")
-        # Try matching against cards table (case-insensitive, strip commas/apostrophes)
-        result = conn.execute(
-            "SELECT name FROM cards "
-            "WHERE LOWER(REPLACE(REPLACE(REPLACE(name, ',', ''), '''', ''), '-', '')) = LOWER(?)",
-            (name_approx.replace(",", "").replace("'", "").replace("-", ""),)
-        ).fetchone()
+        norm_key = name_approx.replace(",", "").replace("'", "").replace("-", "")
+        result = norm_lookup.get(norm_key)
         if result:
-            slug_to_name[slug] = result[0]
+            slug_to_name[slug] = result
         else:
-            # Try fuzzy: just check if all slug words appear in the name
-            # This handles cases like "y'shtola" where apostrophe is tricky
+            # Fuzzy fallback: check if all slug words appear in a legendary card name
             words = slug.split("-")
-            result = conn.execute(
-                "SELECT name FROM cards WHERE type_line LIKE '%Legendary%' "
-                "AND LOWER(name) LIKE ? LIMIT 1",
-                (f"%{words[0]}%",)
-            ).fetchone()
-            if result and all(w in result[0].lower().replace(",", "").replace("'", "")
-                             for w in words):
-                slug_to_name[slug] = result[0]
+            for card_name, card_norm in legendary_cards:
+                if words[0] in card_norm and all(w in card_norm for w in words):
+                    slug_to_name[slug] = card_name
+                    break
 
     return slug_to_name
 
@@ -241,10 +247,10 @@ def main():
                 "GROUP BY commander_slug"
             ):
                 slug_popularity[row[0]] = row[1]
+            name_to_slug_pop = {v: k for k, v in slug_to_name.items()}
             commander_names = sorted(
                 slug_to_name.values(),
-                key=lambda n: slug_popularity.get(
-                    next((s for s, nm in slug_to_name.items() if nm == n), ""), 0),
+                key=lambda n: slug_popularity.get(name_to_slug_pop.get(n, ""), 0),
                 reverse=True
             )[:args.top]
         else:

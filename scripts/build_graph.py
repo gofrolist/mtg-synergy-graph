@@ -1,8 +1,25 @@
 #!/usr/bin/env python3
 """Build the Forge-native causal interaction graph."""
 import argparse
+import json as _json
+import re
+
 from mtg_synergy.db import get_connection
 from mtg_synergy.causal import ensure_causal_schema
+
+_INSERT_EDGE_SQL = (
+    "INSERT OR IGNORE INTO interaction_edges "
+    "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
+    "VALUES (?,?,?,?,?,?,?)"
+)
+
+
+def _flush_batch(conn, batch, total, threshold=10000):
+    if len(batch) >= threshold:
+        conn.executemany(_INSERT_EDGE_SQL, batch)
+        total += len(batch)
+        batch.clear()
+    return total
 
 
 def _build_synthetic_edges(conn, idx, name_to_oid):
@@ -16,7 +33,6 @@ def _build_synthetic_edges(conn, idx, name_to_oid):
     and "broad" edges for card_type matches (e.g., any creature → Soul Warden).
     Streams edges to DB in chunks to avoid holding millions in memory.
     """
-    import json as _json
     from mtg_synergy.parse.forge_filter_parser import parse_forge_filter
     from mtg_synergy.parse.forge_types import ForgeFilter
 
@@ -68,11 +84,9 @@ def _build_synthetic_edges(conn, idx, name_to_oid):
             for st in rf.subtypes:
                 wanted_subtypes.add(st.lower())
 
-        # Build card_type lookup for broad responders
-        broad_card_types = set()
-        for _, _, _, rf in broad_resps:
-            for ct in rf.card_types:
-                broad_card_types.add(ct.lower())
+        # Pre-compute detail strings for this mode
+        detail_exact = _json.dumps({"event": mode, "filter_precision": "exact"})
+        detail_broad = _json.dumps({"event": mode, "filter_precision": "broad"})
 
         # Stream through producer cards
         batch = []
@@ -92,8 +106,7 @@ def _build_synthetic_edges(conn, idx, name_to_oid):
                     if prod_oid == resp_oid:
                         continue
                     if any(st.lower() in prod_type_lower for st in resp_filter.subtypes):
-                        detail = _json.dumps({"event": mode, "filter_precision": "exact"})
-                        batch.append((prod_oid, resp_oid, "triggers", -1, resp_idx, 0.3, detail))
+                        batch.append((prod_oid, resp_oid, "triggers", -1, resp_idx, 0.3, detail_exact))
 
             # Broad matches: producer's card type matches responder's required type
             if broad_resps:
@@ -101,22 +114,11 @@ def _build_synthetic_edges(conn, idx, name_to_oid):
                     if prod_oid == resp_oid:
                         continue
                     if any(ct.lower() in prod_type_lower for ct in resp_filter.card_types):
-                        detail = _json.dumps({"event": mode, "filter_precision": "broad"})
-                        batch.append((prod_oid, resp_oid, "triggers", -1, resp_idx, 0.15, detail))
+                        batch.append((prod_oid, resp_oid, "triggers", -1, resp_idx, 0.15, detail_broad))
 
-            if len(batch) >= 10000:
-                conn.executemany(
-                    "INSERT OR IGNORE INTO interaction_edges (source_id, target_id, edge_type, ability_a, ability_b, strength, detail) VALUES (?,?,?,?,?,?,?)",
-                    batch)
-                total += len(batch)
-                batch.clear()
+            total = _flush_batch(conn, batch, total)
 
-        if batch:
-            conn.executemany(
-                "INSERT OR IGNORE INTO interaction_edges (source_id, target_id, edge_type, ability_a, ability_b, strength, detail) VALUES (?,?,?,?,?,?,?)",
-                batch)
-            total += len(batch)
-            batch.clear()
+        total = _flush_batch(conn, batch, total, threshold=0)
 
         conn.commit()
 
@@ -135,9 +137,6 @@ def _build_entity_presence_edges(conn, name_to_oid):
     These synergies are invisible to event-based trigger matching because
     they scale with board STATE, not individual EVENTS.
     """
-    import json as _json
-    import re
-
     # ── Step 1: Build consumer index ────────────────────────────────────
     # Cards that benefit from entities of specific types
     # consumer_types[oid] = set of (type_lower, precision)
@@ -254,6 +253,8 @@ def _build_entity_presence_edges(conn, name_to_oid):
 
     total = 0
     batch = []
+    detail_exact = _json.dumps({"event": "EntityPresence", "filter_precision": "exact"})
+    detail_broad = _json.dumps({"event": "EntityPresence", "filter_precision": "broad"})
 
     # 3a. Token creators → consumers of that token type
     for prod_oid, types in token_types.items():
@@ -262,25 +263,15 @@ def _build_entity_presence_edges(conn, name_to_oid):
             for cons_oid in exact_consumers.get(token_type, []):
                 if prod_oid == cons_oid:
                     continue
-                detail = _json.dumps({"event": "EntityPresence",
-                                      "filter_precision": "exact"})
-                batch.append((prod_oid, cons_oid, "enables", -1, -1, 0.4, detail))
+                batch.append((prod_oid, cons_oid, "enables", -1, -1, 0.4, detail_exact))
 
             # Broad: consumer wants "creature" and token is a creature type
             for cons_oid in broad_consumers.get("creature", []):
                 if prod_oid == cons_oid:
                     continue
-                detail = _json.dumps({"event": "EntityPresence",
-                                      "filter_precision": "broad"})
-                batch.append((prod_oid, cons_oid, "enables", -1, -1, 0.2, detail))
+                batch.append((prod_oid, cons_oid, "enables", -1, -1, 0.2, detail_broad))
 
-            if len(batch) >= 10000:
-                conn.executemany(
-                    "INSERT OR IGNORE INTO interaction_edges "
-                    "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
-                    "VALUES (?,?,?,?,?,?,?)", batch)
-                total += len(batch)
-                batch.clear()
+            total = _flush_batch(conn, batch, total)
 
     # 3b. Creature cards → consumers of their subtype
     # Stream through all creatures and match subtypes
@@ -302,30 +293,16 @@ def _build_entity_presence_edges(conn, name_to_oid):
             for cons_oid in exact_consumers.get(subtype, []):
                 if prod_oid == cons_oid:
                     continue
-                detail = _json.dumps({"event": "EntityPresence",
-                                      "filter_precision": "exact"})
-                batch.append((prod_oid, cons_oid, "enables", -1, -1, 0.25, detail))
+                batch.append((prod_oid, cons_oid, "enables", -1, -1, 0.25, detail_exact))
 
-            if len(batch) >= 10000:
-                conn.executemany(
-                    "INSERT OR IGNORE INTO interaction_edges "
-                    "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
-                    "VALUES (?,?,?,?,?,?,?)", batch)
-                total += len(batch)
-                batch.clear()
+            total = _flush_batch(conn, batch, total)
 
     # 3c. All creatures → broad consumers of "creature"
     # (sacrifice outlets, "for each creature" effects)
     # Skip this — would create too many edges (30k creatures × 300 consumers = 9M)
     # The ChangesZone synthetic edges already cover broad creature-entering triggers
 
-    if batch:
-        conn.executemany(
-            "INSERT OR IGNORE INTO interaction_edges "
-            "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
-            "VALUES (?,?,?,?,?,?,?)", batch)
-        total += len(batch)
-        batch.clear()
+    total = _flush_batch(conn, batch, total, threshold=0)
 
     conn.commit()
     return total
@@ -343,9 +320,6 @@ def _build_continuous_pump_edges(conn, name_to_oid):
     trigger edges (creature ETB → pump card), this enables the model to detect
     feedback loops like Kyler + Maester Seymour.
     """
-    import json as _json
-    import re as _re
-
     # Load all Continuous pump abilities with their Affected$ filter
     pump_cards = []
     for row in conn.execute(
@@ -357,7 +331,7 @@ def _build_continuous_pump_edges(conn, name_to_oid):
         if not raw:
             continue
         # Parse Affected$ filter
-        m = _re.search(r'Affected\$\s*(\S+)', raw)
+        m = re.search(r'Affected\$\s*(\S+)', raw)
         if not m:
             continue
         affected = m.group(1)
@@ -432,6 +406,7 @@ def _build_continuous_pump_edges(conn, name_to_oid):
     # Create edges: pump_card → each matching creature
     batch = []
     total = 0
+    detail_pump = _json.dumps({"event": "ContinuousPump", "filter_precision": "exact"})
     for pump_oid, pump_name, req_subtypes, req_colors, base in pump_cards:
         for creature_oid, creature_subs in creature_subtypes.items():
             if creature_oid == pump_oid:
@@ -440,8 +415,6 @@ def _build_continuous_pump_edges(conn, name_to_oid):
             # Subtype filter: creature must share at least one subtype
             if not (req_subtypes & creature_subs):
                 continue
-            precision = "exact"
-            strength = 0.3
 
             # Color filter: if pump requires specific colors, creature must match
             if req_colors:
@@ -449,24 +422,11 @@ def _build_continuous_pump_edges(conn, name_to_oid):
                 if not (req_colors & c_colors):
                     continue
 
-            detail = _json.dumps({"event": "ContinuousPump",
-                                  "filter_precision": precision})
-            batch.append((pump_oid, creature_oid, "pumps", -1, -1, strength, detail))
+            batch.append((pump_oid, creature_oid, "pumps", -1, -1, 0.3, detail_pump))
 
-            if len(batch) >= 10000:
-                conn.executemany(
-                    "INSERT OR IGNORE INTO interaction_edges "
-                    "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
-                    "VALUES (?,?,?,?,?,?,?)", batch)
-                total += len(batch)
-                batch.clear()
+            total = _flush_batch(conn, batch, total)
 
-    if batch:
-        conn.executemany(
-            "INSERT OR IGNORE INTO interaction_edges "
-            "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
-            "VALUES (?,?,?,?,?,?,?)", batch)
-        total += len(batch)
+    total = _flush_batch(conn, batch, total, threshold=0)
 
     conn.commit()
     return total
@@ -480,9 +440,6 @@ def _build_theme_synergy_edges(conn, name_to_oid):
     Defender: defender-matters cards ↔ Wall/Defender cards
     ETB doubler: Panharmonicon-class ↔ ETB-heavy cards
     """
-    import json as _json
-    import re as _re
-
     forge_to_oid = {}
     for row in conn.execute("SELECT forge_name, oracle_id FROM forge_name_map"):
         forge_to_oid[row[0]] = row[1]
@@ -506,7 +463,7 @@ def _build_theme_synergy_edges(conn, name_to_oid):
         "WHERE fa.raw_line LIKE '%Equipment%'"
     ):
         oid, raw = row
-        if raw and _re.search(r'(IsPresent|ValidCard|Affected|Condition)\$[^|]*Equipment', raw):
+        if raw and re.search(r'(IsPresent|ValidCard|Affected|Condition)\$[^|]*Equipment', raw):
             equip_payoff_oids.add(oid)
 
     # Also from deck tags
@@ -523,30 +480,17 @@ def _build_theme_synergy_edges(conn, name_to_oid):
 
     batch = []
     total = 0
+    detail_equip = _json.dumps({"event": "EquipmentSynergy", "filter_precision": "exact"})
 
     # Equipment → payoff (equipment enters/is cast → payoff triggers)
     for equip_oid in equipment_oids:
         for payoff_oid in equip_payoff_only:
             if equip_oid == payoff_oid:
                 continue
-            detail = _json.dumps({"event": "EquipmentSynergy",
-                                  "filter_precision": "exact"})
-            batch.append((equip_oid, payoff_oid, "enables", -1, -1, 0.5, detail))
-        if len(batch) >= 10000:
-            conn.executemany(
-                "INSERT OR IGNORE INTO interaction_edges "
-                "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
-                "VALUES (?,?,?,?,?,?,?)", batch)
-            total += len(batch)
-            batch.clear()
+            batch.append((equip_oid, payoff_oid, "enables", -1, -1, 0.5, detail_equip))
+        total = _flush_batch(conn, batch, total)
 
-    if batch:
-        conn.executemany(
-            "INSERT OR IGNORE INTO interaction_edges "
-            "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
-            "VALUES (?,?,?,?,?,?,?)", batch)
-        total += len(batch)
-        batch.clear()
+    total = _flush_batch(conn, batch, total, threshold=0)
     conn.commit()
 
     equip_count = total
@@ -592,29 +536,16 @@ def _build_theme_synergy_edges(conn, name_to_oid):
     enchantress_only = enchantress_oids - enchantment_oids
     batch = []
     ench_count = 0
+    detail_ench = _json.dumps({"event": "EnchantressSynergy", "filter_precision": "exact"})
 
     for ench_oid in enchantment_oids:
         for payoff_oid in enchantress_only:
             if ench_oid == payoff_oid:
                 continue
-            detail = _json.dumps({"event": "EnchantressSynergy",
-                                  "filter_precision": "exact"})
-            batch.append((ench_oid, payoff_oid, "enables", -1, -1, 0.35, detail))
-        if len(batch) >= 10000:
-            conn.executemany(
-                "INSERT OR IGNORE INTO interaction_edges "
-                "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
-                "VALUES (?,?,?,?,?,?,?)", batch)
-            ench_count += len(batch)
-            batch.clear()
+            batch.append((ench_oid, payoff_oid, "enables", -1, -1, 0.35, detail_ench))
+        ench_count = _flush_batch(conn, batch, ench_count)
 
-    if batch:
-        conn.executemany(
-            "INSERT OR IGNORE INTO interaction_edges "
-            "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
-            "VALUES (?,?,?,?,?,?,?)", batch)
-        ench_count += len(batch)
-        batch.clear()
+    ench_count = _flush_batch(conn, batch, ench_count, threshold=0)
     conn.commit()
 
     print(f"  Enchantress synergy edges: {ench_count} "
@@ -652,31 +583,18 @@ def _build_theme_synergy_edges(conn, name_to_oid):
 
     batch = []
     def_count = 0
+    detail_def = _json.dumps({"event": "DefenderSynergy", "filter_precision": "exact"})
 
     # Defender-matters → each defender card (bidirectional)
     for matters_oid in defender_matters_oids:
         for wall_oid in defender_oids:
             if matters_oid == wall_oid:
                 continue
-            detail = _json.dumps({"event": "DefenderSynergy",
-                                  "filter_precision": "exact"})
-            batch.append((matters_oid, wall_oid, "enables", -1, -1, 0.6, detail))
-            batch.append((wall_oid, matters_oid, "enables", -1, -1, 0.6, detail))
-        if len(batch) >= 10000:
-            conn.executemany(
-                "INSERT OR IGNORE INTO interaction_edges "
-                "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
-                "VALUES (?,?,?,?,?,?,?)", batch)
-            def_count += len(batch)
-            batch.clear()
+            batch.append((matters_oid, wall_oid, "enables", -1, -1, 0.6, detail_def))
+            batch.append((wall_oid, matters_oid, "enables", -1, -1, 0.6, detail_def))
+        def_count = _flush_batch(conn, batch, def_count)
 
-    if batch:
-        conn.executemany(
-            "INSERT OR IGNORE INTO interaction_edges "
-            "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
-            "VALUES (?,?,?,?,?,?,?)", batch)
-        def_count += len(batch)
-        batch.clear()
+    def_count = _flush_batch(conn, batch, def_count, threshold=0)
     conn.commit()
 
     print(f"  Defender synergy edges: {def_count} "
@@ -704,29 +622,16 @@ def _build_theme_synergy_edges(conn, name_to_oid):
 
     batch = []
     etb_count = 0
+    detail_etb = _json.dumps({"event": "ETBDoubler", "filter_precision": "exact"})
 
     for doubler_oid in etb_doubler_oids:
         for trigger_oid in etb_trigger_oids:
             if doubler_oid == trigger_oid:
                 continue
-            detail = _json.dumps({"event": "ETBDoubler",
-                                  "filter_precision": "exact"})
-            batch.append((doubler_oid, trigger_oid, "amplifies", -1, -1, 0.7, detail))
-        if len(batch) >= 10000:
-            conn.executemany(
-                "INSERT OR IGNORE INTO interaction_edges "
-                "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
-                "VALUES (?,?,?,?,?,?,?)", batch)
-            etb_count += len(batch)
-            batch.clear()
+            batch.append((doubler_oid, trigger_oid, "amplifies", -1, -1, 0.7, detail_etb))
+        etb_count = _flush_batch(conn, batch, etb_count)
 
-    if batch:
-        conn.executemany(
-            "INSERT OR IGNORE INTO interaction_edges "
-            "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail) "
-            "VALUES (?,?,?,?,?,?,?)", batch)
-        etb_count += len(batch)
-        batch.clear()
+    etb_count = _flush_batch(conn, batch, etb_count, threshold=0)
     conn.commit()
 
     print(f"  ETB doubler edges: {etb_count} "

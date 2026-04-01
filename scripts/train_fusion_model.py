@@ -10,7 +10,6 @@ Usage:
 
 import argparse
 import json
-import math
 import os
 import sqlite3
 import time
@@ -21,7 +20,6 @@ from mtg_synergy.config import ALLOWED_SLUG_TABLES
 from mtg_synergy.recommend.forge_features import (
     ForgeFeatureContext,
     CmdrFeatureContext,
-    compute_card_features,
     compute_batch_features,
 )
 
@@ -368,7 +366,7 @@ def _init_shared_pool(ctx, card_meta):
 
 
 def build_forge_feature_matrix(pairs_by_cmdr, verbose=True):
-    """Build 105-feature matrix from causal graph, strategies, and Forge ability data.
+    """Build 93-feature matrix from causal graph, strategies, and Forge ability data.
 
     Loads ForgeFeatureContext once in the parent process, then shares it
     with fork-based worker processes to avoid redundant edge index loading.
@@ -445,7 +443,7 @@ def build_forge_feature_matrix(pairs_by_cmdr, verbose=True):
                 print(f"    Grade {g}: {int((y == g).sum())}")
 
         print(f"  Commanders: {len(cmdr_oids_ordered)}")
-        print(f"\nPer-feature statistics:")
+        print("\nPer-feature statistics:")
         for i, name in enumerate(FORGE_FEATURE_NAMES):
             col = X[:, i]
             print(f"  {name:>25s}: "
@@ -601,7 +599,6 @@ def train_forge_gbm(X, y, cmdr_ids, tune=False, quick=False):
 
     print(f"  Sample weights: grade 4→{_grade_weight_arr[4]}x, grade 5→{_grade_weight_arr[5]}x")
 
-    n_folds = 1 if quick else 3
     splits = make_cv_splits(cmdr_ids, n_folds=3)  # always build 3 folds
     if quick:
         splits = splits[:1]  # use only fold 0 for quick validation
@@ -656,8 +653,6 @@ def train_forge_gbm(X, y, cmdr_ids, tune=False, quick=False):
         test_sort = np.argsort(cmdr_ids[test_idx])
         ti = train_idx[train_sort]
         vi = test_idx[test_sort]
-        train_group = _build_group_array(cmdr_ids, ti)
-        test_group = _build_group_array(cmdr_ids, vi)
 
         # Run HP configs in parallel (2-3 at a time, each with limited threads)
         n_hp_workers = min(3, len(_hp_configs))
@@ -767,7 +762,6 @@ def _load_pairs_for_features(conn):
     Returns dict[cmdr_oid -> list[(card_oid, grade)]].
     """
     slug_to_oid, name_to_oid = _resolve_slugs_to_oids(conn, "edhrec_card_synergy")
-    oid_to_slug = {v: k for k, v in slug_to_oid.items()}
 
     card_name_to_oid = {}
     for row in conn.execute(
@@ -857,11 +851,11 @@ def _load_pairs_for_features(conn):
                         "Snow-Covered Plains", "Snow-Covered Island",
                         "Snow-Covered Swamp", "Snow-Covered Mountain",
                         "Snow-Covered Forest", "Wastes"}
-    basic_land_oids = set()
-    for name in basic_land_names:
-        row = conn.execute("SELECT oracle_id FROM cards WHERE name = ?", (name,)).fetchone()
-        if row:
-            basic_land_oids.add(row[0])
+    ph = ",".join("?" * len(basic_land_names))
+    basic_land_oids = {r[0] for r in conn.execute(
+        f"SELECT oracle_id FROM cards WHERE name IN ({ph})",
+        list(basic_land_names)
+    ).fetchall()}
 
     card_pool = {r[0] for r in conn.execute(
         "SELECT oracle_id FROM cards WHERE legal_commander = 1")}
@@ -915,7 +909,7 @@ def _load_pairs_for_features(conn):
     for pairs in positives_by_cmdr.values():
         for _, g in pairs:
             grade_counts[g] = grade_counts.get(g, 0) + 1
-    print(f"\n  Final grade distribution:")
+    print("\n  Final grade distribution:")
     for g in sorted(grade_counts.keys(), reverse=True):
         print(f"    Grade {g}: {grade_counts[g]:,}")
 
@@ -1004,7 +998,7 @@ def main():
         m = joblib.load(forge_model_path)
         importances = m.feature_importances_
         names = FORGE_FEATURE_NAMES
-    print(f"\n  Forge model feature importance:")
+    print("\n  Forge model feature importance:")
     total_imp = sum(importances)
     for name, imp in sorted(zip(names, importances), key=lambda x: -x[1]):
         print(f"    {name:25s} {imp:6d} ({imp/total_imp*100:5.1f}%)")
@@ -1023,7 +1017,6 @@ def _run_pipeline_validation(top_n=50):
     Tests the COMPLETE pipeline: model scoring → penalties → mechanical bonus.
     NDCG only tests model quality; this catches scoring/penalty bugs.
     """
-    import re
     from validate_recommendations import (
         get_top_commanders, validate_commanders
     )
