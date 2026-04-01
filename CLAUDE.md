@@ -267,8 +267,24 @@ python3 scripts/train_fusion_model.py --rebuild-features --validate  # 7. Retrai
    Bonus: produces↔consumes dot product, verb→trigger alignment,
    creature ETB / sacrifice outlet / spellcast pattern matches
 4. Sort and output top N with clickable Scryfall hyperlinks (OSC 8)
-Total time: ~3s (with adjacency cache) / ~7s (first run, builds cache)
+Total time: ~0.2s per commander with warm ForgeFeatureContext (pass forge_ctx=
+  to score_forge_candidates to reuse). Cold start: ~4.5s (warm adj cache) / ~57s (first run).
 ```
+
+### API-Ready Inference (warm server pattern)
+
+```python
+# Load context once at startup (~4.5s with warm adj cache)
+ctx = ForgeFeatureContext(conn, preload_edges=True)
+gbm = _load_gbm()  # cached at module level after first call
+
+# Per-request: ~0.2s per commander (was 60-73s before context reuse)
+score_forge_candidates(candidate_scores, cards, conn, commander, deck_cards,
+                       forge_ctx=ctx, gbm_model=gbm)
+```
+
+Runtime footprint (warm server): ~1.1 GB RSS, 10 GB disk (DB + caches).
+Minimum deployment: 2 GB RAM VPS with persistent volume.
 
 ### Hidden Gem Engine (scripts/synergy_graph.py --commander "Name" --gems)
 
@@ -318,7 +334,7 @@ mechanically-synergistic cards that nobody plays.
 | `src/mtg_synergy/tag_db.py` | SQLite tag DB utilities (schema, queries, import) |
 | `src/mtg_synergy/cli.py` | CLI dispatcher (argparse + command routing) |
 | `src/mtg_synergy/recommend/engine.py` | `recommend_cards()` — forge model recommendation pipeline |
-| `src/mtg_synergy/recommend/scoring.py` | `color_identity_filter()`, `score_forge_candidates()`, `_apply_penalties()`, `_apply_mechanical_bonus()` |
+| `src/mtg_synergy/recommend/scoring.py` | `color_identity_filter()`, `score_forge_candidates(forge_ctx=, gbm_model=)`, `_apply_penalties()`, `_apply_mechanical_bonus()`, `_load_gbm()` (cached) |
 | `src/mtg_synergy/recommend/hidden_gems.py` | `find_hidden_gems()` — pure mechanical synergy engine, no popularity bias |
 | `src/mtg_synergy/recommend/forge_features.py` | `ForgeFeatureContext` (data loading, pre-computation: profiles, vectors, demand data, card arrays) |
 | `src/mtg_synergy/recommend/forge_compute.py` | `CmdrFeatureContext`, `compute_batch_features()`, `compute_card_features()` — 89-feature computation |

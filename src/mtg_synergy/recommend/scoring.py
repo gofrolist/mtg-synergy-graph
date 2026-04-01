@@ -19,12 +19,19 @@ from mtg_synergy.recommend.forge_features import (
 )
 
 
+_gbm_cache = None
+
+
 def _load_gbm():
-    """Load the forge GBM model (singleton-ish, but cheap to reload)."""
+    """Load the forge GBM model (cached after first load)."""
+    global _gbm_cache
+    if _gbm_cache is not None:
+        return _gbm_cache
     forge_gbm_path = os.path.join(DATA_DIR, "fusion_model_forge.lgb")
     if not os.path.exists(forge_gbm_path):
         return None
-    return lgb.Booster(model_file=forge_gbm_path)
+    _gbm_cache = lgb.Booster(model_file=forge_gbm_path)
+    return _gbm_cache
 
 
 def _load_all_cards(conn):
@@ -387,12 +394,15 @@ def batch_recommend(conn, commander_names: list[str], top_n: int = 30,
 def score_forge_candidates(candidate_scores: dict, cards: list, conn,
                            commander: str, deck_cards: set,
                            deck_types: set = None, active_strategies: set = None,
-                           color_identity: set = None) -> None:
+                           color_identity: set = None,
+                           forge_ctx: "ForgeFeatureContext | None" = None,
+                           gbm_model=None) -> None:
     """Score candidates for a single commander. Modifies candidate_scores in-place.
 
-    For batch scoring of multiple commanders, use batch_recommend() instead.
+    Pass forge_ctx and gbm_model to reuse pre-loaded context across calls
+    (avoids ~7s rebuild per call). For batch scoring, use batch_recommend().
     """
-    gbm = _load_gbm()
+    gbm = gbm_model or _load_gbm()
     if gbm is None:
         print("  ERROR: forge model not found. Run: python3 train_fusion_model.py")
         return
@@ -419,7 +429,7 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
             cmdr_oid = c.get("oracle_id", "")
             break
 
-    ctx = ForgeFeatureContext(conn, preload_edges=True)
+    ctx = forge_ctx or ForgeFeatureContext(conn, preload_edges=True)
     card_oid = {c["name"]: c.get("oracle_id", "") for c in cards}
     deck_oids = {card_oid.get(n) for n in deck_cards if n in card_oid} - {None, ""}
     cmdr_ctx = CmdrFeatureContext(ctx, cmdr_oid, deck_oids)
