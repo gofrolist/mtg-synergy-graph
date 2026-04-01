@@ -1,7 +1,7 @@
 """Per-commander feature context and batch/single-card feature computation.
 
 Extracted from forge_features.py. Contains CmdrFeatureContext and all
-compute_*() / _compute_*() functions for the 89-feature GBM vector.
+compute_*() / _compute_*() functions for the 93-feature GBM vector.
 """
 import logging
 import sqlite3
@@ -519,7 +519,7 @@ def _batch_vectorized_features(X, N, card_oids, card_cmcs, safe_idx, valid, ctx,
 
     # ── F43-F45: Boolean flags ──
     X[:, 43] = ctx._arr_produces_mana[safe_idx]                        # produces_mana
-    X[:, 44] = ctx._arr_grants_abilities[safe_idx]                     # grants_abilities
+    # F44 (granted_ability_match) computed in per-card loop (needs commander context)
     X[:, 45] = ctx._arr_token_amt_var[safe_idx]                        # token_amount_variable
 
     # ── F46-F49: Ability counts and token stats ──
@@ -827,6 +827,23 @@ def _batch_per_card_loop(X, N, card_oids, card_indices, safe_idx, ctx, cmdr):
             tribal_depth += 1.0
         X[row_i, 70] = tribal_depth                                    # tribal_synergy_depth
 
+        # F44: granted_ability_match — overlap of granted abilities/triggers
+        # with commander's verbs/triggers (replaces boolean grants_abilities)
+        granted = (card_profile.get('granted_ability_names', set())
+                   | card_profile.get('granted_triggers', set()))
+        if granted:
+            cmdr_mechs_for_grant = cmdr_verbs | cmdr_trigs
+            match = float(len(granted & cmdr_mechs_for_grant))
+            X[row_i, 44] = min(match, 5.0)
+
+        # F92: type_change_tribal_match — card changes types to match commander
+        changes = ctx._arr_changes_type[ci]
+        if changes:
+            if '_all_' in changes:
+                X[row_i, 92] = 1.0 if cmdr_subtypes else 0.0
+            elif cmdr_subtypes and (changes & cmdr_subtypes):
+                X[row_i, 92] = 1.0
+
 
 def _batch_mech_subproducts(X, safe_idx, ctx, cmdr):
     """Compute F73-F88: per-category mech sub-product features (vectorized)."""
@@ -852,7 +869,7 @@ def _batch_mech_subproducts(X, safe_idx, ctx, cmdr):
 def compute_batch_features(card_oids, card_cmcs, ctx, cmdr):
     """Vectorized batch feature computation for all cards of one commander.
 
-    Returns (N, 89) float32 numpy array. ~10x faster than per-card loop
+    Returns (N, 93) float32 numpy array. ~10x faster than per-card loop
     by replacing dict lookups with numpy array indexing.
 
     Args:
@@ -862,7 +879,7 @@ def compute_batch_features(card_oids, card_cmcs, ctx, cmdr):
         cmdr: CmdrFeatureContext for the current commander
     """
     N = len(card_oids)
-    X = np.zeros((N, 89), dtype=np.float32)
+    X = np.zeros((N, 93), dtype=np.float32)
 
     # Convert card_oids to ctx indices for array lookup
     card_indices = np.array([ctx.oid_to_idx.get(oid, -1) for oid in card_oids], dtype=np.int32)
@@ -873,6 +890,11 @@ def compute_batch_features(card_oids, card_cmcs, ctx, cmdr):
     _batch_vectorized_features(X, N, card_oids, card_cmcs, safe_idx, valid, ctx, cmdr, cmdr_arrays)
     _batch_per_card_loop(X, N, card_oids, card_indices, safe_idx, ctx, cmdr)
     _batch_mech_subproducts(X, safe_idx, ctx, cmdr)
+
+    # ── F89-F91: New field features (vectorized) ──
+    X[:, 89] = ctx._arr_affected_scope[safe_idx]       # affected_scope_ratio
+    X[:, 90] = ctx._arr_pump_magnitude[safe_idx]        # pump_magnitude
+    X[:, 91] = ctx._arr_pump_variable[safe_idx]         # pump_is_variable
     return X
 
 def _compute_causal_features(card_oid, card_cmc, ctx, cmdr):
@@ -1123,7 +1145,11 @@ def _compute_forge_profile_features(card_oid, card_cmc, card_profile, ctx, cmdr)
     life_amt = card_profile.get('life_amount')
     life_scales = 1.0 if life_amt in ('X', 'Y') else 0.0
     produces_mana = 1.0 if card_profile.get('produces_mana', False) else 0.0
-    grants_abilities = 1.0 if card_profile.get('grants_abilities', False) else 0.0
+    # granted_ability_match: overlap of granted abilities/triggers with commander
+    _granted = (card_profile.get('granted_ability_names', set())
+                | card_profile.get('granted_triggers', set()))
+    cmdr_mechs_for_grant = cmdr.cmdr_profile.get('verbs', set()) | cmdr.cmdr_profile.get('triggers', set())
+    granted_ability_match = min(float(len(_granted & cmdr_mechs_for_grant)), 5.0) if _granted else 0.0
     token_amt_var = 1.0 if card_profile.get('token_amount_variable', False) else 0.0
 
     total_abilities = float(min(ctx._total_ability_counts.get(card_oid, 0), 15))
@@ -1177,11 +1203,25 @@ def _compute_forge_profile_features(card_oid, card_cmc, card_profile, ctx, cmdr)
             ezone_match, scales, is_secondary, gain_ctrl,
             granted_kw_count, condition_count,
             damage_scales, draw_scales, life_scales, produces_mana,
-            grants_abilities, token_amt_var,
+            granted_ability_match, token_amt_var,
             total_abilities, triggered_count, token_pt, token_kw,
             zone_gy, ability_dens,
             put_counter_ratio, cmdr_counter_x_put,
-            no_counter_for_cmdr, mech_cat_fwd, mech_cat_rev)
+            no_counter_for_cmdr, mech_cat_fwd, mech_cat_rev,
+            card_profile.get('affected_scope_ratio', 0.5),
+            min(card_profile.get('max_pump_power', 0), 15),
+            1.0 if card_profile.get('pump_is_variable', False) else 0.0,
+            _type_change_tribal(card_profile, cmdr.cmdr_subtypes))
+
+
+def _type_change_tribal(card_profile, cmdr_subtypes):
+    """Compute type_change_tribal_match for a single card."""
+    changes = card_profile.get('changes_type', set())
+    if card_profile.get('grants_all_creature_types', False):
+        return 1.0 if cmdr_subtypes else 0.0
+    if changes and cmdr_subtypes and (changes & cmdr_subtypes):
+        return 1.0
+    return 0.0
 
 
 def _compute_deck_tag_features(card_oid, ctx, cmdr):
@@ -1268,9 +1308,9 @@ def _compute_fingerprint_features(card_oid, ctx, cmdr):
 
 def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
                           ctx: ForgeFeatureContext, cmdr: CmdrFeatureContext) -> list:
-    """Compute the 89-feature vector for a single (commander, card) pair.
+    """Compute the 93-feature vector for a single (commander, card) pair.
 
-    Returns a list of 89 floats matching FORGE_FEATURE_NAMES order.
+    Returns a list of 93 floats matching FORGE_FEATURE_NAMES order.
     """
     tl = card_type_line
     card_profile = ctx._forge_profiles.get(card_oid, {})
@@ -1292,11 +1332,12 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
      ezone_match, scales, is_secondary, gain_ctrl,
      granted_kw_count, condition_count,
      damage_scales, draw_scales, life_scales, produces_mana,
-     grants_abilities, token_amt_var,
+     granted_ability_match, token_amt_var,
      total_abilities, triggered_count, token_pt, token_kw,
      zone_gy, ability_dens,
      put_counter_ratio, cmdr_counter_x_put,
-     no_counter_for_cmdr, mech_cat_fwd, mech_cat_rev
+     no_counter_for_cmdr, mech_cat_fwd, mech_cat_rev,
+     affected_scope, pump_mag, pump_var, type_change_tribal
      ) = _compute_forge_profile_features(card_oid, card_cmc, card_profile, ctx, cmdr)
 
     (hints_to_has, has_to_hints, needs_to_has, has_overlap,
@@ -1356,7 +1397,7 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         draw_scales,                                     # F41 draw_scales
         life_scales,                                     # F42 life_scales
         produces_mana,                                   # F43 produces_mana
-        grants_abilities,                                # F44 grants_abilities
+        granted_ability_match,                           # F44 granted_ability_match
         token_amt_var,                                   # F45 token_amount_variable
         total_abilities,                                 # F46 total_ability_count
         triggered_count,                                 # F47 triggered_ability_count
@@ -1401,4 +1442,8 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         mech_cat_rev[6],                                 # F86 mech_themes_rev
         mech_cat_fwd[7],                                 # F87 mech_tribal_fwd
         mech_cat_rev[7],                                 # F88 mech_tribal_rev
+        affected_scope,                                  # F89 affected_scope_ratio
+        pump_mag,                                        # F90 pump_magnitude
+        pump_var,                                        # F91 pump_is_variable
+        type_change_tribal,                              # F92 type_change_tribal_match
     ]

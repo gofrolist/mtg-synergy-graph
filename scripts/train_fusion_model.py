@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Train LightGBM LambdaRank model for card recommendation.
 
-Trained on EDHREC labels with 89 Forge-native features.
+Trained on EDHREC labels with 93 Forge-native features.
 
 Usage:
     python3 train_fusion_model.py                          # Train forge GBM (default)
@@ -86,7 +86,7 @@ FORGE_FEATURE_NAMES = [
     "draw_scales",
     "life_scales",
     "produces_mana",
-    "grants_abilities",
+    "granted_ability_match",
     "token_amount_variable",
     # ── Ability / token complexity features ──
     "total_ability_count",
@@ -140,6 +140,11 @@ FORGE_FEATURE_NAMES = [
     "mech_themes_rev",
     "mech_tribal_fwd",              # 80 subtypes
     "mech_tribal_rev",
+    # ── New field features ──
+    "affected_scope_ratio",             # F89: fraction of effects targeting self
+    "pump_magnitude",                   # F90: max pump power (0-15)
+    "pump_is_variable",                 # F91: pump uses X/Y variable
+    "type_change_tribal_match",         # F92: ChangeType$ matches commander tribal
 ]
 
 

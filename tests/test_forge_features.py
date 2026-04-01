@@ -53,14 +53,19 @@ def test_forge_profiles_loaded():
             "effect_zones", "scales_with", "grants_types", "mana_colors",
             "excluded_subtypes", "counter_trigger_themes",
             "opponent_only_events",
+            "granted_ability_names", "granted_triggers", "changes_type",
         }
         expected_bool_keys = {
             "combat_damage", "is_secondary", "gain_control",
             "produces_mana", "counter_num_variable", "grants_abilities",
             "token_amount_variable", "has_static_anthem", "counters_on_lands", "has_p1p1",
+            "grants_all_creature_types", "pump_is_variable",
         }
+        expected_int_keys = {"affected_self_count", "affected_opp_count", "max_pump_power"}
+        expected_float_keys = {"affected_scope_ratio"}
         expected_optional_str_keys = {"damage_amount", "cards_drawn", "life_amount"}
-        all_expected = expected_set_keys | expected_bool_keys | expected_optional_str_keys
+        all_expected = (expected_set_keys | expected_bool_keys | expected_optional_str_keys
+                        | expected_int_keys | expected_float_keys)
         assert set(profile.keys()) == all_expected, (
             f"Profile keys mismatch.\n  Missing: {all_expected - set(profile.keys())}"
             f"\n  Extra: {set(profile.keys()) - all_expected}"
@@ -594,7 +599,7 @@ class TestFeatureCount:
             if found_oid is None:
                 pytest.skip("No card found for feature count test")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert len(features) == 89, (
+            assert len(features) == 93, (
                 f"Expected 107 features, got {len(features)}"
             )
         finally:
@@ -842,7 +847,7 @@ def test_feature_count_71():
             card_oid, card_meta[0] or "", float(card_meta[1] or 0),
             ctx, cmdr_ctx,
         )
-        assert len(feats) == 89, f"Expected 107 features, got {len(feats)}"
+        assert len(feats) == 93, f"Expected 107 features, got {len(feats)}"
     finally:
         pass  # conn is cached, do not close
 

@@ -188,10 +188,17 @@ class ForgeFeatureContext:
             self._raw_abilities.append(row[:12] + (row[14],))
             self._process_forge_ability_row(row)
 
-        # Post-process: static anthem is only meaningful if card has NO PutCounter
+        # Post-process derived fields
         for p in self._forge_profiles.values():
+            # Static anthem is only meaningful if card has NO PutCounter
             if p['has_static_anthem'] and ('PutCounter' in p['verbs'] or 'PutCounterAll' in p['verbs']):
-                p['has_static_anthem'] = False  # card also places real counters, not just anthem
+                p['has_static_anthem'] = False
+            # Derive grants_abilities boolean from detailed set
+            p['grants_abilities'] = bool(p['granted_ability_names'])
+            # Affected$ scope ratio: fraction of effects targeting self vs opponents
+            a_total = p['affected_self_count'] + p['affected_opp_count']
+            p['affected_scope_ratio'] = (p['affected_self_count'] / a_total
+                                         if a_total > 0 else 0.5)
 
         # Pre-compute card-level mechanical unions (avoid redundant set ops in inner loop)
         self._card_mechs = {}
@@ -234,6 +241,12 @@ class ForgeFeatureContext:
             'has_static_anthem': False, 'counters_on_lands': False,
             'counter_trigger_themes': set(), 'has_p1p1': False,
             'opponent_only_events': set(),
+            # New fields: Affected$ scope, AddAbility$ detail, ChangeType$,
+            # pump magnitude, AddTrigger$
+            'affected_self_count': 0, 'affected_opp_count': 0,
+            'granted_ability_names': set(), 'granted_triggers': set(),
+            'changes_type': set(), 'grants_all_creature_types': False,
+            'max_pump_power': 0, 'pump_is_variable': False,
         })
         if verb: p['verbs'].add(verb)
         if trig_mode: p['triggers'].add(trig_mode)
@@ -292,13 +305,24 @@ class ForgeFeatureContext:
 
     @staticmethod
     def _extract_subtypes_from_raw_line(p, raw_line, _generic):
-        """Extract required/excluded subtypes from raw_line fields."""
+        """Extract required/excluded subtypes and Affected$ scope from raw_line."""
+        _SELF_SCOPES = {'youctrl', 'self', 'equippedby', 'enchantedby',
+                        'pairedwith', 'iscommander'}
         for field in ('ValidCards', 'ValidCard', 'ValidTgts',
                       'ValidAttackers', 'Affected', 'AddsCounters'):
             m = re.search(rf'{field}\$\s*(\S+)', raw_line)
             if not m:
                 continue
-            for part in m.group(1).split(","):
+            full_val = m.group(1)
+            # Affected$ scope: track who benefits (YouCtrl vs OppCtrl)
+            if field == 'Affected':
+                segs_lower = full_val.lower().replace('+', '.').split('.')
+                if any(s in _SELF_SCOPES for s in segs_lower):
+                    p['affected_self_count'] += 1
+                elif 'oppctrl' in segs_lower:
+                    p['affected_opp_count'] += 1
+                # Bare scope (e.g., Affected$ Creature) = symmetric, don't count
+            for part in full_val.split(","):
                 for seg in part.split("."):
                     seg = seg.split("+")[0].strip()
                     if not seg or len(seg) <= 2:
@@ -380,6 +404,17 @@ class ForgeFeatureContext:
                     t = t.strip()
                     if t and t[0].isupper():
                         p['grants_types'].add(t.lower())
+        # --- ChangeType$: type changes for tribal synergy ---
+        ct_m = re.search(r'ChangeType\$\s*(\S+)', raw_line)
+        if ct_m:
+            ct_val = ct_m.group(1)
+            if ct_val == 'AllCreatureTypes':
+                p['grants_all_creature_types'] = True
+            else:
+                for t in ct_val.split(","):
+                    t = t.split(".")[0].strip()
+                    if t and t[0].isupper() and len(t) > 2:
+                        p['changes_type'].add(t.lower())
 
     @staticmethod
     def _extract_counters_and_special(p, row, raw_line):
@@ -424,9 +459,27 @@ class ForgeFeatureContext:
         m = re.search(r'CounterNum\$\s*(\S+)', raw_line)
         if m and m.group(1) in ('X', 'Y', 'All', 'Any'):
             p['counter_num_variable'] = True
-        # --- Grants abilities: AddAbility$ ---
-        if 'AddAbility$' in raw_line:
-            p['grants_abilities'] = True
+        # --- Grants abilities: AddAbility$ (extract detail, not just boolean) ---
+        ab_m = re.search(r'AddAbility\$\s*(\S+)', raw_line)
+        if ab_m:
+            p['granted_ability_names'].add(ab_m.group(1))
+        # --- Grants triggers: AddTrigger$ ---
+        trig_m = re.search(r'AddTrigger\$\s*(\S+)', raw_line)
+        if trig_m:
+            p['granted_triggers'].add(trig_m.group(1))
+        # --- Pump magnitude: NumAtt$/AddPower$/NumDef$/AddToughness$ ---
+        for pump_field in ('NumAtt', 'AddPower', 'NumDef', 'AddToughness'):
+            pm = re.search(rf'{pump_field}\$\s*([+-]?\w+)', raw_line)
+            if pm:
+                pval = pm.group(1)
+                if pval in ('X', 'Y', 'AffectedX'):
+                    p['pump_is_variable'] = True
+                else:
+                    try:
+                        mag = abs(int(pval.lstrip('+')))
+                        p['max_pump_power'] = max(p['max_pump_power'], mag)
+                    except ValueError:
+                        pass
         # --- Token amount variable: TokenAmount$ X ---
         m = re.search(r'TokenAmount\$\s*(\S+)', raw_line)
         if m and m.group(1) in ('X', 'Y'):
@@ -938,6 +991,23 @@ class ForgeFeatureContext:
             self._arr_has_any_counter_verb[i] = 1.0 if verbs & {'PutCounter', 'PutCounterAll', 'Proliferate', 'MoveCounter'} else 0.0
             self._arr_zone_gy[i] = 1.0 if oid in self._zone_graveyard else 0.0
             self._arr_zone_ex[i] = 1.0 if oid in self._zone_exile else 0.0
+
+        # ── New field arrays: Affected$ scope, pump magnitude, type changes ──
+        self._arr_affected_scope = np.zeros(n, dtype=np.float32)
+        self._arr_pump_magnitude = np.zeros(n, dtype=np.float32)
+        self._arr_pump_variable = np.zeros(n, dtype=np.float32)
+        self._arr_changes_type = [set() for _ in range(n)]
+
+        for oid, i in self.oid_to_idx.items():
+            p = self._forge_profiles.get(oid, {})
+            self._arr_affected_scope[i] = p.get('affected_scope_ratio', 0.5)
+            self._arr_pump_magnitude[i] = min(p.get('max_pump_power', 0), 15)
+            self._arr_pump_variable[i] = 1.0 if p.get('pump_is_variable', False) else 0.0
+            ct = p.get('changes_type', set())
+            if p.get('grants_all_creature_types', False):
+                ct = ct | {'_all_'}  # sentinel for changeling-type effects
+            if ct:
+                self._arr_changes_type[i] = ct
 
         # ── Verb demand arrays: bitmask of which trigger_modes each card satisfies ──
         # Ordered list of trigger_modes with clear verb mappings

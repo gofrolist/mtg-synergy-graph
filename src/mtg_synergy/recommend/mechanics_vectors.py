@@ -159,7 +159,33 @@ def _is_opponent_only(defined: str | None, raw_line: str) -> bool:
         if ("ValidPlayer$ Player.Opponent" in raw_line
                 or "ValidPlayer$ Opponent" in raw_line):
             return True
+    # Affected$ scope: effects targeting only opponent's permanents
+    if "Affected$" in raw_line:
+        m = re.search(r'Affected\$\s*(\S+)', raw_line)
+        if m:
+            val = m.group(1).lower()
+            if ".oppctrl" in val and ".youctrl" not in val:
+                return True
     return False
+
+
+def _normalize_addtrigger(name):
+    """Normalize AddTrigger$ SVar names to TRIGGER_TO_CONCEPTS keys."""
+    # Strip common prefixes: Trigger, Trig
+    n = re.sub(r'^Trigger|^Trig', '', name)
+    _MAP = {'Attack': 'Attacks', 'AttackTrig': 'Attacks',
+            'Attacks': 'Attacks', 'AttackersDeclared': 'AttackersDeclared',
+            'ETB': 'ChangesZone', 'Death': 'ChangesZone',
+            'Dies': 'ChangesZone', 'DiesTrig': 'ChangesZone',
+            'SpellCast': 'SpellCast', 'DamageDone': 'DamageDone',
+            'DamageDoneOnce': 'DamageDoneOnce',
+            'Drawn': 'Drawn', 'DrawnCard': 'Drawn',
+            'LifeGained': 'LifeGained', 'LifeLost': 'LifeLost',
+            'Phase': 'Phase', 'Upkeep': 'Phase',
+            'Sacrificed': 'Sacrificed', 'Discarded': 'Discarded',
+            'Milled': 'Milled', 'Taps': 'Taps', 'Untaps': 'Untaps',
+            'CounterAdded': 'CounterAdded', 'TokenCreated': 'TokenCreated'}
+    return _MAP.get(n, n if n in TRIGGER_TO_CONCEPTS else None)
 
 
 # R: replacement Event$ types → equivalent verb for VERB_TO_CONCEPTS lookup
@@ -329,6 +355,16 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
         if keyword == 'Defender':
             p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
             p[_concept_idx["defender_available"]] += 1.0
+
+        # AddTrigger$ — granting triggers produces those trigger events (weaker)
+        if raw_line and 'AddTrigger$' in raw_line:
+            at_m = re.search(r'AddTrigger\$\s*(\S+)', raw_line)
+            if at_m:
+                trig_name = _normalize_addtrigger(at_m.group(1))
+                if trig_name and trig_name in TRIGGER_TO_CONCEPTS:
+                    p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
+                    for concept in TRIGGER_TO_CONCEPTS[trig_name]:
+                        p[_concept_idx[concept]] += 0.5
 
         # Zone-aware PRODUCES: verb + destination → zone concept
         # Use trigger_destination column if available, fall back to raw_line
