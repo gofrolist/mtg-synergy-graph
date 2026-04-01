@@ -3,9 +3,9 @@
 
 Usage:
     python3 compare_edhrec.py --commander "Krenko, Mob Boss"   # single commander
-    python3 compare_edhrec.py --all                            # all commanders with synergy data
-    python3 compare_edhrec.py --all --quiet                    # summary table only
-    python3 compare_edhrec.py --commander "Krenko, Mob Boss" --fast  # use cached output
+    python3 compare_edhrec.py --top 100                        # top 100 by popularity (quiet)
+    python3 compare_edhrec.py --all                            # all 2700+ commanders (verbose)
+    python3 compare_edhrec.py --all --quiet                    # all commanders (summary only)
 """
 
 import argparse
@@ -183,10 +183,10 @@ def main():
     parser = argparse.ArgumentParser(description="Compare recommendations vs EDHREC synergy data")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--commander", type=str, help="Commander name (e.g. 'Krenko, Mob Boss')")
+    group.add_argument("--top", type=int, metavar="N",
+                        help="Compare top N commanders by popularity (quiet summary)")
     group.add_argument("--all", action="store_true", help="All commanders with EDHREC data")
     parser.add_argument("--quiet", action="store_true", help="Summary table only")
-    parser.add_argument("--limit", type=int, default=0,
-                        help="Limit number of commanders in --all mode (0=all)")
     args = parser.parse_args()
 
     conn = sqlite3.connect(str(DB_PATH))
@@ -220,8 +220,12 @@ def main():
             print(f"{r['commander']:<40} {r['hi_syn']:>4}/50 {r['top']:>2}/50 "
                   f"{r['on_page']:>4}/50 {r['not_edh']:>4}/50")
 
-    elif args.all:
-        # All commanders — batch mode (load model once)
+    elif args.all or args.top:
+        # Batch mode — load model once, score multiple commanders
+        is_top_n = bool(args.top)
+        if is_top_n:
+            args.quiet = True
+
         print("Building slug-to-name mapping...")
         slug_to_name = build_slug_to_name(conn)
         total_slugs = conn.execute(
@@ -229,9 +233,22 @@ def main():
         ).fetchone()[0]
         print(f"Resolved {len(slug_to_name)} of {total_slugs} slugs")
 
-        commander_names = sorted(slug_to_name.values())
-        if args.limit > 0:
-            commander_names = commander_names[:args.limit]
+        if is_top_n:
+            # Sort by popularity (synergy row count = proxy for deck count)
+            slug_popularity = {}
+            for row in conn.execute(
+                "SELECT commander_slug, COUNT(*) FROM edhrec_card_synergy "
+                "GROUP BY commander_slug"
+            ):
+                slug_popularity[row[0]] = row[1]
+            commander_names = sorted(
+                slug_to_name.values(),
+                key=lambda n: slug_popularity.get(
+                    next((s for s, nm in slug_to_name.items() if nm == n), ""), 0),
+                reverse=True
+            )[:args.top]
+        else:
+            commander_names = sorted(slug_to_name.values())
 
         print(f"\nScoring {len(commander_names)} commanders (batch mode)...")
         t0 = time.time()
