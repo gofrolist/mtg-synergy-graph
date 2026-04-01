@@ -50,14 +50,14 @@ def test_forge_profiles_loaded():
             "verbs", "triggers", "keywords", "counter_types",
             "targets", "ability_types", "trigger_filters", "required_subtypes",
             "granted_keywords", "conditions", "duration",
-            "effect_zones", "scales_with", "grants_types", "mana_colors",
+            "effect_zones", "scales_with",
             "excluded_subtypes", "counter_trigger_themes",
             "opponent_only_events",
             "granted_ability_names", "granted_triggers", "changes_type",
         }
         expected_bool_keys = {
             "combat_damage", "is_secondary", "gain_control",
-            "produces_mana", "counter_num_variable", "grants_abilities",
+            "produces_mana", "grants_abilities",
             "token_amount_variable", "counters_on_lands", "has_p1p1",
             "grants_all_creature_types", "pump_is_variable",
         }
@@ -742,33 +742,6 @@ class TestScalesWith:
             sw = p.get("scales_with", set())
             assert "variable_pt" in sw, f"Expected 'variable_pt' in scales_with, got {sw}"
             assert "count_based" in sw, f"Expected 'count_based' in scales_with, got {sw}"
-        finally:
-            pass  # conn is cached, do not close
-
-
-class TestGrantsTypes:
-    """Profile field: grants_types from Types$/AddType$."""
-
-    def test_restless_fortress_grants_nightmare(self):
-        """Restless Fortress animates into a Nightmare creature."""
-        ctx, conn = _make_ctx()
-        try:
-            oid = _find_oid_by_name(conn, "Restless Fortress")
-            if oid is None:
-                pytest.skip("Restless Fortress not found in DB")
-            p = ctx._forge_profiles.get(oid, {})
-            gt = p.get("grants_types", set())
-            assert "nightmare" in gt, f"Expected 'nightmare' in grants_types, got {gt}"
-            assert "creature" in gt, f"Expected 'creature' in grants_types, got {gt}"
-        finally:
-            pass  # conn is cached, do not close
-
-    def test_coverage(self):
-        """Hundreds of cards should have grants_types."""
-        ctx, conn = _make_ctx()
-        try:
-            count = sum(1 for p in ctx._forge_profiles.values() if p.get("grants_types"))
-            assert count >= 500, f"Expected >=500 cards with grants_types, got {count}"
         finally:
             pass  # conn is cached, do not close
 

@@ -228,11 +228,10 @@ class ForgeFeatureContext:
             'granted_keywords': set(), 'conditions': set(),
             'duration': set(), 'combat_damage': False,
             'effect_zones': set(), 'scales_with': set(),
-            'grants_types': set(), 'damage_amount': None,
+            'damage_amount': None,
             'cards_drawn': None, 'life_amount': None,
             'is_secondary': False, 'gain_control': False,
-            'produces_mana': False, 'mana_colors': set(),
-            'counter_num_variable': False, 'grants_abilities': False,
+            'produces_mana': False, 'grants_abilities': False,
             'token_amount_variable': False,
             'excluded_subtypes': set(),
             'counters_on_lands': False,
@@ -393,14 +392,6 @@ class ForgeFeatureContext:
                     desc = desc_m.group(1).lower()
                     if 'for each' in desc or 'equal to' in desc:
                         p['scales_with'].add('count_based')
-        # --- Grants types: Types$, AddType$ ---
-        for type_field in ('Types', 'AddType'):
-            m = re.search(rf'{type_field}\$\s*(\S+)', raw_line)
-            if m:
-                for t in m.group(1).split(","):
-                    t = t.strip()
-                    if t and t[0].isupper():
-                        p['grants_types'].add(t.lower())
         # --- ChangeType$: type changes for tribal synergy ---
         ct_m = re.search(r'ChangeType\$\s*(\S+)', raw_line)
         if ct_m:
@@ -446,16 +437,6 @@ class ForgeFeatureContext:
         m = re.search(r'Produced\$\s*(\S+)', raw_line)
         if m:
             p['produces_mana'] = True
-            prod = m.group(1)
-            for c in ('W', 'U', 'B', 'R', 'G'):
-                if c in prod:
-                    p['mana_colors'].add(c)
-            if prod in ('Any', 'Combo', 'Chosen'):
-                p['mana_colors'].update({'W', 'U', 'B', 'R', 'G'})
-        # --- Counter quantity variable: CounterNum$ X/Y ---
-        m = re.search(r'CounterNum\$\s*(\S+)', raw_line)
-        if m and m.group(1) in ('X', 'Y', 'All', 'Any'):
-            p['counter_num_variable'] = True
         # --- Grants abilities: AddAbility$ (extract detail, not just boolean) ---
         ab_m = re.search(r'AddAbility\$\s*(\S+)', raw_line)
         if ab_m:

@@ -57,7 +57,7 @@ class CmdrFeatureContext:
             'granted_keywords': set(), 'conditions': set(),
             'duration': set(), 'combat_damage': False,
             'effect_zones': set(), 'scales_with': set(),
-            'grants_types': set(), 'damage_amount': None,
+            'damage_amount': None,
             'cards_drawn': None, 'life_amount': None,
             'is_secondary': False, 'gain_control': False,
         })
