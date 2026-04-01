@@ -86,9 +86,12 @@ _RE_FP_TARGET_FIELDS = {
 # ── Promoted in-function constants ──
 _SELF_SCOPES = frozenset({'youctrl', 'self', 'equippedby', 'enchantedby',
                            'pairedwith', 'iscommander'})
-_GENERIC_TYPES = frozenset({"card", "creature", "permanent", "self", "other",
-                             "youctrl", "oppctrl", "strictlyother", "token",
-                             "nontoken"})
+_GENERIC_TYPES = frozenset({
+    "card", "creature", "permanent", "nontoken", "token",
+    "artifact", "enchantment", "land", "spell",
+    "self", "other", "any",
+    "youctrl", "oppctrl", "strictlyother",
+})
 
 # Known-safe SQL fragments for event column access (avoids f-string injection)
 _EVENT_EXPR_COLUMN = "event"

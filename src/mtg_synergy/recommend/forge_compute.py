@@ -14,6 +14,7 @@ from mtg_synergy.recommend.forge_features import (
     _EVENT_EXPR_COLUMN,
     _EVENT_EXPR_JSON,
     _EDHREC_FREE,
+    _GENERIC_TYPES,
 )
 from mtg_synergy.recommend.mechanics_vectors import _concept_idx
 
@@ -28,12 +29,6 @@ _KW_TO_FILTER = {
     "Hexproof": "hexproof", "Indestructible": "indestructible",
     "Vigilance": "vigilance", "Reach": "reach",
 }
-
-_GENERIC_TYPES = frozenset({
-    "card", "creature", "permanent", "nontoken",
-    "token", "artifact", "enchantment", "land",
-    "spell", "self", "other", "any",
-})
 
 _AMP_TO_PROD = [1, 0, 5, 6]
 _REQ_TO_PROD = {0: 0, 4: 5, 5: 6, 8: 7, 10: 1}

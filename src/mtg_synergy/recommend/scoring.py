@@ -399,6 +399,8 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
 
     Pass forge_ctx and gbm_model to reuse pre-loaded context across calls
     (avoids ~7s rebuild per call). For batch scoring, use batch_recommend().
+
+    NOTE: mutates ``cards`` in-place — appends missing cards fetched from DB.
     """
     gbm = gbm_model or _load_gbm()
     if gbm is None:

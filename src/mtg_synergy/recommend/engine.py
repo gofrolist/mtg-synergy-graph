@@ -30,7 +30,7 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
     if commander and db_path:
         try:
             _shared_conn = sqlite3.connect(db_path)
-        except sqlite3.OperationalError:
+        except (sqlite3.OperationalError, ValueError):
             _shared_conn = None
 
     if _shared_conn:

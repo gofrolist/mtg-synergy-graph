@@ -1,10 +1,12 @@
 """Causal interaction graph — deterministic synergy analysis."""
 import json
 import logging
+import re
 from collections import defaultdict, namedtuple
 from mtg_synergy.causal.types import Edge, EdgeDetail
 
 _log = logging.getLogger(__name__)
+_RE_LIGHT_EVENT = re.compile(r'"event"\s*:\s*"([^"]*)"')
 
 # Lightweight edge for CausalContext scoring — uses 5 fields instead of 7 + full EdgeDetail.
 # Saves ~20MB by avoiding json.loads of full detail dict for 60k+ edges.
@@ -58,13 +60,11 @@ def _parse_light_edges(rows) -> list:
     Only extracts the 'event' field from the detail JSON, saving ~20MB
     on 60k+ edges by avoiding full EdgeDetail construction.
     """
-    import re
-    _event_re = re.compile(r'"event"\s*:\s*"([^"]*)"')
     result = []
     for r in rows:
         # Fast event extraction — avoid full json.loads
         detail_str = r[6]
-        m = _event_re.search(detail_str)
+        m = _RE_LIGHT_EVENT.search(detail_str)
         event = m.group(1) if m else None
         result.append(_LightEdge(r[0], r[1], r[2], r[5], event))
     return result
