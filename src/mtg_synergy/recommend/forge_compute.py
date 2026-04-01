@@ -55,11 +55,10 @@ class CmdrFeatureContext:
             'counter_types': set(), 'targets': set(), 'ability_types': set(),
             'trigger_filters': set(), 'required_subtypes': set(),
             'granted_keywords': set(), 'conditions': set(),
-            'duration': set(), 'combat_damage': False,
-            'effect_zones': set(), 'scales_with': set(),
+            'combat_damage': False,
             'damage_amount': None,
             'cards_drawn': None, 'life_amount': None,
-            'is_secondary': False, 'gain_control': False,
+            'gain_control': False,
         })
 
         # Pre-compute compound values used by compute_card_features (F27)
@@ -489,8 +488,9 @@ def _batch_vectorized_features(X, N, card_oids, card_cmcs, safe_idx, valid, ctx,
     X[:, 24] = ctx._arr_activated_count[safe_idx]                      # activated_ability_count
 
     # ── F25-F26: Duration flags ──
-    X[:, 25] = ctx._arr_dur_permanent[safe_idx]                        # is_permanent_effect
-    X[:, 26] = ctx._arr_dur_temporary[safe_idx]                        # is_temporary_effect
+    # F25-F26: ZEROED (testing removal — absorbed by duration_match + pump_magnitude)
+    # X[:, 25] = ctx._arr_dur_permanent[safe_idx]                      # is_permanent_effect
+    # X[:, 26] = ctx._arr_dur_temporary[safe_idx]                      # is_temporary_effect
 
     # ── F27: duration_match — set in loop ──
 
@@ -499,11 +499,12 @@ def _batch_vectorized_features(X, N, card_oids, card_cmcs, safe_idx, valid, ctx,
 
     # ── F29: effect_zone_match — set in loop ──
 
-    # ── F30: scales_with_board ──
-    X[:, 30] = ctx._arr_scales_with[safe_idx]                          # scales_with_board
+    # F30: ZEROED (testing removal — covered by pump_is_variable + scaling flags)
+    # X[:, 30] = ctx._arr_scales_with[safe_idx]                        # scales_with_board
 
     # ── F31-F32: is_secondary_trigger, gain_control ──
-    X[:, 31] = ctx._arr_is_secondary[safe_idx]                         # is_secondary_trigger
+    # F31: ZEROED (testing removal — counted in triggered_ability_count)
+    # X[:, 31] = ctx._arr_is_secondary[safe_idx]                       # is_secondary_trigger
     X[:, 32] = ctx._arr_gain_control[safe_idx]                         # gain_control
 
     # ── F33-F34: granted_keyword_count, condition_count ──
@@ -591,8 +592,7 @@ def _batch_per_card_loop(X, N, card_oids, card_indices, safe_idx, ctx, cmdr):
     cmdr_trigger_types = cmdr_profile.get('trigger_filters', set())
     cmdr_targets = cmdr_profile.get('targets', set())
     cmdr_zones = cmdr.cmdr_zones
-    cmdr_dur = cmdr.cmdr_profile.get('duration', set())
-    cmdr_ezones = cmdr.cmdr_profile.get('effect_zones', set())
+    # cmdr_dur, cmdr_ezones removed (F27, F29 zeroed)
     cmdr_tribal_filters = cmdr.cmdr_tribal_filters
 
     # Concept-based target alignment setup
@@ -752,15 +752,8 @@ def _batch_per_card_loop(X, N, card_oids, card_indices, safe_idx, ctx, cmdr):
             kw_syn += float(len(card_kws & combat_kws)) * 0.3
         X[row_i, 23] = kw_syn
 
-        # F27: duration_match
-        card_dur = card_profile.get('duration', set())
-        if cmdr_dur and card_dur:
-            X[row_i, 27] = float(len(card_dur & cmdr_dur))
-
-        # F29: effect_zone_match
-        card_ezones = card_profile.get('effect_zones', set())
-        if cmdr_ezones and card_ezones:
-            X[row_i, 29] = float(len(card_ezones & cmdr_ezones))
+        # F27: ZEROED (testing removal — very sparse, covered by pump_magnitude)
+        # F29: ZEROED (testing removal — very sparse, covered by zone mechanics vectors)
 
         # F35-F39: Deck tag overlaps
         card_has = ctx._deck_has.get(oid, set())
@@ -1119,19 +1112,16 @@ def _compute_forge_profile_features(card_oid, card_cmc, card_profile, ctx, cmdr)
 
     activated_count = float(min(ctx._activated_counts.get(card_oid, 0), 5))
 
-    card_dur = card_profile.get('duration', set())
-    is_permanent = 1.0 if 'permanent' in card_dur else 0.0
-    is_temporary = 1.0 if 'temporary' in card_dur else 0.0
-    cmdr_dur = cmdr.cmdr_profile.get('duration', set())
-    duration_match = float(len(card_dur & cmdr_dur)) if card_dur and cmdr_dur else 0.0
+    # F25-F27, F29-F31 zeroed (redundant workaround features)
+    is_permanent = 0.0
+    is_temporary = 0.0
+    duration_match = 0.0
 
     combat_dmg = 1.0 if card_profile.get('combat_damage', False) else 0.0
-    card_ezones = card_profile.get('effect_zones', set())
-    cmdr_ezones = cmdr.cmdr_profile.get('effect_zones', set())
-    ezone_match = float(len(card_ezones & cmdr_ezones)) if card_ezones and cmdr_ezones else 0.0
-    scales = 1.0 if card_profile.get('scales_with', set()) else 0.0
+    ezone_match = 0.0
+    scales = 0.0
 
-    is_secondary = 1.0 if card_profile.get('is_secondary', False) else 0.0
+    is_secondary = 0.0
     gain_ctrl = 1.0 if card_profile.get('gain_control', False) else 0.0
     card_granted = card_profile.get('granted_keywords', set())
     card_conds = card_profile.get('conditions', set())

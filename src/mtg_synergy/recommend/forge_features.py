@@ -226,11 +226,10 @@ class ForgeFeatureContext:
             'counter_types': set(), 'targets': set(), 'ability_types': set(),
             'trigger_filters': set(), 'required_subtypes': set(),
             'granted_keywords': set(), 'conditions': set(),
-            'duration': set(), 'combat_damage': False,
-            'effect_zones': set(), 'scales_with': set(),
+            'combat_damage': False,
             'damage_amount': None,
             'cards_drawn': None, 'life_amount': None,
-            'is_secondary': False, 'gain_control': False,
+            'gain_control': False,
             'produces_mana': False, 'grants_abilities': False,
             'token_amount_variable': False,
             'excluded_subtypes': set(),
@@ -363,35 +362,9 @@ class ForgeFeatureContext:
                     main = part.split(".")[0].split("+")[0].strip()
                     if main and main[0].isupper() and len(main) > 2:
                         p['conditions'].add(main.lower())
-        # --- Duration$ ---
-        m = re.search(r'Duration\$\s*(\S+)', raw_line)
-        if m:
-            p['duration'].add(m.group(1).lower())
-        elif verb in ('Pump', 'PumpAll') and 'Duration$' not in raw_line:
-            # Pump without Duration → temporary buff
-            p['duration'].add('temporary')
         # --- CombatDamage$ True ---
         if 'CombatDamage$ True' in raw_line:
             p['combat_damage'] = True
-        # --- Effect zones: ActiveZones$, EffectZone$, AffectedZone$ ---
-        for zone_field in ('ActiveZones', 'EffectZone', 'AffectedZone'):
-            m = re.search(rf'{zone_field}\$\s*(\S+)', raw_line)
-            if m:
-                for z in m.group(1).split(","):
-                    z = z.strip()
-                    if z:
-                        p['effect_zones'].add(z.lower())
-        # --- Scales with: SetPower$ X or AddPower$ X ---
-        for pw_field in ('SetPower', 'AddPower'):
-            m = re.search(rf'{pw_field}\$\s*(\S+)', raw_line)
-            if m and m.group(1) in ('X', 'Y'):
-                p['scales_with'].add('variable_pt')
-                # Try to extract what it scales with from Description$
-                desc_m = re.search(r'Description\$\s*(.+?)(?:\||$)', raw_line)
-                if desc_m:
-                    desc = desc_m.group(1).lower()
-                    if 'for each' in desc or 'equal to' in desc:
-                        p['scales_with'].add('count_based')
         # --- ChangeType$: type changes for tribal synergy ---
         ct_m = re.search(r'ChangeType\$\s*(\S+)', raw_line)
         if ct_m:
@@ -427,9 +400,6 @@ class ForgeFeatureContext:
             val = m.group(1)
             if p['life_amount'] is None or val == 'X':
                 p['life_amount'] = val
-        # --- Secondary ability ---
-        if 'Secondary$ True' in raw_line:
-            p['is_secondary'] = True
         # --- Gain control ---
         if 'GainControl$ True' in raw_line:
             p['gain_control'] = True
@@ -909,14 +879,12 @@ class ForgeFeatureContext:
 
         # ── Profile-derived boolean flags ──
         self._arr_combat_damage = np.zeros(n, dtype=np.float32)
-        self._arr_scales_with = np.zeros(n, dtype=np.float32)
-        self._arr_is_secondary = np.zeros(n, dtype=np.float32)
+        # _arr_scales_with, _arr_is_secondary removed (F30, F31 zeroed — redundant)
         self._arr_gain_control = np.zeros(n, dtype=np.float32)
         self._arr_produces_mana = np.zeros(n, dtype=np.float32)
         self._arr_token_amt_var = np.zeros(n, dtype=np.float32)
         self._arr_has_p1p1 = np.zeros(n, dtype=np.float32)
-        self._arr_dur_permanent = np.zeros(n, dtype=np.float32)
-        self._arr_dur_temporary = np.zeros(n, dtype=np.float32)
+        # _arr_dur_permanent, _arr_dur_temporary removed (F25, F26 zeroed — redundant)
         self._arr_has_T = np.zeros(n, dtype=np.float32)
         self._arr_has_A = np.zeros(n, dtype=np.float32)
         self._arr_has_phase = np.zeros(n, dtype=np.float32)
@@ -937,15 +905,13 @@ class ForgeFeatureContext:
         for oid, i in self.oid_to_idx.items():
             p = self._forge_profiles.get(oid, {})
             self._arr_combat_damage[i] = 1.0 if p.get('combat_damage', False) else 0.0
-            self._arr_scales_with[i] = 1.0 if p.get('scales_with', set()) else 0.0
-            self._arr_is_secondary[i] = 1.0 if p.get('is_secondary', False) else 0.0
+            # scales_with, is_secondary arrays removed (features zeroed)
             self._arr_gain_control[i] = 1.0 if p.get('gain_control', False) else 0.0
             self._arr_produces_mana[i] = 1.0 if p.get('produces_mana', False) else 0.0
             self._arr_token_amt_var[i] = 1.0 if p.get('token_amount_variable', False) else 0.0
             self._arr_has_p1p1[i] = 1.0 if p.get('has_p1p1', False) else 0.0
             dur = p.get('duration', set())
-            self._arr_dur_permanent[i] = 1.0 if 'permanent' in dur else 0.0
-            self._arr_dur_temporary[i] = 1.0 if 'temporary' in dur else 0.0
+            # dur_permanent, dur_temporary arrays removed (features zeroed)
             atypes = p.get('ability_types', set())
             self._arr_has_T[i] = 1.0 if 'T' in atypes else 0.0
             self._arr_has_A[i] = 1.0 if 'A' in atypes else 0.0

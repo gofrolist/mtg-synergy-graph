@@ -49,14 +49,13 @@ def test_forge_profiles_loaded():
         expected_set_keys = {
             "verbs", "triggers", "keywords", "counter_types",
             "targets", "ability_types", "trigger_filters", "required_subtypes",
-            "granted_keywords", "conditions", "duration",
-            "effect_zones", "scales_with",
+            "granted_keywords", "conditions",
             "excluded_subtypes", "counter_trigger_themes",
             "opponent_only_events",
             "granted_ability_names", "granted_triggers", "changes_type",
         }
         expected_bool_keys = {
-            "combat_damage", "is_secondary", "gain_control",
+            "combat_damage", "gain_control",
             "produces_mana", "grants_abilities",
             "token_amount_variable", "counters_on_lands", "has_p1p1",
             "grants_all_creature_types", "pump_is_variable",
@@ -702,50 +701,6 @@ class TestConditions:
             pass  # conn is cached, do not close
 
 
-class TestDuration:
-    """Profile field: duration from Duration$ and pump inference."""
-
-    def test_duration_extracted(self):
-        """At least 3000 cards should have duration info."""
-        ctx, conn = _make_ctx()
-        try:
-            count = sum(1 for p in ctx._forge_profiles.values() if p.get("duration"))
-            assert count >= 3000, f"Expected >=3000 cards with duration, got {count}"
-        finally:
-            pass  # conn is cached, do not close
-
-    def test_permanent_duration_exists(self):
-        """Some cards should have permanent duration."""
-        ctx, conn = _make_ctx()
-        try:
-            found = False
-            for _oid, p in ctx._forge_profiles.items():
-                if "permanent" in p.get("duration", set()):
-                    found = True
-                    break
-            assert found, "No card with 'permanent' duration found"
-        finally:
-            pass  # conn is cached, do not close
-
-
-class TestScalesWith:
-    """Profile field: scales_with from SetPower$/AddPower$ with X/Y values."""
-
-    def test_reckless_one_scales(self):
-        """Reckless One (P/T = number of Goblins) should have scales_with."""
-        ctx, conn = _make_ctx()
-        try:
-            oid = _find_oid_by_name(conn, "Reckless One")
-            if oid is None:
-                pytest.skip("Reckless One not found in DB")
-            p = ctx._forge_profiles.get(oid, {})
-            sw = p.get("scales_with", set())
-            assert "variable_pt" in sw, f"Expected 'variable_pt' in scales_with, got {sw}"
-            assert "count_based" in sw, f"Expected 'count_based' in scales_with, got {sw}"
-        finally:
-            pass  # conn is cached, do not close
-
-
 class TestGainControl:
     """Profile field: gain_control from GainControl$ True."""
 
@@ -781,19 +736,6 @@ class TestCardsDrawn:
         try:
             count = sum(1 for p in ctx._forge_profiles.values() if p.get("cards_drawn"))
             assert count >= 1000, f"Expected >=1000 cards with cards_drawn, got {count}"
-        finally:
-            pass  # conn is cached, do not close
-
-
-class TestEffectZones:
-    """Profile field: effect_zones from ActiveZones$/EffectZone$/AffectedZone$."""
-
-    def test_effect_zones_extracted(self):
-        """Hundreds of cards should have effect_zones."""
-        ctx, conn = _make_ctx()
-        try:
-            count = sum(1 for p in ctx._forge_profiles.values() if p.get("effect_zones"))
-            assert count >= 1000, f"Expected >=1000 cards with effect_zones, got {count}"
         finally:
             pass  # conn is cached, do not close
 
