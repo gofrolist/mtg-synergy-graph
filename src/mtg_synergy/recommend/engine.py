@@ -21,19 +21,11 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
     card_oid_lookup = {}
     partial_combos = []
 
-    # Build card metadata early — needed by combo lookup below
+    # Build oid lookup early — needed by combo lookup below.
+    # card_meta is rebuilt after scoring since score_forge_candidates
+    # appends newly-found cards to the cards list.
     for c in cards:
-        name = c["name"]
-        tl = c.get("type_line", "")
-        existing = card_meta.get(name)
-        if existing and "Token" not in existing.get("type_line", "") and "Token" in tl:
-            continue
-        card_meta[name] = {
-            "type_line": tl, "cmc": c.get("cmc", 0),
-            "mana_cost": c.get("mana_cost", ""), "oracle_id": c.get("oracle_id", ""),
-            "edhrec_rank": c.get("edhrec_rank"),
-        }
-        card_oid_lookup[name] = c.get("oracle_id", "")
+        card_oid_lookup[c["name"]] = c.get("oracle_id", "")
 
     if commander and db_path:
         try:
@@ -97,6 +89,20 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
             key=lambda x: -x[1])[:10]}
         candidate_scores = _candidate_scores(
             graph, deck_cards, commander=commander, key_cards=key_cards)
+
+    # Build card metadata for display (after scoring, which may append cards)
+    for c in cards:
+        name = c["name"]
+        tl = c.get("type_line", "")
+        existing = card_meta.get(name)
+        if existing and "Token" not in existing.get("type_line", "") and "Token" in tl:
+            continue
+        card_meta[name] = {
+            "type_line": tl, "cmc": c.get("cmc", 0),
+            "mana_cost": c.get("mana_cost", ""), "oracle_id": c.get("oracle_id", ""),
+            "edhrec_rank": c.get("edhrec_rank"),
+        }
+        card_oid_lookup[name] = c.get("oracle_id", "")
 
     # Sort by total synergy
     ranked = sorted(candidate_scores.items(), key=lambda x: x[1]["total"], reverse=True)
