@@ -190,9 +190,6 @@ class ForgeFeatureContext:
 
         # Post-process derived fields
         for p in self._forge_profiles.values():
-            # Static anthem is only meaningful if card has NO PutCounter
-            if p['has_static_anthem'] and ('PutCounter' in p['verbs'] or 'PutCounterAll' in p['verbs']):
-                p['has_static_anthem'] = False
             # Derive grants_abilities boolean from detailed set
             p['grants_abilities'] = bool(p['granted_ability_names'])
             # Affected$ scope ratio: fraction of effects targeting self vs opponents
@@ -238,7 +235,7 @@ class ForgeFeatureContext:
             'counter_num_variable': False, 'grants_abilities': False,
             'token_amount_variable': False,
             'excluded_subtypes': set(),
-            'has_static_anthem': False, 'counters_on_lands': False,
+            'counters_on_lands': False,
             'counter_trigger_themes': set(), 'has_p1p1': False,
             'opponent_only_events': set(),
             # New fields: Affected$ scope, AddAbility$ detail, ChangeType$,
@@ -485,8 +482,6 @@ class ForgeFeatureContext:
         if m and m.group(1) in ('X', 'Y'):
             p['token_amount_variable'] = True
         # --- Static anthem: Continuous + AddPower (not actual counters) ---
-        if verb == 'Continuous' and 'AddPower$' in raw_line:
-            p['has_static_anthem'] = True
         # --- Counters on lands: PutCounter targeting lands, or Earthbend ---
         if verb in ('PutCounter', 'PutCounterAll'):
             vtgt = re.search(r'ValidTgts\$\s*(\S+)', raw_line)
@@ -937,7 +932,6 @@ class ForgeFeatureContext:
         self._arr_is_secondary = np.zeros(n, dtype=np.float32)
         self._arr_gain_control = np.zeros(n, dtype=np.float32)
         self._arr_produces_mana = np.zeros(n, dtype=np.float32)
-        self._arr_grants_abilities = np.zeros(n, dtype=np.float32)
         self._arr_token_amt_var = np.zeros(n, dtype=np.float32)
         self._arr_has_p1p1 = np.zeros(n, dtype=np.float32)
         self._arr_dur_permanent = np.zeros(n, dtype=np.float32)
@@ -966,7 +960,6 @@ class ForgeFeatureContext:
             self._arr_is_secondary[i] = 1.0 if p.get('is_secondary', False) else 0.0
             self._arr_gain_control[i] = 1.0 if p.get('gain_control', False) else 0.0
             self._arr_produces_mana[i] = 1.0 if p.get('produces_mana', False) else 0.0
-            self._arr_grants_abilities[i] = 1.0 if p.get('grants_abilities', False) else 0.0
             self._arr_token_amt_var[i] = 1.0 if p.get('token_amount_variable', False) else 0.0
             self._arr_has_p1p1[i] = 1.0 if p.get('has_p1p1', False) else 0.0
             dur = p.get('duration', set())

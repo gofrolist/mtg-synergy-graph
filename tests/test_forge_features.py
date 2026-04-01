@@ -58,7 +58,7 @@ def test_forge_profiles_loaded():
         expected_bool_keys = {
             "combat_damage", "is_secondary", "gain_control",
             "produces_mana", "counter_num_variable", "grants_abilities",
-            "token_amount_variable", "has_static_anthem", "counters_on_lands", "has_p1p1",
+            "token_amount_variable", "counters_on_lands", "has_p1p1",
             "grants_all_creature_types", "pump_is_variable",
         }
         expected_int_keys = {"affected_self_count", "affected_opp_count", "max_pump_power"}
