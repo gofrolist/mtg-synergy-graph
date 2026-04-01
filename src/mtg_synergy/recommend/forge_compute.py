@@ -19,6 +19,29 @@ from mtg_synergy.recommend.mechanics_vectors import _concept_idx
 
 _log = logging.getLogger(__name__)
 
+# ── Module-level constants (avoid re-creating per call) ──
+
+_KW_TO_FILTER = {
+    "Flying": "flying", "Trample": "trample", "Haste": "haste",
+    "Deathtouch": "deathtouch", "Lifelink": "lifelink", "Menace": "menace",
+    "First Strike": "firststrike", "Double Strike": "doublestrike",
+    "Hexproof": "hexproof", "Indestructible": "indestructible",
+    "Vigilance": "vigilance", "Reach": "reach",
+}
+
+_GENERIC_TYPES = frozenset({
+    "card", "creature", "permanent", "nontoken",
+    "token", "artifact", "enchantment", "land",
+    "spell", "self", "other", "any",
+})
+
+_AMP_TO_PROD = [1, 0, 5, 6]
+_REQ_TO_PROD = {0: 0, 4: 5, 5: 6, 8: 7, 10: 1}
+
+_COMBAT_KWS = frozenset({
+    "Flying", "Trample", "Haste", "Menace", "Double Strike", "First Strike",
+})
+
 
 class CmdrFeatureContext:
     """Per-commander pre-loaded data for feature computation."""
@@ -42,6 +65,10 @@ class CmdrFeatureContext:
 
         # Commander functional fingerprint
         self.cmdr_func = ctx._func_fingerprints.get(cmdr_oid)
+
+        # Cached norms (avoid recomputing per card)
+        self.cmdr_strat_norm = float(np.linalg.norm(self.cmdr_strat_vec)) if self.cmdr_strat_vec is not None else 0.0
+        self.cmdr_func_norm = float(np.linalg.norm(self.cmdr_func)) if self.cmdr_func is not None else 0.0
 
         # Commander deck tags (Forge's deck-building AI signals)
         self.cmdr_has = ctx._deck_has.get(cmdr_oid, set())
@@ -608,32 +635,17 @@ def _batch_per_card_loop(X, N, card_oids, card_indices, safe_idx, ctx, cmdr):
             if idx is not None and cmdr_produces[idx] > 0:
                 cmdr_prod_types.add(target_type)
 
-    # Keyword-filter mapping for F23
-    kw_to_filter = {
-        "Flying": "flying", "Trample": "trample", "Haste": "haste",
-        "Deathtouch": "deathtouch", "Lifelink": "lifelink", "Menace": "menace",
-        "First Strike": "firststrike", "Double Strike": "doublestrike",
-        "Hexproof": "hexproof", "Indestructible": "indestructible",
-        "Vigilance": "vigilance", "Reach": "reach",
-    }
     creature_idx_concept = _concept_idx.get("creature_enters")
     cmdr_makes_creatures = (cmdr_produces is not None and creature_idx_concept is not None
                             and cmdr_produces[creature_idx_concept] > 0)
-    combat_kws = {"Flying", "Trample", "Haste", "Menace", "Double Strike", "First Strike"}
 
     # Functional fingerprint slices
     P = ForgeFeatureContext._FUNC_PRODUCES_SLICE
     R = ForgeFeatureContext._FUNC_REQUIRES_SLICE
     A = ForgeFeatureContext._FUNC_AMPLIFIES_SLICE
-    _amp_to_prod = [1, 0, 5, 6]
-    _req_to_prod = {0: 0, 4: 5, 5: 6, 8: 7, 10: 1}
     cmdr_prod_projected = None
     if cmdr_func is not None:
-        cmdr_prod_projected = np.array([cmdr_func[P.start + i] for i in _amp_to_prod])
-
-    generic_types = {"card", "creature", "permanent", "nontoken",
-                     "token", "artifact", "enchantment", "land",
-                     "spell", "self", "other", "any"}
+        cmdr_prod_projected = np.array([cmdr_func[P.start + i] for i in _AMP_TO_PROD])
 
     for row_i in range(N):
         oid = card_oids[row_i]
@@ -647,7 +659,7 @@ def _batch_per_card_loop(X, N, card_oids, card_indices, safe_idx, ctx, cmdr):
         csv = ctx.strat_vector(oid)
         if cmdr_strat_vec is not None and csv is not None:
             d = float(np.dot(cmdr_strat_vec, csv))
-            nc = float(np.linalg.norm(cmdr_strat_vec))
+            nc = cmdr.cmdr_strat_norm
             nd = float(np.linalg.norm(csv))
             X[row_i, 3] = d / (nc * nd) if nc > 0 and nd > 0 else 0.0
 
@@ -702,12 +714,12 @@ def _batch_per_card_loop(X, N, card_oids, card_indices, safe_idx, ctx, cmdr):
         if cmdr_subtypes:
             anti = 0.0
             for tf in card_trigger_types:
-                if tf not in generic_types and tf not in cmdr_subtypes:
+                if tf not in _GENERIC_TYPES and tf not in cmdr_subtypes:
                     anti = 1.0
                     break
             if anti == 0.0:
                 for rs in card_profile.get('required_subtypes', set()):
-                    if rs not in generic_types and rs not in cmdr_subtypes:
+                    if rs not in _GENERIC_TYPES and rs not in cmdr_subtypes:
                         anti = 1.0
                         break
             if anti == 0.0:
@@ -746,11 +758,11 @@ def _batch_per_card_loop(X, N, card_oids, card_indices, safe_idx, ctx, cmdr):
         card_kws = card_profile.get('keywords', set())
         kw_syn = 0.0
         for kw in card_kws:
-            ff = kw_to_filter.get(kw, kw.lower().replace(" ", ""))
+            ff = _KW_TO_FILTER.get(kw, kw.lower().replace(" ", ""))
             if any(ff in f for f in cmdr_filter_kws):
                 kw_syn += 1.0
         if cmdr_makes_creatures:
-            kw_syn += float(len(card_kws & combat_kws)) * 0.3
+            kw_syn += float(len(card_kws & _COMBAT_KWS)) * 0.3
         X[row_i, 23] = kw_syn
 
         # F27: ZEROED (testing removal — very sparse, covered by pump_magnitude)
@@ -787,10 +799,10 @@ def _batch_per_card_loop(X, N, card_oids, card_indices, safe_idx, ctx, cmdr):
         card_func = ctx._func_fingerprints.get(oid)
         if card_func is not None and cmdr_func is not None:
             X[row_i, 58] = float(np.dot(cmdr_prod_projected, card_func[A]))
-            for req_dim, prod_dim in _req_to_prod.items():
+            for req_dim, prod_dim in _REQ_TO_PROD.items():
                 X[row_i, 59] += cmdr_func[R.start + req_dim] * card_func[P.start + prod_dim]
                 X[row_i, 60] += card_func[R.start + req_dim] * cmdr_func[P.start + prod_dim]
-            norm_c = np.linalg.norm(cmdr_func)
+            norm_c = cmdr.cmdr_func_norm
             norm_d = np.linalg.norm(card_func)
             if norm_c > 0 and norm_d > 0:
                 X[row_i, 61] = float(np.dot(cmdr_func, card_func) / (norm_c * norm_d))
@@ -974,17 +986,14 @@ def _compute_tribal_features(card_oid, card_type_line, card_profile, ctx, cmdr):
 
     anti_tribal = 0.0
     if cmdr.cmdr_subtypes:
-        generic_types = {"card", "creature", "permanent", "nontoken",
-                        "token", "artifact", "enchantment", "land",
-                        "spell", "self", "other", "any"}
         for tf in card_trigger_types:
-            if tf not in generic_types and tf not in cmdr.cmdr_subtypes:
+            if tf not in _GENERIC_TYPES and tf not in cmdr.cmdr_subtypes:
                 anti_tribal = 1.0
                 break
         if anti_tribal == 0.0:
             req_subs = card_profile.get('required_subtypes', set())
             for rs in req_subs:
-                if rs not in generic_types and rs not in cmdr.cmdr_subtypes:
+                if rs not in _GENERIC_TYPES and rs not in cmdr.cmdr_subtypes:
                     anti_tribal = 1.0
                     break
         if anti_tribal == 0.0:
@@ -1052,7 +1061,7 @@ def _compute_forge_profile_features(card_oid, card_cmc, card_profile, ctx, cmdr)
     strat_cos = 0.0
     if cmdr.cmdr_strat_vec is not None and csv is not None:
         d = float(np.dot(cmdr.cmdr_strat_vec, csv))
-        nc = float(np.linalg.norm(cmdr.cmdr_strat_vec))
+        nc = cmdr.cmdr_strat_norm
         nd = float(np.linalg.norm(csv))
         strat_cos = d / (nc * nd) if nc > 0 and nd > 0 else 0.0
 
@@ -1094,22 +1103,14 @@ def _compute_forge_profile_features(card_oid, card_cmc, card_profile, ctx, cmdr)
     card_kws = card_profile.get('keywords', set())
     cmdr_filter_kws = cmdr.cmdr_profile.get('trigger_filters', set())
     kw_syn = 0.0
-    kw_to_filter = {
-        "Flying": "flying", "Trample": "trample", "Haste": "haste",
-        "Deathtouch": "deathtouch", "Lifelink": "lifelink", "Menace": "menace",
-        "First Strike": "firststrike", "Double Strike": "doublestrike",
-        "Hexproof": "hexproof", "Indestructible": "indestructible",
-        "Vigilance": "vigilance", "Reach": "reach",
-    }
     for kw in card_kws:
-        filter_form = kw_to_filter.get(kw, kw.lower().replace(" ", ""))
+        filter_form = _KW_TO_FILTER.get(kw, kw.lower().replace(" ", ""))
         if any(filter_form in f for f in cmdr_filter_kws):
             kw_syn += 1.0
     if cmdr.cmdr_produces is not None:
         creature_idx = _concept_idx.get("creature_enters")
         if creature_idx is not None and cmdr.cmdr_produces[creature_idx] > 0:
-            combat_kws = {"Flying", "Trample", "Haste", "Menace", "Double Strike", "First Strike"}
-            kw_syn += float(len(card_kws & combat_kws)) * 0.3
+            kw_syn += float(len(card_kws & _COMBAT_KWS)) * 0.3
 
     activated_count = float(min(ctx._activated_counts.get(card_oid, 0), 5))
 
@@ -1280,16 +1281,14 @@ def _compute_fingerprint_features(card_oid, ctx, cmdr):
         R = ForgeFeatureContext._FUNC_REQUIRES_SLICE
         A = ForgeFeatureContext._FUNC_AMPLIFIES_SLICE
 
-        _amp_to_prod = [1, 0, 5, 6]
-        cmdr_prod_projected = np.array([cmdr_func[P.start + i] for i in _amp_to_prod])
+        cmdr_prod_projected = np.array([cmdr_func[P.start + i] for i in _AMP_TO_PROD])
         func_produces_amp = float(np.dot(cmdr_prod_projected, card_func[A]))
 
-        _req_to_prod = {0: 0, 4: 5, 5: 6, 8: 7, 10: 1}
-        for req_dim, prod_dim in _req_to_prod.items():
+        for req_dim, prod_dim in _REQ_TO_PROD.items():
             func_requires_prod += cmdr_func[R.start + req_dim] * card_func[P.start + prod_dim]
             func_card_req_cmdr += card_func[R.start + req_dim] * cmdr_func[P.start + prod_dim]
 
-        norm_c = np.linalg.norm(cmdr_func)
+        norm_c = cmdr.cmdr_func_norm
         norm_d = np.linalg.norm(card_func)
         if norm_c > 0 and norm_d > 0:
             func_full_cosine = float(np.dot(cmdr_func, card_func) / (norm_c * norm_d))

@@ -17,6 +17,79 @@ _EDHREC_FREE = os.environ.get("EDHREC_FREE", "") == "1"
 
 from mtg_synergy.recommend.mechanics_vectors import _concept_idx
 
+# ── Pre-compiled regex patterns for hot-path methods ──
+# Used in _process_forge_ability_row / _extract_subtypes_from_raw_line /
+# _extract_keywords_and_conditions / _extract_counters_and_special /
+# _build_func_fingerprints.  Avoids ~2.87M re._compile calls per run.
+
+# Fixed field patterns (field$\s*value)
+_RE_EVENT = re.compile(r'Event\$\s*(\S+)')
+_RE_DURATION = re.compile(r'Duration\$\s*(\S+)')
+_RE_CHANGE_TYPE = re.compile(r'ChangeType\$\s*(\S+)')
+_RE_NUM_DMG = re.compile(r'NumDmg\$\s*(\S+)')
+_RE_NUM_CARDS = re.compile(r'NumCards\$\s*(\S+)')
+_RE_LIFE_AMOUNT = re.compile(r'LifeAmount\$\s*(\S+)')
+_RE_PRODUCED = re.compile(r'Produced\$\s*(\S+)')
+_RE_ADD_ABILITY = re.compile(r'AddAbility\$\s*(\S+)')
+_RE_ADD_TRIGGER = re.compile(r'AddTrigger\$\s*(\S+)')
+_RE_TOKEN_AMOUNT = re.compile(r'TokenAmount\$\s*(\S+)')
+_RE_VALID_TGTS = re.compile(r'ValidTgts\$\s*(\S+)')
+_RE_ORIGIN = re.compile(r'Origin\$\s*(\S+)')
+_RE_DESTINATION = re.compile(r'Destination\$\s*(\S+)')
+_RE_REPLACE_WITH = re.compile(r'ReplaceWith\$\s*(\S+)')
+
+# Cost subtype patterns
+_RE_TAP_X_TYPE = re.compile(r'tapXType<\d+/(\w+)')
+_RE_SAC_TYPE = re.compile(r'Sac<\d+/(\w+)')
+
+# Description non-X exclusion
+_RE_NON_CREATURE = re.compile(r'non-(\w+)\s+creature', re.IGNORECASE)
+
+# Loop-variable field patterns: pre-compiled per field name
+# _extract_subtypes_from_raw_line: field$\s*(\S+)
+_RE_SUBTYPE_FIELDS = {
+    field: re.compile(rf'{field}\$\s*(\S+)')
+    for field in ('ValidCards', 'ValidCard', 'ValidTgts',
+                  'ValidAttackers', 'Affected', 'AddsCounters')
+}
+# _extract_subtypes_from_raw_line: desc_field$\s*(.+?)(?:\||$)
+_RE_DESC_FIELDS = {
+    field: re.compile(rf'{field}\$\s*(.+?)(?:\||$)')
+    for field in ('TriggerDescription', 'Description', 'SpellDescription')
+}
+# _extract_keywords_and_conditions: kw_field$\s*([^|]+)
+_RE_KEYWORD_FIELDS = {
+    field: re.compile(rf'{field}\$\s*([^|]+)')
+    for field in ('AddKeyword', 'KW', 'PumpKeywords', 'Keywords')
+}
+# _extract_keywords_and_conditions: cond_field$\s*(\S+)
+_RE_CONDITION_FIELDS = {
+    field: re.compile(rf'{field}\$\s*(\S+)')
+    for field in ('IsPresent', 'ConditionPresent')
+}
+# _extract_keywords_and_conditions: zone_field$\s*(\S+)
+_RE_ZONE_FIELDS = {
+    field: re.compile(rf'{field}\$\s*(\S+)')
+    for field in ('ActiveZones', 'EffectZone', 'AffectedZone')
+}
+# _extract_counters_and_special: pump_field$\s*([+-]?\w+)
+_RE_PUMP_FIELDS = {
+    field: re.compile(rf'{field}\$\s*([+-]?\w+)')
+    for field in ('NumAtt', 'AddPower', 'NumDef', 'AddToughness')
+}
+# _build_func_fingerprints: targets field$\s*(\S+)
+_RE_FP_TARGET_FIELDS = {
+    field: re.compile(rf'{field}\$\s*(\S+)')
+    for field in ('ValidTgts', 'Affected')
+}
+
+# ── Promoted in-function constants ──
+_SELF_SCOPES = frozenset({'youctrl', 'self', 'equippedby', 'enchantedby',
+                           'pairedwith', 'iscommander'})
+_GENERIC_TYPES = frozenset({"card", "creature", "permanent", "self", "other",
+                             "youctrl", "oppctrl", "strictlyother", "token",
+                             "nontoken"})
+
 # Known-safe SQL fragments for event column access (avoids f-string injection)
 _EVENT_EXPR_COLUMN = "event"
 _EVENT_EXPR_JSON = "json_extract(detail, '$.event')"
@@ -262,7 +335,7 @@ class ForgeFeatureContext:
         if ability_type: p['ability_types'].add(ability_type)
         # Track opponent-only replacement events (e.g., Bruvac's Mill)
         if ability_type == 'R' and raw_line_val:
-            m = re.search(r'Event\$\s*(\S+)', raw_line_val)
+            m = _RE_EVENT.search(raw_line_val)
             if m and ('ValidPlayer$ Player.Opponent' in raw_line_val
                       or 'ValidPlayer$ Opponent' in raw_line_val):
                 p['opponent_only_events'].add(m.group(1))
@@ -276,10 +349,10 @@ class ForgeFeatureContext:
         defined_str = defined or ""
         raw_line = raw_line_val or ""
         # Cost subtypes: tapXType<1/Cleric>, Sac<1/Human>
-        for m in re.findall(r'tapXType<\d+/(\w+)', cost_str):
+        for m in _RE_TAP_X_TYPE.findall(cost_str):
             if m not in ("CARDNAME",):
                 p['required_subtypes'].add(m.lower())
-        for m in re.findall(r'Sac<\d+/(\w+)', cost_str):
+        for m in _RE_SAC_TYPE.findall(cost_str):
             if m not in ("CARDNAME",) and m[0].isupper():
                 p['required_subtypes'].add(m.lower())
         # Defined$ with subtype filter (e.g., TriggeredCardLKICopy.Spider)
@@ -293,20 +366,16 @@ class ForgeFeatureContext:
         # ValidCard$, ValidAttackers$, AddsCounters$ in raw_line
         # e.g., ValidCards$ Creature.Orc → effect only benefits Orcs
         # e.g., Affected$ Creature.nonHuman → EXCLUDES Humans
-        _generic = {"card", "creature", "permanent", "self", "other",
-                    "youctrl", "oppctrl", "strictlyother", "token", "nontoken"}
-        self._extract_subtypes_from_raw_line(p, raw_line, _generic)
+        self._extract_subtypes_from_raw_line(p, raw_line, _GENERIC_TYPES)
         self._extract_keywords_and_conditions(p, verb, raw_line)
         self._extract_counters_and_special(p, row, raw_line)
 
     @staticmethod
     def _extract_subtypes_from_raw_line(p, raw_line, _generic):
         """Extract required/excluded subtypes and Affected$ scope from raw_line."""
-        _SELF_SCOPES = {'youctrl', 'self', 'equippedby', 'enchantedby',
-                        'pairedwith', 'iscommander'}
         for field in ('ValidCards', 'ValidCard', 'ValidTgts',
                       'ValidAttackers', 'Affected', 'AddsCounters'):
-            m = re.search(rf'{field}\$\s*(\S+)', raw_line)
+            m = _RE_SUBTYPE_FIELDS[field].search(raw_line)
             if not m:
                 continue
             full_val = m.group(1)
@@ -333,9 +402,9 @@ class ForgeFeatureContext:
         # Also extract non-X from TriggerDescription$ and Description$
         # Catches sub-ability targets like "non-Human creature"
         for desc_field in ('TriggerDescription', 'Description', 'SpellDescription'):
-            dm = re.search(rf'{desc_field}\$\s*(.+?)(?:\||$)', raw_line)
+            dm = _RE_DESC_FIELDS[desc_field].search(raw_line)
             if dm:
-                for nm in re.finditer(r'non-(\w+)\s+creature', dm.group(1), re.IGNORECASE):
+                for nm in _RE_NON_CREATURE.finditer(dm.group(1)):
                     excl = nm.group(1).lower()
                     if excl not in _generic and len(excl) > 2:
                         p['excluded_subtypes'].add(excl)
@@ -345,7 +414,7 @@ class ForgeFeatureContext:
         """Extract granted keywords, conditions, duration, zones, scaling, and types."""
         # --- Granted keywords: AddKeyword$, KW$, PumpKeywords$, Keywords$ ---
         for kw_field in ('AddKeyword', 'KW', 'PumpKeywords', 'Keywords'):
-            m = re.search(rf'{kw_field}\$\s*([^|]+)', raw_line)
+            m = _RE_KEYWORD_FIELDS[kw_field].search(raw_line)
             if m:
                 for kw in m.group(1).split("&"):
                     kw = kw.strip()
@@ -357,14 +426,14 @@ class ForgeFeatureContext:
                             p['granted_keywords'].add(kw.lower())
         # --- Conditions: IsPresent$, ConditionPresent$ ---
         for cond_field in ('IsPresent', 'ConditionPresent'):
-            m = re.search(rf'{cond_field}\$\s*(\S+)', raw_line)
+            m = _RE_CONDITION_FIELDS[cond_field].search(raw_line)
             if m:
                 for part in m.group(1).split(","):
                     main = part.split(".")[0].split("+")[0].strip()
                     if main and main[0].isupper() and len(main) > 2:
                         p['conditions'].add(main.lower())
         # --- Duration$ ---
-        m = re.search(r'Duration\$\s*(\S+)', raw_line)
+        m = _RE_DURATION.search(raw_line)
         if m:
             p['duration'].add(m.group(1).lower())
         elif verb in ('Pump', 'PumpAll') and 'Duration$' not in raw_line:
@@ -374,14 +443,14 @@ class ForgeFeatureContext:
             p['combat_damage'] = True
         # --- Effect zones: ActiveZones$, EffectZone$, AffectedZone$ ---
         for zone_field in ('ActiveZones', 'EffectZone', 'AffectedZone'):
-            m = re.search(rf'{zone_field}\$\s*(\S+)', raw_line)
+            m = _RE_ZONE_FIELDS[zone_field].search(raw_line)
             if m:
                 for z in m.group(1).split(","):
                     z = z.strip()
                     if z:
                         p['effect_zones'].add(z.lower())
         # --- ChangeType$: type changes for tribal synergy ---
-        ct_m = re.search(r'ChangeType\$\s*(\S+)', raw_line)
+        ct_m = _RE_CHANGE_TYPE.search(raw_line)
         if ct_m:
             ct_val = ct_m.group(1)
             if ct_val == 'AllCreatureTypes':
@@ -397,20 +466,20 @@ class ForgeFeatureContext:
         """Extract damage/draw/life amounts, mana, counters, and special flags."""
         verb = row[1]
         # --- Damage amount: NumDmg$ ---
-        m = re.search(r'NumDmg\$\s*(\S+)', raw_line)
+        m = _RE_NUM_DMG.search(raw_line)
         if m:
             val = m.group(1)
             # Keep the latest (most relevant) if multiple abilities
             if p['damage_amount'] is None or val == 'X':
                 p['damage_amount'] = val
         # --- Cards drawn: NumCards$ ---
-        m = re.search(r'NumCards\$\s*(\S+)', raw_line)
+        m = _RE_NUM_CARDS.search(raw_line)
         if m:
             val = m.group(1)
             if p['cards_drawn'] is None or val == 'X':
                 p['cards_drawn'] = val
         # --- Life amount: LifeAmount$ ---
-        m = re.search(r'LifeAmount\$\s*(\S+)', raw_line)
+        m = _RE_LIFE_AMOUNT.search(raw_line)
         if m:
             val = m.group(1)
             if p['life_amount'] is None or val == 'X':
@@ -422,20 +491,20 @@ class ForgeFeatureContext:
         if 'GainControl$ True' in raw_line:
             p['gain_control'] = True
         # --- Mana production: Produced$ W/U/B/R/G/C/Any/Combo ---
-        m = re.search(r'Produced\$\s*(\S+)', raw_line)
+        m = _RE_PRODUCED.search(raw_line)
         if m:
             p['produces_mana'] = True
         # --- Grants abilities: AddAbility$ (extract detail, not just boolean) ---
-        ab_m = re.search(r'AddAbility\$\s*(\S+)', raw_line)
+        ab_m = _RE_ADD_ABILITY.search(raw_line)
         if ab_m:
             p['granted_ability_names'].add(ab_m.group(1))
         # --- Grants triggers: AddTrigger$ ---
-        trig_m = re.search(r'AddTrigger\$\s*(\S+)', raw_line)
+        trig_m = _RE_ADD_TRIGGER.search(raw_line)
         if trig_m:
             p['granted_triggers'].add(trig_m.group(1))
         # --- Pump magnitude: NumAtt$/AddPower$/NumDef$/AddToughness$ ---
         for pump_field in ('NumAtt', 'AddPower', 'NumDef', 'AddToughness'):
-            pm = re.search(rf'{pump_field}\$\s*([+-]?\w+)', raw_line)
+            pm = _RE_PUMP_FIELDS[pump_field].search(raw_line)
             if pm:
                 pval = pm.group(1)
                 if pval in ('X', 'Y', 'AffectedX'):
@@ -447,13 +516,13 @@ class ForgeFeatureContext:
                     except ValueError:
                         pass
         # --- Token amount variable: TokenAmount$ X ---
-        m = re.search(r'TokenAmount\$\s*(\S+)', raw_line)
+        m = _RE_TOKEN_AMOUNT.search(raw_line)
         if m and m.group(1) in ('X', 'Y'):
             p['token_amount_variable'] = True
         # --- Static anthem: Continuous + AddPower (not actual counters) ---
         # --- Counters on lands: PutCounter targeting lands, or Earthbend ---
         if verb in ('PutCounter', 'PutCounterAll'):
-            vtgt = re.search(r'ValidTgts\$\s*(\S+)', raw_line)
+            vtgt = _RE_VALID_TGTS.search(raw_line)
             if vtgt and 'Land' in vtgt.group(1) and 'Creature' not in vtgt.group(1):
                 p['counters_on_lands'] = True
         if verb == 'Earthbend':
@@ -1430,8 +1499,6 @@ class ForgeFeatureContext:
         Each card gets a 33-dim vector encoding what it does semantically:
         produces, requires (triggers), amplifies (doublers), targets.
         """
-        import re as _re
-
         fingerprints = {}
 
         for row in conn.execute(
@@ -1467,8 +1534,8 @@ class ForgeFeatureContext:
                 fp[7] = 1.0  # removal
             if verb == 'ChangeZone':
                 # Reanimate: moves from graveyard to battlefield
-                orig = re.search(r'Origin\$\s*(\S+)', raw_line)
-                dest = re.search(r'Destination\$\s*(\S+)', raw_line)
+                orig = _RE_ORIGIN.search(raw_line)
+                dest = _RE_DESTINATION.search(raw_line)
                 if (orig and 'Graveyard' in orig.group(1) and
                         dest and 'Battlefield' in dest.group(1)):
                     fp[8] = 1.0  # reanimate
@@ -1481,8 +1548,8 @@ class ForgeFeatureContext:
 
             # ── REQUIRES / triggers (dims 12-22) ──
             if trig_mode == 'ChangesZone':
-                dest = re.search(r'Destination\$\s*(\S+)', raw_line)
-                orig = re.search(r'Origin\$\s*(\S+)', raw_line)
+                dest = _RE_DESTINATION.search(raw_line)
+                orig = _RE_ORIGIN.search(raw_line)
                 filt = trig_filter or ''
                 if dest and 'Battlefield' in dest.group(1):
                     if 'Creature' in filt or 'Human' in filt or (not filt and 'Land' not in filt):
@@ -1512,8 +1579,8 @@ class ForgeFeatureContext:
                 fp[22] = 1.0  # counter_placed
 
             # ── AMPLIFIES / replacement effects (dims 23-26) ──
-            event_m = re.search(r'Event\$\s*(\S+)', raw_line)
-            repl_m = re.search(r'ReplaceWith\$\s*(\S+)', raw_line)
+            event_m = _RE_EVENT.search(raw_line)
+            repl_m = _RE_REPLACE_WITH.search(raw_line)
             if event_m and repl_m:
                 event = event_m.group(1)
                 repl = repl_m.group(1)
@@ -1528,7 +1595,7 @@ class ForgeFeatureContext:
 
             # ── TARGETS (dims 27-32) ──
             for field in ('ValidTgts', 'Affected'):
-                tgt_m = re.search(rf'{field}\$\s*(\S+)', raw_line)
+                tgt_m = _RE_FP_TARGET_FIELDS[field].search(raw_line)
                 if tgt_m:
                     tgt = tgt_m.group(1)
                     if tgt.startswith('Card.Self') or tgt == 'Card.Self':

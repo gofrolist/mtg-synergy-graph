@@ -1,7 +1,10 @@
 """Causal interaction graph — deterministic synergy analysis."""
 import json
+import logging
 from collections import defaultdict, namedtuple
 from mtg_synergy.causal.types import Edge, EdgeDetail
+
+_log = logging.getLogger(__name__)
 
 # Lightweight edge for CausalContext scoring — uses 5 fields instead of 7 + full EdgeDetail.
 # Saves ~20MB by avoiding json.loads of full detail dict for 60k+ edges.
@@ -31,15 +34,19 @@ def ensure_causal_schema(conn):
 def store_edges(conn, edges: list[Edge]) -> int:
     """Store edges in interaction_edges table."""
     conn.execute("DELETE FROM interaction_edges")
-    for e in edges:
-        detail_dict = e.detail.to_dict()
-        precision = detail_dict.get("filter_precision")
-        conn.execute(
-            "INSERT OR REPLACE INTO interaction_edges "
-            "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail, filter_precision) "
-            "VALUES (?,?,?,?,?,?,?,?)",
-            (e.source, e.target, e.edge_type, e.ability_a, e.ability_b,
-             e.strength, json.dumps(detail_dict), precision))
+
+    def _edge_rows(edges):
+        for e in edges:
+            detail_dict = e.detail.to_dict()
+            precision = detail_dict.get("filter_precision")
+            yield (e.source, e.target, e.edge_type, e.ability_a, e.ability_b,
+                   e.strength, json.dumps(detail_dict), precision)
+
+    conn.executemany(
+        "INSERT OR REPLACE INTO interaction_edges "
+        "(source_id, target_id, edge_type, ability_a, ability_b, strength, detail, filter_precision) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        _edge_rows(edges))
     conn.commit()
     return len(edges)
 
@@ -199,7 +206,7 @@ class CausalContext:
             ).fetchone()
             cmdr_ability_count = row[0] if row else 1
         except Exception:
-            pass
+            _log.debug("Failed to load commander ability count", exc_info=True)
         self._cmdr_relevance = min(1.0, 2.0 / max(cmdr_ability_count, 1))
 
         # Commander strategy profile: derive from edges (no parsing needed)
@@ -227,7 +234,7 @@ class CausalContext:
                 prev = self._card_impact.get(oid, 0.0)
                 self._card_impact[oid] = max(prev, impact)
         except Exception:
-            pass
+            _log.debug("Failed to load card effect verbs", exc_info=True)
 
         # Anti-synergy detection: cards that prevent events the deck relies on
         # {card_id: set of events this card prevents}
@@ -241,7 +248,7 @@ class CausalContext:
                 if prevented:
                     self._card_prevents[oid] = prevented
         except Exception:
-            pass
+            _log.debug("Failed to load anti-synergy prevention data", exc_info=True)
 
         # Deck event profile: what events does the deck's strategy rely on?
         # Derived from what the commander + deck cards trigger on

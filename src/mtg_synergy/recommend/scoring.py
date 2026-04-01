@@ -15,7 +15,8 @@ import lightgbm as lgb
 from mtg_synergy.config import DATA_DIR
 from mtg_synergy.recommend.cmdr_patterns import detect_cmdr_patterns
 from mtg_synergy.recommend.forge_features import (
-    ForgeFeatureContext, CmdrFeatureContext, compute_card_features,
+    ForgeFeatureContext, CmdrFeatureContext, compute_batch_features,
+    compute_card_features,
 )
 
 
@@ -315,15 +316,12 @@ def _score_commander(cmdr_oid, cmdr_name, color_identity, deck_cards,
 
     # Compute features
     cand_list = list(candidates.items())
-    features = []
-    for name, cd in cand_list:
-        features.append(compute_card_features(
-            cd["oracle_id"], cd["type_line"], float(cd["cmc"]), ctx, cmdr_ctx))
-
-    if not features:
+    if not cand_list:
         return []
 
-    X = np.array(features, dtype=np.float64)
+    card_oids_list = [cd["oracle_id"] for _, cd in cand_list]
+    card_cmcs = np.array([float(cd["cmc"]) for _, cd in cand_list], dtype=np.float32)
+    X = compute_batch_features(card_oids_list, card_cmcs, ctx, cmdr_ctx).astype(np.float64)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         scores = gbm.predict(X, raw_score=True)
@@ -439,14 +437,12 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
     cmdr_ctx.cmdr_subtypes = extract_subtypes(cmdr_type)
 
     cand_list = [(n, card_data[n]) for n in candidate_scores if n in card_data]
-    features = []
-    for name, cd in cand_list:
-        oid = cd.get("oracle_id") or card_oid.get(name, "")
-        features.append(compute_card_features(oid, cd.get("type_line", ""),
-                                               float(cd.get("cmc", 0)), ctx, cmdr_ctx))
+    card_oids_list = [cd.get("oracle_id") or card_oid.get(name, "") for name, cd in cand_list]
+    card_cmcs = np.array([float(cd.get("cmc", 0)) for _, cd in cand_list], dtype=np.float32)
+    X_batch = compute_batch_features(card_oids_list, card_cmcs, ctx, cmdr_ctx) if cand_list else None
 
-    if features:
-        X = np.array(features, dtype=np.float64)
+    if X_batch is not None:
+        X = X_batch.astype(np.float64)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             scores = gbm.predict(X, raw_score=True)

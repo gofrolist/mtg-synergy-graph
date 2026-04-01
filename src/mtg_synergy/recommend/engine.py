@@ -1,4 +1,5 @@
 """Card recommendation engine — forge-only scoring pipeline."""
+import sqlite3
 from collections import defaultdict
 from urllib.parse import quote
 
@@ -15,16 +16,29 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
     Uses color-identity filter for candidate discovery, then Forge GBM
     (105 features) for final ranking.
     """
-    import sqlite3 as _sql_dyn
     _shared_conn = None
     card_meta = {}
     card_oid_lookup = {}
     partial_combos = []
 
+    # Build card metadata early — needed by combo lookup below
+    for c in cards:
+        name = c["name"]
+        tl = c.get("type_line", "")
+        existing = card_meta.get(name)
+        if existing and "Token" not in existing.get("type_line", "") and "Token" in tl:
+            continue
+        card_meta[name] = {
+            "type_line": tl, "cmc": c.get("cmc", 0),
+            "mana_cost": c.get("mana_cost", ""), "oracle_id": c.get("oracle_id", ""),
+            "edhrec_rank": c.get("edhrec_rank"),
+        }
+        card_oid_lookup[name] = c.get("oracle_id", "")
+
     if commander and db_path:
         try:
-            _shared_conn = _sql_dyn.connect(db_path)
-        except Exception:
+            _shared_conn = sqlite3.connect(db_path)
+        except sqlite3.OperationalError:
             _shared_conn = None
 
     if _shared_conn:
@@ -83,21 +97,6 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
             key=lambda x: -x[1])[:10]}
         candidate_scores = _candidate_scores(
             graph, deck_cards, commander=commander, key_cards=key_cards)
-
-    # Build card metadata (shared by both paths)
-    # Prefer non-token entries when a name has both (e.g., Eternalize tokens)
-    for c in cards:
-        name = c["name"]
-        tl = c.get("type_line", "")
-        existing = card_meta.get(name)
-        if existing and "Token" not in existing.get("type_line", "") and "Token" in tl:
-            continue  # don't overwrite real card with token version
-        card_meta[name] = {
-            "type_line": tl, "cmc": c.get("cmc", 0),
-            "mana_cost": c.get("mana_cost", ""), "oracle_id": c.get("oracle_id", ""),
-            "edhrec_rank": c.get("edhrec_rank"),
-        }
-        card_oid_lookup[name] = c.get("oracle_id", "")
 
     # Sort by total synergy
     ranked = sorted(candidate_scores.items(), key=lambda x: x[1]["total"], reverse=True)

@@ -17,6 +17,32 @@ import re
 import numpy as np
 from collections import Counter
 
+# Pre-compiled regex patterns
+_RE_AFFECTED = re.compile(r'Affected\$\s*(\S+)')
+_RE_EVENT = re.compile(r'Event\$\s*(\S+)')
+_RE_ADDTRIGGER = re.compile(r'AddTrigger\$\s*(\S+)')
+_RE_DESTINATION = re.compile(r'Destination\$\s*(\S+)')
+_RE_ORIGIN = re.compile(r'Origin\$\s*(\S+)')
+_RE_SAC_COST = re.compile(r"Sac<\d+/([^/>]+)", re.IGNORECASE)
+_RE_FOR_EACH = re.compile(r"for each (\w+)")
+_RE_TAP_COST = re.compile(r"tap<\d+/([^/>]+)")
+_RE_TRIGGER_PREFIX = re.compile(r'^Trigger|^Trig')
+
+# AddTrigger$ SVar name → TRIGGER_TO_CONCEPTS key mapping
+_ADDTRIGGER_MAP = {
+    'Attack': 'Attacks', 'AttackTrig': 'Attacks',
+    'Attacks': 'Attacks', 'AttackersDeclared': 'AttackersDeclared',
+    'ETB': 'ChangesZone', 'Death': 'ChangesZone',
+    'Dies': 'ChangesZone', 'DiesTrig': 'ChangesZone',
+    'SpellCast': 'SpellCast', 'DamageDone': 'DamageDone',
+    'DamageDoneOnce': 'DamageDoneOnce',
+    'Drawn': 'Drawn', 'DrawnCard': 'Drawn',
+    'LifeGained': 'LifeGained', 'LifeLost': 'LifeLost',
+    'Phase': 'Phase', 'Upkeep': 'Phase',
+    'Sacrificed': 'Sacrificed', 'Discarded': 'Discarded',
+    'Milled': 'Milled', 'Taps': 'Taps', 'Untaps': 'Untaps',
+    'CounterAdded': 'CounterAdded', 'TokenCreated': 'TokenCreated',
+}
 
 # Shared game concept dimensions — effects and triggers map to these
 GAME_CONCEPTS = [
@@ -161,7 +187,7 @@ def _is_opponent_only(defined: str | None, raw_line: str) -> bool:
             return True
     # Affected$ scope: effects targeting only opponent's permanents
     if "Affected$" in raw_line:
-        m = re.search(r'Affected\$\s*(\S+)', raw_line)
+        m = _RE_AFFECTED.search(raw_line)
         if m:
             val = m.group(1).lower()
             if ".oppctrl" in val and ".youctrl" not in val:
@@ -172,20 +198,8 @@ def _is_opponent_only(defined: str | None, raw_line: str) -> bool:
 def _normalize_addtrigger(name):
     """Normalize AddTrigger$ SVar names to TRIGGER_TO_CONCEPTS keys."""
     # Strip common prefixes: Trigger, Trig
-    n = re.sub(r'^Trigger|^Trig', '', name)
-    _MAP = {'Attack': 'Attacks', 'AttackTrig': 'Attacks',
-            'Attacks': 'Attacks', 'AttackersDeclared': 'AttackersDeclared',
-            'ETB': 'ChangesZone', 'Death': 'ChangesZone',
-            'Dies': 'ChangesZone', 'DiesTrig': 'ChangesZone',
-            'SpellCast': 'SpellCast', 'DamageDone': 'DamageDone',
-            'DamageDoneOnce': 'DamageDoneOnce',
-            'Drawn': 'Drawn', 'DrawnCard': 'Drawn',
-            'LifeGained': 'LifeGained', 'LifeLost': 'LifeLost',
-            'Phase': 'Phase', 'Upkeep': 'Phase',
-            'Sacrificed': 'Sacrificed', 'Discarded': 'Discarded',
-            'Milled': 'Milled', 'Taps': 'Taps', 'Untaps': 'Untaps',
-            'CounterAdded': 'CounterAdded', 'TokenCreated': 'TokenCreated'}
-    return _MAP.get(n, n if n in TRIGGER_TO_CONCEPTS else None)
+    n = _RE_TRIGGER_PREFIX.sub('', name)
+    return _ADDTRIGGER_MAP.get(n, n if n in TRIGGER_TO_CONCEPTS else None)
 
 
 # R: replacement Event$ types → equivalent verb for VERB_TO_CONCEPTS lookup
@@ -242,13 +256,15 @@ def _add_type_based_produces(conn, produces, consumes, dim):
             continue
         # Non-land cards produce spell_cast (they are spells when cast)
         if "Land" not in tl:
-            p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
-            p[_concept_idx["spell_cast"]] += 1.0
+            if oid not in produces:
+                produces[oid] = np.zeros(dim, dtype=np.float32)
+            produces[oid][_concept_idx["spell_cast"]] += 1.0
         # Creatures produce creature_attacks and creature_available
         if "Creature" in tl:
-            p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
-            p[_concept_idx["creature_attacks"]] += 1.0
-            p[_concept_idx["creature_available"]] += 0.5
+            if oid not in produces:
+                produces[oid] = np.zeros(dim, dtype=np.float32)
+            produces[oid][_concept_idx["creature_attacks"]] += 1.0
+            produces[oid][_concept_idx["creature_available"]] += 0.5
 
 
 def build_mechanics_vectors(conn, preloaded_abilities=None):
@@ -306,6 +322,17 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
         trig_dest = ab[11] if len(ab) > 11 else None
         defined = ab[12] if len(ab) > 12 else None
 
+        # Parse Origin$ and Destination$ once per row for reuse below
+        _parsed_dest = None
+        _parsed_orig = None
+        if raw_line:
+            m_dest = _RE_DESTINATION.search(raw_line)
+            if m_dest:
+                _parsed_dest = m_dest.group(1)
+            m_orig = _RE_ORIGIN.search(raw_line)
+            if m_orig:
+                _parsed_orig = m_orig.group(1)
+
         # --- PRODUCES: effect verb → game concepts ---
         # For R: replacement effects, parse Event$ from raw_line and map
         # to equivalent verb. R: abilities have verb=NULL in forge_abilities
@@ -314,7 +341,7 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
         effective_verb = verb
         if is_replacement:
             # Parse Event$ from raw_line (verb column is NULL for R: abilities)
-            m = re.search(r'Event\$\s*(\S+)', raw_line)
+            m = _RE_EVENT.search(raw_line)
             if m:
                 event_type = m.group(1)
                 effective_verb = _REPLACEMENT_EVENT_TO_VERB.get(event_type)
@@ -335,46 +362,54 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
         if effective_verb and effective_verb in VERB_TO_CONCEPTS:
             opponent_only = _is_opponent_only(defined, raw_line)
             if not opponent_only:
-                p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
+                if oid not in produces:
+                    produces[oid] = np.zeros(dim, dtype=np.float32)
+                p = produces[oid]
                 for concept in VERB_TO_CONCEPTS[effective_verb]:
                     p[_concept_idx[concept]] += 1.0
 
         # Theme-specific PRODUCES
         keyword = ab[5]
         if verb == 'Panharmonicon':
-            p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
-            p[_concept_idx["etb_doubled"]] += 1.0
+            if oid not in produces:
+                produces[oid] = np.zeros(dim, dtype=np.float32)
+            produces[oid][_concept_idx["etb_doubled"]] += 1.0
         if verb == 'CanAttackDefender':
             # Defender-matters cards consume defenders
-            c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
-            c[_concept_idx["defender_available"]] += 1.0
+            if oid not in consumes:
+                consumes[oid] = np.zeros(dim, dtype=np.float32)
+            consumes[oid][_concept_idx["defender_available"]] += 1.0
         if keyword == 'Equip':
-            p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
-            p[_concept_idx["equipment_enters"]] += 1.0
-            p[_concept_idx["equipment_equipped"]] += 1.0
+            if oid not in produces:
+                produces[oid] = np.zeros(dim, dtype=np.float32)
+            produces[oid][_concept_idx["equipment_enters"]] += 1.0
+            produces[oid][_concept_idx["equipment_equipped"]] += 1.0
         if keyword == 'Defender':
-            p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
-            p[_concept_idx["defender_available"]] += 1.0
+            if oid not in produces:
+                produces[oid] = np.zeros(dim, dtype=np.float32)
+            produces[oid][_concept_idx["defender_available"]] += 1.0
 
         # AddTrigger$ — granting triggers produces those trigger events (weaker)
         if raw_line and 'AddTrigger$' in raw_line:
-            at_m = re.search(r'AddTrigger\$\s*(\S+)', raw_line)
+            at_m = _RE_ADDTRIGGER.search(raw_line)
             if at_m:
                 trig_name = _normalize_addtrigger(at_m.group(1))
                 if trig_name and trig_name in TRIGGER_TO_CONCEPTS:
-                    p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
+                    if oid not in produces:
+                        produces[oid] = np.zeros(dim, dtype=np.float32)
+                    p = produces[oid]
                     for concept in TRIGGER_TO_CONCEPTS[trig_name]:
                         p[_concept_idx[concept]] += 0.5
 
         # Zone-aware PRODUCES: verb + destination → zone concept
         # Use trigger_destination column if available, fall back to raw_line
         dest_str = trig_dest or ""
-        if not dest_str and verb and verb in _ZONE_VERBS and raw_line:
-            m = re.search(r'Destination\$\s*(\S+)', raw_line)
-            if m:
-                dest_str = m.group(1)
+        if not dest_str and verb and verb in _ZONE_VERBS and _parsed_dest:
+            dest_str = _parsed_dest
         if verb and verb in _ZONE_VERBS and dest_str:
-            p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
+            if oid not in produces:
+                produces[oid] = np.zeros(dim, dtype=np.float32)
+            p = produces[oid]
             if "Graveyard" in dest_str:
                 p[_concept_idx["goes_to_graveyard"]] += 1.0
             if "Exile" in dest_str:
@@ -384,34 +419,40 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
         if token_script:
             parts = token_script.lower().split("_")
             if len(parts) >= 4:
-                p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
+                if oid not in produces:
+                    produces[oid] = np.zeros(dim, dtype=np.float32)
+                p = produces[oid]
                 for part in parts[3:]:
                     if part in subtype_idx:
                         p[subtype_idx[part]] += 1.0
 
         # --- CONSUMES: trigger mode → game concepts ---
         if trig_mode and trig_mode in TRIGGER_TO_CONCEPTS:
-            c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
+            if oid not in consumes:
+                consumes[oid] = np.zeros(dim, dtype=np.float32)
+            c = consumes[oid]
             for concept in TRIGGER_TO_CONCEPTS[trig_mode]:
                 c[_concept_idx[concept]] += 1.0
 
         # Equipment-related CONSUMES: triggers on Equipment entering/being attached
         if trig_filter and 'Equipment' in trig_filter:
-            c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
-            c[_concept_idx["equipment_enters"]] += 1.0
+            if oid not in consumes:
+                consumes[oid] = np.zeros(dim, dtype=np.float32)
+            consumes[oid][_concept_idx["equipment_enters"]] += 1.0
         # ETB-doubled CONSUMES: ETB triggers benefit from Panharmonicon
         etb_dest = trig_dest or ""
-        if not etb_dest and trig_mode in ('ChangesZone', 'ChangesZoneAll') and raw_line:
-            m = re.search(r'Destination\$\s*(\S+)', raw_line)
-            if m:
-                etb_dest = m.group(1)
+        if not etb_dest and trig_mode in ('ChangesZone', 'ChangesZoneAll') and _parsed_dest:
+            etb_dest = _parsed_dest
         if trig_mode in ('ChangesZone', 'ChangesZoneAll') and 'Battlefield' in etb_dest:
-            c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
-            c[_concept_idx["etb_doubled"]] += 1.0
+            if oid not in consumes:
+                consumes[oid] = np.zeros(dim, dtype=np.float32)
+            consumes[oid][_concept_idx["etb_doubled"]] += 1.0
 
         # Trigger filter subtypes → consumes those subtypes
         if trig_filter:
-            c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
+            if oid not in consumes:
+                consumes[oid] = np.zeros(dim, dtype=np.float32)
+            c = consumes[oid]
             for part in trig_filter.split(","):
                 main = part.split(".")[0].strip().lower()
                 if main in subtype_idx:
@@ -420,12 +461,12 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
         # Zone-aware CONSUMES: trigger + origin → zone concept
         # Use trigger_origin column if available, fall back to raw_line
         orig_str = trig_origin or ""
-        if not orig_str and trig_mode and raw_line:
-            m = re.search(r'Origin\$\s*(\S+)', raw_line)
-            if m:
-                orig_str = m.group(1)
+        if not orig_str and trig_mode and _parsed_orig:
+            orig_str = _parsed_orig
         if trig_mode and orig_str:
-            c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
+            if oid not in consumes:
+                consumes[oid] = np.zeros(dim, dtype=np.float32)
+            c = consumes[oid]
             if "Graveyard" in orig_str:
                 c[_concept_idx["enters_from_graveyard"]] += 1.0
             if "Exile" in orig_str:
@@ -434,30 +475,27 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
                 c[_concept_idx["enters_from_hand"]] += 1.0
         # Trigger with Destination=Graveyard → consumes goes_to_graveyard (death triggers)
         trig_dest_str = trig_dest or ""
-        if not trig_dest_str and trig_mode and raw_line:
-            m = re.search(r'Destination\$\s*(\S+)', raw_line)
-            if m:
-                trig_dest_str = m.group(1)
+        if not trig_dest_str and trig_mode and _parsed_dest:
+            trig_dest_str = _parsed_dest
         if trig_mode and "Graveyard" in trig_dest_str:
-            c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
-            c[_concept_idx["goes_to_graveyard"]] += 1.0
+            if oid not in consumes:
+                consumes[oid] = np.zeros(dim, dtype=np.float32)
+            consumes[oid][_concept_idx["goes_to_graveyard"]] += 1.0
 
         # ChangeZone with origin → produces zone-specific entry (reanimate, blink return)
         # Use column values first, fall back to raw_line
         verb_orig = trig_origin or ""
         verb_dest = trig_dest or ""
-        if verb in ("ChangeZone", "ChangeZoneAll") and raw_line:
-            if not verb_orig:
-                m = re.search(r'Origin\$\s*(\S+)', raw_line)
-                if m:
-                    verb_orig = m.group(1)
-            if not verb_dest:
-                m = re.search(r'Destination\$\s*(\S+)', raw_line)
-                if m:
-                    verb_dest = m.group(1)
+        if verb in ("ChangeZone", "ChangeZoneAll"):
+            if not verb_orig and _parsed_orig:
+                verb_orig = _parsed_orig
+            if not verb_dest and _parsed_dest:
+                verb_dest = _parsed_dest
         if verb in ("ChangeZone", "ChangeZoneAll") and verb_dest and verb_orig:
             if "Battlefield" in verb_dest:
-                p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
+                if oid not in produces:
+                    produces[oid] = np.zeros(dim, dtype=np.float32)
+                p = produces[oid]
                 if "Graveyard" in verb_orig:
                     p[_concept_idx["enters_from_graveyard"]] += 1.0
                 if "Exile" in verb_orig:
@@ -467,10 +505,12 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
 
         # Cost → consumes resources (check raw_line always, cost field often empty)
         if raw_line:
-            sac_match = re.findall(r"Sac<\d+/([^/>]+)", raw_line, re.IGNORECASE)
+            sac_match = _RE_SAC_COST.findall(raw_line)
             for m in sac_match:
                 sac_type = m.split("/")[0].split(".")[0].lower()
-                c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
+                if oid not in consumes:
+                    consumes[oid] = np.zeros(dim, dtype=np.float32)
+                c = consumes[oid]
                 if sac_type == "creature":
                     c[_concept_idx["creature_sacrificed"]] += 1.0
                     c[_concept_idx["creature_available"]] += 1.0
@@ -506,30 +546,35 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
         if amount == "X" and "for each" in raw_line:
             idx = raw_line.find("for each")
             snippet = raw_line[idx:]
-            for m in re.finditer(r"for each (\w+)", snippet):
+            for m in _RE_FOR_EACH.finditer(snippet):
                 t = m.group(1)
                 if t in subtype_idx:
-                    c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
-                    c[subtype_idx[t]] += 1.0
+                    if oid not in consumes:
+                        consumes[oid] = np.zeros(dim, dtype=np.float32)
+                    consumes[oid][subtype_idx[t]] += 1.0
                 elif t == "creature":
-                    c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
-                    c[_concept_idx["creature_available"]] += 1.0
+                    if oid not in consumes:
+                        consumes[oid] = np.zeros(dim, dtype=np.float32)
+                    consumes[oid][_concept_idx["creature_available"]] += 1.0
                 elif t == "artifact":
-                    c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
-                    c[_concept_idx["artifact_enters"]] += 0.5
+                    if oid not in consumes:
+                        consumes[oid] = np.zeros(dim, dtype=np.float32)
+                    consumes[oid][_concept_idx["artifact_enters"]] += 0.5
 
         # "Tap" cost patterns
         if "tap<" in raw_line:
-            for m in re.finditer(r"tap<\d+/([^/>]+)", raw_line):
+            for m in _RE_TAP_COST.finditer(raw_line):
                 t = m.group(1).split("/")[0].split(".")[0].lower()
                 if t in subtype_idx:
-                    c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
-                    c[subtype_idx[t]] += 1.0
-                    c[_concept_idx["creature_tapped"]] += 0.5
+                    if oid not in consumes:
+                        consumes[oid] = np.zeros(dim, dtype=np.float32)
+                    consumes[oid][subtype_idx[t]] += 1.0
+                    consumes[oid][_concept_idx["creature_tapped"]] += 0.5
                 elif t == "creature":
-                    c = consumes.setdefault(oid, np.zeros(dim, dtype=np.float32))
-                    c[_concept_idx["creature_tapped"]] += 1.0
-                    c[_concept_idx["creature_available"]] += 0.5
+                    if oid not in consumes:
+                        consumes[oid] = np.zeros(dim, dtype=np.float32)
+                    consumes[oid][_concept_idx["creature_tapped"]] += 1.0
+                    consumes[oid][_concept_idx["creature_available"]] += 0.5
 
     _add_type_based_produces(conn, produces, consumes, dim)
 
