@@ -136,14 +136,14 @@ def test_replacement_opponent_mill_excluded():
         bruvac_oid = "fake-bruvac-0000"
         self_mill_oid = "fake-selfmill-0000"
         abilities = [
-            # Bruvac: R: replacement, verb=None (not stored), Event$ in raw_line
+            # Bruvac: R: replacement, verb=None, Event$ in raw_line, no defined
             (bruvac_oid, None, None, None, None, None, None, None,
              "R:Event$ Mill | ValidPlayer$ Player.Opponent | ReplaceWith$ MillTwice",
-             None, None, None),
-            # A normal self-mill card: verb=Mill, targets you
+             None, None, None, None),
+            # A normal self-mill card: verb=Mill, defined=You
             (self_mill_oid, "Mill", None, None, None, None, None, None,
              "A:AB$ Mill | Cost$ T | Defined$ You | NumCards$ 3",
-             None, None, None),
+             None, None, None, "You"),
         ]
         produces, consumes, dim, _ = build_mechanics_vectors(
             conn, preloaded_abilities=abilities
@@ -163,6 +163,51 @@ def test_replacement_opponent_mill_excluded():
         conn.close()
 
 
+def test_trigger_opponent_mill_excluded():
+    """T: abilities that only mill opponents (defined=Player.Opponent) should NOT produce card_milled."""
+    _needs_db()
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        manic_oid = "fake-manicscribe-0000"
+        mindcrank_oid = "fake-mindcrank-0000"
+        hedron_oid = "fake-hedroncrab-0000"
+        abilities = [
+            # Manic Scribe ETB: verb=Mill, defined=Player.Opponent
+            (manic_oid, "Mill", "ChangesZone", None, None, None, None, None,
+             "T:Mode$ ChangesZone | Execute$ TrigMill1",
+             None, None, None, "Player.Opponent"),
+            # Mindcrank: verb=Mill, defined=TriggeredPlayer, ValidPlayer$Opponent
+            (mindcrank_oid, "Mill", "LifeLost", None, None, None, None, None,
+             "T:Mode$ LifeLost | ValidPlayer$ Opponent | Execute$ TrigMill",
+             None, None, None, "TriggeredPlayer"),
+            # Hedron Crab: verb=Mill, target=Player (any player, can self-mill)
+            (hedron_oid, "Mill", "ChangesZone", None, None, None, None, None,
+             "T:Mode$ ChangesZone | Execute$ TrigMill",
+             None, None, None, None),
+        ]
+        produces, consumes, dim, _ = build_mechanics_vectors(
+            conn, preloaded_abilities=abilities
+        )
+        mill_idx = _concept_idx["card_milled"]
+        # Manic Scribe: opponent-only → no card_milled
+        if manic_oid in produces:
+            assert produces[manic_oid][mill_idx] == 0.0, (
+                "Opponent-only Mill (defined=Player.Opponent) should not produce card_milled"
+            )
+        # Mindcrank: TriggeredPlayer + ValidPlayer$Opponent → no card_milled
+        if mindcrank_oid in produces:
+            assert produces[mindcrank_oid][mill_idx] == 0.0, (
+                "Opponent-only Mill (TriggeredPlayer+ValidPlayer$Opponent) should not produce card_milled"
+            )
+        # Hedron Crab: any-player targeting → SHOULD produce card_milled
+        assert hedron_oid in produces
+        assert produces[hedron_oid][mill_idx] > 0, (
+            "Any-player Mill (no opponent restriction) should produce card_milled"
+        )
+    finally:
+        conn.close()
+
+
 def test_replacement_self_life_gain_produces():
     """Self-targeting replacement effects (like Rhox Faithmender) SHOULD produce concepts."""
     _needs_db()
@@ -173,7 +218,7 @@ def test_replacement_self_life_gain_produces():
             # Rhox Faithmender: R: replacement, verb=None, Event$ in raw_line
             (faithmender_oid, None, None, None, None, None, None, None,
              "R:Event$ GainLife | ValidPlayer$ You | ReplaceWith$ GainDouble",
-             None, None, None),
+             None, None, None, None),
         ]
         produces, consumes, dim, _ = build_mechanics_vectors(
             conn, preloaded_abilities=abilities

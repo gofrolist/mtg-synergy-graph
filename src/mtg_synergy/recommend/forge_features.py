@@ -174,7 +174,7 @@ class ForgeFeatureContext:
         # Also collect raw abilities for build_mechanics_vectors (avoids redundant DB scan)
         # Output format consumed by mechanics_vectors.py:
         #   (oid, verb, trig_mode, trig_filter, cost, kw, token_script,
-        #    counter, raw_line, amount, trigger_origin, trigger_destination)
+        #    counter, raw_line, amount, trigger_origin, trigger_destination, defined)
         self._raw_abilities = []
         for row in conn.execute(
             "SELECT fnm.oracle_id, fa.verb, fa.trigger_mode, fa.trigger_filter, "
@@ -184,8 +184,8 @@ class ForgeFeatureContext:
             "FROM forge_abilities fa "
             "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name"
         ):
-            # row[0..11] match the output tuple directly; row[12..14] used only for profiles below
-            self._raw_abilities.append(row[:12])
+            # row[0..11] + row[14] (defined) → 13-element tuple for mechanics_vectors
+            self._raw_abilities.append(row[:12] + (row[14],))
             self._process_forge_ability_row(row)
 
         # Post-process: static anthem is only meaningful if card has NO PutCounter

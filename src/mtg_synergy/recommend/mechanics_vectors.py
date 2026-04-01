@@ -135,6 +135,33 @@ COST_CONCEPTS = {
     "discard":       "card_discarded",
 }
 
+def _is_opponent_only(defined: str | None, raw_line: str) -> bool:
+    """Check if an ability targets only opponents (not self/any player).
+
+    Uses two signals:
+    - defined field: "Player.Opponent", "Opponent" → explicit opponent targeting
+    - defined + ValidPlayer$: "TriggeredPlayer"/"TriggeredTarget" with
+      ValidPlayer$Opponent means the triggered player IS the opponent
+    - ValidPlayer$ alone (for R: abilities with no defined field)
+    """
+    d = (defined or "").lower()
+    # Explicit opponent in defined field (e.g., Manic Scribe: defined=Player.Opponent)
+    if "opponent" in d and "you" not in d:
+        return True
+    # Triggered player/target with ValidPlayer$Opponent context
+    # (e.g., Mindcrank: defined=TriggeredPlayer, ValidPlayer$Opponent)
+    if d in ("triggeredplayer", "triggeredtarget"):
+        if ("ValidPlayer$ Player.Opponent" in raw_line
+                or "ValidPlayer$ Opponent" in raw_line):
+            return True
+    # R: abilities without defined: check ValidPlayer$ directly
+    if not defined and raw_line.startswith("R:"):
+        if ("ValidPlayer$ Player.Opponent" in raw_line
+                or "ValidPlayer$ Opponent" in raw_line):
+            return True
+    return False
+
+
 # R: replacement Event$ types → equivalent verb for VERB_TO_CONCEPTS lookup
 # E.g., Event$DamageDone → treat like verb "DealDamage" for concept production
 _REPLACEMENT_EVENT_TO_VERB = {
@@ -205,8 +232,10 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
         conn: SQLite connection
         preloaded_abilities: optional list of (oracle_id, verb, trigger_mode,
             trigger_filter, cost, keyword, token_script, counter_type, raw_line,
-            amount, trigger_origin, trigger_destination) tuples.
+            amount, trigger_origin, trigger_destination[, defined]) tuples.
             When provided, skips the forge_abilities DB scan.
+            The optional `defined` field (index 12) carries player targeting
+            (e.g., "You", "Player.Opponent", "TriggeredPlayer").
 
     Returns:
         produces: dict[oracle_id → numpy float32 vector]
@@ -227,14 +256,14 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
         for row in conn.execute(
             "SELECT card_name, verb, trigger_mode, trigger_filter, cost, "
             "keyword, token_script, counter_type, raw_line, amount, "
-            "trigger_origin, trigger_destination "
+            "trigger_origin, trigger_destination, defined "
             "FROM forge_abilities"
         ):
             oid = forge_to_oid.get(row[0])
             if oid:
                 abilities.append((oid, row[1], row[2], row[3], row[4],
                                   row[5], row[6], row[7], row[8], row[9],
-                                  row[10], row[11]))
+                                  row[10], row[11], row[12]))
 
 
     top_subtypes, subtype_idx, dim = _collect_subtypes(abilities)
@@ -249,14 +278,13 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
         raw_line = ab[8] or ""
         trig_origin = ab[10] if len(ab) > 10 else None
         trig_dest = ab[11] if len(ab) > 11 else None
+        defined = ab[12] if len(ab) > 12 else None
 
         # --- PRODUCES: effect verb → game concepts ---
         # For R: replacement effects, parse Event$ from raw_line and map
-        # to equivalent verb. Skip opponent-only effects (e.g., Bruvac
-        # doubles opponent mill but doesn't help self-mill commanders).
-        # R: abilities have verb=NULL in forge_abilities to avoid polluting
-        # forge_profiles with false verb alignment signals.
-        is_replacement = (raw_line or "").startswith("R:")
+        # to equivalent verb. R: abilities have verb=NULL in forge_abilities
+        # to avoid polluting forge_profiles with false verb alignment signals.
+        is_replacement = raw_line.startswith("R:")
         effective_verb = verb
         if is_replacement:
             # Parse Event$ from raw_line (verb column is NULL for R: abilities)
@@ -269,16 +297,21 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
                         or "PreventionEffect$ True" in raw_line
                         or "Layer$ CantHappen" in raw_line):
                     effective_verb = None
-                # Skip opponent-only replacement effects
-                elif ("ValidPlayer$ Player.Opponent" in raw_line
-                        or "ValidPlayer$ Opponent" in raw_line):
-                    effective_verb = None
             else:
                 effective_verb = None
+
+        # Skip opponent-only effects: cards that only affect opponents don't
+        # produce concepts that self-targeting commanders can consume.
+        # Checked for ALL ability types (R:, T:, A:) using both defined field
+        # and ValidPlayer$ from raw_line.
+        # E.g., Bruvac (R: Mill opponent), Manic Scribe (T: Mill opponent),
+        # Mindcrank (T: opponent loses life → mill opponent)
         if effective_verb and effective_verb in VERB_TO_CONCEPTS:
-            p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
-            for concept in VERB_TO_CONCEPTS[effective_verb]:
-                p[_concept_idx[concept]] += 1.0
+            opponent_only = _is_opponent_only(defined, raw_line)
+            if not opponent_only:
+                p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
+                for concept in VERB_TO_CONCEPTS[effective_verb]:
+                    p[_concept_idx[concept]] += 1.0
 
         # Theme-specific PRODUCES
         keyword = ab[5]
