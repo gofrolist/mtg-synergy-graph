@@ -135,6 +135,16 @@ COST_CONCEPTS = {
     "discard":       "card_discarded",
 }
 
+# R: replacement Event$ types → equivalent verb for VERB_TO_CONCEPTS lookup
+# E.g., Event$DamageDone → treat like verb "DealDamage" for concept production
+_REPLACEMENT_EVENT_TO_VERB = {
+    "Mill":        "Mill",
+    "DamageDone":  "DealDamage",
+    "GainLife":    "GainLife",
+    "Draw":        "Draw",
+    "LoseLife":    "LoseLife",
+}
+
 
 def _collect_subtypes(abilities):
     """Count subtypes from trigger_filter and token_script, return top 80 with indices."""
@@ -241,9 +251,33 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
         trig_dest = ab[11] if len(ab) > 11 else None
 
         # --- PRODUCES: effect verb → game concepts ---
-        if verb and verb in VERB_TO_CONCEPTS:
+        # For R: replacement effects, parse Event$ from raw_line and map
+        # to equivalent verb. Skip opponent-only effects (e.g., Bruvac
+        # doubles opponent mill but doesn't help self-mill commanders).
+        # R: abilities have verb=NULL in forge_abilities to avoid polluting
+        # forge_profiles with false verb alignment signals.
+        is_replacement = (raw_line or "").startswith("R:")
+        effective_verb = verb
+        if is_replacement:
+            # Parse Event$ from raw_line (verb column is NULL for R: abilities)
+            m = re.search(r'Event\$\s*(\S+)', raw_line)
+            if m:
+                event_type = m.group(1)
+                effective_verb = _REPLACEMENT_EVENT_TO_VERB.get(event_type)
+                # Skip if prevention/restriction (not amplification)
+                if ("Prevent$ True" in raw_line
+                        or "PreventionEffect$ True" in raw_line
+                        or "Layer$ CantHappen" in raw_line):
+                    effective_verb = None
+                # Skip opponent-only replacement effects
+                elif ("ValidPlayer$ Player.Opponent" in raw_line
+                        or "ValidPlayer$ Opponent" in raw_line):
+                    effective_verb = None
+            else:
+                effective_verb = None
+        if effective_verb and effective_verb in VERB_TO_CONCEPTS:
             p = produces.setdefault(oid, np.zeros(dim, dtype=np.float32))
-            for concept in VERB_TO_CONCEPTS[verb]:
+            for concept in VERB_TO_CONCEPTS[effective_verb]:
                 p[_concept_idx[concept]] += 1.0
 
         # Theme-specific PRODUCES

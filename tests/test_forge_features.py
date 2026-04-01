@@ -52,6 +52,7 @@ def test_forge_profiles_loaded():
             "granted_keywords", "conditions", "duration",
             "effect_zones", "scales_with", "grants_types", "mana_colors",
             "excluded_subtypes", "counter_trigger_themes",
+            "opponent_only_events",
         }
         expected_bool_keys = {
             "combat_damage", "is_secondary", "gain_control",

@@ -233,6 +233,7 @@ class ForgeFeatureContext:
             'excluded_subtypes': set(),
             'has_static_anthem': False, 'counters_on_lands': False,
             'counter_trigger_themes': set(), 'has_p1p1': False,
+            'opponent_only_events': set(),
         })
         if verb: p['verbs'].add(verb)
         if trig_mode: p['triggers'].add(trig_mode)
@@ -250,6 +251,12 @@ class ForgeFeatureContext:
                 if main:
                     p['targets'].add(main)
         if ability_type: p['ability_types'].add(ability_type)
+        # Track opponent-only replacement events (e.g., Bruvac's Mill)
+        if ability_type == 'R' and raw_line_val:
+            m = re.search(r'Event\$\s*(\S+)', raw_line_val)
+            if m and ('ValidPlayer$ Player.Opponent' in raw_line_val
+                      or 'ValidPlayer$ Opponent' in raw_line_val):
+                p['opponent_only_events'].add(m.group(1))
         if trig_filter:
             for part in trig_filter.split(","):
                 main = part.split(".")[0].strip()

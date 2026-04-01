@@ -128,6 +128,66 @@ def test_vectors_l2_normalized():
         conn.close()
 
 
+def test_replacement_opponent_mill_excluded():
+    """Opponent-only replacement effects (like Bruvac) should NOT produce card_milled."""
+    _needs_db()
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        bruvac_oid = "fake-bruvac-0000"
+        self_mill_oid = "fake-selfmill-0000"
+        abilities = [
+            # Bruvac: R: replacement, verb=None (not stored), Event$ in raw_line
+            (bruvac_oid, None, None, None, None, None, None, None,
+             "R:Event$ Mill | ValidPlayer$ Player.Opponent | ReplaceWith$ MillTwice",
+             None, None, None),
+            # A normal self-mill card: verb=Mill, targets you
+            (self_mill_oid, "Mill", None, None, None, None, None, None,
+             "A:AB$ Mill | Cost$ T | Defined$ You | NumCards$ 3",
+             None, None, None),
+        ]
+        produces, consumes, dim, _ = build_mechanics_vectors(
+            conn, preloaded_abilities=abilities
+        )
+        mill_idx = _concept_idx["card_milled"]
+        # Bruvac should NOT produce card_milled (opponent-only replacement)
+        if bruvac_oid in produces:
+            assert produces[bruvac_oid][mill_idx] == 0.0, (
+                "Opponent-only mill replacement should not produce card_milled"
+            )
+        # Normal self-mill card SHOULD produce card_milled
+        assert self_mill_oid in produces
+        assert produces[self_mill_oid][mill_idx] > 0, (
+            "Normal Mill verb should produce card_milled"
+        )
+    finally:
+        conn.close()
+
+
+def test_replacement_self_life_gain_produces():
+    """Self-targeting replacement effects (like Rhox Faithmender) SHOULD produce concepts."""
+    _needs_db()
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        faithmender_oid = "fake-faithmender-0000"
+        abilities = [
+            # Rhox Faithmender: R: replacement, verb=None, Event$ in raw_line
+            (faithmender_oid, None, None, None, None, None, None, None,
+             "R:Event$ GainLife | ValidPlayer$ You | ReplaceWith$ GainDouble",
+             None, None, None),
+        ]
+        produces, consumes, dim, _ = build_mechanics_vectors(
+            conn, preloaded_abilities=abilities
+        )
+        life_idx = _concept_idx["life_gained"]
+        # Self-targeting life gain replacement SHOULD produce life_gained
+        assert faithmender_oid in produces
+        assert produces[faithmender_oid][life_idx] > 0, (
+            "Self-targeting life gain replacement should produce life_gained"
+        )
+    finally:
+        conn.close()
+
+
 def test_preloaded_abilities_with_zone_fields():
     """build_mechanics_vectors handles preloaded tuples with zone fields."""
     _needs_db()

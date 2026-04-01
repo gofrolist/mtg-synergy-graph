@@ -193,6 +193,14 @@ def _apply_penalties(scores, cand_list, ctx, cmdr_ctx, cmdr_oid,
         cmdr_prov = cmdr_ctx.cmdr_has | cmdr_ctx.cmdr_hints
         if _has_unmet_type_needs(card_needs, card_hints, cmdr_prov):
             scores[i] *= 0.3
+        # Opponent-only replacement effects that conflict with commander's
+        # self-targeting strategy (e.g., Bruvac doubles opponent mill but
+        # Sidisi cares about self-mill)
+        opp_events = profile.get('opponent_only_events', set())
+        if opp_events:
+            cmdr_strats = cmdr_ctx.cmdr_strats
+            if 'Mill' in opp_events and 'self-mill' in cmdr_strats:
+                scores[i] *= 0.3
 
 
 def _apply_mechanical_bonus(scores, cand_list, ctx, cmdr_ctx, cmdr_oid):

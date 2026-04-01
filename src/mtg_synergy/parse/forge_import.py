@@ -149,6 +149,18 @@ def extract_ability_fields(line: str, prefix: str, svars: dict) -> dict:
                 result["sub_ability"] = resolved.get("sub_ability")
     elif prefix == "S":
         result["verb"] = fields.get("SP") or fields.get("Mode")
+    elif prefix == "R":
+        # Replacement effects: Event$ is the event being replaced/amplified,
+        # ReplaceWith$ is what replaces it, ValidPlayer$ is who's affected.
+        # Do NOT store Event$ as verb — that would pollute forge_profiles
+        # and create false verb alignment (e.g., Bruvac "Mill" matching Sidisi's
+        # ChangesZone trigger). Instead, mechanics_vectors.py parses Event$
+        # and ValidPlayer$ directly from raw_line.
+        # Store player targeting for downstream use
+        result["target"] = (fields.get("ValidPlayer")
+                            or fields.get("ValidTarget")
+                            or fields.get("ValidSource"))
+        result["defined"] = fields.get("ValidSource")
     elif prefix == "K":
         # K: lines store keyword name directly
         kw_part = line.split("|")[0].strip()

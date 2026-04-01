@@ -37,9 +37,13 @@ FORGE MODEL (--recommend): Pure Forge mechanical synergy
      card produces → commander consumes dot product.
      Zone-aware concepts: enters_from_graveyard/exile/hand, goes_to_graveyard/exile
      Theme concepts: equipment_enters, equipment_equipped, defender_available, etb_doubled
+     R: replacement effects parsed from raw_line (Event$, ValidPlayer$):
+       Self-targeting replacements (ValidPlayer$You) produce concepts normally.
+       Opponent-only replacements (ValidPlayer$Player.Opponent) excluded from
+       concept production — prevents false synergy (e.g., Bruvac for Sidisi).
   4. Can evaluate new cards day-1 without playtesting data
   5. Works for any of 3,141+ commanders (not just 1,361 with EDHREC)
-  6. NDCG@30 = 0.592 on leave-commander-out CV (2:1 negatives, sample-weighted, early_stop=40)
+  6. NDCG@30 = 0.594 on leave-commander-out CV (2:1 negatives, sample-weighted, early_stop=40)
      Training labels: edhrec_card_synergy (703k rows, continuous synergy grading)
      Grade 5=synergy≥0.30, 4=synergy≥0.15, 3=synergy≥0.05, 2=synergy 0-0.05, 1=negative, 0=random neg
      label_gain=[0, 1, 3, 8, 20, 30] (less steep curve between mid/high grades)
@@ -108,7 +112,7 @@ python3 scripts/validate_recommendations.py --top 100              # Pipeline va
 python3 scripts/train_fusion_model.py --validate      # Train + validate in one step
 
 # Tests
-uv run pytest tests/ -v                        # Run all 153 tests
+uv run pytest tests/ -v                        # Run all 159 tests
 uv run pytest tests/test_recommendation_quality.py -v              # Pipeline quality tests only
 ```
 
@@ -157,7 +161,7 @@ python3 scripts/train_fusion_model.py --rebuild-features --validate  # 7. Retrai
 | spellbook_combo_cards | ~289k | Combo ↔ card junction |
 | interaction_edges | ~21.7M | Causal edges from Forge: 30+ event types + 6.5M synthetic + 2.7M entity-presence + 60k continuous pump + 922k theme synergy edges |
 | edhrec_card_synergy | ~733k | EDHREC synergy scores for 2,761 commanders (87% coverage) |
-| forge_abilities | ~72k | Raw Forge ability data + SubAbility chain expansions (12.7k expanded rows). 20 columns: 19 consumed in features or during import, 1 unused (unless_cost). sub_ability column is resolved during import by expanding chains into separate rows. |
+| forge_abilities | ~72k | Raw Forge ability data + SubAbility chain expansions (12.7k expanded rows). 20 columns: 19 consumed in features or during import, 1 unused (unless_cost). sub_ability column is resolved during import by expanding chains into separate rows. R: replacement abilities: target stores ValidPlayer$ (e.g., Player.Opponent), verb stays NULL to avoid polluting forge_profiles. |
 | forge_deck_tags | ~14k | Forge deck-building AI: has (what card provides), hints (what card wants), needs (what card requires). 9,868 unique cards. |
 | forge_name_map | ~31k | Forge card name → oracle_id mapping (prefers non-token versions) |
 
@@ -184,8 +188,9 @@ python3 scripts/train_fusion_model.py --rebuild-features --validate  # 7. Retrai
   produces_mana, mana_colors, counter_num_variable, grants_abilities,
   token_amount_variable, has_static_anthem, counters_on_lands,
   counter_trigger_themes, has_p1p1
+  opponent_only_events (R: replacement effects targeting only opponents)
   (from cost, defined, ValidCards$, Affected$, Produced$, CounterNum$,
-  AddAbility$, TokenAmount$, Event$, ReplaceWith$ fields)
+  AddAbility$, TokenAmount$, Event$, ReplaceWith$, ValidPlayer$ fields)
 - forge_deck_tags: Forge's deck-building AI (has/hints/needs) for 9,868 cards
   Maps what a card provides, wants, and requires in a deck
 - Mechanics vectors (`src/mtg_synergy/recommend/mechanics_vectors.py`): 116-dim shared
@@ -229,6 +234,9 @@ python3 scripts/train_fusion_model.py --rebuild-features --validate  # 7. Retrai
   - "Choose a Background" / "Doctor's companion" hard filter (score=-1e9)
   - wrong-color needs hard filter (score=-1e9): e.g., Pearl Medallion in mono-G
   - unmet Type$ needs/hints (×0.3): e.g., needs=Type$Dinosaur in Human deck
+  - opponent-only replacement for self-targeting commander (×0.3): R: ability with
+    ValidPlayer$Player.Opponent for event the commander self-targets
+    (e.g., Bruvac doubles opponent mill but Sidisi cares about self-mill)
 - DFC-aware subtype extraction: `config.extract_subtypes()` parses both faces
 - Pipeline validation: `--validate` flag or `test_recommendation_quality.py` (7 tests)
 - GBM: LambdaRank, num_leaves=767, lr=0.025, n_estimators=1000 (early_stop=40),
@@ -334,7 +342,7 @@ mechanically-synergistic cards that nobody plays.
 - CLI uses `--commander "Name"` or `uv run mtg-synergy --commander "Name"`
 - Package uses `src/` layout (`src/mtg_synergy/`), built with `uv_build` backend
 - Pipeline scripts live in `scripts/`, library modules in `src/mtg_synergy/`
-- Tests: 154 tests in `tests/`, run with `uv run pytest tests/`
+- Tests: 159 tests in `tests/`, run with `uv run pytest tests/`
   - 7 end-to-end pipeline quality tests (`test_recommendation_quality.py`)
   - Requires trained model + populated DB (auto-skipped if missing)
 - After training, always run `--validate` to check full pipeline (not just NDCG):
