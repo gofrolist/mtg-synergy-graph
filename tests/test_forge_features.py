@@ -49,13 +49,14 @@ def test_forge_profiles_loaded():
         expected_set_keys = {
             "verbs", "triggers", "keywords", "counter_types",
             "targets", "ability_types", "trigger_filters", "required_subtypes",
-            "granted_keywords", "conditions",
+            "granted_keywords", "conditions", "duration",
+            "effect_zones",
             "excluded_subtypes", "counter_trigger_themes",
             "opponent_only_events",
             "granted_ability_names", "granted_triggers", "changes_type",
         }
         expected_bool_keys = {
-            "combat_damage", "gain_control",
+            "combat_damage", "is_secondary", "gain_control",
             "produces_mana", "grants_abilities",
             "token_amount_variable", "counters_on_lands", "has_p1p1",
             "grants_all_creature_types", "pump_is_variable",

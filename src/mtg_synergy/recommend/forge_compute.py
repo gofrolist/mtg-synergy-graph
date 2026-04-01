@@ -55,10 +55,11 @@ class CmdrFeatureContext:
             'counter_types': set(), 'targets': set(), 'ability_types': set(),
             'trigger_filters': set(), 'required_subtypes': set(),
             'granted_keywords': set(), 'conditions': set(),
-            'combat_damage': False,
+            'duration': set(), 'combat_damage': False,
+            'effect_zones': set(),
             'damage_amount': None,
             'cards_drawn': None, 'life_amount': None,
-            'gain_control': False,
+            'is_secondary': False, 'gain_control': False,
         })
 
         # Pre-compute compound values used by compute_card_features (F27)

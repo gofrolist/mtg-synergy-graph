@@ -226,10 +226,11 @@ class ForgeFeatureContext:
             'counter_types': set(), 'targets': set(), 'ability_types': set(),
             'trigger_filters': set(), 'required_subtypes': set(),
             'granted_keywords': set(), 'conditions': set(),
-            'combat_damage': False,
+            'duration': set(), 'combat_damage': False,
+            'effect_zones': set(),
             'damage_amount': None,
             'cards_drawn': None, 'life_amount': None,
-            'gain_control': False,
+            'is_secondary': False, 'gain_control': False,
             'produces_mana': False, 'grants_abilities': False,
             'token_amount_variable': False,
             'excluded_subtypes': set(),
@@ -362,9 +363,23 @@ class ForgeFeatureContext:
                     main = part.split(".")[0].split("+")[0].strip()
                     if main and main[0].isupper() and len(main) > 2:
                         p['conditions'].add(main.lower())
+        # --- Duration$ ---
+        m = re.search(r'Duration\$\s*(\S+)', raw_line)
+        if m:
+            p['duration'].add(m.group(1).lower())
+        elif verb in ('Pump', 'PumpAll') and 'Duration$' not in raw_line:
+            p['duration'].add('temporary')
         # --- CombatDamage$ True ---
         if 'CombatDamage$ True' in raw_line:
             p['combat_damage'] = True
+        # --- Effect zones: ActiveZones$, EffectZone$, AffectedZone$ ---
+        for zone_field in ('ActiveZones', 'EffectZone', 'AffectedZone'):
+            m = re.search(rf'{zone_field}\$\s*(\S+)', raw_line)
+            if m:
+                for z in m.group(1).split(","):
+                    z = z.strip()
+                    if z:
+                        p['effect_zones'].add(z.lower())
         # --- ChangeType$: type changes for tribal synergy ---
         ct_m = re.search(r'ChangeType\$\s*(\S+)', raw_line)
         if ct_m:
@@ -400,6 +415,9 @@ class ForgeFeatureContext:
             val = m.group(1)
             if p['life_amount'] is None or val == 'X':
                 p['life_amount'] = val
+        # --- Secondary ability ---
+        if 'Secondary$ True' in raw_line:
+            p['is_secondary'] = True
         # --- Gain control ---
         if 'GainControl$ True' in raw_line:
             p['gain_control'] = True
