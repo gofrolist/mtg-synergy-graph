@@ -37,10 +37,13 @@ FORGE MODEL (--recommend): Pure Forge mechanical synergy
      card produces → commander consumes dot product.
      Zone-aware concepts: enters_from_graveyard/exile/hand, goes_to_graveyard/exile
      Theme concepts: equipment_enters, equipment_equipped, defender_available, etb_doubled
-     R: replacement effects parsed from raw_line (Event$, ValidPlayer$):
+     Opponent-only detection for ALL ability types (R:/T:/A:):
+       Uses defined field + ValidPlayer$ from raw_line via _is_opponent_only().
+       Cards that only affect opponents (defined=Player.Opponent, or
+       TriggeredPlayer+ValidPlayer$Opponent) excluded from concept production.
+       Prevents false synergy: Bruvac, Manic Scribe, Mindcrank for Sidisi.
+       R: replacement effects parsed from raw_line (Event$, ValidPlayer$):
        Self-targeting replacements (ValidPlayer$You) produce concepts normally.
-       Opponent-only replacements (ValidPlayer$Player.Opponent) excluded from
-       concept production — prevents false synergy (e.g., Bruvac for Sidisi).
   4. Can evaluate new cards day-1 without playtesting data
   5. Works for any of 3,141+ commanders (not just 1,361 with EDHREC)
   6. NDCG@30 = 0.594 on leave-commander-out CV (2:1 negatives, sample-weighted, early_stop=40)
@@ -112,7 +115,7 @@ python3 scripts/validate_recommendations.py --top 100              # Pipeline va
 python3 scripts/train_fusion_model.py --validate      # Train + validate in one step
 
 # Tests
-uv run pytest tests/ -v                        # Run all 159 tests
+uv run pytest tests/ -v                        # Run all 160 tests
 uv run pytest tests/test_recommendation_quality.py -v              # Pipeline quality tests only
 ```
 
@@ -342,7 +345,7 @@ mechanically-synergistic cards that nobody plays.
 - CLI uses `--commander "Name"` or `uv run mtg-synergy --commander "Name"`
 - Package uses `src/` layout (`src/mtg_synergy/`), built with `uv_build` backend
 - Pipeline scripts live in `scripts/`, library modules in `src/mtg_synergy/`
-- Tests: 159 tests in `tests/`, run with `uv run pytest tests/`
+- Tests: 160 tests in `tests/`, run with `uv run pytest tests/`
   - 7 end-to-end pipeline quality tests (`test_recommendation_quality.py`)
   - Requires trained model + populated DB (auto-skipped if missing)
 - After training, always run `--validate` to check full pipeline (not just NDCG):
