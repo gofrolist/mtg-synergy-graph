@@ -512,11 +512,12 @@ def _train_one_fold(args):
     train_group = _build_group_array(cmdr_ids, ti)
     test_group = _build_group_array(cmdr_ids, vi)
 
-    # Limit threads per fold to avoid contention when running parallel folds
+    # Thread allocation: single fold gets all CPUs, parallel folds share
     fold_params = {**params}
     if "num_threads" not in fold_params:
         import multiprocessing as mp
-        fold_params["num_threads"] = max(1, mp.cpu_count() // 3)
+        n_folds = fold_params.pop("_n_folds", 3)
+        fold_params["num_threads"] = max(1, mp.cpu_count() // max(n_folds, 1))
 
     train_data = lgb.Dataset(X[ti], label=y[ti], weight=w[ti], group=train_group,
                              feature_name=feature_names, free_raw_data=False)
@@ -544,8 +545,11 @@ def _run_cv_folds(splits, X, y, w, cmdr_ids, params, feature_names, quick):
     """Run CV folds in parallel (or serial for single fold)."""
     from concurrent.futures import ProcessPoolExecutor
 
+    # Tell _train_one_fold how many folds run concurrently for thread allocation
+    n_concurrent = 1 if (quick or len(splits) == 1) else len(splits)
+    params_with_folds = {**params, "_n_folds": n_concurrent}
     fold_args = [
-        (fold_i, train_idx, test_idx, X, y, w, cmdr_ids, params, feature_names)
+        (fold_i, train_idx, test_idx, X, y, w, cmdr_ids, params_with_folds, feature_names)
         for fold_i, (train_idx, test_idx) in enumerate(splits)
     ]
 
