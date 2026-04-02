@@ -329,7 +329,7 @@ mechanically-synergistic cards that nobody plays.
 
 | Module | Purpose |
 |---|---|
-| `src/mtg_synergy/config.py` | Centralized paths, thresholds, DB settings, `extract_subtypes()` (DFC-aware) |
+| `src/mtg_synergy/config.py` | Centralized paths, DB settings, `extract_subtypes()` (DFC-aware) |
 | `src/mtg_synergy/constants.py` | STAPLE_ROLES |
 | `src/mtg_synergy/db.py` | Centralized DB connection factory |
 | `src/mtg_synergy/tag_db.py` | SQLite tag DB utilities (schema, queries, import) |
