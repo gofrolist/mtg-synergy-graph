@@ -14,8 +14,6 @@ def test_new_tables_exist(tmp_db):
     conn.close()
     assert "cards" in tables
     assert "card_strategies" in tables
-    assert "spellbook_combos" in tables
-    assert "spellbook_combo_cards" in tables
 
 
 def test_card_strategies_table(tmp_db):

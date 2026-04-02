@@ -161,8 +161,6 @@ python3 scripts/train_fusion_model.py --rebuild-features --validate  # 6. Retrai
 |---|---|---|
 | cards | ~36k | Card metadata from Scryfall |
 | card_strategies | ~88k | Strategy assignments |
-| spellbook_combos | ~82k | Commander Spellbook combos (data only, combo detection moved to deck builder) |
-| spellbook_combo_cards | ~289k | Combo ↔ card junction (data only) |
 | interaction_edges | ~21.7M | Causal edges from Forge: 30+ event types + 6.5M synthetic + 2.7M entity-presence + 60k continuous pump + 922k theme synergy edges |
 | edhrec_card_synergy | ~733k | EDHREC synergy scores for 2,761 commanders (87% coverage) |
 | forge_abilities | ~72k | Raw Forge ability data + SubAbility chain expansions (12.7k expanded rows). 20 columns: 19 consumed in features or during import, 1 unused (unless_cost). sub_ability column is resolved during import by expanding chains into separate rows. R: replacement abilities: target stores ValidPlayer$ (e.g., Player.Opponent), verb stays NULL to avoid polluting forge_profiles. |
