@@ -1,6 +1,7 @@
 __pycache__/
 .DS_Store
 .claude/
+.ecc/
 
 # Large/regenerable data files
 data/oracle_cards.json
@@ -18,11 +19,12 @@ data/spellbook_features.json
 data/spellbook_templates.json
 
 # Model + feature caches (regenerable)
-data/fusion_model_forge.lgb
-data/fusion_model_forge.lgb.bak
-data/forge_features_cache.npz
-data/forge_features_cache.npz.bak
-data/forge_features_cache.npz.bak2
+data/fusion_model_forge*.lgb
+data/fusion_model_forge*.lgb.bak
+data/forge_features_cache*.npz
+data/forge_features_cache*.npz.bak
+data/sweep_best_features.npz
+data/sweep_results.json
 data/edge_index_cache.npz
 data/edge_adj_cache.npz
 data/edge_adj_cache.pkl
@@ -78,6 +80,10 @@ model_output/
 experiment_results.json
 EXPERIMENT_LOG.md
 unsloth_compiled_cache/
+
+# Training/comparison logs
+data/train_*.log
+data/compare_*.log
 
 # Environment
 .venv/
