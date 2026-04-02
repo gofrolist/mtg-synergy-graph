@@ -960,27 +960,12 @@ class ForgeFeatureContext:
         self._arr_edhrec_pct = np.zeros(n, dtype=np.float32)
         self._arr_strat_count = np.zeros(n, dtype=np.float32)
 
-        for oid, i in self.oid_to_idx.items():
-            self._arr_activated_count[i] = min(self._activated_counts.get(oid, 0), 5)
-            self._arr_total_abilities[i] = min(self._total_ability_counts.get(oid, 0), 15)
-            self._arr_triggered_count[i] = min(self._triggered_counts.get(oid, 0), 10)
-            self._arr_token_pt[i] = min(self._token_max_pt.get(oid, 0), 20)
-            self._arr_token_kw[i] = min(self._token_max_kw.get(oid, 0), 5)
-            self._arr_forge_richness[i] = self._forge_richness.get(oid, 0.0)
-            self._arr_in_forge[i] = 1.0 if oid in self._has_forge_data else 0.0
-            self._arr_deck_tag_count[i] = self._deck_tag_count.get(oid, 0.0)
-            if not _EDHREC_FREE:
-                self._arr_edhrec_pct[i] = self._edhrec_deck_pct.get(oid, 0.0)
-            self._arr_strat_count[i] = min(len(self.card_strats.get(oid, set())), 5)
-
         # ── Profile-derived boolean flags ──
         self._arr_combat_damage = np.zeros(n, dtype=np.float32)
-        # _arr_scales_with, _arr_is_secondary removed (F30, F31 zeroed — redundant)
         self._arr_gain_control = np.zeros(n, dtype=np.float32)
         self._arr_produces_mana = np.zeros(n, dtype=np.float32)
         self._arr_token_amt_var = np.zeros(n, dtype=np.float32)
         self._arr_has_p1p1 = np.zeros(n, dtype=np.float32)
-        # _arr_dur_permanent, _arr_dur_temporary removed (F25, F26 zeroed — redundant)
         self._arr_has_T = np.zeros(n, dtype=np.float32)
         self._arr_has_A = np.zeros(n, dtype=np.float32)
         self._arr_has_phase = np.zeros(n, dtype=np.float32)
@@ -993,57 +978,72 @@ class ForgeFeatureContext:
         self._arr_n_counter_verbs = np.zeros(n, dtype=np.float32)
         self._arr_n_pump_verbs = np.zeros(n, dtype=np.float32)
         self._arr_has_any_counter_verb = np.zeros(n, dtype=np.float32)
-        # Sets needed for batch computation (kept as lists of sets)
         self._arr_zone_gy = np.zeros(n, dtype=np.float32)
         self._arr_zone_ex = np.zeros(n, dtype=np.float32)
-
-
-        for oid, i in self.oid_to_idx.items():
-            p = self._forge_profiles.get(oid, {})
-            self._arr_combat_damage[i] = 1.0 if p.get('combat_damage', False) else 0.0
-            # scales_with, is_secondary arrays removed (features zeroed)
-            self._arr_gain_control[i] = 1.0 if p.get('gain_control', False) else 0.0
-            self._arr_produces_mana[i] = 1.0 if p.get('produces_mana', False) else 0.0
-            self._arr_token_amt_var[i] = 1.0 if p.get('token_amount_variable', False) else 0.0
-            self._arr_has_p1p1[i] = 1.0 if p.get('has_p1p1', False) else 0.0
-            dur = p.get('duration', set())
-            # dur_permanent, dur_temporary arrays removed (features zeroed)
-            atypes = p.get('ability_types', set())
-            self._arr_has_T[i] = 1.0 if 'T' in atypes else 0.0
-            self._arr_has_A[i] = 1.0 if 'A' in atypes else 0.0
-            self._arr_has_phase[i] = 1.0 if self.card_phase_order.get(oid) else 0.0
-            depth = (len(p.get('verbs', set())) + len(p.get('triggers', set())) +
-                     len(p.get('keywords', set())) + len(p.get('counter_types', set())))
-            self._arr_forge_depth[i] = min(depth, 10.0)
-            self._arr_damage_scales[i] = 1.0 if p.get('damage_amount') in ('X', 'Y') else 0.0
-            self._arr_draw_scales[i] = 1.0 if p.get('cards_drawn') in ('X', 'Y') else 0.0
-            self._arr_life_scales[i] = 1.0 if p.get('life_amount') in ('X', 'Y') else 0.0
-            self._arr_granted_kw_count[i] = min(len(p.get('granted_keywords', set())), 5)
-            self._arr_condition_count[i] = min(len(p.get('conditions', set())), 5)
-            verbs = p.get('verbs', set())
-            self._arr_n_counter_verbs[i] = sum(1 for v in verbs if v in ('PutCounter', 'PutCounterAll'))
-            self._arr_n_pump_verbs[i] = sum(1 for v in verbs if v in ('Pump', 'PumpAll'))
-            # Broader counter verb check for F78 (includes Proliferate, MoveCounter)
-            self._arr_has_any_counter_verb[i] = 1.0 if verbs & {'PutCounter', 'PutCounterAll', 'Proliferate', 'MoveCounter'} else 0.0
-            self._arr_zone_gy[i] = 1.0 if oid in self._zone_graveyard else 0.0
-            self._arr_zone_ex[i] = 1.0 if oid in self._zone_exile else 0.0
-
         # ── New field arrays: Affected$ scope, pump magnitude, type changes ──
         self._arr_affected_scope = np.zeros(n, dtype=np.float32)
         self._arr_pump_magnitude = np.zeros(n, dtype=np.float32)
         self._arr_pump_variable = np.zeros(n, dtype=np.float32)
         self._arr_changes_type = [set() for _ in range(n)]
 
+        # Single merged loop over all cards (was 3 separate loops)
+        _COUNTER_VERBS = frozenset({'PutCounter', 'PutCounterAll'})
+        _PUMP_VERBS = frozenset({'Pump', 'PumpAll'})
+        _ANY_COUNTER_VERBS = frozenset({'PutCounter', 'PutCounterAll', 'Proliferate', 'MoveCounter'})
+        _XY = frozenset({'X', 'Y'})
+        _empty_set = set()
+        _empty_prof = {}
         for oid, i in self.oid_to_idx.items():
-            p = self._forge_profiles.get(oid, {})
-            self._arr_affected_scope[i] = p.get('affected_scope_ratio', 0.5)
-            self._arr_pump_magnitude[i] = min(p.get('max_pump_power', 0), 15)
-            self._arr_pump_variable[i] = 1.0 if p.get('pump_is_variable', False) else 0.0
-            ct = p.get('changes_type', set())
-            if p.get('grants_all_creature_types', False):
-                ct = ct | {'_all_'}  # sentinel for changeling-type effects
-            if ct:
-                self._arr_changes_type[i] = ct
+            # Ability counts
+            self._arr_activated_count[i] = min(self._activated_counts.get(oid, 0), 5)
+            self._arr_total_abilities[i] = min(self._total_ability_counts.get(oid, 0), 15)
+            self._arr_triggered_count[i] = min(self._triggered_counts.get(oid, 0), 10)
+            self._arr_token_pt[i] = min(self._token_max_pt.get(oid, 0), 20)
+            self._arr_token_kw[i] = min(self._token_max_kw.get(oid, 0), 5)
+            self._arr_forge_richness[i] = self._forge_richness.get(oid, 0.0)
+            self._arr_in_forge[i] = 1.0 if oid in self._has_forge_data else 0.0
+            self._arr_deck_tag_count[i] = self._deck_tag_count.get(oid, 0.0)
+            if not _EDHREC_FREE:
+                self._arr_edhrec_pct[i] = self._edhrec_deck_pct.get(oid, 0.0)
+            self._arr_strat_count[i] = min(len(self.card_strats.get(oid, _empty_set)), 5)
+
+            # Profile-derived flags (single dict lookup)
+            p = self._forge_profiles.get(oid, _empty_prof)
+            if p:
+                self._arr_combat_damage[i] = 1.0 if p.get('combat_damage', False) else 0.0
+                self._arr_gain_control[i] = 1.0 if p.get('gain_control', False) else 0.0
+                self._arr_produces_mana[i] = 1.0 if p.get('produces_mana', False) else 0.0
+                self._arr_token_amt_var[i] = 1.0 if p.get('token_amount_variable', False) else 0.0
+                self._arr_has_p1p1[i] = 1.0 if p.get('has_p1p1', False) else 0.0
+                atypes = p.get('ability_types', _empty_set)
+                self._arr_has_T[i] = 1.0 if 'T' in atypes else 0.0
+                self._arr_has_A[i] = 1.0 if 'A' in atypes else 0.0
+                self._arr_has_phase[i] = 1.0 if self.card_phase_order.get(oid) else 0.0
+                verbs = p.get('verbs', _empty_set)
+                triggers = p.get('triggers', _empty_set)
+                keywords = p.get('keywords', _empty_set)
+                counter_types = p.get('counter_types', _empty_set)
+                depth = len(verbs) + len(triggers) + len(keywords) + len(counter_types)
+                self._arr_forge_depth[i] = min(depth, 10.0)
+                self._arr_damage_scales[i] = 1.0 if p.get('damage_amount') in _XY else 0.0
+                self._arr_draw_scales[i] = 1.0 if p.get('cards_drawn') in _XY else 0.0
+                self._arr_life_scales[i] = 1.0 if p.get('life_amount') in _XY else 0.0
+                self._arr_granted_kw_count[i] = min(len(p.get('granted_keywords', _empty_set)), 5)
+                self._arr_condition_count[i] = min(len(p.get('conditions', _empty_set)), 5)
+                self._arr_n_counter_verbs[i] = sum(1 for v in verbs if v in _COUNTER_VERBS)
+                self._arr_n_pump_verbs[i] = sum(1 for v in verbs if v in _PUMP_VERBS)
+                self._arr_has_any_counter_verb[i] = 1.0 if verbs & _ANY_COUNTER_VERBS else 0.0
+                self._arr_zone_gy[i] = 1.0 if oid in self._zone_graveyard else 0.0
+                self._arr_zone_ex[i] = 1.0 if oid in self._zone_exile else 0.0
+                # Affected$ scope, pump magnitude, type changes
+                self._arr_affected_scope[i] = p.get('affected_scope_ratio', 0.5)
+                self._arr_pump_magnitude[i] = min(p.get('max_pump_power', 0), 15)
+                self._arr_pump_variable[i] = 1.0 if p.get('pump_is_variable', False) else 0.0
+                ct = p.get('changes_type', _empty_set)
+                if p.get('grants_all_creature_types', False):
+                    ct = ct | {'_all_'}
+                if ct:
+                    self._arr_changes_type[i] = ct
 
         # ── Verb demand arrays: bitmask of which trigger_modes each card satisfies ──
         # Ordered list of trigger_modes with clear verb mappings

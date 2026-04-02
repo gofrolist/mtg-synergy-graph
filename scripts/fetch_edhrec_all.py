@@ -126,6 +126,12 @@ def ensure_schemas(conn):
             PRIMARY KEY (commander_slug, card_name)
         )
     """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_edhrec_synergy_slug "
+                 "ON edhrec_card_synergy(commander_slug)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_edhrec_synergy_card "
+                 "ON edhrec_card_synergy(card_name)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_edhrec_card_slug "
+                 "ON edhrec_card_synergy(card_name, commander_slug)")
     conn.commit()
 
 
