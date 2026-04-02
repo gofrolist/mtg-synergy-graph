@@ -83,7 +83,7 @@ def _row_to_card(row: sqlite3.Row) -> dict:
     return card
 
 
-def get_cards_by_names(names: list[str], db_path: str = DB_PATH) -> list[dict]:
+def get_cards_by_names(names: list[str], db_path: str = DB_PATH) -> list[dict[str, object]]:
     conn = get_connection(db_path)
     conn.row_factory = sqlite3.Row
 

@@ -3,7 +3,7 @@
 Usage:
     python3 scripts/synergy_graph.py --commander "Krenko, Mob Boss" --recommend
     python3 scripts/synergy_graph.py --commander "Krenko, Mob Boss" --recommend --top 10
-    python3 scripts/synergy_graph.py --commander "Krenko, Mob Boss" --combos
+    python3 scripts/synergy_graph.py --commander "Krenko, Mob Boss" --gems
 """
 
 import argparse
@@ -16,14 +16,14 @@ from mtg_synergy.analysis.strategy import _detect_deck_types
 
 def run():
     parser = argparse.ArgumentParser(description="MTG Synergy Graph — commander recommendations")
-    parser.add_argument("--commander", type=str, required=True,
+    parser.add_argument("--commander", type=str, default=None,
                         help="Commander name (e.g. 'Krenko, Mob Boss')")
     parser.add_argument("--recommend", action="store_true",
                         help="Recommend cards for this commander")
-    parser.add_argument("--combos", action="store_true",
-                        help="Detect combos for this commander's color identity")
     parser.add_argument("--gems", action="store_true",
                         help="Find hidden gems — rare cards with strong mechanical synergy")
+    parser.add_argument("--deck", type=str, default=None,
+                        help="Path to deck file (one card name per line)")
     parser.add_argument("--top", type=int, default=50, help="Top N results (default: 50)")
     parser.add_argument("--strategies", default="auto",
                         help="Comma-separated strategies to focus (default: auto-detect)")
@@ -31,12 +31,17 @@ def run():
                         help="Comma-separated strategies to exclude")
     args = parser.parse_args()
 
-    if not args.recommend and not args.combos and not args.gems:
-        parser.error("Must specify --recommend, --combos, or --gems")
+    if not args.recommend and not args.gems:
+        parser.error("Must specify --recommend or --gems")
+
+    if not args.commander:
+        parser.error("--recommend and --gems require --commander")
 
     from mtg_synergy.tag_db import get_cards_by_names, DB_PATH
 
     conn = sqlite3.connect(DB_PATH)
+
+    # --- Commander-based modes ---
     cmdr_row = conn.execute(
         "SELECT name, oracle_id, color_identity, type_line FROM cards "
         "WHERE LOWER(name) = LOWER(?)", (args.commander,)
@@ -50,11 +55,22 @@ def run():
     cards = get_cards_by_names([cmdr_name], DB_PATH)
     deck_set = {cmdr_name}
 
+    # If --deck provided with --commander, load the deck list too
+    if args.deck:
+        try:
+            with open(args.deck) as f:
+                card_names = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+        except OSError as e:
+            parser.error(f"Cannot read deck file {args.deck!r}: {e}")
+        extra_cards = get_cards_by_names(card_names, DB_PATH)
+        cards.extend(extra_cards)
+        deck_set.update(c["name"] for c in extra_cards)
+
     # Detect strategies from commander
-    import sys as _sys, pathlib as _pathlib
-    _scripts_dir = str(_pathlib.Path(__file__).resolve().parent.parent.parent / "scripts")
-    if _scripts_dir not in _sys.path:
-        _sys.path.insert(0, _scripts_dir)
+    import sys, pathlib
+    _scripts_dir = str(pathlib.Path(__file__).resolve().parent.parent.parent / "scripts")
+    if _scripts_dir not in sys.path:
+        sys.path.insert(0, _scripts_dir)
     from strategy_detector import detect_strategies
     active_strategies = set()
     if args.strategies == "auto":
@@ -77,11 +93,6 @@ def run():
         recommend_cards(graph, deck_set, cards, deck_types, args.top,
                         active_strategies=active_strategies, db_path=DB_PATH,
                         color_identity=color_identity, commander=cmdr_name)
-
-    if args.combos:
-        from mtg_synergy.combos.display import show_combos_tiered
-        deck_oids = {c["oracle_id"] for c in cards if c["name"] in deck_set}
-        show_combos_tiered(deck_oids, cmdr_name, DB_PATH, color_identity=color_identity)
 
     if args.gems:
         from mtg_synergy.recommend.hidden_gems import show_hidden_gems

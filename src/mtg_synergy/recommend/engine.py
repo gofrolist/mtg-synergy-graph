@@ -3,8 +3,6 @@ import sqlite3
 from collections import defaultdict
 from urllib.parse import quote
 
-from mtg_synergy.combos.detector import find_partial_combos
-
 
 def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                     deck_types: set[str] = None, top_n: int = 50,
@@ -14,14 +12,13 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
     """Rank non-deck cards by total synergy with the current decklist.
 
     Uses color-identity filter for candidate discovery, then Forge GBM
-    (105 features) for final ranking.
+    (93 features, 87 active + 6 zeroed) for final ranking.
     """
     _shared_conn = None
     card_meta = {}
     card_oid_lookup = {}
-    partial_combos = []
 
-    # Build oid lookup early — needed by combo lookup below.
+    # Build oid lookup early.
     # card_meta is rebuilt after scoring since score_forge_candidates
     # appends newly-found cards to the cards list.
     for c in cards:
@@ -59,26 +56,11 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
         print(f"  Color-identity filter: {len(ci_results)} color-legal cards "
               f"({len(candidate_scores)} after excluding deck)")
 
-        # Forge-only scoring (63 features, no EDHREC)
+        # Forge-only scoring (93 features, 87 active + 6 zeroed)
         score_forge_candidates(candidate_scores, cards, _shared_conn,
                                commander, deck_cards, deck_types,
                                active_strategies,
                                color_identity=color_identity)
-
-        # Find partial Spellbook combos for display
-        deck_oids = {card_oid_lookup[n] for n in deck_cards if n in card_oid_lookup}
-        partial_combos = find_partial_combos(deck_oids, db_path, color_identity=color_identity)
-        # Build reverse lookup: oid -> candidate name (O(n) instead of O(n*m*k))
-        _oid_to_cand = {}
-        for cn in candidate_scores:
-            coid = card_oid_lookup.get(cn)
-            if coid:
-                _oid_to_cand[coid] = cn
-        for pc in partial_combos:
-            for oid in pc.get("missing_oids", []):
-                cn = _oid_to_cand.get(oid)
-                if cn:
-                    candidate_scores[cn]["combo_completion"] = True
 
         _shared_conn.close()
     else:
@@ -122,17 +104,6 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
     print(header)
     print(f"{'=' * 80}")
 
-    # Combo completions banner
-    completions = [(c, i) for c, i in ranked if i.get("combo_completion")]
-    if completions:
-        print(f"\n  COMBO COMPLETIONS:")
-        for card, info in completions[:3]:
-            matching = [pc for pc in partial_combos
-                        if card_oid_lookup.get(card) in pc.get("missing_oids", [])]
-            for pc in matching[:1]:
-                print(f"    {' + '.join(pc['present_cards'])} + [{card}] → {pc['result']}")
-        print()
-
     # Column header
     print(f"  {'#':>3s}  {'Name':<35s}  {'Type':<28s}  {'CMC':>3s}  {'Score':>6s}")
     print(f"  {'─' * 3}  {'─' * 35}  {'─' * 28}  {'─' * 3}  {'─' * 6}")
@@ -142,10 +113,6 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
         type_line = meta.get("type_line", "")
         cmc = meta.get("cmc", 0)
         score = info["total"]
-        tags = ""
-        if info.get("combo_completion"):
-            tags += " *"
-
         # Shorten type_line: remove "Legendary " prefix, truncate
         short_type = type_line.replace("Legendary ", "L ")
         if len(short_type) > 28:
@@ -159,7 +126,7 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
         padded_name = osc_name + " " * pad
 
         cmc_str = f"{cmc:3.0f}" if cmc == int(cmc) else f"{cmc:3.1f}"
-        print(f"  {rank_idx:3d}  {padded_name}  {short_type:<28s}  {cmc_str}  {score:6.1f}{tags}")
+        print(f"  {rank_idx:3d}  {padded_name}  {short_type:<28s}  {cmc_str}  {score:6.1f}")
 
 
 def _deck_card_scores(graph: dict, deck_cards: set[str]) -> dict:

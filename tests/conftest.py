@@ -15,7 +15,7 @@ def tmp_db(tmp_path):
     db_path = str(tmp_path / "test_tags.db")
     conn = sqlite3.connect(db_path)
     conn.executescript(tag_db.SCHEMA)
-    # Add Forge tables used by strategy_detector, combo detector, etc.
+    # Add Forge tables used by strategy_detector, etc.
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS forge_abilities (
             card_name TEXT NOT NULL,
