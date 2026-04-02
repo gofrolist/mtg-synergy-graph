@@ -120,7 +120,7 @@ python3 scripts/validate_recommendations.py --top 100              # Pipeline va
 python3 scripts/train_fusion_model.py --validate      # Train + validate in one step
 
 # Tests
-uv run pytest tests/ -v                        # Run all 154 tests
+uv run pytest tests/ -v                        # Run all 153 tests
 uv run pytest tests/test_recommendation_quality.py -v              # Pipeline quality tests only
 ```
 
@@ -231,9 +231,10 @@ python3 scripts/train_fusion_model.py --rebuild-features --validate  # 7. Retrai
   mech_tempo_fwd 2.5%, func_full_cosine 2.5%, mech_board_rev 2.4%
 - EDHREC_FREE=1 env var disables edhrec_deck_pct for pure Forge-native inference
 - Edge index: two-layer cache (npz raw edges + adjacency dict cache)
-  First run: npz ~0.1s + adj build ~11s. Subsequent: adj cache ~1.5s (train) / ~0.3s (inference)
-  Auto-invalidates on edge count, card count, or strength mode change
-- Edge index pre-loaded at inference: CmdrFeatureContext uses in-memory adjacency (~3s total)
+  First run: npz ~0.1s + adj build ~11s. Subsequent: adj cache ~0.1s
+  Auto-invalidates on MAX(rowid), card count, or strength mode change
+  (uses MAX(rowid) instead of COUNT(*) to avoid 26s full table scan)
+- Edge index pre-loaded at inference: CmdrFeatureContext uses in-memory adjacency (~4s total)
 - Per-grade sample weights: grade 5 x3, grade 4 x2
 - HP sweep tool: `scripts/sweep_hyperparams.py` — two-phase sweep with pipeline validation
 - Post-scoring penalties (scoring.py `_apply_penalties()`):
@@ -267,18 +268,18 @@ python3 scripts/train_fusion_model.py --rebuild-features --validate  # 7. Retrai
    Bonus: produces↔consumes dot product, verb→trigger alignment,
    creature ETB / sacrifice outlet / spellcast pattern matches
 4. Sort and output top N with clickable Scryfall hyperlinks (OSC 8)
-Total time: ~0.2s per commander with warm ForgeFeatureContext (pass forge_ctx=
-  to score_forge_candidates to reuse). Cold start: ~4.5s (warm adj cache) / ~57s (first run).
+Total time: ~0.5s per commander with warm ForgeFeatureContext (pass forge_ctx=
+  to score_forge_candidates to reuse). Cold start: ~5s CLI wall time (warm adj cache).
 ```
 
 ### API-Ready Inference (warm server pattern)
 
 ```python
-# Load context once at startup (~4.5s with warm adj cache)
+# Load context once at startup (~4s with warm adj cache)
 ctx = ForgeFeatureContext(conn, preload_edges=True)
 gbm = _load_gbm()  # cached at module level after first call
 
-# Per-request: ~0.2s per commander (was 60-73s before context reuse)
+# Per-request: ~0.5s per commander (was 60-73s before context reuse)
 score_forge_candidates(candidate_scores, cards, conn, commander, deck_cards,
                        forge_ctx=ctx, gbm_model=gbm)
 ```
@@ -367,18 +368,22 @@ mechanically-synergistic cards that nobody plays.
 - Cards keyed by `oracle_id` (Scryfall UUID) for dedup across reprints
 - `data/oracle_cards.json` is gitignored (~150MB); must run `scripts/download_cards.py` first
 - API calls use `urllib.request` (stdlib only, no external HTTP dependency)
-- Dependencies: only `numpy` + `lightgbm` (pyproject.toml)
+- Dependencies: `numpy` + `lightgbm` (runtime), `vulture` (dev)
 - All scripts use `from mtg_synergy.config import DB_PATH, DATA_DIR` for paths
 - Tribal subtypes extracted via `config.extract_subtypes()` (DFC-aware, both faces)
 - CLI uses `--commander "Name"` or `uv run mtg-synergy --commander "Name"`
 - Package uses `src/` layout (`src/mtg_synergy/`), built with `uv_build` backend
 - Pipeline scripts live in `scripts/`, library modules in `src/mtg_synergy/`
-- Tests: 154 tests in `tests/`, run with `uv run pytest tests/`
+- Tests: 153 tests in `tests/`, run with `uv run pytest tests/`
   - 7 end-to-end pipeline quality tests (`test_recommendation_quality.py`)
   - Requires trained model + populated DB (auto-skipped if missing)
 - After training, always run `--validate` to check full pipeline (not just NDCG):
   `python3 scripts/train_fusion_model.py --validate`
 - Adjacency cache uses np.savez (not legacy serialization) for security
+- All np.load() calls use allow_pickle=False — enforced project-wide
+- SQL fragment interpolation guarded by _VALID_*_EXPRS frozensets + ValueError
+  (never use assert for security — stripped by python -O)
+- External download URLs validated via urlparse (scheme + netloc)
 - Shared helpers: `causal/idf.py` (IDF + precision strength), `recommend/cmdr_patterns.py` (commander mechanical flags)
 - Scoring penalties in `_apply_penalties()` apply to ALL commanders (not just tribal)
 - Spellbook combo boosts must check color identity
