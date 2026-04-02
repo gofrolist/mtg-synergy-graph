@@ -46,7 +46,7 @@ uv sync
 FORGE MODEL (--recommend): Zero oracle text, pure mechanical synergy
 
   1. Color-identity filter -> all legal cards for this commander
-  2. LightGBM LambdaRank scores every candidate (105 features):
+  2. LightGBM LambdaRank scores every candidate (93 features, 87 active):
      - 29 profile fields per card from Forge abilities
      - Causal graph features (edge counts, hub scores, 2-hop paths)
      - Strategy cosine similarity
@@ -57,7 +57,7 @@ FORGE MODEL (--recommend): Zero oracle text, pure mechanical synergy
   3. Post-scoring: anti-synergy penalties + mechanical synergy bonus
   4. Top N results with clickable Scryfall links
 
-  NDCG@30 = 0.53 | Works for 3,141+ commanders | Day-1 new card evaluation
+  NDCG@30 = 0.594 | Works for 3,141+ commanders | Day-1 new card evaluation
 ```
 
 ## Commands
@@ -69,7 +69,6 @@ python3 scripts/download_cards.py                    # Refresh Scryfall data (~1
 python3 scripts/import_forge.py --download --import  # Update Forge ability data
 python3 scripts/build_graph.py --rebuild     # Build causal graph (~20M edges)
 python3 scripts/strategy_detector.py --populate      # Assign strategies
-python3 scripts/fetch_spellbook.py                   # Fetch 82k combos
 ```
 
 ### EDHREC Data
@@ -95,8 +94,8 @@ python3 scripts/train_fusion_model.py --tune              # Hyperparameter searc
 ```bash
 uv run mtg-synergy --commander "Krenko, Mob Boss" --recommend       # Top 30 recommendations
 uv run mtg-synergy --commander "Krenko, Mob Boss" --recommend --top 10
+uv run mtg-synergy --commander "Krenko, Mob Boss" --recommend --deck deck.txt  # With deck context
 uv run mtg-synergy --commander "Krenko, Mob Boss" --gems            # Hidden gems (no popularity bias)
-uv run mtg-synergy --commander "Krenko, Mob Boss" --combos          # Combo detection
 ```
 
 ### Evaluation
@@ -109,7 +108,7 @@ python3 scripts/compare_edhrec.py --all --quiet                    # All command
 ### Tests
 
 ```bash
-uv run pytest tests/ -v    # Run all 363 tests
+uv run pytest tests/ -v    # Run all 136 tests
 ```
 
 ## Architecture
@@ -125,8 +124,6 @@ Scryfall API -> scripts/download_cards.py -> data/oracle_cards.json (36k cards)
                                                   |
                      scripts/strategy_detector.py -> card_strategies table
                                                   |
-                     scripts/fetch_spellbook.py -> spellbook_combos (82k combos)
-                                                  |
                      scripts/fetch_edhrec_all.py -> edhrec_card_synergy (733k pairs, 2,724 cmdrs)
                                                   |
                      scripts/train_fusion_model.py -> data/fusion_model_forge.lgb
@@ -141,9 +138,8 @@ python3 scripts/download_cards.py                                          # 1. 
 python3 scripts/import_forge.py --download --import                        # 2. Update Forge data
 python3 scripts/build_graph.py --rebuild                           # 3. Rebuild causal graph
 python3 scripts/strategy_detector.py --populate                            # 4. Strategies
-python3 scripts/fetch_spellbook.py                                         # 5. Refresh combos
-python3 scripts/fetch_edhrec_all.py --max 2000 --refresh-top 200          # 6. Refresh EDHREC
-python3 scripts/train_fusion_model.py --rebuild-features     # 7. Retrain (~7 min, $0)
+python3 scripts/fetch_edhrec_all.py --max 2000 --refresh-top 200          # 5. Refresh EDHREC
+python3 scripts/train_fusion_model.py --rebuild-features     # 6. Retrain (~7 min, $0)
 ```
 
 ### DB Schema (data/tags.db)
@@ -153,10 +149,7 @@ python3 scripts/train_fusion_model.py --rebuild-features     # 7. Retrain (~7 mi
 | cards | ~36k | Card metadata from Scryfall |
 | abilities | ~76k | Parsed oracle text abilities |
 | card_strategies | ~88k | Strategy assignments |
-| spellbook_combos | ~82k | Commander Spellbook combos |
-| spellbook_combo_cards | ~289k | Combo <-> card junction |
-| interaction_edges | ~20.6M | Causal edges: 30+ event types, synthetic, entity-presence, continuous pump, theme synergy |
-| commander_profiles | ~3.4k | Auto-inferred commander archetypes |
+| interaction_edges | ~21.7M | Causal edges: 30+ event types, synthetic, entity-presence, continuous pump, theme synergy |
 | edhrec_card_synergy | ~733k | EDHREC synergy scores (2,724 commanders, 87% coverage) |
 | forge_abilities | ~72k | Forge ability data + SubAbility chain expansions |
 | forge_deck_tags | ~14k | Forge deck-building AI: has/hints/needs tags |
@@ -172,28 +165,19 @@ python3 scripts/train_fusion_model.py --rebuild-features     # 7. Retrain (~7 mi
 Total: ~3s (cached) / ~7s (first run)
 ```
 
-### Combo Detection (3-tier)
-
-| Tier | Label | Detection |
-|------|-------|-----------|
-| Confirmed Infinite | `infinite-confirmed` | All combo cards match a Commander Spellbook entry |
-| Likely Combo | `combo-likely` | Circular trigger chain |
-| Synergy | `synergy` | Interaction without confirmed loop |
-
 ## Project Structure
 
 ```
 .
 ├── scripts/
-│   ├── synergy_graph.py       # CLI entry point (recommend, gems, combos)
+│   ├── synergy_graph.py       # CLI entry point (recommend, gems)
 │   ├── train_fusion_model.py  # LightGBM LambdaRank training
 │   ├── compare_edhrec.py      # Evaluate recommendations vs EDHREC
 │   ├── build_graph.py         # Causal interaction graph builder
 │   ├── strategy_detector.py   # Rule-based strategy detection
 │   ├── download_cards.py      # Scryfall bulk data downloader
 │   ├── import_forge.py        # Forge ability data importer
-│   ├── fetch_edhrec_all.py    # EDHREC synergy + avg deck fetcher
-│   └── fetch_spellbook.py     # Commander Spellbook API fetcher
+│   └── fetch_edhrec_all.py    # EDHREC synergy + avg deck fetcher
 │
 ├── src/mtg_synergy/
 │   ├── cli.py                 # CLI dispatcher
@@ -202,12 +186,11 @@ Total: ~3s (cached) / ~7s (first run)
 │   ├── recommend/
 │   │   ├── engine.py          # recommend_cards() pipeline
 │   │   ├── scoring.py         # Color filter, GBM scoring, mechanical bonus
-│   │   ├── forge_features.py  # 105-feature computation (ForgeFeatureContext)
+│   │   ├── forge_features.py  # 93-feature computation (ForgeFeatureContext)
 │   │   ├── mechanics_vectors.py  # 116-dim shared concept space
 │   │   ├── hidden_gems.py     # Pure mechanical synergy (no popularity)
-│   │   ├── swaps.py           # Card swap suggestions
 │   │   ├── affinity.py        # Commander affinity scoring
-│   │   └── commander_profile.py  # Auto-infer commander archetype
+│   │   └── cmdr_patterns.py   # Commander mechanical flag detection
 │   ├── causal/
 │   │   ├── __init__.py        # DB storage, CausalContext, anti-synergy
 │   │   ├── graph_builder.py   # Build causal edges from parsed abilities
@@ -218,10 +201,9 @@ Total: ~3s (cached) / ~7s (first run)
 │   │   ├── __init__.py        # parse_card() pipeline
 │   │   ├── forge_import.py    # Forge DSL import with SVar resolution
 │   │   └── ...                # AST types, parsers, resolvers
-│   ├── combos/                # Combo detection + anti-synergy
-│   └── analysis/              # Deck analysis + strategy detection
+│   └── analysis/              # Strategy detection + tribal type analysis
 │
-├── tests/                     # 363 tests
+├── tests/                     # 136 tests
 └── data/                      # DB, models, caches (mostly gitignored)
 ```
 
