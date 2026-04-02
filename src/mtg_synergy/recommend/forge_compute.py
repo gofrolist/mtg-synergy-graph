@@ -13,6 +13,7 @@ from mtg_synergy.recommend.forge_features import (
     _decode_events,
     _EVENT_EXPR_COLUMN,
     _EVENT_EXPR_JSON,
+    _VALID_EVENT_EXPRS,
     _EDHREC_FREE,
     _GENERIC_TYPES,
 )
@@ -207,6 +208,8 @@ class CmdrFeatureContext:
         """SQL fallback for commander strength/event edges (inference mode)."""
         conn = ctx.conn
         event_expr = _EVENT_EXPR_COLUMN if ctx._has_event_col else _EVENT_EXPR_JSON
+        if event_expr not in _VALID_EVENT_EXPRS:
+            raise ValueError(f"Unexpected SQL fragment: {event_expr!r}")
         try:
             for row in conn.execute(
                 f"SELECT target_id, SUM(strength), GROUP_CONCAT(DISTINCT {event_expr}) "
@@ -327,6 +330,8 @@ class CmdrFeatureContext:
     def _init_from_db(self, ctx, conn, oid_to_idx, cmdr_oid, deck_oids):
         """Original DB query path (used for inference with small datasets)."""
         event_expr = _EVENT_EXPR_COLUMN if ctx._has_event_col else _EVENT_EXPR_JSON
+        if event_expr not in _VALID_EVENT_EXPRS:
+            raise ValueError(f"Unexpected SQL fragment: {event_expr!r}")
         # Causal edges from/to commander
         self.cmdr_out = {}
         self.cmdr_in = {}

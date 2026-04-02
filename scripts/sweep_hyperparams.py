@@ -223,7 +223,7 @@ def run_phase2(dry_run=False, feature_cache=None):
             return []
 
         print(f"  Loading features from {cache_path}")
-        cached = np.load(cache_path)
+        cached = np.load(cache_path, allow_pickle=False)
         X, y, cmdr_ids = cached["X"], cached["y"], cached["cmdr_ids"]
 
     print(f"  Matrix: {X.shape[0]:,} samples, {X.shape[1]} features")
@@ -305,7 +305,7 @@ def _validate_top_configs(all_results, top_n=5, validate_cmdrs=50):
                 sweep_cache = os.path.join(DATA_DIR, "sweep_best_features.npz")
                 main_cache = os.path.join(DATA_DIR, "forge_features_cache.npz")
                 cache_path = sweep_cache if os.path.exists(sweep_cache) else main_cache
-                cached = np.load(cache_path)
+                cached = np.load(cache_path, allow_pickle=False)
                 X, y, cmdr_ids = cached["X"], cached["y"], cached["cmdr_ids"]
                 sw = r["sample_weights"]
                 lg = r["label_gain"]

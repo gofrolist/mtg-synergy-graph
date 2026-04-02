@@ -954,7 +954,7 @@ def main():
     cache_path = os.path.join(DATA_DIR, "forge_features_cache.npz")
     if os.path.exists(cache_path) and not args.rebuild_features:
         print(f"\nLoading cached feature matrix from {cache_path}")
-        cached = np.load(cache_path)
+        cached = np.load(cache_path, allow_pickle=False)
         X_forge = cached["X"]
         y_forge = cached["y"]
         cmdr_ids_forge = cached["cmdr_ids"]

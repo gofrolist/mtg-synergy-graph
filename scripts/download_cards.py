@@ -8,6 +8,7 @@ Usage:
 import json
 import os
 import urllib.request
+from urllib.parse import urlparse
 
 from mtg_synergy.config import DATA_DIR, CARDS_JSON
 
@@ -35,6 +36,9 @@ def download():
         raise RuntimeError("Could not find 'oracle_cards' in bulk-data catalog")
 
     download_uri = oracle_entry["download_uri"]
+    parsed = urlparse(download_uri)
+    if parsed.scheme != "https" or parsed.netloc != "data.scryfall.io":
+        raise ValueError(f"Unexpected download_uri origin: {parsed.netloc!r}")
     print(f"Downloading oracle_cards from {download_uri} ...")
 
     req = urllib.request.Request(download_uri, headers=headers)

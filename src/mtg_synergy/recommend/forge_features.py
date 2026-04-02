@@ -93,9 +93,15 @@ _GENERIC_TYPES = frozenset({
     "youctrl", "oppctrl", "strictlyother",
 })
 
-# Known-safe SQL fragments for event column access (avoids f-string injection)
+# Known-safe SQL fragments for column access (avoids f-string injection).
+# Only these values are ever interpolated into SQL — validated at each use site.
 _EVENT_EXPR_COLUMN = "event"
 _EVENT_EXPR_JSON = "json_extract(detail, '$.event')"
+_VALID_EVENT_EXPRS = frozenset({_EVENT_EXPR_COLUMN, _EVENT_EXPR_JSON})
+
+_PREC_EXPR_COLUMN = "filter_precision"
+_PREC_EXPR_JSON = "json_extract(detail, '$.filter_precision')"
+_VALID_PREC_EXPRS = frozenset({_PREC_EXPR_COLUMN, _PREC_EXPR_JSON})
 
 
 def _decode_events(mask, bit_to_event):
@@ -1139,14 +1145,16 @@ class ForgeFeatureContext:
         t0 = time.time()
 
         cache_path = os.path.join(DATA_DIR, "edge_index_cache.npz")
-        edge_count = conn.execute("SELECT COUNT(*) FROM interaction_edges").fetchone()[0]
+        # MAX(rowid) is O(1) vs COUNT(*) which is a full 20M-row table scan (~26s).
+        # Safe because interaction_edges is rebuilt from scratch (no row deletions).
+        edge_count = conn.execute("SELECT MAX(rowid) FROM interaction_edges").fetchone()[0] or 0
         card_count = len(self.oid_to_idx)
 
         # Try loading from cache (numpy arrays only)
         src = tgt = exact = strength = event_ids = event_names = None
         if os.path.exists(cache_path):
             try:
-                cached = np.load(cache_path)
+                cached = np.load(cache_path, allow_pickle=False)
                 if (int(cached['edge_count']) == edge_count and
                     int(cached['card_count']) == card_count and
                     'strength' in cached and 'event_ids' in cached
@@ -1210,8 +1218,12 @@ class ForgeFeatureContext:
             r[1] == "filter_precision"
             for r in conn.execute("PRAGMA table_info(interaction_edges)")
         )
-        prec_expr = "filter_precision" if has_col else "json_extract(detail, '$.filter_precision')"
+        prec_expr = _PREC_EXPR_COLUMN if has_col else _PREC_EXPR_JSON
         event_expr = _EVENT_EXPR_COLUMN if self._has_event_col else _EVENT_EXPR_JSON
+        if event_expr not in _VALID_EVENT_EXPRS:
+            raise ValueError(f"Unexpected SQL fragment: {event_expr!r}")
+        if prec_expr not in _VALID_PREC_EXPRS:
+            raise ValueError(f"Unexpected SQL fragment: {prec_expr!r}")
         src = np.empty(edge_count, dtype=np.int32)
         tgt = np.empty(edge_count, dtype=np.int32)
         exact = np.empty(edge_count, dtype=np.bool_)
