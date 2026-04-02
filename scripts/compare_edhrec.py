@@ -14,7 +14,6 @@ import re
 import sqlite3
 import sys
 import time
-from pathlib import Path
 
 from mtg_synergy.config import DB_PATH
 

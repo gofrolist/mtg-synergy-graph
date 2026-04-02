@@ -16,7 +16,6 @@ from mtg_synergy.config import DATA_DIR
 from mtg_synergy.recommend.cmdr_patterns import detect_cmdr_patterns
 from mtg_synergy.recommend.forge_features import (
     ForgeFeatureContext, CmdrFeatureContext, compute_batch_features,
-    compute_card_features,
 )
 
 

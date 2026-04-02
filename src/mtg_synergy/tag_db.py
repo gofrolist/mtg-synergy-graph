@@ -7,6 +7,8 @@ This module provides the cards table schema and card lookup functions.
 import os
 import sqlite3
 
+from mtg_synergy.db import get_connection
+
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
 DB_PATH = os.path.join(DATA_DIR, "tags.db")
 
@@ -58,20 +60,6 @@ CREATE TABLE IF NOT EXISTS spellbook_combo_cards (
 );
 CREATE INDEX IF NOT EXISTS idx_spellbook_cards_oracle ON spellbook_combo_cards(oracle_id);
 """
-
-
-def get_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    return conn
-
-
-def init_db(db_path: str = DB_PATH):
-    """Create tables and indices if they don't exist."""
-    conn = get_connection(db_path)
-    conn.executescript(SCHEMA)
-    conn.close()
 
 
 # ── Query API ──

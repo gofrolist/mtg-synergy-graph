@@ -1,8 +1,5 @@
 """Strategy detection, candidate filtering, and commander-based deck building."""
-import sqlite3
 from collections import Counter
-
-from mtg_synergy.config import DATA_DIR
 
 
 def _detect_deck_types(cards: list[dict], deck_cards: set[str],

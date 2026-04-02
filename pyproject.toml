@@ -25,6 +25,7 @@ required-environments = [
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
+    "vulture>=2.16",
 ]
 
 [project.scripts]

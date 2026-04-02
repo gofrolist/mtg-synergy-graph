@@ -24,7 +24,3 @@ class Edge:
     strength: float
     detail: EdgeDetail
 
-    def to_dict(self):
-        d = {k: v for k, v in self.__dict__.items() if k != "detail"}
-        d["detail"] = self.detail.to_dict()
-        return d
