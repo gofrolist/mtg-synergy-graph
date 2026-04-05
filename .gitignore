@@ -10,10 +10,6 @@ data/
 *.egg-info/
 packages/mtg-synergy/src/mtg_synergy/_version.py
 main.py
-model_output/
-experiment_results.json
-EXPERIMENT_LOG.md
-unsloth_compiled_cache/
 
 # Environment
 .venv/
