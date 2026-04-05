@@ -91,3 +91,6 @@ data/compare_*.log
 
 # SQLite database
 mtg_synergy.db
+
+# Inference export artifacts (regenerable via scripts/export_inference_db.py)
+data/inference/
