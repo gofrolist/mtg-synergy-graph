@@ -1,6 +1,7 @@
 name: Publish mtg-synergy wheel
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
