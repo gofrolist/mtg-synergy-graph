@@ -1,0 +1,45 @@
+name: Publish mtg-synergy wheel
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/mtg-synergy/**'
+      - '.github/workflows/publish-wheel.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Build wheel
+        run: uv build packages/mtg-synergy
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(grep '^version' packages/mtg-synergy/pyproject.toml | sed 's/.*"\(.*\)"/\1/')
+          SHA_SHORT=$(git rev-parse --short HEAD)
+          echo "tag=mtg-synergy-v${VERSION}+${SHA_SHORT}" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Create release with wheel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release delete "$TAG" --yes 2>/dev/null || true
+          git tag -f "$TAG"
+          git push -f origin "$TAG"
+          gh release create "$TAG" \
+            dist/*.whl \
+            --title "mtg-synergy ${VERSION}" \
+            --notes "Auto-built from $(git rev-parse --short HEAD)" \
+            --latest
