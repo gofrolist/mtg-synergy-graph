@@ -3,75 +3,8 @@ __pycache__/
 .claude/
 .ecc/
 
-# Large/regenerable data files
-data/oracle_cards.json
-data/tags.db
-data/*_candidates.json
-data/*_synergy_viz.html
-
-# Forge data (downloaded by scripts/import_forge.py)
-data/forge/
-
-# Commander Spellbook cache
-data/commander_spellbook.json
-data/spellbook_unresolved.txt
-data/spellbook_features.json
-data/spellbook_templates.json
-
-# Model + feature caches (regenerable)
-data/fusion_model_forge*.lgb
-data/fusion_model_forge*.lgb.bak
-data/forge_features_cache*.npz
-data/forge_features_cache*.npz.bak
-data/sweep_best_features.npz
-data/sweep_results.json
-data/edge_index_cache.npz
-data/edge_adj_cache.npz
-data/edge_adj_cache.pkl
-data/recommend_cache/
-
-# EDHREC data (fetched by scripts/fetch_edhrec_all.py)
-data/edhrec_commanders/
-
-# Legacy artifacts (no longer generated)
-data/embeddings.npy
-data/embeddings_index.json
-data/embeddings_normed_f16.npy
-data/card2vec_embeddings.npy
-data/card2vec_index.json
-data/tower_model.npz
-data/tower_model_edhrec.npz
-data/tower_model_llm_backup.npz
-data/tower_model_forge.npz
-data/fusion_model.lgb
-data/fusion_model.lgb.bak
-data/recommender_training.json
-data/recommender_weights.json
-data/retag_*.json
-data/*_tags_*.json
-data/*_merged*.json
-data/all_tags_gpt41mini.json
-data/top10000_tags.json
-data/golden_tags.json
-data/commander_slugs.json
-data/new_commander_slugs.json
-data/mtgjson_atomic.json.bz2
-data/mtgjson_precons.json
-data/baseline_edhrec_*.txt
-data/batch_*.jsonl
-data/*.backup*
-data/mtg_rules.txt
-data/rules_chunks.json
-data/rules_index.json
-data/scryfall_rulings.json
-data/scryfall_function_tags.json
-data/pending_*.json
-data/train.jsonl
-data/train_*.jsonl*
-data/val.jsonl
-data/val_sample.json
-data/retag1k_mtg_tagger.json
-data/kyler_tags.json
+# All data files (regenerable via scripts/)
+data/
 
 # Build artifacts
 *.egg-info/
@@ -82,17 +15,9 @@ experiment_results.json
 EXPERIMENT_LOG.md
 unsloth_compiled_cache/
 
-# Training/comparison logs
-data/train_*.log
-data/compare_*.log
-
 # Environment
 .venv/
 .env
 
 # SQLite database
 mtg_synergy.db
-
-# Inference export artifacts (regenerable via scripts/export_inference_db.py)
-data/inference/
-.ecc/
