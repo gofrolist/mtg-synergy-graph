@@ -15,6 +15,7 @@ from mtg_synergy.recommend.forge_features import (
     _EVENT_EXPR_JSON,
     _VALID_EVENT_EXPRS,
     _EDHREC_FREE,
+    _EMPTY_INT32,
     _GENERIC_TYPES,
 )
 from mtg_synergy.recommend.mechanics_vectors import _concept_idx
@@ -57,16 +58,17 @@ def _merge_vecs_sum(vecs: list) -> "np.ndarray | None":
     return vecs[0] + vecs[1]
 
 
-def _merge_profiles(profiles: list[dict], empty: dict) -> dict:
-    """Merge 1-2 forge profiles: union sets, OR bools, max scalars."""
+def _merge_profiles(profiles: list, empty: dict) -> dict:
+    """Merge 1-2 forge profiles (dict or ForgeProfile): union sets, OR bools, max scalars."""
+    _set_types = (set, frozenset)
     if not profiles:
         return dict(empty)
     if len(profiles) == 1:
-        return profiles[0]
+        return dict(profiles[0].items())
     merged = {}
     for key, default in empty.items():
         vals = [p.get(key, default) for p in profiles]
-        if isinstance(default, set):
+        if isinstance(default, _set_types):
             merged[key] = vals[0] | vals[1]
         elif isinstance(default, bool):
             merged[key] = vals[0] or vals[1]
@@ -80,8 +82,8 @@ def _merge_profiles(profiles: list[dict], empty: dict) -> dict:
     for p in profiles:
         for key, val in p.items():
             if key not in merged:
-                if isinstance(val, set):
-                    merged[key] = merged.get(key, set()) | val
+                if isinstance(val, _set_types):
+                    merged[key] = merged.get(key, frozenset()) | val
                 elif isinstance(val, bool):
                     merged[key] = merged.get(key, False) or val
                 else:
@@ -156,9 +158,12 @@ class CmdrFeatureContext:
             sv = ctx.strat_vector(oid)
             if sv is not None:
                 strat_vecs.append(sv)
-            av = ctx._ability_vectors.get(oid)
-            if av is not None:
-                ability_vecs.append(av)
+            av_sparse = ctx._ability_vectors.get(oid)
+            if av_sparse is not None:
+                # Expand sparse (indices, values) to dense for commander merge
+                av_dense = np.zeros(ctx._n_abilities, dtype=np.float32)
+                av_dense[av_sparse[0]] = av_sparse[1]
+                ability_vecs.append(av_dense)
             pv = ctx._mech_produces.get(oid)
             if pv is not None:
                 produce_vecs.append(pv)
@@ -313,11 +318,11 @@ class CmdrFeatureContext:
         cmdr_idx = ctx.oid_to_idx.get(cmdr_oid)
         idx_to_oid = ctx._idx_to_oid
         if cmdr_idx is not None:
-            for tgt_idx in ctx._exact_out.get(cmdr_idx, np.array([], dtype=np.int32)):
+            for tgt_idx in ctx._exact_out.get(cmdr_idx, _EMPTY_INT32):
                 oid = idx_to_oid.get(int(tgt_idx))
                 if oid:
                     self.cmdr_exact.add(oid)
-            for src_idx in ctx._exact_in.get(cmdr_idx, np.array([], dtype=np.int32)):
+            for src_idx in ctx._exact_in.get(cmdr_idx, _EMPTY_INT32):
                 oid = idx_to_oid.get(int(src_idx))
                 if oid:
                     self.cmdr_exact.add(oid)
@@ -760,10 +765,11 @@ def _batch_per_card_loop(X, N, card_oids, card_indices, safe_idx, ctx, cmdr):
             nd = float(np.linalg.norm(csv))
             X[row_i, 3] = d / (nc * nd) if nc > 0 and nd > 0 else 0.0
 
-        # F4: forge_ability_cosine
-        card_av = ctx._ability_vectors.get(oid)
-        if cmdr_ability_vec is not None and card_av is not None:
-            X[row_i, 4] = float(np.dot(cmdr_ability_vec, card_av))
+        # F4: forge_ability_cosine (sparse dot product)
+        card_av_sparse = ctx._ability_vectors.get(oid)
+        if cmdr_ability_vec is not None and card_av_sparse is not None:
+            idx, vals = card_av_sparse
+            X[row_i, 4] = float(np.dot(cmdr_ability_vec[idx], vals))
 
         # F5: phase_match
         cp = ctx.card_phase_order.get(oid, set())
@@ -1021,10 +1027,8 @@ def _compute_causal_features(card_oid, card_cmc, ctx, cmdr):
     hub = 0.0
     hub_raw = 0.0
     if ctx._has_edge_index and di is not None:
-        n_out = len(ctx._adj_out.get(di, []))
-        n_in = len(ctx._adj_in.get(di, []))
-        hub_raw = float(n_out + n_in)
-        hub = np.log2(1.0 + min(n_out + n_in, 500))
+        hub_raw = float(ctx._arr_hub_raw[di])
+        hub = float(ctx._arr_hub_score[di])
     elif di is not None:
         hub = np.log2(1.0 + min(cmdr.deck_edge_counts.get(card_oid, 0), 20))
 
@@ -1141,9 +1145,11 @@ def _compute_forge_profile_features(card_oid, card_cmc, card_profile, ctx, cmdr)
     cmdr_verbs = cmdr_profile.get('verbs', set())
 
     # forge_ability_cosine
-    card_ability_vec = ctx._ability_vectors.get(card_oid)
-    forge_ability_cos = float(np.dot(cmdr.cmdr_ability_vec, card_ability_vec)) \
-        if cmdr.cmdr_ability_vec is not None and card_ability_vec is not None else 0.0
+    card_av_sparse = ctx._ability_vectors.get(card_oid)
+    forge_ability_cos = 0.0
+    if cmdr.cmdr_ability_vec is not None and card_av_sparse is not None:
+        idx, vals = card_av_sparse
+        forge_ability_cos = float(np.dot(cmdr.cmdr_ability_vec[idx], vals))
 
     # phase match
     cp = ctx.card_phase_order.get(card_oid, set())

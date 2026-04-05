@@ -12,10 +12,159 @@ import numpy as np
 
 _log = logging.getLogger(__name__)
 
+_EMPTY_INT32 = np.array([], dtype=np.int32)
+_EMPTY_FS = frozenset()
+
+# All forge profile field names (must match _process_forge_ability_row template)
+_PROFILE_SET_FIELDS = (
+    'verbs', 'triggers', 'keywords', 'counter_types', 'targets',
+    'ability_types', 'trigger_filters', 'required_subtypes',
+    'granted_keywords', 'conditions', 'duration', 'effect_zones',
+    'excluded_subtypes', 'counter_trigger_themes', 'opponent_only_events',
+    'granted_ability_names', 'granted_triggers', 'changes_type',
+)
+_PROFILE_BOOL_FIELDS = (
+    'combat_damage', 'is_secondary', 'gain_control', 'produces_mana',
+    'grants_abilities', 'token_amount_variable', 'counters_on_lands',
+    'has_p1p1', 'grants_all_creature_types', 'pump_is_variable',
+)
+_PROFILE_ALL_SLOTS = (
+    _PROFILE_SET_FIELDS + _PROFILE_BOOL_FIELDS
+    + ('damage_amount', 'cards_drawn', 'life_amount')  # optional str
+    + ('affected_self_count', 'affected_opp_count', 'max_pump_power')  # int
+    + ('affected_scope_ratio',)  # float
+)
+
+
+class ForgeProfile:
+    """Memory-efficient forge profile using __slots__.
+
+    Replaces per-card dicts (~832 bytes + 58 MiB key strings for 31K cards)
+    with a compact object (~320 bytes, no key storage).
+    Provides dict-like .get() for backward compatibility.
+    """
+    __slots__ = _PROFILE_ALL_SLOTS
+
+    def get(self, key: str, default=None):
+        """Dict-compatible accessor."""
+        return getattr(self, key, default)
+
+    def __getitem__(self, key: str):
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key)
+
+    def __contains__(self, key: str) -> bool:
+        return key in self.__slots__
+
+    def items(self):
+        """Iterate (key, value) pairs like dict.items()."""
+        for k in self.__slots__:
+            yield k, getattr(self, k, None)
+
+    def keys(self):
+        return iter(self.__slots__)
+
+    @classmethod
+    def from_dict(cls, d: dict, fs_cache: dict) -> 'ForgeProfile':
+        """Build from a mutable profile dict, deduplicating frozensets."""
+        p = cls()
+        for k in _PROFILE_SET_FIELDS:
+            v = d.get(k)
+            if v:
+                fs = frozenset(v) if isinstance(v, set) else v
+                fs = fs_cache.setdefault(fs, fs)
+            else:
+                fs = _EMPTY_FS
+            setattr(p, k, fs)
+        for k in _PROFILE_BOOL_FIELDS:
+            setattr(p, k, d.get(k, False))
+        for k in ('damage_amount', 'cards_drawn', 'life_amount'):
+            setattr(p, k, d.get(k))
+        for k in ('affected_self_count', 'affected_opp_count', 'max_pump_power'):
+            setattr(p, k, d.get(k, 0))
+        p.affected_scope_ratio = d.get('affected_scope_ratio', 0.5)
+        return p
+
+
+class CSRIndex:
+    """Memory-efficient adjacency index using CSR (Compressed Sparse Row) format.
+
+    Stores the same data as dict[int, np.ndarray[int32]] but without Python
+    dict/object overhead (~100 MiB savings for 30K+ keys, 18M values).
+    Lookups use binary search on the sorted keys array: O(log n) where n=keys.
+    """
+    __slots__ = ('_keys', '_offsets', '_values')
+
+    def __init__(self, keys: np.ndarray, offsets: np.ndarray, values: np.ndarray):
+        self._keys = keys        # int32, sorted
+        self._offsets = offsets   # int64, len = len(keys) + 1
+        self._values = values    # int32
+
+    def get(self, key: int, default=None) -> np.ndarray | None:
+        """Look up neighbors for *key*. Returns np.ndarray view or *default*.
+
+        Note: returns a view into the underlying values array (no copy).
+        Callers must not mutate the returned array.
+        """
+        idx = np.searchsorted(self._keys, key)
+        if idx < len(self._keys) and int(self._keys[idx]) == key:
+            start, end = int(self._offsets[idx]), int(self._offsets[idx + 1])
+            return self._values[start:end]
+        return default
+
+    def __contains__(self, key: int) -> bool:
+        idx = np.searchsorted(self._keys, key)
+        return idx < len(self._keys) and int(self._keys[idx]) == key
+
+    def __len__(self) -> int:
+        return len(self._keys)
+
+    def total_values(self) -> int:
+        """Total number of stored neighbor entries."""
+        return len(self._values)
+
+    def neighbor_count(self, key: int) -> int:
+        """Return number of neighbors for *key* (0 if absent)."""
+        idx = np.searchsorted(self._keys, key)
+        if idx < len(self._keys) and int(self._keys[idx]) == key:
+            return int(self._offsets[idx + 1]) - int(self._offsets[idx])
+        return 0
+
+    def to_arrays(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return (keys, offsets, values) arrays for serialization."""
+        return self._keys, self._offsets, self._values
+
+    @classmethod
+    def empty(cls) -> 'CSRIndex':
+        return cls(_EMPTY_INT32, np.array([0], dtype=np.int64), _EMPTY_INT32)
+
+    @classmethod
+    def from_dict(cls, adj: dict) -> 'CSRIndex':
+        """Build from dict[int, np.ndarray]."""
+        if not adj:
+            return cls.empty()
+        sorted_keys = np.array(sorted(adj.keys()), dtype=np.int32)
+        lengths = np.array([len(adj[int(k)]) for k in sorted_keys], dtype=np.int64)
+        offsets = np.zeros(len(sorted_keys) + 1, dtype=np.int64)
+        np.cumsum(lengths, out=offsets[1:])
+        total = int(offsets[-1])
+        values = np.empty(total, dtype=np.int32)
+        for i, k in enumerate(sorted_keys):
+            start, end = int(offsets[i]), int(offsets[i + 1])
+            values[start:end] = adj[int(k)]
+        return cls(sorted_keys, offsets, values)
+
+    @classmethod
+    def from_csr_arrays(cls, keys: np.ndarray, offsets: np.ndarray,
+                        values: np.ndarray) -> 'CSRIndex':
+        """Build from pre-existing CSR arrays (e.g. loaded from npz cache)."""
+        return cls(keys, offsets, values)
+
+
 # Set EDHREC_FREE=1 to disable edhrec_deck_pct feature (pure Forge-native mode)
 _EDHREC_FREE = os.environ.get("EDHREC_FREE", "") == "1"
-
-from mtg_synergy.recommend.mechanics_vectors import _concept_idx
 
 # ── Pre-compiled regex patterns for hot-path methods ──
 # Used in _process_forge_ability_row / _extract_subtypes_from_raw_line /
@@ -146,6 +295,7 @@ class ForgeFeatureContext:
                  card_provider=None, artifact_dir=None):
         self.conn = conn
         self._has_edge_index = False
+        self._bit_to_event = {}
         self._preload_strength = preload_strength
         # Store artifact dir for edge cache paths
         if artifact_dir is not None:
@@ -171,6 +321,9 @@ class ForgeFeatureContext:
 
         self._load_card_data(conn)
         self._load_forge_profiles(conn)  # populates self._raw_abilities
+        # Compact profiles early (before heavy allocations) to reduce peak RSS.
+        # Replaces mutable sets with deduplicated frozensets, saves ~60 MiB.
+        self._compact_forge_profiles()
         # Note: _load_functional_fingerprints does its own DB query (independent
         # of self._raw_abilities). Must stay BEFORE del self._raw_abilities below.
         self._load_functional_fingerprints(conn)
@@ -218,6 +371,21 @@ class ForgeFeatureContext:
 
         if preload_edges:
             self._build_edge_index(conn)
+
+    def _compact_forge_profiles(self):
+        """Compact _forge_profiles: replace dicts with __slots__ ForgeProfile objects.
+
+        Saves ~130 MiB by eliminating per-dict overhead (832 bytes → ~320 bytes)
+        and key string storage (58 MiB for 31K × 30 keys).
+        Builds a new dict to avoid peak RSS spike from overlapping old+new.
+        """
+        fs_cache = {_EMPTY_FS: _EMPTY_FS}
+        new_profiles = {}
+        for oid, p in self._forge_profiles.items():
+            new_profiles[oid] = ForgeProfile.from_dict(p, fs_cache)
+        self._forge_profiles = new_profiles
+        _log.info("Compacted forge profiles: %d cards, %d unique frozensets cached",
+                   len(self._forge_profiles), len(fs_cache))
 
     def _load_card_data(self, conn):
         """Load card index, type lines, strategies, and phase data."""
@@ -288,13 +456,6 @@ class ForgeFeatureContext:
             a_total = p['affected_self_count'] + p['affected_opp_count']
             p['affected_scope_ratio'] = (p['affected_self_count'] / a_total
                                          if a_total > 0 else 0.5)
-
-        # Pre-compute card-level mechanical unions (avoid redundant set ops in inner loop)
-        self._card_mechs = {}
-        for oid, p in self._forge_profiles.items():
-            mechs = p['verbs'] | p['triggers'] | p['keywords']
-            if mechs:
-                self._card_mechs[oid] = mechs
 
     def _process_forge_ability_row(self, row):
         """Process a single forge_abilities row into the profile dict."""
@@ -612,23 +773,36 @@ class ForgeFeatureContext:
         self._ability_vocab = sorted(all_abilities)
         self._ability_idx = {a: i for i, a in enumerate(self._ability_vocab)}
         self._n_abilities = len(self._ability_vocab)
+        if self._n_abilities > 65535:
+            raise ValueError(
+                f"Ability vocab ({self._n_abilities}) exceeds uint16 range; "
+                "update sparse vector dtype to uint32"
+            )
 
-        # Pre-compute normalized ability vectors per card
+        # Pre-compute normalized ability vectors per card (sparse format).
+        # 99.7% sparse (avg 2.6 nonzero per 754-dim vector), so sparse saves ~90 MiB.
+        # Each card stores (indices: uint16, values: float32) arrays.
         self._ability_vectors = {}
         for oid, p in self._forge_profiles.items():
-            v = np.zeros(self._n_abilities, dtype=np.float32)
+            indices = []
             for a in p['verbs']:
                 idx = self._ability_idx.get(a)
-                if idx is not None: v[idx] = 1.0
+                if idx is not None:
+                    indices.append(idx)
             for a in p['triggers']:
                 idx = self._ability_idx.get(a)
-                if idx is not None: v[idx] = 1.0
+                if idx is not None:
+                    indices.append(idx)
             for a in p['keywords']:
                 idx = self._ability_idx.get(a)
-                if idx is not None: v[idx] = 1.0
-            norm = np.linalg.norm(v)
-            if norm > 0:
-                self._ability_vectors[oid] = v / norm
+                if idx is not None:
+                    indices.append(idx)
+            if indices:
+                idx_arr = np.array(sorted(set(indices)), dtype=np.uint16)
+                n = len(idx_arr)
+                norm = np.sqrt(float(n))  # binary vector: norm = sqrt(count)
+                vals = np.full(n, 1.0 / norm, dtype=np.float32)
+                self._ability_vectors[oid] = (idx_arr, vals)
 
         # Pre-load trigger zones per card (for F36)
         self._card_zones = {}
@@ -1142,14 +1316,12 @@ class ForgeFeatureContext:
     def _build_edge_index(self, conn):
         """Pre-load edge adjacency + strength + events into memory.
 
-        Caches raw numpy arrays to data/edge_index_cache.npz (~2s reload vs ~40s DB scan).
-        Cache key: interaction_edges row count + card count.
-        Stores: src, tgt, exact, strength (float32), event_ids (uint8), event_names.
+        Tries adj cache first (skips loading 271 MiB raw edge arrays).
+        Falls back to edge_index_cache.npz, then DB scan.
         """
         _log.info("Building in-memory edge index...")
         t0 = time.time()
 
-        cache_path = os.path.join(self._artifact_dir, "edge_index_cache.npz")
         # Get edge_count from DB if available (for cache validation).
         # In inference-only mode (synergy.db without interaction_edges),
         # edge_count stays None and we trust the cache unconditionally.
@@ -1162,8 +1334,36 @@ class ForgeFeatureContext:
             pass  # no interaction_edges table (inference-only synergy.db)
         card_count = len(self.oid_to_idx)
 
-        # Try loading from cache (numpy arrays, allow_pickle=False)
-        src = tgt = exact = strength = event_ids = event_names = None
+        # Try adj cache first — avoids loading raw edge arrays entirely (~271 MiB savings)
+        adj_cache_path = os.path.join(self._artifact_dir, "edge_adj_cache.npz")
+        adj_loaded = self._load_adj_cache(adj_cache_path, edge_count, card_count, t0)
+
+        if adj_loaded:
+            # _load_adj_cache sets _bit_to_event if event_names is in cache
+            if not self._bit_to_event:
+                # Legacy adj cache without event_names — load from raw cache
+                self._load_event_names_from_raw_cache(edge_count, card_count)
+        else:
+            # Need raw edge arrays to build adj dicts
+            src, tgt, exact, strength, event_ids, event_names = (
+                self._load_raw_edges(conn, edge_count, card_count, t0)
+            )
+            self._bit_to_event = {i: str(name) for i, name in enumerate(event_names)}
+            self._build_adj_from_arrays(src, tgt, exact, strength, event_ids)
+            self._save_adj_cache(adj_cache_path, edge_count, card_count, event_names)
+            del src, tgt, exact, strength, event_ids
+
+        self._idx_to_oid = {v: k for k, v in self.oid_to_idx.items()}
+        self._n_cards_idx = len(self.oid_to_idx)
+        self._has_edge_index = True
+
+        elapsed = time.time() - t0
+        n_unique = self._adj_out.total_values()
+        _log.info("Edge index built: %.1fs, %s unique outgoing pairs", elapsed, f"{n_unique:,}")
+
+    def _load_raw_edges(self, conn, edge_count, card_count, t0):
+        """Load raw edge arrays from npz cache or DB."""
+        cache_path = os.path.join(self._artifact_dir, "edge_index_cache.npz")
         if os.path.exists(cache_path):
             try:
                 cached = np.load(cache_path, allow_pickle=False)
@@ -1171,61 +1371,58 @@ class ForgeFeatureContext:
                     'strength' in cached and 'event_ids' in cached
                     and 'event_names' in cached
                 )
-                # Validate against DB counts when available
                 if cache_valid and edge_count is not None:
                     cache_valid = (
                         int(cached['edge_count']) == edge_count
                         and int(cached['card_count']) == card_count
                     )
                 if cache_valid:
-                    src = cached['src']
-                    tgt = cached['tgt']
-                    exact = cached['exact']
-                    strength = cached['strength']
-                    event_ids = cached['event_ids']
-                    event_names = cached['event_names']
-                    _log.info("Loaded %s edges from cache (%.1fs)", f"{len(src):,}", time.time()-t0)
+                    _log.info("Loaded %s edges from cache (%.1fs)",
+                              f"{len(cached['src']):,}", time.time() - t0)
+                    return (cached['src'], cached['tgt'], cached['exact'],
+                            cached['strength'], cached['event_ids'], cached['event_names'])
             except (ValueError, KeyError, OSError) as e:
                 _log.warning("Edge index cache load failed, rebuilding: %s", e)
 
-        if src is None:
-            if edge_count is None:
-                raise RuntimeError(
-                    "Edge cache not found and interaction_edges table not available. "
-                    "Run export_inference_db.py to regenerate edge caches."
-                )
-            src, tgt, exact, strength, event_ids, event_names = (
-                self._load_edges_from_db(conn, edge_count, t0)
+        if edge_count is None:
+            raise RuntimeError(
+                "Edge cache not found and interaction_edges table not available. "
+                "Run export_inference_db.py to regenerate edge caches."
             )
+        src, tgt, exact, strength, event_ids, event_names = (
+            self._load_edges_from_db(conn, edge_count, t0)
+        )
+        try:
+            np.savez(cache_path, src=src, tgt=tgt, exact=exact,
+                     strength=strength, event_ids=event_ids,
+                     event_names=event_names,
+                     edge_count=np.array(edge_count), card_count=np.array(card_count))
+            _log.info("Cached to %s", cache_path)
+        except (OSError, ValueError) as e:
+            _log.warning("Cache write failed: %s", e)
+        return src, tgt, exact, strength, event_ids, event_names
+
+    def _load_event_names_from_raw_cache(self, edge_count, card_count):
+        """Load only event_names from edge_index_cache.npz (legacy adj cache compat)."""
+        cache_path = os.path.join(self._artifact_dir, "edge_index_cache.npz")
+        if os.path.exists(cache_path):
             try:
-                np.savez(cache_path, src=src, tgt=tgt, exact=exact,
-                         strength=strength, event_ids=event_ids,
-                         event_names=event_names,
-                         edge_count=np.array(edge_count), card_count=np.array(card_count))
-                _log.info("Cached to %s", cache_path)
-            except Exception as e:
-                _log.warning("Cache write failed: %s", e)
-
-        # Build event lookup dict
-        self._bit_to_event = {i: str(name) for i, name in enumerate(event_names)}
-
-        # Try loading pre-built adjacency dicts from CSR-style npz cache.
-        adj_cache_path = os.path.join(self._artifact_dir, "edge_adj_cache.npz")
-        adj_loaded = self._load_adj_cache(adj_cache_path, edge_count, card_count, t0)
-
-        if not adj_loaded:
-            self._build_adj_from_arrays(src, tgt, exact, strength, event_ids)
-            self._save_adj_cache(adj_cache_path, edge_count, card_count)
-
-        del src, tgt, exact, strength, event_ids
-
-        self._idx_to_oid = {v: k for k, v in self.oid_to_idx.items()}
-        self._n_cards_idx = len(self.oid_to_idx)
-        self._has_edge_index = True
-
-        elapsed = time.time() - t0
-        n_unique = sum(len(v) for v in self._adj_out.values())
-        _log.info("Edge index built: %.1fs, %s unique outgoing pairs", elapsed, f"{n_unique:,}")
+                cached = np.load(cache_path, allow_pickle=False)
+                if 'event_names' in cached:
+                    cache_valid = True
+                    if edge_count is not None:
+                        cache_valid = (
+                            int(cached['edge_count']) == edge_count
+                            and int(cached['card_count']) == card_count
+                        )
+                    if cache_valid:
+                        self._bit_to_event = {
+                            i: str(name) for i, name in enumerate(cached['event_names'])
+                        }
+                        return
+            except (ValueError, KeyError, OSError):
+                pass
+        _log.warning("Could not load event_names from raw edge cache")
 
     def _load_edges_from_db(self, conn, edge_count, t0):
         """Load raw edge arrays from the database."""
@@ -1275,31 +1472,6 @@ class ForgeFeatureContext:
         _log.info("Loaded %s edges from DB (%.1fs)", f"{n:,}", time.time()-t0)
         return src, tgt, exact, strength, event_ids, event_names
 
-    @staticmethod
-    def _adj_dict_to_csr(adj):
-        """Convert adjacency dict {int: np.array(int32)} to CSR-like arrays."""
-        if not adj:
-            return np.array([], dtype=np.int32), np.array([0], dtype=np.int64), np.array([], dtype=np.int32)
-        sorted_keys = np.array(sorted(adj.keys()), dtype=np.int32)
-        lengths = np.array([len(adj[int(k)]) for k in sorted_keys], dtype=np.int64)
-        offsets = np.zeros(len(sorted_keys) + 1, dtype=np.int64)
-        np.cumsum(lengths, out=offsets[1:])
-        total = int(offsets[-1])
-        values = np.empty(total, dtype=np.int32)
-        for i, k in enumerate(sorted_keys):
-            start, end = int(offsets[i]), int(offsets[i + 1])
-            values[start:end] = adj[int(k)]
-        return sorted_keys, offsets, values
-
-    @staticmethod
-    def _csr_to_adj_dict(keys, offsets, values):
-        """Restore adjacency dict from CSR-like arrays."""
-        result = {}
-        for i, k in enumerate(keys):
-            start, end = int(offsets[i]), int(offsets[i + 1])
-            result[int(k)] = values[start:end].copy()
-        return result
-
     def _load_adj_cache(self, adj_cache_path, edge_count, card_count, t0):
         """Try loading adjacency dicts from CSR-style npz cache. Returns True if loaded."""
         if not os.path.exists(adj_cache_path):
@@ -1314,13 +1486,13 @@ class ForgeFeatureContext:
                     return False
             elif bool(cached['has_strength']) != self._preload_strength:
                 return False
-            self._adj_out = self._csr_to_adj_dict(
+            self._adj_out = CSRIndex.from_csr_arrays(
                 cached['adj_out_keys'], cached['adj_out_offsets'], cached['adj_out_values'])
-            self._adj_in = self._csr_to_adj_dict(
+            self._adj_in = CSRIndex.from_csr_arrays(
                 cached['adj_in_keys'], cached['adj_in_offsets'], cached['adj_in_values'])
-            self._exact_out = self._csr_to_adj_dict(
+            self._exact_out = CSRIndex.from_csr_arrays(
                 cached['exact_out_keys'], cached['exact_out_offsets'], cached['exact_out_values'])
-            self._exact_in = self._csr_to_adj_dict(
+            self._exact_in = CSRIndex.from_csr_arrays(
                 cached['exact_in_keys'], cached['exact_in_offsets'], cached['exact_in_values'])
             self._arr_hub_raw = cached['hub_raw']
             self._arr_hub_score = cached['hub_score']
@@ -1333,6 +1505,11 @@ class ForgeFeatureContext:
                     cached, 'agg_str_out')
                 self._agg_strength_in, self._agg_events_in = self._load_agg_from_cache(
                     cached, 'agg_str_in')
+            # Load event_names if present (saves loading 271 MiB raw edge cache)
+            if 'event_names' in cached:
+                self._bit_to_event = {
+                    i: str(name) for i, name in enumerate(cached['event_names'])
+                }
             _log.info("Loaded adjacency dicts from cache (%.1fs)", time.time()-t0)
             return True
         except (ValueError, KeyError, OSError) as e:
@@ -1390,13 +1567,13 @@ class ForgeFeatureContext:
             offsets[i + 1] = pos
         return sorted_keys, offsets, val_keys, val_strengths, val_events
 
-    def _save_adj_cache(self, adj_cache_path, edge_count, card_count):
-        """Save adjacency dicts to CSR-style npz cache."""
+    def _save_adj_cache(self, adj_cache_path, edge_count, card_count, event_names=None):
+        """Save adjacency CSR indices to npz cache."""
         try:
-            ao_k, ao_o, ao_v = self._adj_dict_to_csr(self._adj_out)
-            ai_k, ai_o, ai_v = self._adj_dict_to_csr(self._adj_in)
-            eo_k, eo_o, eo_v = self._adj_dict_to_csr(self._exact_out)
-            ei_k, ei_o, ei_v = self._adj_dict_to_csr(self._exact_in)
+            ao_k, ao_o, ao_v = self._adj_out.to_arrays()
+            ai_k, ai_o, ai_v = self._adj_in.to_arrays()
+            eo_k, eo_o, eo_v = self._exact_out.to_arrays()
+            ei_k, ei_o, ei_v = self._exact_in.to_arrays()
             save_dict = {
                 'edge_count': np.array(edge_count),
                 'card_count': np.array(card_count),
@@ -1408,6 +1585,8 @@ class ForgeFeatureContext:
                 'hub_raw': self._arr_hub_raw,
                 'hub_score': self._arr_hub_score,
             }
+            if event_names is not None:
+                save_dict['event_names'] = event_names
             if self._preload_strength:
                 so_k, so_o, so_vk, so_vs, so_ve = self._serialize_agg_dicts(
                     self._agg_strength_out, self._agg_events_out)
@@ -1423,21 +1602,23 @@ class ForgeFeatureContext:
                 })
             np.savez(adj_cache_path, **save_dict)
             _log.info("Cached adjacency dicts to %s", adj_cache_path)
-        except Exception as e:
+        except (OSError, ValueError) as e:
             _log.warning("Adjacency cache write failed: %s", e)
 
     def _build_adj_from_arrays(self, src, tgt, exact, strength, event_ids):
-        """Build adjacency dicts from raw edge arrays."""
-        self._adj_out = self._build_adj_arrays(src, tgt)
-        self._adj_in = self._build_adj_arrays(tgt, src)
+        """Build CSRIndex adjacency from raw edge arrays."""
+        adj_out_dict = self._build_adj_arrays(src, tgt)
+        adj_in_dict = self._build_adj_arrays(tgt, src)
+        self._adj_out = CSRIndex.from_dict(adj_out_dict)
+        self._adj_in = CSRIndex.from_dict(adj_in_dict)
 
         # Exact-precision adjacency
         if exact.any():
-            self._exact_out = self._build_adj_arrays(src[exact], tgt[exact])
-            self._exact_in = self._build_adj_arrays(tgt[exact], src[exact])
+            self._exact_out = CSRIndex.from_dict(self._build_adj_arrays(src[exact], tgt[exact]))
+            self._exact_in = CSRIndex.from_dict(self._build_adj_arrays(tgt[exact], src[exact]))
         else:
-            self._exact_out = {}
-            self._exact_in = {}
+            self._exact_out = CSRIndex.empty()
+            self._exact_in = CSRIndex.empty()
 
         # Aggregated strength + event dicts for commander edge lookups (no SQL needed).
         # Only built for training (preload_strength=True); inference uses SQL fallback.
@@ -1455,8 +1636,8 @@ class ForgeFeatureContext:
         # Build hub score arrays
         n = len(self.oid_to_idx)
         for i in range(n):
-            n_out = len(self._adj_out.get(i, []))
-            n_in = len(self._adj_in.get(i, []))
+            n_out = self._adj_out.neighbor_count(i)
+            n_in = self._adj_in.neighbor_count(i)
             raw = float(n_out + n_in)
             self._arr_hub_raw[i] = raw
             self._arr_hub_score[i] = np.log2(1.0 + min(raw, 500))

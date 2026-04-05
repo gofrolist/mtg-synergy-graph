@@ -21,6 +21,7 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
     (93 features, 87 active + 6 zeroed) for final ranking.
     """
     _shared_conn = None
+    _extra_meta = {}
     card_meta = {}
     card_oid_lookup = {}
 
@@ -69,6 +70,23 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                                    active_strategies,
                                    color_identity=color_identity,
                                    card_provider=card_provider)
+
+            # Fill card metadata for scored candidates (before conn closes).
+            # Build into _extra_meta (local) — never mutate caller's cards list.
+            _extra_meta = {}
+            known_names = {c["name"] for c in cards}
+            missing_meta = [n for n in candidate_scores if n not in known_names]
+            if missing_meta:
+                for i in range(0, len(missing_meta), 500):
+                    chunk = missing_meta[i:i + 500]
+                    ph = ",".join("?" * len(chunk))
+                    for row in _shared_conn.execute(
+                        f"SELECT name, type_line, cmc FROM cards "
+                        f"WHERE name IN ({ph})", chunk
+                    ).fetchall():
+                        _extra_meta[row[0]] = {
+                            "type_line": row[1] or "", "cmc": row[2] or 0,
+                        }
     else:
         # Fallback: graph scores only (no DB)
         deck_scores = _deck_card_scores(graph, deck_cards)
@@ -91,6 +109,10 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
             "edhrec_rank": c.get("edhrec_rank"),
         }
         card_oid_lookup[name] = c.get("oracle_id", "")
+
+    # Merge extra metadata from DB for scored candidates not in original cards
+    if _extra_meta:
+        card_meta.update(_extra_meta)
 
     # Sort by total synergy
     ranked = sorted(candidate_scores.items(), key=lambda x: x[1]["total"], reverse=True)

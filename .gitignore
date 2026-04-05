@@ -94,3 +94,4 @@ mtg_synergy.db
 
 # Inference export artifacts (regenerable via scripts/export_inference_db.py)
 data/inference/
+.ecc/

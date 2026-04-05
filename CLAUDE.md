@@ -123,7 +123,7 @@ python3 scripts/export_inference_db.py                # Build data/inference/ (~
 python3 scripts/export_inference_db.py --output /path # Custom output directory
 
 # Tests
-uv run pytest tests/ -v                        # Run all 136 tests
+uv run pytest tests/ -v                        # Run all 152 tests
 uv run pytest tests/test_recommendation_quality.py -v              # Pipeline quality tests only
 ```
 
@@ -229,11 +229,18 @@ python3 scripts/export_inference_db.py                          # 7. Export infe
   forge_ability_cosine 3.9%, cmdr_2hop_count 3.8%, cmc 3.4%,
   mech_tempo_fwd 2.5%, func_full_cosine 2.5%, mech_board_rev 2.4%
 - EDHREC_FREE=1 env var disables edhrec_deck_pct for pure Forge-native inference
-- Edge index: two-layer cache (npz raw edges + adjacency dict cache)
-  First run: npz ~0.1s + adj build ~11s. Subsequent: adj cache ~0.1s
+- Edge index: two-layer cache (npz raw edges + CSR adjacency cache)
+  Warm path: adj cache loaded directly (~0.1s), raw edge arrays never touched
+  Cold path: npz ~0.1s + adj build ~11s (auto-saved to adj cache)
   Auto-invalidates on MAX(rowid), card count, or strength mode change
   (uses MAX(rowid) instead of COUNT(*) to avoid 26s full table scan)
-- Edge index pre-loaded at inference: CmdrFeatureContext uses in-memory adjacency (~4s total)
+- CSRIndex: memory-efficient adjacency using sorted keys + offsets + values arrays.
+  O(log n) lookup via np.searchsorted. Saves ~100 MiB vs Python dict unpacking.
+- Ability vectors: sparse format (uint16 indices + float32 values per card).
+  99.7% sparse (avg 2.6 nonzero per 754-dim), saves ~89 MiB vs dense arrays.
+- ForgeProfile: __slots__-based profile objects replace per-card dicts.
+  312 bytes vs 832 bytes per profile, frozenset dedup (8830 unique across 570K refs).
+- Edge index pre-loaded at inference: CmdrFeatureContext uses in-memory CSR adjacency (~3s total)
 - Per-grade sample weights: grade 5 x3, grade 4 x2
 - HP sweep tool: `scripts/sweep_hyperparams.py` — two-phase sweep with pipeline validation
 - Post-scoring penalties (scoring.py `_apply_penalties()`):
@@ -271,7 +278,7 @@ python3 scripts/export_inference_db.py                          # 7. Export infe
    creature ETB / sacrifice outlet / spellcast pattern matches
 4. Sort and output top N with clickable Scryfall hyperlinks (OSC 8)
 Total time: ~0.5s per commander with warm ForgeFeatureContext (pass forge_ctx=
-  to score_forge_candidates to reuse). Cold start: ~5s CLI wall time (warm adj cache).
+  to score_forge_candidates to reuse). Cold start: ~3.3s CLI wall time (warm adj cache).
 ```
 
 ### API-Ready Inference (warm server pattern)
@@ -290,8 +297,8 @@ score_forge_candidates(candidate_scores, cards, synergy_conn, commander, deck_ca
 cmdr_ctx = CmdrFeatureContext(ctx, cmdr_oids=["oid1", "oid2"], deck_oids=deck_oids)
 ```
 
-Runtime footprint (warm server): ~1.1 GB RSS, ~650 MB disk (inference artifacts).
-Minimum deployment: 2 GB RAM VPS with persistent volume.
+Runtime footprint (warm server): ~490 MB RSS, ~650 MB disk (inference artifacts).
+Minimum deployment: 1 GB RAM VPS with persistent volume.
 
 ### Hidden Gem Engine (scripts/synergy_graph.py --commander "Name" --gems)
 
@@ -324,7 +331,7 @@ packages/
 | `recommend/engine.py` | `recommend_cards()` — forge model recommendation pipeline |
 | `recommend/scoring.py` | `color_identity_filter()`, `score_forge_candidates(card_provider=)`, `batch_recommend(card_provider=)`, `_apply_penalties()`, `_apply_mechanical_bonus()`, `_load_gbm()` |
 | `recommend/hidden_gems.py` | `find_hidden_gems(card_provider=, cmdr_oids=)` — pure mechanical synergy engine |
-| `recommend/forge_features.py` | `ForgeFeatureContext(conn, card_provider=)` — data loading, pre-computation |
+| `recommend/forge_features.py` | `ForgeFeatureContext(conn, card_provider=)` — data loading, pre-computation. `CSRIndex` (memory-efficient adjacency), `ForgeProfile` (__slots__-based card profiles) |
 | `recommend/forge_compute.py` | `CmdrFeatureContext(ctx, cmdr_oids=[...])` — per-commander features, partner pair support |
 | `recommend/mechanics_vectors.py` | 116-dim forge mechanics vectors: shared game concept space (36 concepts + 80 subtypes) |
 | `recommend/cmdr_patterns.py` | `detect_cmdr_patterns()` — shared commander mechanical flag detection |
@@ -369,7 +376,7 @@ packages/
 - Inference code: `from mtg_synergy...`, training code: `from mtg_synergy_train...`
 - CardProvider protocol (`protocol.py`) abstracts card data — inference never queries `cards` table directly
 - Partner pair support: `CmdrFeatureContext(ctx, cmdr_oids=["oid1", "oid2"])` merges profiles/vectors/edges
-- Tests: 152 tests in `tests/`, run with `uv run pytest tests/`
+- Tests: 152 tests in `tests/`, run with `uv run pytest tests/` (~15s)
   - 7 end-to-end pipeline quality tests (`test_recommendation_quality.py`)
   - Requires trained model + populated DB (auto-skipped if missing)
 - After training, run `--validate` then export: `python3 scripts/export_inference_db.py` (~646 MB)

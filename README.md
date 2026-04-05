@@ -108,7 +108,7 @@ python3 scripts/compare_edhrec.py --all --quiet                    # All command
 ### Tests
 
 ```bash
-uv run pytest tests/ -v    # Run all 136 tests
+uv run pytest tests/ -v    # Run all 152 tests
 ```
 
 ## Architecture
@@ -162,7 +162,7 @@ python3 scripts/train_fusion_model.py --rebuild-features     # 6. Retrain (~7 mi
 2. Score all candidates with GBM (batch predict, ~0.5s for 13k cards)
 3. Post-scoring: anti-synergy penalties + mechanical synergy bonus
 4. Sort and output top N with Scryfall hyperlinks
-Total: ~3s (cached) / ~7s (first run)
+Total: ~3.3s CLI wall time (~490 MB RSS, warm cache)
 ```
 
 ## Project Structure
@@ -203,7 +203,7 @@ Total: ~3s (cached) / ~7s (first run)
 │   │   └── ...                # AST types, parsers, resolvers
 │   └── analysis/              # Strategy detection + tribal type analysis
 │
-├── tests/                     # 136 tests
+├── tests/                     # 152 tests
 └── data/                      # DB, models, caches (mostly gitignored)
 ```
 

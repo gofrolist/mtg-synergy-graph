@@ -70,9 +70,9 @@ def test_forge_profiles_loaded():
             f"Profile keys mismatch.\n  Missing: {all_expected - set(profile.keys())}"
             f"\n  Extra: {set(profile.keys()) - all_expected}"
         )
-        # Set-valued fields should be sets
+        # Set-valued fields should be sets or frozensets (compacted after init)
         for key in expected_set_keys:
-            assert isinstance(profile[key], set), f"{key} should be a set"
+            assert isinstance(profile[key], (set, frozenset)), f"{key} should be a set/frozenset"
         # Bool-valued fields should be bool
         for key in expected_bool_keys:
             assert isinstance(profile[key], bool), f"{key} should be a bool"
@@ -546,11 +546,12 @@ class TestAbilityVectorsLoaded:
             pass  # conn is cached, do not close
 
     def test_ability_vectors_normalized(self):
-        """Each ability vector should be L2-normalized."""
+        """Each ability vector should be L2-normalized (sparse format)."""
         ctx, conn = _make_ctx()
         try:
-            for oid, vec in list(ctx._ability_vectors.items())[:10]:
-                norm = float(np.linalg.norm(vec))
+            for oid, sparse in list(ctx._ability_vectors.items())[:10]:
+                idx, vals = sparse
+                norm = float(np.linalg.norm(vals))
                 assert abs(norm - 1.0) < 1e-5, (
                     f"Ability vector for {oid} has norm {norm}, expected 1.0"
                 )
@@ -585,8 +586,8 @@ class TestNoOracleTextInFeatures:
 class TestFeatureCount:
     """Verify compute_card_features returns exactly 38 elements."""
 
-    def test_feature_count_is_71(self):
-        """Feature vector length should be 71."""
+    def test_feature_count_is_93(self):
+        """Feature vector length should be 93."""
         ctx, conn = _make_ctx()
         try:
             cmdr = _make_cmdr(ctx, KRENKO_OID, subtypes={"goblin"})
@@ -600,7 +601,7 @@ class TestFeatureCount:
                 pytest.skip("No card found for feature count test")
             features = _compute_features(ctx, cmdr, found_oid, conn)
             assert len(features) == 93, (
-                f"Expected 107 features, got {len(features)}"
+                f"Expected 93 features, got {len(features)}"
             )
         finally:
             pass  # conn is cached, do not close
@@ -763,7 +764,7 @@ def test_feature_count_71():
             card_oid, card_meta[0] or "", float(card_meta[1] or 0),
             ctx, cmdr_ctx,
         )
-        assert len(feats) == 93, f"Expected 107 features, got {len(feats)}"
+        assert len(feats) == 93, f"Expected 93 features, got {len(feats)}"
     finally:
         pass  # conn is cached, do not close
 
