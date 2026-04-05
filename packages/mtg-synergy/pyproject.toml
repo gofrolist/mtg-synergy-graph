@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "mtg-synergy"
-version = "0.1.0"
+dynamic = ["version"]
 description = "MTG EDH/Commander card synergy inference library — Forge mechanics + LightGBM LambdaRank"
 requires-python = ">=3.12"
 dependencies = [
@@ -12,5 +12,13 @@ dependencies = [
     "lightgbm>=4.0",
 ]
 
+[tool.hatch.version]
+source = "vcs"
+raw-options.root = "../.."
+tag-pattern = "v(?P<version>.*)"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/mtg_synergy"]
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/mtg_synergy/_version.py"

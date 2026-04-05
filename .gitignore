@@ -75,6 +75,7 @@ data/kyler_tags.json
 
 # Build artifacts
 *.egg-info/
+packages/mtg-synergy/src/mtg_synergy/_version.py
 main.py
 model_output/
 experiment_results.json

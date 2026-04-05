@@ -3,10 +3,8 @@ name: Publish mtg-synergy wheel
 on:
   workflow_dispatch:
   push:
-    branches: [main]
-    paths:
-      - 'packages/mtg-synergy/**'
-      - '.github/workflows/publish-wheel.yml'
+    tags:
+      - 'v*'
 
 permissions:
   contents: write
@@ -16,31 +14,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # hatch-vcs needs full history for version
 
       - uses: astral-sh/setup-uv@v5
 
       - name: Build wheel
         run: uv build packages/mtg-synergy
 
-      - name: Get version
+      - name: Get version from wheel filename
         id: version
         run: |
-          VERSION=$(grep '^version' packages/mtg-synergy/pyproject.toml | sed 's/.*"\(.*\)"/\1/')
-          SHA_SHORT=$(git rev-parse --short HEAD)
-          echo "tag=mtg-synergy-v${VERSION}+${SHA_SHORT}" >> "$GITHUB_OUTPUT"
+          WHEEL=$(ls dist/*.whl)
+          # Extract version from wheel filename: mtg_synergy-X.Y.Z-py3-none-any.whl
+          VERSION=$(basename "$WHEEL" | sed 's/mtg_synergy-\(.*\)-py3-none-any.whl/\1/')
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Built version: $VERSION"
 
-      - name: Create release with wheel
+      - name: Create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.version.outputs.tag }}
+          TAG: ${{ github.ref_name }}
           VERSION: ${{ steps.version.outputs.version }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
         run: |
-          gh release delete "$TAG" --yes 2>/dev/null || true
-          git tag -f "$TAG"
-          git push -f origin "$TAG"
+          SHA_SHORT="${SHA:0:7}"
           gh release create "$TAG" \
             dist/*.whl \
             --title "mtg-synergy ${VERSION}" \
-            --notes "Auto-built from $(git rev-parse --short HEAD)" \
+            --notes "Built from ${SHA_SHORT}" \
             --latest
