@@ -3,7 +3,7 @@ import json
 import logging
 import re
 from collections import defaultdict, namedtuple
-from mtg_synergy.causal.types import Edge, EdgeDetail
+from mtg_synergy_train.causal.types import Edge, EdgeDetail
 
 _log = logging.getLogger(__name__)
 _RE_LIGHT_EVENT = re.compile(r'"event"\s*:\s*"([^"]*)"')

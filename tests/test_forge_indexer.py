@@ -1,8 +1,8 @@
 """Tests for Forge-native causal indexer."""
 import sqlite3
 import pytest
-from mtg_synergy.causal.forge_indexer import ForgeIndex, build_forge_index
-from mtg_synergy.parse.forge_import import ensure_forge_schema, parse_forge_card_file, import_card_to_db
+from mtg_synergy_train.causal.forge_indexer import ForgeIndex, build_forge_index
+from mtg_synergy_train.parse.forge_import import ensure_forge_schema, parse_forge_card_file, import_card_to_db
 
 
 KRENKO = """Name:Krenko, Mob Boss

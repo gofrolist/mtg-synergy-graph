@@ -9,7 +9,6 @@ Usage:
 """
 import json
 import sqlite3
-from urllib.parse import quote
 
 import numpy as np
 
@@ -20,7 +19,9 @@ from mtg_synergy.recommend.forge_features import (
 from mtg_synergy.recommend.mechanics_vectors import _concept_idx
 
 
-def find_hidden_gems(cmdr_oid, conn, top_n=30, popularity_cap=0.05, verbose=True):
+def find_hidden_gems(cmdr_oid, conn, top_n=30, popularity_cap=0.05, verbose=True,
+                     *, card_provider=None, cmdr_name=None, color_identity=None,
+                     cmdr_oids=None, forge_ctx=None):
     """Find mechanically-synergistic cards that aren't commonly played.
 
     Scores cards by pure mechanical interaction with the commander:
@@ -33,23 +34,31 @@ def find_hidden_gems(cmdr_oid, conn, top_n=30, popularity_cap=0.05, verbose=True
     to surface hidden gems.
 
     Args:
-        cmdr_oid: commander oracle_id
-        conn: sqlite3 connection
+        cmdr_oid: commander oracle_id (primary, for backward compat)
+        conn: sqlite3 connection (for synergy data; None if forge_ctx given)
         top_n: number of results
         popularity_cap: max edhrec_deck_pct (0.05 = top 5% excluded)
         verbose: print progress
+        card_provider: CardProvider for card data (optional)
+        cmdr_name: commander name for display (optional, avoids cards lookup)
+        color_identity: set of colors (optional, avoids cards lookup)
+        cmdr_oids: list of commander oids for partner support (optional)
+        forge_ctx: pre-loaded ForgeFeatureContext (optional)
 
     Returns:
         list of (card_name, score, reasons) tuples
     """
-    ctx = ForgeFeatureContext(conn, preload_edges=True, preload_strength=False)
-    cmdr_ctx = CmdrFeatureContext(ctx, cmdr_oid, set())
+    oids = cmdr_oids or [cmdr_oid]
+    ctx = forge_ctx or ForgeFeatureContext(conn, preload_edges=True,
+                                           preload_strength=False,
+                                           card_provider=card_provider)
+    cmdr_ctx = CmdrFeatureContext(ctx, cmdr_oids=oids, deck_oids=set())
 
-    # Commander mechanical profile
-    cmdr_profile = ctx._forge_profiles.get(cmdr_oid, {})
-    cmdr_produces = ctx._mech_produces.get(cmdr_oid)
-    cmdr_consumes = ctx._mech_consumes.get(cmdr_oid)
-    cmdr_func = ctx._func_fingerprints.get(cmdr_oid)
+    # Commander mechanical profile (merged for partners)
+    cmdr_profile = cmdr_ctx.cmdr_profile
+    cmdr_produces = cmdr_ctx.cmdr_produces
+    cmdr_consumes = cmdr_ctx.cmdr_consumes
+    cmdr_func = cmdr_ctx.cmdr_func
     cmdr_verbs = cmdr_profile.get('verbs', set())
     cmdr_triggers = cmdr_profile.get('triggers', set())
     cmdr_trigger_filters = cmdr_profile.get('trigger_filters', set())
@@ -57,9 +66,15 @@ def find_hidden_gems(cmdr_oid, conn, top_n=30, popularity_cap=0.05, verbose=True
     cmdr_counters = cmdr_profile.get('counter_types', set())
 
     # Commander name for display
-    cmdr_name_row = conn.execute(
-        "SELECT name FROM cards WHERE oracle_id = ?", (cmdr_oid,)).fetchone()
-    cmdr_name = cmdr_name_row[0] if cmdr_name_row else cmdr_oid[:8]
+    if cmdr_name is None:
+        if card_provider is not None:
+            # Reverse-lookup: oid → name via name_to_oid dict
+            oid_to_name = {v: k for k, v in card_provider.get_name_to_oid().items()}
+            cmdr_name = oid_to_name.get(cmdr_oid, cmdr_oid[:8])
+        else:
+            row = conn.execute(
+                "SELECT name FROM cards WHERE oracle_id = ?", (cmdr_oid,)).fetchone()
+            cmdr_name = row[0] if row else cmdr_oid[:8]
 
     if verbose:
         print(f"\nHidden Gem Engine — {cmdr_name}")
@@ -70,24 +85,39 @@ def find_hidden_gems(cmdr_oid, conn, top_n=30, popularity_cap=0.05, verbose=True
             print(f"  Commander subtypes: {cmdr_subtypes}")
 
     # Get all color-legal candidates
-    ci_row = conn.execute(
-        "SELECT color_identity FROM cards WHERE oracle_id = ?", (cmdr_oid,)
-    ).fetchone()
-    color_identity = set(json.loads(ci_row[0] or "[]")) if ci_row else set()
+    if color_identity is None:
+        if card_provider is not None:
+            cmdrs = card_provider.get_commanders([cmdr_oid])
+            color_identity = cmdrs[0]["color_identity"] if cmdrs else set()
+        else:
+            ci_row = conn.execute(
+                "SELECT color_identity FROM cards WHERE oracle_id = ?", (cmdr_oid,)
+            ).fetchone()
+            color_identity = set(json.loads(ci_row[0] or "[]")) if ci_row else set()
 
-    candidates = {}
-    for row in conn.execute(
-        "SELECT oracle_id, name, type_line, cmc, color_identity FROM cards "
-        "WHERE legal_commander = 1 AND type_line NOT LIKE '%Token%'"
-    ):
-        oid, name, tl, cmc, ci_json = row
-        if oid == cmdr_oid:
-            continue
-        card_ci = set(json.loads(ci_json or "[]"))
-        if card_ci <= color_identity:
-            candidates[oid] = {
-                "name": name, "type_line": tl or "", "cmc": cmc or 0,
+    cmdr_oid_set = set(oids)
+    if card_provider is not None:
+        legal = card_provider.get_color_legal(color_identity, exclude_oids=cmdr_oid_set)
+        candidates = {}
+        for cd in legal:
+            candidates[cd["oracle_id"]] = {
+                "name": cd["name"], "type_line": cd.get("type_line", ""),
+                "cmc": cd.get("cmc", 0),
             }
+    else:
+        candidates = {}
+        for row in conn.execute(
+            "SELECT oracle_id, name, type_line, cmc, color_identity FROM cards "
+            "WHERE legal_commander = 1 AND type_line NOT LIKE '%Token%'"
+        ):
+            oid, name, tl, cmc, ci_json = row
+            if oid in cmdr_oid_set:
+                continue
+            card_ci = set(json.loads(ci_json or "[]"))
+            if card_ci <= color_identity:
+                candidates[oid] = {
+                    "name": name, "type_line": tl or "", "cmc": cmc or 0,
+                }
 
     if verbose:
         print(f"  Color-legal candidates: {len(candidates)}")
@@ -227,9 +257,18 @@ def find_hidden_gems(cmdr_oid, conn, top_n=30, popularity_cap=0.05, verbose=True
             if pct > popularity_cap:
                 popular.add(oid)
 
-    gems = [(name, score, reasons) for oid, name, score, reasons in scored
-            if oid not in popular]
-    gems.sort(key=lambda x: -x[1])
+    gems = []
+    for oid, name, score, reasons in scored:
+        if oid not in popular:
+            card = candidates[oid]
+            gems.append({
+                "name": name,
+                "score": score,
+                "reasons": reasons,
+                "type_line": card.get("type_line", ""),
+                "cmc": card.get("cmc", 0),
+            })
+    gems.sort(key=lambda x: -x["score"])
 
     if verbose:
         n_filtered = sum(1 for oid, _, s, _ in scored if oid in popular and s > 0)
@@ -239,23 +278,18 @@ def find_hidden_gems(cmdr_oid, conn, top_n=30, popularity_cap=0.05, verbose=True
     return gems[:top_n]
 
 
-def show_hidden_gems(cmdr_oid, conn, top_n=30, popularity_cap=0.05):
-    """Display hidden gem recommendations with OSC 8 clickable links."""
+def show_hidden_gems(cmdr_oid, conn, top_n=30, popularity_cap=0.05, **kwargs):
+    """Display hidden gem recommendations in the same table format as --recommend."""
+    from mtg_synergy.recommend.display import print_card_table
+
     gems = find_hidden_gems(cmdr_oid, conn, top_n=top_n,
-                            popularity_cap=popularity_cap)
+                            popularity_cap=popularity_cap, **kwargs)
 
     if not gems:
         print("  No hidden gems found.")
         return
 
-    print(f"\n{'─' * 70}")
-    print(f"  HIDDEN GEMS — mechanically synergistic, rarely played")
-    print(f"  (cards appearing in <{popularity_cap*100:.0f}% of EDHREC decks)")
-    print(f"{'─' * 70}\n")
-
-    for i, (name, score, reasons) in enumerate(gems, 1):
-        # OSC 8 clickable Scryfall link
-        url = f"https://scryfall.com/search?q=!%22{quote(name)}%22"
-        link = f"\033]8;;{url}\033\\{name}\033]8;;\033\\"
-        reason_str = " + ".join(reasons[:3])
-        print(f"  {i:2d}. {link:40s}  score={score:.1f}  [{reason_str}]")
+    print_card_table(
+        f"TOP {top_n} HIDDEN GEMS — mechanically synergistic, rarely played",
+        gems, top_n=top_n,
+    )

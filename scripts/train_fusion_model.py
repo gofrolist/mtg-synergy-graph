@@ -906,7 +906,7 @@ def _load_pairs_for_features(conn):
     )
     print(f"  Negative pairs: {len(neg_pairs)}")
 
-    for cmdr_oid, card_oid, label in neg_pairs:
+    for cmdr_oid, card_oid, _ in neg_pairs:
         positives_by_cmdr.setdefault(cmdr_oid, []).append((card_oid, 0))
 
     grade_counts = {}

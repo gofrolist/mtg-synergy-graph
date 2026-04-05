@@ -43,8 +43,8 @@ def main():
         download_forge()
         return
 
-    from mtg_synergy.db import get_connection
-    from mtg_synergy.parse.forge_import import import_all, show_stats, build_name_mapping
+    from mtg_synergy_train.db import get_connection
+    from mtg_synergy_train.parse.forge_import import import_all, show_stats, build_name_mapping
 
     conn = get_connection()
     if args.do_import:

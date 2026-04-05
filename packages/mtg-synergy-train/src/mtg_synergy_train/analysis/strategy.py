@@ -1,5 +1,8 @@
 """Strategy detection, candidate filtering, and commander-based deck building."""
+import logging
 from collections import Counter
+
+_log = logging.getLogger(__name__)
 
 
 def _detect_deck_types(cards: list[dict], deck_cards: set[str],
@@ -33,7 +36,7 @@ def _detect_deck_types(cards: list[dict], deck_cards: set[str],
             dominant.add(t)
 
     if dominant:
-        print(f"  Detected tribal types: {', '.join(sorted(dominant))} "
-              f"(>{threshold:.0%} of {creature_count} creatures)")
+        _log.info("Detected tribal types: %s (>%d%% of %d creatures)",
+                  ", ".join(sorted(dominant)), int(threshold * 100), creature_count)
 
     return dominant

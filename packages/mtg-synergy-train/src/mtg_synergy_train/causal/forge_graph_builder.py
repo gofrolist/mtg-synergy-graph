@@ -3,11 +3,11 @@
 Matches effect producers against trigger responders using ForgeFilter
 matching and IDF weighting.
 """
-from mtg_synergy.causal.forge_indexer import ForgeIndex
-from mtg_synergy.causal.idf import PRECISION_STRENGTH
-from mtg_synergy.causal.types import Edge, EdgeDetail
-from mtg_synergy.parse.forge_filter_parser import parse_forge_filter
-from mtg_synergy.parse.forge_types import ForgeFilter
+from mtg_synergy_train.causal.forge_indexer import ForgeIndex
+from mtg_synergy_train.causal.idf import PRECISION_STRENGTH
+from mtg_synergy_train.causal.types import Edge, EdgeDetail
+from mtg_synergy_train.parse.forge_filter_parser import parse_forge_filter
+from mtg_synergy_train.parse.forge_types import ForgeFilter
 
 
 def compute_filter_match(responder_filter: ForgeFilter, producer_detail: dict,

@@ -4,8 +4,8 @@ import argparse
 import json as _json
 import re
 
-from mtg_synergy.db import get_connection
-from mtg_synergy.causal import ensure_causal_schema
+from mtg_synergy_train.db import get_connection
+from mtg_synergy_train.causal import ensure_causal_schema
 
 _INSERT_EDGE_SQL = (
     "INSERT OR IGNORE INTO interaction_edges "
@@ -33,8 +33,8 @@ def _build_synthetic_edges(conn, idx, name_to_oid):
     and "broad" edges for card_type matches (e.g., any creature → Soul Warden).
     Streams edges to DB in chunks to avoid holding millions in memory.
     """
-    from mtg_synergy.parse.forge_filter_parser import parse_forge_filter
-    from mtg_synergy.parse.forge_types import ForgeFilter
+    from mtg_synergy_train.parse.forge_filter_parser import parse_forge_filter
+    from mtg_synergy_train.parse.forge_types import ForgeFilter
 
     # (trigger_mode, card_type_sql, resp_dest_filter, include_broad)
     # resp_dest_filter: only include responders matching this destination (None = any)
@@ -407,7 +407,7 @@ def _build_continuous_pump_edges(conn, name_to_oid):
     batch = []
     total = 0
     detail_pump = _json.dumps({"event": "ContinuousPump", "filter_precision": "exact"})
-    for pump_oid, pump_name, req_subtypes, req_colors, base in pump_cards:
+    for pump_oid, _, req_subtypes, req_colors, base in pump_cards:
         for creature_oid, creature_subs in creature_subtypes.items():
             if creature_oid == pump_oid:
                 continue
@@ -643,9 +643,9 @@ def _build_theme_synergy_edges(conn, name_to_oid):
 
 def _build_forge_graph(conn):
     """Build the full Forge-native causal interaction graph."""
-    from mtg_synergy.causal.forge_indexer import build_forge_index
-    from mtg_synergy.causal.forge_graph_builder import build_forge_edges
-    from mtg_synergy.causal import store_edges
+    from mtg_synergy_train.causal.forge_indexer import build_forge_index
+    from mtg_synergy_train.causal.forge_graph_builder import build_forge_edges
+    from mtg_synergy_train.causal import store_edges
     print("Building Forge-native graph...")
     name_to_oid = {}
     for row in conn.execute("SELECT forge_name, oracle_id FROM forge_name_map"):

@@ -1,12 +1,12 @@
 """End-to-end test: Forge import -> index -> graph -> score."""
 import sqlite3
 import pytest
-from mtg_synergy.parse.forge_import import (
+from mtg_synergy_train.parse.forge_import import (
     ensure_forge_schema, parse_forge_card_file, import_card_to_db
 )
-from mtg_synergy.causal.forge_indexer import build_forge_index
-from mtg_synergy.causal.forge_graph_builder import build_forge_edges
-from mtg_synergy.causal import ensure_causal_schema
+from mtg_synergy_train.causal.forge_indexer import build_forge_index
+from mtg_synergy_train.causal.forge_graph_builder import build_forge_edges
+from mtg_synergy_train.causal import ensure_causal_schema
 
 
 KRENKO = """Name:Krenko, Mob Boss
@@ -49,12 +49,12 @@ def test_end_to_end_forge_graph(tmp_db):
     assert len(edges) > 0
 
     # Store edges
-    from mtg_synergy.causal import store_edges
+    from mtg_synergy_train.causal import store_edges
     count = store_edges(conn, edges)
     assert count > 0
 
     # Verify we can load and score
-    from mtg_synergy.causal import CausalContext
+    from mtg_synergy_train.causal import CausalContext
     ctx = CausalContext(conn, "Krenko, Mob Boss", {"Purphoros, God of the Forge"})
     score = ctx.causal_score("Impact Tremors")
     assert score > 0  # Impact Tremors should synergize with Krenko

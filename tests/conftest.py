@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.join(_project_root, "scripts"))
 @pytest.fixture
 def tmp_db(tmp_path):
     """Create a temporary SQLite DB with the full schema for testing."""
-    from mtg_synergy import tag_db
+    from mtg_synergy_train import tag_db
     db_path = str(tmp_path / "test_tags.db")
     conn = sqlite3.connect(db_path)
     conn.executescript(tag_db.SCHEMA)

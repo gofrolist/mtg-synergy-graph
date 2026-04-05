@@ -23,7 +23,7 @@ import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from mtg_synergy.db import get_connection
+from mtg_synergy_train.db import get_connection
 
 BASIC_LANDS = {"Plains", "Island", "Swamp", "Mountain", "Forest",
                "Wastes", "Snow-Covered Plains", "Snow-Covered Island",

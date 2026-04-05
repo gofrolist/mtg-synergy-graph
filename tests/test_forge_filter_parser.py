@@ -1,6 +1,6 @@
 """Tests for Forge filter grammar parser."""
 import pytest
-from mtg_synergy.parse.forge_filter_parser import parse_forge_filter
+from mtg_synergy_train.parse.forge_filter_parser import parse_forge_filter
 
 
 def test_simple_card_type():

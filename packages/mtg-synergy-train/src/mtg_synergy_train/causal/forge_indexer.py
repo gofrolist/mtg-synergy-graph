@@ -6,8 +6,8 @@ what events each card produces.
 from collections import defaultdict
 from dataclasses import dataclass, field
 
-from mtg_synergy.causal.idf import compute_event_idf as _compute_event_idf
-from mtg_synergy.causal.verb_event_map import verb_to_events
+from mtg_synergy_train.causal.idf import compute_event_idf as _compute_event_idf
+from mtg_synergy_train.causal.verb_event_map import verb_to_events
 
 
 @dataclass

@@ -129,7 +129,7 @@ def _find_oid_by_name(conn, name):
 
 def _compute_features(ctx, cmdr, card_oid, conn):
     """Compute forge feature vector for a single card."""
-    from mtg_synergy.recommend.forge_features import compute_card_features
+    from mtg_synergy.recommend.forge_compute import compute_card_features
     row = conn.execute(
         "SELECT type_line, cmc FROM cards WHERE oracle_id = ?", (card_oid,)
     ).fetchone()
@@ -750,7 +750,7 @@ def test_feature_count_71():
     """compute_card_features should return 74 features."""
     ctx, conn = _make_ctx()
     try:
-        from mtg_synergy.recommend.forge_features import (
+        from mtg_synergy.recommend.forge_compute import (
             compute_card_features, CmdrFeatureContext,
         )
         krenko_oid = KRENKO_OID

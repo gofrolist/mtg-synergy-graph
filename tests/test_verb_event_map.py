@@ -1,6 +1,6 @@
 """Tests for Forge verb → trigger event mapping."""
 import pytest
-from mtg_synergy.causal.verb_event_map import verb_to_events
+from mtg_synergy_train.causal.verb_event_map import verb_to_events
 
 
 def test_token_produces_changes_zone():

@@ -142,16 +142,32 @@ class ForgeFeatureContext:
     training (build_forge_feature_matrix) and inference (score_forge_candidates).
     """
 
-    def __init__(self, conn, preload_edges=False, preload_strength=False):
+    def __init__(self, conn, preload_edges=False, preload_strength=False,
+                 card_provider=None, artifact_dir=None):
         self.conn = conn
         self._has_edge_index = False
         self._preload_strength = preload_strength
+        # Store artifact dir for edge cache paths
+        if artifact_dir is not None:
+            self._artifact_dir = str(artifact_dir)
+        else:
+            from mtg_synergy.config import ARTIFACT_DIR
+            self._artifact_dir = str(ARTIFACT_DIR)
 
-        # Check for materialized event column (speeds up commander edge queries)
-        self._has_event_col = any(
-            r[1] == "event"
-            for r in conn.execute("PRAGMA table_info(interaction_edges)")
-        )
+        # Default to SqliteCardProvider if none provided
+        if card_provider is None:
+            from mtg_synergy.protocol import SqliteCardProvider
+            card_provider = SqliteCardProvider(conn)
+        self._card_provider = card_provider
+
+        # Check if interaction_edges table exists and has event column
+        _edge_cols = []
+        try:
+            _edge_cols = [r[1] for r in conn.execute("PRAGMA table_info(interaction_edges)")]
+        except sqlite3.OperationalError:
+            pass
+        self._has_edges_table = bool(_edge_cols)
+        self._has_event_col = "event" in _edge_cols
 
         self._load_card_data(conn)
         self._load_forge_profiles(conn)  # populates self._raw_abilities
@@ -192,7 +208,8 @@ class ForgeFeatureContext:
         # Pass pre-loaded abilities to avoid redundant forge_abilities DB scan
         from mtg_synergy.recommend.mechanics_vectors import build_mechanics_vectors
         self._mech_produces, self._mech_consumes, self._mech_dim, _ = \
-            build_mechanics_vectors(conn, preloaded_abilities=self._raw_abilities)
+            build_mechanics_vectors(conn, preloaded_abilities=self._raw_abilities,
+                                   type_lines=self._type_lines)
         # Free raw abilities list after mechanics vectors are built (~5MB)
         del self._raw_abilities
 
@@ -204,18 +221,11 @@ class ForgeFeatureContext:
 
     def _load_card_data(self, conn):
         """Load card index, type lines, strategies, and phase data."""
-        # Build oid_to_idx from cards table
-        self.oid_to_idx = {}
-        for i, (oid,) in enumerate(
-            conn.execute("SELECT DISTINCT oracle_id FROM cards")
-        ):
-            self.oid_to_idx[oid] = i
+        # Load type_lines from CardProvider (replaces cards table queries)
+        self._type_lines = self._card_provider.get_type_lines()
 
-        # Pre-cache type_lines for CmdrFeatureContext (avoids per-commander SQL)
-        self._type_lines = {}
-        for oid, tl in conn.execute("SELECT oracle_id, type_line FROM cards"):
-            if tl:
-                self._type_lines[oid] = tl
+        # Build oid_to_idx from all known oracle_ids (sorted for deterministic ordering)
+        self.oid_to_idx = {oid: i for i, oid in enumerate(sorted(self._type_lines))}
 
         # Card strategies
         self.card_strats = {}
@@ -855,10 +865,8 @@ class ForgeFeatureContext:
                 "SELECT COUNT(DISTINCT commander_slug) FROM edhrec_card_synergy"
             ).fetchone()[0]
             if total_cmdrs > 0:
-                # Build name→oracle_id lookup (fast Python join instead of slow SQL LOWER)
-                name_to_oid = {}
-                for row in conn.execute("SELECT oracle_id, name FROM cards"):
-                    name_to_oid[row[1].lower()] = row[0]
+                # Build name→oracle_id lookup from CardProvider
+                name_to_oid = self._card_provider.get_name_to_oid()
                 # Count commanders per card_name
                 card_cmdr_counts = {}
                 for row in conn.execute(
@@ -1087,7 +1095,6 @@ class ForgeFeatureContext:
         # Hub scores (computed from edge index, filled after edge loading)
         self._arr_hub_score = np.zeros(n, dtype=np.float32)
         self._arr_hub_raw = np.zeros(n, dtype=np.float32)
-        self._hub_scores_built = False
 
         # ── Per-category mech slice arrays for vectorized sub-product features ──
         # Category dimension indices into the 116-dim mechanics vector
@@ -1139,26 +1146,38 @@ class ForgeFeatureContext:
         Cache key: interaction_edges row count + card count.
         Stores: src, tgt, exact, strength (float32), event_ids (uint8), event_names.
         """
-        from mtg_synergy.config import DATA_DIR
-
         _log.info("Building in-memory edge index...")
         t0 = time.time()
 
-        cache_path = os.path.join(DATA_DIR, "edge_index_cache.npz")
-        # MAX(rowid) is O(1) vs COUNT(*) which is a full 20M-row table scan (~26s).
-        # Safe because interaction_edges is rebuilt from scratch (no row deletions).
-        edge_count = conn.execute("SELECT MAX(rowid) FROM interaction_edges").fetchone()[0] or 0
+        cache_path = os.path.join(self._artifact_dir, "edge_index_cache.npz")
+        # Get edge_count from DB if available (for cache validation).
+        # In inference-only mode (synergy.db without interaction_edges),
+        # edge_count stays None and we trust the cache unconditionally.
+        edge_count = None
+        try:
+            edge_count = conn.execute(
+                "SELECT MAX(rowid) FROM interaction_edges"
+            ).fetchone()[0] or 0
+        except sqlite3.OperationalError:
+            pass  # no interaction_edges table (inference-only synergy.db)
         card_count = len(self.oid_to_idx)
 
-        # Try loading from cache (numpy arrays only)
+        # Try loading from cache (numpy arrays, allow_pickle=False)
         src = tgt = exact = strength = event_ids = event_names = None
         if os.path.exists(cache_path):
             try:
                 cached = np.load(cache_path, allow_pickle=False)
-                if (int(cached['edge_count']) == edge_count and
-                    int(cached['card_count']) == card_count and
+                cache_valid = (
                     'strength' in cached and 'event_ids' in cached
-                    and 'event_names' in cached):
+                    and 'event_names' in cached
+                )
+                # Validate against DB counts when available
+                if cache_valid and edge_count is not None:
+                    cache_valid = (
+                        int(cached['edge_count']) == edge_count
+                        and int(cached['card_count']) == card_count
+                    )
+                if cache_valid:
                     src = cached['src']
                     tgt = cached['tgt']
                     exact = cached['exact']
@@ -1170,6 +1189,11 @@ class ForgeFeatureContext:
                 _log.warning("Edge index cache load failed, rebuilding: %s", e)
 
         if src is None:
+            if edge_count is None:
+                raise RuntimeError(
+                    "Edge cache not found and interaction_edges table not available. "
+                    "Run export_inference_db.py to regenerate edge caches."
+                )
             src, tgt, exact, strength, event_ids, event_names = (
                 self._load_edges_from_db(conn, edge_count, t0)
             )
@@ -1182,12 +1206,11 @@ class ForgeFeatureContext:
             except Exception as e:
                 _log.warning("Cache write failed: %s", e)
 
-        # Build event lookup dicts
-        self._event_names = list(event_names)
+        # Build event lookup dict
         self._bit_to_event = {i: str(name) for i, name in enumerate(event_names)}
 
         # Try loading pre-built adjacency dicts from CSR-style npz cache.
-        adj_cache_path = os.path.join(DATA_DIR, "edge_adj_cache.npz")
+        adj_cache_path = os.path.join(self._artifact_dir, "edge_adj_cache.npz")
         adj_loaded = self._load_adj_cache(adj_cache_path, edge_count, card_count, t0)
 
         if not adj_loaded:
@@ -1283,9 +1306,13 @@ class ForgeFeatureContext:
             return False
         try:
             cached = np.load(adj_cache_path, allow_pickle=False)
-            if (int(cached['edge_count']) != edge_count
-                    or int(cached['card_count']) != card_count
-                    or bool(cached['has_strength']) != self._preload_strength):
+            # Validate counts against DB when available
+            if edge_count is not None:
+                if (int(cached['edge_count']) != edge_count
+                        or int(cached['card_count']) != card_count
+                        or bool(cached['has_strength']) != self._preload_strength):
+                    return False
+            elif bool(cached['has_strength']) != self._preload_strength:
                 return False
             self._adj_out = self._csr_to_adj_dict(
                 cached['adj_out_keys'], cached['adj_out_offsets'], cached['adj_out_values'])
@@ -1297,7 +1324,6 @@ class ForgeFeatureContext:
                 cached['exact_in_keys'], cached['exact_in_offsets'], cached['exact_in_values'])
             self._arr_hub_raw = cached['hub_raw']
             self._arr_hub_score = cached['hub_score']
-            self._hub_scores_built = True
             self._agg_strength_out = {}
             self._agg_events_out = {}
             self._agg_strength_in = {}
@@ -1434,7 +1460,6 @@ class ForgeFeatureContext:
             raw = float(n_out + n_in)
             self._arr_hub_raw[i] = raw
             self._arr_hub_score[i] = np.log2(1.0 + min(raw, 500))
-        self._hub_scores_built = True
 
     @staticmethod
     def _build_adj_arrays(keys, values):
@@ -1643,5 +1668,4 @@ class ForgeFeatureContext:
 from mtg_synergy.recommend.forge_compute import (  # noqa: E402
     CmdrFeatureContext,
     compute_batch_features,
-    compute_card_features,
 )

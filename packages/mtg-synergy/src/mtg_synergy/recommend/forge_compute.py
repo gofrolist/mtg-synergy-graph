@@ -39,41 +39,98 @@ _COMBAT_KWS = frozenset({
 })
 
 
+def _merge_vecs_max(vecs: list) -> "np.ndarray | None":
+    """Element-wise max of numpy vectors (for mechanics/ability vectors)."""
+    if not vecs:
+        return None
+    if len(vecs) == 1:
+        return vecs[0]
+    return np.maximum(vecs[0], vecs[1])
+
+
+def _merge_vecs_sum(vecs: list) -> "np.ndarray | None":
+    """Sum of numpy vectors (for strategy/functional fingerprint vectors)."""
+    if not vecs:
+        return None
+    if len(vecs) == 1:
+        return vecs[0]
+    return vecs[0] + vecs[1]
+
+
+def _merge_profiles(profiles: list[dict], empty: dict) -> dict:
+    """Merge 1-2 forge profiles: union sets, OR bools, max scalars."""
+    if not profiles:
+        return dict(empty)
+    if len(profiles) == 1:
+        return profiles[0]
+    merged = {}
+    for key, default in empty.items():
+        vals = [p.get(key, default) for p in profiles]
+        if isinstance(default, set):
+            merged[key] = vals[0] | vals[1]
+        elif isinstance(default, bool):
+            merged[key] = vals[0] or vals[1]
+        elif default is None:
+            # Numeric scalars (damage_amount, cards_drawn, life_amount): take max
+            non_none = [v for v in vals if v is not None]
+            merged[key] = max(non_none) if non_none else None
+        else:
+            merged[key] = vals[0]
+    # Preserve extra keys from profiles that aren't in the empty template
+    for p in profiles:
+        for key, val in p.items():
+            if key not in merged:
+                if isinstance(val, set):
+                    merged[key] = merged.get(key, set()) | val
+                elif isinstance(val, bool):
+                    merged[key] = merged.get(key, False) or val
+                else:
+                    merged.setdefault(key, val)
+    return merged
+
+
 class CmdrFeatureContext:
-    """Per-commander pre-loaded data for feature computation."""
+    """Per-commander pre-loaded data for feature computation.
 
-    def __init__(self, ctx: ForgeFeatureContext, cmdr_oid: str, deck_oids: set):
-        self.cmdr_oid = cmdr_oid
+    Supports 1 or 2 commanders (partner pairs / backgrounds).
+    When multiple commanders are given, fields are merged:
+    - Sets: union
+    - Vectors (numpy): element-wise max
+    - Bools: OR
+    - Scalars (damage_amount, etc.): max
+    """
 
-        # Commander vectors
-        self.cmdr_strats = ctx.card_strats.get(cmdr_oid, set())
-        self.cmdr_strat_vec = ctx.strat_vector(cmdr_oid)
-        self.cmdr_ability_vec = ctx._ability_vectors.get(cmdr_oid)
-        self.cmdr_phases = ctx.card_phase_order.get(cmdr_oid, set())
+    def __init__(self, ctx: ForgeFeatureContext,
+                 cmdr_oid: str | None = None, deck_oids: set = (),
+                 *, cmdr_oids: list[str] | None = None):
+        # Accept either single cmdr_oid (backward compat) or cmdr_oids list
+        if cmdr_oids is not None:
+            self.cmdr_oids = list(cmdr_oids)
+        elif cmdr_oid is not None:
+            self.cmdr_oids = [cmdr_oid]
+        else:
+            raise ValueError("Must provide cmdr_oid or cmdr_oids")
+        # Keep cmdr_oid for backward compat (primary commander)
+        self.cmdr_oid = self.cmdr_oids[0]
+        deck_oids = set(deck_oids)
 
-        # Commander subtypes for tribal matching (from pre-cached type_lines)
         from mtg_synergy.config import extract_subtypes
-        self.cmdr_subtypes = extract_subtypes(ctx._type_lines.get(cmdr_oid, ""))
 
-        # Commander mechanics vectors
-        self.cmdr_produces = ctx._mech_produces.get(cmdr_oid)
-        self.cmdr_consumes = ctx._mech_consumes.get(cmdr_oid)
+        # ── Merge commander data across 1-2 commanders ──
+        self.cmdr_strats = set()
+        self.cmdr_phases = set()
+        self.cmdr_subtypes = set()
+        self.cmdr_has = set()
+        self.cmdr_hints = set()
+        self.cmdr_needs = set()
+        self.cmdr_zones = set()
+        strat_vecs = []
+        ability_vecs = []
+        produce_vecs = []
+        consume_vecs = []
+        func_vecs = []
 
-        # Commander functional fingerprint
-        self.cmdr_func = ctx._func_fingerprints.get(cmdr_oid)
-
-        # Cached norms (avoid recomputing per card)
-        self.cmdr_strat_norm = float(np.linalg.norm(self.cmdr_strat_vec)) if self.cmdr_strat_vec is not None else 0.0
-        self.cmdr_func_norm = float(np.linalg.norm(self.cmdr_func)) if self.cmdr_func is not None else 0.0
-
-        # Commander deck tags (Forge's deck-building AI signals)
-        self.cmdr_has = ctx._deck_has.get(cmdr_oid, set())
-        self.cmdr_hints = ctx._deck_hints.get(cmdr_oid, set())
-        self.cmdr_needs = ctx._deck_needs.get(cmdr_oid, set())
-
-        # Commander zones and profile for new features F33-F39
-        self.cmdr_zones = ctx._card_zones.get(cmdr_oid, set())
-        self.cmdr_profile = ctx._forge_profiles.get(cmdr_oid, {
+        _EMPTY_PROFILE = {
             'verbs': set(), 'triggers': set(), 'keywords': set(),
             'counter_types': set(), 'targets': set(), 'ability_types': set(),
             'trigger_filters': set(), 'required_subtypes': set(),
@@ -83,12 +140,50 @@ class CmdrFeatureContext:
             'damage_amount': None,
             'cards_drawn': None, 'life_amount': None,
             'is_secondary': False, 'gain_control': False,
-        })
+        }
 
-        # Pre-compute compound values used by compute_card_features (F27)
-        self.cmdr_mechs = (self.cmdr_profile.get('verbs', set()) |
-                           self.cmdr_profile.get('triggers', set()) |
-                           self.cmdr_profile.get('keywords', set()))
+        # Collect per-commander, then merge
+        profiles = []
+        for oid in self.cmdr_oids:
+            self.cmdr_strats |= ctx.card_strats.get(oid, set())
+            self.cmdr_phases |= ctx.card_phase_order.get(oid, set())
+            self.cmdr_subtypes |= extract_subtypes(ctx._type_lines.get(oid, ""))
+            self.cmdr_has |= ctx._deck_has.get(oid, set())
+            self.cmdr_hints |= ctx._deck_hints.get(oid, set())
+            self.cmdr_needs |= ctx._deck_needs.get(oid, set())
+            self.cmdr_zones |= ctx._card_zones.get(oid, set())
+
+            sv = ctx.strat_vector(oid)
+            if sv is not None:
+                strat_vecs.append(sv)
+            av = ctx._ability_vectors.get(oid)
+            if av is not None:
+                ability_vecs.append(av)
+            pv = ctx._mech_produces.get(oid)
+            if pv is not None:
+                produce_vecs.append(pv)
+            cv = ctx._mech_consumes.get(oid)
+            if cv is not None:
+                consume_vecs.append(cv)
+            fv = ctx._func_fingerprints.get(oid)
+            if fv is not None:
+                func_vecs.append(fv)
+
+            profiles.append(ctx._forge_profiles.get(oid, _EMPTY_PROFILE))
+
+        # Merge vectors: element-wise max for mechanics/ability, sum for strat/func
+        self.cmdr_strat_vec = _merge_vecs_sum(strat_vecs)
+        self.cmdr_ability_vec = _merge_vecs_max(ability_vecs)
+        self.cmdr_produces = _merge_vecs_max(produce_vecs)
+        self.cmdr_consumes = _merge_vecs_max(consume_vecs)
+        self.cmdr_func = _merge_vecs_sum(func_vecs)
+
+        # Merge profiles: union sets, OR bools, max scalars
+        self.cmdr_profile = _merge_profiles(profiles, _EMPTY_PROFILE)
+
+        # Cached norms (avoid recomputing per card)
+        self.cmdr_strat_norm = float(np.linalg.norm(self.cmdr_strat_vec)) if self.cmdr_strat_vec is not None else 0.0
+        self.cmdr_func_norm = float(np.linalg.norm(self.cmdr_func)) if self.cmdr_func is not None else 0.0
 
         # ── Commander per-category mech slices (for vectorized sub-product features) ──
         self.cmdr_cat_produces = []  # list of 1D arrays, one per category
@@ -118,22 +213,26 @@ class CmdrFeatureContext:
                 self.cmdr_verb_demand_mask[bit] = 1.0
         # Also check trigger_demand from the raw forge data (covers triggers
         # that don't appear in the profile 'triggers' set but do appear as trigger_mode)
-        for tm in ctx._card_trigger_demand.get(cmdr_oid, set()):
-            bit = ctx._demand_tm_to_bit.get(tm)
-            if bit is not None:
-                self.cmdr_verb_demand_mask[bit] = 1.0
+        for oid in self.cmdr_oids:
+            for tm in ctx._card_trigger_demand.get(oid, set()):
+                bit = ctx._demand_tm_to_bit.get(tm)
+                if bit is not None:
+                    self.cmdr_verb_demand_mask[bit] = 1.0
         self.cmdr_has_verb_demand = bool(self.cmdr_verb_demand_mask.any())
 
         # ── Commander type demand: what card types does this commander's triggers want? ──
-        raw_demand = ctx._card_type_demand.get(cmdr_oid, {})
         self.cmdr_type_demand = np.zeros(7, dtype=np.float32)
-        if raw_demand:
-            for j, t in enumerate(ctx._demand_type_names):
-                self.cmdr_type_demand[j] = raw_demand.get(t, 0.0)
-            # Normalize to max 1.0
-            max_val = self.cmdr_type_demand.max()
-            if max_val > 0:
-                self.cmdr_type_demand /= max_val
+        for oid in self.cmdr_oids:
+            raw_demand = ctx._card_type_demand.get(oid, {})
+            if raw_demand:
+                for j, t in enumerate(ctx._demand_type_names):
+                    val = raw_demand.get(t, 0.0)
+                    if val > self.cmdr_type_demand[j]:
+                        self.cmdr_type_demand[j] = val
+        # Normalize to max 1.0
+        max_val = self.cmdr_type_demand.max()
+        if max_val > 0:
+            self.cmdr_type_demand /= max_val
         self.cmdr_has_type_demand = bool(self.cmdr_type_demand.any())
 
         # Tribal depth data: commander's creature-type interests from multiple sources
@@ -144,9 +243,9 @@ class CmdrFeatureContext:
         for tf in self.cmdr_profile.get('trigger_filters', set()):
             if tf not in generic:
                 cmdr_tribal_filters.add(tf)
-        # Add token subtypes (Krenko creates Goblins → wants Goblins)
-        cmdr_token_subs = ctx._token_subtypes.get(cmdr_oid, set())
-        cmdr_tribal_filters |= cmdr_token_subs
+        # Add token subtypes from ALL commanders (Krenko creates Goblins → wants Goblins)
+        for oid in self.cmdr_oids:
+            cmdr_tribal_filters |= ctx._token_subtypes.get(oid, set())
         # Add Type$ hints from deck tags (e.g., hints Type$Goblin)
         for tag in self.cmdr_hints | self.cmdr_needs:
             if tag.startswith('Type$'):
@@ -158,82 +257,61 @@ class CmdrFeatureContext:
             cmdr_tribal_filters = self.cmdr_subtypes.copy()
         self.cmdr_tribal_filters = cmdr_tribal_filters
 
-        if ctx._has_edge_index:
-            self._init_from_index(ctx, cmdr_oid, deck_oids)
-        else:
-            self._init_from_db(ctx, ctx.conn, ctx.oid_to_idx, cmdr_oid, deck_oids)
-
-    def _init_from_index(self, ctx, cmdr_oid, deck_oids):
-        """Fast path: use pre-loaded edge index for deck edges.
-
-        Commander strength/event dicts use in-memory agg arrays when available
-        (training mode, preload_strength=True), otherwise fall back to SQL
-        (inference mode, saves ~5-6 GB memory).
-        """
+        # ── Edge data: merge edges from all commanders ──
         self.cmdr_out = {}
         self.cmdr_in = {}
         self.cmdr_out_events = {}
         self.cmdr_in_events = {}
+        self.cmdr_exact = set()
+        for oid in self.cmdr_oids:
+            if ctx._has_edge_index:
+                self._gather_edges_from_index(ctx, oid)
+            elif ctx._has_edges_table:
+                self._gather_edges_from_db(ctx, oid)
+        # Deck edges + 2-hop (use all commander oids)
+        if ctx._has_edge_index:
+            self._init_deck_and_2hop_from_index(ctx, deck_oids)
+        elif ctx._has_edges_table:
+            self._init_deck_edges_from_db(ctx, ctx.conn, deck_oids)
+            self.cmdr_2hop_counts = {}
+        else:
+            self.deck_edge_counts = {}
+            self.deck_exact_counts = {}
+            self.deck_broad_counts = {}
+            self.cmdr_2hop_counts = {}
 
+        # Zone interaction flags (any commander)
+        self.cmdr_zone_graveyard = any(oid in ctx._zone_graveyard for oid in self.cmdr_oids)
+
+    def _gather_edges_from_index(self, ctx, cmdr_oid):
+        """Gather commander edges from in-memory index (merges into existing dicts)."""
         if ctx._agg_strength_out:
-            # Training mode: in-memory aggregated dicts available
             cmdr_idx = ctx.oid_to_idx.get(cmdr_oid)
             idx_to_oid = ctx._idx_to_oid
-
             if cmdr_idx is not None:
                 str_dict = ctx._agg_strength_out.get(cmdr_idx, {})
                 evt_dict = ctx._agg_events_out.get(cmdr_idx, {})
                 for tgt_idx, s in str_dict.items():
                     oid = idx_to_oid.get(tgt_idx)
                     if oid:
-                        self.cmdr_out[oid] = s
-                        mask = evt_dict.get(tgt_idx, 0)
-                        self.cmdr_out_events[oid] = _decode_events(mask, ctx._bit_to_event)
+                        self.cmdr_out[oid] = max(self.cmdr_out.get(oid, 0), s)
+                        evts = _decode_events(evt_dict.get(tgt_idx, 0), ctx._bit_to_event)
+                        self.cmdr_out_events[oid] = self.cmdr_out_events.get(oid, set()) | evts
 
                 str_dict = ctx._agg_strength_in.get(cmdr_idx, {})
                 evt_dict = ctx._agg_events_in.get(cmdr_idx, {})
                 for src_idx, s in str_dict.items():
                     oid = idx_to_oid.get(src_idx)
                     if oid:
-                        self.cmdr_in[oid] = s
-                        mask = evt_dict.get(src_idx, 0)
-                        self.cmdr_in_events[oid] = _decode_events(mask, ctx._bit_to_event)
-        else:
-            # Inference mode: agg dicts not built; use SQL for commander edges only
-            self._init_cmdr_edges_from_db(ctx)
+                        self.cmdr_in[oid] = max(self.cmdr_in.get(oid, 0), s)
+                        evts = _decode_events(evt_dict.get(src_idx, 0), ctx._bit_to_event)
+                        self.cmdr_in_events[oid] = self.cmdr_in_events.get(oid, set()) | evts
+        elif ctx._has_edges_table:
+            self._gather_edges_from_db_sql(ctx, cmdr_oid)
 
-        self._init_cmdr_exact_and_deck_edges(ctx, cmdr_oid, deck_oids)
-
-    def _init_cmdr_edges_from_db(self, ctx):
-        """SQL fallback for commander strength/event edges (inference mode)."""
-        conn = ctx.conn
-        event_expr = _EVENT_EXPR_COLUMN if ctx._has_event_col else _EVENT_EXPR_JSON
-        if event_expr not in _VALID_EVENT_EXPRS:
-            raise ValueError(f"Unexpected SQL fragment: {event_expr!r}")
-        try:
-            for row in conn.execute(
-                f"SELECT target_id, SUM(strength), GROUP_CONCAT(DISTINCT {event_expr}) "
-                "FROM interaction_edges WHERE source_id = ? GROUP BY target_id",
-                (self.cmdr_oid,)):
-                self.cmdr_out[row[0]] = row[1]
-                self.cmdr_out_events[row[0]] = set(row[2].split(",")) if row[2] else set()
-            for row in conn.execute(
-                f"SELECT source_id, SUM(strength), GROUP_CONCAT(DISTINCT {event_expr}) "
-                "FROM interaction_edges WHERE target_id = ? GROUP BY source_id",
-                (self.cmdr_oid,)):
-                self.cmdr_in[row[0]] = row[1]
-                self.cmdr_in_events[row[0]] = set(row[2].split(",")) if row[2] else set()
-        except sqlite3.OperationalError as e:
-            _log.warning("Commander edge query failed for %s: %s", self.cmdr_oid, e)
-
-    def _init_cmdr_exact_and_deck_edges(self, ctx, cmdr_oid, deck_oids):
-        """Compute commander exact edges and deck edge counts from in-memory index."""
-        oid_to_idx = ctx.oid_to_idx
+        # Exact edges from adjacency index
+        cmdr_idx = ctx.oid_to_idx.get(cmdr_oid)
         idx_to_oid = ctx._idx_to_oid
-        cmdr_idx = oid_to_idx.get(cmdr_oid)
-
-        # Commander exact edges from adjacency index
-        self.cmdr_exact = set()
         if cmdr_idx is not None:
             for tgt_idx in ctx._exact_out.get(cmdr_idx, np.array([], dtype=np.int32)):
                 oid = idx_to_oid.get(int(tgt_idx))
@@ -243,6 +321,69 @@ class CmdrFeatureContext:
                 oid = idx_to_oid.get(int(src_idx))
                 if oid:
                     self.cmdr_exact.add(oid)
+
+    def _gather_edges_from_db_sql(self, ctx, cmdr_oid):
+        """SQL fallback for commander strength/event edges (inference mode)."""
+        conn = ctx.conn
+        event_expr = _EVENT_EXPR_COLUMN if ctx._has_event_col else _EVENT_EXPR_JSON
+        if event_expr not in _VALID_EVENT_EXPRS:
+            raise ValueError(f"Unexpected SQL fragment: {event_expr!r}")
+        try:
+            for row in conn.execute(
+                f"SELECT target_id, SUM(strength), GROUP_CONCAT(DISTINCT {event_expr}) "
+                "FROM interaction_edges WHERE source_id = ? GROUP BY target_id",
+                (cmdr_oid,)):
+                self.cmdr_out[row[0]] = max(self.cmdr_out.get(row[0], 0), row[1])
+                evts = set(row[2].split(",")) if row[2] else set()
+                self.cmdr_out_events[row[0]] = self.cmdr_out_events.get(row[0], set()) | evts
+            for row in conn.execute(
+                f"SELECT source_id, SUM(strength), GROUP_CONCAT(DISTINCT {event_expr}) "
+                "FROM interaction_edges WHERE target_id = ? GROUP BY source_id",
+                (cmdr_oid,)):
+                self.cmdr_in[row[0]] = max(self.cmdr_in.get(row[0], 0), row[1])
+                evts = set(row[2].split(",")) if row[2] else set()
+                self.cmdr_in_events[row[0]] = self.cmdr_in_events.get(row[0], set()) | evts
+        except sqlite3.OperationalError as e:
+            _log.warning("Commander edge query failed for %s: %s", cmdr_oid, e)
+
+    def _gather_edges_from_db(self, ctx, cmdr_oid):
+        """DB path: gather commander edges (strength + exact) for one commander."""
+        event_expr = _EVENT_EXPR_COLUMN if ctx._has_event_col else _EVENT_EXPR_JSON
+        if event_expr not in _VALID_EVENT_EXPRS:
+            raise ValueError(f"Unexpected SQL fragment: {event_expr!r}")
+        conn = ctx.conn
+        try:
+            for row in conn.execute(
+                f"SELECT target_id, SUM(strength), GROUP_CONCAT(DISTINCT {event_expr}) "
+                "FROM interaction_edges WHERE source_id = ? GROUP BY target_id", (cmdr_oid,)):
+                self.cmdr_out[row[0]] = max(self.cmdr_out.get(row[0], 0), row[1])
+                evts = set(row[2].split(",")) if row[2] else set()
+                self.cmdr_out_events[row[0]] = self.cmdr_out_events.get(row[0], set()) | evts
+            for row in conn.execute(
+                f"SELECT source_id, SUM(strength), GROUP_CONCAT(DISTINCT {event_expr}) "
+                "FROM interaction_edges WHERE target_id = ? GROUP BY source_id", (cmdr_oid,)):
+                self.cmdr_in[row[0]] = max(self.cmdr_in.get(row[0], 0), row[1])
+                evts = set(row[2].split(",")) if row[2] else set()
+                self.cmdr_in_events[row[0]] = self.cmdr_in_events.get(row[0], set()) | evts
+        except sqlite3.OperationalError as e:
+            _log.warning("Commander edge query failed for %s: %s", cmdr_oid, e)
+        # Exact edges
+        try:
+            for row in conn.execute(
+                "SELECT target_id FROM interaction_edges WHERE source_id = ? "
+                "AND COALESCE(filter_precision, json_extract(detail, '$.filter_precision')) = 'exact'", (cmdr_oid,)):
+                self.cmdr_exact.add(row[0])
+            for row in conn.execute(
+                "SELECT source_id FROM interaction_edges WHERE target_id = ? "
+                "AND COALESCE(filter_precision, json_extract(detail, '$.filter_precision')) = 'exact'", (cmdr_oid,)):
+                self.cmdr_exact.add(row[0])
+        except sqlite3.OperationalError as e:
+            _log.warning("Commander exact edge query failed for %s: %s", cmdr_oid, e)
+
+    def _init_deck_and_2hop_from_index(self, ctx, deck_oids):
+        """Compute deck edge counts and 2-hop from in-memory index."""
+        oid_to_idx = ctx.oid_to_idx
+        idx_to_oid = ctx._idx_to_oid
 
         # Deck edge counts via numpy set intersection
         self.deck_edge_counts = {}
@@ -262,24 +403,19 @@ class CmdrFeatureContext:
                 exact_counts = np.zeros(n_cards, dtype=np.int32)
 
                 for d_idx in deck_indices:
-                    # Outgoing: deck card → candidate (distinct deck cards counted)
                     out_neighbors = ctx._adj_out.get(d_idx)
                     if out_neighbors is not None:
                         counts[out_neighbors] += 1
-                    # Incoming: candidate → deck card
                     in_neighbors = ctx._adj_in.get(d_idx)
                     if in_neighbors is not None:
                         counts[in_neighbors] += 1
-                    # Exact outgoing
                     exact_out = ctx._exact_out.get(d_idx)
                     if exact_out is not None:
                         exact_counts[exact_out] += 1
-                    # Exact incoming
                     exact_in = ctx._exact_in.get(d_idx)
                     if exact_in is not None:
                         exact_counts[exact_in] += 1
 
-                # Convert to dicts (only non-zero entries)
                 nonzero = np.nonzero(counts)[0]
                 for i in nonzero:
                     oid = idx_to_oid.get(int(i))
@@ -293,20 +429,25 @@ class CmdrFeatureContext:
                         if bc > 0:
                             self.deck_broad_counts[oid] = bc
 
-        # ── 2-hop graph features: commander → intermediary → candidate ──
-        # Count how many of the commander's direct causal neighbors also connect
-        # to each candidate. Available during both training and inference.
+        # ── 2-hop graph features: commander(s) → intermediary → candidate ──
         self.cmdr_2hop_counts = {}
-        if ctx._has_edge_index and cmdr_idx is not None:
-            # Get commander's direct out-neighbors (indices)
+        cmdr_indices = set()
+        for oid in self.cmdr_oids:
+            idx = oid_to_idx.get(oid)
+            if idx is not None:
+                cmdr_indices.add(idx)
+
+        if cmdr_indices:
+            # Get all direct out-neighbors of all commanders
             cmdr_out_indices = set()
-            if ctx._agg_strength_out:
-                cmdr_out_indices = set(ctx._agg_strength_out.get(cmdr_idx, {}).keys())
-            else:
-                for oid in self.cmdr_out:
-                    idx = oid_to_idx.get(oid)
-                    if idx is not None:
-                        cmdr_out_indices.add(idx)
+            for cmdr_idx in cmdr_indices:
+                if ctx._agg_strength_out:
+                    cmdr_out_indices |= set(ctx._agg_strength_out.get(cmdr_idx, {}).keys())
+                else:
+                    for oid in self.cmdr_out:
+                        idx = oid_to_idx.get(oid)
+                        if idx is not None:
+                            cmdr_out_indices.add(idx)
 
             if cmdr_out_indices:
                 n_cards = ctx._n_cards_idx
@@ -317,94 +458,50 @@ class CmdrFeatureContext:
                         hop2_counts[out_neighbors] += 1
                 nonzero = np.nonzero(hop2_counts)[0]
                 for i in nonzero:
-                    if i == cmdr_idx:
+                    if i in cmdr_indices:
                         continue
                     oid = idx_to_oid.get(int(i))
                     if oid:
                         self.cmdr_2hop_counts[oid] = int(hop2_counts[i])
 
-        # Zone interaction flags
-        self.cmdr_zone_graveyard = self.cmdr_oid in ctx._zone_graveyard
-        self.cmdr_zone_exile = self.cmdr_oid in ctx._zone_exile
-
-    def _init_from_db(self, ctx, conn, oid_to_idx, cmdr_oid, deck_oids):
-        """Original DB query path (used for inference with small datasets)."""
-        event_expr = _EVENT_EXPR_COLUMN if ctx._has_event_col else _EVENT_EXPR_JSON
-        if event_expr not in _VALID_EVENT_EXPRS:
-            raise ValueError(f"Unexpected SQL fragment: {event_expr!r}")
-        # Causal edges from/to commander
-        self.cmdr_out = {}
-        self.cmdr_in = {}
-        self.cmdr_out_events = {}
-        self.cmdr_in_events = {}
-        try:
-            for row in conn.execute(
-                f"SELECT target_id, SUM(strength), GROUP_CONCAT(DISTINCT {event_expr}) "
-                "FROM interaction_edges WHERE source_id = ? GROUP BY target_id", (cmdr_oid,)):
-                self.cmdr_out[row[0]] = row[1]
-                self.cmdr_out_events[row[0]] = set(row[2].split(",")) if row[2] else set()
-            for row in conn.execute(
-                f"SELECT source_id, SUM(strength), GROUP_CONCAT(DISTINCT {event_expr}) "
-                "FROM interaction_edges WHERE target_id = ? GROUP BY source_id", (cmdr_oid,)):
-                self.cmdr_in[row[0]] = row[1]
-                self.cmdr_in_events[row[0]] = set(row[2].split(",")) if row[2] else set()
-        except sqlite3.OperationalError as e:
-            _log.warning("Commander edge query failed for %s: %s", cmdr_oid, e)
-
-        # Deck edge counts + precision
+    def _init_deck_edges_from_db(self, ctx, conn, deck_oids):
+        """DB path for deck edge counts."""
         self.deck_edge_counts = {}
         self.deck_exact_counts = {}
         self.deck_broad_counts = {}
-        if deck_oids:
-            dl = list(deck_oids)
-            for i in range(0, len(dl), 500):
-                chunk = dl[i:i + 500]
-                ph = ",".join("?" * len(chunk))
-                for row in conn.execute(
-                    f"SELECT target_id, COUNT(DISTINCT source_id) FROM interaction_edges "
-                    f"WHERE source_id IN ({ph}) GROUP BY target_id", chunk):
-                    self.deck_edge_counts[row[0]] = self.deck_edge_counts.get(row[0], 0) + row[1]
-                for row in conn.execute(
-                    f"SELECT source_id, COUNT(DISTINCT target_id) FROM interaction_edges "
-                    f"WHERE target_id IN ({ph}) GROUP BY source_id", chunk):
-                    self.deck_edge_counts[row[0]] = self.deck_edge_counts.get(row[0], 0) + row[1]
-                for row in conn.execute(
-                    f"SELECT target_id, COALESCE(filter_precision, json_extract(detail, '$.filter_precision')), COUNT(*) "
-                    f"FROM interaction_edges WHERE source_id IN ({ph}) "
-                    f"GROUP BY target_id, COALESCE(filter_precision, json_extract(detail, '$.filter_precision'))", chunk):
-                    if row[1] == "exact":
-                        self.deck_exact_counts[row[0]] = self.deck_exact_counts.get(row[0], 0) + row[2]
-                    else:
-                        self.deck_broad_counts[row[0]] = self.deck_broad_counts.get(row[0], 0) + row[2]
-                for row in conn.execute(
-                    f"SELECT source_id, COALESCE(filter_precision, json_extract(detail, '$.filter_precision')), COUNT(*) "
-                    f"FROM interaction_edges WHERE target_id IN ({ph}) "
-                    f"GROUP BY source_id, COALESCE(filter_precision, json_extract(detail, '$.filter_precision'))", chunk):
-                    if row[1] == "exact":
-                        self.deck_exact_counts[row[0]] = self.deck_exact_counts.get(row[0], 0) + row[2]
-                    else:
-                        self.deck_broad_counts[row[0]] = self.deck_broad_counts.get(row[0], 0) + row[2]
-
-        # Commander exact edges
-        self.cmdr_exact = set()
-        try:
+        if not deck_oids:
+            return
+        event_expr = _EVENT_EXPR_COLUMN if ctx._has_event_col else _EVENT_EXPR_JSON
+        if event_expr not in _VALID_EVENT_EXPRS:
+            raise ValueError(f"Unexpected SQL fragment: {event_expr!r}")
+        dl = list(deck_oids)
+        for i in range(0, len(dl), 500):
+            chunk = dl[i:i + 500]
+            ph = ",".join("?" * len(chunk))
             for row in conn.execute(
-                "SELECT target_id FROM interaction_edges WHERE source_id = ? "
-                "AND COALESCE(filter_precision, json_extract(detail, '$.filter_precision')) = 'exact'", (cmdr_oid,)):
-                self.cmdr_exact.add(row[0])
+                f"SELECT target_id, COUNT(DISTINCT source_id) FROM interaction_edges "
+                f"WHERE source_id IN ({ph}) GROUP BY target_id", chunk):
+                self.deck_edge_counts[row[0]] = self.deck_edge_counts.get(row[0], 0) + row[1]
             for row in conn.execute(
-                "SELECT source_id FROM interaction_edges WHERE target_id = ? "
-                "AND COALESCE(filter_precision, json_extract(detail, '$.filter_precision')) = 'exact'", (cmdr_oid,)):
-                self.cmdr_exact.add(row[0])
-        except sqlite3.OperationalError as e:
-            _log.warning("Commander exact edge query failed for %s: %s", cmdr_oid, e)
-
-        # 2-hop counts (DB path — skip, too expensive for SQL)
-        self.cmdr_2hop_counts = {}
-
-        # Zone interaction flags
-        self.cmdr_zone_graveyard = self.cmdr_oid in ctx._zone_graveyard
-        self.cmdr_zone_exile = self.cmdr_oid in ctx._zone_exile
+                f"SELECT source_id, COUNT(DISTINCT target_id) FROM interaction_edges "
+                f"WHERE target_id IN ({ph}) GROUP BY source_id", chunk):
+                self.deck_edge_counts[row[0]] = self.deck_edge_counts.get(row[0], 0) + row[1]
+            for row in conn.execute(
+                f"SELECT target_id, COALESCE(filter_precision, json_extract(detail, '$.filter_precision')), COUNT(*) "
+                f"FROM interaction_edges WHERE source_id IN ({ph}) "
+                f"GROUP BY target_id, COALESCE(filter_precision, json_extract(detail, '$.filter_precision'))", chunk):
+                if row[1] == "exact":
+                    self.deck_exact_counts[row[0]] = self.deck_exact_counts.get(row[0], 0) + row[2]
+                else:
+                    self.deck_broad_counts[row[0]] = self.deck_broad_counts.get(row[0], 0) + row[2]
+            for row in conn.execute(
+                f"SELECT source_id, COALESCE(filter_precision, json_extract(detail, '$.filter_precision')), COUNT(*) "
+                f"FROM interaction_edges WHERE target_id IN ({ph}) "
+                f"GROUP BY source_id, COALESCE(filter_precision, json_extract(detail, '$.filter_precision'))", chunk):
+                if row[1] == "exact":
+                    self.deck_exact_counts[row[0]] = self.deck_exact_counts.get(row[0], 0) + row[2]
+                else:
+                    self.deck_broad_counts[row[0]] = self.deck_broad_counts.get(row[0], 0) + row[2]
 
 
 def _batch_gather_cmdr_arrays(ctx, cmdr):
@@ -612,11 +709,11 @@ def _batch_per_card_loop(X, N, card_oids, card_indices, safe_idx, ctx, cmdr):
     cmdr_produces = cmdr.cmdr_produces
     cmdr_consumes = cmdr.cmdr_consumes
     cmdr_func = cmdr.cmdr_func
-    cmdr_profile = ctx._forge_profiles.get(cmdr.cmdr_oid, {})
+    cmdr_profile = cmdr.cmdr_profile
     cmdr_trigs = cmdr_profile.get('triggers', set())
     cmdr_verbs = cmdr_profile.get('verbs', set())
-    cmdr_counters = cmdr.cmdr_profile.get('counter_types', set())
-    cmdr_filter_kws = cmdr.cmdr_profile.get('trigger_filters', set())
+    cmdr_counters = cmdr_profile.get('counter_types', set())
+    cmdr_filter_kws = cmdr_profile.get('trigger_filters', set())
     cmdr_trigger_types = cmdr_profile.get('trigger_filters', set())
     cmdr_targets = cmdr_profile.get('targets', set())
     cmdr_zones = cmdr.cmdr_zones
@@ -954,7 +1051,7 @@ def _compute_tribal_features(card_oid, card_type_line, card_profile, ctx, cmdr):
         except (IndexError, AttributeError):
             pass
 
-    cmdr_profile = ctx._forge_profiles.get(cmdr.cmdr_oid, {})
+    cmdr_profile = cmdr.cmdr_profile
     cmdr_trigger_types = cmdr_profile.get('trigger_filters', set())
     cmdr_targets = cmdr_profile.get('targets', set())
     card_trigger_types = card_profile.get('trigger_filters', set())
@@ -1037,7 +1134,7 @@ def _compute_tribal_features(card_oid, card_type_line, card_profile, ctx, cmdr):
 
 def _compute_forge_profile_features(card_oid, card_cmc, card_profile, ctx, cmdr):
     """Compute forge ability profile features."""
-    cmdr_profile = ctx._forge_profiles.get(cmdr.cmdr_oid, {})
+    cmdr_profile = cmdr.cmdr_profile
     card_verbs = card_profile.get('verbs', set())
     card_trigs = card_profile.get('triggers', set())
     cmdr_trigs = cmdr_profile.get('triggers', set())

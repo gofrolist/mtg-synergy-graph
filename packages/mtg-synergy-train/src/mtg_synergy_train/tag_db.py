@@ -7,10 +7,12 @@ This module provides the cards table schema and card lookup functions.
 import os
 import sqlite3
 
-from mtg_synergy.db import get_connection
+from mtg_synergy_train.db import get_connection
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
-DB_PATH = os.path.join(DATA_DIR, "tags.db")
+from mtg_synergy.config import DATA_DIR as _DATA_DIR, DB_PATH as _CONFIG_DB_PATH
+
+DATA_DIR = str(_DATA_DIR)
+DB_PATH = str(_CONFIG_DB_PATH)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS cards (
@@ -67,18 +69,16 @@ def _row_to_card(row: sqlite3.Row) -> dict:
 
 
 def get_cards_by_names(names: list[str], db_path: str = DB_PATH) -> list[dict[str, object]]:
-    conn = get_connection(db_path)
-    conn.row_factory = sqlite3.Row
-
-    cards = []
-    chunk_size = 500
-    for i in range(0, len(names), chunk_size):
-        chunk = names[i : i + chunk_size]
-        placeholders = ",".join("?" * len(chunk))
-        rows = conn.execute(
-            f"SELECT * FROM cards WHERE name IN ({placeholders})", chunk
-        ).fetchall()
-        cards.extend(_row_to_card(r) for r in rows)
-
-    conn.close()
+    from contextlib import closing
+    with closing(get_connection(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        cards = []
+        chunk_size = 500
+        for i in range(0, len(names), chunk_size):
+            chunk = names[i : i + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            rows = conn.execute(
+                f"SELECT * FROM cards WHERE name IN ({placeholders})", chunk
+            ).fetchall()
+            cards.extend(_row_to_card(r) for r in rows)
     return cards

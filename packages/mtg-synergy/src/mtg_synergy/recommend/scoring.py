@@ -6,52 +6,62 @@ Public functions:
   batch_recommend() — scores multiple commanders, loading model once
 """
 import json
+import logging
 import os
 import warnings
 
 import numpy as np
 import lightgbm as lgb
 
-from mtg_synergy.config import DATA_DIR
+from mtg_synergy.config import ARTIFACT_DIR
 from mtg_synergy.recommend.cmdr_patterns import detect_cmdr_patterns
 from mtg_synergy.recommend.forge_features import (
     ForgeFeatureContext, CmdrFeatureContext, compute_batch_features,
 )
 
+_log = logging.getLogger(__name__)
+
 
 _gbm_cache = None
 
 
-def _load_gbm():
+def _load_gbm(artifact_dir=None):
     """Load the forge GBM model (cached after first load)."""
     global _gbm_cache
     if _gbm_cache is not None:
         return _gbm_cache
-    forge_gbm_path = os.path.join(DATA_DIR, "fusion_model_forge.lgb")
+    base = artifact_dir or str(ARTIFACT_DIR)
+    forge_gbm_path = os.path.join(base, "fusion_model_forge.lgb")
     if not os.path.exists(forge_gbm_path):
         return None
     _gbm_cache = lgb.Booster(model_file=forge_gbm_path)
     return _gbm_cache
 
 
-def _load_all_cards(conn):
-    """Load all card metadata from DB into a dict[name -> card_dict]."""
-    card_data = {}
-    for row in conn.execute(
-        "SELECT oracle_id, name, type_line, mana_cost, cmc FROM cards "
-        "WHERE type_line NOT LIKE '%Token%' AND legal_commander = 1"
-    ):
-        card_data[row[1]] = {
-            "oracle_id": row[0], "name": row[1],
-            "type_line": row[2] or "", "mana_cost": row[3] or "",
-            "cmc": row[4] or 0,
-        }
-    return card_data
+def color_identity_filter(conn, cmdr_oid: str, color_identity: set[str],
+                          deck_cards: set[str] | None = None, *,
+                          card_provider=None) -> list[tuple[str, str]]:
+    """Return all color-legal non-token cards as (oid, name) pairs.
 
+    If card_provider is given, uses it instead of conn for card data.
+    """
+    if card_provider is not None:
+        exclude = set()
+        if cmdr_oid:
+            exclude.add(cmdr_oid)
+        if deck_cards:
+            # deck_cards is a set of names; we need oids for exclusion
+            # For now, exclude by oid only (commander). Name filtering done by caller.
+            pass
+        candidates = card_provider.get_color_legal(color_identity, exclude_oids=exclude)
+        results = []
+        deck_names = deck_cards or set()
+        for cd in candidates:
+            if cd["name"] not in deck_names:
+                results.append((cd["oracle_id"], cd["name"]))
+        return results
 
-def color_identity_filter(conn, cmdr_oid: str, color_identity: set,
-                          deck_cards: set = None) -> list:
-    """Return all color-legal non-token cards as (oid, name) pairs."""
+    # Legacy path: direct SQL
     results = []
     deck_cards = deck_cards or set()
     for row in conn.execute(
@@ -117,18 +127,40 @@ def _has_unmet_type_needs(card_needs: set, card_hints: set,
     return not bool(type_reqs & cmdr_provides)
 
 
-def _apply_penalties(scores, cand_list, ctx, cmdr_ctx, cmdr_oid,
-                     color_identity, oid_fn=None):
+def _has_unmet_ability_needs(card_needs: set[str],
+                             cmdr_has: set[str]) -> bool:
+    """Check if card needs Ability$ tags the commander can't provide.
+
+    Cards needing Ability$LifeGain in a counters-only commander deck, or
+    Ability$Sacrifice in a tokens-only commander, are clear mismatches.
+    Only checks 'needs' (hard requirements), not 'hints' (soft preferences).
+    Uses only cmdr_has (what the commander supplies), not cmdr_hints
+    (what the commander wants) — a commander wanting lifegain doesn't
+    mean it provides lifegain.
+    """
+    ability_reqs = {tag for tag in card_needs if tag.startswith("Ability$")}
+    if not ability_reqs:
+        return False
+    return not bool(ability_reqs & cmdr_has)
+
+
+def _default_oid_fn(_name: str, cd: dict) -> str:
+    """Default oracle_id resolver: reads directly from card dict."""
+    return cd["oracle_id"]
+
+
+def _apply_penalties(scores, cand_list, ctx, cmdr_ctx, color_identity,
+                     oid_fn=None):
     """Apply post-scoring penalties for clear anti-synergy patterns.
 
     Modifies ``scores`` in-place. ``oid_fn`` resolves a (name, card_dict) pair
     to an oracle_id; defaults to ``cd["oracle_id"]``.
     """
     if oid_fn is None:
-        oid_fn = lambda _name, cd: cd["oracle_id"]
+        oid_fn = _default_oid_fn
 
     cmdr_subtypes = cmdr_ctx.cmdr_subtypes or set()
-    cmdr_profile = ctx._forge_profiles.get(cmdr_oid, {})
+    cmdr_profile = cmdr_ctx.cmdr_profile
     cmdr_has_counters = 'P1P1' in cmdr_profile.get('counter_types', set())
     cmdr_is_tribal = bool(cmdr_profile.get('trigger_filters', set()) & cmdr_subtypes)
 
@@ -195,6 +227,11 @@ def _apply_penalties(scores, cand_list, ctx, cmdr_ctx, cmdr_oid,
         cmdr_prov = cmdr_ctx.cmdr_has | cmdr_ctx.cmdr_hints
         if _has_unmet_type_needs(card_needs, card_hints, cmdr_prov):
             scores[i] *= 0.3
+        # Card needs Ability$ tags the commander doesn't supply
+        # (e.g., Nykthos Paragon needs LifeGain but Kyler only has Counters)
+        # Uses cmdr_has only — hints mean "wants", not "provides"
+        if _has_unmet_ability_needs(card_needs, cmdr_ctx.cmdr_has):
+            scores[i] *= 0.85
         # Opponent-only replacement effects that conflict with commander's
         # self-targeting strategy (e.g., Bruvac doubles opponent mill but
         # Sidisi cares about self-mill)
@@ -205,7 +242,7 @@ def _apply_penalties(scores, cand_list, ctx, cmdr_ctx, cmdr_oid,
                 scores[i] *= 0.3
 
 
-def _apply_mechanical_bonus(scores, cand_list, ctx, cmdr_ctx, cmdr_oid):
+def _apply_mechanical_bonus(scores, cand_list, ctx, cmdr_ctx):
     """Boost cards with strong mechanical interaction the GBM may underweight.
 
     Applies a multiplicative bonus (1.0-1.15) based on:
@@ -213,9 +250,9 @@ def _apply_mechanical_bonus(scores, cand_list, ctx, cmdr_ctx, cmdr_oid):
     - Verb→trigger alignment (card produces events commander triggers on)
     - Creature ETB / sacrifice / spellcast pattern matches
     """
-    cmdr_profile = ctx._forge_profiles.get(cmdr_oid, {})
-    cmdr_produces = ctx._mech_produces.get(cmdr_oid)
-    cmdr_consumes = ctx._mech_consumes.get(cmdr_oid)
+    cmdr_profile = cmdr_ctx.cmdr_profile
+    cmdr_produces = cmdr_ctx.cmdr_produces
+    cmdr_consumes = cmdr_ctx.cmdr_consumes
     cmdr_verbs = cmdr_profile.get('verbs', set())
     cmdr_triggers = cmdr_profile.get('triggers', set())
     cmdr_trigger_filters = cmdr_profile.get('trigger_filters', set())
@@ -287,31 +324,33 @@ def _apply_mechanical_bonus(scores, cand_list, ctx, cmdr_ctx, cmdr_oid):
             scores[i] *= (1.0 + min(bonus, 0.15))
 
 
-def _score_commander(cmdr_oid, cmdr_name, color_identity, deck_cards,
+def _score_commander(cmdr_oids, cmdr_names, color_identity, deck_cards,
                      ctx, gbm, card_data, top_n=50):
-    """Score all color-legal candidates for one commander. Returns ranked list of (name, score).
+    """Score all color-legal candidates for commander(s). Returns ranked list of (name, score).
 
-    Uses pre-loaded ctx and gbm to avoid re-initialization.
+    Args:
+        cmdr_oids: list of 1-2 oracle_ids (for partners/backgrounds).
+        cmdr_names: list of 1-2 commander names.
+        color_identity: union color identity set.
+        card_data: dict[name -> card_dict] with "_ci_json" for color filtering.
+        ctx: ForgeFeatureContext.
+        gbm: LightGBM booster.
     """
-    # Color identity filter
-    deck_cards = deck_cards or {cmdr_name}
+    deck_cards = deck_cards or set(cmdr_names)
+    cmdr_oid_set = set(cmdr_oids)
     candidates = {}
     for name, cd in card_data.items():
-        if name in deck_cards or cd["oracle_id"] == cmdr_oid:
+        if name in deck_cards or cd["oracle_id"] in cmdr_oid_set:
             continue
         ci = set(json.loads(
             cd.get("_ci_json", "[]")
         )) if "_ci_json" in cd else set()
-        # We already filtered tokens in _load_all_cards
         if ci <= color_identity:
             candidates[name] = cd
 
-    # Commander context
+    # Commander context (supports 1-2 commanders)
     deck_oids = set()
-    cmdr_ctx = CmdrFeatureContext(ctx, cmdr_oid, deck_oids)
-    from mtg_synergy.config import extract_subtypes
-    cmdr_type = card_data.get(cmdr_name, {}).get("type_line", "")
-    cmdr_ctx.cmdr_subtypes = extract_subtypes(cmdr_type)
+    cmdr_ctx = CmdrFeatureContext(ctx, cmdr_oids=cmdr_oids, deck_oids=deck_oids)
 
     # Compute features
     cand_list = list(candidates.items())
@@ -325,13 +364,11 @@ def _score_commander(cmdr_oid, cmdr_name, color_identity, deck_cards,
         warnings.simplefilter("ignore")
         scores = gbm.predict(X, raw_score=True)
 
-    # Post-scoring penalties for clear anti-synergy patterns
-    _apply_penalties(scores, cand_list, ctx, cmdr_ctx, cmdr_oid, color_identity)
+    # Post-scoring penalties
+    _apply_penalties(scores, cand_list, ctx, cmdr_ctx, color_identity)
 
-    # Mechanical synergy bonus: boost cards with strong forge-mechanical
-    # interaction that the GBM may underweight. Uses the same signals as
-    # the hidden gem engine but as a mild re-ranking bonus (~5-15% of score).
-    _apply_mechanical_bonus(scores, cand_list, ctx, cmdr_ctx, cmdr_oid)
+    # Mechanical synergy bonus
+    _apply_mechanical_bonus(scores, cand_list, ctx, cmdr_ctx)
 
     # Rank and return top N
     ranked = sorted(zip([n for n, _ in cand_list], scores),
@@ -340,50 +377,88 @@ def _score_commander(cmdr_oid, cmdr_name, color_identity, deck_cards,
 
 
 def batch_recommend(conn, commander_names: list[str], top_n: int = 30,
-                    verbose: bool = True) -> dict[str, list[tuple[str, float]]]:
+                    verbose: bool = True, *,
+                    card_provider=None) -> dict[str, list[tuple[str, float]]]:
     """Score multiple commanders in batch, loading model and context once.
 
     Returns dict[commander_name -> list[(card_name, score)]].
     ~0.3s per commander after initial 3s setup (vs 7s per commander in subprocess).
+
+    If card_provider is given, uses it for card data instead of conn.
     """
     gbm = _load_gbm()
     if gbm is None:
-        print("ERROR: forge model not found. Run: python3 train_fusion_model.py")
+        _log.error("Forge model not found. Run: python3 train_fusion_model.py")
         return {}
 
     if verbose:
-        print("Loading shared context...")
-    ctx = ForgeFeatureContext(conn, preload_edges=True)
+        _log.info("Loading shared context...")
+    ctx = ForgeFeatureContext(conn, preload_edges=True, card_provider=card_provider)
 
-    # Load all card data + color identities
-    card_data = _load_all_cards(conn)
-    # Add color identity to card_data for fast filtering
-    for row in conn.execute("SELECT name, color_identity FROM cards"):
-        if row[0] in card_data:
-            card_data[row[0]]["_ci_json"] = row[1] or "[]"
+    if card_provider is not None:
+        # Build card_data from card_provider (all legal cards incl. colorless)
+        all_colors = {"W", "U", "B", "R", "G", "C"}
+        all_legal = card_provider.get_color_legal(all_colors)
+        card_data = {}
+        for cd in all_legal:
+            ci = cd["color_identity"]
+            card_data[cd["name"]] = {
+                "oracle_id": cd["oracle_id"],
+                "name": cd["name"],
+                "type_line": cd.get("type_line", ""),
+                "mana_cost": cd.get("mana_cost", ""),
+                "cmc": cd.get("cmc", 0),
+                "_ci_json": json.dumps(sorted(ci)) if isinstance(ci, set) else "[]",
+            }
+    else:
+        # Legacy path: load from conn
+        card_data = {}
+        for row in conn.execute(
+            "SELECT oracle_id, name, type_line, mana_cost, cmc FROM cards "
+            "WHERE type_line NOT LIKE '%Token%' AND legal_commander = 1"
+        ):
+            card_data[row[1]] = {
+                "oracle_id": row[0], "name": row[1],
+                "type_line": row[2] or "", "mana_cost": row[3] or "",
+                "cmc": row[4] or 0,
+            }
+        for row in conn.execute("SELECT name, color_identity FROM cards"):
+            if row[0] in card_data:
+                card_data[row[0]]["_ci_json"] = row[1] or "[]"
 
     # Resolve commander names to oids + color identities
     results = {}
     for i, cmdr_name in enumerate(commander_names):
-        row = conn.execute(
-            "SELECT oracle_id, color_identity FROM cards WHERE LOWER(name) = LOWER(?)",
-            (cmdr_name,)
-        ).fetchone()
-        if not row:
-            if verbose:
-                print(f"  [{i+1}/{len(commander_names)}] {cmdr_name}: NOT FOUND")
-            continue
+        if card_provider is not None:
+            cmdrs = card_provider.get_commanders([cmdr_name])
+            if not cmdrs:
+                if verbose:
+                    _log.warning("[%d/%d] %s: NOT FOUND", i+1, len(commander_names), cmdr_name)
+                continue
+            cmdr_oids = [c["oracle_id"] for c in cmdrs]
+            color_identity = set()
+            for c in cmdrs:
+                color_identity |= c["color_identity"]
+        else:
+            row = conn.execute(
+                "SELECT oracle_id, color_identity FROM cards WHERE LOWER(name) = LOWER(?)",
+                (cmdr_name,)
+            ).fetchone()
+            if not row:
+                if verbose:
+                    _log.warning("[%d/%d] %s: NOT FOUND", i+1, len(commander_names), cmdr_name)
+                continue
+            cmdr_oids = [row[0]]
+            color_identity = set(json.loads(row[1] or "[]"))
 
-        cmdr_oid, ci_json = row
-        color_identity = set(json.loads(ci_json or "[]"))
-
+        cmdr_names_list = [cmdr_name]
         ranked = _score_commander(
-            cmdr_oid, cmdr_name, color_identity, {cmdr_name},
+            cmdr_oids, cmdr_names_list, color_identity, set(cmdr_names_list),
             ctx, gbm, card_data, top_n=top_n)
         results[cmdr_name] = ranked
 
         if verbose and ((i + 1) % 50 == 0 or i == 0):
-            print(f"  [{i+1}/{len(commander_names)}] {cmdr_name}: {len(ranked)} recs")
+            _log.info("[%d/%d] %s: %d recs", i+1, len(commander_names), cmdr_name, len(ranked))
 
     return results
 
@@ -393,49 +468,58 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
                            deck_types: set = None, active_strategies: set = None,
                            color_identity: set = None,
                            forge_ctx: "ForgeFeatureContext | None" = None,
-                           gbm_model=None) -> None:
+                           gbm_model=None, *,
+                           card_provider=None) -> None:
     """Score candidates for a single commander. Modifies candidate_scores in-place.
 
     Pass forge_ctx and gbm_model to reuse pre-loaded context across calls
     (avoids ~7s rebuild per call). For batch scoring, use batch_recommend().
 
-    NOTE: mutates ``cards`` in-place — appends missing cards fetched from DB.
+    If card_provider is given, uses it for missing card resolution instead of conn.
     """
     gbm = gbm_model or _load_gbm()
     if gbm is None:
-        print("  ERROR: forge model not found. Run: python3 train_fusion_model.py")
+        _log.error("Forge model not found. Run: python3 train_fusion_model.py")
         return
 
-    # Build card data lookup
+    # Build card data lookup (local copy — never mutate caller's list)
     card_data = {c["name"]: c for c in cards}
     missing = [n for n in candidate_scores if n not in card_data]
     if missing:
-        for i in range(0, len(missing), 500):
-            chunk = missing[i:i + 500]
-            ph = ",".join("?" * len(chunk))
-            for row in conn.execute(
-                f"SELECT oracle_id, name, type_line, mana_cost, cmc, edhrec_rank "
-                f"FROM cards WHERE name IN ({ph}) AND type_line NOT LIKE '%Token%'", chunk
-            ).fetchall():
-                cd = {"oracle_id": row[0], "name": row[1], "type_line": row[2] or "",
-                      "mana_cost": row[3] or "", "cmc": row[4] or 0}
-                cards.append(cd)
-                card_data[row[1]] = cd
+        if card_provider is not None:
+            all_colors = {"W", "U", "B", "R", "G", "C"}
+            all_legal = card_provider.get_color_legal(all_colors)
+            legal_by_name = {cd["name"]: cd for cd in all_legal}
+            for name in missing:
+                cd = legal_by_name.get(name)
+                if cd:
+                    card_data[name] = {
+                        "oracle_id": cd["oracle_id"], "name": cd["name"],
+                        "type_line": cd.get("type_line", ""),
+                        "mana_cost": cd.get("mana_cost", ""),
+                        "cmc": cd.get("cmc", 0),
+                    }
+        else:
+            for i in range(0, len(missing), 500):
+                chunk = missing[i:i + 500]
+                ph = ",".join("?" * len(chunk))
+                for row in conn.execute(
+                    f"SELECT oracle_id, name, type_line, mana_cost, cmc, edhrec_rank "
+                    f"FROM cards WHERE name IN ({ph}) AND type_line NOT LIKE '%Token%'", chunk
+                ).fetchall():
+                    card_data[row[1]] = {
+                        "oracle_id": row[0], "name": row[1],
+                        "type_line": row[2] or "",
+                        "mana_cost": row[3] or "", "cmc": row[4] or 0,
+                    }
 
-    cmdr_oid = ""
-    for c in cards:
-        if c["name"] == commander:
-            cmdr_oid = c.get("oracle_id", "")
-            break
+    cmdr_cd = card_data.get(commander)
+    cmdr_oid = cmdr_cd.get("oracle_id", "") if cmdr_cd else ""
 
-    ctx = forge_ctx or ForgeFeatureContext(conn, preload_edges=True)
-    card_oid = {c["name"]: c.get("oracle_id", "") for c in cards}
+    ctx = forge_ctx or ForgeFeatureContext(conn, preload_edges=True, card_provider=card_provider)
+    card_oid = {name: cd.get("oracle_id", "") for name, cd in card_data.items()}
     deck_oids = {card_oid.get(n) for n in deck_cards if n in card_oid} - {None, ""}
     cmdr_ctx = CmdrFeatureContext(ctx, cmdr_oid, deck_oids)
-
-    from mtg_synergy.config import extract_subtypes
-    cmdr_type = next((c.get("type_line", "") for c in cards if c.get("oracle_id") == cmdr_oid), "")
-    cmdr_ctx.cmdr_subtypes = extract_subtypes(cmdr_type)
 
     cand_list = [(n, card_data[n]) for n in candidate_scores if n in card_data]
     card_oids_list = [cd.get("oracle_id") or card_oid.get(name, "") for name, cd in cand_list]
@@ -448,13 +532,15 @@ def score_forge_candidates(candidate_scores: dict, cards: list, conn,
             warnings.simplefilter("ignore")
             scores = gbm.predict(X, raw_score=True)
 
-        # Post-scoring penalties for clear anti-synergy patterns
-        _apply_penalties(scores, cand_list, ctx, cmdr_ctx, cmdr_oid,
-                         color_identity,
-                         oid_fn=lambda name, cd, _oid=card_oid: cd.get("oracle_id") or _oid.get(name, ""))
+        # Post-scoring penalties
+        def _oid_with_fallback(name: str, cd: dict) -> str:
+            return cd.get("oracle_id") or card_oid.get(name, "")
 
-        # Mechanical synergy bonus (same as _score_commander path)
-        _apply_mechanical_bonus(scores, cand_list, ctx, cmdr_ctx, cmdr_oid)
+        _apply_penalties(scores, cand_list, ctx, cmdr_ctx,
+                         color_identity, oid_fn=_oid_with_fallback)
+
+        # Mechanical synergy bonus
+        _apply_mechanical_bonus(scores, cand_list, ctx, cmdr_ctx)
 
         for i, (name, _) in enumerate(cand_list):
             info = candidate_scores[name]

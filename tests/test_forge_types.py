@@ -1,6 +1,6 @@
 """Tests for Forge-native AST types."""
 import pytest
-from mtg_synergy.parse.forge_types import ForgeFilter, ForgeTrigger, ForgeEffect
+from mtg_synergy_train.parse.forge_types import ForgeFilter, ForgeTrigger, ForgeEffect
 
 
 def test_forge_filter_defaults():

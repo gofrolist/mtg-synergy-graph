@@ -8,7 +8,7 @@ Examples:
   'Goblin.YouCtrl+Other'
 """
 import re
-from mtg_synergy.parse.forge_types import ForgeFilter
+from mtg_synergy_train.parse.forge_types import ForgeFilter
 
 # Known card types in Forge
 _CARD_TYPES = {
@@ -134,7 +134,7 @@ def parse_forge_filter(filter_str: str) -> ForgeFilter:
     # If we have unparsed modifiers, store them in raw
     if unparsed:
         f.raw = filter_str  # keep full string for unparsed cases
-    elif not unparsed:
+    else:
         f.raw = None  # fully parsed — clear raw
 
     return f

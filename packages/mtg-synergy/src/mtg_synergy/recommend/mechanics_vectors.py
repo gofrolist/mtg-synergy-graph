@@ -153,14 +153,6 @@ _concept_idx = {c: i for i, c in enumerate(GAME_CONCEPTS)}
 _ZONE_VERBS = {"ChangeZone", "ChangeZoneAll", "Sacrifice", "Destroy",
                "DestroyAll", "Mill", "Discard"}
 
-# Cost types → game concepts consumed
-COST_CONCEPTS = {
-    "sac_creature":  "creature_sacrificed",
-    "sac_artifact":  "artifact_enters",  # needs artifact to sacrifice
-    "tap_creature":  "creature_tapped",
-    "discard":       "card_discarded",
-}
-
 def _is_opponent_only(defined: str | None, raw_line: str) -> bool:
     """Check if an ability targets only opponents (not self/any player).
 
@@ -245,11 +237,12 @@ def _collect_subtypes(abilities):
     return top_subtypes, subtype_idx, dim
 
 
-def _add_type_based_produces(conn, produces, consumes, dim):
-    """Add type-based produces: non-land cards produce spell_cast, creatures produce attacks."""
-    type_lines = {}
-    for row in conn.execute("SELECT oracle_id, type_line FROM cards"):
-        type_lines[row[0]] = row[1] or ""
+def _add_type_based_produces(type_lines, produces, consumes, dim):
+    """Add type-based produces: non-land cards produce spell_cast, creatures produce attacks.
+
+    Args:
+        type_lines: dict[oracle_id → type_line] (from CardProvider or conn).
+    """
     for oid in set(produces.keys()) | set(consumes.keys()):
         tl = type_lines.get(oid, "")
         if not tl:
@@ -267,11 +260,13 @@ def _add_type_based_produces(conn, produces, consumes, dim):
             produces[oid][_concept_idx["creature_available"]] += 0.5
 
 
-def build_mechanics_vectors(conn, preloaded_abilities=None):
+def build_mechanics_vectors(conn, preloaded_abilities=None, type_lines=None):
     """Build dense mechanics vectors for all cards with Forge data.
 
     Args:
         conn: SQLite connection
+        type_lines: optional dict[oracle_id → type_line] from CardProvider.
+            When provided, avoids querying the cards table.
         preloaded_abilities: optional list of (oracle_id, verb, trigger_mode,
             trigger_filter, cost, keyword, token_script, counter_type, raw_line,
             amount, trigger_origin, trigger_destination[, defined]) tuples.
@@ -576,7 +571,13 @@ def build_mechanics_vectors(conn, preloaded_abilities=None):
                     consumes[oid][_concept_idx["creature_tapped"]] += 1.0
                     consumes[oid][_concept_idx["creature_available"]] += 0.5
 
-    _add_type_based_produces(conn, produces, consumes, dim)
+    # Add type-based produces (uses type_lines from CardProvider if available)
+    if type_lines is None:
+        # Fallback: load from conn (for standalone use / training)
+        type_lines = {}
+        for row in conn.execute("SELECT oracle_id, type_line FROM cards"):
+            type_lines[row[0]] = row[1] or ""
+    _add_type_based_produces(type_lines, produces, consumes, dim)
 
     # L2 normalize all vectors
     for oid in produces:

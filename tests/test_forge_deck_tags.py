@@ -1,7 +1,7 @@
 """Tests for DeckHas/DeckHints scoring integration."""
 import sqlite3
 import pytest
-from mtg_synergy.parse.forge_import import ensure_forge_schema
+from mtg_synergy_train.parse.forge_import import ensure_forge_schema
 
 
 def _setup_deck_tags(conn):

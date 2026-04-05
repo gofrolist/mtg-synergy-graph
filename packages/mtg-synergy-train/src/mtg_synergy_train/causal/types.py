@@ -1,5 +1,5 @@
 """Causal graph dataclasses for the interaction graph."""
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 
 @dataclass
@@ -10,8 +10,9 @@ class EdgeDetail:
     scaling: str | None = None
     filter_precision: str = "broad"
 
-    def to_dict(self):
-        return {k: v for k, v in self.__dict__.items() if v is not None}
+    def to_dict(self) -> dict:
+        return {f.name: getattr(self, f.name) for f in fields(self)
+                if getattr(self, f.name) is not None}
 
 
 @dataclass

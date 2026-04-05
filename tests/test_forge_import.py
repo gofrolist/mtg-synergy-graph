@@ -1,7 +1,7 @@
 """Tests for full Forge DSL import pipeline."""
 import sqlite3
 import pytest
-from mtg_synergy.parse.forge_import import (
+from mtg_synergy_train.parse.forge_import import (
     parse_forge_card_file, ensure_forge_schema, shallow_svar_resolve,
     extract_ability_fields,
 )

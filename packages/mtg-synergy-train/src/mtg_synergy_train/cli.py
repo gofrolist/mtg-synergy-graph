@@ -11,7 +11,7 @@ import json
 import sqlite3
 
 from mtg_synergy.recommend import recommend_cards
-from mtg_synergy.analysis.strategy import _detect_deck_types
+from mtg_synergy_train.analysis.strategy import _detect_deck_types
 
 
 def run():
@@ -37,7 +37,7 @@ def run():
     if not args.commander:
         parser.error("--recommend and --gems require --commander")
 
-    from mtg_synergy.tag_db import get_cards_by_names, DB_PATH
+    from mtg_synergy_train.tag_db import get_cards_by_names, DB_PATH
 
     conn = sqlite3.connect(DB_PATH)
 
@@ -50,7 +50,7 @@ def run():
         print(f"Commander not found: {args.commander}")
         conn.close()
         return
-    cmdr_name, cmdr_oid, ci_json, cmdr_type = cmdr_row
+    cmdr_name, cmdr_oid, ci_json, _ = cmdr_row
     color_identity = set(json.loads(ci_json or "[]"))
     cards = get_cards_by_names([cmdr_name], DB_PATH)
     deck_set = {cmdr_name}
@@ -67,15 +67,26 @@ def run():
         deck_set.update(c["name"] for c in extra_cards)
 
     # Detect strategies from commander
-    import sys, pathlib
-    _scripts_dir = str(pathlib.Path(__file__).resolve().parent.parent.parent / "scripts")
-    if _scripts_dir not in sys.path:
-        sys.path.insert(0, _scripts_dir)
-    from strategy_detector import detect_strategies
     active_strategies = set()
     if args.strategies == "auto":
-        detected = detect_strategies(cmdr_oid, DB_PATH)
-        active_strategies = {s["name"] for s in detected if s["confidence"] >= 0.3}
+        try:
+            from strategy_detector import detect_strategies
+        except ImportError:
+            # strategy_detector is a standalone script in scripts/
+            # Available when running from monorepo, not from installed wheel
+            import sys, pathlib
+            for parent in pathlib.Path(__file__).resolve().parents:
+                candidate = parent / "scripts" / "strategy_detector.py"
+                if candidate.exists():
+                    sys.path.insert(0, str(candidate.parent))
+                    from strategy_detector import detect_strategies
+                    break
+            else:
+                detect_strategies = None
+                print("WARNING: strategy_detector not found; strategy auto-detection disabled")
+        if detect_strategies is not None:
+            detected = detect_strategies(cmdr_oid, DB_PATH)
+            active_strategies = {s["name"] for s in detected if s["confidence"] >= 0.3}
     else:
         active_strategies = set(args.strategies.split(","))
 

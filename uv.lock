@@ -9,6 +9,13 @@ resolution-markers = [
     "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 
+[manifest]
+members = [
+    "mtg-synergy",
+    "mtg-synergy-graph",
+    "mtg-synergy-train",
+]
+
 [[package]]
 name = "colorama"
 version = "0.4.6"
@@ -45,30 +52,58 @@ wheels = [
 ]
 
 [[package]]
-name = "mtg-synergy-graph"
+name = "mtg-synergy"
 version = "0.1.0"
-source = { editable = "." }
+source = { editable = "packages/mtg-synergy" }
 dependencies = [
     { name = "lightgbm" },
     { name = "numpy" },
 ]
 
+[package.metadata]
+requires-dist = [
+    { name = "lightgbm", specifier = ">=4.0" },
+    { name = "numpy", specifier = ">=2.0" },
+]
+
+[[package]]
+name = "mtg-synergy-graph"
+version = "0.1.0"
+source = { virtual = "." }
+
 [package.dev-dependencies]
 dev = [
+    { name = "mtg-synergy" },
+    { name = "mtg-synergy-train" },
     { name = "pytest" },
     { name = "vulture" },
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "lightgbm", specifier = ">=4.6.0" },
-    { name = "numpy", specifier = ">=2.4.3" },
-]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "mtg-synergy", editable = "packages/mtg-synergy" },
+    { name = "mtg-synergy-train", editable = "packages/mtg-synergy-train" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "vulture", specifier = ">=2.16" },
+]
+
+[[package]]
+name = "mtg-synergy-train"
+version = "0.1.0"
+source = { editable = "packages/mtg-synergy-train" }
+dependencies = [
+    { name = "lightgbm" },
+    { name = "mtg-synergy" },
+    { name = "numpy" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "lightgbm", specifier = ">=4.0" },
+    { name = "mtg-synergy", editable = "packages/mtg-synergy" },
+    { name = "numpy", specifier = ">=2.0" },
 ]
 
 [[package]]

@@ -118,6 +118,10 @@ python3 scripts/compare_edhrec.py --all --quiet                    # All command
 python3 scripts/validate_recommendations.py --top 100              # Pipeline validation (model + scoring)
 python3 scripts/train_fusion_model.py --validate      # Train + validate in one step
 
+# === Export inference artifacts ===
+python3 scripts/export_inference_db.py                # Build data/inference/ (~646 MB)
+python3 scripts/export_inference_db.py --output /path # Custom output directory
+
 # Tests
 uv run pytest tests/ -v                        # Run all 136 tests
 uv run pytest tests/test_recommendation_quality.py -v              # Pipeline quality tests only
@@ -153,6 +157,7 @@ python3 scripts/build_graph.py --rebuild                # 3. Rebuild causal grap
 python3 scripts/strategy_detector.py --populate                 # 4. Strategies
 python3 scripts/fetch_edhrec_all.py --max 2000 --refresh-top 200  # 5. Refresh EDHREC (new + top 200 stale)
 python3 scripts/train_fusion_model.py --rebuild-features --validate  # 6. Retrain + validate (~8 min, $0)
+python3 scripts/export_inference_db.py                          # 7. Export inference artifacts (~646 MB)
 ```
 
 ### DB Schema (data/tags.db)
@@ -242,6 +247,9 @@ python3 scripts/train_fusion_model.py --rebuild-features --validate  # 6. Retrai
   - "Choose a Background" / "Doctor's companion" hard filter (score=-1e9)
   - wrong-color needs hard filter (score=-1e9): e.g., Pearl Medallion in mono-G
   - unmet Type$ needs/hints (×0.3): e.g., needs=Type$Dinosaur in Human deck
+  - unmet Ability$ needs (×0.85): card needs Ability$LifeGain but commander only has
+    Ability$Counters. Uses cmdr_has only (not cmdr_hints — hints=wants, not provides).
+    171 cards with Ability$ needs across 11 ability types.
   - opponent-only replacement for self-targeting commander (×0.3): R: ability with
     ValidPlayer$Player.Opponent for event the commander self-targets
     (e.g., Bruvac doubles opponent mill but Sidisi cares about self-mill)
@@ -270,15 +278,19 @@ Total time: ~0.5s per commander with warm ForgeFeatureContext (pass forge_ctx=
 
 ```python
 # Load context once at startup (~4s with warm adj cache)
-ctx = ForgeFeatureContext(conn, preload_edges=True)
+# With CardProvider: card data comes from external DB (e.g., Neon Postgres)
+ctx = ForgeFeatureContext(synergy_conn, preload_edges=True, card_provider=provider)
 gbm = _load_gbm()  # cached at module level after first call
 
 # Per-request: ~0.5s per commander (was 60-73s before context reuse)
-score_forge_candidates(candidate_scores, cards, conn, commander, deck_cards,
-                       forge_ctx=ctx, gbm_model=gbm)
+score_forge_candidates(candidate_scores, cards, synergy_conn, commander, deck_cards,
+                       forge_ctx=ctx, gbm_model=gbm, card_provider=provider)
+
+# Partner pair support: pass cmdr_oids list to CmdrFeatureContext
+cmdr_ctx = CmdrFeatureContext(ctx, cmdr_oids=["oid1", "oid2"], deck_oids=deck_oids)
 ```
 
-Runtime footprint (warm server): ~1.1 GB RSS, 10 GB disk (DB + caches).
+Runtime footprint (warm server): ~1.1 GB RSS, ~650 MB disk (inference artifacts).
 Minimum deployment: 2 GB RAM VPS with persistent volume.
 
 ### Hidden Gem Engine (scripts/synergy_graph.py --commander "Name" --gems)
@@ -292,51 +304,50 @@ mechanically-synergistic cards that nobody plays.
 
 ## Key Files
 
-### `src/mtg_synergy/parse/` package (Forge data import)
+### Monorepo Package Structure
+
+```
+packages/
+  mtg-synergy/          # Package A: inference library (pip install mtg-synergy)
+    src/mtg_synergy/    # numpy + lightgbm only
+  mtg-synergy-train/    # Package B: training + pipelines (pip install mtg-synergy-train)
+    src/mtg_synergy_train/  # depends on mtg-synergy
+```
+
+### Package A: `mtg_synergy` (inference library)
 
 | Module | Purpose |
 |---|---|
-| `src/mtg_synergy/parse/forge_import.py` | Import Forge ability data into DB |
-| `src/mtg_synergy/parse/forge_filter_parser.py` | Parse Forge ValidCard$ filter expressions |
-| `src/mtg_synergy/parse/forge_types.py` | ForgeFilter dataclass for parsed filters |
+| `config.py` | Configurable paths (env vars: MTG_SYNERGY_DATA_DIR, MTG_SYNERGY_DB_PATH, MTG_SYNERGY_ARTIFACT_DIR), `extract_subtypes()` |
+| `constants.py` | STAPLE_ROLES |
+| `protocol.py` | `CardProvider` protocol + `SqliteCardProvider` — abstracts card data access for external DB integration |
+| `recommend/engine.py` | `recommend_cards()` — forge model recommendation pipeline |
+| `recommend/scoring.py` | `color_identity_filter()`, `score_forge_candidates(card_provider=)`, `batch_recommend(card_provider=)`, `_apply_penalties()`, `_apply_mechanical_bonus()`, `_load_gbm()` |
+| `recommend/hidden_gems.py` | `find_hidden_gems(card_provider=, cmdr_oids=)` — pure mechanical synergy engine |
+| `recommend/forge_features.py` | `ForgeFeatureContext(conn, card_provider=)` — data loading, pre-computation |
+| `recommend/forge_compute.py` | `CmdrFeatureContext(ctx, cmdr_oids=[...])` — per-commander features, partner pair support |
+| `recommend/mechanics_vectors.py` | 116-dim forge mechanics vectors: shared game concept space (36 concepts + 80 subtypes) |
+| `recommend/cmdr_patterns.py` | `detect_cmdr_patterns()` — shared commander mechanical flag detection |
 
-### `src/mtg_synergy/causal/` package (interaction graph)
-
-| Module | Purpose |
-|---|---|
-| `src/mtg_synergy/causal/__init__.py` | DB storage, CausalContext (pre-loaded scoring), anti-synergy detection |
-| `src/mtg_synergy/causal/types.py` | Edge, EdgeDetail dataclasses |
-| `src/mtg_synergy/causal/forge_indexer.py` | Index cards by events from Forge data |
-| `src/mtg_synergy/causal/forge_graph_builder.py` | Build causal edges from Forge data |
-| `src/mtg_synergy/causal/idf.py` | Shared IDF computation + PRECISION_STRENGTH constant |
-| `src/mtg_synergy/causal/verb_event_map.py` | Forge verb → trigger event mapping (extracted from Java source) |
-
-### `src/mtg_synergy/` package (core logic)
+### Package B: `mtg_synergy_train` (training + pipelines)
 
 | Module | Purpose |
 |---|---|
-| `src/mtg_synergy/config.py` | Centralized paths, DB settings, `extract_subtypes()` (DFC-aware) |
-| `src/mtg_synergy/constants.py` | STAPLE_ROLES |
-| `src/mtg_synergy/db.py` | Centralized DB connection factory |
-| `src/mtg_synergy/tag_db.py` | SQLite tag DB utilities (schema, queries, import) |
-| `src/mtg_synergy/cli.py` | CLI dispatcher (argparse + command routing) |
-| `src/mtg_synergy/recommend/engine.py` | `recommend_cards()` — forge model recommendation pipeline |
-| `src/mtg_synergy/recommend/scoring.py` | `color_identity_filter()`, `score_forge_candidates(forge_ctx=, gbm_model=)`, `_apply_penalties()`, `_apply_mechanical_bonus()`, `_load_gbm()` (cached) |
-| `src/mtg_synergy/recommend/hidden_gems.py` | `find_hidden_gems()` — pure mechanical synergy engine, no popularity bias |
-| `src/mtg_synergy/recommend/forge_features.py` | `ForgeFeatureContext` (data loading, pre-computation: profiles, vectors, demand data, card arrays) |
-| `src/mtg_synergy/recommend/forge_compute.py` | `CmdrFeatureContext`, `compute_batch_features()`, `compute_card_features()` — 89-feature computation |
-| `src/mtg_synergy/recommend/mechanics_vectors.py` | 116-dim forge mechanics vectors: shared game concept space (36 concepts + 80 subtypes) |
-| `src/mtg_synergy/recommend/cmdr_patterns.py` | `detect_cmdr_patterns()` — shared commander mechanical flag detection |
-| `src/mtg_synergy/recommend/affinity.py` | Commander affinity scoring |
-| `src/mtg_synergy/analysis/strategy.py` | `_detect_deck_types()` — tribal type detection |
+| `db.py` | Centralized DB connection factory |
+| `tag_db.py` | SQLite tag DB utilities (schema, queries, import) |
+| `cli.py` | CLI dispatcher (argparse + command routing) |
+| `causal/` | Interaction graph: DB storage, edge types, forge indexer, graph builder, IDF, verb_event_map |
+| `parse/` | Forge data import: forge_import, forge_filter_parser, forge_types |
+| `analysis/strategy.py` | `_detect_deck_types()` — tribal type detection |
 
 ### `scripts/` directory (pipelines + entry points)
 
 | File | Purpose |
 |---|---|
-| `scripts/synergy_graph.py` | Thin wrapper — re-exports from `mtg_synergy/`, CLI entry point |
+| `scripts/synergy_graph.py` | CLI entry point — re-exports from both packages |
+| `scripts/export_inference_db.py` | Build inference artifact bundle (synergy.db + caches + model) |
 | `scripts/train_fusion_model.py` | Forge LambdaRank GBM training + feature cache rebuild + `--validate` |
-| `scripts/sweep_hyperparams.py` | Two-phase HP sweep (grade boundaries + neg ratio, sample weights + label_gain) with pipeline validation |
+| `scripts/sweep_hyperparams.py` | Two-phase HP sweep with pipeline validation |
 | `scripts/compare_edhrec.py` | Compare recommendations vs EDHREC High Synergy section |
 | `scripts/validate_recommendations.py` | End-to-end pipeline validation (model + scoring + penalties) |
 | `scripts/strategy_detector.py` | Rule-based strategy detection |
@@ -351,20 +362,21 @@ mechanically-synergistic cards that nobody plays.
 - `data/oracle_cards.json` is gitignored (~150MB); must run `scripts/download_cards.py` first
 - API calls use `urllib.request` (stdlib only, no external HTTP dependency)
 - Dependencies: `numpy` + `lightgbm` (runtime), `vulture` (dev)
-- All scripts use `from mtg_synergy.config import DB_PATH, DATA_DIR` for paths
+- Paths configurable via env vars: `MTG_SYNERGY_DATA_DIR`, `MTG_SYNERGY_DB_PATH`, `MTG_SYNERGY_ARTIFACT_DIR`
 - Tribal subtypes extracted via `config.extract_subtypes()` (DFC-aware, both faces)
 - CLI uses `--commander "Name"` or `uv run mtg-synergy --commander "Name"`
-- Package uses `src/` layout (`src/mtg_synergy/`), built with `uv_build` backend
-- Pipeline scripts live in `scripts/`, library modules in `src/mtg_synergy/`
-- Tests: 136 tests in `tests/`, run with `uv run pytest tests/`
+- Monorepo: uv workspace with `packages/mtg-synergy` (inference) + `packages/mtg-synergy-train` (training)
+- Inference code: `from mtg_synergy...`, training code: `from mtg_synergy_train...`
+- CardProvider protocol (`protocol.py`) abstracts card data — inference never queries `cards` table directly
+- Partner pair support: `CmdrFeatureContext(ctx, cmdr_oids=["oid1", "oid2"])` merges profiles/vectors/edges
+- Tests: 152 tests in `tests/`, run with `uv run pytest tests/`
   - 7 end-to-end pipeline quality tests (`test_recommendation_quality.py`)
   - Requires trained model + populated DB (auto-skipped if missing)
-- After training, always run `--validate` to check full pipeline (not just NDCG):
-  `python3 scripts/train_fusion_model.py --validate`
+- After training, run `--validate` then export: `python3 scripts/export_inference_db.py` (~646 MB)
 - Adjacency cache uses np.savez (not legacy serialization) for security
 - All np.load() calls use allow_pickle=False — enforced project-wide
 - SQL fragment interpolation guarded by _VALID_*_EXPRS frozensets + ValueError
   (never use assert for security — stripped by python -O)
 - External download URLs validated via urlparse (scheme + netloc)
-- Shared helpers: `causal/idf.py` (IDF + precision strength), `recommend/cmdr_patterns.py` (commander mechanical flags)
-- Scoring penalties in `_apply_penalties()` apply to ALL commanders (not just tribal)
+- Scoring penalties in `_apply_penalties()` use `cmdr_ctx.cmdr_profile` (merged for partners)
+- `score_forge_candidates()` does not mutate the caller's `cards` list — builds local `card_data` dict

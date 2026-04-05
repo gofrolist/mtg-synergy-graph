@@ -1,13 +1,19 @@
 """Card recommendation engine — forge-only scoring pipeline."""
+import logging
 import sqlite3
 from collections import defaultdict
-from urllib.parse import quote
+from contextlib import closing
+
+_log = logging.getLogger(__name__)
 
 
 def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
-                    deck_types: set[str] = None, top_n: int = 50,
-                    active_strategies: set = None, db_path: str = None,
-                    color_identity: set = None, commander: str = None,
+                    deck_types: set[str] | None = None, top_n: int = 50,
+                    active_strategies: set[str] | None = None,
+                    db_path: str | None = None,
+                    color_identity: set[str] | None = None,
+                    commander: str | None = None,
+                    *, card_provider=None,
 ):
     """Rank non-deck cards by total synergy with the current decklist.
 
@@ -34,35 +40,35 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
         from mtg_synergy.recommend.scoring import (
             color_identity_filter, score_forge_candidates)
 
-        # Get commander oracle_id
-        cmdr_oid = ""
-        for c in cards:
-            if c["name"] == commander:
-                cmdr_oid = c.get("oracle_id", "")
-                break
+        with closing(_shared_conn):
+            # Get commander oracle_id
+            cmdr_oid = ""
+            for c in cards:
+                if c["name"] == commander:
+                    cmdr_oid = c.get("oracle_id", "")
+                    break
 
-        ci_results = color_identity_filter(
-            _shared_conn, cmdr_oid, color_identity or set(),
-            deck_cards=deck_cards)
+            ci_results = color_identity_filter(
+                _shared_conn, cmdr_oid, color_identity or set(),
+                deck_cards=deck_cards, card_provider=card_provider)
 
-        candidate_scores = {}
-        for oid, name in ci_results:
-            if name not in deck_cards:
-                candidate_scores[name] = {
-                    "total": 0.0, "partners": [], "multi_sig": 0,
-                    "commander_synergy": 0.0, "key_synergy": 0.0,
-                }
+            candidate_scores = {}
+            for oid, name in ci_results:
+                if name not in deck_cards:
+                    candidate_scores[name] = {
+                        "total": 0.0, "partners": [], "multi_sig": 0,
+                        "commander_synergy": 0.0, "key_synergy": 0.0,
+                    }
 
-        print(f"  Color-identity filter: {len(ci_results)} color-legal cards "
-              f"({len(candidate_scores)} after excluding deck)")
+            _log.info("Color-identity filter: %d color-legal cards (%d after excluding deck)",
+                      len(ci_results), len(candidate_scores))
 
-        # Forge-only scoring (93 features, 87 active + 6 zeroed)
-        score_forge_candidates(candidate_scores, cards, _shared_conn,
-                               commander, deck_cards, deck_types,
-                               active_strategies,
-                               color_identity=color_identity)
-
-        _shared_conn.close()
+            # Forge-only scoring (93 features, 87 active + 6 zeroed)
+            score_forge_candidates(candidate_scores, cards, _shared_conn,
+                                   commander, deck_cards, deck_types,
+                                   active_strategies,
+                                   color_identity=color_identity,
+                                   card_provider=card_provider)
     else:
         # Fallback: graph scores only (no DB)
         deck_scores = _deck_card_scores(graph, deck_cards)
@@ -97,36 +103,22 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
         info["pct"] = round(info["total"] / max_score * 100, 1)
 
     # --- Output ---
-    print(f"\n{'=' * 80}")
+    from mtg_synergy.recommend.display import print_card_table
+
     header = f"TOP {top_n} RECOMMENDED CARDS"
     if active_strategies:
         header += f" | {', '.join(sorted(active_strategies))}"
-    print(header)
-    print(f"{'=' * 80}")
 
-    # Column header
-    print(f"  {'#':>3s}  {'Name':<35s}  {'Type':<28s}  {'CMC':>3s}  {'Score':>6s}")
-    print(f"  {'─' * 3}  {'─' * 35}  {'─' * 28}  {'─' * 3}  {'─' * 6}")
-
-    for rank_idx, (card, info) in enumerate(ranked[:top_n], 1):
+    rows = []
+    for card, info in ranked[:top_n]:
         meta = card_meta.get(card, {})
-        type_line = meta.get("type_line", "")
-        cmc = meta.get("cmc", 0)
-        score = info["total"]
-        # Shorten type_line: remove "Legendary " prefix, truncate
-        short_type = type_line.replace("Legendary ", "L ")
-        if len(short_type) > 28:
-            short_type = short_type[:27] + "…"
-
-        # OSC 8 clickable Scryfall link
-        scryfall_url = f"https://scryfall.com/search?q=!%22{quote(card, safe='')}%22"
-        osc_name = f"\033]8;;{scryfall_url}\033\\{card}\033]8;;\033\\"
-        # Pad the visible name to 35 chars (link escape chars are invisible)
-        pad = max(0, 35 - len(card))
-        padded_name = osc_name + " " * pad
-
-        cmc_str = f"{cmc:3.0f}" if cmc == int(cmc) else f"{cmc:3.1f}"
-        print(f"  {rank_idx:3d}  {padded_name}  {short_type:<28s}  {cmc_str}  {score:6.1f}")
+        rows.append({
+            "name": card,
+            "type_line": meta.get("type_line", ""),
+            "cmc": meta.get("cmc", 0),
+            "score": info["total"],
+        })
+    print_card_table(header, rows, top_n=top_n)
 
 
 def _deck_card_scores(graph: dict, deck_cards: set[str]) -> dict:

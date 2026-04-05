@@ -7,7 +7,7 @@ public symbols so existing ``from synergy_graph import X`` imports work.
 
 # Re-export public symbols
 from mtg_synergy.recommend import recommend_cards
-from mtg_synergy.cli import run
+from mtg_synergy_train.cli import run
 
 
 if __name__ == "__main__":

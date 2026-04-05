@@ -1,11 +1,11 @@
 """Tests for Forge-native causal graph builder."""
 import sqlite3
 import pytest
-from mtg_synergy.causal.forge_graph_builder import build_forge_edges, compute_filter_match
-from mtg_synergy.causal.forge_indexer import build_forge_index
-from mtg_synergy.causal.types import Edge
-from mtg_synergy.parse.forge_import import ensure_forge_schema, parse_forge_card_file, import_card_to_db
-from mtg_synergy.parse.forge_filter_parser import parse_forge_filter
+from mtg_synergy_train.causal.forge_graph_builder import build_forge_edges, compute_filter_match
+from mtg_synergy_train.causal.forge_indexer import build_forge_index
+from mtg_synergy_train.causal.types import Edge
+from mtg_synergy_train.parse.forge_import import ensure_forge_schema, parse_forge_card_file, import_card_to_db
+from mtg_synergy_train.parse.forge_filter_parser import parse_forge_filter
 
 
 # Reuse card fixtures from test_forge_indexer
