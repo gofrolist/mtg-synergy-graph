@@ -172,6 +172,15 @@ _EDHREC_FREE = os.environ.get("EDHREC_FREE", "") == "1"
 # _extract_keywords_and_conditions / _extract_counters_and_special /
 # _build_func_fingerprints.  Avoids ~2.87M re._compile calls per run.
 
+# R: replacement Event$ → effective verb for profile enrichment.
+# Non-opponent R: abilities get this verb added to their profile so they
+# appear in verb_alignment, shared_verb, verb_concentration, and deck tags.
+_R_EVENT_TO_VERB = {
+    "CreateToken": "Token", "AddCounter": "PutCounter",
+    "Mill": "Mill", "DamageDone": "DealDamage", "Draw": "Draw",
+    "GainLife": "GainLife", "LoseLife": "LoseLife",
+}
+
 # Fixed field patterns (field$\s*value)
 _RE_EVENT = re.compile(r'Event\$\s*(\S+)')
 _RE_DURATION = re.compile(r'Duration\$\s*(\S+)')
@@ -343,6 +352,7 @@ class ForgeFeatureContext:
         self._load_functional_fingerprints(conn)
         self._load_deck_tags(conn)
         self._load_ability_vectors(conn)
+        self._enrich_deck_tags_from_tokens()
         self._load_edhrec_stats(conn)
 
         # Verb→trigger alignment mapping for F30
@@ -433,6 +443,7 @@ class ForgeFeatureContext:
         # Forge ability profiles: per-card structured data from forge_abilities
         # Replaces oracle text regex matching for features F25-F30
         self._forge_profiles = {}
+        self._verb_counts = {}  # oracle_id → Counter of verb occurrences (for concentration)
         # Also collect raw abilities for build_mechanics_vectors (avoids redundant DB scan)
         # Output format consumed by mechanics_vectors.py:
         #   (oid, verb, trig_mode, trig_filter, cost, kw, token_script,
@@ -501,7 +512,11 @@ class ForgeFeatureContext:
             'cost_types': set(),  # sacrifice, tap, discard, exile, paylife
             'raw_trigger_filters': set(),  # full trigger_filter strings for IDF
         })
-        if verb: p['verbs'].add(verb)
+        if verb:
+            p['verbs'].add(verb)
+            # Track verb occurrence counts for concentration feature
+            vc = self._verb_counts.setdefault(oid, {})
+            vc[verb] = vc.get(verb, 0) + 1
         if trig_mode: p['triggers'].add(trig_mode)
         if keyword: p['keywords'].add(keyword)
         if counter_type:
@@ -518,11 +533,23 @@ class ForgeFeatureContext:
                     p['targets'].add(main)
         if ability_type: p['ability_types'].add(ability_type)
         # Track opponent-only replacement events (e.g., Bruvac's Mill)
+        # and extract effective verbs from non-opponent R: abilities
         if ability_type == 'R' and raw_line_val:
             m = _RE_EVENT.search(raw_line_val)
-            if m and ('ValidPlayer$ Player.Opponent' in raw_line_val
-                      or 'ValidPlayer$ Opponent' in raw_line_val):
-                p['opponent_only_events'].add(m.group(1))
+            if m:
+                is_opp_only = ('ValidPlayer$ Player.Opponent' in raw_line_val
+                               or 'ValidPlayer$ Opponent' in raw_line_val)
+                if is_opp_only:
+                    p['opponent_only_events'].add(m.group(1))
+                else:
+                    # Non-opponent R: effects → add effective verb so they appear
+                    # in verb_alignment, shared_verb, verb_concentration, deck tags.
+                    # E.g., Chatterfang R:Event$ CreateToken → verb=Token
+                    eff_verb = _R_EVENT_TO_VERB.get(m.group(1))
+                    if eff_verb:
+                        p['verbs'].add(eff_verb)
+                        vc = self._verb_counts.setdefault(oid, {})
+                        vc[eff_verb] = vc.get(eff_verb, 0) + 1
         if trig_filter:
             if trig_filter != "Card.Self":
                 p['raw_trigger_filters'].add(trig_filter)
@@ -772,11 +799,51 @@ class ForgeFeatureContext:
             elif tag_type == "needs":
                 self._deck_needs.setdefault(oid, set()).update(tags)
 
+        # Auto-derive deck tags from forge profiles for cards missing them.
+        # verb → has (card provides this ability), trigger → hints (card wants this event).
+        # Uses verb/trigger names directly as tags (e.g., Ability$Sacrifice, Ability$Token).
+        # Internally consistent vocabulary — no manual mapping needed.
+        # ChangesZone/ChangesZoneAll excluded: too generic (nearly all triggered cards).
+        _TRIGGER_STEM = {
+            "Sacrificed": "Sacrifice", "TokenCreated": "Token",
+            "DamageDone": "DealDamage", "DamageDoneOnce": "DealDamage",
+            "Drawn": "Draw", "CounterAdded": "PutCounter",
+            "CounterAddedOnce": "PutCounter", "LifeGained": "GainLife",
+            "LifeLost": "LoseLife", "Milled": "Mill",
+            "Discarded": "Discard", "SpellCast": "SpellCast",
+            "Taps": "Tap", "Untaps": "Untap",
+        }
+        _generic_types = {"card", "creature", "permanent", "nontoken", "token",
+                          "artifact", "enchantment", "land", "spell", "self",
+                          "other", "any"}
+        for oid, profile in self._forge_profiles.items():
+            for verb in profile.get('verbs', set()):
+                tag = f"Ability${verb}"
+                self._deck_has.setdefault(oid, set()).add(tag)
+            for trig in profile.get('triggers', set()):
+                stem = _TRIGGER_STEM.get(trig)
+                if stem:
+                    tag = f"Ability${stem}"
+                    self._deck_hints.setdefault(oid, set()).add(tag)
+            # Type$ tags from trigger_filters (card triggers on specific types)
+            for tf in profile.get('trigger_filters', set()):
+                if tf not in _generic_types and len(tf) > 2:
+                    self._deck_hints.setdefault(oid, set()).add(f"Type${tf.title()}")
+        # Note: Type$ tags from token subtypes are added in _enrich_deck_tags_from_tokens()
+        # after _load_ability_vectors() populates _token_subtypes.
+
         # Reverse index: tag → set of oids that "has" it (for needs_rarity feature)
         self._deck_has_providers = {}
         for oid, tags in self._deck_has.items():
             for tag in tags:
                 self._deck_has_providers.setdefault(tag, set()).add(oid)
+
+    def _enrich_deck_tags_from_tokens(self):
+        """Add Type$ has-tags from token subtypes (runs after _load_ability_vectors)."""
+        for oid, subs in self._token_subtypes.items():
+            for sub in subs:
+                self._deck_has.setdefault(oid, set()).add(f"Type${sub.title()}")
+                self._deck_has_providers.setdefault(f"Type${sub.title()}", set()).add(oid)
 
     def _load_ability_vectors(self, conn):
         """Load ability vectors, trigger zones, ability counts, token/zone stats."""

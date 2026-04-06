@@ -147,6 +147,14 @@ def extract_ability_fields(line: str, prefix: str, svars: dict) -> dict:
                 result["unless_cost"] = resolved.get("unless_cost")
             if not result.get("sub_ability"):
                 result["sub_ability"] = resolved.get("sub_ability")
+            # Append Execute$ SVar content to raw_line so downstream
+            # parsers (mechanics_vectors.py) can extract the effect's
+            # zone/type info.  The trigger line has the trigger context
+            # (Origin$ Any = self enters), but the SVar has the actual
+            # effect context (Origin$ Graveyard, ChangeType$ Land).
+            svar_value = svars.get(execute_ref, "")
+            if svar_value and "|EXEC|" not in result["raw_line"]:
+                result["raw_line"] += " |EXEC| " + svar_value
     elif prefix == "S":
         result["verb"] = fields.get("SP") or fields.get("Mode")
     elif prefix == "R":

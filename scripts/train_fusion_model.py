@@ -26,7 +26,7 @@ from mtg_synergy.recommend.forge_features import (
 from mtg_synergy.config import DATA_DIR, DB_PATH
 
 # ── Training constants ────────────────────────────────────────────────
-_NEGATIVE_RATIO = 2
+_NEGATIVE_RATIO = 4
 _STAPLE_THRESHOLD = 0.30
 _GRADE_BOUNDARIES = (0.30, 0.15, 0.05, 0.0)
 _FINAL_ROUND_MULTIPLIER = 1.1
@@ -63,13 +63,13 @@ FORGE_FEATURE_NAMES = [
     "target_alignment",
     "forge_keyword_synergy",
     "activated_ability_count",
-    "is_permanent_effect",
-    "is_temporary_effect",
-    "duration_match",
+    "shared_verb_count",
+    "shared_trigger_count",
+    "cmdr_verb_concentration",
     "combat_damage_flag",
-    "effect_zone_match",
-    "scales_with_board",
-    "is_secondary_trigger",
+    "mech_fwd_synergy",
+    "mech_rev_synergy",
+    "co_producer_score",
     "gain_control",
     "granted_keyword_count",
     "condition_count",
@@ -219,13 +219,14 @@ def _resolve_slugs_to_oids(conn, table="edhrec_average_decks"):
 
 def sample_negatives(positives_by_cmdr, all_card_oids, card_colors, cmdr_colors,
                      ratio=_NEGATIVE_RATIO, card_subtypes=None,
-                     card_has_tags=None):
+                     card_has_tags=None, popular_cards=None):
     """Sample negative pairs (cards NOT in a commander's EDHREC page).
 
-    For each commander, samples ratio * |positives| negative cards in 3 tiers:
-    - 1/3 subtype overlap (same tribe, wrong card)
-    - 1/3 tag overlap (same has-tags as commander, e.g., Ability$Counters)
-    - 1/3 random color-legal cards
+    For each commander, samples ratio * |positives| negative cards in 4 tiers:
+    - 1/4 subtype overlap (same tribe, wrong card)
+    - 1/4 tag overlap (same has-tags as commander, e.g., Ability$Counters)
+    - 1/4 popular cards (appear in many EDHREC lists but not this commander's)
+    - 1/4 random color-legal cards
 
     Returns list of (cmdr_oid, card_oid, 0) tuples.
     """
@@ -272,7 +273,7 @@ def sample_negatives(positives_by_cmdr, all_card_oids, card_colors, cmdr_colors,
         if n_neg == 0:
             continue
 
-        n_per_tier = n_neg // 3
+        n_per_tier = n_neg // 4
         all_chosen = set()
 
         # Tier 1: subtype overlap (same tribe but wrong card)
@@ -299,10 +300,19 @@ def sample_negatives(positives_by_cmdr, all_card_oids, card_colors, cmdr_colors,
                     for idx in rng.choice(len(tag_pool), size=n_pick, replace=False):
                         all_chosen.add(tag_pool[idx])
 
+        # Tier 3: popular cards (appear in many EDHREC lists but not this commander's)
+        if n_per_tier > 0 and popular_cards:
+            pop_pool = [oid for oid in popular_cards
+                        if oid in cand_set and oid not in all_chosen]
+            if pop_pool:
+                n_pick = min(n_per_tier, len(pop_pool))
+                for idx in rng.choice(len(pop_pool), size=n_pick, replace=False):
+                    all_chosen.add(pop_pool[idx])
+
         for oid in all_chosen:
             negatives.append((cmdr_oid, oid, 0))
 
-        # Tier 3: random (fill remainder)
+        # Tier 4: random (fill remainder)
         n_random = n_neg - len(all_chosen)
         if n_random > 0:
             random_pool = [oid for oid in candidates if oid not in all_chosen]
@@ -714,6 +724,15 @@ def train_forge_gbm(X, y, cmdr_ids, tune=False, quick=False):
     final_booster = lgb.train(final_params, all_data, num_boost_round=avg_best)
 
     model_path = os.path.join(DATA_DIR, "fusion_model_forge.lgb")
+    # Auto-backup previous model before overwriting (one-step rollback).
+    # Restore with: cp data/fusion_model_forge.lgb.prev data/fusion_model_forge.lgb
+    if os.path.exists(model_path):
+        import shutil
+        shutil.copy2(model_path, model_path + ".prev")
+        meta_path_prev = model_path + ".meta.json"
+        if os.path.exists(meta_path_prev):
+            shutil.copy2(meta_path_prev, meta_path_prev + ".prev")
+        print(f"  Backed up previous model to {model_path}.prev")
     final_booster.save_model(model_path)
     print(f"  Forge model saved to {model_path}")
 
@@ -906,12 +925,26 @@ def _load_pairs_for_features(conn):
     positives_for_neg = {cmdr: {oid for oid, _ in pairs}
                          for cmdr, pairs in positives_by_cmdr.items()}
 
-    print(f"\nSampling negatives (ratio={_NEGATIVE_RATIO}, 1/3 subtype + 1/3 tag + 1/3 random)...")
+    # Compute popular cards for hard-negative sampling: cards in top-25% by EDHREC
+    # commander count. These are "generically good" cards the model must learn to
+    # downrank for commanders where they don't appear.
+    popular_cards = None
+    if card_cmdr_count:
+        counts_sorted = sorted(card_cmdr_count.values(), reverse=True)
+        pop_threshold = counts_sorted[len(counts_sorted) // 4] if counts_sorted else 0
+        popular_cards = [oid for oid, cnt in card_cmdr_count.items()
+                         if cnt >= pop_threshold]
+        print(f"  Popular cards for hard negatives: {len(popular_cards)} "
+              f"(threshold: appears in {pop_threshold}+ commander lists)")
+
+    print(f"\nSampling negatives (ratio={_NEGATIVE_RATIO}, "
+          f"1/4 subtype + 1/4 tag + 1/4 popular + 1/4 random)...")
     neg_pairs = sample_negatives(
         positives_for_neg, all_card_oids, card_colors, card_colors,
         ratio=_NEGATIVE_RATIO,
         card_subtypes=card_subtypes,
         card_has_tags=card_has_tags,
+        popular_cards=popular_cards,
     )
     print(f"  Negative pairs: {len(neg_pairs)}")
 
