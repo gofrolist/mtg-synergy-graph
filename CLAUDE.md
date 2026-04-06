@@ -4,16 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MTG Synergy Graph — a tool for analyzing Magic: The Gathering EDH/Commander deck synergies. The system uses a LightGBM LambdaRank model trained on EDHREC labels. Production model uses edhrec_deck_pct as a feature (top importance); set EDHREC_FREE=1 for pure Forge-native inference (day-1 new card evaluation, ~7% lower NDCG).
+MTG Synergy Graph — a tool for analyzing Magic: The Gathering EDH/Commander deck synergies. The system uses a LightGBM LambdaRank model trained on EDHREC labels. Set EDHREC_FREE=1 for pure Forge-native inference (day-1 new card evaluation, ~4% lower NDCG). Model versioning via sidecar `.meta.json` + `model_registry.jsonl`.
 
 ### Signal Architecture (recommendation pipeline)
 
 ```
 FORGE MODEL (--recommend): Pure Forge mechanical synergy
   1. Color-identity filter → all legal cards scored directly by GBM
-  2. Forge LambdaRank GBM: 93 features (87 active + 6 zeroed), EDHREC labels,
+  2. Forge LambdaRank GBM: 98 features (92 active + 6 zeroed), EDHREC labels,
      fully general (no archetype names). See docs/FEATURE_REFERENCE.md for
      complete mapping of all features to Forge DSL fields with examples.
+     + mech_cosine (F3): full commander-to-card mechanics vector cosine
+       (replaced strategy_cosine — no EDHREC strategy dependency)
      + forge_deck_tags (Forge's deck-building AI: has/hints/needs theme signals)
      + ability counts, token complexity, zone interaction, ability density
      + deck tag expansion (cmdr_needs_to_card_has, card_needs_satisfied, needs_rarity)
@@ -30,33 +32,35 @@ FORGE MODEL (--recommend): Pure Forge mechanical synergy
      + pump magnitude (F90-F91): NumAtt$/AddPower$ values + variable detection
      + granted ability match (F44): AddAbility$/AddTrigger$ detail vs cmdr
      + type change tribal (F92): ChangeType$ matching commander subtypes
+     + graph_neighbor_overlap (F93): Jaccard-like overlap of causal graph neighborhoods
+     + cost_feeds_cmdr (F94): card ability costs match commander's resource production
+     + trigger_specificity (F95): IDF-weighted trigger filter match with commander
+     + mech_density (F96): mechanical complexity per mana (mech_nonzero / cmc)
+     + graph_pagerank (F97): PageRank centrality on causal graph
      + 6 zeroed features (F25-F27, F29-F31): redundant workarounds kept as
        columns for index stability, always output 0.0
-     Top features: edhrec_deck_pct 9.4%, deck_edge_count 6.4%, card_hub_score 5.1%,
-     cmdr_2hop_ratio 5.0%, ability_density 4.5%, strategy_cosine 4.2%,
-     forge_ability_cosine 3.9%, cmdr_2hop_count 3.8%, cmc 3.4%,
-     mech_tempo_fwd 2.5%, func_full_cosine 2.5%
-  3. Forge mechanics vectors: 116-dim shared concept space encoding ALL mechanical
-     interactions (36 game concepts + 80 subtypes). Captures synergy through
-     card produces → commander consumes dot product.
+     Top features (EDHREC_FREE): graph_neighbor_overlap 9.2%, mech_cosine 6.5%,
+     graph_pagerank 6.2%, card_hub_score 5.3%, mech_density 5.2%,
+     ability_density 4.2%, cmdr_2hop_ratio 4.8%
+  3. Forge mechanics vectors: auto-derived concept space (257 concepts + 80 subtypes,
+     dim=337). Effects and triggers map to same dimensions via event tuples
+     (event_class, type_qualifier, from_zone, to_zone). Built dynamically from Forge DSL.
      Zone-aware concepts: enters_from_graveyard/exile/hand, goes_to_graveyard/exile
      Theme concepts: equipment_enters, equipment_equipped, defender_available, etb_doubled
-     Opponent-only detection for ALL ability types (R:/T:/A:):
-       Uses defined field + ValidPlayer$ from raw_line via _is_opponent_only().
-       Cards that only affect opponents (defined=Player.Opponent, or
-       TriggeredPlayer+ValidPlayer$Opponent) excluded from concept production.
-       Prevents false synergy: Bruvac, Manic Scribe, Mindcrank for Sidisi.
-       R: replacement effects parsed from raw_line (Event$, ValidPlayer$):
-       Self-targeting replacements (ValidPlayer$You) produce concepts normally.
+     ALL cards produce concepts regardless of targeting (opponent-only cards included).
+     Opponent-only handling moved to post-scoring penalties in _apply_penalties().
+     R: replacement effects add to CONSUMES vector (Bruvac consumes mill events).
+     RepeatSubAbility$ parsed for sub-ability verbs (e.g., DBMill → mill concept).
   4. Can evaluate new cards day-1 without playtesting data
   5. Works for any of 3,141+ commanders (not just 1,361 with EDHREC)
-  6. NDCG@30 = 0.594 on leave-commander-out CV (2:1 negatives, sample-weighted, early_stop=40)
+  6. NDCG@30 = 0.571 on leave-commander-out CV (2:1 negatives, sample-weighted, early_stop=40)
+     EDHREC_FREE NDCG@30 = 0.569 (pure Forge-native, no edhrec_deck_pct feature)
      Training labels: edhrec_card_synergy (703k rows, continuous synergy grading)
      Grade 5=synergy≥0.30, 4=synergy≥0.15, 3=synergy≥0.05, 2=synergy 0-0.05, 1=negative, 0=random neg
      label_gain=[0, 1, 3, 8, 20, 30] (less steep curve between mid/high grades)
      EDHREC synergy = deck_inclusion% - color_baseline% (commander-specific affinity)
-     Training: 2:1 negative ratio (1.4M negatives), 3-tier sampling:
-       1/3 strategy/subtype overlap, 1/3 tag overlap, 1/3 random
+     Training: 2:1 negative ratio (1.4M negatives), 2-tier sampling:
+       1/3 subtype overlap, 1/3 tag overlap, 1/3 random (strategy sampling removed)
      Per-grade sample weights: grade 5→3x, grade 4→2x
      2,724 commanders with EDHREC data (87% of legal commanders)
      (variance ±0.3 between runs due to GBM non-determinism)
@@ -90,7 +94,7 @@ python3 scripts/download_cards.py                  # Refresh Scryfall data (~150
 python3 scripts/import_forge.py --download --import  # Update Forge ability data
 python3 scripts/build_graph.py --rebuild   # Build causal interaction graph from Forge (~17M edges)
 python3 scripts/build_graph.py --stats             # Graph stats
-python3 scripts/strategy_detector.py --populate    # Assign strategies
+# python3 scripts/strategy_detector.py --populate  # (legacy, no longer used by model)
 
 # === EDHREC data ===
 python3 scripts/fetch_edhrec_all.py                    # Fetch next 500 new commanders (synergy + avg decks)
@@ -123,7 +127,7 @@ python3 scripts/export_inference_db.py                # Build data/inference/ (~
 python3 scripts/export_inference_db.py --output /path # Custom output directory
 
 # Tests
-uv run pytest tests/ -v                        # Run all 152 tests
+uv run pytest tests/ -v                        # Run all 148 tests
 uv run pytest tests/test_recommendation_quality.py -v              # Pipeline quality tests only
 ```
 
@@ -137,8 +141,6 @@ Scryfall API → scripts/download_cards.py → data/oracle_cards.json (36k cards
                     scripts/import_forge.py → forge_abilities + forge_name_map tables
                                                 ↓
                     scripts/build_graph.py --rebuild → interaction_edges table (17.1M causal edges, 30 event types)
-                                                ↓
-                    scripts/strategy_detector.py → card_strategies table
                                                 ↓
                     scripts/fetch_edhrec_all.py → edhrec_card_synergy table (733k pairs, 2,761 cmdrs)
                                                 ↓
@@ -154,10 +156,9 @@ Scryfall API → scripts/download_cards.py → data/oracle_cards.json (36k cards
 python3 scripts/download_cards.py                               # 1. Refresh Scryfall
 python3 scripts/import_forge.py --download --import             # 2. Update Forge data
 python3 scripts/build_graph.py --rebuild                # 3. Rebuild causal graph
-python3 scripts/strategy_detector.py --populate                 # 4. Strategies
-python3 scripts/fetch_edhrec_all.py --max 2000 --refresh-top 200  # 5. Refresh EDHREC (new + top 200 stale)
-python3 scripts/train_fusion_model.py --rebuild-features --validate  # 6. Retrain + validate (~8 min, $0)
-python3 scripts/export_inference_db.py                          # 7. Export inference artifacts (~646 MB)
+python3 scripts/fetch_edhrec_all.py --max 2000 --refresh-top 200  # 4. Refresh EDHREC (new + top 200 stale)
+python3 scripts/train_fusion_model.py --rebuild-features --validate  # 5. Retrain + validate (~8 min, $0)
+python3 scripts/export_inference_db.py                          # 6. Export inference artifacts (~646 MB)
 ```
 
 ### DB Schema (data/tags.db)
@@ -175,10 +176,10 @@ python3 scripts/export_inference_db.py                          # 7. Export infe
 ### Forge Model
 
 **Forge model** (data/fusion_model_forge.lgb):
-- LambdaRank GBM on 93 features (87 active + 6 zeroed), shared via
+- LambdaRank GBM on 98 features (92 active + 6 zeroed), shared via
   `forge_features.py` + `forge_compute.py`. 100% Forge-native, fully general.
   See docs/FEATURE_REFERENCE.md for complete feature→Forge DSL mapping.
-  causal (2), strategy_cosine, forge_ability_cosine, phase (2), tribal, cmc,
+  causal (2), mech_cosine, forge_ability_cosine, phase (2), tribal, cmc,
   deck edges (3), causal_composite, card_hub_score,
   forge type/mechanics (6), counter/zone/target/keyword matching (6),
   ability profile flags (3 active + 6 zeroed), deck tag overlaps (5+3 needs),
@@ -186,8 +187,10 @@ python3 scripts/export_inference_db.py                          # 7. Export infe
   functional fingerprints (4), 2-hop graph (2), card quality (4),
   tribal depth (3), general demand (2),
   per-category mech sub-products (16): 8 categories × fwd/rev,
-  new field features (4): affected_scope_ratio, pump_magnitude,
-  pump_is_variable, type_change_tribal_match
+  field features (4): affected_scope_ratio, pump_magnitude,
+  pump_is_variable, type_change_tribal_match,
+  graph features (2): graph_neighbor_overlap, graph_pagerank,
+  cost/trigger features (3): cost_feeds_cmdr, trigger_specificity, mech_density
 - Functional fingerprints (`ForgeFeatureContext._func_fingerprints`): 33-dim semantic
   vectors per card encoding produces/requires/amplifies/targets. Dot products between
   commander and card fingerprints capture synergy without hand-coded rules.
@@ -199,36 +202,43 @@ python3 scripts/export_inference_db.py                          # 7. Export infe
   counter_trigger_themes, has_p1p1, opponent_only_events,
   affected_self_count, affected_opp_count, affected_scope_ratio,
   granted_ability_names, granted_triggers, changes_type,
-  grants_all_creature_types, max_pump_power, pump_is_variable
+  grants_all_creature_types, max_pump_power, pump_is_variable,
+  cost_types (sacrifice/tap/discard/exile/paylife), raw_trigger_filters
   (from cost, defined, ValidCards$, Affected$, Produced$,
   AddAbility$, AddTrigger$, ChangeType$, NumAtt$, AddPower$, NumDef$,
   AddToughness$, TokenAmount$, Event$, ReplaceWith$, ValidPlayer$ fields)
 - forge_deck_tags: Forge's deck-building AI (has/hints/needs) for 9,868 cards
   Maps what a card provides, wants, and requires in a deck
-- Mechanics vectors (`src/mtg_synergy/recommend/mechanics_vectors.py`): 116-dim shared
-  concept space (36 game concepts + 80 subtypes). Effects and triggers map to same
-  dimensions. Per-category dot products = mechanical synergy features.
+- Mechanics vectors (`src/mtg_synergy/recommend/mechanics_vectors.py`): auto-derived
+  concept space (257 concepts + 80 subtypes, dim=337). Event tuples extracted
+  from all Forge abilities, vocabulary built dynamically and sorted deterministically.
+  ALL cards produce concepts (opponent-only gate removed, handled by penalties).
+  R: replacement effects add to consumes vector via Event$ field.
+  RepeatSubAbility$ parsed for sub-ability verbs (DBMill → mill concept).
   Type-based produces: non-land cards produce spell_cast, creatures produce creature_attacks.
   Zone-aware: raw_line fallback for Origin$/Destination$ when column values are empty.
   Theme concepts: equipment_enters, equipment_equipped, defender_available, etb_doubled
+  `summarize_commander()`: mechanics-derived labels for CLI display (replaces strategy_detector)
 - Training data: edhrec_card_synergy (703k rows, 2,724 commanders), continuous synergy grading
   Grade 5=synergy>=0.30, 4=synergy>=0.15, 3=synergy>=0.05, 2=synergy 0-0.05, 1=negative, 0=random neg
   label_gain=[0, 1, 3, 8, 20, 30] (less steep curve between mid/high grades)
   EDHREC synergy = deck_inclusion% - color_baseline% (commander-specific affinity)
   Generic staples (>30% frequency) demoted from grade 4/5 to 3
   Commander-illegal cards filtered from negative pool
-  2:1 negative ratio, 3-tier sampling: 1/3 strategy/subtype, 1/3 tag overlap, 1/3 random
+  2:1 negative ratio, 2-tier sampling: 1/3 subtype overlap, 1/3 tag overlap, 1/3 random
+  (strategy-based sampling removed — no EDHREC strategy dependency)
 - Training: `python3 scripts/train_fusion_model.py --rebuild-features` (~7 min)
   Feature build: shared ForgeFeatureContext via fork pool (8 workers, ~17s)
   CV folds: 3 folds trained in parallel via ProcessPoolExecutor (thread-pinned)
   Batch features: vectorized array indexing for ~50 features, loop for ~35
   Vectorized NDCG@30, CV splits, weight arrays, group arrays
   Use `--tune` for parallel HP search (~12 min). Default uses cached best HP.
-- Feature importance: edhrec_deck_pct 9.4%, deck_edge_count 6.4%, card_hub_score 5.1%,
-  cmdr_2hop_ratio 5.0%, ability_density 4.5%, strategy_cosine 4.2%,
-  forge_ability_cosine 3.9%, cmdr_2hop_count 3.8%, cmc 3.4%,
-  mech_tempo_fwd 2.5%, func_full_cosine 2.5%, mech_board_rev 2.4%
+- Feature importance (EDHREC_FREE): graph_neighbor_overlap 9.2%, mech_cosine 6.5%,
+  graph_pagerank 6.2%, card_hub_score 5.3%, mech_density 5.2%,
+  ability_density 4.2%, cmdr_2hop_ratio 4.8%, cmc 3.9%, forge_ability_cosine 3.8%
 - EDHREC_FREE=1 env var disables edhrec_deck_pct for pure Forge-native inference
+- Model versioning: `model_meta.py` saves `.meta.json` sidecar + `model_registry.jsonl`
+  Tracks NDCG, hyperparameters, feature importance, git commit, MD5 hash
 - Edge index: two-layer cache (npz raw edges + CSR adjacency cache)
   Warm path: adj cache loaded directly (~0.1s), raw edge arrays never touched
   Cold path: npz ~0.1s + adj build ~11s (auto-saved to adj cache)
@@ -257,11 +267,11 @@ python3 scripts/export_inference_db.py                          # 7. Export infe
   - unmet Ability$ needs (×0.85): card needs Ability$LifeGain but commander only has
     Ability$Counters. Uses cmdr_has only (not cmdr_hints — hints=wants, not provides).
     171 cards with Ability$ needs across 11 ability types.
-  - opponent-only replacement for self-targeting commander (×0.3): R: ability with
-    ValidPlayer$Player.Opponent for event the commander self-targets
-    (e.g., Bruvac doubles opponent mill but Sidisi cares about self-mill)
+  - opponent-only replacement for self-mill commander (×0.3): R: ability with
+    ValidPlayer$Player.Opponent for Mill event when commander self-mills
+    (has Mill verb or Milled trigger). E.g., Bruvac penalized for Sidisi.
   - excluded_subtypes penalty REMOVED — absorbed by forge_anti_tribal feature (F16)
-    + affected_scope_ratio (F89) + _is_opponent_only() in mechanics vectors
+    + affected_scope_ratio (F89)
 - DFC-aware subtype extraction: `config.extract_subtypes()` parses both faces
 - Pipeline validation: `--validate` flag or `test_recommendation_quality.py` (7 tests)
 - GBM: LambdaRank, num_leaves=767, lr=0.025, n_estimators=1000 (early_stop=40),
@@ -333,7 +343,8 @@ packages/
 | `recommend/hidden_gems.py` | `find_hidden_gems(card_provider=, cmdr_oids=)` — pure mechanical synergy engine |
 | `recommend/forge_features.py` | `ForgeFeatureContext(conn, card_provider=)` — data loading, pre-computation. `CSRIndex` (memory-efficient adjacency), `ForgeProfile` (__slots__-based card profiles) |
 | `recommend/forge_compute.py` | `CmdrFeatureContext(ctx, cmdr_oids=[...])` — per-commander features, partner pair support |
-| `recommend/mechanics_vectors.py` | 116-dim forge mechanics vectors: shared game concept space (36 concepts + 80 subtypes) |
+| `model_meta.py` | Model versioning: `save_model_meta()`, `load_model_meta()`, `append_to_registry()`, `build_meta()` |
+| `recommend/mechanics_vectors.py` | Auto-derived forge mechanics vectors: shared game concept space (257 concepts + 80 subtypes), `summarize_commander()` |
 | `recommend/cmdr_patterns.py` | `detect_cmdr_patterns()` — shared commander mechanical flag detection |
 
 ### Package B: `mtg_synergy_train` (training + pipelines)
@@ -376,7 +387,7 @@ packages/
 - Inference code: `from mtg_synergy...`, training code: `from mtg_synergy_train...`
 - CardProvider protocol (`protocol.py`) abstracts card data — inference never queries `cards` table directly
 - Partner pair support: `CmdrFeatureContext(ctx, cmdr_oids=["oid1", "oid2"])` merges profiles/vectors/edges
-- Tests: 152 tests in `tests/`, run with `uv run pytest tests/` (~15s)
+- Tests: 148 tests in `tests/`, run with `uv run pytest tests/` (~15s)
   - 7 end-to-end pipeline quality tests (`test_recommendation_quality.py`)
   - Requires trained model + populated DB (auto-skipped if missing)
 - After training, run `--validate` then export: `python3 scripts/export_inference_db.py` (~646 MB)

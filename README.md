@@ -16,16 +16,13 @@ python3 scripts/import_forge.py --download --import
 # 3. Build causal interaction graph (~20M edges)
 python3 scripts/build_graph.py --rebuild
 
-# 4. Assign strategies
-python3 scripts/strategy_detector.py --populate
-
-# 5. Fetch EDHREC synergy data (training labels)
+# 4. Fetch EDHREC synergy data (training labels)
 python3 scripts/fetch_edhrec_all.py --max 500
 
-# 6. Train the model (~7 min)
+# 5. Train the model (~7 min)
 python3 scripts/train_fusion_model.py --rebuild-features
 
-# 7. Get recommendations
+# 6. Get recommendations
 uv run mtg-synergy --commander "Krenko, Mob Boss" --recommend
 ```
 
@@ -46,18 +43,20 @@ uv sync
 FORGE MODEL (--recommend): Zero oracle text, pure mechanical synergy
 
   1. Color-identity filter -> all legal cards for this commander
-  2. LightGBM LambdaRank scores every candidate (93 features, 87 active):
+  2. LightGBM LambdaRank scores every candidate (98 features, 92 active):
      - 29 profile fields per card from Forge abilities
-     - Causal graph features (edge counts, hub scores, 2-hop paths)
-     - Strategy cosine similarity
+     - Causal graph features (edge counts, hub scores, 2-hop paths, PageRank)
+     - Mechanics cosine similarity (auto-derived concept space)
+     - Graph neighborhood overlap (Jaccard on causal graph neighbors)
      - Forge deck tag overlap (has/hints/needs)
      - 33-dim functional fingerprints (produces/requires/amplifies/targets)
-     - 116-dim mechanics vectors (shared concept space)
+     - Auto-derived mechanics vectors (257 concepts + 80 subtypes)
      - Counter/anthem/tribal distinction features
+     - Cost-effect alignment, trigger specificity, mech density
   3. Post-scoring: anti-synergy penalties + mechanical synergy bonus
-  4. Top N results with clickable Scryfall links
+  4. Top N results with clickable Scryfall links + mechanics-derived labels
 
-  NDCG@30 = 0.594 | Works for 3,141+ commanders | Day-1 new card evaluation
+  NDCG@30 = 0.569 (EDHREC_FREE) | Works for 3,141+ commanders | Day-1 new card evaluation
 ```
 
 ## Commands
@@ -68,7 +67,6 @@ FORGE MODEL (--recommend): Zero oracle text, pure mechanical synergy
 python3 scripts/download_cards.py                    # Refresh Scryfall data (~150MB)
 python3 scripts/import_forge.py --download --import  # Update Forge ability data
 python3 scripts/build_graph.py --rebuild     # Build causal graph (~20M edges)
-python3 scripts/strategy_detector.py --populate      # Assign strategies
 ```
 
 ### EDHREC Data
@@ -108,7 +106,7 @@ python3 scripts/compare_edhrec.py --all --quiet                    # All command
 ### Tests
 
 ```bash
-uv run pytest tests/ -v    # Run all 152 tests
+uv run pytest tests/ -v    # Run all 148 tests
 ```
 
 ## Architecture
@@ -121,8 +119,6 @@ Scryfall API -> scripts/download_cards.py -> data/oracle_cards.json (36k cards)
                      scripts/import_forge.py -> forge_abilities + forge_name_map tables
                                                   |
                      scripts/build_graph.py --forge -> interaction_edges (20.6M causal edges)
-                                                  |
-                     scripts/strategy_detector.py -> card_strategies table
                                                   |
                      scripts/fetch_edhrec_all.py -> edhrec_card_synergy (733k pairs, 2,724 cmdrs)
                                                   |
@@ -137,9 +133,8 @@ Scryfall API -> scripts/download_cards.py -> data/oracle_cards.json (36k cards)
 python3 scripts/download_cards.py                                          # 1. Refresh Scryfall
 python3 scripts/import_forge.py --download --import                        # 2. Update Forge data
 python3 scripts/build_graph.py --rebuild                           # 3. Rebuild causal graph
-python3 scripts/strategy_detector.py --populate                            # 4. Strategies
-python3 scripts/fetch_edhrec_all.py --max 2000 --refresh-top 200          # 5. Refresh EDHREC
-python3 scripts/train_fusion_model.py --rebuild-features     # 6. Retrain (~7 min, $0)
+python3 scripts/fetch_edhrec_all.py --max 2000 --refresh-top 200          # 4. Refresh EDHREC
+python3 scripts/train_fusion_model.py --rebuild-features     # 5. Retrain (~7 min, $0)
 ```
 
 ### DB Schema (data/tags.db)
@@ -187,7 +182,7 @@ Total: ~3.3s CLI wall time (~490 MB RSS, warm cache)
 │   │   ├── engine.py          # recommend_cards() pipeline
 │   │   ├── scoring.py         # Color filter, GBM scoring, mechanical bonus
 │   │   ├── forge_features.py  # 93-feature computation (ForgeFeatureContext)
-│   │   ├── mechanics_vectors.py  # 116-dim shared concept space
+│   │   ├── mechanics_vectors.py  # Auto-derived shared concept space (337-dim)
 │   │   ├── hidden_gems.py     # Pure mechanical synergy (no popularity)
 │   │   ├── affinity.py        # Commander affinity scoring
 │   │   └── cmdr_patterns.py   # Commander mechanical flag detection
@@ -211,8 +206,9 @@ Total: ~3.3s CLI wall time (~490 MB RSS, warm cache)
 
 - **100% Forge-native**: No oracle text parsing, no embeddings, no neural networks. All features derived from Forge game engine data.
 - **LambdaRank**: Learning-to-rank optimizes directly for recommendation ordering (NDCG), not classification.
-- **EDHREC as training signal only**: Model learns from EDHREC synergy scores but can evaluate any commander, including those without EDHREC data.
-- **Day-1 new cards**: Set `EDHREC_FREE=1` for pure mechanical inference (~7% lower NDCG but works for cards with zero play data).
+- **EDHREC as training signal only**: Model learns from EDHREC synergy scores but can evaluate any commander, including those without EDHREC data. Strategy labels fully eliminated from model.
+- **Day-1 new cards**: Set `EDHREC_FREE=1` for pure mechanical inference (~4% lower NDCG but works for cards with zero play data).
+- **Model versioning**: Sidecar `.meta.json` tracks NDCG, hyperparameters, feature importance, git commit, MD5 hash per training run.
 - **Cards keyed by `oracle_id`**: Scryfall UUID deduplicates across reprints.
 
 ## License

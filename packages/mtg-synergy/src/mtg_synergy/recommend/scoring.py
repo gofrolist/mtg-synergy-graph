@@ -35,6 +35,14 @@ def _load_gbm(artifact_dir=None):
     if not os.path.exists(forge_gbm_path):
         return None
     _gbm_cache = lgb.Booster(model_file=forge_gbm_path)
+
+    from mtg_synergy.model_meta import load_model_meta
+    meta = load_model_meta(forge_gbm_path)
+    if meta:
+        _log.info("Model v%s (git:%s, NDCG@30=%.4f, md5:%s)",
+                  meta["version"], meta["git_commit"],
+                  meta["mean_ndcg30"], meta.get("model_md5", "?")[:8])
+
     return _gbm_cache
 
 
@@ -237,8 +245,11 @@ def _apply_penalties(scores, cand_list, ctx, cmdr_ctx, color_identity,
         # Sidisi cares about self-mill)
         opp_events = profile.get('opponent_only_events', set())
         if opp_events:
-            cmdr_strats = cmdr_ctx.cmdr_strats
-            if 'Mill' in opp_events and 'self-mill' in cmdr_strats:
+            cmdr_profile = cmdr_ctx.cmdr_profile
+            cmdr_trigs = cmdr_profile.get('triggers', set())
+            cmdr_verbs = cmdr_profile.get('verbs', set())
+            # Opponent-only mill vs commander that self-mills
+            if 'Mill' in opp_events and ('Milled' in cmdr_trigs or 'Mill' in cmdr_verbs):
                 scores[i] *= 0.3
 
 

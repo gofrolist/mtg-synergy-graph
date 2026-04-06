@@ -25,10 +25,6 @@ def run():
     parser.add_argument("--deck", type=str, default=None,
                         help="Path to deck file (one card name per line)")
     parser.add_argument("--top", type=int, default=50, help="Top N results (default: 50)")
-    parser.add_argument("--strategies", default="auto",
-                        help="Comma-separated strategies to focus (default: auto-detect)")
-    parser.add_argument("--exclude-strategies", default=None,
-                        help="Comma-separated strategies to exclude")
     args = parser.parse_args()
 
     if not args.recommend and not args.gems:
@@ -66,43 +62,35 @@ def run():
         cards.extend(extra_cards)
         deck_set.update(c["name"] for c in extra_cards)
 
-    # Detect strategies from commander
-    active_strategies = set()
-    if args.strategies == "auto":
-        try:
-            from strategy_detector import detect_strategies
-        except ImportError:
-            # strategy_detector is a standalone script in scripts/
-            # Available when running from monorepo, not from installed wheel
-            import sys, pathlib
-            for parent in pathlib.Path(__file__).resolve().parents:
-                candidate = parent / "scripts" / "strategy_detector.py"
-                if candidate.exists():
-                    sys.path.insert(0, str(candidate.parent))
-                    from strategy_detector import detect_strategies
-                    break
-            else:
-                detect_strategies = None
-                print("WARNING: strategy_detector not found; strategy auto-detection disabled")
-        if detect_strategies is not None:
-            detected = detect_strategies(cmdr_oid, DB_PATH)
-            active_strategies = {s["name"] for s in detected if s["confidence"] >= 0.3}
-    else:
-        active_strategies = set(args.strategies.split(","))
-
-    if args.exclude_strategies:
-        active_strategies -= set(args.exclude_strategies.split(","))
-
     # Detect tribal from commander type
     deck_types = _detect_deck_types(cards, deck_set)
 
-    if active_strategies:
-        print(f"Active strategies: {', '.join(sorted(active_strategies))}")
+    # Mechanics-derived commander summary (Forge-native, no EDHREC)
+    mech_labels = []
+    try:
+        import sqlite3 as _sql
+        from mtg_synergy.config import extract_subtypes
+        from mtg_synergy.recommend.mechanics_vectors import (
+            build_mechanics_vectors, summarize_commander,
+        )
+        _conn = _sql.connect(DB_PATH)
+        produces, consumes, _, subtype_idx, _ = build_mechanics_vectors(
+            _conn, quiet=True)
+        cmdr_type = _conn.execute(
+            "SELECT type_line FROM cards WHERE oracle_id = ?", (cmdr_oid,)
+        ).fetchone()
+        cmdr_subtypes = extract_subtypes(cmdr_type[0]) if cmdr_type else set()
+        mech_labels = summarize_commander(
+            produces, consumes, subtype_idx, cmdr_oid, cmdr_subtypes)
+        _conn.close()
+    except Exception:
+        pass
 
     if args.recommend:
         graph = {"adjacency": {}, "edges": [], "stats": {}}
         recommend_cards(graph, deck_set, cards, deck_types, args.top,
-                        active_strategies=active_strategies, db_path=DB_PATH,
+                        mech_labels=mech_labels or None,
+                        db_path=DB_PATH,
                         color_identity=color_identity, commander=cmdr_name)
 
     if args.gems:

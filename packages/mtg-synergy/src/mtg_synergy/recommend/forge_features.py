@@ -22,6 +22,7 @@ _PROFILE_SET_FIELDS = (
     'granted_keywords', 'conditions', 'duration', 'effect_zones',
     'excluded_subtypes', 'counter_trigger_themes', 'opponent_only_events',
     'granted_ability_names', 'granted_triggers', 'changes_type',
+    'cost_types', 'raw_trigger_filters',
 )
 _PROFILE_BOOL_FIELDS = (
     'combat_damage', 'is_secondary', 'gain_control', 'produces_mana',
@@ -324,6 +325,19 @@ class ForgeFeatureContext:
         # Compact profiles early (before heavy allocations) to reduce peak RSS.
         # Replaces mutable sets with deduplicated frozensets, saves ~60 MiB.
         self._compact_forge_profiles()
+
+        # Trigger filter IDF weights: log(N / freq) for each trigger_filter string
+        import math
+        tf_counts = {}
+        for p in self._forge_profiles.values():
+            for tf in p.get('raw_trigger_filters', frozenset()):
+                tf_counts[tf] = tf_counts.get(tf, 0) + 1
+        n_cards_tf = len(self._forge_profiles)
+        self._trigger_filter_idf = {
+            tf: math.log(n_cards_tf / count)
+            for tf, count in tf_counts.items()
+        }
+
         # Note: _load_functional_fingerprints does its own DB query (independent
         # of self._raw_abilities). Must stay BEFORE del self._raw_abilities below.
         self._load_functional_fingerprints(conn)
@@ -360,7 +374,7 @@ class ForgeFeatureContext:
         # Forge mechanics vectors: encode each card's full mechanical profile
         # Pass pre-loaded abilities to avoid redundant forge_abilities DB scan
         from mtg_synergy.recommend.mechanics_vectors import build_mechanics_vectors
-        self._mech_produces, self._mech_consumes, self._mech_dim, _ = \
+        self._mech_produces, self._mech_consumes, self._mech_dim, _, self._mech_category_dims = \
             build_mechanics_vectors(conn, preloaded_abilities=self._raw_abilities,
                                    type_lines=self._type_lines)
         # Free raw abilities list after mechanics vectors are built (~5MB)
@@ -394,18 +408,6 @@ class ForgeFeatureContext:
 
         # Build oid_to_idx from all known oracle_ids (sorted for deterministic ordering)
         self.oid_to_idx = {oid: i for i, oid in enumerate(sorted(self._type_lines))}
-
-        # Card strategies
-        self.card_strats = {}
-        for oid, strat in conn.execute(
-            "SELECT oracle_id, strategy FROM card_strategies WHERE confidence >= 0.3"
-        ):
-            self.card_strats.setdefault(oid, set()).add(strat)
-
-        # Strategy vector index
-        self.all_strategies = sorted({s for strats in self.card_strats.values() for s in strats})
-        self._strat_idx = {s: i for i, s in enumerate(self.all_strategies)}
-        self._n_strats = len(self.all_strategies)
 
         # Phase data
         self.card_phase_order = {}
@@ -496,6 +498,8 @@ class ForgeFeatureContext:
             'granted_ability_names': set(), 'granted_triggers': set(),
             'changes_type': set(), 'grants_all_creature_types': False,
             'max_pump_power': 0, 'pump_is_variable': False,
+            'cost_types': set(),  # sacrifice, tap, discard, exile, paylife
+            'raw_trigger_filters': set(),  # full trigger_filter strings for IDF
         })
         if verb: p['verbs'].add(verb)
         if trig_mode: p['triggers'].add(trig_mode)
@@ -520,12 +524,25 @@ class ForgeFeatureContext:
                       or 'ValidPlayer$ Opponent' in raw_line_val):
                 p['opponent_only_events'].add(m.group(1))
         if trig_filter:
+            if trig_filter != "Card.Self":
+                p['raw_trigger_filters'].add(trig_filter)
             for part in trig_filter.split(","):
                 main = part.split(".")[0].strip()
                 if main and main != "Card" and main[0].isupper():
                     p['trigger_filters'].add(main.lower())
-        # Extract subtype requirements from cost, defined, and raw_line fields
+        # Extract cost types for cost-effect alignment
         cost_str = cost or ""
+        if "Sac" in cost_str:
+            p['cost_types'].add('sacrifice')
+        if "T" in cost_str.split() or cost_str == "T":
+            p['cost_types'].add('tap')
+        if "Discard" in cost_str:
+            p['cost_types'].add('discard')
+        if "Exile" in cost_str:
+            p['cost_types'].add('exile')
+        if "PayLife" in cost_str:
+            p['cost_types'].add('paylife')
+        # Extract subtype requirements from cost, defined, and raw_line fields
         defined_str = defined or ""
         raw_line = raw_line_val or ""
         # Cost subtypes: tapXType<1/Cleric>, Sac<1/Human>
@@ -1140,7 +1157,7 @@ class ForgeFeatureContext:
         self._arr_in_forge = np.zeros(n, dtype=np.float32)
         self._arr_deck_tag_count = np.zeros(n, dtype=np.float32)
         self._arr_edhrec_pct = np.zeros(n, dtype=np.float32)
-        self._arr_strat_count = np.zeros(n, dtype=np.float32)
+        self._arr_mech_nonzero = np.zeros(n, dtype=np.float32)
 
         # ── Profile-derived boolean flags ──
         self._arr_combat_damage = np.zeros(n, dtype=np.float32)
@@ -1187,7 +1204,14 @@ class ForgeFeatureContext:
             self._arr_deck_tag_count[i] = self._deck_tag_count.get(oid, 0.0)
             if not _EDHREC_FREE:
                 self._arr_edhrec_pct[i] = self._edhrec_deck_pct.get(oid, 0.0)
-            self._arr_strat_count[i] = min(len(self.card_strats.get(oid, _empty_set)), 5)
+            pv = self._mech_produces.get(oid)
+            cv = self._mech_consumes.get(oid)
+            nz = 0
+            if pv is not None:
+                nz += int(np.count_nonzero(pv))
+            if cv is not None:
+                nz += int(np.count_nonzero(cv))
+            self._arr_mech_nonzero[i] = min(nz, 50)
 
             # Profile-derived flags (single dict lookup)
             p = self._forge_profiles.get(oid, _empty_prof)
@@ -1271,16 +1295,16 @@ class ForgeFeatureContext:
         self._arr_hub_raw = np.zeros(n, dtype=np.float32)
 
         # ── Per-category mech slice arrays for vectorized sub-product features ──
-        # Category dimension indices into the 116-dim mechanics vector
-        self._MECH_BOARD_DIMS = [0, 1, 2, 3, 9, 10, 21, 22, 25, 26]
-        self._MECH_RESOURCE_DIMS = [4, 5, 6, 7, 8, 23]
-        self._MECH_DISRUPTION_DIMS = [11, 12, 16]
-        self._MECH_TEMPO_DIMS = [13, 14, 15]
-        self._MECH_UTILITY_DIMS = [17, 18, 19, 20, 24]
-        self._MECH_ZONES_DIMS = [27, 28, 29, 30, 31]
-        self._MECH_THEMES_DIMS = [32, 33, 34, 35]
-        # MECH_TRIBAL: everything from index 36 onwards
-        self._MECH_TRIBAL_DIMS = list(range(36, self._mech_dim))
+        # Category dimensions auto-derived from mechanics_vectors vocabulary
+        cd = self._mech_category_dims
+        self._MECH_BOARD_DIMS = cd.get("board", [])
+        self._MECH_RESOURCE_DIMS = cd.get("resource", [])
+        self._MECH_DISRUPTION_DIMS = cd.get("disruption", [])
+        self._MECH_TEMPO_DIMS = cd.get("tempo", [])
+        self._MECH_UTILITY_DIMS = cd.get("utility", [])
+        self._MECH_ZONES_DIMS = cd.get("zones", [])
+        self._MECH_THEMES_DIMS = cd.get("themes", [])
+        self._MECH_TRIBAL_DIMS = cd.get("tribal", [])
         self._mech_categories = [
             self._MECH_BOARD_DIMS,
             self._MECH_RESOURCE_DIMS,
@@ -1496,6 +1520,8 @@ class ForgeFeatureContext:
                 cached['exact_in_keys'], cached['exact_in_offsets'], cached['exact_in_values'])
             self._arr_hub_raw = cached['hub_raw']
             self._arr_hub_score = cached['hub_score']
+            # PageRank computed live from CSR (fast, ~1s)
+            self._arr_pagerank = self._compute_pagerank(len(self.oid_to_idx))
             self._agg_strength_out = {}
             self._agg_events_out = {}
             self._agg_strength_in = {}
@@ -1641,6 +1667,31 @@ class ForgeFeatureContext:
             raw = float(n_out + n_in)
             self._arr_hub_raw[i] = raw
             self._arr_hub_score[i] = np.log2(1.0 + min(raw, 500))
+
+        # PageRank on the causal graph (20 iterations, damping=0.85)
+        self._arr_pagerank = self._compute_pagerank(n)
+
+    def _compute_pagerank(self, n, damping=0.85, n_iter=20):
+        """Compute PageRank on the outgoing adjacency graph."""
+        pr = np.ones(n, dtype=np.float32) / n
+        out_keys, out_offsets, out_vals = self._adj_out.to_arrays()
+        # Precompute out-degree for each node
+        out_degree = np.zeros(n, dtype=np.float32)
+        for ki in range(len(out_keys)):
+            k = int(out_keys[ki])
+            out_degree[k] = float(out_offsets[ki + 1] - out_offsets[ki])
+        for _ in range(n_iter):
+            new_pr = np.full(n, (1.0 - damping) / n, dtype=np.float32)
+            # For each node with outgoing edges, distribute PR to neighbors
+            for ki in range(len(out_keys)):
+                k = int(out_keys[ki])
+                start, end = int(out_offsets[ki]), int(out_offsets[ki + 1])
+                if end > start and out_degree[k] > 0:
+                    contrib = damping * pr[k] / out_degree[k]
+                    np.add.at(new_pr, out_vals[start:end], contrib)
+            pr = new_pr
+        # Log-transform for feature scale
+        return np.log2(1.0 + pr * n)
 
     @staticmethod
     def _build_adj_arrays(keys, values):
@@ -1834,15 +1885,6 @@ class ForgeFeatureContext:
 
         return fingerprints
 
-    def strat_vector(self, oid):
-        """Get one-hot strategy vector for a card."""
-        strats = self.card_strats.get(oid, set())
-        if not strats:
-            return None
-        v = np.zeros(self._n_strats, dtype=np.float32)
-        for s in strats:
-            v[self._strat_idx[s]] = 1.0
-        return v
 
 
 # Re-export compute functions for backward compatibility

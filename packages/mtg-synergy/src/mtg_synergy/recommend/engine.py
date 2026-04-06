@@ -9,7 +9,7 @@ _log = logging.getLogger(__name__)
 
 def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
                     deck_types: set[str] | None = None, top_n: int = 50,
-                    active_strategies: set[str] | None = None,
+                    mech_labels: list[str] | None = None,
                     db_path: str | None = None,
                     color_identity: set[str] | None = None,
                     commander: str | None = None,
@@ -67,7 +67,7 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
             # Forge-only scoring (93 features, 87 active + 6 zeroed)
             score_forge_candidates(candidate_scores, cards, _shared_conn,
                                    commander, deck_cards, deck_types,
-                                   active_strategies,
+                                   None,  # active_strategies (removed)
                                    color_identity=color_identity,
                                    card_provider=card_provider)
 
@@ -128,8 +128,8 @@ def recommend_cards(graph: dict, deck_cards: set[str], cards: list[dict],
     from mtg_synergy.recommend.display import print_card_table
 
     header = f"TOP {top_n} RECOMMENDED CARDS"
-    if active_strategies:
-        header += f" | {', '.join(sorted(active_strategies))}"
+    if mech_labels:
+        header += f" | {', '.join(mech_labels)}"
 
     rows = []
     for card, info in ranked[:top_n]:

@@ -54,6 +54,7 @@ def test_forge_profiles_loaded():
             "excluded_subtypes", "counter_trigger_themes",
             "opponent_only_events",
             "granted_ability_names", "granted_triggers", "changes_type",
+            "cost_types", "raw_trigger_filters",
         }
         expected_bool_keys = {
             "combat_damage", "is_secondary", "gain_control",
@@ -409,7 +410,7 @@ class TestMechanicsVectorsNoOracleText:
                 return getattr(self._conn, name)
 
         wrapper = TrackingConn(real_conn)
-        produces, consumes, dim, subtype_idx = build_mechanics_vectors(wrapper)
+        produces, consumes, dim, subtype_idx, _ = build_mechanics_vectors(wrapper)
         real_conn.close()
 
         oracle_queries = [q for q in queries if 'oracle_text' in q.lower()]
@@ -600,8 +601,8 @@ class TestFeatureCount:
             if found_oid is None:
                 pytest.skip("No card found for feature count test")
             features = _compute_features(ctx, cmdr, found_oid, conn)
-            assert len(features) == 93, (
-                f"Expected 93 features, got {len(features)}"
+            assert len(features) == 98, (
+                f"Expected 98 features, got {len(features)}"
             )
         finally:
             pass  # conn is cached, do not close
@@ -764,7 +765,7 @@ def test_feature_count_71():
             card_oid, card_meta[0] or "", float(card_meta[1] or 0),
             ctx, cmdr_ctx,
         )
-        assert len(feats) == 93, f"Expected 93 features, got {len(feats)}"
+        assert len(feats) == 98, f"Expected 95 features, got {len(feats)}"
     finally:
         pass  # conn is cached, do not close
 

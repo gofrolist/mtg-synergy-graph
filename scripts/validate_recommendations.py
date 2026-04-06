@@ -146,8 +146,6 @@ def validate_commanders(conn, commanders, ctx, all_recs, top_n=30, quiet=False):
         cmdr_type = cmdr_row[1] or ""
         cmdr_subtypes = extract_subtypes(cmdr_type)
 
-        cmdr_strats = ctx.card_strats.get(cmdr_oid, set())
-
         issues = []
         for rank, (name, score) in enumerate(recs, 1):
             card_row = conn.execute(
@@ -161,7 +159,7 @@ def validate_commanders(conn, commanders, ctx, all_recs, top_n=30, quiet=False):
 
             warnings = check_card(
                 name, card_oid, card_type or "", card_text or "", card_profile,
-                cmdr_name, cmdr_profile, cmdr_subtypes, cmdr_strats
+                cmdr_name, cmdr_profile, cmdr_subtypes, set()
             )
             if warnings:
                 issues.append((rank, name, score, warnings))

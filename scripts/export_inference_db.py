@@ -26,7 +26,7 @@ import time
 
 _ALLOWED_EXPORT_TABLES = frozenset({
     "forge_abilities", "forge_deck_tags", "forge_name_map",
-    "card_strategies", "edhrec_card_synergy",
+    "edhrec_card_synergy",
 })
 
 
@@ -101,7 +101,6 @@ def export_inference_db(tags_db_path: str, output_dir: str):
         "forge_abilities",
         "forge_deck_tags",
         "forge_name_map",
-        "card_strategies",
         "edhrec_card_synergy",
     ]
 
@@ -126,6 +125,7 @@ def export_inference_db(tags_db_path: str, output_dir: str):
         "edge_index_cache.npz",
         "edge_adj_cache.npz",
         "fusion_model_forge.lgb",
+        "fusion_model_forge.lgb.meta.json",
     ]
 
     print("\nCopying artifacts:")

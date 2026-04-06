@@ -58,6 +58,17 @@ def _merge_vecs_sum(vecs: list) -> "np.ndarray | None":
     return vecs[0] + vecs[1]
 
 
+def _mech_combine(prod: "np.ndarray | None", cons: "np.ndarray | None") -> "np.ndarray | None":
+    """Combine produces + consumes into a single mechanics identity vector."""
+    if prod is None and cons is None:
+        return None
+    if prod is None:
+        return cons
+    if cons is None:
+        return prod
+    return prod + cons
+
+
 def _merge_profiles(profiles: list, empty: dict) -> dict:
     """Merge 1-2 forge profiles (dict or ForgeProfile): union sets, OR bools, max scalars."""
     _set_types = (set, frozenset)
@@ -119,14 +130,12 @@ class CmdrFeatureContext:
         from mtg_synergy.config import extract_subtypes
 
         # ── Merge commander data across 1-2 commanders ──
-        self.cmdr_strats = set()
         self.cmdr_phases = set()
         self.cmdr_subtypes = set()
         self.cmdr_has = set()
         self.cmdr_hints = set()
         self.cmdr_needs = set()
         self.cmdr_zones = set()
-        strat_vecs = []
         ability_vecs = []
         produce_vecs = []
         consume_vecs = []
@@ -147,7 +156,6 @@ class CmdrFeatureContext:
         # Collect per-commander, then merge
         profiles = []
         for oid in self.cmdr_oids:
-            self.cmdr_strats |= ctx.card_strats.get(oid, set())
             self.cmdr_phases |= ctx.card_phase_order.get(oid, set())
             self.cmdr_subtypes |= extract_subtypes(ctx._type_lines.get(oid, ""))
             self.cmdr_has |= ctx._deck_has.get(oid, set())
@@ -155,9 +163,6 @@ class CmdrFeatureContext:
             self.cmdr_needs |= ctx._deck_needs.get(oid, set())
             self.cmdr_zones |= ctx._card_zones.get(oid, set())
 
-            sv = ctx.strat_vector(oid)
-            if sv is not None:
-                strat_vecs.append(sv)
             av_sparse = ctx._ability_vectors.get(oid)
             if av_sparse is not None:
                 # Expand sparse (indices, values) to dense for commander merge
@@ -176,8 +181,7 @@ class CmdrFeatureContext:
 
             profiles.append(ctx._forge_profiles.get(oid, _EMPTY_PROFILE))
 
-        # Merge vectors: element-wise max for mechanics/ability, sum for strat/func
-        self.cmdr_strat_vec = _merge_vecs_sum(strat_vecs)
+        # Merge vectors: element-wise max for mechanics/ability, sum for func
         self.cmdr_ability_vec = _merge_vecs_max(ability_vecs)
         self.cmdr_produces = _merge_vecs_max(produce_vecs)
         self.cmdr_consumes = _merge_vecs_max(consume_vecs)
@@ -186,9 +190,12 @@ class CmdrFeatureContext:
         # Merge profiles: union sets, OR bools, max scalars
         self.cmdr_profile = _merge_profiles(profiles, _EMPTY_PROFILE)
 
+        # Combined mechanics identity vector (produces + consumes)
+        self._mech_combined = _mech_combine(self.cmdr_produces, self.cmdr_consumes)
+
         # Cached norms (avoid recomputing per card)
-        self.cmdr_strat_norm = float(np.linalg.norm(self.cmdr_strat_vec)) if self.cmdr_strat_vec is not None else 0.0
         self.cmdr_func_norm = float(np.linalg.norm(self.cmdr_func)) if self.cmdr_func is not None else 0.0
+        self._mech_combined_norm = float(np.linalg.norm(self._mech_combined)) if self._mech_combined is not None else 0.0
 
         # ── Commander per-category mech slices (for vectorized sub-product features) ──
         self.cmdr_cat_produces = []  # list of 1D arrays, one per category
@@ -240,6 +247,21 @@ class CmdrFeatureContext:
             self.cmdr_type_demand /= max_val
         self.cmdr_has_type_demand = bool(self.cmdr_type_demand.any())
 
+        # Commander resource production (for cost-effect alignment)
+        # What resources does the commander provide that could feed a card's costs?
+        cmdr_v = self.cmdr_profile.get('verbs', set())
+        cmdr_t = self.cmdr_profile.get('triggers', set())
+        self.cmdr_feeds = set()
+        if cmdr_v & {'Token', 'CopyPermanent'} or cmdr_t & {'TokenCreated'}:
+            self.cmdr_feeds.add('sacrifice')  # makes tokens → feeds sacrifice costs
+            self.cmdr_feeds.add('tap')  # makes creatures → can tap them
+        if cmdr_v & {'Draw', 'Dig'} or cmdr_t & {'Drawn'}:
+            self.cmdr_feeds.add('discard')  # draws cards → feeds discard costs
+        if cmdr_v & {'GainLife'} or cmdr_t & {'LifeGained'}:
+            self.cmdr_feeds.add('paylife')  # gains life → feeds pay life costs
+        if cmdr_v & {'Tap', 'Untap'} or cmdr_t & {'Untaps'}:
+            self.cmdr_feeds.add('tap')  # untaps → enables tap costs
+
         # Tribal depth data: commander's creature-type interests from multiple sources
         # Combines trigger_filters, token subtypes, deck hints, and type_line subtypes
         cmdr_tribal_filters = set()
@@ -284,6 +306,9 @@ class CmdrFeatureContext:
             self.deck_exact_counts = {}
             self.deck_broad_counts = {}
             self.cmdr_2hop_counts = {}
+
+        # Graph neighborhood set (for overlap feature)
+        self.cmdr_neighbor_set = self._build_neighbor_set(ctx)
 
         # Zone interaction flags (any commander)
         self.cmdr_zone_graveyard = any(oid in ctx._zone_graveyard for oid in self.cmdr_oids)
@@ -469,6 +494,23 @@ class CmdrFeatureContext:
                     if oid:
                         self.cmdr_2hop_counts[oid] = int(hop2_counts[i])
 
+    def _build_neighbor_set(self, ctx):
+        """Build set of all graph neighbor indices for the commander (out + in)."""
+        if not ctx._has_edge_index:
+            return set()
+        neighbors = set()
+        for oid in self.cmdr_oids:
+            idx = ctx.oid_to_idx.get(oid)
+            if idx is None:
+                continue
+            out = ctx._adj_out.get(idx)
+            if out is not None:
+                neighbors.update(out.tolist())
+            inn = ctx._adj_in.get(idx)
+            if inn is not None:
+                neighbors.update(inn.tolist())
+        return neighbors
+
     def _init_deck_edges_from_db(self, ctx, conn, deck_oids):
         """DB path for deck edge counts."""
         self.deck_edge_counts = {}
@@ -545,14 +587,41 @@ def _batch_gather_cmdr_arrays(ctx, cmdr):
         if i is not None:
             hop2_arr[i] = val
 
-    # Fancy-index to get per-card values (use 0 index for invalid, will be masked)
+    # Graph neighborhood overlap: for each card, what fraction of the
+    # commander's neighbors does this card also connect to?
+    # Vectorized: mark cmdr neighbors, then for each edge (src→tgt) where
+    # tgt is a cmdr neighbor, increment src's overlap count.
+    neighbor_overlap_arr = np.zeros(n_total, dtype=np.float32)
+    cmdr_nset = cmdr.cmdr_neighbor_set
+    cmdr_nsize = len(cmdr_nset)
+    if cmdr_nsize > 0 and ctx._has_edge_index:
+        cmdr_mask = np.zeros(n_total, dtype=bool)
+        for nb in cmdr_nset:
+            if nb < n_total:
+                cmdr_mask[nb] = True
+        # Use raw CSR arrays: for each edge src→tgt, if tgt in cmdr_mask, add 1 to src
+        out_keys, out_offsets, out_vals = ctx._adj_out.to_arrays()
+        in_keys, in_offsets, in_vals = ctx._adj_in.to_arrays()
+        # Outgoing: card→neighbor, count neighbors that are cmdr neighbors
+        hits = cmdr_mask[out_vals]  # bool array: is this neighbor a cmdr neighbor?
+        # Map each hit back to its source card using offsets
+        card_indices = np.repeat(out_keys, np.diff(out_offsets))
+        np.add.at(neighbor_overlap_arr, card_indices[hits], 1.0)
+        # Incoming: neighbor→card, count neighbors that are cmdr neighbors
+        hits = cmdr_mask[in_vals]
+        card_indices = np.repeat(in_keys, np.diff(in_offsets))
+        np.add.at(neighbor_overlap_arr, card_indices[hits], 1.0)
+        # Normalize
+        neighbor_overlap_arr /= cmdr_nsize
 
-    return cmdr_out_arr, cmdr_in_arr, deck_edge_arr, deck_exact_arr, deck_broad_arr, hop2_arr
+    return (cmdr_out_arr, cmdr_in_arr, deck_edge_arr, deck_exact_arr,
+            deck_broad_arr, hop2_arr, neighbor_overlap_arr)
 
 
 def _batch_vectorized_features(X, N, card_oids, card_cmcs, safe_idx, valid, ctx, cmdr, cmdr_arrays):
     """Compute all vectorized array-indexed features (F0-F72 excluding per-card loop)."""
-    cmdr_out_arr, cmdr_in_arr, deck_edge_arr, deck_exact_arr, deck_broad_arr, hop2_arr = cmdr_arrays
+    (cmdr_out_arr, cmdr_in_arr, deck_edge_arr, deck_exact_arr,
+     deck_broad_arr, hop2_arr, neighbor_overlap_arr) = cmdr_arrays
 
     out_s = cmdr_out_arr[safe_idx]
     in_s = cmdr_in_arr[safe_idx]
@@ -573,7 +642,7 @@ def _batch_vectorized_features(X, N, card_oids, card_cmcs, safe_idx, valid, ctx,
     X[:, 2] = np.log2(1.0 + np.minimum(deck_edges, 50))               # deck_edge_count
 
     # ── F3-F4: Strategy and ability cosine (set in per-card loop below) ──
-    # F3: strategy_cosine — set in loop
+    # F3: mech_cosine — set in loop
     # F4: forge_ability_cosine — set in loop
 
     # ── F5-F6: Phase features ──
@@ -693,7 +762,7 @@ def _batch_vectorized_features(X, N, card_oids, card_cmcs, safe_idx, valid, ctx,
 
     # ── F64-F67: Card quality features ──
     X[:, 64] = ctx._arr_forge_richness[safe_idx]                       # forge_ability_richness
-    X[:, 65] = ctx._arr_strat_count[safe_idx]                          # card_strategy_count
+    X[:, 65] = ctx._arr_mech_nonzero[safe_idx]                         # mech_nonzero_count
     X[:, 66] = ctx._arr_deck_tag_count[safe_idx]                       # deck_tag_count
     X[:, 67] = ctx._arr_edhrec_pct[safe_idx]                           # edhrec_deck_pct
 
@@ -707,8 +776,7 @@ def _batch_vectorized_features(X, N, card_oids, card_cmcs, safe_idx, valid, ctx,
 
 
 def _batch_per_card_loop(X, N, card_oids, card_indices, safe_idx, ctx, cmdr):
-    """Compute per-card features requiring set operations (strategy, profile, tribal, fingerprints)."""
-    cmdr_strat_vec = cmdr.cmdr_strat_vec
+    """Compute per-card features requiring set operations (profile, tribal, fingerprints)."""
     cmdr_ability_vec = cmdr.cmdr_ability_vec
     cmdr_subtypes = cmdr.cmdr_subtypes
     cmdr_produces = cmdr.cmdr_produces
@@ -716,6 +784,7 @@ def _batch_per_card_loop(X, N, card_oids, card_indices, safe_idx, ctx, cmdr):
     cmdr_func = cmdr.cmdr_func
     cmdr_profile = cmdr.cmdr_profile
     cmdr_trigs = cmdr_profile.get('triggers', set())
+    cmdr_feeds = cmdr.cmdr_feeds
     cmdr_verbs = cmdr_profile.get('verbs', set())
     cmdr_counters = cmdr_profile.get('counter_types', set())
     cmdr_filter_kws = cmdr_profile.get('trigger_filters', set())
@@ -728,16 +797,18 @@ def _batch_per_card_loop(X, N, card_oids, card_indices, safe_idx, ctx, cmdr):
     # Concept-based target alignment setup
     cmdr_prod_types = set()
     if cmdr_produces is not None:
-        for concept, target_type in [("creature_enters", "Creature"),
-                                      ("artifact_enters", "Artifact"),
-                                      ("enchantment_enters", "Enchantment"),
-                                      ("token_created", "Creature"),
-                                      ("counter_added", "Creature")]:
+        for concept, target_type in [
+            (("enters", "creature", None, None), "Creature"),
+            (("zone_change", "artifact", None, "bf"), "Artifact"),
+            (("zone_change", "enchantment", None, "bf"), "Enchantment"),
+            (("token_created", None, None, None), "Creature"),
+            (("counter_add", None, None, None), "Creature"),
+        ]:
             idx = _concept_idx.get(concept)
             if idx is not None and cmdr_produces[idx] > 0:
                 cmdr_prod_types.add(target_type)
 
-    creature_idx_concept = _concept_idx.get("creature_enters")
+    creature_idx_concept = _concept_idx.get(("enters", "creature", None, None))
     cmdr_makes_creatures = (cmdr_produces is not None and creature_idx_concept is not None
                             and cmdr_produces[creature_idx_concept] > 0)
 
@@ -757,13 +828,16 @@ def _batch_per_card_loop(X, N, card_oids, card_indices, safe_idx, ctx, cmdr):
 
         card_profile = ctx._forge_profiles.get(oid, {})
 
-        # F3: strategy_cosine
-        csv = ctx.strat_vector(oid)
-        if cmdr_strat_vec is not None and csv is not None:
-            d = float(np.dot(cmdr_strat_vec, csv))
-            nc = cmdr.cmdr_strat_norm
-            nd = float(np.linalg.norm(csv))
-            X[row_i, 3] = d / (nc * nd) if nc > 0 and nd > 0 else 0.0
+        # F3: mech_cosine (full commander-to-card mechanics vector cosine)
+        card_prod = ctx._mech_produces.get(oid)
+        card_cons = ctx._mech_consumes.get(oid)
+        if cmdr._mech_combined is not None:
+            card_combined = _mech_combine(card_prod, card_cons)
+            if card_combined is not None:
+                nc = cmdr._mech_combined_norm
+                nd = float(np.linalg.norm(card_combined))
+                if nc > 0 and nd > 0:
+                    X[row_i, 3] = float(np.dot(cmdr._mech_combined, card_combined)) / (nc * nd)
 
         # F4: forge_ability_cosine (sparse dot product)
         card_av_sparse = ctx._ability_vectors.get(oid)
@@ -953,6 +1027,27 @@ def _batch_per_card_loop(X, N, card_oids, card_indices, safe_idx, ctx, cmdr):
             elif cmdr_subtypes and (changes & cmdr_subtypes):
                 X[row_i, 92] = 1.0
 
+        # F94: cost_feeds_cmdr — commander produces what card's costs need
+        if cmdr_feeds:
+            card_costs = card_profile.get('cost_types', set())
+            if card_costs:
+                X[row_i, 94] = float(len(card_costs & cmdr_feeds))
+
+        # F95: trigger_specificity — IDF-weighted trigger filter match
+        raw_tfs = card_profile.get('raw_trigger_filters', frozenset())
+        if raw_tfs and cmdr_subtypes:
+            best_idf = 0.0
+            idf_map = ctx._trigger_filter_idf
+            for tf in raw_tfs:
+                # Check if any commander subtype appears in the trigger filter
+                tf_lower = tf.lower()
+                for st in cmdr_subtypes:
+                    if st in tf_lower:
+                        idf = idf_map.get(tf, 0.0)
+                        if idf > best_idf:
+                            best_idf = idf
+            X[row_i, 95] = min(best_idf, 12.0)
+
 
 def _batch_mech_subproducts(X, safe_idx, ctx, cmdr):
     """Compute F73-F88: per-category mech sub-product features (vectorized)."""
@@ -988,7 +1083,8 @@ def compute_batch_features(card_oids, card_cmcs, ctx, cmdr):
         cmdr: CmdrFeatureContext for the current commander
     """
     N = len(card_oids)
-    X = np.zeros((N, 93), dtype=np.float32)
+    n_features = 98
+    X = np.zeros((N, n_features), dtype=np.float32)
 
     # Convert card_oids to ctx indices for array lookup
     card_indices = np.array([ctx.oid_to_idx.get(oid, -1) for oid in card_oids], dtype=np.int32)
@@ -1004,6 +1100,20 @@ def compute_batch_features(card_oids, card_cmcs, ctx, cmdr):
     X[:, 89] = ctx._arr_affected_scope[safe_idx]       # affected_scope_ratio
     X[:, 90] = ctx._arr_pump_magnitude[safe_idx]        # pump_magnitude
     X[:, 91] = ctx._arr_pump_variable[safe_idx]         # pump_is_variable
+
+    # ── F93: graph_neighbor_overlap (vectorized from cmdr_arrays) ──
+    neighbor_overlap_arr = cmdr_arrays[-1]
+    X[:, 93] = neighbor_overlap_arr[safe_idx]
+
+    # ── F96: mech_density = mech_nonzero / max(cmc, 1) ──
+    mech_nz = ctx._arr_mech_nonzero[safe_idx]
+    safe_cmc = np.maximum(card_cmcs, 1.0)
+    X[:, 96] = np.minimum(mech_nz / safe_cmc, 10.0)
+
+    # ── F97: graph_pagerank ──
+    if hasattr(ctx, '_arr_pagerank'):
+        X[:, 97] = ctx._arr_pagerank[safe_idx]
+
     return X
 
 def _compute_causal_features(card_oid, card_cmc, ctx, cmdr):
@@ -1159,14 +1269,17 @@ def _compute_forge_profile_features(card_oid, card_cmc, card_profile, ctx, cmdr)
             for p2 in cp:
                 phase_m = max(phase_m, max(0.0, 1.0 - abs(p1 - p2) * 2.0))
 
-    # strategy cosine
-    csv = ctx.strat_vector(card_oid)
-    strat_cos = 0.0
-    if cmdr.cmdr_strat_vec is not None and csv is not None:
-        d = float(np.dot(cmdr.cmdr_strat_vec, csv))
-        nc = cmdr.cmdr_strat_norm
-        nd = float(np.linalg.norm(csv))
-        strat_cos = d / (nc * nd) if nc > 0 and nd > 0 else 0.0
+    # mech_cosine: full commander-to-card mechanics vector cosine
+    card_prod = ctx._mech_produces.get(card_oid)
+    card_cons = ctx._mech_consumes.get(card_oid)
+    mech_cos = 0.0
+    if cmdr._mech_combined is not None:
+        card_combined = _mech_combine(card_prod, card_cons)
+        if card_combined is not None:
+            nc = cmdr._mech_combined_norm
+            nd = float(np.linalg.norm(card_combined))
+            if nc > 0 and nd > 0:
+                mech_cos = float(np.dot(cmdr._mech_combined, card_combined)) / (nc * nd)
 
     card_depth = float(len(card_verbs) + len(card_trigs) +
                        len(card_profile.get('keywords', set())) +
@@ -1192,11 +1305,13 @@ def _compute_forge_profile_features(card_oid, card_cmc, card_profile, ctx, cmdr)
 
     cmdr_prod_types = set()
     if cmdr.cmdr_produces is not None:
-        for concept, target_type in [("creature_enters", "Creature"),
-                                      ("artifact_enters", "Artifact"),
-                                      ("enchantment_enters", "Enchantment"),
-                                      ("token_created", "Creature"),
-                                      ("counter_added", "Creature")]:
+        for concept, target_type in [
+            (("enters", "creature", None, None), "Creature"),
+            (("zone_change", "artifact", None, "bf"), "Artifact"),
+            (("zone_change", "enchantment", None, "bf"), "Enchantment"),
+            (("token_created", None, None, None), "Creature"),
+            (("counter_add", None, None, None), "Creature"),
+        ]:
             idx = _concept_idx.get(concept)
             if idx is not None and cmdr.cmdr_produces[idx] > 0:
                 cmdr_prod_types.add(target_type)
@@ -1211,7 +1326,7 @@ def _compute_forge_profile_features(card_oid, card_cmc, card_profile, ctx, cmdr)
         if any(filter_form in f for f in cmdr_filter_kws):
             kw_syn += 1.0
     if cmdr.cmdr_produces is not None:
-        creature_idx = _concept_idx.get("creature_enters")
+        creature_idx = _concept_idx.get(("enters", "creature", None, None))
         if creature_idx is not None and cmdr.cmdr_produces[creature_idx] > 0:
             kw_syn += float(len(card_kws & _COMBAT_KWS)) * 0.3
 
@@ -1290,7 +1405,7 @@ def _compute_forge_profile_features(card_oid, card_cmc, card_profile, ctx, cmdr)
         mech_cat_fwd.append(fwd)
         mech_cat_rev.append(rev)
 
-    return (strat_cos, forge_ability_cos, phase_m, cp,
+    return (mech_cos, forge_ability_cos, phase_m, cp,
             forge_depth, verb_align,
             counter_match, ratio_T, ratio_A, zone_align, target_align,
             kw_syn, activated_count,
@@ -1399,15 +1514,70 @@ def _compute_fingerprint_features(card_oid, ctx, cmdr):
     return func_produces_amp, func_requires_prod, func_card_req_cmdr, func_full_cosine
 
 
+def _graph_neighbor_overlap(card_oid, ctx, cmdr):
+    """Fraction of commander's graph neighbors that this card also connects to."""
+    cmdr_nset = cmdr.cmdr_neighbor_set
+    if not cmdr_nset or not ctx._has_edge_index:
+        return 0.0
+    card_idx = ctx.oid_to_idx.get(card_oid)
+    if card_idx is None:
+        return 0.0
+    overlap = 0
+    out = ctx._adj_out.get(card_idx)
+    if out is not None:
+        for nb in out:
+            if nb in cmdr_nset:
+                overlap += 1
+    inn = ctx._adj_in.get(card_idx)
+    if inn is not None:
+        for nb in inn:
+            if nb in cmdr_nset:
+                overlap += 1
+    return float(overlap) / len(cmdr_nset)
+
+
+def _trigger_specificity(card_profile, ctx, cmdr):
+    """IDF-weighted trigger filter match: rare triggers matching commander = high signal."""
+    raw_tfs = card_profile.get('raw_trigger_filters', frozenset())
+    cmdr_subtypes = cmdr.cmdr_subtypes
+    if not raw_tfs or not cmdr_subtypes:
+        return 0.0
+    best_idf = 0.0
+    idf_map = ctx._trigger_filter_idf
+    for tf in raw_tfs:
+        tf_lower = tf.lower()
+        for st in cmdr_subtypes:
+            if st in tf_lower:
+                idf = idf_map.get(tf, 0.0)
+                if idf > best_idf:
+                    best_idf = idf
+    return min(best_idf, 12.0)
+
+
+def _cost_feeds_cmdr(card_profile, cmdr):
+    """Count how many of the card's ability cost types the commander can feed."""
+    card_costs = card_profile.get('cost_types', set())
+    if not card_costs or not cmdr.cmdr_feeds:
+        return 0.0
+    return float(len(card_costs & cmdr.cmdr_feeds))
+
+
 def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
                           ctx: ForgeFeatureContext, cmdr: CmdrFeatureContext) -> list:
-    """Compute the 93-feature vector for a single (commander, card) pair.
+    """Compute the feature vector for a single (commander, card) pair.
 
-    Returns a list of 93 floats matching FORGE_FEATURE_NAMES order.
+    Returns a list of floats matching FORGE_FEATURE_NAMES order.
     """
     tl = card_type_line
     card_profile = ctx._forge_profiles.get(card_oid, {})
-    c_strats = ctx.card_strats.get(card_oid, set())
+    # mech_nonzero_count: mechanical complexity from produces+consumes vectors
+    _pv = ctx._mech_produces.get(card_oid)
+    _cv = ctx._mech_consumes.get(card_oid)
+    _nz = 0
+    if _pv is not None:
+        _nz += int(np.count_nonzero(_pv))
+    if _cv is not None:
+        _nz += int(np.count_nonzero(_cv))
 
     (out_s, in_s, event_div, deck_exact_ratio, exact_edge,
      causal_composite, hub, deck_exact_abs, cmdr_2hop, cmdr_2hop_ratio
@@ -1417,7 +1587,7 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
      tribal_lord, tribal_member, tribal_depth
      ) = _compute_tribal_features(card_oid, tl, card_profile, ctx, cmdr)
 
-    (strat_cos, forge_ability_cos, phase_m, cp,
+    (mech_cos, forge_ability_cos, phase_m, cp,
      forge_depth, verb_align,
      counter_match, ratio_T, ratio_A, zone_align, target_align,
      kw_syn, activated_count,
@@ -1441,7 +1611,7 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
      ) = _compute_fingerprint_features(card_oid, ctx, cmdr)
 
     forge_richness = ctx._forge_richness.get(card_oid, 0.0)
-    strat_count = float(min(len(c_strats), 5))
+    mech_nz = float(min(_nz, 50))
     deck_tags = ctx._deck_tag_count.get(card_oid, 0.0)
     edhrec_pct = 0.0 if _EDHREC_FREE else ctx._edhrec_deck_pct.get(card_oid, 0.0)
 
@@ -1449,7 +1619,7 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         min(out_s, 10.0),                                # F0 causal_cmdr_to_card
         min(in_s, 10.0),                                 # F1 causal_card_to_cmdr
         np.log2(1.0 + min(cmdr.deck_edge_counts.get(card_oid, 0), 50)),  # F2 deck_edge_count
-        strat_cos,                                       # F3 strategy_cosine
+        mech_cos,                                        # F3 mech_cosine
         forge_ability_cos,                               # F4 forge_ability_cosine
         phase_m,                                         # F5 phase_match
         1.0 if cp else 0.0,                              # F6 has_phase_trigger
@@ -1511,7 +1681,7 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         cmdr_2hop,                                       # F62 cmdr_2hop_count
         cmdr_2hop_ratio,                                 # F63 cmdr_2hop_ratio
         forge_richness,                                  # F64 forge_ability_richness
-        strat_count,                                     # F65 card_strategy_count
+        mech_nz,                                         # F65 mech_nonzero_count
         deck_tags,                                       # F66 deck_tag_count
         edhrec_pct,                                      # F67 edhrec_deck_pct
         tribal_lord,                                     # F68 tribal_lord_for_cmdr
@@ -1539,4 +1709,11 @@ def compute_card_features(card_oid: str, card_type_line: str, card_cmc: float,
         pump_mag,                                        # F90 pump_magnitude
         pump_var,                                        # F91 pump_is_variable
         type_change_tribal,                              # F92 type_change_tribal_match
+        _graph_neighbor_overlap(card_oid, ctx, cmdr),    # F93 graph_neighbor_overlap
+        _cost_feeds_cmdr(card_profile, cmdr),            # F94 cost_feeds_cmdr
+        _trigger_specificity(card_profile, ctx, cmdr),   # F95 trigger_specificity
+        min(float(_nz) / max(float(card_cmc), 1.0), 10.0),  # F96 mech_density
+        float(ctx._arr_pagerank[ctx.oid_to_idx[card_oid]])
+            if hasattr(ctx, '_arr_pagerank') and card_oid in ctx.oid_to_idx
+            else 0.0,                                    # F97 graph_pagerank
     ]

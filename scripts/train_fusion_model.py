@@ -36,8 +36,8 @@ FORGE_FEATURE_NAMES = [
     "causal_cmdr_to_card",          # F0
     "causal_card_to_cmdr",          # F1
     "deck_edge_count",              # F2
-    # ── Strategy features ──
-    "strategy_cosine",              # F3
+    # ── Mechanics identity ──
+    "mech_cosine",                  # F3
     "forge_ability_cosine",         # F4
     # ── Phase / trigger features ──
     "phase_match",                  # F5
@@ -111,7 +111,7 @@ FORGE_FEATURE_NAMES = [
     "cmdr_2hop_ratio",
     # ── Card quality / noise suppression ──
     "forge_ability_richness",
-    "card_strategy_count",
+    "mech_nonzero_count",
     "deck_tag_count",
     "edhrec_deck_pct",
     # ── Tribal depth features ──
@@ -143,6 +143,12 @@ FORGE_FEATURE_NAMES = [
     "pump_magnitude",                   # F90: max pump power (0-15)
     "pump_is_variable",                 # F91: pump uses X/Y variable
     "type_change_tribal_match",         # F92: ChangeType$ matches commander tribal
+    # ── Graph neighborhood + cost alignment features ──
+    "graph_neighbor_overlap",            # F93: |card_neighbors ∩ cmdr_neighbors| / |cmdr_neighbors|
+    "cost_feeds_cmdr",                   # F94: card's ability costs match commander's produces
+    "trigger_specificity",               # F95: IDF-weighted trigger filter match with commander
+    "mech_density",                      # F96: mech_nonzero_count / max(cmc, 1)
+    "graph_pagerank",                    # F97: PageRank centrality on causal graph
 ]
 
 
@@ -212,12 +218,12 @@ def _resolve_slugs_to_oids(conn, table="edhrec_average_decks"):
 
 
 def sample_negatives(positives_by_cmdr, all_card_oids, card_colors, cmdr_colors,
-                     ratio=_NEGATIVE_RATIO, card_strats=None, card_subtypes=None,
+                     ratio=_NEGATIVE_RATIO, card_subtypes=None,
                      card_has_tags=None):
     """Sample negative pairs (cards NOT in a commander's EDHREC page).
 
     For each commander, samples ratio * |positives| negative cards in 3 tiers:
-    - 1/3 strategy/subtype overlap (same tribe/archetype, wrong card)
+    - 1/3 subtype overlap (same tribe, wrong card)
     - 1/3 tag overlap (same has-tags as commander, e.g., Ability$Counters)
     - 1/3 random color-legal cards
 
@@ -269,13 +275,11 @@ def sample_negatives(positives_by_cmdr, all_card_oids, card_colors, cmdr_colors,
         n_per_tier = n_neg // 3
         all_chosen = set()
 
-        # Tier 1: strategy/subtype overlap (same tribe but wrong card)
-        if n_per_tier > 0 and (card_strats or card_subtypes):
-            cmdr_strats = card_strats.get(cmdr_oid, set()) if card_strats else set()
-            cmdr_subs = card_subtypes.get(cmdr_oid, set()) if card_subtypes else set()
+        # Tier 1: subtype overlap (same tribe but wrong card)
+        if n_per_tier > 0 and card_subtypes:
+            cmdr_subs = card_subtypes.get(cmdr_oid, set())
             hard_pool = [oid for oid in candidates
-                         if (card_strats and bool(cmdr_strats & card_strats.get(oid, set()))) or
-                            (card_subtypes and bool(cmdr_subs & card_subtypes.get(oid, set())))]
+                         if cmdr_subs and bool(cmdr_subs & card_subtypes.get(oid, set()))]
             if hard_pool:
                 n_pick = min(n_per_tier, len(hard_pool))
                 for idx in rng.choice(len(hard_pool), size=n_pick, replace=False):
@@ -400,7 +404,6 @@ def build_forge_feature_matrix(pairs_by_cmdr, verbose=True):
             ctx._arr_cmc[i] = float(meta["cmc"])
 
     if verbose:
-        print(f"  Strategy vector: {ctx._n_strats} strategies")
         print(f"  Forge ability vectors: {ctx._n_abilities} vocab, {len(ctx._ability_vectors)} cards with vectors")
 
     # ── Prepare for parallel workers ─────────────────────────────────
@@ -587,6 +590,8 @@ def train_forge_gbm(X, y, cmdr_ids, tune=False, quick=False):
     """
     import lightgbm as lgb
 
+    t0 = time.time()
+
     # Sort data by commander ID (required for LambdaRank groups)
     sort_order = np.argsort(cmdr_ids)
     X = X[sort_order]
@@ -712,8 +717,18 @@ def train_forge_gbm(X, y, cmdr_ids, tune=False, quick=False):
     final_booster.save_model(model_path)
     print(f"  Forge model saved to {model_path}")
 
-    return final_booster, {"mean_ndcg30": float(np.mean(fold_ndcgs)),
-                           "fold_ndcgs": fold_ndcgs}
+    return final_booster, {
+        "mean_ndcg30": float(np.mean(fold_ndcgs)),
+        "fold_ndcgs": [float(x) for x in fold_ndcgs],
+        "fold_best_iters": [int(x) for x in fold_best_iters],
+        "final_rounds": avg_best,
+        "n_folds": len(splits),
+        "hyperparameters": {k: v for k, v in params.items()
+                            if k not in ("verbose", "num_threads")},
+        "training_time_s": round(time.time() - t0, 1),
+        "quick_mode": quick,
+        "tune_mode": tune,
+    }
 
 
 def make_cv_splits(cmdr_ids, n_folds=5, seed=42):
@@ -867,12 +882,6 @@ def _load_pairs_for_features(conn):
                      if oid not in basic_land_oids
                      and "Token" not in type_lines.get(oid, "")]
 
-    card_strats = {}
-    for oid, s in conn.execute(
-        "SELECT oracle_id, strategy FROM card_strategies WHERE confidence >= 0.3"
-    ):
-        card_strats.setdefault(oid, set()).add(s)
-
     card_subtypes = {}
     for row in conn.execute(
         "SELECT oracle_id, type_line FROM cards WHERE type_line LIKE '%\u2014%'"
@@ -901,7 +910,7 @@ def _load_pairs_for_features(conn):
     neg_pairs = sample_negatives(
         positives_for_neg, all_card_oids, card_colors, card_colors,
         ratio=_NEGATIVE_RATIO,
-        card_strats=card_strats, card_subtypes=card_subtypes,
+        card_subtypes=card_subtypes,
         card_has_tags=card_has_tags,
     )
     print(f"  Negative pairs: {len(neg_pairs)}")
@@ -1004,8 +1013,35 @@ def main():
         names = FORGE_FEATURE_NAMES
     print("\n  Forge model feature importance:")
     total_imp = sum(importances)
-    for name, imp in sorted(zip(names, importances), key=lambda x: -x[1]):
+    top_features = sorted(zip(names, importances), key=lambda x: -x[1])
+    for name, imp in top_features:
         print(f"    {name:25s} {imp:6d} ({imp/total_imp*100:5.1f}%)")
+
+    # ── Save model metadata ──
+    from mtg_synergy.model_meta import (
+        append_to_registry, build_meta, save_model_meta,
+    )
+
+    grade_dist = {str(g): int((y_forge == g).sum())
+                  for g in range(int(y_forge.max()) + 1)}
+    feat_imp = [{"name": n, "splits": int(s), "pct": round(s / total_imp * 100, 1)}
+                for n, s in top_features[:20]]
+
+    meta = build_meta(
+        scores=forge_scores,
+        model_path=forge_model_path,
+        n_samples=len(y_forge),
+        n_commanders=int(len(np.unique(cmdr_ids_forge))),
+        grade_distribution=grade_dist,
+        n_features=len(FORGE_FEATURE_NAMES),
+        feature_names=list(FORGE_FEATURE_NAMES),
+        feature_importance=feat_imp,
+    )
+    meta_path = save_model_meta(meta, forge_model_path)
+    append_to_registry(meta, os.path.join(DATA_DIR, "model_registry.jsonl"))
+    print(f"\n  Model metadata: {meta_path}")
+    print(f"  Version: {meta['version']} (git:{meta['git_commit']}"
+          f"{'*' if meta['git_dirty'] else ''}, md5:{meta['model_md5'][:8]})")
 
     # ── Post-training pipeline validation ──
     if args.validate:
