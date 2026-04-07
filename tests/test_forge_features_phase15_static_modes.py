@@ -40,10 +40,16 @@ class TestStaticModeColumnExtraction:
         a_result = extract_ability_fields(a_line, "A", svars={})
         assert a_result.get("static_mode") is None
 
-        # T: line — must NOT set static_mode
+        # T: line — must NOT set static_mode. Mode$ on a T: line is the
+        # trigger condition (e.g., ChangesZone), and lands in trigger_mode.
+        # Cross-column assertion proves the T: and S: branches are isolated:
+        # if a future change broke prefix dispatch and T: rows fell into the
+        # S: branch, static_mode would absorb "ChangesZone" and trigger_mode
+        # would be None — both halves of the assertion would fail.
         t_line = "Mode$ ChangesZone | Origin$ Any | Destination$ Battlefield | ValidCard$ Card.Self | Execute$ TrigPump"
         t_result = extract_ability_fields(t_line, "T", svars={})
         assert t_result.get("static_mode") is None
+        assert t_result.get("trigger_mode") == "ChangesZone"
 
         # R: line — must NOT set static_mode
         r_line = "Event$ Moved | ValidCard$ Card.Self | Destination$ Graveyard | ReplaceWith$ Exile"
@@ -51,7 +57,11 @@ class TestStaticModeColumnExtraction:
         assert r_result.get("static_mode") is None
 
     def test_s_line_no_mode_field_returns_null(self):
-        # Defensive: S: line without Mode$ field — should return None, not crash
+        # Defensive: S: line with SP$ but no Mode$ field. SP$ was previously
+        # stored as verb for S: rows (the verb-pollution bug). Verify it is
+        # now ignored for both verb and static_mode — neither field is
+        # populated when only SP$ is present.
         line = "SP$ Effect | Description$ Malformed S: line for testing."
         result = extract_ability_fields(line, "S", svars={})
         assert result.get("static_mode") is None
+        assert result.get("verb") is None
