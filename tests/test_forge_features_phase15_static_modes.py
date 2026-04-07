@@ -335,3 +335,88 @@ class TestStaticModeAutoTags:
         assert "oid-pan" in providers, (
             f"Card not in providers index for Static$Panharmonicon: {providers}"
         )
+
+
+class TestStaticModeMechanicsVectors:
+    """mechanics_vectors.py — static_mode produces synthetic event tuples."""
+
+    def test_static_mode_event_tuple_in_produces(self):
+        from mtg_synergy.recommend.mechanics_vectors import build_mechanics_vectors
+
+        conn = _build_test_db_with_static_mode()
+        # Exercise the preloaded path with a manually-constructed 14-element
+        # tuple matching forge_features.py's _raw_abilities format:
+        #   (oid, verb, trig_mode, trig_filter, cost, kw, token_script,
+        #    counter, raw_line, amount, trigger_origin, trigger_destination,
+        #    defined, static_mode)
+        pan_raw = (
+            "Mode$ Panharmonicon | ValidCard$ Permanent.YouCtrl | "
+            "Description$ If a permanent entering causes a triggered ability "
+            "of a permanent you control to trigger, that ability triggers an "
+            "additional time."
+        )
+        preloaded = [(
+            "oid-pan", None, None, None, None, None, None, None,
+            pan_raw, None, None, None, None, "Panharmonicon",
+        )]
+        produces, consumes, dim, subtype_idx, category_dims = build_mechanics_vectors(
+            conn, preloaded_abilities=preloaded, quiet=True
+        )
+        # The vector for Panharmonicon must have a non-zero entry corresponding
+        # to ("static_mode", "panharmonicon", None, None)
+        vec = produces.get("oid-pan")
+        assert vec is not None, "Card has no produces vector"
+        assert vec.sum() > 0, (
+            "Produces vector is all zeros — static_mode tuple not added"
+        )
+
+    def test_static_mode_qualifier_lowercased(self):
+        """The qualifier in the synthetic tuple must be lowercased
+        (Panharmonicon → 'panharmonicon')."""
+        from mtg_synergy.recommend.mechanics_vectors import build_mechanics_vectors
+
+        conn = _build_test_db_with_static_mode()
+        # Build via the fallback DB path (preloaded_abilities=None) so the
+        # test does not depend on _raw_abilities, which ForgeFeatureContext
+        # frees during __init__ after building mechanics vectors.
+        produces, consumes, dim, subtype_idx, category_dims = build_mechanics_vectors(
+            conn, preloaded_abilities=None, quiet=True
+        )
+        # The "themes" category must contain a non-zero dim for Panharmonicon
+        themes_dims = category_dims.get("themes", [])
+        assert themes_dims, "themes category has no dims registered"
+        vec = produces["oid-pan"]
+        themes_sum = sum(vec[i] for i in themes_dims)
+        assert themes_sum > 0, (
+            f"static_mode panharmonicon should add to themes category, "
+            f"but vec sums to {themes_sum} across themes dims {themes_dims}"
+        )
+
+    def test_static_mode_not_in_consumes(self):
+        """Static modes are always self-produced; never consumes."""
+        from mtg_synergy.recommend.mechanics_vectors import build_mechanics_vectors
+
+        conn = _build_test_db_with_static_mode()
+        # Build via the fallback DB path (preloaded_abilities=None) so the
+        # test does not depend on _raw_abilities, which ForgeFeatureContext
+        # frees during __init__ after building mechanics vectors.
+        produces, consumes, dim, subtype_idx, category_dims = build_mechanics_vectors(
+            conn, preloaded_abilities=None, quiet=True
+        )
+        # The card may or may not have a consumes vector. If it does,
+        # the static_mode contribution must be zero (the S: line has no
+        # other event-class signal).
+        cvec = consumes.get("oid-pan")
+        if cvec is not None:
+            assert cvec.sum() == 0, (
+                f"static_mode card has non-zero consumes vector: {cvec.sum()}"
+            )
+
+    def test_static_mode_category_in_event_category_dict(self):
+        """_EVENT_CATEGORY dict must include 'static_mode' → 'themes'."""
+        from mtg_synergy.recommend.mechanics_vectors import _EVENT_CATEGORY
+
+        assert _EVENT_CATEGORY.get("static_mode") == "themes", (
+            f"Expected _EVENT_CATEGORY['static_mode'] == 'themes', "
+            f"got {_EVENT_CATEGORY.get('static_mode')!r}"
+        )

@@ -515,7 +515,8 @@ class ForgeFeatureContext:
         # Also collect raw abilities for build_mechanics_vectors (avoids redundant DB scan)
         # Output format consumed by mechanics_vectors.py:
         #   (oid, verb, trig_mode, trig_filter, cost, kw, token_script,
-        #    counter, raw_line, amount, trigger_origin, trigger_destination, defined)
+        #    counter, raw_line, amount, trigger_origin, trigger_destination,
+        #    defined, static_mode)
         self._raw_abilities = []
         for row in conn.execute(
             "SELECT fnm.oracle_id, fa.verb, fa.trigger_mode, fa.trigger_filter, "
@@ -525,11 +526,12 @@ class ForgeFeatureContext:
             "FROM forge_abilities fa "
             "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name"
         ):
-            # row[0..11] + row[14] (defined) → 13-element tuple for mechanics_vectors.
-            # Phase 1.5 sub-project B note: static_mode (row[15]) is intentionally
-            # NOT appended here yet — Task 7 will extend the tuple in lockstep with
-            # mechanics_vectors.py to keep every commit individually green.
-            self._raw_abilities.append(row[:12] + (row[14],))
+            # row[0..11] + row[14] (defined) + row[15] (static_mode) →
+            # 14-element tuple for mechanics_vectors.py.
+            # Phase 1.5 sub-project B Task 7: static_mode now flows through
+            # to the mechanics vectors as a synthetic ("static_mode", ..)
+            # produces tuple in the themes category.
+            self._raw_abilities.append(row[:12] + (row[14], row[15]))
             self._process_forge_ability_row(row)
 
         # Post-process derived fields
