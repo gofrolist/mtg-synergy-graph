@@ -211,7 +211,7 @@ _TRIGGER_STEM_TO_VERB = {
 }
 
 # Generic type tokens that should NOT be promoted to Type$ deck hints
-# (too broad to be meaningful tribal/themetic signal).
+# (too broad to be meaningful tribal/thematic signal).
 _GENERIC_TRIGGER_FILTER_TYPES = frozenset({
     "card", "creature", "permanent", "nontoken", "token",
     "artifact", "enchantment", "land", "spell", "self",
@@ -396,6 +396,7 @@ class ForgeFeatureContext:
         self._load_deck_tags(conn)
         self._load_ability_vectors(conn)
         self._enrich_deck_tags_from_tokens()
+        self._build_deck_has_providers()
         self._load_edhrec_stats(conn)
 
         # Verb→trigger alignment mapping for F30
@@ -596,10 +597,7 @@ class ForgeFeatureContext:
         if trig_filter:
             if trig_filter != "Card.Self":
                 p['raw_trigger_filters'].add(trig_filter)
-            for part in trig_filter.split(","):
-                main = part.split(".")[0].strip()
-                if main and main != "Card" and main[0].isupper():
-                    p['trigger_filters'].add(main.lower())
+            p['trigger_filters'] |= ForgeFeatureContext._derive_coarse_filter_types(trig_filter)
         # Phase 1: combat trigger filters (ValidAttacker$ / ValidBlocker$)
         # The trigger_filter column is populated from ValidCard$; combat
         # triggers use ValidAttacker$/ValidBlocker$ instead, which would
@@ -607,13 +605,7 @@ class ForgeFeatureContext:
         if ability_type == 'T' and raw_line_val:
             for combat_filter in ForgeFeatureContext._parse_combat_trigger_filters(raw_line_val):
                 p['raw_trigger_filters'].add(combat_filter)
-                # Coarse type — mirror the existing ValidCard$ derivation,
-                # iterating ALL comma-separated parts so multi-type filters
-                # like 'Creature,Artifact' add both coarse types.
-                for part in combat_filter.split(","):
-                    main = part.split(".")[0].strip()
-                    if main and main != "Card" and main[0].isupper():
-                        p['trigger_filters'].add(main.lower())
+                p['trigger_filters'] |= ForgeFeatureContext._derive_coarse_filter_types(combat_filter)
         # Extract cost types for cost-effect alignment (flows into cost_feeds_cmdr F94)
         cost_str = cost or ""
         p['cost_types'] |= ForgeFeatureContext._parse_cost_types(cost_str)
@@ -664,6 +656,26 @@ class ForgeFeatureContext:
         return out
 
     @staticmethod
+    def _derive_coarse_filter_types(filter_string: str | None) -> set[str]:
+        """Extract lowercase coarse type tokens from a comma-separated filter value.
+
+        Used by both the existing ValidCard$ trig_filter path and the Phase 1
+        ValidAttacker$/ValidBlocker$ combat-filter path so the two paths cannot
+        drift. Iterates ALL comma-separated parts (multi-type filters like
+        'Creature,Artifact' produce {'creature', 'artifact'}). Skips the
+        'Card' sentinel and any token that does not start with an uppercase
+        letter (heuristic to filter out qualifiers like 'nonHuman').
+        """
+        if not filter_string:
+            return set()
+        out: set[str] = set()
+        for part in filter_string.split(","):
+            main = part.split(".")[0].strip()
+            if main and main != "Card" and main[0].isupper():
+                out.add(main.lower())
+        return out
+
+    @staticmethod
     def _parse_cost_types(cost_str: str | None) -> set[str]:
         """Tokenize a Forge cost string into mechanical cost categories.
 
@@ -677,8 +689,8 @@ class ForgeFeatureContext:
           - subcounter: counter-removal costs (P1P1, CHARGE, OIL, ..., loyalty-minus)
           - exilegrave: graveyard-exile costs (ALWAYS additive — ExileFromGrave
                         strings also set 'exile' via the base substring match,
-                        preserving the pre-Phase-1 'exile' count bit-for-bit so
-                        the post-WIP 0.5707 baseline is not shifted)
+                        preserving the pre-Phase-1 'exile' count bit-for-bit
+                        so the trained model's baseline is not shifted)
           - taptype:    typed tap costs (tapXType<N/Subtype>, convoke/improvise style)
           - return:     bounce-to-hand costs (Return<N/Target> — '<' anchor
                         to avoid matching ReturnToHand/ReturnFromGrave verbs)
@@ -920,6 +932,12 @@ class ForgeFeatureContext:
         # Uses verb/trigger names directly as tags (e.g., Ability$Sacrifice, Ability$Token).
         # Trigger normalization map _TRIGGER_STEM_TO_VERB is module-level — see top
         # of file for the maintenance contract.
+        #
+        # The reverse index self._deck_has_providers is built once in
+        # _build_deck_has_providers() AFTER _enrich_deck_tags_from_tokens() has
+        # added token Type$ tags. Do not build it here — that would force a
+        # second incremental update later and create a hidden ordering bug if
+        # the call sequence in __init__ ever changes.
         for oid, profile in self._forge_profiles.items():
             for verb in profile.get('verbs', set()):
                 tag = f"Ability${verb}"
@@ -933,21 +951,24 @@ class ForgeFeatureContext:
             for tf in profile.get('trigger_filters', set()):
                 if tf not in _GENERIC_TRIGGER_FILTER_TYPES and len(tf) > 2:
                     self._deck_hints.setdefault(oid, set()).add(f"Type${tf.title()}")
-        # Note: Type$ tags from token subtypes are added in _enrich_deck_tags_from_tokens()
-        # after _load_ability_vectors() populates _token_subtypes.
-
-        # Reverse index: tag → set of oids that "has" it (for needs_rarity feature)
-        self._deck_has_providers = {}
-        for oid, tags in self._deck_has.items():
-            for tag in tags:
-                self._deck_has_providers.setdefault(tag, set()).add(oid)
 
     def _enrich_deck_tags_from_tokens(self):
         """Add Type$ has-tags from token subtypes (runs after _load_ability_vectors)."""
         for oid, subs in self._token_subtypes.items():
             for sub in subs:
                 self._deck_has.setdefault(oid, set()).add(f"Type${sub.title()}")
-                self._deck_has_providers.setdefault(f"Type${sub.title()}", set()).add(oid)
+
+    def _build_deck_has_providers(self):
+        """Build the tag → providers reverse index from the final _deck_has state.
+
+        Must be called AFTER _load_deck_tags() and _enrich_deck_tags_from_tokens()
+        have populated _deck_has. Single-pass construction so the index is always
+        consistent with _deck_has — no incremental updates that could rot.
+        """
+        self._deck_has_providers = {}
+        for oid, tags in self._deck_has.items():
+            for tag in tags:
+                self._deck_has_providers.setdefault(tag, set()).add(oid)
 
     def _load_ability_vectors(self, conn):
         """Load ability vectors, trigger zones, ability counts, token/zone stats."""

@@ -11,6 +11,7 @@ Usage:
 import argparse
 import json
 import os
+import shutil
 import sqlite3
 import time
 
@@ -717,11 +718,10 @@ def train_forge_gbm(X, y, cmdr_ids, tune=False, quick=False):
     # Auto-backup previous model before overwriting (one-step rollback).
     # Restore with: cp data/fusion_model_forge.lgb.prev data/fusion_model_forge.lgb
     if os.path.exists(model_path):
-        import shutil
         shutil.copy2(model_path, model_path + ".prev")
-        meta_path_prev = model_path + ".meta.json"
-        if os.path.exists(meta_path_prev):
-            shutil.copy2(meta_path_prev, meta_path_prev + ".prev")
+        meta_path = model_path + ".meta.json"
+        if os.path.exists(meta_path):
+            shutil.copy2(meta_path, meta_path + ".prev")
         print(f"  Backed up previous model to {model_path}.prev")
     final_booster.save_model(model_path)
     print(f"  Forge model saved to {model_path}")
