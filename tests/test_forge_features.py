@@ -55,6 +55,7 @@ def test_forge_profiles_loaded():
             "opponent_only_events",
             "granted_ability_names", "granted_triggers", "changes_type",
             "cost_types", "raw_trigger_filters",
+            "static_modes",  # Phase 1.5 sub-project B
         }
         expected_bool_keys = {
             "combat_damage", "is_secondary", "gain_control",

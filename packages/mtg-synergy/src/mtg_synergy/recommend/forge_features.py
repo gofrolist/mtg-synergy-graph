@@ -23,6 +23,7 @@ _PROFILE_SET_FIELDS = (
     'excluded_subtypes', 'counter_trigger_themes', 'opponent_only_events',
     'granted_ability_names', 'granted_triggers', 'changes_type',
     'cost_types', 'raw_trigger_filters',
+    'static_modes',  # Phase 1.5 sub-project B: S: line Mode$ values
 )
 _PROFILE_BOOL_FIELDS = (
     'combat_damage', 'is_secondary', 'gain_control', 'produces_mana',
@@ -347,6 +348,7 @@ class ForgeFeatureContext:
     def __init__(self, conn, preload_edges=False, preload_strength=False,
                  card_provider=None, artifact_dir=None):
         self.conn = conn
+        self._check_schema(conn)
         self._has_edge_index = False
         self._bit_to_event = {}
         self._preload_strength = preload_strength
@@ -440,6 +442,20 @@ class ForgeFeatureContext:
         if preload_edges:
             self._build_edge_index(conn)
 
+    def _check_schema(self, conn):
+        """Verify the DB schema includes Phase 1.5 sub-project B columns.
+
+        Surfaces a clear error message if the developer forgot to re-run
+        scripts/import_forge.py after pulling the schema migration.
+        """
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(forge_abilities)")}
+        if "static_mode" not in cols:
+            raise RuntimeError(
+                "forge_abilities is missing the 'static_mode' column "
+                "(Phase 1.5 sub-project B). Re-import Forge data: "
+                "python3 scripts/import_forge.py --import"
+            )
+
     def _compact_forge_profiles(self):
         """Compact _forge_profiles: replace dicts with __slots__ ForgeProfile objects.
 
@@ -497,11 +513,14 @@ class ForgeFeatureContext:
             "SELECT fnm.oracle_id, fa.verb, fa.trigger_mode, fa.trigger_filter, "
             "fa.cost, fa.keyword, fa.token_script, fa.counter_type, fa.raw_line, "
             "fa.amount, fa.trigger_origin, fa.trigger_destination, "
-            "fa.target, fa.ability_type, fa.defined "
+            "fa.target, fa.ability_type, fa.defined, fa.static_mode "
             "FROM forge_abilities fa "
             "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name"
         ):
-            # row[0..11] + row[14] (defined) → 13-element tuple for mechanics_vectors
+            # row[0..11] + row[14] (defined) → 13-element tuple for mechanics_vectors.
+            # Phase 1.5 sub-project B note: static_mode (row[15]) is intentionally
+            # NOT appended here yet — Task 7 will extend the tuple in lockstep with
+            # mechanics_vectors.py to keep every commit individually green.
             self._raw_abilities.append(row[:12] + (row[14],))
             self._process_forge_ability_row(row)
 
@@ -530,6 +549,7 @@ class ForgeFeatureContext:
         target = row[12]
         ability_type = row[13]
         defined = row[14]
+        static_mode = row[15]  # Phase 1.5 sub-project B
 
         p = self._forge_profiles.setdefault(oid, {
             'verbs': set(), 'triggers': set(), 'keywords': set(),
@@ -555,7 +575,10 @@ class ForgeFeatureContext:
             'max_pump_power': 0, 'pump_is_variable': False,
             'cost_types': set(),  # sacrifice, tap, discard, exile, paylife
             'raw_trigger_filters': set(),  # full trigger_filter strings for IDF
+            'static_modes': set(),  # Phase 1.5 sub-project B: S: line Mode$ values
         })
+        if static_mode:
+            p['static_modes'].add(static_mode)
         if verb:
             p['verbs'].add(verb)
             # Track verb occurrence counts for concentration feature
