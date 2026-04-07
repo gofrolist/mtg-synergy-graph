@@ -87,6 +87,29 @@ Evaluation: compare our top 30 recommendations against EDHREC's "High Synergy Ca
 
 Use `scripts/compare_edhrec.py --commander "Name"`, `--top 100`, or `--all` to evaluate.
 
+**Latest measurements (Phase 1.5b, 2026-04-07):**
+
+- NDCG@30 (EDHREC_FREE) = **0.5707** (mean of 3-fold CV: 0.5664 / 0.5648 / 0.5809)
+- Pipeline validation: 3/3000 flags (0.1%, baseline noise level)
+- Top 100 popular commanders (compare_edhrec.py --top 100, ~92s):
+  - Average Hi-Syn (in High Synergy Cards): 1.5/50 (3.0%)
+  - Average Top (in Top Cards): 0.8/50 (1.6%)
+  - Average OnPage (anywhere on EDHREC): 10.0/50 (20.0%)
+  - Average NotEDH (not on EDHREC at all): 40.0/50 (80%, includes hidden gems)
+- Per-commander wins on archetype targets (5 commanders spanning the
+  Phase 1 and Phase 1.5b mechanical changes):
+  - Adriana, Captain of the Guard: 0/0/6 → 3/2/18 (Static$Continuous anthem)
+  - Roon of the Hidden Realm: 2/7/18 → 3/7/22 (Static$Panharmonicon ETB)
+  - Yarok, the Desecrated: 1/1/6 → 2/1/5 (ETB doubler)
+  - Saheeli, the Gifted: 0/1/6 → 0/2/7 (Static$ReduceCost artifacts)
+  - Sun Quan, Lord of Wu: 1/0/11 → 1/0/11 (Static$CantBlockBy, flat)
+  - Aggregate: +125% Hi-Syn, +34% OnPage on the 5 targets
+
+**History:**
+- Pre-Phase-1 historical baseline (2026-04-06): NDCG@30 = 0.569
+- Post-Phase-1 baseline (commit `63b7ca9`): NDCG@30 ~ 0.5691
+- Post-Phase-1.5b (commit `a0734b4`): NDCG@30 = 0.5707 (+0.0016)
+
 ## Common Commands
 
 ```bash

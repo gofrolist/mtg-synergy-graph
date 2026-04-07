@@ -56,8 +56,27 @@ FORGE MODEL (--recommend): Zero oracle text, pure mechanical synergy
   3. Post-scoring: anti-synergy penalties + mechanical synergy bonus
   4. Top N results with clickable Scryfall links + mechanics-derived labels
 
-  NDCG@30 = 0.569 (EDHREC_FREE) | Works for 3,141+ commanders | Day-1 new card evaluation
+  NDCG@30 = 0.5707 (EDHREC_FREE, Phase 1.5b) | Works for 3,141+ commanders | Day-1 new card evaluation
 ```
+
+## Recent Improvements
+
+**Phase 1.5b (2026-04-07) — Static ability `Mode$` semantics**
+
+Extracts the ~6,000 cards (19% of corpus) with Forge S: line static abilities into a structured `static_mode` column on `forge_abilities`. Fixes a long-standing verb-column pollution bug where `Mode$` values like `Continuous`, `Panharmonicon`, `ReduceCost` were silently dumped into the `verb` column alongside actual verbs.
+
+Surfaces the new data through two pathways without adding any GBM feature columns:
+- `Static$<mode>` auto-derived deck tags (5 features pick them up via deck_has_overlap, deck_has_to_hints, etc.)
+- Synthetic `("static_mode", lowercased_mode, None, None)` event tuples in the mechanics_vectors produces vector (themes category, ~80 new dims)
+
+Per-commander wins on archetype targets: **+125% Hi-Syn, +34% OnPage** across 5 commanders spanning anthem, ETB-doubler, cost-reduction, and evasion archetypes. Adriana (Static$Continuous anthem) is the standout: 0/6 → 3/18.
+
+**Phase 1 (2026-04-06) — Forge DSL extraction expansions**
+
+- `ValidAttacker$` / `ValidBlocker$` combat trigger filters (~669 cards) now feed `trigger_specificity` (F95)
+- 4 new `cost_types` categories: `subcounter`, `exilegrave`, `taptype`, `return` (~900 cards combined) flow into `cost_feeds_cmdr` (F94)
+- Bisected and reverted a regressing 4:1 + popular-card hard-negative sampling experiment (recovered NDCG from 0.5145 → 0.5707)
+- Phase 1 Task 1 abandoned: original audit specified a `ReplaceWith$` DSL format that did not exist in the corpus; deferred to Phase 1.5 sub-project A with proper SVar resolution at the import layer.
 
 ## Commands
 
