@@ -627,7 +627,7 @@ class ForgeFeatureContext:
         return out
 
     @staticmethod
-    def _parse_cost_types(cost_str: str) -> set[str]:
+    def _parse_cost_types(cost_str: str | None) -> set[str]:
         """Tokenize a Forge cost string into mechanical cost categories.
 
         Returns a set of category labels consumed by cost_feeds_cmdr (F94).
@@ -638,9 +638,13 @@ class ForgeFeatureContext:
 
         Phase 1 adds 4 new categories:
           - subcounter: counter-removal costs (P1P1, CHARGE, OIL, ..., loyalty-minus)
-          - exilegrave: graveyard-exile costs (additive — also sets 'exile')
+          - exilegrave: graveyard-exile costs (ALWAYS additive — ExileFromGrave
+                        strings also set 'exile' via the base substring match,
+                        preserving the pre-Phase-1 'exile' count bit-for-bit so
+                        the post-WIP 0.5707 baseline is not shifted)
           - taptype:    typed tap costs (tapXType<N/Subtype>, convoke/improvise style)
-          - return:     bounce-to-hand costs (Return<N/Target> — '<' anchor)
+          - return:     bounce-to-hand costs (Return<N/Target> — '<' anchor
+                        to avoid matching ReturnToHand/ReturnFromGrave verbs)
         """
         if not cost_str:
             return set()

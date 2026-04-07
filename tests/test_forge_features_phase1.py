@@ -157,6 +157,10 @@ class TestCostTypesExpansion:
         assert "tap" in ForgeFeatureContext._parse_cost_types("T")
         assert "tap" in ForgeFeatureContext._parse_cost_types("1 T")
         assert "tap" in ForgeFeatureContext._parse_cost_types("T Sac<1/CARDNAME>")
+        # Capital 'T' appears as a substring of 'PayLife<2>' but NOT as a
+        # whitespace-separated token. Locks in the reason the rule uses
+        # split() instead of plain substring match.
+        assert "tap" not in ForgeFeatureContext._parse_cost_types("PayLife<2>")
 
     def test_discard_regression(self):
         assert "discard" in ForgeFeatureContext._parse_cost_types("1 R Discard<1/Card>")
