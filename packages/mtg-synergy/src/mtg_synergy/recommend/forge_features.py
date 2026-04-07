@@ -978,6 +978,14 @@ class ForgeFeatureContext:
                 if stem:
                     tag = f"Ability${stem}"
                     self._deck_hints.setdefault(oid, set()).add(tag)
+            # Phase 1.5 sub-project B: Static$<mode> tags from S: line Mode$ values.
+            # Static modes are properties a card HAS (provides), not properties
+            # a card WANTS — they go in _deck_has, not _deck_hints. The reverse
+            # index self._deck_has_providers is built later in
+            # _build_deck_has_providers() so the new tags appear there
+            # automatically; do NOT update it incrementally here.
+            for mode in profile.get('static_modes', set()):
+                self._deck_has.setdefault(oid, set()).add(f"Static${mode}")
             # Type$ tags from trigger_filters (card triggers on specific types)
             for tf in profile.get('trigger_filters', set()):
                 if tf not in _GENERIC_TRIGGER_FILTER_TYPES and len(tf) > 2:

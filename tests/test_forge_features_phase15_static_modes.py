@@ -309,3 +309,29 @@ class TestStaticModeColumnExtraction:
         result = extract_ability_fields(line, "S", svars={})
         assert result.get("static_mode") is None
         assert result.get("verb") is None
+
+
+class TestStaticModeAutoTags:
+    """forge_features.py — static_modes flow into _deck_has as Static$<mode> tags."""
+
+    def test_static_mode_creates_deck_has_tag(self):
+        """The auto-derive loop in _load_deck_tags must add Static$<mode> tags
+        for each Mode$ value in profile.static_modes."""
+        conn = _build_test_db_with_static_mode()
+        ctx = _make_ctx(conn)
+        tags = ctx._deck_has.get("oid-pan", set())
+        assert "Static$Panharmonicon" in tags, (
+            f"Expected Static$Panharmonicon in deck_has tags, got: {sorted(tags)}"
+        )
+
+    def test_static_tag_in_deck_has_providers_reverse_index(self):
+        """The Static$<mode> tag must also appear in _deck_has_providers
+        (the tag → set-of-oids reverse index used by needs_rarity F50).
+        Verifies the single-pass _build_deck_has_providers() picks up the
+        new tags without any incremental update in _load_deck_tags."""
+        conn = _build_test_db_with_static_mode()
+        ctx = _make_ctx(conn)
+        providers = ctx._deck_has_providers.get("Static$Panharmonicon", set())
+        assert "oid-pan" in providers, (
+            f"Card not in providers index for Static$Panharmonicon: {providers}"
+        )
