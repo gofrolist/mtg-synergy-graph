@@ -170,7 +170,7 @@ python3 scripts/export_inference_db.py                          # 6. Export infe
 | card_strategies | ~88k | Strategy assignments |
 | interaction_edges | ~21.7M | Causal edges from Forge: 30+ event types + 6.5M synthetic + 2.7M entity-presence + 60k continuous pump + 922k theme synergy edges |
 | edhrec_card_synergy | ~733k | EDHREC synergy scores for 2,761 commanders (87% coverage) |
-| forge_abilities | ~72k | Raw Forge ability data + SubAbility chain expansions (12.7k expanded rows). 20 columns: 19 consumed in features or during import, 1 unused (unless_cost). sub_ability column is resolved during import by expanding chains into separate rows. R: replacement abilities: target stores ValidPlayer$ (e.g., Player.Opponent), verb stays NULL to avoid polluting forge_profiles. |
+| forge_abilities | ~72k | Raw Forge ability data + SubAbility chain expansions (12.7k expanded rows). 21 columns: 20 consumed in features or during import, 1 unused (unless_cost). sub_ability column is resolved during import by expanding chains into separate rows. R: replacement abilities: target stores ValidPlayer$ (e.g., Player.Opponent), verb stays NULL to avoid polluting forge_profiles. **Phase 1.5b**: static_mode column (~6,000 S: rows) holds the literal Mode$ value from S: lines (Continuous, Panharmonicon, ReduceCost, etc.). Replaces the previous verb-column pollution where S: branch silently dumped Mode$ into the verb column. |
 | forge_deck_tags | ~14k | Forge deck-building AI: has (what card provides), hints (what card wants), needs (what card requires). 9,868 unique cards. |
 | forge_name_map | ~31k | Forge card name → oracle_id mapping (prefers non-token versions) |
 
@@ -212,7 +212,20 @@ python3 scripts/export_inference_db.py                          # 6. Export infe
   (Phase 1 — combat triggers: Attacks/Blocks/AttackerBlockedByCreature),
   Affected$, Produced$, AddAbility$, AddTrigger$, ChangeType$, NumAtt$,
   AddPower$, NumDef$, AddToughness$, TokenAmount$, Event$, ReplaceWith$,
-  ValidPlayer$ fields)
+  ValidPlayer$ fields),
+  static_modes (Phase 1.5b: ~60 distinct Mode$ values from S: lines —
+  Continuous, Panharmonicon, ReduceCost, RaiseCost, CantBlock, MayPlay,
+  Prevent, etc. — flowing into Static$<mode> auto-derived deck tags AND
+  the mechanics_vectors concept space as synthetic ("static_mode",
+  lowercased_mode, None, None) tuples in the produces vector (themes
+  category). 5,945 cards / 87 themes dims).
+- Auto-derived deck tag prefixes (built by forge_features.py
+  _load_deck_tags from forge profiles):
+  - Ability$<verb> — has-tag, from profile.verbs
+  - Ability$<stem> — hint-tag, from profile.triggers via _TRIGGER_STEM_TO_VERB
+  - Type$<subtype> — hint-tag from trigger_filters; has-tag from token_subtypes
+  - Static$<mode> — has-tag from profile.static_modes (Phase 1.5b,
+    e.g., Static$Panharmonicon, Static$ReduceCost, Static$Continuous)
 - forge_deck_tags: Forge's deck-building AI (has/hints/needs) for 9,868 cards
   Maps what a card provides, wants, and requires in a deck
 - Mechanics vectors (`src/mtg_synergy/recommend/mechanics_vectors.py`): auto-derived
