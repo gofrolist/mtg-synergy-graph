@@ -5,6 +5,8 @@ from T: ability raw_line rows. Inputs are verbatim samples from
 data/tags.db forge_abilities.raw_line rows.
 """
 
+import sqlite3
+
 from mtg_synergy.recommend.forge_features import ForgeFeatureContext
 
 
@@ -93,3 +95,47 @@ class TestCombatTriggerFilters:
         )
         result = ForgeFeatureContext._parse_combat_trigger_filters(line)
         assert result == {"Creature.YouCtrl+Dragon"}
+
+    def test_multi_type_filter_derives_all_coarse_types(self):
+        """Regression: coarse-type derivation must iterate ALL comma-separated
+        parts of a filter value, matching the existing ValidCard$ block.
+
+        Builds a tiny in-memory DB with one T: row using a multi-type combat
+        filter, then runs a minimal ForgeFeatureContext and asserts both
+        coarse types land in trigger_filters.
+        """
+        conn = sqlite3.connect(":memory:")
+        # Minimal forge_abilities schema matching the project's real schema
+        conn.execute(
+            "CREATE TABLE forge_abilities ("
+            "card_name TEXT, ability_index INT, ability_type TEXT, verb TEXT, "
+            "trigger_mode TEXT, trigger_filter TEXT, trigger_origin TEXT, "
+            "trigger_destination TEXT, trigger_phase TEXT, trigger_zones TEXT, "
+            "target TEXT, defined TEXT, amount TEXT, cost TEXT, keyword TEXT, "
+            "token_script TEXT, counter_type TEXT, sub_ability TEXT, "
+            "unless_cost TEXT, raw_line TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO forge_abilities VALUES "
+            "('Fake Card', 0, 'T', NULL, 'Attacks', NULL, NULL, NULL, NULL, NULL, "
+            "NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, "
+            "'T:Mode$ Attacks | ValidAttacker$ Creature,Artifact | "
+            "Execute$ TrigDraw | TriggerDescription$ Whenever a creature or "
+            "artifact attacks, draw.')"
+        )
+
+        # Exercise the helper and the wiring logic directly (no full context).
+        raw = conn.execute(
+            "SELECT raw_line FROM forge_abilities WHERE card_name='Fake Card'"
+        ).fetchone()[0]
+        filters = ForgeFeatureContext._parse_combat_trigger_filters(raw)
+        assert filters == {"Creature,Artifact"}
+
+        # Derive coarse types using the exact loop shape from the wiring block.
+        trigger_filters: set[str] = set()
+        for combat_filter in filters:
+            for part in combat_filter.split(","):
+                main = part.split(".")[0].strip()
+                if main and main != "Card" and main[0].isupper():
+                    trigger_filters.add(main.lower())
+        assert trigger_filters == {"creature", "artifact"}

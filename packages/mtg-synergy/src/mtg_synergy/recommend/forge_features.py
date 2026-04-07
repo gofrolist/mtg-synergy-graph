@@ -570,10 +570,13 @@ class ForgeFeatureContext:
         if ability_type == 'T' and raw_line_val:
             for combat_filter in ForgeFeatureContext._parse_combat_trigger_filters(raw_line_val):
                 p['raw_trigger_filters'].add(combat_filter)
-                # Coarse type — mirror the existing ValidCard$ derivation
-                main = combat_filter.split(",")[0].split(".")[0].strip()
-                if main and main != "Card" and main[0].isupper():
-                    p['trigger_filters'].add(main.lower())
+                # Coarse type — mirror the existing ValidCard$ derivation,
+                # iterating ALL comma-separated parts so multi-type filters
+                # like 'Creature,Artifact' add both coarse types.
+                for part in combat_filter.split(","):
+                    main = part.split(".")[0].strip()
+                    if main and main != "Card" and main[0].isupper():
+                        p['trigger_filters'].add(main.lower())
         # Extract cost types for cost-effect alignment
         cost_str = cost or ""
         if "Sac" in cost_str:
