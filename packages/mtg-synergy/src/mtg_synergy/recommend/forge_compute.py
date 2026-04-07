@@ -261,6 +261,25 @@ class CmdrFeatureContext:
             self.cmdr_feeds.add('paylife')  # gains life → feeds pay life costs
         if cmdr_v & {'Tap', 'Untap'} or cmdr_t & {'Untaps'}:
             self.cmdr_feeds.add('tap')  # untaps → enables tap costs
+        # Reverse: commander BENEFITS when cards use these cost types.
+        # E.g., Korvold triggers on Sacrificed → cards with sacrifice costs synergize.
+        if 'Sacrificed' in cmdr_t or 'Sacrifice' in cmdr_v:
+            self.cmdr_feeds.add('sacrifice')
+        if 'Discarded' in cmdr_t:
+            self.cmdr_feeds.add('discard')
+        if 'LifeLost' in cmdr_t:
+            self.cmdr_feeds.add('paylife')
+        if 'Taps' in cmdr_t or 'TapsForMana' in cmdr_t:
+            self.cmdr_feeds.add('tap')
+
+        # Commander verb concentration: frequency of each verb across all abilities.
+        # Tells the model "Korvold is 60% sacrifice" vs "Kyler is 80% counters".
+        merged_verb_counts: dict[str, int] = {}
+        for oid in self.cmdr_oids:
+            for v, c in ctx._verb_counts.get(oid, {}).items():
+                merged_verb_counts[v] = merged_verb_counts.get(v, 0) + c
+        total_verbs = sum(merged_verb_counts.values()) or 1
+        self.cmdr_verb_freq = {v: c / total_verbs for v, c in merged_verb_counts.items()}
 
         # Tribal depth data: commander's creature-type interests from multiple sources
         # Combines trigger_filters, token subtypes, deck hints, and type_line subtypes
@@ -686,24 +705,10 @@ def _batch_vectorized_features(X, N, card_oids, card_cmcs, safe_idx, valid, ctx,
     # ── F24: activated_ability_count ──
     X[:, 24] = ctx._arr_activated_count[safe_idx]                      # activated_ability_count
 
-    # ── F25-F26: Duration flags ──
-    # F25-F26: ZEROED (testing removal — absorbed by duration_match + pump_magnitude)
-    # X[:, 25] = ctx._arr_dur_permanent[safe_idx]                      # is_permanent_effect
-    # X[:, 26] = ctx._arr_dur_temporary[safe_idx]                      # is_temporary_effect
-
-    # ── F27: duration_match — set in loop ──
-
+    # ── F25-F27: set in per-card loop (shared_verb_count, shared_trigger_count, cmdr_verb_concentration)
     # ── F28: combat_damage_flag ──
     X[:, 28] = ctx._arr_combat_damage[safe_idx]                        # combat_damage_flag
-
-    # ── F29: effect_zone_match — set in loop ──
-
-    # F30: ZEROED (testing removal — covered by pump_is_variable + scaling flags)
-    # X[:, 30] = ctx._arr_scales_with[safe_idx]                        # scales_with_board
-
-    # ── F31-F32: is_secondary_trigger, gain_control ──
-    # F31: ZEROED (testing removal — counted in triggered_ability_count)
-    # X[:, 31] = ctx._arr_is_secondary[safe_idx]                       # is_secondary_trigger
+    # ── F29-F31: set in per-card loop (mech_fwd_synergy, mech_rev_synergy, co_producer_score)
     X[:, 32] = ctx._arr_gain_control[safe_idx]                         # gain_control
 
     # ── F33-F34: granted_keyword_count, condition_count ──
@@ -942,8 +947,23 @@ def _batch_per_card_loop(X, N, card_oids, card_indices, safe_idx, ctx, cmdr):
             kw_syn += float(len(card_kws & _COMBAT_KWS)) * 0.3
         X[row_i, 23] = kw_syn
 
-        # F27: ZEROED (testing removal — very sparse, covered by pump_magnitude)
-        # F29: ZEROED (testing removal — very sparse, covered by zone mechanics vectors)
+        # F25: shared_verb_count — both commander and card share the same verbs
+        X[row_i, 25] = float(len(cmdr_verbs & card_verbs))
+        # F26: shared_trigger_count — both respond to the same events
+        X[row_i, 26] = float(len(cmdr_trigs & card_trigs))
+        # F27: cmdr_verb_concentration — card's verbs match commander's dominant theme
+        if card_verbs and cmdr.cmdr_verb_freq:
+            X[row_i, 27] = max(cmdr.cmdr_verb_freq.get(v, 0.0) for v in card_verbs)
+        # F29: mech_fwd_synergy — cmdr produces what card consumes (cmdr feeds card)
+        if cmdr_produces is not None and card_cons is not None:
+            X[row_i, 29] = float(np.dot(cmdr_produces, card_cons))
+        # F30: mech_rev_synergy — card produces what cmdr consumes (card feeds cmdr)
+        if card_prod is not None and cmdr_consumes is not None:
+            X[row_i, 30] = float(np.dot(card_prod, cmdr_consumes))
+        # F31: co_producer_score — cmdr and card both produce the same events
+        # (e.g., Atraxa proliferates, Evolution Sage proliferates → both produce counter_add)
+        if cmdr_produces is not None and card_prod is not None:
+            X[row_i, 31] = float(np.dot(cmdr_produces, card_prod))
 
         # F35-F39: Deck tag overlaps
         card_has = ctx._deck_has.get(oid, set())

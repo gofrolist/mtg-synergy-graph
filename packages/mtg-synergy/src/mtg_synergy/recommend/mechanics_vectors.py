@@ -147,6 +147,7 @@ _EVENT_CATEGORY = {
     "attach":        "themes",
     "etb_doubled":   "themes",
     "phase":         "utility",
+    "static_mode":   "themes",  # Phase 1.5 sub-project B
 }
 
 # Known card types for trigger_filter parsing
@@ -291,6 +292,11 @@ def _extract_tuples_from_ability(ab):
     raw_line = ab[8] or ""
     trig_origin = ab[10] if len(ab) > 10 else None
     trig_dest = ab[11] if len(ab) > 11 else None
+    # Phase 1.5 sub-project B: static_mode is index 13 in the 14-element tuple
+    # produced by forge_features.py _load_forge_profiles. Defensive length
+    # guards keep this code backward-compatible if any caller still passes
+    # a 13-element tuple.
+    static_mode = ab[13] if len(ab) > 13 else None
 
     exec_ct, exec_orig, exec_dest = _parse_exec_section(raw_line)
     type_qual = _extract_type_qualifier(trig_filter, raw_line, token_script, exec_ct)
@@ -354,6 +360,11 @@ def _extract_tuples_from_ability(ab):
     if keyword == 'Defender':
         tuples.add(("defender", None, None, None))
 
+    # Phase 1.5 sub-project B: static_mode → synthetic produces tuple.
+    # Always self-produced; never enters consumes.
+    if static_mode:
+        tuples.add(("static_mode", static_mode.lower(), None, None))
+
     return tuples
 
 
@@ -396,7 +407,7 @@ def _build_concept_vocabulary(abilities):
         from_z, to_z = t[2], t[3]
         if ec == "zone_change" and (from_z or to_z):
             category_dims["zones"].append(idx)
-        elif ec in ("equip", "attach", "etb_doubled", "defender"):
+        elif ec in ("equip", "attach", "etb_doubled", "defender", "static_mode"):
             category_dims["themes"].append(idx)
         elif ec == "available":
             category_dims["board"].append(idx)
@@ -438,14 +449,16 @@ def build_mechanics_vectors(conn, preloaded_abilities=None, type_lines=None,
         for row in conn.execute(
             "SELECT card_name, verb, trigger_mode, trigger_filter, cost, "
             "keyword, token_script, counter_type, raw_line, amount, "
-            "trigger_origin, trigger_destination, defined "
+            "trigger_origin, trigger_destination, defined, static_mode "
             "FROM forge_abilities"
         ):
             oid = forge_to_oid.get(row[0])
             if oid:
+                # Phase 1.5 sub-project B: 14-element tuple matches the
+                # preloaded path produced by forge_features.py.
                 abilities.append((oid, row[1], row[2], row[3], row[4],
                                   row[5], row[6], row[7], row[8], row[9],
-                                  row[10], row[11], row[12]))
+                                  row[10], row[11], row[12], row[13]))
 
     # Build vocabulary and subtypes
     tuple_to_idx, n_concepts, category_dims = _build_concept_vocabulary(abilities)
@@ -484,6 +497,10 @@ def build_mechanics_vectors(conn, preloaded_abilities=None, type_lines=None,
         trig_origin = ab[10] if len(ab) > 10 else None
         trig_dest = ab[11] if len(ab) > 11 else None
         defined = ab[12] if len(ab) > 12 else None
+        # Phase 1.5 sub-project B: static_mode is index 13 in the 14-element
+        # tuple from forge_features.py. Defensive length guard preserves
+        # backward-compat for any caller still passing a 13-element tuple.
+        static_mode = ab[13] if len(ab) > 13 else None
 
         exec_ct, exec_orig, exec_dest = _parse_exec_section(raw_line)
         type_qual = _extract_type_qualifier(trig_filter, raw_line, token_script, exec_ct)
@@ -669,6 +686,12 @@ def build_mechanics_vectors(conn, preloaded_abilities=None, type_lines=None,
                 p = _ensure_p(oid)
                 _add_tuple(p, ("discard", None, None, None))
                 _add_tuple(p, ("zone_change", None, None, "gy"))
+
+        # Phase 1.5 sub-project B: static modes from S: lines.
+        # Always self-produced — never enters consumes vector.
+        if static_mode:
+            p = _ensure_p(oid)
+            _add_tuple(p, ("static_mode", static_mode.lower(), None, None))
 
     # ── Scaling patterns from raw_line ──
     def _scaling_tuples():

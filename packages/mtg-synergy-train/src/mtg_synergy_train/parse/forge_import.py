@@ -13,7 +13,18 @@ CARDS_DIR_DEFAULT = os.path.join("data", "forge", "forge-gui", "res", "cardsfold
 
 
 def ensure_forge_schema(conn):
-    """Create Forge tables."""
+    """Create Forge tables.
+
+    Migrates stale schemas by dropping and recreating forge_abilities if
+    the static_mode column (Phase 1.5 sub-project B) is missing. The
+    project has no migration system; tables are always rebuilt from
+    Forge files via import_all().
+    """
+    existing_cols = {
+        r[1] for r in conn.execute("PRAGMA table_info(forge_abilities)")
+    }
+    if existing_cols and "static_mode" not in existing_cols:
+        conn.execute("DROP TABLE forge_abilities")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS forge_abilities (
             card_name TEXT NOT NULL,
@@ -35,6 +46,7 @@ def ensure_forge_schema(conn):
             counter_type TEXT,
             sub_ability TEXT,
             unless_cost TEXT,
+            static_mode TEXT,
             raw_line TEXT NOT NULL,
             PRIMARY KEY (card_name, ability_index)
         )
@@ -114,6 +126,7 @@ def extract_ability_fields(line: str, prefix: str, svars: dict) -> dict:
         "counter_type": None,
         "sub_ability": None,
         "unless_cost": None,
+        "static_mode": None,
     }
 
     if prefix == "A":
@@ -147,8 +160,20 @@ def extract_ability_fields(line: str, prefix: str, svars: dict) -> dict:
                 result["unless_cost"] = resolved.get("unless_cost")
             if not result.get("sub_ability"):
                 result["sub_ability"] = resolved.get("sub_ability")
+            # Append Execute$ SVar content to raw_line so downstream
+            # parsers (mechanics_vectors.py) can extract the effect's
+            # zone/type info.  The trigger line has the trigger context
+            # (Origin$ Any = self enters), but the SVar has the actual
+            # effect context (Origin$ Graveyard, ChangeType$ Land).
+            svar_value = svars.get(execute_ref, "")
+            if svar_value and "|EXEC|" not in result["raw_line"]:
+                result["raw_line"] += " |EXEC| " + svar_value
     elif prefix == "S":
-        result["verb"] = fields.get("SP") or fields.get("Mode")
+        # Phase 1.5 sub-project B: Mode$ goes to its own structured column.
+        # Previously this stored Mode$ in the verb column, polluting verbs
+        # with mode names like "Continuous", "Panharmonicon", "ReduceCost".
+        # Drop the SP$ fallback to keep verb semantically pure.
+        result["static_mode"] = fields.get("Mode")
     elif prefix == "R":
         # Replacement effects: Event$ is the event being replaced/amplified,
         # ReplaceWith$ is what replaces it, ValidPlayer$ is who's affected.
@@ -313,7 +338,7 @@ def import_card_to_db(conn, card: dict):
 
     for ab in card["abilities"]:
         conn.execute(
-            "INSERT OR REPLACE INTO forge_abilities VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO forge_abilities VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (name, ab["ability_index"], ab["ability_type"], ab.get("verb"),
              ab.get("trigger_mode"), ab.get("trigger_filter"),
              ab.get("trigger_origin"), ab.get("trigger_destination"),
@@ -321,7 +346,8 @@ def import_card_to_db(conn, card: dict):
              ab.get("target"), ab.get("defined"), ab.get("amount"),
              ab.get("cost"), ab.get("keyword"), ab.get("token_script"),
              ab.get("counter_type"), ab.get("sub_ability"),
-             ab.get("unless_cost"), ab.get("raw_line", "")),
+             ab.get("unless_cost"), ab.get("static_mode"),
+             ab.get("raw_line", "")),
         )
 
     for tag in card["deck_tags"]:

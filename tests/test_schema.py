@@ -23,3 +23,13 @@ def test_card_strategies_table(tmp_db):
     assert "oracle_id" in cols
     assert "strategy" in cols
     assert "confidence" in cols
+
+
+def test_forge_abilities_has_static_mode_column(tmp_db):
+    """Phase 1.5 sub-project B: forge_abilities must include static_mode column."""
+    conn = sqlite3.connect(tmp_db)
+    cols = [r[1] for r in conn.execute(
+        "PRAGMA table_info(forge_abilities)"
+    ).fetchall()]
+    conn.close()
+    assert "static_mode" in cols, f"static_mode missing from columns: {cols}"

@@ -11,6 +11,7 @@ Usage:
 import argparse
 import json
 import os
+import shutil
 import sqlite3
 import time
 
@@ -63,13 +64,13 @@ FORGE_FEATURE_NAMES = [
     "target_alignment",
     "forge_keyword_synergy",
     "activated_ability_count",
-    "is_permanent_effect",
-    "is_temporary_effect",
-    "duration_match",
+    "shared_verb_count",
+    "shared_trigger_count",
+    "cmdr_verb_concentration",
     "combat_damage_flag",
-    "effect_zone_match",
-    "scales_with_board",
-    "is_secondary_trigger",
+    "mech_fwd_synergy",
+    "mech_rev_synergy",
+    "co_producer_score",
     "gain_control",
     "granted_keyword_count",
     "condition_count",
@@ -714,6 +715,14 @@ def train_forge_gbm(X, y, cmdr_ids, tune=False, quick=False):
     final_booster = lgb.train(final_params, all_data, num_boost_round=avg_best)
 
     model_path = os.path.join(DATA_DIR, "fusion_model_forge.lgb")
+    # Auto-backup previous model before overwriting (one-step rollback).
+    # Restore with: cp data/fusion_model_forge.lgb.prev data/fusion_model_forge.lgb
+    if os.path.exists(model_path):
+        shutil.copy2(model_path, model_path + ".prev")
+        meta_path = model_path + ".meta.json"
+        if os.path.exists(meta_path):
+            shutil.copy2(meta_path, meta_path + ".prev")
+        print(f"  Backed up previous model to {model_path}.prev")
     final_booster.save_model(model_path)
     print(f"  Forge model saved to {model_path}")
 

@@ -23,6 +23,7 @@ _PROFILE_SET_FIELDS = (
     'excluded_subtypes', 'counter_trigger_themes', 'opponent_only_events',
     'granted_ability_names', 'granted_triggers', 'changes_type',
     'cost_types', 'raw_trigger_filters',
+    'static_modes',  # Phase 1.5 sub-project B: S: line Mode$ values
 )
 _PROFILE_BOOL_FIELDS = (
     'combat_damage', 'is_secondary', 'gain_control', 'produces_mana',
@@ -172,6 +173,52 @@ _EDHREC_FREE = os.environ.get("EDHREC_FREE", "") == "1"
 # _extract_keywords_and_conditions / _extract_counters_and_special /
 # _build_func_fingerprints.  Avoids ~2.87M re._compile calls per run.
 
+# ── Forge engine vocabulary normalization maps ──────────────────────────
+# These two dicts normalize Forge engine event/trigger names to the canonical
+# verb vocabulary used by features (mech_cosine, shared_verb_count,
+# cmdr_verb_concentration, mech_density, auto-derived deck tags).
+#
+# They are NOT per-card rules — each entry is a stable engine-name → verb
+# mapping that applies to every card using that event/trigger. Treat them as
+# vocabulary, not as gameplay logic.
+#
+# MAINTENANCE CONTRACT: when Forge ships a new TriggerType or replacement
+# Event$ value (see data/forge/forge-game/src/main/java/forge/game/trigger/
+# TriggerType.java and replacement/ReplacementType.java), add an entry here
+# if the new event has a meaningful canonical verb. Missing entries fail
+# silently — the event simply does not contribute verb-based feature signal.
+
+# R: replacement Event$ → canonical verb for non-opponent R: abilities.
+# Lets cards like Doubling Season, Anointed Procession, Chatterfang surface
+# their substitute effect verb in mech_cosine + the auto-derived deck tags.
+_R_EVENT_TO_VERB = {
+    "CreateToken": "Token", "AddCounter": "PutCounter",
+    "Mill": "Mill", "DamageDone": "DealDamage", "Draw": "Draw",
+    "GainLife": "GainLife", "LoseLife": "LoseLife",
+}
+
+# T: trigger mode (past-tense engine name) → canonical present-tense verb.
+# Used by _load_deck_tags to auto-derive Ability$<verb> hints from a card's
+# trigger set. Excludes ChangesZone/ChangesZoneAll (too generic — nearly all
+# triggered cards would get the same hint).
+_TRIGGER_STEM_TO_VERB = {
+    "Sacrificed": "Sacrifice", "TokenCreated": "Token",
+    "DamageDone": "DealDamage", "DamageDoneOnce": "DealDamage",
+    "Drawn": "Draw", "CounterAdded": "PutCounter",
+    "CounterAddedOnce": "PutCounter", "LifeGained": "GainLife",
+    "LifeLost": "LoseLife", "Milled": "Mill",
+    "Discarded": "Discard", "SpellCast": "SpellCast",
+    "Taps": "Tap", "Untaps": "Untap",
+}
+
+# Generic type tokens that should NOT be promoted to Type$ deck hints
+# (too broad to be meaningful tribal/thematic signal).
+_GENERIC_TRIGGER_FILTER_TYPES = frozenset({
+    "card", "creature", "permanent", "nontoken", "token",
+    "artifact", "enchantment", "land", "spell", "self",
+    "other", "any",
+})
+
 # Fixed field patterns (field$\s*value)
 _RE_EVENT = re.compile(r'Event\$\s*(\S+)')
 _RE_DURATION = re.compile(r'Duration\$\s*(\S+)')
@@ -187,6 +234,12 @@ _RE_VALID_TGTS = re.compile(r'ValidTgts\$\s*(\S+)')
 _RE_ORIGIN = re.compile(r'Origin\$\s*(\S+)')
 _RE_DESTINATION = re.compile(r'Destination\$\s*(\S+)')
 _RE_REPLACE_WITH = re.compile(r'ReplaceWith\$\s*(\S+)')
+
+# Phase 1: combat trigger filter regexes — values extend up to next ' | ' or EOL.
+# Unlike most field regexes (which use \S+), these may legitimately be plain
+# tokens like `Creature`, so a non-greedy match to the next `|` boundary is used.
+_RE_VALID_ATTACKER = re.compile(r'ValidAttacker\$\s*([^|]+?)(?:\s*\||$)')
+_RE_VALID_BLOCKER = re.compile(r'ValidBlocker\$\s*([^|]+?)(?:\s*\||$)')
 
 # Cost subtype patterns
 _RE_TAP_X_TYPE = re.compile(r'tapXType<\d+/(\w+)')
@@ -295,6 +348,7 @@ class ForgeFeatureContext:
     def __init__(self, conn, preload_edges=False, preload_strength=False,
                  card_provider=None, artifact_dir=None):
         self.conn = conn
+        self._check_schema(conn)
         self._has_edge_index = False
         self._bit_to_event = {}
         self._preload_strength = preload_strength
@@ -343,6 +397,8 @@ class ForgeFeatureContext:
         self._load_functional_fingerprints(conn)
         self._load_deck_tags(conn)
         self._load_ability_vectors(conn)
+        self._enrich_deck_tags_from_tokens()
+        self._build_deck_has_providers()
         self._load_edhrec_stats(conn)
 
         # Verb→trigger alignment mapping for F30
@@ -385,6 +441,28 @@ class ForgeFeatureContext:
 
         if preload_edges:
             self._build_edge_index(conn)
+
+    def _check_schema(self, conn):
+        """Verify the DB schema includes Phase 1.5 sub-project B columns.
+
+        Surfaces a clear error message if the developer forgot to re-run
+        scripts/import_forge.py after pulling the schema migration. Also
+        distinguishes the table-missing case from the column-missing case
+        so the error message points the developer at the right fix.
+        """
+        rows = list(conn.execute("PRAGMA table_info(forge_abilities)"))
+        if not rows:
+            raise RuntimeError(
+                "forge_abilities table not found. Import Forge data first: "
+                "python3 scripts/import_forge.py --import"
+            )
+        cols = {r[1] for r in rows}
+        if "static_mode" not in cols:
+            raise RuntimeError(
+                "forge_abilities is missing the 'static_mode' column "
+                "(Phase 1.5 sub-project B). Re-import Forge data: "
+                "python3 scripts/import_forge.py --import"
+            )
 
     def _compact_forge_profiles(self):
         """Compact _forge_profiles: replace dicts with __slots__ ForgeProfile objects.
@@ -433,21 +511,27 @@ class ForgeFeatureContext:
         # Forge ability profiles: per-card structured data from forge_abilities
         # Replaces oracle text regex matching for features F25-F30
         self._forge_profiles = {}
+        self._verb_counts = {}  # oracle_id → Counter of verb occurrences (for concentration)
         # Also collect raw abilities for build_mechanics_vectors (avoids redundant DB scan)
         # Output format consumed by mechanics_vectors.py:
         #   (oid, verb, trig_mode, trig_filter, cost, kw, token_script,
-        #    counter, raw_line, amount, trigger_origin, trigger_destination, defined)
+        #    counter, raw_line, amount, trigger_origin, trigger_destination,
+        #    defined, static_mode)
         self._raw_abilities = []
         for row in conn.execute(
             "SELECT fnm.oracle_id, fa.verb, fa.trigger_mode, fa.trigger_filter, "
             "fa.cost, fa.keyword, fa.token_script, fa.counter_type, fa.raw_line, "
             "fa.amount, fa.trigger_origin, fa.trigger_destination, "
-            "fa.target, fa.ability_type, fa.defined "
+            "fa.target, fa.ability_type, fa.defined, fa.static_mode "
             "FROM forge_abilities fa "
             "JOIN forge_name_map fnm ON fnm.forge_name = fa.card_name"
         ):
-            # row[0..11] + row[14] (defined) → 13-element tuple for mechanics_vectors
-            self._raw_abilities.append(row[:12] + (row[14],))
+            # row[0..11] + row[14] (defined) + row[15] (static_mode) →
+            # 14-element tuple for mechanics_vectors.py.
+            # Phase 1.5 sub-project B Task 7: static_mode now flows through
+            # to the mechanics vectors as a synthetic ("static_mode", ..)
+            # produces tuple in the themes category.
+            self._raw_abilities.append(row[:12] + (row[14], row[15]))
             self._process_forge_ability_row(row)
 
         # Post-process derived fields
@@ -475,6 +559,7 @@ class ForgeFeatureContext:
         target = row[12]
         ability_type = row[13]
         defined = row[14]
+        static_mode = row[15]  # Phase 1.5 sub-project B
 
         p = self._forge_profiles.setdefault(oid, {
             'verbs': set(), 'triggers': set(), 'keywords': set(),
@@ -500,8 +585,15 @@ class ForgeFeatureContext:
             'max_pump_power': 0, 'pump_is_variable': False,
             'cost_types': set(),  # sacrifice, tap, discard, exile, paylife
             'raw_trigger_filters': set(),  # full trigger_filter strings for IDF
+            'static_modes': set(),  # Phase 1.5 sub-project B: S: line Mode$ values
         })
-        if verb: p['verbs'].add(verb)
+        if static_mode:
+            p['static_modes'].add(static_mode)
+        if verb:
+            p['verbs'].add(verb)
+            # Track verb occurrence counts for concentration feature
+            vc = self._verb_counts.setdefault(oid, {})
+            vc[verb] = vc.get(verb, 0) + 1
         if trig_mode: p['triggers'].add(trig_mode)
         if keyword: p['keywords'].add(keyword)
         if counter_type:
@@ -518,30 +610,38 @@ class ForgeFeatureContext:
                     p['targets'].add(main)
         if ability_type: p['ability_types'].add(ability_type)
         # Track opponent-only replacement events (e.g., Bruvac's Mill)
+        # and extract effective verbs from non-opponent R: abilities
         if ability_type == 'R' and raw_line_val:
             m = _RE_EVENT.search(raw_line_val)
-            if m and ('ValidPlayer$ Player.Opponent' in raw_line_val
-                      or 'ValidPlayer$ Opponent' in raw_line_val):
-                p['opponent_only_events'].add(m.group(1))
+            if m:
+                is_opp_only = ('ValidPlayer$ Player.Opponent' in raw_line_val
+                               or 'ValidPlayer$ Opponent' in raw_line_val)
+                if is_opp_only:
+                    p['opponent_only_events'].add(m.group(1))
+                else:
+                    # Non-opponent R: effects → add effective verb so they appear
+                    # in verb_alignment, shared_verb, verb_concentration, deck tags.
+                    # E.g., Chatterfang R:Event$ CreateToken → verb=Token
+                    eff_verb = _R_EVENT_TO_VERB.get(m.group(1))
+                    if eff_verb:
+                        p['verbs'].add(eff_verb)
+                        vc = self._verb_counts.setdefault(oid, {})
+                        vc[eff_verb] = vc.get(eff_verb, 0) + 1
         if trig_filter:
             if trig_filter != "Card.Self":
                 p['raw_trigger_filters'].add(trig_filter)
-            for part in trig_filter.split(","):
-                main = part.split(".")[0].strip()
-                if main and main != "Card" and main[0].isupper():
-                    p['trigger_filters'].add(main.lower())
-        # Extract cost types for cost-effect alignment
+            p['trigger_filters'] |= ForgeFeatureContext._derive_coarse_filter_types(trig_filter)
+        # Phase 1: combat trigger filters (ValidAttacker$ / ValidBlocker$)
+        # The trigger_filter column is populated from ValidCard$; combat
+        # triggers use ValidAttacker$/ValidBlocker$ instead, which would
+        # otherwise be invisible to raw_trigger_filters / trigger_specificity.
+        if ability_type == 'T' and raw_line_val:
+            for combat_filter in ForgeFeatureContext._parse_combat_trigger_filters(raw_line_val):
+                p['raw_trigger_filters'].add(combat_filter)
+                p['trigger_filters'] |= ForgeFeatureContext._derive_coarse_filter_types(combat_filter)
+        # Extract cost types for cost-effect alignment (flows into cost_feeds_cmdr F94)
         cost_str = cost or ""
-        if "Sac" in cost_str:
-            p['cost_types'].add('sacrifice')
-        if "T" in cost_str.split() or cost_str == "T":
-            p['cost_types'].add('tap')
-        if "Discard" in cost_str:
-            p['cost_types'].add('discard')
-        if "Exile" in cost_str:
-            p['cost_types'].add('exile')
-        if "PayLife" in cost_str:
-            p['cost_types'].add('paylife')
+        p['cost_types'] |= ForgeFeatureContext._parse_cost_types(cost_str)
         # Extract subtype requirements from cost, defined, and raw_line fields
         defined_str = defined or ""
         raw_line = raw_line_val or ""
@@ -566,6 +666,94 @@ class ForgeFeatureContext:
         self._extract_subtypes_from_raw_line(p, raw_line, _GENERIC_TYPES)
         self._extract_keywords_and_conditions(p, verb, raw_line)
         self._extract_counters_and_special(p, row, raw_line)
+
+    @staticmethod
+    def _parse_combat_trigger_filters(raw_line: str | None) -> set[str]:
+        """Extract ValidAttacker$/ValidBlocker$ filter values from a raw_line.
+
+        Combat triggers (Attacks, Blocks, AttackerBlockedByCreature, etc.)
+        filter the trigger source via ValidAttacker$/ValidBlocker$ rather than
+        ValidCard$. Returns the full filter strings (e.g., 'Creature.Vampire',
+        'Creature.YouCtrl+Dragon') for downstream use by raw_trigger_filters
+        / trigger_specificity. Skips the 'Card.Self' sentinel, mirroring the
+        existing ValidCard$ handling. Returns empty set for None / empty input.
+        """
+        if not raw_line:
+            return set()
+        out: set[str] = set()
+        for rx in (_RE_VALID_ATTACKER, _RE_VALID_BLOCKER):
+            for m in rx.finditer(raw_line):
+                val = m.group(1).strip()
+                if val and val != "Card.Self":
+                    out.add(val)
+        return out
+
+    @staticmethod
+    def _derive_coarse_filter_types(filter_string: str | None) -> set[str]:
+        """Extract lowercase coarse type tokens from a comma-separated filter value.
+
+        Used by both the existing ValidCard$ trig_filter path and the Phase 1
+        ValidAttacker$/ValidBlocker$ combat-filter path so the two paths cannot
+        drift. Iterates ALL comma-separated parts (multi-type filters like
+        'Creature,Artifact' produce {'creature', 'artifact'}). Skips the
+        'Card' sentinel and any token that does not start with an uppercase
+        letter (heuristic to filter out qualifiers like 'nonHuman').
+        """
+        if not filter_string:
+            return set()
+        out: set[str] = set()
+        for part in filter_string.split(","):
+            main = part.split(".")[0].strip()
+            if main and main != "Card" and main[0].isupper():
+                out.add(main.lower())
+        return out
+
+    @staticmethod
+    def _parse_cost_types(cost_str: str | None) -> set[str]:
+        """Tokenize a Forge cost string into mechanical cost categories.
+
+        Returns a set of category labels consumed by cost_feeds_cmdr (F94).
+        Categories are intentionally generic (no per-card rules).
+
+        Preserves the prior 5-category substring semantics exactly:
+        sacrifice, tap, discard, exile, paylife.
+
+        Phase 1 adds 4 new categories:
+          - subcounter: counter-removal costs (P1P1, CHARGE, OIL, ..., loyalty-minus)
+          - exilegrave: graveyard-exile costs (ALWAYS additive — ExileFromGrave
+                        strings also set 'exile' via the base substring match,
+                        preserving the pre-Phase-1 'exile' count bit-for-bit
+                        so the trained model's baseline is not shifted)
+          - taptype:    typed tap costs (tapXType<N/Subtype>, convoke/improvise style)
+          - return:     bounce-to-hand costs (Return<N/Target> — '<' anchor
+                        to avoid matching ReturnToHand/ReturnFromGrave verbs)
+        """
+        if not cost_str:
+            return set()
+        out: set[str] = set()
+        # --- Existing 5 categories (preserve exact semantics) ---
+        if "Sac" in cost_str:
+            out.add('sacrifice')
+        if "T" in cost_str.split() or cost_str == "T":
+            out.add('tap')
+        if "Discard" in cost_str:
+            out.add('discard')
+        if "Exile" in cost_str:
+            out.add('exile')
+        if "PayLife" in cost_str:
+            out.add('paylife')
+        # --- Phase 1 new categories ---
+        if "SubCounter" in cost_str:
+            out.add('subcounter')
+        if "ExileFromGrave" in cost_str:
+            # Additive: exile is already set above via the 'Exile' substring;
+            # this only adds the more specific 'exilegrave' tag.
+            out.add('exilegrave')
+        if "tapXType" in cost_str:
+            out.add('taptype')
+        if "Return<" in cost_str:
+            out.add('return')
+        return out
 
     @staticmethod
     def _extract_subtypes_from_raw_line(p, raw_line, _generic):
@@ -772,7 +960,52 @@ class ForgeFeatureContext:
             elif tag_type == "needs":
                 self._deck_needs.setdefault(oid, set()).update(tags)
 
-        # Reverse index: tag → set of oids that "has" it (for needs_rarity feature)
+        # Auto-derive deck tags from forge profiles for cards missing them.
+        # verb → has (card provides this ability), trigger → hints (card wants this event).
+        # Uses verb/trigger names directly as tags (e.g., Ability$Sacrifice, Ability$Token).
+        # Trigger normalization map _TRIGGER_STEM_TO_VERB is module-level — see top
+        # of file for the maintenance contract.
+        #
+        # The reverse index self._deck_has_providers is built once in
+        # _build_deck_has_providers() AFTER _enrich_deck_tags_from_tokens() has
+        # added token Type$ tags. Do not build it here — that would force a
+        # second incremental update later and create a hidden ordering bug if
+        # the call sequence in __init__ ever changes.
+        for oid, profile in self._forge_profiles.items():
+            for verb in profile.get('verbs', set()):
+                tag = f"Ability${verb}"
+                self._deck_has.setdefault(oid, set()).add(tag)
+            for trig in profile.get('triggers', set()):
+                stem = _TRIGGER_STEM_TO_VERB.get(trig)
+                if stem:
+                    tag = f"Ability${stem}"
+                    self._deck_hints.setdefault(oid, set()).add(tag)
+            # Phase 1.5 sub-project B: Static$<mode> tags from S: line Mode$ values.
+            # Static modes are properties a card HAS (provides), not properties
+            # a card WANTS — they go in _deck_has, not _deck_hints. The reverse
+            # index self._deck_has_providers is built later in
+            # _build_deck_has_providers() so the new tags appear there
+            # automatically; do NOT update it incrementally here.
+            for mode in profile.get('static_modes', set()):
+                self._deck_has.setdefault(oid, set()).add(f"Static${mode}")
+            # Type$ tags from trigger_filters (card triggers on specific types)
+            for tf in profile.get('trigger_filters', set()):
+                if tf not in _GENERIC_TRIGGER_FILTER_TYPES and len(tf) > 2:
+                    self._deck_hints.setdefault(oid, set()).add(f"Type${tf.title()}")
+
+    def _enrich_deck_tags_from_tokens(self):
+        """Add Type$ has-tags from token subtypes (runs after _load_ability_vectors)."""
+        for oid, subs in self._token_subtypes.items():
+            for sub in subs:
+                self._deck_has.setdefault(oid, set()).add(f"Type${sub.title()}")
+
+    def _build_deck_has_providers(self):
+        """Build the tag → providers reverse index from the final _deck_has state.
+
+        Must be called AFTER _load_deck_tags() and _enrich_deck_tags_from_tokens()
+        have populated _deck_has. Single-pass construction so the index is always
+        consistent with _deck_has — no incremental updates that could rot.
+        """
         self._deck_has_providers = {}
         for oid, tags in self._deck_has.items():
             for tag in tags:

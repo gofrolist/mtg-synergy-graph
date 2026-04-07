@@ -12,8 +12,9 @@ MTG Synergy Graph — a tool for analyzing Magic: The Gathering EDH/Commander de
 FORGE MODEL (--recommend): Pure Forge mechanical synergy
   1. Color-identity filter → all legal cards scored directly by GBM
   2. Forge LambdaRank GBM: 98 features (92 active + 6 zeroed), EDHREC labels,
-     fully general (no archetype names). See docs/FEATURE_REFERENCE.md for
-     complete mapping of all features to Forge DSL fields with examples.
+     fully general (no archetype names). Authoritative feature list:
+     `FORGE_FEATURE_NAMES` in `scripts/train_fusion_model.py`. Implementation:
+     `packages/mtg-synergy/src/mtg_synergy/recommend/forge_compute.py`.
      + mech_cosine (F3): full commander-to-card mechanics vector cosine
        (replaced strategy_cosine — no EDHREC strategy dependency)
      + forge_deck_tags (Forge's deck-building AI: has/hints/needs theme signals)
@@ -85,6 +86,29 @@ Forge model finds mechanical synergies from Forge data alone (no EDHREC at infer
 Evaluation: compare our top 30 recommendations against EDHREC's "High Synergy Cards" section.
 
 Use `scripts/compare_edhrec.py --commander "Name"`, `--top 100`, or `--all` to evaluate.
+
+**Latest measurements (Phase 1.5b, 2026-04-07):**
+
+- NDCG@30 (EDHREC_FREE) = **0.5707** (mean of 3-fold CV: 0.5664 / 0.5648 / 0.5809)
+- Pipeline validation: 3/3000 flags (0.1%, baseline noise level)
+- Top 100 popular commanders (compare_edhrec.py --top 100, ~92s):
+  - Average Hi-Syn (in High Synergy Cards): 1.5/50 (3.0%)
+  - Average Top (in Top Cards): 0.8/50 (1.6%)
+  - Average OnPage (anywhere on EDHREC): 10.0/50 (20.0%)
+  - Average NotEDH (not on EDHREC at all): 40.0/50 (80%, includes hidden gems)
+- Per-commander wins on archetype targets (5 commanders spanning the
+  Phase 1 and Phase 1.5b mechanical changes):
+  - Adriana, Captain of the Guard: 0/0/6 → 3/2/18 (Static$Continuous anthem)
+  - Roon of the Hidden Realm: 2/7/18 → 3/7/22 (Static$Panharmonicon ETB)
+  - Yarok, the Desecrated: 1/1/6 → 2/1/5 (ETB doubler)
+  - Saheeli, the Gifted: 0/1/6 → 0/2/7 (Static$ReduceCost artifacts)
+  - Sun Quan, Lord of Wu: 1/0/11 → 1/0/11 (Static$CantBlockBy, flat)
+  - Aggregate: +125% Hi-Syn, +34% OnPage on the 5 targets
+
+**History:**
+- Pre-Phase-1 historical baseline (2026-04-06): NDCG@30 = 0.569
+- Post-Phase-1 baseline (commit `63b7ca9`): NDCG@30 ~ 0.5691
+- Post-Phase-1.5b (commit `a0734b4`): NDCG@30 = 0.5707 (+0.0016)
 
 ## Common Commands
 
@@ -169,7 +193,7 @@ python3 scripts/export_inference_db.py                          # 6. Export infe
 | card_strategies | ~88k | Strategy assignments |
 | interaction_edges | ~21.7M | Causal edges from Forge: 30+ event types + 6.5M synthetic + 2.7M entity-presence + 60k continuous pump + 922k theme synergy edges |
 | edhrec_card_synergy | ~733k | EDHREC synergy scores for 2,761 commanders (87% coverage) |
-| forge_abilities | ~72k | Raw Forge ability data + SubAbility chain expansions (12.7k expanded rows). 20 columns: 19 consumed in features or during import, 1 unused (unless_cost). sub_ability column is resolved during import by expanding chains into separate rows. R: replacement abilities: target stores ValidPlayer$ (e.g., Player.Opponent), verb stays NULL to avoid polluting forge_profiles. |
+| forge_abilities | ~72k | Raw Forge ability data + SubAbility chain expansions (12.7k expanded rows). 21 columns: 20 consumed in features or during import, 1 unused (unless_cost). sub_ability column is resolved during import by expanding chains into separate rows. R: replacement abilities: target stores ValidPlayer$ (e.g., Player.Opponent), verb stays NULL to avoid polluting forge_profiles. **Phase 1.5b**: static_mode column (~6,000 S: rows) holds the literal Mode$ value from S: lines (Continuous, Panharmonicon, ReduceCost, etc.). Replaces the previous verb-column pollution where S: branch silently dumped Mode$ into the verb column. |
 | forge_deck_tags | ~14k | Forge deck-building AI: has (what card provides), hints (what card wants), needs (what card requires). 9,868 unique cards. |
 | forge_name_map | ~31k | Forge card name → oracle_id mapping (prefers non-token versions) |
 
@@ -178,7 +202,7 @@ python3 scripts/export_inference_db.py                          # 6. Export infe
 **Forge model** (data/fusion_model_forge.lgb):
 - LambdaRank GBM on 98 features (92 active + 6 zeroed), shared via
   `forge_features.py` + `forge_compute.py`. 100% Forge-native, fully general.
-  See docs/FEATURE_REFERENCE.md for complete feature→Forge DSL mapping.
+  Authoritative feature list: `FORGE_FEATURE_NAMES` in `scripts/train_fusion_model.py`.
   causal (2), mech_cosine, forge_ability_cosine, phase (2), tribal, cmc,
   deck edges (3), causal_composite, card_hub_score,
   forge type/mechanics (6), counter/zone/target/keyword matching (6),
@@ -203,10 +227,28 @@ python3 scripts/export_inference_db.py                          # 6. Export infe
   affected_self_count, affected_opp_count, affected_scope_ratio,
   granted_ability_names, granted_triggers, changes_type,
   grants_all_creature_types, max_pump_power, pump_is_variable,
-  cost_types (sacrifice/tap/discard/exile/paylife), raw_trigger_filters
-  (from cost, defined, ValidCards$, Affected$, Produced$,
-  AddAbility$, AddTrigger$, ChangeType$, NumAtt$, AddPower$, NumDef$,
-  AddToughness$, TokenAmount$, Event$, ReplaceWith$, ValidPlayer$ fields)
+  cost_types (9 categories: sacrifice/tap/discard/exile/paylife +
+  subcounter/exilegrave/taptype/return — Phase 1 additions feed
+  cost_feeds_cmdr F94 transparently; exilegrave is additive with exile
+  to preserve pre-Phase-1 baseline counts), raw_trigger_filters
+  (from cost, defined, ValidCards$, ValidAttacker$/ValidBlocker$
+  (Phase 1 — combat triggers: Attacks/Blocks/AttackerBlockedByCreature),
+  Affected$, Produced$, AddAbility$, AddTrigger$, ChangeType$, NumAtt$,
+  AddPower$, NumDef$, AddToughness$, TokenAmount$, Event$, ReplaceWith$,
+  ValidPlayer$ fields),
+  static_modes (Phase 1.5b: ~60 distinct Mode$ values from S: lines —
+  Continuous, Panharmonicon, ReduceCost, RaiseCost, CantBlock, MayPlay,
+  Prevent, etc. — flowing into Static$<mode> auto-derived deck tags AND
+  the mechanics_vectors concept space as synthetic ("static_mode",
+  lowercased_mode, None, None) tuples in the produces vector (themes
+  category). 5,945 cards / 87 themes dims).
+- Auto-derived deck tag prefixes (built by forge_features.py
+  _load_deck_tags from forge profiles):
+  - Ability$<verb> — has-tag, from profile.verbs
+  - Ability$<stem> — hint-tag, from profile.triggers via _TRIGGER_STEM_TO_VERB
+  - Type$<subtype> — hint-tag from trigger_filters; has-tag from token_subtypes
+  - Static$<mode> — has-tag from profile.static_modes (Phase 1.5b,
+    e.g., Static$Panharmonicon, Static$ReduceCost, Static$Continuous)
 - forge_deck_tags: Forge's deck-building AI (has/hints/needs) for 9,868 cards
   Maps what a card provides, wants, and requires in a deck
 - Mechanics vectors (`src/mtg_synergy/recommend/mechanics_vectors.py`): auto-derived
@@ -368,7 +410,7 @@ packages/
 | `scripts/sweep_hyperparams.py` | Two-phase HP sweep with pipeline validation |
 | `scripts/compare_edhrec.py` | Compare recommendations vs EDHREC High Synergy section |
 | `scripts/validate_recommendations.py` | End-to-end pipeline validation (model + scoring + penalties) |
-| `scripts/strategy_detector.py` | Rule-based strategy detection |
+| `scripts/strategy_detector.py` | VESTIGIAL — populates `card_strategies` table from EDHREC + tribal oracle text. No longer used by inference; kept for `compare_strategy_vs_mech.py` |
 | `scripts/build_graph.py` | Causal interaction graph builder CLI (--rebuild, --stats) |
 | `scripts/import_forge.py` | Forge ability data importer |
 | `scripts/fetch_edhrec_all.py` | Fetch EDHREC synergy + avg decks (concurrent, refresh support) |
