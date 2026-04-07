@@ -281,7 +281,19 @@ Expected: 4 files copied. This is the rollback target if any of Tasks 1-3 break 
 
 ---
 
-## Task 1: Extract `ReplaceWith$ DB$/SP$` substitute-effect verbs into `ForgeProfile.verbs`
+## Task 1: ABANDONED — `ReplaceWith$` substitute-effect verbs
+
+**Status:** Abandoned 2026-04-06 after code-quality review of commit `3a012f4`.
+
+**Reason:** The plan's assumed DSL format `ReplaceWith$ DB$ <Verb>` (with embedded `$` separator) does not exist in the Forge corpus. Real format is a single token that is either (a) an SVar reference like `DBTap`, `DBPutP1P1`, `ZealousDmg` requiring resolution against the card's SVar table, or (b) a built-in Forge engine replacement name like `Exile`, `ETBTapped`, `LandTapped`. The implemented regex matched zero rows in production. Commit `3a012f4` was reset.
+
+**Future work (deferred to a Phase 1.5):** Extract these verbs properly by extending `packages/mtg-synergy-train/src/mtg_synergy_train/parse/forge_import.py` to resolve `ReplaceWith$ <svar>` into the raw_line via the same mechanism as `|EXEC|` (Execute$ SVar resolution). This touches both packages, requires re-importing Forge data (`scripts/import_forge.py --import`), and is properly grouped with other "extend forge_import.py structured extraction" improvements from the original DSL audit (static ability Mode$ semantics, structured R: Event$/ReplaceWith$ columns, `IsPresent$`/`CheckSVar$` conditional handling). Phase 1 proceeds with Tasks 2 and 3 only.
+
+---
+
+### Original Task 1 description (retained for reference)
+
+**Task 1: Extract `ReplaceWith$ DB$/SP$` substitute-effect verbs into `ForgeProfile.verbs`**
 
 **Background:** After Task A, R: lines contribute via the WIP's `_R_EVENT_TO_VERB` map of the Event$ being replaced (CreateToken, AddCounter, Mill, DamageDone, Draw, GainLife, LoseLife → 7 mapped events). This catches the broad event class but **misses the substitute effect's verb** — the thing the replacement effect actually produces in place of the original event. For example:
 - Doubling Season — `R:Event$ CreateToken | ReplaceWith$ DBTokenDouble` — the WIP catches `Token` from Event$, but DBTokenDouble's actual verb (Token doubling, often a `PutCounter` or another `Token` for paired counter doublers) is invisible.
