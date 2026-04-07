@@ -37,6 +37,7 @@ def tmp_db(tmp_path):
             counter_type TEXT,
             sub_ability TEXT,
             unless_cost TEXT,
+            static_mode TEXT,
             raw_line TEXT NOT NULL,
             PRIMARY KEY (card_name, ability_index)
         );
