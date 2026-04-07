@@ -2,6 +2,28 @@
 
 Maps every model feature to its Forge DSL source, what question it answers, and an example.
 
+> **STALE NOTICE (2026-04-06):** This document has not been refreshed since the
+> 2026-03-27 feature expansion and still references removed features like
+> `strategy_cosine` (F3 was replaced by `mech_cosine` after strategy elimination).
+> It also does not cover the 6 new F25–F31 features added in commit `ce8ca96`
+> (shared_verb_count, shared_trigger_count, cmdr_verb_concentration,
+> mech_fwd_synergy, mech_rev_synergy, co_producer_score) nor the Phase 1 extraction
+> improvements in commits `08ec3ee`, `de95a40`, `8fb10f3`, `854ce00`:
+>
+> - `trigger_specificity` (F95) now receives `ValidAttacker$` / `ValidBlocker$`
+>   filter strings from combat triggers (Attacks/Blocks/AttackerBlockedByCreature).
+>   ~78 previously-invisible card profiles now contribute structured combat-filter
+>   signal via raw_trigger_filters + IDF.
+> - `cost_feeds_cmdr` (F94) now recognizes 9 cost categories (was 5):
+>   +`subcounter` (~623 cards), +`exilegrave` (~172, additive with `exile`),
+>   +`taptype` (~185), +`return` (~51). All feed through the existing cost_types
+>   set — no new feature columns.
+>
+> A full refresh of this document is tracked separately. Until then, treat the
+> per-feature table below as historical. See `packages/mtg-synergy/src/mtg_synergy/recommend/forge_compute.py`
+> and `FORGE_FEATURE_NAMES` in `scripts/train_fusion_model.py` for the current
+> authoritative feature list.
+
 ## Quick Summary
 
 | Category | Features | Count | Data Source |

@@ -203,10 +203,15 @@ python3 scripts/export_inference_db.py                          # 6. Export infe
   affected_self_count, affected_opp_count, affected_scope_ratio,
   granted_ability_names, granted_triggers, changes_type,
   grants_all_creature_types, max_pump_power, pump_is_variable,
-  cost_types (sacrifice/tap/discard/exile/paylife), raw_trigger_filters
-  (from cost, defined, ValidCards$, Affected$, Produced$,
-  AddAbility$, AddTrigger$, ChangeType$, NumAtt$, AddPower$, NumDef$,
-  AddToughness$, TokenAmount$, Event$, ReplaceWith$, ValidPlayer$ fields)
+  cost_types (9 categories: sacrifice/tap/discard/exile/paylife +
+  subcounter/exilegrave/taptype/return — Phase 1 additions feed
+  cost_feeds_cmdr F94 transparently; exilegrave is additive with exile
+  to preserve pre-Phase-1 baseline counts), raw_trigger_filters
+  (from cost, defined, ValidCards$, ValidAttacker$/ValidBlocker$
+  (Phase 1 — combat triggers: Attacks/Blocks/AttackerBlockedByCreature),
+  Affected$, Produced$, AddAbility$, AddTrigger$, ChangeType$, NumAtt$,
+  AddPower$, NumDef$, AddToughness$, TokenAmount$, Event$, ReplaceWith$,
+  ValidPlayer$ fields)
 - forge_deck_tags: Forge's deck-building AI (has/hints/needs) for 9,868 cards
   Maps what a card provides, wants, and requires in a deck
 - Mechanics vectors (`src/mtg_synergy/recommend/mechanics_vectors.py`): auto-derived
