@@ -197,6 +197,12 @@ _RE_ORIGIN = re.compile(r'Origin\$\s*(\S+)')
 _RE_DESTINATION = re.compile(r'Destination\$\s*(\S+)')
 _RE_REPLACE_WITH = re.compile(r'ReplaceWith\$\s*(\S+)')
 
+# Phase 1: combat trigger filter regexes — values extend up to next ' | ' or EOL.
+# Unlike most field regexes (which use \S+), these may legitimately be plain
+# tokens like `Creature`, so a non-greedy match to the next `|` boundary is used.
+_RE_VALID_ATTACKER = re.compile(r'ValidAttacker\$\s*([^|]+?)(?:\s*\||$)')
+_RE_VALID_BLOCKER = re.compile(r'ValidBlocker\$\s*([^|]+?)(?:\s*\||$)')
+
 # Cost subtype patterns
 _RE_TAP_X_TYPE = re.compile(r'tapXType<\d+/(\w+)')
 _RE_SAC_TYPE = re.compile(r'Sac<\d+/(\w+)')
@@ -557,6 +563,17 @@ class ForgeFeatureContext:
                 main = part.split(".")[0].strip()
                 if main and main != "Card" and main[0].isupper():
                     p['trigger_filters'].add(main.lower())
+        # Phase 1: combat trigger filters (ValidAttacker$ / ValidBlocker$)
+        # The trigger_filter column is populated from ValidCard$; combat
+        # triggers use ValidAttacker$/ValidBlocker$ instead, which would
+        # otherwise be invisible to raw_trigger_filters / trigger_specificity.
+        if ability_type == 'T' and raw_line_val:
+            for combat_filter in ForgeFeatureContext._parse_combat_trigger_filters(raw_line_val):
+                p['raw_trigger_filters'].add(combat_filter)
+                # Coarse type — mirror the existing ValidCard$ derivation
+                main = combat_filter.split(",")[0].split(".")[0].strip()
+                if main and main != "Card" and main[0].isupper():
+                    p['trigger_filters'].add(main.lower())
         # Extract cost types for cost-effect alignment
         cost_str = cost or ""
         if "Sac" in cost_str:
@@ -593,6 +610,27 @@ class ForgeFeatureContext:
         self._extract_subtypes_from_raw_line(p, raw_line, _GENERIC_TYPES)
         self._extract_keywords_and_conditions(p, verb, raw_line)
         self._extract_counters_and_special(p, row, raw_line)
+
+    @staticmethod
+    def _parse_combat_trigger_filters(raw_line: str | None) -> set[str]:
+        """Extract ValidAttacker$/ValidBlocker$ filter values from a raw_line.
+
+        Combat triggers (Attacks, Blocks, AttackerBlockedByCreature, etc.)
+        filter the trigger source via ValidAttacker$/ValidBlocker$ rather than
+        ValidCard$. Returns the full filter strings (e.g., 'Creature.Vampire',
+        'Creature.YouCtrl+Dragon') for downstream use by raw_trigger_filters
+        / trigger_specificity. Skips the 'Card.Self' sentinel, mirroring the
+        existing ValidCard$ handling. Returns empty set for None / empty input.
+        """
+        if not raw_line:
+            return set()
+        out: set[str] = set()
+        for rx in (_RE_VALID_ATTACKER, _RE_VALID_BLOCKER):
+            for m in rx.finditer(raw_line):
+                val = m.group(1).strip()
+                if val and val != "Card.Self":
+                    out.add(val)
+        return out
 
     @staticmethod
     def _extract_subtypes_from_raw_line(p, raw_line, _generic):
