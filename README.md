@@ -169,7 +169,7 @@ Total: ~3.3s CLI wall time (~490 MB RSS, warm cache)
 │   ├── train_fusion_model.py  # LightGBM LambdaRank training
 │   ├── compare_edhrec.py      # Evaluate recommendations vs EDHREC
 │   ├── build_graph.py         # Causal interaction graph builder
-│   ├── strategy_detector.py   # Rule-based strategy detection
+│   ├── strategy_detector.py   # Vestigial — see file docstring
 │   ├── download_cards.py      # Scryfall bulk data downloader
 │   ├── import_forge.py        # Forge ability data importer
 │   └── fetch_edhrec_all.py    # EDHREC synergy + avg deck fetcher

@@ -172,14 +172,51 @@ _EDHREC_FREE = os.environ.get("EDHREC_FREE", "") == "1"
 # _extract_keywords_and_conditions / _extract_counters_and_special /
 # _build_func_fingerprints.  Avoids ~2.87M re._compile calls per run.
 
-# R: replacement Event$ → effective verb for profile enrichment.
-# Non-opponent R: abilities get this verb added to their profile so they
-# appear in verb_alignment, shared_verb, verb_concentration, and deck tags.
+# ── Forge engine vocabulary normalization maps ──────────────────────────
+# These two dicts normalize Forge engine event/trigger names to the canonical
+# verb vocabulary used by features (mech_cosine, shared_verb_count,
+# cmdr_verb_concentration, mech_density, auto-derived deck tags).
+#
+# They are NOT per-card rules — each entry is a stable engine-name → verb
+# mapping that applies to every card using that event/trigger. Treat them as
+# vocabulary, not as gameplay logic.
+#
+# MAINTENANCE CONTRACT: when Forge ships a new TriggerType or replacement
+# Event$ value (see data/forge/forge-game/src/main/java/forge/game/trigger/
+# TriggerType.java and replacement/ReplacementType.java), add an entry here
+# if the new event has a meaningful canonical verb. Missing entries fail
+# silently — the event simply does not contribute verb-based feature signal.
+
+# R: replacement Event$ → canonical verb for non-opponent R: abilities.
+# Lets cards like Doubling Season, Anointed Procession, Chatterfang surface
+# their substitute effect verb in mech_cosine + the auto-derived deck tags.
 _R_EVENT_TO_VERB = {
     "CreateToken": "Token", "AddCounter": "PutCounter",
     "Mill": "Mill", "DamageDone": "DealDamage", "Draw": "Draw",
     "GainLife": "GainLife", "LoseLife": "LoseLife",
 }
+
+# T: trigger mode (past-tense engine name) → canonical present-tense verb.
+# Used by _load_deck_tags to auto-derive Ability$<verb> hints from a card's
+# trigger set. Excludes ChangesZone/ChangesZoneAll (too generic — nearly all
+# triggered cards would get the same hint).
+_TRIGGER_STEM_TO_VERB = {
+    "Sacrificed": "Sacrifice", "TokenCreated": "Token",
+    "DamageDone": "DealDamage", "DamageDoneOnce": "DealDamage",
+    "Drawn": "Draw", "CounterAdded": "PutCounter",
+    "CounterAddedOnce": "PutCounter", "LifeGained": "GainLife",
+    "LifeLost": "LoseLife", "Milled": "Mill",
+    "Discarded": "Discard", "SpellCast": "SpellCast",
+    "Taps": "Tap", "Untaps": "Untap",
+}
+
+# Generic type tokens that should NOT be promoted to Type$ deck hints
+# (too broad to be meaningful tribal/themetic signal).
+_GENERIC_TRIGGER_FILTER_TYPES = frozenset({
+    "card", "creature", "permanent", "nontoken", "token",
+    "artifact", "enchantment", "land", "spell", "self",
+    "other", "any",
+})
 
 # Fixed field patterns (field$\s*value)
 _RE_EVENT = re.compile(r'Event\$\s*(\S+)')
@@ -881,32 +918,20 @@ class ForgeFeatureContext:
         # Auto-derive deck tags from forge profiles for cards missing them.
         # verb → has (card provides this ability), trigger → hints (card wants this event).
         # Uses verb/trigger names directly as tags (e.g., Ability$Sacrifice, Ability$Token).
-        # Internally consistent vocabulary — no manual mapping needed.
-        # ChangesZone/ChangesZoneAll excluded: too generic (nearly all triggered cards).
-        _TRIGGER_STEM = {
-            "Sacrificed": "Sacrifice", "TokenCreated": "Token",
-            "DamageDone": "DealDamage", "DamageDoneOnce": "DealDamage",
-            "Drawn": "Draw", "CounterAdded": "PutCounter",
-            "CounterAddedOnce": "PutCounter", "LifeGained": "GainLife",
-            "LifeLost": "LoseLife", "Milled": "Mill",
-            "Discarded": "Discard", "SpellCast": "SpellCast",
-            "Taps": "Tap", "Untaps": "Untap",
-        }
-        _generic_types = {"card", "creature", "permanent", "nontoken", "token",
-                          "artifact", "enchantment", "land", "spell", "self",
-                          "other", "any"}
+        # Trigger normalization map _TRIGGER_STEM_TO_VERB is module-level — see top
+        # of file for the maintenance contract.
         for oid, profile in self._forge_profiles.items():
             for verb in profile.get('verbs', set()):
                 tag = f"Ability${verb}"
                 self._deck_has.setdefault(oid, set()).add(tag)
             for trig in profile.get('triggers', set()):
-                stem = _TRIGGER_STEM.get(trig)
+                stem = _TRIGGER_STEM_TO_VERB.get(trig)
                 if stem:
                     tag = f"Ability${stem}"
                     self._deck_hints.setdefault(oid, set()).add(tag)
             # Type$ tags from trigger_filters (card triggers on specific types)
             for tf in profile.get('trigger_filters', set()):
-                if tf not in _generic_types and len(tf) > 2:
+                if tf not in _GENERIC_TRIGGER_FILTER_TYPES and len(tf) > 2:
                     self._deck_hints.setdefault(oid, set()).add(f"Type${tf.title()}")
         # Note: Type$ tags from token subtypes are added in _enrich_deck_tags_from_tokens()
         # after _load_ability_vectors() populates _token_subtypes.

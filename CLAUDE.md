@@ -12,8 +12,9 @@ MTG Synergy Graph — a tool for analyzing Magic: The Gathering EDH/Commander de
 FORGE MODEL (--recommend): Pure Forge mechanical synergy
   1. Color-identity filter → all legal cards scored directly by GBM
   2. Forge LambdaRank GBM: 98 features (92 active + 6 zeroed), EDHREC labels,
-     fully general (no archetype names). See docs/FEATURE_REFERENCE.md for
-     complete mapping of all features to Forge DSL fields with examples.
+     fully general (no archetype names). Authoritative feature list:
+     `FORGE_FEATURE_NAMES` in `scripts/train_fusion_model.py`. Implementation:
+     `packages/mtg-synergy/src/mtg_synergy/recommend/forge_compute.py`.
      + mech_cosine (F3): full commander-to-card mechanics vector cosine
        (replaced strategy_cosine — no EDHREC strategy dependency)
      + forge_deck_tags (Forge's deck-building AI: has/hints/needs theme signals)
@@ -178,7 +179,7 @@ python3 scripts/export_inference_db.py                          # 6. Export infe
 **Forge model** (data/fusion_model_forge.lgb):
 - LambdaRank GBM on 98 features (92 active + 6 zeroed), shared via
   `forge_features.py` + `forge_compute.py`. 100% Forge-native, fully general.
-  See docs/FEATURE_REFERENCE.md for complete feature→Forge DSL mapping.
+  Authoritative feature list: `FORGE_FEATURE_NAMES` in `scripts/train_fusion_model.py`.
   causal (2), mech_cosine, forge_ability_cosine, phase (2), tribal, cmc,
   deck edges (3), causal_composite, card_hub_score,
   forge type/mechanics (6), counter/zone/target/keyword matching (6),
@@ -373,7 +374,7 @@ packages/
 | `scripts/sweep_hyperparams.py` | Two-phase HP sweep with pipeline validation |
 | `scripts/compare_edhrec.py` | Compare recommendations vs EDHREC High Synergy section |
 | `scripts/validate_recommendations.py` | End-to-end pipeline validation (model + scoring + penalties) |
-| `scripts/strategy_detector.py` | Rule-based strategy detection |
+| `scripts/strategy_detector.py` | VESTIGIAL — populates `card_strategies` table from EDHREC + tribal oracle text. No longer used by inference; kept for `compare_strategy_vs_mech.py` |
 | `scripts/build_graph.py` | Causal interaction graph builder CLI (--rebuild, --stats) |
 | `scripts/import_forge.py` | Forge ability data importer |
 | `scripts/fetch_edhrec_all.py` | Fetch EDHREC synergy + avg decks (concurrent, refresh support) |

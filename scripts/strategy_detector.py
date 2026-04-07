@@ -1,10 +1,24 @@
 #!/usr/bin/env python3
-"""Strategy detection: maps cards to strategy themes from EDHREC data + tribal oracle text.
+"""Strategy detection — VESTIGIAL.
 
-Strategies provide a coarse archetype signal (F3 strategy_cosine, ~4% importance).
-Mechanical synergy is captured by the auto-derived mechanics vectors instead.
+This script populates the `card_strategies` table from EDHREC theme data and
+tribal oracle text matching. It is **no longer used by the inference pipeline**:
+the forge model (commit cd278d3) eliminated the `strategy_cosine` feature in
+favor of `mech_cosine` (auto-derived from Forge mechanics vectors), and the
+strategy table is now read only by the `compare_strategy_vs_mech.py` analysis
+script for offline comparisons.
 
-Usage:
+In production deployments the `data/edhrec_theme_cards.json` file is gitignored
+and absent, so `_load_edhrec_strategies()` returns `{}` and only the tribal
+oracle-text path produces output. The oracle-text path is itself deprecated
+(see project rule `feedback_oracle_text_bad`: oracle text features cause wrong
+recommendations).
+
+Kept for back-compat with `compare_strategy_vs_mech.py` and historical
+reference. Safe to delete in a future cleanup pass that also removes the
+`card_strategies` schema, the comparison script, and the related tests.
+
+Usage (analysis only — no longer part of the inference pipeline):
     python3 strategy_detector.py --commander "Kyler, Sigardian Emissary"
     python3 strategy_detector.py --populate      # populate card_strategies for all cards
     python3 strategy_detector.py --stats         # show strategy distribution
