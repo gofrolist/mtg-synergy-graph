@@ -446,9 +446,17 @@ class ForgeFeatureContext:
         """Verify the DB schema includes Phase 1.5 sub-project B columns.
 
         Surfaces a clear error message if the developer forgot to re-run
-        scripts/import_forge.py after pulling the schema migration.
+        scripts/import_forge.py after pulling the schema migration. Also
+        distinguishes the table-missing case from the column-missing case
+        so the error message points the developer at the right fix.
         """
-        cols = {r[1] for r in conn.execute("PRAGMA table_info(forge_abilities)")}
+        rows = list(conn.execute("PRAGMA table_info(forge_abilities)"))
+        if not rows:
+            raise RuntimeError(
+                "forge_abilities table not found. Import Forge data first: "
+                "python3 scripts/import_forge.py --import"
+            )
+        cols = {r[1] for r in rows}
         if "static_mode" not in cols:
             raise RuntimeError(
                 "forge_abilities is missing the 'static_mode' column "

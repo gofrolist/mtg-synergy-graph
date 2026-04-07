@@ -204,6 +204,39 @@ class TestStaticModeProfileLoading:
         with pytest.raises(RuntimeError, match=r"static_mode.*Phase 1\.5"):
             ForgeFeatureContext(conn, card_provider=provider)
 
+    def test_schema_check_raises_on_missing_forge_abilities_table(self):
+        """Distinct error message when forge_abilities table doesn't exist at all
+        (e.g., a fresh DB before any import). The 'missing column' message would
+        mislead the developer into running --import expecting the existing table
+        to be re-populated, when actually the table needs to be created from scratch."""
+        conn = sqlite3.connect(":memory:")
+        # Create the OTHER tables ForgeFeatureContext touches, but NOT forge_abilities
+        conn.execute(
+            "CREATE TABLE cards (oracle_id TEXT PRIMARY KEY, name TEXT, type_line TEXT, "
+            "color_identity TEXT, cmc REAL)"
+        )
+        conn.execute(
+            "CREATE TABLE forge_name_map (forge_name TEXT PRIMARY KEY, oracle_id TEXT NOT NULL)"
+        )
+        conn.execute(
+            "CREATE TABLE forge_deck_tags (card_name TEXT NOT NULL, tag_type TEXT NOT NULL, "
+            "tag TEXT NOT NULL, PRIMARY KEY (card_name, tag_type, tag))"
+        )
+        conn.execute(
+            "CREATE TABLE edhrec_card_synergy (commander_slug TEXT NOT NULL, "
+            "card_name TEXT NOT NULL, synergy REAL, inclusion INTEGER, "
+            "num_decks INTEGER, section TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE interaction_edges (source_id TEXT NOT NULL, target_id TEXT NOT NULL, "
+            "edge_type TEXT NOT NULL, ability_a INTEGER NOT NULL, ability_b INTEGER NOT NULL, "
+            "strength REAL NOT NULL, detail TEXT NOT NULL, filter_precision TEXT, event TEXT)"
+        )
+        conn.commit()
+        provider = _FakeCardProvider({})
+        with pytest.raises(RuntimeError, match=r"forge_abilities table not found"):
+            ForgeFeatureContext(conn, card_provider=provider)
+
     def test_non_s_rows_dont_pollute_static_modes(self):
         # Add an A: row for a separate card; static_modes must remain empty for it,
         # while verbs must contain "Tap".
