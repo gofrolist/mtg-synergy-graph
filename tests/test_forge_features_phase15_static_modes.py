@@ -341,48 +341,44 @@ class TestStaticModeMechanicsVectors:
     """mechanics_vectors.py — static_mode produces synthetic event tuples."""
 
     def test_static_mode_event_tuple_in_produces(self):
+        """Preloaded path: a 14-element tuple containing only static_mode
+        (no raw_line, no verb, no trigger) must produce a non-zero vector
+        purely from the static_mode contribution. Passing raw_line=None
+        eliminates ambiguity about whether other parsers contributed."""
         from mtg_synergy.recommend.mechanics_vectors import build_mechanics_vectors
 
         conn = _build_test_db_with_static_mode()
-        # Exercise the preloaded path with a manually-constructed 14-element
-        # tuple matching forge_features.py's _raw_abilities format:
+        # Manually-constructed 14-element tuple matching forge_features.py
+        # _raw_abilities format. raw_line=None ensures the only signal source
+        # is the static_mode field at position 13.
         #   (oid, verb, trig_mode, trig_filter, cost, kw, token_script,
         #    counter, raw_line, amount, trigger_origin, trigger_destination,
         #    defined, static_mode)
-        pan_raw = (
-            "Mode$ Panharmonicon | ValidCard$ Permanent.YouCtrl | "
-            "Description$ If a permanent entering causes a triggered ability "
-            "of a permanent you control to trigger, that ability triggers an "
-            "additional time."
-        )
         preloaded = [(
             "oid-pan", None, None, None, None, None, None, None,
-            pan_raw, None, None, None, None, "Panharmonicon",
+            None, None, None, None, None, "Panharmonicon",
         )]
         produces, consumes, dim, subtype_idx, category_dims = build_mechanics_vectors(
             conn, preloaded_abilities=preloaded, quiet=True
         )
-        # The vector for Panharmonicon must have a non-zero entry corresponding
-        # to ("static_mode", "panharmonicon", None, None)
         vec = produces.get("oid-pan")
         assert vec is not None, "Card has no produces vector"
         assert vec.sum() > 0, (
-            "Produces vector is all zeros — static_mode tuple not added"
+            "Produces vector is all zeros — static_mode tuple not added "
+            "(silent failure: vocabulary build did not register static_mode "
+            "or _add_tuple did not match it)"
         )
 
-    def test_static_mode_qualifier_lowercased(self):
-        """The qualifier in the synthetic tuple must be lowercased
-        (Panharmonicon → 'panharmonicon')."""
+    def test_static_mode_themes_dim_nonzero(self):
+        """The themes category must contain a non-zero dim for a card with
+        a static mode. Verifies the category routing AND the synthetic tuple
+        emission AND the vocabulary registration are all working together."""
         from mtg_synergy.recommend.mechanics_vectors import build_mechanics_vectors
 
         conn = _build_test_db_with_static_mode()
-        # Build via the fallback DB path (preloaded_abilities=None) so the
-        # test does not depend on _raw_abilities, which ForgeFeatureContext
-        # frees during __init__ after building mechanics vectors.
         produces, consumes, dim, subtype_idx, category_dims = build_mechanics_vectors(
             conn, preloaded_abilities=None, quiet=True
         )
-        # The "themes" category must contain a non-zero dim for Panharmonicon
         themes_dims = category_dims.get("themes", [])
         assert themes_dims, "themes category has no dims registered"
         vec = produces["oid-pan"]
@@ -390,6 +386,53 @@ class TestStaticModeMechanicsVectors:
         assert themes_sum > 0, (
             f"static_mode panharmonicon should add to themes category, "
             f"but vec sums to {themes_sum} across themes dims {themes_dims}"
+        )
+
+    def test_static_mode_qualifier_is_lowercase_in_vocabulary(self):
+        """Direct case-mismatch regression guard: the synthetic tuple key
+        registered in the concept vocabulary must be lowercase, regardless
+        of the original Mode$ value's case. If a future change removes
+        .lower() from one emission site but not the other, the vocabulary
+        and population would silently disagree and _add_tuple would drop
+        the contribution.
+
+        Builds a context with the literal Mode$ value 'Panharmonicon'
+        (mixed case as it appears in Forge data), then asserts the
+        vocabulary contains the lowercase tuple key.
+        """
+        from mtg_synergy.recommend.mechanics_vectors import (
+            build_mechanics_vectors,
+            _build_concept_vocabulary,
+        )
+
+        conn = _build_test_db_with_static_mode()
+        # Read the same abilities the build function would see
+        forge_to_oid = {row[0]: row[1] for row in conn.execute(
+            "SELECT forge_name, oracle_id FROM forge_name_map"
+        )}
+        abilities = []
+        for row in conn.execute(
+            "SELECT card_name, verb, trigger_mode, trigger_filter, cost, "
+            "keyword, token_script, counter_type, raw_line, amount, "
+            "trigger_origin, trigger_destination, defined, static_mode "
+            "FROM forge_abilities"
+        ):
+            oid = forge_to_oid.get(row[0])
+            if oid:
+                abilities.append((oid, row[1], row[2], row[3], row[4],
+                                  row[5], row[6], row[7], row[8], row[9],
+                                  row[10], row[11], row[12], row[13]))
+        tuple_to_idx, n_concepts, category_dims = _build_concept_vocabulary(abilities)
+        # The lowercase key must be present
+        assert ("static_mode", "panharmonicon", None, None) in tuple_to_idx, (
+            f"Vocabulary missing lowercase static_mode key. Available "
+            f"static_mode tuples: "
+            f"{[k for k in tuple_to_idx if k[0] == 'static_mode']}"
+        )
+        # And the original-case key must NOT be present
+        assert ("static_mode", "Panharmonicon", None, None) not in tuple_to_idx, (
+            "Vocabulary contains original-case 'Panharmonicon' key — "
+            ".lower() was not applied at the vocabulary build site"
         )
 
     def test_static_mode_not_in_consumes(self):
