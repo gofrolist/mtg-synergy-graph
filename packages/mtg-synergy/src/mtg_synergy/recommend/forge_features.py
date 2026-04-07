@@ -577,18 +577,9 @@ class ForgeFeatureContext:
                     main = part.split(".")[0].strip()
                     if main and main != "Card" and main[0].isupper():
                         p['trigger_filters'].add(main.lower())
-        # Extract cost types for cost-effect alignment
+        # Extract cost types for cost-effect alignment (flows into cost_feeds_cmdr F94)
         cost_str = cost or ""
-        if "Sac" in cost_str:
-            p['cost_types'].add('sacrifice')
-        if "T" in cost_str.split() or cost_str == "T":
-            p['cost_types'].add('tap')
-        if "Discard" in cost_str:
-            p['cost_types'].add('discard')
-        if "Exile" in cost_str:
-            p['cost_types'].add('exile')
-        if "PayLife" in cost_str:
-            p['cost_types'].add('paylife')
+        p['cost_types'] |= ForgeFeatureContext._parse_cost_types(cost_str)
         # Extract subtype requirements from cost, defined, and raw_line fields
         defined_str = defined or ""
         raw_line = raw_line_val or ""
@@ -633,6 +624,49 @@ class ForgeFeatureContext:
                 val = m.group(1).strip()
                 if val and val != "Card.Self":
                     out.add(val)
+        return out
+
+    @staticmethod
+    def _parse_cost_types(cost_str: str) -> set[str]:
+        """Tokenize a Forge cost string into mechanical cost categories.
+
+        Returns a set of category labels consumed by cost_feeds_cmdr (F94).
+        Categories are intentionally generic (no per-card rules).
+
+        Preserves the prior 5-category substring semantics exactly:
+        sacrifice, tap, discard, exile, paylife.
+
+        Phase 1 adds 4 new categories:
+          - subcounter: counter-removal costs (P1P1, CHARGE, OIL, ..., loyalty-minus)
+          - exilegrave: graveyard-exile costs (additive — also sets 'exile')
+          - taptype:    typed tap costs (tapXType<N/Subtype>, convoke/improvise style)
+          - return:     bounce-to-hand costs (Return<N/Target> — '<' anchor)
+        """
+        if not cost_str:
+            return set()
+        out: set[str] = set()
+        # --- Existing 5 categories (preserve exact semantics) ---
+        if "Sac" in cost_str:
+            out.add('sacrifice')
+        if "T" in cost_str.split() or cost_str == "T":
+            out.add('tap')
+        if "Discard" in cost_str:
+            out.add('discard')
+        if "Exile" in cost_str:
+            out.add('exile')
+        if "PayLife" in cost_str:
+            out.add('paylife')
+        # --- Phase 1 new categories ---
+        if "SubCounter" in cost_str:
+            out.add('subcounter')
+        if "ExileFromGrave" in cost_str:
+            # Additive: exile is already set above via the 'Exile' substring;
+            # this only adds the more specific 'exilegrave' tag.
+            out.add('exilegrave')
+        if "tapXType" in cost_str:
+            out.add('taptype')
+        if "Return<" in cost_str:
+            out.add('return')
         return out
 
     @staticmethod

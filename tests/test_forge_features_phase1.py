@@ -139,3 +139,94 @@ class TestCombatTriggerFilters:
                 if main and main != "Card" and main[0].isupper():
                     trigger_filters.add(main.lower())
         assert trigger_filters == {"creature", "artifact"}
+
+
+class TestCostTypesExpansion:
+    """Phase 1: 4 new cost categories (subcounter, exilegrave, taptype, return).
+    Inputs are verbatim samples from forge_abilities.cost column.
+    """
+
+    # === Regression: the 5 existing categories must still fire ===
+
+    def test_sacrifice_regression(self):
+        # Real samples from DB
+        assert "sacrifice" in ForgeFeatureContext._parse_cost_types("Sac<1/CARDNAME>")
+        assert "sacrifice" in ForgeFeatureContext._parse_cost_types("2 Sac<1/Creature>")
+
+    def test_tap_regression(self):
+        assert "tap" in ForgeFeatureContext._parse_cost_types("T")
+        assert "tap" in ForgeFeatureContext._parse_cost_types("1 T")
+        assert "tap" in ForgeFeatureContext._parse_cost_types("T Sac<1/CARDNAME>")
+
+    def test_discard_regression(self):
+        assert "discard" in ForgeFeatureContext._parse_cost_types("1 R Discard<1/Card>")
+
+    def test_exile_regression(self):
+        assert "exile" in ForgeFeatureContext._parse_cost_types("2 Exile<1/CARDNAME>")
+
+    def test_paylife_regression(self):
+        assert "paylife" in ForgeFeatureContext._parse_cost_types("PayLife<2>")
+
+    # === New categories ===
+
+    def test_subcounter_p1p1(self):
+        result = ForgeFeatureContext._parse_cost_types("SubCounter<1/P1P1>")
+        assert "subcounter" in result
+
+    def test_subcounter_with_tap(self):
+        # Real combined form from DB
+        result = ForgeFeatureContext._parse_cost_types("T SubCounter<1/CHARGE>")
+        assert result >= {"tap", "subcounter"}
+
+    def test_subcounter_loyalty_still_tagged(self):
+        # Loyalty-minus planeswalker costs must also set subcounter — harmless
+        # because no commander produces LOYALTY counters, so cost_feeds_cmdr
+        # will never spuriously match. Controller-approved.
+        assert "subcounter" in ForgeFeatureContext._parse_cost_types("SubCounter<2/LOYALTY>")
+
+    def test_exilegrave_additive(self):
+        # CRITICAL invariant: ExileFromGrave sets BOTH exile AND exilegrave.
+        # This preserves the existing 'exile' count bit-for-bit so the
+        # post-WIP baseline (0.5707) is not shifted by Phase 1.
+        result = ForgeFeatureContext._parse_cost_types("5 R ExileFromGrave<1/CARDNAME>")
+        assert result == {"exile", "exilegrave"}
+
+    def test_exilegrave_with_creature_pool(self):
+        result = ForgeFeatureContext._parse_cost_types("3 B G ExileFromGrave<1/Creature>")
+        assert {"exile", "exilegrave"} <= result
+
+    def test_taptype_convoke_style(self):
+        result = ForgeFeatureContext._parse_cost_types("tapXType<1/Creature>")
+        assert "taptype" in result
+
+    def test_taptype_tribal(self):
+        # Convoke/improvise-style tribal tap-cost
+        result = ForgeFeatureContext._parse_cost_types("tapXType<2/Ape>")
+        assert "taptype" in result
+
+    def test_return_bounce_cost(self):
+        # Return-to-hand-as-cost pattern (phoenix-like recursion)
+        result = ForgeFeatureContext._parse_cost_types("2 Return<1/CARDNAME>")
+        assert "return" in result
+
+    def test_return_with_sacrifice(self):
+        # Combined cost — Return and Sac both apply
+        result = ForgeFeatureContext._parse_cost_types("Sac<1/Creature> Return<1/CARDNAME>")
+        assert {"sacrifice", "return"} <= result
+
+    def test_return_substring_anchored(self):
+        # Unanchored 'Return' must NOT match other verbs that contain it.
+        # We can't easily construct a realistic example, but verify the
+        # anchoring by checking a plain word. This locks in the '<' anchor.
+        result = ForgeFeatureContext._parse_cost_types("ReturnToHandNotACost")
+        assert "return" not in result
+
+    # === Edge cases ===
+
+    def test_empty_string(self):
+        assert ForgeFeatureContext._parse_cost_types("") == set()
+
+    def test_combined_real_cost(self):
+        # Full real-world combined cost: tap + sacrifice + subcounter
+        result = ForgeFeatureContext._parse_cost_types("T Sac<1/CARDNAME> SubCounter<1/P1P1>")
+        assert result == {"tap", "sacrifice", "subcounter"}
