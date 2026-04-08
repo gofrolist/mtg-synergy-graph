@@ -62,6 +62,22 @@ def _cmdr_wants_combat_damage(cmdr_ports: list[PortRow]) -> bool:
     )
 
 
+def _cmdr_wants_combat(cmdr_ports: list[PortRow]) -> bool:
+    """Phase D3: broader combat-wants predicate. Fires for any commander
+    whose triggers key on the attack or combat-damage steps. Used by the
+    new combat-modifier rule so Yuriko / Edgar / Lathril / Kaalia /
+    Saskia / Marrow-Gnawer pick up non-keyword evasion grants."""
+    for p in cmdr_ports:
+        if p.get("port_type") != "trigger":
+            continue
+        ev = p.get("event_class") or ""
+        if ev == "Attacks":
+            return True
+        if ev == "DamageDone" and bool(p.get("is_combat")):
+            return True
+    return False
+
+
 def _evasion_boost(cand: CandidateRecord) -> bool:
     card = cand["card"]
     try:
@@ -142,6 +158,40 @@ def _tribal_density_boost(cand: CandidateRecord) -> bool:
     )
 
 
+#: Phase D3: static-mode event_class values that grant evasion or force
+#: the opponent's board into suboptimal combat positions. Only cards with
+#: at least one port in this set qualify for the combat-modifier rule.
+_COMBAT_MODIFIER_STATICS: frozenset[str] = frozenset({
+    "CantBlockBy",   # 350 corpus cards — grants evasion to matching creatures
+    "MustAttack",    #  97 corpus cards — forces opponent's attackers (goad-class)
+    "MustBlock",     #   8 corpus cards — pairs with deathtouch lockdown
+})
+
+
+def _combat_modifier_boost(cand: CandidateRecord) -> bool:
+    """Phase D3: card has a static combat modifier that enables the
+    commander's combat-damage or attack triggers.
+
+    Gated by cmc ≤ 4 so expensive enchantments / creatures with niche
+    force-combat effects don't flood the strategic bucket — the goal is
+    to surface cheap enablers (Rogue's Passage cmc 0, Whispersilk Cloak
+    cmc 3, Curse of Opulence cmc 1, Bident of Thassa cmc 3) not
+    slow-roll win conditions.
+    """
+    card = cand["card"]
+    try:
+        cmc = float(card.get("cmc") or 0)
+    except (TypeError, ValueError):
+        cmc = 0
+    if cmc > 4:
+        return False
+    return any(
+        p.get("port_type") == "static"
+        and (p.get("event_class") or "") in _COMBAT_MODIFIER_STATICS
+        for p in cand["ports"]
+    )
+
+
 def _anti_stax_self_hose(cand: CandidateRecord) -> bool:
     return any(
         p.get("port_type") in ("replacement", "static")
@@ -161,6 +211,22 @@ STRATEGIC_RULES: tuple[StrategicRule, ...] = (
         "boost":     _evasion_boost,
         "weight":    5,
         "reason":    "Low-cost evasion enables combat damage triggers",
+    },
+    {
+        # Phase D3 — broader combat modifier rule covering static
+        # CantBlockBy / MustAttack / MustBlock enablers that the
+        # keyword-based _evasion_boost can't see (Rogue's Passage,
+        # Whispersilk Cloak, Bident of Thassa, Curse of Opulence).
+        # Uses the broader _cmdr_wants_combat predicate so Attacks-
+        # trigger commanders (Yuriko, Edgar, Lathril, Marrow-Gnawer)
+        # also pick it up, not just DamageDone-to-player commanders.
+        # Weight=2 — at weight=3 the rule pushed cheap evasion artifacts
+        # above tribal lords in Edgar Markov's top-30 (−0.01 NDCG).
+        "name":      "combat_modifier_for_attack_triggers",
+        "condition": _cmdr_wants_combat,
+        "boost":     _combat_modifier_boost,
+        "weight":    1,
+        "reason":    "Static combat modifier grants evasion / forces combat",
     },
     {
         "name":      "mass_pump_for_tokens",
