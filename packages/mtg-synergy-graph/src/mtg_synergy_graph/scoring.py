@@ -1600,6 +1600,13 @@ def score_all_candidates(
     _score_replacements(conn, commander_set, scores, matches)
     _score_sacrifice_synergies(conn, commander_set, scores, matches)
     _score_mana_restriction(conn, commander_set, scores, matches)
+    # Phase D4 (find_flicker_loop_matches) is intentionally NOT wired
+    # in here. The matcher correctly identifies flicker-source clusters
+    # but the only golden-set commander it applies to (Brago) regresses
+    # at any weight: EDHREC's high-synergy picks for Brago emphasise
+    # ETB *targets* (Reflector Mage, Mulldrifter), not source clusters.
+    # The matcher is kept as a reusable primitive in graph_engine.py
+    # for phase E density-gated strategic rules to consume later.
 
     # Finalise totals.
     for buckets in scores.values():

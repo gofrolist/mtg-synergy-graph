@@ -1673,6 +1673,107 @@ def _zone_overlap(
     return False
 
 
+# ---------------------------------------------------------------------------
+# Phase D4 — flicker self-loop detector
+# ---------------------------------------------------------------------------
+
+
+def _card_has_flicker_chain(ports: list[PortRow]) -> bool:
+    """Phase D4: True iff a card has both a ``ChangeZone Battlefield→Exile``
+    effect and a ``ChangeZone (Exile|All)→Battlefield`` effect.
+
+    The ``All`` origin is needed because Forge importer captures
+    SubAbility chains that use ``Defined$ Remembered`` with implicit
+    origin = "any zone" — Brago's ``DBReturn`` and Conjurer's Closet's
+    return path both surface as ``Origin: All``. Soulherder and
+    Ephemerate use the literal ``Exile`` origin.
+    """
+    has_bf_to_exile = False
+    has_exile_to_bf = False
+    for p in ports:
+        if p.get("port_type") != "effect":
+            continue
+        if (p.get("event_class") or "") != "ChangeZone":
+            continue
+        orig = (p.get("zone_origin") or "").strip()
+        dest = (p.get("zone_destination") or "").strip()
+        if orig == "Battlefield" and dest == "Exile":
+            has_bf_to_exile = True
+        elif orig in ("Exile", "All") and dest == "Battlefield":
+            has_exile_to_bf = True
+        if has_bf_to_exile and has_exile_to_bf:
+            return True
+    return False
+
+
+def find_flicker_loop_matches(
+    conn: sqlite3.Connection,
+    commander_set: Sequence[str],
+) -> list[dict[str, Any]]:
+    """Phase D4: when the commander is a flicker source, award candidates
+    that are ALSO flicker sources — Brago + Conjurer's Closet, Soulherder
+    + Ephemerate, etc. The mutual cluster is mechanically meaningful
+    (each side amplifies the other's loop) and the existing
+    ``find_etb_self_matches`` / ``find_trigger_feeders`` matchers don't
+    pick it up because both sides are *effects*, not trigger ↔ effect
+    pairs.
+
+    Detection is structural — both sides need a ``Battlefield → Exile``
+    effect followed by an ``(Exile|All) → Battlefield`` effect. Only 162
+    cards in the cardsfolder match the pattern, so the bucket-spreading
+    risk is contained.
+    """
+    cmdr_ports = load_ports_for_set(conn, commander_set)
+    if not _card_has_flicker_chain(cmdr_ports):
+        return []
+
+    cmdr_set = set(commander_set)
+    cur = conn.execute(
+        "SELECT card_name, zone_origin, zone_destination, branch_kind, is_conditional "
+        "FROM card_ports "
+        "WHERE port_type = 'effect' AND event_class = 'ChangeZone' "
+        "AND ((zone_origin = 'Battlefield' AND zone_destination = 'Exile') "
+        "OR (zone_origin IN ('Exile', 'All') AND zone_destination = 'Battlefield'))"
+    )
+
+    by_card: dict[str, dict[str, Any]] = {}
+    for r in cur.fetchall():
+        cn = r["card_name"]
+        if cn in cmdr_set:
+            continue
+        info = by_card.setdefault(
+            cn,
+            {
+                "bf_to_exile":    False,
+                "exile_to_bf":    False,
+                "branch_kind":    r["branch_kind"] or "root",
+                "is_conditional": bool(r["is_conditional"]),
+            },
+        )
+        if r["zone_origin"] == "Battlefield":
+            info["bf_to_exile"] = True
+        else:
+            info["exile_to_bf"] = True
+        # Keep the strongest (least discounted) branch.
+        if (r["branch_kind"] or "root") == "root":
+            info["branch_kind"] = "root"
+        if not r["is_conditional"]:
+            info["is_conditional"] = False
+
+    matches: list[dict[str, Any]] = []
+    for card, info in by_card.items():
+        if info["bf_to_exile"] and info["exile_to_bf"]:
+            matches.append(
+                {
+                    "candidate":      card,
+                    "direction":      "flicker_cluster",
+                    "branch_kind":    info["branch_kind"],
+                    "is_conditional": info["is_conditional"],
+                }
+            )
+    return matches
+
+
 def find_replacement_conflicts(
     conn: sqlite3.Connection,
     commander_set: Sequence[str],

@@ -214,11 +214,13 @@ def test_replacement_conflicts_returns_empty_for_korvold(populated_db):
 
 
 from mtg_synergy_graph.graph_engine import (
+    _card_has_flicker_chain,
     _commander_death_signature,
     _commander_synergy_tags,
     _is_unhelpful_payoff_trigger,
     _parse_restriction_tags,
     _zone_overlap,
+    find_flicker_loop_matches,
     find_mana_restriction_matches,
     find_sacrifice_synergies,
 )
@@ -475,6 +477,102 @@ def test_find_mana_restriction_against_full_db_talrand():
         assert {"Instant", "Sorcery"} & set(r["matched_tags"]), (
             f"unexpected match {r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase D4 — flicker self-loop detector (primitive only — not wired into
+# scoring; see scoring.py docstring near _score_mana_restriction for the
+# rationale on why the bucket boost is deferred to phase E)
+# ---------------------------------------------------------------------------
+
+
+def test_card_has_flicker_chain_detects_clean_pair():
+    # Soulherder-shape: Battlefield→Exile + Exile→Battlefield.
+    ports = [
+        {"port_type": "effect", "event_class": "ChangeZone",
+         "zone_origin": "Battlefield", "zone_destination": "Exile"},
+        {"port_type": "effect", "event_class": "ChangeZone",
+         "zone_origin": "Exile", "zone_destination": "Battlefield"},
+    ]
+    assert _card_has_flicker_chain(ports)
+
+
+def test_card_has_flicker_chain_handles_all_origin():
+    # Brago / Conjurer's Closet — return path uses Origin=All because
+    # the SVar resolves via Defined$ Remembered (any zone).
+    ports = [
+        {"port_type": "effect", "event_class": "ChangeZone",
+         "zone_origin": "Battlefield", "zone_destination": "Exile"},
+        {"port_type": "effect", "event_class": "ChangeZone",
+         "zone_origin": "All", "zone_destination": "Battlefield"},
+    ]
+    assert _card_has_flicker_chain(ports)
+
+
+def test_card_has_flicker_chain_rejects_one_sided():
+    # Bouncing-effect-only (no return path) — Cyclonic Rift, Boomerang.
+    ports = [
+        {"port_type": "effect", "event_class": "ChangeZone",
+         "zone_origin": "Battlefield", "zone_destination": "Hand"},
+    ]
+    assert not _card_has_flicker_chain(ports)
+
+
+def test_card_has_flicker_chain_rejects_etb_only():
+    # Yarok-shape: ETB doubler with no exile/return chain.
+    ports = [
+        {"port_type": "trigger", "event_class": "ChangesZone",
+         "zone_origin": "", "zone_destination": "Battlefield"},
+    ]
+    assert not _card_has_flicker_chain(ports)
+
+
+def test_find_flicker_loop_matches_brago_against_full_db():
+    """Integration: Brago is the only golden-set commander with a
+    flicker chain. Verify the matcher finds him AND surfaces well-known
+    flicker-source partners (Conjurer's Closet, Eldrazi Displacer)
+    so phase E density rules can use it.
+    """
+    import sqlite3
+    from pathlib import Path
+
+    db_path = Path("/tmp/synergy_full.db")
+    if not db_path.exists():
+        import pytest
+        pytest.skip("/tmp/synergy_full.db not present — run import_cardsfolder first")
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = find_flicker_loop_matches(conn, ["Brago, King Eternal"])
+    finally:
+        conn.close()
+
+    assert rows, "expected at least one flicker cluster match for Brago"
+    cands = {r["candidate"] for r in rows}
+    expected = {"Conjurer's Closet", "Soulherder", "Eldrazi Displacer"}
+    assert cands & expected, (
+        f"expected at least one of {expected} in {sorted(cands)[:20]}"
+    )
+
+
+def test_find_flicker_loop_matches_returns_empty_for_non_flicker_commander():
+    import sqlite3
+    from pathlib import Path
+
+    db_path = Path("/tmp/synergy_full.db")
+    if not db_path.exists():
+        import pytest
+        pytest.skip("/tmp/synergy_full.db not present — run import_cardsfolder first")
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        # Korvold has zero flicker chain — must return empty.
+        rows = find_flicker_loop_matches(conn, ["Korvold, Fae-Cursed King"])
+    finally:
+        conn.close()
+    assert rows == []
 
 
 def test_find_mana_restriction_kaalia_does_not_explode():
