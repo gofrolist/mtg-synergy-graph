@@ -64,13 +64,18 @@ def main() -> int:
     resolved = conn.execute(
         "SELECT COUNT(*) FROM cards WHERE oracle_id IS NOT NULL"
     ).fetchone()[0]
+    ranked = conn.execute(
+        "SELECT COUNT(*) FROM cards WHERE edhrec_rank IS NOT NULL"
+    ).fetchone()[0]
 
     rate = cards / elapsed if elapsed else 0
     print(f"imported {cards} cards / {ports} ports / {attrs} attributes "
           f"in {elapsed:.1f}s ({rate:.0f} cards/s)")
     if cards:
-        pct = 100.0 * resolved / cards
-        print(f"oracle_id coverage: {resolved}/{cards} ({pct:.1f}%)")
+        oid_pct = 100.0 * resolved / cards
+        rank_pct = 100.0 * ranked / cards
+        print(f"oracle_id   coverage: {resolved}/{cards} ({oid_pct:.1f}%)")
+        print(f"edhrec_rank coverage: {ranked}/{cards} ({rank_pct:.1f}%)")
     else:
         print("oracle_id coverage: 0/0")
 

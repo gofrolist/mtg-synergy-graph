@@ -233,7 +233,7 @@ def _bulk_load_candidates(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]
     out: dict[str, dict[str, Any]] = {}
     for row in conn.execute(
         "SELECT name, color_identity, subtypes, oracle_text, card_types, "
-        "       cmc, deck_needs, deck_hints, deck_has FROM cards"
+        "       cmc, deck_needs, deck_hints, deck_has, edhrec_rank FROM cards"
     ).fetchall():
         out[row["name"]] = {
             "name":           row["name"],
@@ -245,6 +245,7 @@ def _bulk_load_candidates(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]
             "deck_needs":     row["deck_needs"],
             "deck_hints":     row["deck_hints"],
             "deck_has":       row["deck_has"],
+            "edhrec_rank":    row["edhrec_rank"],
         }
     return out
 

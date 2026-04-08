@@ -2,23 +2,23 @@
   "entries": [
     {
       "commander": "Korvold, Fae-Cursed King",
-      "ndcg30": 0.018299,
+      "ndcg30": 0.029003,
       "top10": [
-        "Retrofitter Foundry",
         "Witch's Oven",
+        "Retrofitter Foundry",
         "Legion Extruder",
         "Fain, the Broker",
         "Hammer of Purphoros",
         "Transmogrant Altar",
-        "Michelangelo, Weirdness to 11",
         "Throne of Geth",
-        "Blood Fountain",
-        "The Underworld Cookbook"
+        "Michelangelo, Weirdness to 11",
+        "The Underworld Cookbook",
+        "Blood Fountain"
       ]
     },
     {
       "commander": "Krenko, Mob Boss",
-      "ndcg30": 0.454416,
+      "ndcg30": 0.454393,
       "top10": [
         "Goblin King",
         "Rundvelt Hordemaster",
@@ -34,27 +34,27 @@
     },
     {
       "commander": "Atraxa, Praetors' Voice",
-      "ndcg30": 0.136754,
+      "ndcg30": 0.123824,
       "top10": [
         "Merfolk Skydiver",
         "Roalesk, Apex Hybrid",
-        "Benevolent Hydra",
-        "Contagion Clasp",
         "Ozolith, the Shattered Spire",
-        "Courage in Crisis",
-        "Grim Affliction",
+        "Contagion Clasp",
+        "Benevolent Hydra",
         "Lulu, Stern Guardian",
-        "Brimaz, Blight of Oreskos",
-        "Yawgmoth, Thran Physician"
+        "Grim Affliction",
+        "Courage in Crisis",
+        "Yawgmoth, Thran Physician",
+        "Brimaz, Blight of Oreskos"
       ]
     },
     {
       "commander": "Edgar Markov",
-      "ndcg30": 0.355021,
+      "ndcg30": 0.354657,
       "top10": [
         "Legion Lieutenant",
-        "Thirsting Bloodlord",
         "Vampire Nocturnus",
+        "Thirsting Bloodlord",
         "Falkenrath Gorger",
         "Captivating Vampire",
         "Stromkirk Captain",
@@ -66,114 +66,114 @@
     },
     {
       "commander": "Meren of Clan Nel Toth",
-      "ndcg30": 0.006387,
+      "ndcg30": 0.010825,
       "top10": [
         "Grist, Voracious Larva",
         "Jerren, Corrupted Bishop",
         "Seedship Broodtender",
         "Zabaz, the Glimmerwasp",
+        "Winding Constrictor",
         "Benevolent Hydra",
         "Michelangelo, Weirdness to 11",
-        "Winding Constrictor",
-        "A-Cauldron Familiar",
+        "Stitcher's Supplier",
         "Cauldron Familiar",
-        "Deathbonnet Sprout"
+        "Ravenous Squirrel"
       ]
     },
     {
       "commander": "Kaalia of the Vast",
-      "ndcg30": 0.123465,
+      "ndcg30": 0.115038,
       "top10": [
-        "Path to Exile",
         "Sol Ring",
         "Swords to Plowshares",
+        "Path to Exile",
         "Arcane Signet",
-        "Demonic Tutor",
-        "Dockside Extortionist",
-        "Feed the Swarm",
         "Thought Vessel",
+        "Demonic Tutor",
+        "Feed the Swarm",
+        "Dockside Extortionist",
         "Chaos Warp",
-        "Deflecting Swat"
+        "Generous Gift"
       ]
     },
     {
       "commander": "Yuriko, the Tiger's Shadow",
-      "ndcg30": 0.22294,
+      "ndcg30": 0.269263,
       "top10": [
-        "A-Silver-Fur Master",
         "Silver-Fur Master",
+        "A-Silver-Fur Master",
         "Splinter, Hamato Yoshi",
         "Throatseeker",
-        "Mystic Remora",
         "Sol Ring",
+        "Mystic Remora",
         "Arcane Signet",
         "Counterspell",
-        "Cyclonic Rift",
-        "Demonic Tutor"
+        "Thought Vessel",
+        "Cyclonic Rift"
       ]
     },
     {
       "commander": "The Ur-Dragon",
-      "ndcg30": 0.175024,
+      "ndcg30": 0.181161,
       "top10": [
         "Dragon's Disciple",
         "Korlessa, Scale Singer",
-        "Call the Spirit Dragons",
         "Rith, Liberated Primeval",
+        "Call the Spirit Dragons",
         "Stormscale Scion",
         "Rivaz of the Claw",
-        "Mystic Remora",
-        "Path to Exile",
         "Sol Ring",
-        "Swords to Plowshares"
+        "Swords to Plowshares",
+        "Path to Exile",
+        "Mystic Remora"
       ]
     },
     {
       "commander": "Animar, Soul of Elements",
-      "ndcg30": 0.180063,
+      "ndcg30": 0.17933,
       "top10": [
         "Benevolent Hydra",
         "Ozolith, the Shattered Spire",
         "The Earth Crystal",
         "Merfolk Skydiver",
         "Roalesk, Apex Hybrid",
-        "Mystic Remora",
         "Sol Ring",
+        "Mystic Remora",
         "Arcane Signet",
         "Counterspell",
-        "Cyclonic Rift"
+        "Thought Vessel"
       ]
     },
     {
       "commander": "Brago, King Eternal",
-      "ndcg30": 0.107182,
+      "ndcg30": 0.096806,
       "top10": [
-        "Mystic Remora",
-        "Path to Exile",
         "Sol Ring",
         "Swords to Plowshares",
+        "Path to Exile",
+        "Mystic Remora",
         "Arcane Signet",
         "Counterspell",
-        "Cyclonic Rift",
         "Thought Vessel",
-        "Fierce Guardianship",
+        "Cyclonic Rift",
+        "Rhystic Study",
         "Generous Gift"
       ]
     },
     {
       "commander": "Yarok, the Desecrated",
-      "ndcg30": 0.045368,
+      "ndcg30": 0.052368,
       "top10": [
         "Sunderflock",
+        "Nissa, Resurgent Animist",
         "Endless Evil",
         "Grell Philosopher",
         "Mwonvuli Beast Tracker",
-        "Nissa, Resurgent Animist",
         "Overgrowth Elemental",
         "Umbris, Fear Manifest",
         "Titania, Nature's Force",
-        "Mystic Remora",
-        "Sol Ring"
+        "Sol Ring",
+        "Mystic Remora"
       ]
     },
     {
@@ -182,83 +182,83 @@
       "top10": [
         "Kodama's Reach",
         "Command Tower",
+        "Prismatic Vista",
         "Demolition Field",
         "Escape Tunnel",
         "Horizon of Progress",
-        "Prismatic Vista",
-        "Promising Vein",
         "Shire Terrace",
         "Volatile Fault",
-        "Blighted Woodland"
+        "Promising Vein",
+        "Evolving Wilds"
       ]
     },
     {
       "commander": "Niv-Mizzet, Parun",
-      "ndcg30": 0.208712,
+      "ndcg30": 0.209142,
       "top10": [
         "Counterspell",
         "Cyclonic Rift",
         "Chaos Warp",
-        "Deflecting Swat",
         "Fierce Guardianship",
+        "Deflecting Swat",
         "Jeska's Will",
         "Blasphemous Act",
-        "Mystic Remora",
         "Sol Ring",
+        "Mystic Remora",
         "Arcane Signet"
       ]
     },
     {
       "commander": "Talrand, Sky Summoner",
-      "ndcg30": 0.042238,
+      "ndcg30": 0.042384,
       "top10": [
         "Counterspell",
         "Cyclonic Rift",
         "Fierce Guardianship",
-        "Mystic Remora",
         "Sol Ring",
+        "Mystic Remora",
         "Arcane Signet",
-        "Master of the Pearl Trident",
         "Thought Vessel",
-        "Academy Manufactor",
-        "Donatello, the Brains"
+        "Master of the Pearl Trident",
+        "Rhystic Study",
+        "Academy Manufactor"
       ]
     },
     {
       "commander": "Karador, Ghost Chieftain",
-      "ndcg30": 0.001936,
+      "ndcg30": 0.001579,
       "top10": [
-        "Path to Exile",
         "Sol Ring",
         "Swords to Plowshares",
+        "Path to Exile",
         "Arcane Signet",
+        "Thought Vessel",
+        "Nature's Lore",
+        "Heroic Intervention",
         "Demonic Tutor",
         "Feed the Swarm",
-        "Heroic Intervention",
-        "Nature's Lore",
-        "Sylvan Library",
-        "Thought Vessel"
+        "Sylvan Library"
       ]
     },
     {
       "commander": "Saskia the Unyielding",
-      "ndcg30": 0.155968,
+      "ndcg30": 0.14891,
       "top10": [
-        "Path to Exile",
         "Sol Ring",
         "Swords to Plowshares",
+        "Path to Exile",
         "Arcane Signet",
-        "Demonic Tutor",
-        "Dockside Extortionist",
-        "Feed the Swarm",
-        "Heroic Intervention",
+        "Thought Vessel",
         "Nature's Lore",
+        "Heroic Intervention",
+        "Demonic Tutor",
+        "Feed the Swarm",
         "Sylvan Library"
       ]
     },
     {
       "commander": "Marrow-Gnawer",
-      "ndcg30": 0.599031,
+      "ndcg30": 0.594395,
       "top10": [
         "Ogre Slumlord",
         "Piper of the Swarm",
@@ -267,22 +267,22 @@
         "Twisted Sewer-Witch",
         "Sol Ring",
         "Arcane Signet",
+        "Thought Vessel",
         "Demonic Tutor",
-        "Feed the Swarm",
-        "Pack Rat"
+        "Feed the Swarm"
       ]
     },
     {
       "commander": "Lathril, Blade of the Elves",
-      "ndcg30": 0.513502,
+      "ndcg30": 0.521693,
       "top10": [
         "Elvish Archdruid",
         "Dwynen, Gilt-Leaf Daen",
         "Joraga Warcaller",
-        "Eladamri, Lord of Leaves",
         "Leaf-Crowned Visionary",
-        "Elvish Champion",
+        "Eladamri, Lord of Leaves",
         "Imperious Perfect",
+        "Elvish Champion",
         "Galadhrim Brigade",
         "Elvish Clancaller",
         "Morcant's Loyalist"
@@ -290,7 +290,7 @@
     },
     {
       "commander": "Slimefoot, the Stowaway",
-      "ndcg30": 0.122276,
+      "ndcg30": 0.121039,
       "top10": [
         "Bolas's Citadel",
         "Propagator Drone",
@@ -299,105 +299,105 @@
         "Sporoloth Ancient",
         "Sol Ring",
         "Arcane Signet",
-        "Demonic Tutor",
-        "Feed the Swarm",
+        "Thought Vessel",
+        "Nature's Lore",
         "Heroic Intervention"
       ]
     },
     {
       "commander": "Vito, Thorn of the Dusk Rose",
-      "ndcg30": 0.103105,
+      "ndcg30": 0.103987,
       "top10": [
         "Restless Bloodseeker",
-        "Glass-Cast Heart",
         "Necropotence",
+        "Glass-Cast Heart",
         "Profane Prayers",
         "Malakir Bloodwitch",
-        "A-Sorin, Imperious Bloodlord",
-        "Arterial Flow",
-        "Bounty Board",
         "Sorin, Imperious Bloodlord",
+        "Bounty Board",
+        "Arterial Flow",
+        "A-Sorin, Imperious Bloodlord",
         "South Wind Avatar"
       ]
     },
     {
       "commander": "Rakdos, Lord of Riots",
-      "ndcg30": 0.075115,
+      "ndcg30": 0.074537,
       "top10": [
         "Sol Ring",
         "Arcane Signet",
-        "Demonic Tutor",
-        "Dockside Extortionist",
-        "Feed the Swarm",
         "Thought Vessel",
+        "Demonic Tutor",
+        "Feed the Swarm",
+        "Dockside Extortionist",
         "Chaos Warp",
+        "Toxic Deluge",
         "Deflecting Swat",
-        "Jeska's Will",
-        "Necropotence"
+        "Jeska's Will"
       ]
     },
     {
       "commander": "Sliver Overlord",
-      "ndcg30": 0.330417,
+      "ndcg30": 0.28605,
       "top10": [
         "Magma Sliver",
         "Sliver Legion",
         "Hatchery Sliver",
-        "Capricious Sliver",
         "Lazotep Sliver",
         "Regal Sliver",
         "Taunting Sliver",
+        "Capricious Sliver",
         "Sliver Gravemother",
-        "Galerider Sliver",
-        "Mindlash Sliver"
+        "Sol Ring",
+        "Swords to Plowshares"
       ]
     },
     {
       "commander": "Yidris, Maelstrom Wielder",
-      "ndcg30": 0.042397,
+      "ndcg30": 0.044985,
       "top10": [
-        "Mystic Remora",
         "Sol Ring",
+        "Mystic Remora",
         "Arcane Signet",
         "Counterspell",
+        "Thought Vessel",
+        "Nature's Lore",
+        "Heroic Intervention",
         "Cyclonic Rift",
         "Demonic Tutor",
-        "Dockside Extortionist",
-        "Feed the Swarm",
-        "Heroic Intervention",
-        "Nature's Lore"
+        "Feed the Swarm"
       ]
     },
     {
       "commander": "Nekusar, the Mindrazer",
-      "ndcg30": 0.058655,
+      "ndcg30": 0.064895,
       "top10": [
-        "Mystic Remora",
         "Sol Ring",
+        "Mystic Remora",
         "Arcane Signet",
         "Counterspell",
+        "Thought Vessel",
         "Cyclonic Rift",
         "Demonic Tutor",
-        "Dockside Extortionist",
         "Feed the Swarm",
-        "Thought Vessel",
+        "Dockside Extortionist",
         "Chaos Warp"
       ]
     },
     {
       "commander": "Phenax, God of Deception",
-      "ndcg30": 0.01301,
+      "ndcg30": 0.012831,
       "top10": [
-        "Mystic Remora",
         "Sol Ring",
+        "Mystic Remora",
         "Arcane Signet",
         "Counterspell",
+        "Thought Vessel",
         "Cyclonic Rift",
         "Demonic Tutor",
         "Feed the Swarm",
-        "Thought Vessel",
-        "Fierce Guardianship",
-        "Necropotence"
+        "Rhystic Study",
+        "Toxic Deluge"
       ]
     }
   ],

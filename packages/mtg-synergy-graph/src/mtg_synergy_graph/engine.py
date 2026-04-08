@@ -451,16 +451,35 @@ class SynergyEngine:
             buckets["total"] = adjusted
             ranked.append((cand, buckets, raw_matches))
 
-        # Tiebreak first by lower CMC (cheaper cards are more flexible),
-        # then alphabetically for stable ordering. Without this, ties on
-        # the mechanical score buckets degenerate to alphabetical order,
-        # which is misleading at the top of the list.
-        cmc_lookup = {
-            name: (row["cmc"] if row["cmc"] is not None else 99.0)
-            for name, row in penalty_ctx.candidate_rows.items()
-        }
+        # Tiebreak in order:
+        #   1. lower mechanical total (reversed to highest-first)
+        #   2. lower CMC — cheaper cards are more flexible
+        #   3. lower edhrec_rank — within mechanically-equal clusters,
+        #      more popular cards rise (pure tiebreaker; never changes
+        #      the displayed mechanical score). Aligned with the
+        #      "EDHREC as tiebreaker only" rule — cards without an
+        #      edhrec_rank slot below every ranked card in the same
+        #      tie rather than being penalised outright.
+        #   4. alphabetical — stable final fallback
+        #
+        # Without (3), the ~62-card clusters that share a total like
+        # 18.0 degenerate into CMC + alphabetical order, which made
+        # the top of the list look arbitrary for counter-payoff
+        # commanders like Kyler.
+        _UNRANKED = 10**9
+        cmc_lookup: dict[str, float] = {}
+        rank_lookup: dict[str, int] = {}
+        for name, row in penalty_ctx.candidate_rows.items():
+            cmc_lookup[name] = row["cmc"] if row["cmc"] is not None else 99.0
+            raw_rank = row.get("edhrec_rank")
+            rank_lookup[name] = int(raw_rank) if raw_rank is not None else _UNRANKED
         ranked.sort(
-            key=lambda r: (-r[1]["total"], cmc_lookup.get(r[0], 99.0), r[0])
+            key=lambda r: (
+                -r[1]["total"],
+                cmc_lookup.get(r[0], 99.0),
+                rank_lookup.get(r[0], _UNRANKED),
+                r[0],
+            )
         )
         total = len(ranked)
         window = ranked[offset : offset + limit]

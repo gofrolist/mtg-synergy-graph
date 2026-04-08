@@ -22,11 +22,21 @@ log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Scryfall oracle_id resolver (4-tier, mirrors the legacy forge_name_map)
+# Scryfall metadata resolver (4-tier, mirrors the legacy forge_name_map)
 # ---------------------------------------------------------------------------
+#
+# Resolver value type: ``(oracle_id, edhrec_rank)``.
+#
+# ``edhrec_rank`` is Scryfall's global popularity index — lower rank =
+# more commonly played across *all* commanders. We persist it alongside
+# oracle_id so the engine can use it as a pure intra-tie tiebreaker:
+# inside a cluster of cards with identical mechanical scores (e.g. the
+# 62 cards at total=18 for Kyler), the more popular ones rise to the
+# top. This *never* influences the displayed mechanical score — only
+# the intra-tie ordering. Aligned with the "EDHREC as tiebreaker only"
+# rule banked in ~/.claude/memory/feedback_edhrec_hivemind.md.
 
-#: Tier descriptions in the order the resolver tries them. Each tier maps a
-#: Forge card name to a Scryfall ``(oracle_id, canonical_name)`` pair.
+#: Tier descriptions in the order the resolver tries them.
 _RESOLVER_TIERS = (
     "exact_non_token",
     "exact_any",
@@ -34,80 +44,113 @@ _RESOLVER_TIERS = (
     "dfc_back_face",      # Forge has alternate_name "B", Scryfall stores "A // B"
 )
 
+#: Value type produced by the resolver: ``(oracle_id, edhrec_rank)``.
+#: ``edhrec_rank`` is ``None`` when the Scryfall source row has no rank,
+#: or when the scryfall DB schema pre-dates the column (tiny test fixtures).
+ScryfallMeta = tuple[str, int | None]
+
 
 def _build_oracle_id_resolver(
     scryfall_conn: sqlite3.Connection,
-) -> dict[str, tuple[str, str]]:
+) -> dict[str, ScryfallMeta]:
     """Index the Scryfall ``cards`` table for fast name-based lookup.
 
-    Returns a dict keyed by BOTH the canonical Scryfall name and — for
-    DFC/MDFC cards — the front-face and back-face substrings split out of
-    ``A // B`` forms. Values are ``(oracle_id, canonical_name)`` tuples.
+    Returns a dict keyed by the canonical Scryfall name *and* — for
+    DFC/MDFC cards — the front-face and back-face substrings split out
+    of ``A // B`` forms. Values are :data:`ScryfallMeta` tuples
+    ``(oracle_id, edhrec_rank)``.
 
-    Resolution priority is encoded by the key space: exact matches on
-    canonical names overwrite DFC partial matches that come later.
+    Resolution priority is encoded by bucket iteration order: exact
+    non-token matches win, then exact any, then DFC front-face, then
+    DFC back-face. ``dict.setdefault`` guarantees earlier tiers are
+    never overwritten by later ones.
+
+    The scryfall DB is permitted to lack ``type_line`` or
+    ``edhrec_rank`` columns — the former disables the token-priority
+    tier, the latter makes every entry's ``edhrec_rank`` ``None``.
+    Both concessions exist for the tiny synthetic fixtures used in
+    unit tests.
     """
-    # Accept either the legacy ``data/tags.db`` schema (has a ``type_line``
-    # column) or a tiny test fixture that omits it — we only use type_line
-    # for the non-token preference.
     cols = {r[1] for r in scryfall_conn.execute("PRAGMA table_info(cards)").fetchall()}
     has_type_line = "type_line" in cols
+    has_edhrec_rank = "edhrec_rank" in cols
 
     # Bucket each Scryfall row by priority so later tiers never clobber
     # earlier ones.
-    by_name_non_token: dict[str, tuple[str, str]] = {}
-    by_name_any: dict[str, tuple[str, str]] = {}
-    by_front: dict[str, tuple[str, str]] = {}
-    by_back: dict[str, tuple[str, str]] = {}
+    by_name_non_token: dict[str, ScryfallMeta] = {}
+    by_name_any: dict[str, ScryfallMeta] = {}
+    by_front: dict[str, ScryfallMeta] = {}
+    by_back: dict[str, ScryfallMeta] = {}
 
-    sql = "SELECT oracle_id, name" + (", type_line" if has_type_line else "") + " FROM cards"
+    select_cols = ["oracle_id", "name"]
+    if has_type_line:
+        select_cols.append("type_line")
+    if has_edhrec_rank:
+        select_cols.append("edhrec_rank")
+    sql = "SELECT " + ", ".join(select_cols) + " FROM cards"
+
     for row in scryfall_conn.execute(sql):
         oracle_id = row[0]
         canonical = row[1]
-        type_line = row[2] if has_type_line else ""
+        idx = 2
+        type_line = row[idx] if has_type_line else ""
+        if has_type_line:
+            idx += 1
+        raw_rank = row[idx] if has_edhrec_rank else None
+        edhrec_rank = int(raw_rank) if raw_rank is not None else None
+
         if not oracle_id or not canonical:
             continue
 
+        meta: ScryfallMeta = (oracle_id, edhrec_rank)
         is_token = bool(type_line) and "Token" in type_line
         if is_token:
-            by_name_any.setdefault(canonical, (oracle_id, canonical))
+            by_name_any.setdefault(canonical, meta)
         else:
-            by_name_non_token.setdefault(canonical, (oracle_id, canonical))
-            by_name_any.setdefault(canonical, (oracle_id, canonical))
+            by_name_non_token.setdefault(canonical, meta)
+            by_name_any.setdefault(canonical, meta)
 
         if " // " in canonical:
             front, _, back = canonical.partition(" // ")
-            by_front.setdefault(front, (oracle_id, canonical))
-            by_back.setdefault(back, (oracle_id, canonical))
+            by_front.setdefault(front, meta)
+            by_back.setdefault(back, meta)
 
-    # Merge into a single resolver dict, respecting tier priority (earlier
-    # tiers win). Python 3.9+ dict merge preserves the left-hand-side value
-    # on key collision when built via repeated updates.
-    resolver: dict[str, tuple[str, str]] = {}
+    resolver: dict[str, ScryfallMeta] = {}
     for bucket in (by_name_non_token, by_name_any, by_front, by_back):
         for k, v in bucket.items():
             resolver.setdefault(k, v)
     return resolver
 
 
-def _resolve_oracle_id(
+def _resolve_scryfall_meta(
     forge_name: str,
     alternate_name: str | None,
-    resolver: dict[str, tuple[str, str]],
-) -> str | None:
-    """Look up ``forge_name`` (and its optional DFC back face) in ``resolver``.
+    resolver: dict[str, ScryfallMeta],
+) -> ScryfallMeta | None:
+    """Look up a Forge card's Scryfall metadata tuple.
 
-    Tries the front face first, falls back to the back face. Returns the
-    oracle_id of the winning tier, or ``None`` if nothing matched.
+    Tries the front face first, then the DFC back face. Returns
+    ``None`` if nothing matched.
     """
     hit = resolver.get(forge_name)
     if hit is not None:
-        return hit[0]
+        return hit
     if alternate_name:
         hit = resolver.get(alternate_name)
         if hit is not None:
-            return hit[0]
+            return hit
     return None
+
+
+def _resolve_oracle_id(
+    forge_name: str,
+    alternate_name: str | None,
+    resolver: dict[str, ScryfallMeta],
+) -> str | None:
+    """Back-compat shim: return just the oracle_id from the full meta
+    tuple. Prefer :func:`_resolve_scryfall_meta` in new code."""
+    hit = _resolve_scryfall_meta(forge_name, alternate_name, resolver)
+    return hit[0] if hit is not None else None
 
 # ---------------------------------------------------------------------------
 # Card row construction
@@ -246,7 +289,7 @@ def _card_row(card: dict[str, Any]) -> dict[str, Any]:
         "deck_hints":     deck_hints_json,
         "deck_needs":     deck_needs_json,
         "deck_has":       deck_has_json,
-        "edhrec_rank":    None,
+        "edhrec_rank":    card.get("edhrec_rank"),
         "rarity":         None,
         "set_code":       None,
     }
@@ -303,14 +346,14 @@ def import_card(
     conn: sqlite3.Connection,
     card: dict[str, Any],
     *,
-    oracle_id_resolver: dict[str, tuple[str, str]] | None = None,
+    oracle_id_resolver: dict[str, ScryfallMeta] | None = None,
 ) -> int:
     """Import a single parsed card. Returns number of port rows inserted.
 
     Idempotent — drops any existing rows for this card before reinserting.
-    When ``oracle_id_resolver`` is supplied, the card's oracle_id is
-    resolved via the 4-tier lookup (exact / front-face / back-face DFC)
-    and persisted into ``cards.oracle_id``.
+    When ``oracle_id_resolver`` is supplied, the card's ``oracle_id``
+    *and* ``edhrec_rank`` are resolved via the 4-tier lookup and
+    persisted into the corresponding ``cards`` columns.
     """
     name = card.get("name")
     if not name:
@@ -327,9 +370,17 @@ def import_card(
     conn.execute("DELETE FROM card_svars WHERE card_name = ?", (name,))
 
     if oracle_id_resolver is not None and not card.get("oracle_id"):
-        card["oracle_id"] = _resolve_oracle_id(
+        hit = _resolve_scryfall_meta(
             name, card.get("alternate_name"), oracle_id_resolver,
         )
+        if hit is not None:
+            card["oracle_id"] = hit[0]
+            # Only overwrite edhrec_rank when not already set on the
+            # parsed card (future-proofing: if parsers ever learn to
+            # read rank directly from Forge data, that would take
+            # priority).
+            if card.get("edhrec_rank") is None:
+                card["edhrec_rank"] = hit[1]
 
     conn.execute(_CARD_INSERT_SQL, _card_row(card))
 
@@ -360,7 +411,7 @@ def import_cards(
     conn: sqlite3.Connection,
     cards: Iterable[dict[str, Any]],
     *,
-    oracle_id_resolver: dict[str, tuple[str, str]] | None = None,
+    oracle_id_resolver: dict[str, ScryfallMeta] | None = None,
 ) -> int:
     """Import a sequence of already-parsed cards inside a single transaction."""
     total_ports = 0
@@ -381,13 +432,14 @@ def import_cards_folder(
 ) -> tuple[int, int]:
     """Walk a Forge ``cardsfolder/`` tree and import every ``.txt``.
 
-    ``scryfall_db`` must point at a Scryfall-shaped sqlite database with a
-    ``cards(oracle_id TEXT, name TEXT[, type_line TEXT])`` table — in
-    practice the ECC-era ``data/tags.db``. The importer builds a 4-tier
-    name→oracle_id resolver from that file and writes ``cards.oracle_id``
-    for every Forge card it can match. Pass ``None`` *only* from tests
-    where oracle_id population is intentionally skipped; production
-    callers must supply a real path.
+    ``scryfall_db`` must point at a Scryfall-shaped sqlite database with
+    a ``cards(oracle_id TEXT, name TEXT[, type_line TEXT, edhrec_rank
+    INTEGER])`` table — in practice the ECC-era ``data/tags.db``. The
+    importer builds a 4-tier name→metadata resolver and writes both
+    ``cards.oracle_id`` and ``cards.edhrec_rank`` for every Forge card
+    it can match. Pass ``None`` *only* from tests where Scryfall
+    metadata population is intentionally skipped; production callers
+    must supply a real path.
 
     Returns ``(card_count, port_count)``.
     """
@@ -396,7 +448,7 @@ def import_cards_folder(
     if limit is not None:
         txt_files = txt_files[:limit]
 
-    resolver: dict[str, tuple[str, str]] | None = None
+    resolver: dict[str, ScryfallMeta] | None = None
     if scryfall_db is not None:
         scryfall_path = Path(scryfall_db)
         if not scryfall_path.exists():
@@ -448,6 +500,14 @@ def import_cards_folder(
         log.info(
             "oracle_id coverage: %d/%d cards resolved (%.1f%%)",
             resolved, card_count, pct,
+        )
+        ranked = conn.execute(
+            "SELECT COUNT(*) FROM cards WHERE edhrec_rank IS NOT NULL"
+        ).fetchone()[0]
+        rank_pct = (100.0 * ranked / card_count) if card_count else 0.0
+        log.info(
+            "edhrec_rank coverage: %d/%d cards ranked (%.1f%%)",
+            ranked, card_count, rank_pct,
         )
         if unresolved:
             head = ", ".join(unresolved[:5])
