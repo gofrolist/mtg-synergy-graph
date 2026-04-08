@@ -575,6 +575,77 @@ def test_find_flicker_loop_matches_returns_empty_for_non_flicker_commander():
     assert rows == []
 
 
+# ---------------------------------------------------------------------------
+# Phase C2 — substitution-blocking replacement detection
+# ---------------------------------------------------------------------------
+
+
+from mtg_synergy_graph.graph_engine import _is_substitution_blocking_result
+
+
+def test_substitution_blocking_rest_in_peace_pattern():
+    # Moved + Graveyard destination + Exile substitution = GY hate.
+    assert _is_substitution_blocking_result("Moved", "Exile", "Graveyard")
+
+
+def test_substitution_blocking_rejects_amplifiers():
+    # Doublers are NOT blocks — they're synergy.
+    assert not _is_substitution_blocking_result("GainLife", "GainDouble", "")
+    assert not _is_substitution_blocking_result("DamageDone", "DmgTwice", "")
+
+
+def test_substitution_blocking_rejects_etb_tapped():
+    # Card.Self entry modifiers are not anti-synergy for any commander.
+    assert not _is_substitution_blocking_result("Moved", "ETBTapped", "Battlefield")
+
+
+def test_substitution_blocking_requires_graveyard_destination():
+    # Only the GY→Exile pattern is handled today.
+    assert not _is_substitution_blocking_result("Moved", "Exile", "Battlefield")
+    assert not _is_substitution_blocking_result("Moved", "Exile", "")
+
+
+def test_substitution_blocking_rejects_non_moved_events():
+    assert not _is_substitution_blocking_result("Draw", "Exile", "Graveyard")
+    assert not _is_substitution_blocking_result("", "Exile", "Graveyard")
+
+
+def test_find_replacement_conflicts_flags_rest_in_peace_for_meren():
+    """Integration: Meren's BF→GY trigger is blocked by Rest in Peace's
+    Moved+Exile substitution. Karador has no triggers at all so the
+    matcher returns nothing for him — confirming the trigger gate works.
+    """
+    import sqlite3
+    from pathlib import Path
+
+    db_path = Path("/tmp/synergy_full.db")
+    if not db_path.exists():
+        import pytest
+        pytest.skip("/tmp/synergy_full.db not present — run import_cardsfolder first")
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        from mtg_synergy_graph.graph_engine import find_replacement_conflicts
+        meren = find_replacement_conflicts(conn, ["Meren of Clan Nel Toth"])
+        karador = find_replacement_conflicts(conn, ["Karador, Ghost Chieftain"])
+    finally:
+        conn.close()
+
+    meren_subs = [r for r in meren if r.get("match_kind") == "substitution"]
+    assert meren_subs, "expected at least one substitution flag for Meren"
+    meren_cards = {r["anti_synergy_card"] for r in meren_subs}
+    expected = {
+        "Rest in Peace", "Leyline of the Void", "Rayami, First of the Fallen",
+    }
+    assert meren_cards & expected, (
+        f"expected at least one of {expected}, got {sorted(meren_cards)[:20]}"
+    )
+    # Karador has no triggers (his abilities are static + activated),
+    # so the matcher's trigger gate returns early.
+    assert karador == []
+
+
 def test_find_mana_restriction_kaalia_does_not_explode():
     """Regression: Kaalia of the Vast must NOT match generic Legendary /
     Cleric restrictions via her literal type line. Her trigger valid

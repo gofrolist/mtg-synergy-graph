@@ -1774,14 +1774,52 @@ def find_flicker_loop_matches(
     return matches
 
 
+def _is_substitution_blocking_result(
+    replacement_event: str,
+    replacement_result: str,
+    zone_destination: str,
+) -> bool:
+    """Phase C2: detect ``ReplaceWith$`` substitutions that are
+    *equivalent* to a Prevent for cluster-anti-synergy purposes.
+
+    Only one unambiguous pattern is handled today: Rest in Peace-class
+    graveyard hate, where a ``Moved`` replacement with
+    ``Destination$ Graveyard`` and ``ReplaceWith$ Exile`` reroutes
+    everything that would die into exile instead. For the commander's
+    ChangesZone Battlefield→Graveyard trigger this is a full block —
+    the creature never enters the graveyard, so the trigger never fires.
+
+    Other ReplaceWith substitution patterns found in the corpus are
+    *amplifiers* (``GainDouble``, ``DmgTwice``) or ``Card.Self`` entry
+    modifiers (``ETBTapped``) — neither should produce a conflict.
+    """
+    if (replacement_event or "") != "Moved":
+        return False
+    if (replacement_result or "") != "Exile":
+        return False
+    # Must be replacing an ENTRY into the graveyard (dest=Graveyard).
+    # Origin is intentionally unchecked — Rest in Peace uses an empty
+    # Origin field meaning "from anywhere".
+    if (zone_destination or "") != "Graveyard":
+        return False
+    return True
+
+
 def find_replacement_conflicts(
     conn: sqlite3.Connection,
     commander_set: Sequence[str],
 ) -> list[dict[str, Any]]:
-    """Find ``R:`` lines with ReplaceWith$Prevent that block commander triggers.
+    """Find ``R:`` lines that block commander triggers — both outright
+    Prevent replacements and C2 substitution equivalents.
 
     Phase C1: ``Event$ Moved | Prevent$ True`` is matched zone-aware so
     Grafdigger's Cage flags Karador / Meren but NOT Brago / Yarok.
+
+    Phase C2: ``Event$ Moved | Destination$ Graveyard | ReplaceWith$ Exile``
+    (Rest in Peace, Leyline of the Void, Rayami — 54 non-opponent-scoped
+    cards in the corpus) is treated as a substitution-block with
+    ``match_kind='substitution'`` so the scoring layer can half-weight
+    it relative to Prevent blocks.
     """
     cmdr_ports = load_ports_for_set(conn, commander_set)
     cmdr_triggers = {
@@ -1812,9 +1850,21 @@ def find_replacement_conflicts(
         port = _row_to_dict(r)
         if port["card_name"] in cmdr_set:
             continue
-        if (port.get("replacement_result") or "") != "Prevent":
-            continue
+        result = port.get("replacement_result") or ""
         ev = port.get("replacement_event") or ""
+        zone_dest = port.get("zone_destination") or ""
+        is_prevent = result == "Prevent"
+        is_substitution = not is_prevent and _is_substitution_blocking_result(
+            ev, result, zone_dest
+        )
+        if not (is_prevent or is_substitution):
+            continue
+        # Substitutions must also NOT be opponent-scoped — the 11 cards
+        # in the corpus with ``ValidLKI$ Creature.OppCtrl`` are exiling
+        # *opponent* creatures and are actually friendly for reanimator
+        # commanders (they deny the opponent's recursion).
+        if is_substitution and _is_unhelpful_payoff_trigger(port.get("valid_filter")):
+            continue
         blocked = REPLACEMENT_BLOCKS_TRIGGER.get(ev, frozenset())
         intersect = blocked & cmdr_triggers
         # Phase C1: zone-scope ``Moved`` so it only flags reanimator-style
@@ -1832,6 +1882,8 @@ def find_replacement_conflicts(
                 {
                     "anti_synergy_card": port["card_name"],
                     "replacement_event": ev,
+                    "replacement_result": result,
+                    "match_kind":        "substitution" if is_substitution else "prevent",
                     "blocked_triggers":  sorted(intersect),
                     "branch_kind":       port.get("branch_kind") or "root",
                     "is_conditional":    bool(port.get("is_conditional")),

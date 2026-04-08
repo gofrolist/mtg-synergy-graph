@@ -517,12 +517,19 @@ def _score_replacements(
     scores: dict[str, BucketDict],
     matches: dict[str, MatchList],
 ) -> None:
-    """Anti-synergy from ``Prevent``-style replacement effects."""
+    """Anti-synergy from Prevent-style and Phase C2 substitution-style
+    replacement effects. Substitutions are half-weighted — the effect is
+    still blocking the commander's trigger, but the card often also
+    offers positive utility (Rest in Peace replaces death with exile,
+    which at least removes threats), so the anti-synergy is softer.
+    """
     for row in find_replacement_conflicts(conn, commander_set):
         weight = _branch_weight(row["branch_kind"])
+        multiplier = 0.5 if row.get("match_kind") == "substitution" else 1.0
         _add_bucket(
             scores, matches, row["anti_synergy_card"], "replacement",
-            -REPLACEMENT_WEIGHT * weight, {**row, "bucket": "replacement"},
+            -REPLACEMENT_WEIGHT * weight * multiplier,
+            {**row, "bucket": "replacement"},
         )
 
 
