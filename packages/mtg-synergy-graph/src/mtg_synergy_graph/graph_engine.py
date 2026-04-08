@@ -96,6 +96,14 @@ EVENT_MATCH_MAP: dict[str, dict[str, EventCheck]] = {
     "AttackerBlocked": {"*": _always},
     "TapsForMana":    {"Mana": _always},
     "BecomesTarget":  {"*": _always},
+    # Phase B1: trigger ↔ effect pairs from corpus inventory.
+    # Sacrificed/Discarded/Drawn are already covered above; these were
+    # missing because the trigger Mode$ value differs from the effect
+    # verb name (Investigated vs Investigate, etc.).
+    "Proliferate":    {"Proliferate": _always},   # 7 trigs / 69 effects
+    "Investigated":   {"Investigate":  _always},  # 2 trigs / 117 effects
+    "Surveil":        {"Surveil":      _always},  # 11 trigs / 136 effects
+    "LifeLost":       {"LoseLife":     _always},  # 21 trigs / 1000 effects
 }
 
 #: Cost-port event_class → set of trigger event_classes that this cost

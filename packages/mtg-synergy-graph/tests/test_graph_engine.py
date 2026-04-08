@@ -87,6 +87,42 @@ def test_event_match_map_loaded():
     assert "SpellCast" in EVENT_MATCH_MAP
 
 
+# Phase B1: trigger ↔ effect pairs added from corpus inventory.
+def test_match_event_proliferate_pair():
+    assert match_event(
+        {"event_class": "Proliferate"},
+        {"event_class": "Proliferate"},
+    )
+
+
+def test_match_event_investigated_to_investigate():
+    assert match_event(
+        {"event_class": "Investigated"},
+        {"event_class": "Investigate"},
+    )
+
+
+def test_match_event_surveil_pair():
+    assert match_event(
+        {"event_class": "Surveil"},
+        {"event_class": "Surveil"},
+    )
+
+
+def test_match_event_life_lost_to_lose_life():
+    assert match_event(
+        {"event_class": "LifeLost"},
+        {"event_class": "LoseLife"},
+    )
+
+
+def test_match_event_life_lost_does_not_match_unrelated():
+    assert not match_event(
+        {"event_class": "LifeLost"},
+        {"event_class": "GainLife"},
+    )
+
+
 # ---------------------------------------------------------------------------
 # filter_matches — Python fallback (controller is runtime-only)
 # ---------------------------------------------------------------------------
