@@ -844,6 +844,13 @@ REPLACEMENT_BLOCKS_TRIGGER: dict[str, frozenset[str]] = {
     "GainLife":   frozenset({"LifeGained"}),
     "LoseLife":   frozenset({"LifeLost"}),
     "Discard":    frozenset({"Discarded"}),
+    # Phase C1: zone-change replacements (Grafdigger's Cage, Soulless
+    # Jailer, Kunoros, Worms of the Earth, Weathered Runestone). Pairs
+    # with a zone-aware filter in find_replacement_conflicts so the
+    # block applies only when the trigger's zone_origin/destination
+    # overlap with the replacement's. Without that filter, every
+    # ChangesZone trigger commander would be falsely flagged.
+    "Moved":      frozenset({"ChangesZone"}),
 }
 
 
@@ -1480,11 +1487,46 @@ def internal_synergy_boost(
     return min(matches * 6, 30)
 
 
+def _zone_overlap(
+    replacement_origin: str,
+    replacement_dest: str,
+    cmdr_triggers_with_zones: list[tuple[str, str, str]],
+) -> bool:
+    """Phase C1: True iff any commander ChangesZone trigger has a zone
+    pair compatible with the replacement's Origin$/Destination$.
+
+    Empty replacement zone fields mean "any zone" → match anything. A
+    populated replacement zone must intersect the trigger's same field
+    (treating empty trigger zones as "any" too, since Forge omits them
+    when the trigger is unscoped).
+    """
+    def _split(zones: str) -> set[str]:
+        return {z.strip() for z in zones.split(",") if z.strip()}
+
+    r_orig = _split(replacement_origin)
+    r_dest = _split(replacement_dest)
+    for ev, t_orig, t_dest in cmdr_triggers_with_zones:
+        if ev != "ChangesZone":
+            continue
+        t_orig_set = _split(t_orig)
+        t_dest_set = _split(t_dest)
+        # Empty side = "any" → consider it compatible.
+        orig_ok = not r_orig or not t_orig_set or bool(r_orig & t_orig_set)
+        dest_ok = not r_dest or not t_dest_set or bool(r_dest & t_dest_set)
+        if orig_ok and dest_ok:
+            return True
+    return False
+
+
 def find_replacement_conflicts(
     conn: sqlite3.Connection,
     commander_set: Sequence[str],
 ) -> list[dict[str, Any]]:
-    """Find ``R:`` lines with ReplaceWith$Prevent that block commander triggers."""
+    """Find ``R:`` lines with ReplaceWith$Prevent that block commander triggers.
+
+    Phase C1: ``Event$ Moved | Prevent$ True`` is matched zone-aware so
+    Grafdigger's Cage flags Karador / Meren but NOT Brago / Yarok.
+    """
     cmdr_ports = load_ports_for_set(conn, commander_set)
     cmdr_triggers = {
         (p.get("event_class") or "")
@@ -1493,6 +1535,17 @@ def find_replacement_conflicts(
     }
     if not cmdr_triggers:
         return []
+
+    cmdr_zone_triggers: list[tuple[str, str, str]] = [
+        (
+            (p.get("event_class") or ""),
+            (p.get("zone_origin") or ""),
+            (p.get("zone_destination") or ""),
+        )
+        for p in cmdr_ports
+        if p.get("port_type") == "trigger"
+        and (p.get("event_class") or "") == "ChangesZone"
+    ]
 
     cur = conn.execute(
         "SELECT * FROM card_ports WHERE port_type = 'replacement'"
@@ -1508,6 +1561,16 @@ def find_replacement_conflicts(
         ev = port.get("replacement_event") or ""
         blocked = REPLACEMENT_BLOCKS_TRIGGER.get(ev, frozenset())
         intersect = blocked & cmdr_triggers
+        # Phase C1: zone-scope ``Moved`` so it only flags reanimator-style
+        # commanders whose ChangesZone triggers actually share an origin
+        # / destination with the replacement's filter.
+        if intersect and ev == "Moved":
+            if not _zone_overlap(
+                port.get("zone_origin") or "",
+                port.get("zone_destination") or "",
+                cmdr_zone_triggers,
+            ):
+                continue
         if intersect:
             conflicts.append(
                 {

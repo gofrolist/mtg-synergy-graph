@@ -206,3 +206,52 @@ def test_replacement_conflicts_returns_empty_for_korvold(populated_db):
     """No fixture yet contains a Prevent replacement that hits Korvold's
     triggers — the call should still return an empty list cleanly."""
     assert find_replacement_conflicts(populated_db, ["Korvold, Fae-Cursed King"]) == []
+
+
+# ---------------------------------------------------------------------------
+# Phase C1 — zone-aware Moved/Prevent (graveyard hate)
+# ---------------------------------------------------------------------------
+
+
+from mtg_synergy_graph.graph_engine import _zone_overlap
+
+
+def test_zone_overlap_grafdiggers_cage_matches_reanimator():
+    # Replacement: Origin=Graveyard,Library Destination=Battlefield
+    # Trigger:     Origin=Graveyard           Destination=Battlefield (Karador)
+    assert _zone_overlap(
+        "Graveyard,Library", "Battlefield",
+        [("ChangesZone", "Graveyard", "Battlefield")],
+    )
+
+
+def test_zone_overlap_grafdiggers_cage_does_not_match_blink_commander():
+    # Brago: ChangesZone Origin=Battlefield Destination=Battlefield (flicker
+    # path is exile-then-return, but the trigger is on attack damage; his
+    # *zone* trigger is the flickered creature's ETB which fires on
+    # Battlefield→Battlefield. Origin sets disjoint → no overlap.
+    assert not _zone_overlap(
+        "Graveyard,Library", "Battlefield",
+        [("ChangesZone", "Exile", "Battlefield")],
+    )
+
+
+def test_zone_overlap_unscoped_replacement_matches_anything():
+    # An empty replacement zone field means "any zone" — must still match.
+    assert _zone_overlap("", "", [("ChangesZone", "Graveyard", "Battlefield")])
+
+
+def test_zone_overlap_destination_mismatch_blocks():
+    # Replacement only blocks zone changes INTO the battlefield. A trigger
+    # firing on Battlefield→Graveyard (death trigger) is unaffected.
+    assert not _zone_overlap(
+        "Graveyard", "Battlefield",
+        [("ChangesZone", "Battlefield", "Graveyard")],
+    )
+
+
+def test_zone_overlap_skips_non_changes_zone_triggers():
+    assert not _zone_overlap(
+        "Graveyard", "Battlefield",
+        [("Attacks", "", ""), ("DamageDone", "", "")],
+    )

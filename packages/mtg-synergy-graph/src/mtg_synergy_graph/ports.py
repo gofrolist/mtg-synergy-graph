@@ -449,6 +449,12 @@ def extract_replacement_ports(card_name: str, parsed: dict[str, Any]) -> list[Po
     """
     has_condition = bool(parsed.get("Condition") or parsed.get("CheckSVar"))
     replace_with = parsed.get("ReplaceWith") or ("Prevent" if "Prevent" in parsed else "")
+    # Phase C1: capture Origin$/Destination$ on replacement ports so the
+    # zone-aware conflict matcher can scope ``Event$ Moved | Prevent$ True``
+    # graveyard-hate effects (Grafdigger's Cage, Soulless Jailer) to ONLY
+    # the reanimator commanders whose triggers actually fire on
+    # GY→BF zone changes — and not flag every ChangesZone trigger commander
+    # like Brago/Yarok/Yuriko as anti-synergy.
     return [
         {
             "card_name":          card_name,
@@ -458,6 +464,8 @@ def extract_replacement_ports(card_name: str, parsed: dict[str, Any]) -> list[Po
             "replacement_result": replace_with,
             "replacement_player": parsed.get("ValidPlayer", ""),
             "valid_filter":       parsed.get("ValidCard") or parsed.get("ValidSource", ""),
+            "zone_origin":        parsed.get("Origin", ""),
+            "zone_destination":   parsed.get("Destination", ""),
             "is_conditional":     has_condition,
             "branch_kind":        "replacement_condition" if has_condition else "root",
             "branch_parent":      None,
