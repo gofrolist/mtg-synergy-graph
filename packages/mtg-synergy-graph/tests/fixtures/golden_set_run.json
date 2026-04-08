@@ -2,18 +2,18 @@
   "entries": [
     {
       "commander": "Korvold, Fae-Cursed King",
-      "ndcg30": 0.01122,
+      "ndcg30": 0.018299,
       "top10": [
-        "Michelangelo, Weirdness to 11",
-        "Blood Fountain",
         "Retrofitter Foundry",
-        "The Underworld Cookbook",
         "Witch's Oven",
-        "Bumbleflower's Sharepot",
-        "Cogworker's Puzzleknot",
         "Legion Extruder",
-        "Mask of the Jadecrafter",
-        "Melded Moxite"
+        "Fain, the Broker",
+        "Hammer of Purphoros",
+        "Transmogrant Altar",
+        "Michelangelo, Weirdness to 11",
+        "Throne of Geth",
+        "Blood Fountain",
+        "The Underworld Cookbook"
       ]
     },
     {
@@ -66,18 +66,18 @@
     },
     {
       "commander": "Meren of Clan Nel Toth",
-      "ndcg30": 0.007127,
+      "ndcg30": 0.006387,
       "top10": [
         "Grist, Voracious Larva",
+        "Jerren, Corrupted Bishop",
         "Seedship Broodtender",
         "Zabaz, the Glimmerwasp",
         "Benevolent Hydra",
         "Michelangelo, Weirdness to 11",
         "Winding Constrictor",
-        "Deathbonnet Sprout",
-        "Excavated Wall",
-        "Festerleech",
-        "Patchwork Beastie"
+        "A-Cauldron Familiar",
+        "Cauldron Familiar",
+        "Deathbonnet Sprout"
       ]
     },
     {
@@ -258,18 +258,18 @@
     },
     {
       "commander": "Marrow-Gnawer",
-      "ndcg30": 0.604086,
+      "ndcg30": 0.599031,
       "top10": [
         "Ogre Slumlord",
         "Piper of the Swarm",
         "Karumonix, the Rat King",
+        "Voracious Vermin",
         "Twisted Sewer-Witch",
         "Sol Ring",
         "Arcane Signet",
         "Demonic Tutor",
         "Feed the Swarm",
-        "Pack Rat",
-        "Persistent Marshstalker"
+        "Pack Rat"
       ]
     },
     {
@@ -290,8 +290,9 @@
     },
     {
       "commander": "Slimefoot, the Stowaway",
-      "ndcg30": 0.093723,
+      "ndcg30": 0.122276,
       "top10": [
+        "Bolas's Citadel",
         "Propagator Drone",
         "Beast Within",
         "Gothmog, Morgul Lieutenant",
@@ -300,8 +301,7 @@
         "Arcane Signet",
         "Demonic Tutor",
         "Feed the Swarm",
-        "Heroic Intervention",
-        "Nature's Lore"
+        "Heroic Intervention"
       ]
     },
     {

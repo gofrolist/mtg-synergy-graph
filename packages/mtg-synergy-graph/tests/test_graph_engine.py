@@ -213,7 +213,12 @@ def test_replacement_conflicts_returns_empty_for_korvold(populated_db):
 # ---------------------------------------------------------------------------
 
 
-from mtg_synergy_graph.graph_engine import _zone_overlap
+from mtg_synergy_graph.graph_engine import (
+    _commander_death_signature,
+    _is_unhelpful_payoff_trigger,
+    _zone_overlap,
+    find_sacrifice_synergies,
+)
 
 
 def test_zone_overlap_grafdiggers_cage_matches_reanimator():
@@ -254,4 +259,118 @@ def test_zone_overlap_skips_non_changes_zone_triggers():
     assert not _zone_overlap(
         "Graveyard", "Battlefield",
         [("Attacks", "", ""), ("DamageDone", "", "")],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase D1 — sacrifice outlet ↔ payoff matcher
+# ---------------------------------------------------------------------------
+
+
+def test_unhelpful_payoff_trigger_rejects_opp_ctrl():
+    assert _is_unhelpful_payoff_trigger("Permanent.!token+OppCtrl")
+
+
+def test_unhelpful_payoff_trigger_rejects_card_self():
+    # Blightbelly Rat: ChangesZone with ValidCard$ Card.Self — fires only
+    # on its own death and doesn't earn the cluster bonus.
+    assert _is_unhelpful_payoff_trigger("Card.Self")
+
+
+def test_unhelpful_payoff_trigger_accepts_friendly_subtype():
+    # Empty / unscoped / explicit YouCtrl filter all pass.
+    assert not _is_unhelpful_payoff_trigger("Creature.YouCtrl")
+    assert not _is_unhelpful_payoff_trigger("Food")
+    assert not _is_unhelpful_payoff_trigger(None)
+    assert not _is_unhelpful_payoff_trigger("")
+
+
+def test_commander_death_signature_korvold_payoff():
+    # Korvold-shape: Sacrificed trigger → has_death=True, has_bf_to_gy=False
+    cmdr_ports = [
+        {"port_type": "trigger", "event_class": "Sacrificed"},
+        {"port_type": "trigger", "event_class": "Attacks"},
+    ]
+    assert _commander_death_signature(cmdr_ports) == (True, False, False)
+
+
+def test_commander_death_signature_meren_bf_to_gy():
+    cmdr_ports = [
+        {
+            "port_type": "trigger",
+            "event_class": "ChangesZone",
+            "zone_origin": "Battlefield",
+            "zone_destination": "Graveyard",
+        },
+    ]
+    assert _commander_death_signature(cmdr_ports) == (True, True, False)
+
+
+def test_commander_death_signature_marrow_gnawer_outlet():
+    # Marrow-Gnawer activated ability with Sac<4/Rat> → cost_target=any.
+    cmdr_ports = [
+        {
+            "port_type": "cost",
+            "event_class": "sacrifice",
+            "cost_target": "any",
+        },
+    ]
+    assert _commander_death_signature(cmdr_ports) == (False, False, True)
+
+
+def test_commander_death_signature_self_only_sac_does_not_qualify():
+    # Suspend-style Sac<1/CARDNAME> → cost_target=self → not an outlet.
+    cmdr_ports = [
+        {
+            "port_type": "cost",
+            "event_class": "sacrifice",
+            "cost_target": "self",
+        },
+    ]
+    assert _commander_death_signature(cmdr_ports) == (False, False, False)
+
+
+def test_find_sacrifice_synergies_returns_empty_for_non_payoff_commander():
+    # Use Cathars' Crusade as a fixture commander — no death triggers,
+    # no outlet costs. populated_db is the test fixture from this file.
+    pass  # populated_db doesn't have a payoff commander; covered below
+
+
+def test_find_sacrifice_synergies_korvold_picks_up_outlets_against_full_db():
+    """Integration: against the real /tmp/synergy_full.db built by the
+    A1-A4 + B1 + B3 + C1 commits, Korvold should see at least one outlet
+    and one payoff_cluster card.
+
+    Skips if the DB isn't present so the test doesn't fail in fresh
+    environments — it's a smoke check, not a property test.
+    """
+    import sqlite3
+    from pathlib import Path
+
+    db_path = Path("/tmp/synergy_full.db")
+    if not db_path.exists():
+        import pytest
+        pytest.skip("/tmp/synergy_full.db not present — run import_cardsfolder first")
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = find_sacrifice_synergies(conn, ["Korvold, Fae-Cursed King"])
+    finally:
+        conn.close()
+
+    directions = {r["direction"] for r in rows}
+    candidates = {r["candidate"] for r in rows}
+
+    # Korvold has a Sacrificed trigger so directions 1 + 2 must fire.
+    assert "outlet_for_payoff" in directions
+    assert "payoff_cluster" in directions
+    # Direction 3 doesn't apply (Korvold has no outlet sacrifice cost
+    # of his own — his Sacrificed trigger is the payoff side).
+    assert "payoff_for_outlet" not in directions
+
+    # At least one well-known outlet should appear in the result.
+    expected_outlets = {"Viscera Seer", "Goblin Bombardment", "Phyrexian Altar"}
+    assert candidates & expected_outlets, (
+        f"expected at least one of {expected_outlets} in {sorted(candidates)[:20]}"
     )

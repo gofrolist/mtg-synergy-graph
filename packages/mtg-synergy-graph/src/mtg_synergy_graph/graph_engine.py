@@ -1582,3 +1582,214 @@ def find_replacement_conflicts(
                 }
             )
     return conflicts
+
+
+# ---------------------------------------------------------------------------
+# Phase D1 — sacrifice outlet ↔ payoff matcher
+# ---------------------------------------------------------------------------
+
+#: Cost-target values that qualify a sacrifice cost as a real outlet
+#: (depends on Phase A1 ``cost_target`` field). ``self`` is excluded —
+#: suspend-style ``Sac<1/CARDNAME>`` is not a generic outlet.
+_OUTLET_COST_TARGETS: frozenset[str] = frozenset({"other", "any"})
+
+
+def _is_unhelpful_payoff_trigger(valid_filter: str | None) -> bool:
+    """Phase D1: reject trigger filters that are mechanically NOT a
+    sacrifice / death cluster payoff.
+
+    Two cases:
+
+    1. **Opponent-scope** (``OppCtrl`` / ``Opponent``) — fires on
+       opponents losing life or sacrificing. The friendly cluster wants
+       the same-player path, so opponent triggers are anti-synergy noise.
+
+    2. **Card.Self** — the trigger only fires on the source's own death
+       (Blightbelly Rat, every "when CARDNAME dies" creature). These do
+       NOT scale with the rest of the deck's death rate the way real
+       payoffs (Blood Artist, Zulaport Cutthroat) do, so they shouldn't
+       earn the cluster bonus.
+
+    Empty / unscoped filters pass — in practice the surrounding
+    ``ValidPlayer$`` field (which we don't currently store on the port)
+    almost always defaults to friendly.
+    """
+    if not valid_filter:
+        return False
+    text = valid_filter
+    if "OppCtrl" in text or "Opponent" in text:
+        return True
+    if "Card.Self" in text:
+        return True
+    return False
+
+
+def _commander_death_signature(
+    cmdr_ports: list[PortRow],
+) -> tuple[bool, bool, bool]:
+    """Return ``(has_death_trig, has_bf_to_gy_trig, has_outlet_cost)``.
+
+    A "death trigger" is one of ``Sacrificed``, ``LifeLost`` (which fires
+    on sac-induced life loss for cards like Blood Artist), or
+    ``ChangesZone`` from Battlefield to Graveyard. The BF→GY case is
+    tracked separately so the SQL queries below can lift it without an
+    extra IN-list.
+    """
+    has_death = False
+    has_bf_to_gy = False
+    has_outlet_cost = False
+    for p in cmdr_ports:
+        ptype = p.get("port_type")
+        ev = (p.get("event_class") or "").strip()
+        if ptype == "trigger":
+            if ev in ("Sacrificed", "LifeLost"):
+                has_death = True
+            elif ev == "ChangesZone":
+                if (p.get("zone_origin") or "").strip() == "Battlefield" and \
+                   (p.get("zone_destination") or "").strip() == "Graveyard":
+                    has_death = True
+                    has_bf_to_gy = True
+        elif ptype == "cost" and ev == "sacrifice":
+            if (p.get("cost_target") or "") in _OUTLET_COST_TARGETS:
+                has_outlet_cost = True
+    return has_death, has_bf_to_gy, has_outlet_cost
+
+
+def find_sacrifice_synergies(
+    conn: sqlite3.Connection,
+    commander_set: Sequence[str],
+) -> list[dict[str, Any]]:
+    """Find sacrifice-based synergies above and beyond the generic
+    cost-feeds-trigger path.
+
+    Three directions are emitted:
+
+    1. **outlet_for_payoff** — commander has a death trigger
+       (``Sacrificed``, ``LifeLost``, ``ChangesZone Battlefield→Graveyard``)
+       and the candidate has a sacrifice cost with
+       ``cost_target IN ('other', 'any')``. Filters out the
+       ``cost_target='self'`` suspend-class cards that would otherwise
+       look like outlets.
+
+    2. **payoff_cluster** — commander has a death trigger AND the
+       candidate has the same kind of trigger. Captures the Korvold +
+       Blood Artist mutual cluster — both fire on the same event, neither
+       feeds the other through an effect port, so the existing
+       trigger-feeders matcher misses the synergy entirely.
+
+    3. **payoff_for_outlet** — commander IS the outlet (has a sacrifice
+       cost with ``cost_target='other'/'any'``) and the candidate has a
+       death trigger. Rare but real — Yahenni, Marrow-Gnawer, Slimefoot
+       (in our golden set).
+
+    Each (candidate, direction) pair is emitted at most once.
+    """
+    cmdr_ports = load_ports_for_set(conn, commander_set)
+    has_death, has_bf_to_gy, has_outlet_cost = _commander_death_signature(cmdr_ports)
+    if not (has_death or has_outlet_cost):
+        return []
+
+    cmdr_set = set(commander_set)
+    matches: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _emit(candidate: str, direction: str, **extra: Any) -> None:
+        key = (direction, candidate)
+        if candidate in cmdr_set or key in seen:
+            return
+        seen.add(key)
+        matches.append({"candidate": candidate, "direction": direction, **extra})
+
+    # Direction 1: commander payoff trigger → candidate outlet cost.
+    if has_death:
+        cur = conn.execute(
+            "SELECT DISTINCT card_name, branch_kind, is_conditional "
+            "FROM card_ports "
+            "WHERE port_type = 'cost' AND event_class = 'sacrifice' "
+            "AND cost_target IN ('other', 'any')"
+        )
+        for r in cur.fetchall():
+            _emit(
+                r["card_name"],
+                "outlet_for_payoff",
+                branch_kind=r["branch_kind"] or "root",
+                is_conditional=bool(r["is_conditional"]),
+            )
+
+    # Direction 2: commander payoff trigger → candidate payoff trigger.
+    # Reject explicitly opponent-scope triggers (OppCtrl / Opponent in
+    # the valid_filter) so cards that fire on opponents losing life or
+    # opponents sacrificing don't pollute the friendly cluster.
+    if has_death:
+        cur = conn.execute(
+            "SELECT DISTINCT card_name, event_class, valid_filter, "
+            "branch_kind, is_conditional "
+            "FROM card_ports "
+            "WHERE port_type = 'trigger' AND event_class IN ('Sacrificed', 'LifeLost')"
+        )
+        for r in cur.fetchall():
+            if _is_unhelpful_payoff_trigger(r["valid_filter"]):
+                continue
+            _emit(
+                r["card_name"],
+                "payoff_cluster",
+                trigger_event=r["event_class"],
+                branch_kind=r["branch_kind"] or "root",
+                is_conditional=bool(r["is_conditional"]),
+            )
+        if has_bf_to_gy:
+            cur = conn.execute(
+                "SELECT DISTINCT card_name, valid_filter, "
+                "branch_kind, is_conditional "
+                "FROM card_ports "
+                "WHERE port_type = 'trigger' AND event_class = 'ChangesZone' "
+                "AND zone_origin = 'Battlefield' AND zone_destination = 'Graveyard'"
+            )
+            for r in cur.fetchall():
+                if _is_unhelpful_payoff_trigger(r["valid_filter"]):
+                    continue
+                _emit(
+                    r["card_name"],
+                    "payoff_cluster",
+                    trigger_event="ChangesZone:BF->GY",
+                    branch_kind=r["branch_kind"] or "root",
+                    is_conditional=bool(r["is_conditional"]),
+                )
+
+    # Direction 3: commander outlet cost → candidate payoff trigger.
+    if has_outlet_cost:
+        cur = conn.execute(
+            "SELECT DISTINCT card_name, event_class, valid_filter, "
+            "branch_kind, is_conditional "
+            "FROM card_ports "
+            "WHERE port_type = 'trigger' AND event_class IN ('Sacrificed', 'LifeLost')"
+        )
+        for r in cur.fetchall():
+            if _is_unhelpful_payoff_trigger(r["valid_filter"]):
+                continue
+            _emit(
+                r["card_name"],
+                "payoff_for_outlet",
+                trigger_event=r["event_class"],
+                branch_kind=r["branch_kind"] or "root",
+                is_conditional=bool(r["is_conditional"]),
+            )
+        cur = conn.execute(
+            "SELECT DISTINCT card_name, valid_filter, "
+            "branch_kind, is_conditional "
+            "FROM card_ports "
+            "WHERE port_type = 'trigger' AND event_class = 'ChangesZone' "
+            "AND zone_origin = 'Battlefield' AND zone_destination = 'Graveyard'"
+        )
+        for r in cur.fetchall():
+            if _is_unhelpful_payoff_trigger(r["valid_filter"]):
+                continue
+            _emit(
+                r["card_name"],
+                "payoff_for_outlet",
+                trigger_event="ChangesZone:BF->GY",
+                branch_kind=r["branch_kind"] or "root",
+                is_conditional=bool(r["is_conditional"]),
+            )
+
+    return matches

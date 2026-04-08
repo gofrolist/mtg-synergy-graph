@@ -43,6 +43,7 @@ from .graph_engine import (
     find_etb_self_matches,
     find_lord_matches,
     find_replacement_conflicts,
+    find_sacrifice_synergies,
     find_scaling_matches,
     find_trigger_feeders,
     internal_synergy_boost,
@@ -106,6 +107,7 @@ from .parser import parser_branch_kinds  # noqa: E402, F401
 PORT_MATCH_WEIGHT       = 10
 CATCH_ALL_WEIGHT        = 1   # weak per-card; v3 halved from 2
 COST_FEED_WEIGHT        = 6   # v3 raised from 4 — strong signal
+SACRIFICE_SYNERGY_WEIGHT = 4  # Phase D1 — additive on top of cost_feed
 SCALING_WEIGHT          = 6   # v3 raised from 5
 DECKHINTS_WEIGHT        = 4   # v3 raised from 3 — Forge's own annotations
 CHAIN_WEIGHT            = 3
@@ -228,6 +230,7 @@ BUCKETS: tuple[str, ...] = (
     "port_match",
     "catchall",
     "cost_synergy",
+    "sacrifice_synergy",   # Phase D1 — outlet ↔ payoff cluster
     "scaling",
     "deck_hints",
     "chain",
@@ -518,6 +521,31 @@ def _score_replacements(
         _add_bucket(
             scores, matches, row["anti_synergy_card"], "replacement",
             -REPLACEMENT_WEIGHT * weight, {**row, "bucket": "replacement"},
+        )
+
+
+def _score_sacrifice_synergies(
+    conn: sqlite3.Connection,
+    commander_set: Sequence[str],
+    scores: dict[str, BucketDict],
+    matches: dict[str, MatchList],
+) -> None:
+    """Phase D1 — outlet ↔ payoff cluster boost.
+
+    Awards :data:`SACRIFICE_SYNERGY_WEIGHT` once per (candidate, direction)
+    pair from :func:`find_sacrifice_synergies`. Stacks additively on top
+    of the existing ``cost_synergy`` bucket so a card that is BOTH a real
+    outlet (Viscera Seer, cost_target=any) AND fed via the cost-feed
+    matcher gets credit in both buckets — the additional bonus is
+    intentional and reflects that real outlets are mechanically distinct
+    from suspend-class self-sacrifice cards.
+    """
+    for row in find_sacrifice_synergies(conn, commander_set):
+        weight = _branch_weight(row.get("branch_kind"))
+        _add_bucket(
+            scores, matches, row["candidate"], "sacrifice_synergy",
+            SACRIFICE_SYNERGY_WEIGHT * weight,
+            {**row, "bucket": "sacrifice_synergy"},
         )
 
 
@@ -1546,6 +1574,7 @@ def score_all_candidates(
     _score_replacement_resonance(conn, commander_set, cmdr_ports, scores, matches)
     _score_staples(conn, commander_set, scores, matches)
     _score_replacements(conn, commander_set, scores, matches)
+    _score_sacrifice_synergies(conn, commander_set, scores, matches)
 
     # Finalise totals.
     for buckets in scores.values():
