@@ -42,6 +42,7 @@ from .graph_engine import (
     find_deckhints_matches,
     find_etb_self_matches,
     find_lord_matches,
+    find_mana_restriction_matches,
     find_replacement_conflicts,
     find_sacrifice_synergies,
     find_scaling_matches,
@@ -108,6 +109,7 @@ PORT_MATCH_WEIGHT       = 10
 CATCH_ALL_WEIGHT        = 1   # weak per-card; v3 halved from 2
 COST_FEED_WEIGHT        = 6   # v3 raised from 4 — strong signal
 SACRIFICE_SYNERGY_WEIGHT = 4  # Phase D1 — additive on top of cost_feed
+MANA_RESTRICTION_WEIGHT  = 2  # Phase D2 — folds into cost_synergy bucket
 SCALING_WEIGHT          = 6   # v3 raised from 5
 DECKHINTS_WEIGHT        = 4   # v3 raised from 3 — Forge's own annotations
 CHAIN_WEIGHT            = 3
@@ -521,6 +523,28 @@ def _score_replacements(
         _add_bucket(
             scores, matches, row["anti_synergy_card"], "replacement",
             -REPLACEMENT_WEIGHT * weight, {**row, "bucket": "replacement"},
+        )
+
+
+def _score_mana_restriction(
+    conn: sqlite3.Connection,
+    commander_set: Sequence[str],
+    scores: dict[str, BucketDict],
+    matches: dict[str, MatchList],
+) -> None:
+    """Phase D2 — mana-restriction positive boost.
+
+    Folds into the existing ``cost_synergy`` bucket so the per-bucket
+    layout doesn't grow. The signal is mechanically a "cost-feeds-cmdr"
+    relationship — the candidate's restricted mana would be wasted
+    elsewhere but is exactly what the commander wants to spend on.
+    """
+    for row in find_mana_restriction_matches(conn, commander_set):
+        weight = _branch_weight(row.get("branch_kind"))
+        _add_bucket(
+            scores, matches, row["candidate"], "cost_synergy",
+            MANA_RESTRICTION_WEIGHT * weight,
+            {**row, "bucket": "cost_synergy", "match_kind": "mana_restriction"},
         )
 
 
@@ -1575,6 +1599,7 @@ def score_all_candidates(
     _score_staples(conn, commander_set, scores, matches)
     _score_replacements(conn, commander_set, scores, matches)
     _score_sacrifice_synergies(conn, commander_set, scores, matches)
+    _score_mana_restriction(conn, commander_set, scores, matches)
 
     # Finalise totals.
     for buckets in scores.values():

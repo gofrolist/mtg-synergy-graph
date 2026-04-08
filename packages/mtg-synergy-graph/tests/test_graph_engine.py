@@ -215,8 +215,11 @@ def test_replacement_conflicts_returns_empty_for_korvold(populated_db):
 
 from mtg_synergy_graph.graph_engine import (
     _commander_death_signature,
+    _commander_synergy_tags,
     _is_unhelpful_payoff_trigger,
+    _parse_restriction_tags,
     _zone_overlap,
+    find_mana_restriction_matches,
     find_sacrifice_synergies,
 )
 
@@ -373,4 +376,135 @@ def test_find_sacrifice_synergies_korvold_picks_up_outlets_against_full_db():
     expected_outlets = {"Viscera Seer", "Goblin Bombardment", "Phyrexian Altar"}
     assert candidates & expected_outlets, (
         f"expected at least one of {expected_outlets} in {sorted(candidates)[:20]}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase D2 — mana restriction matcher
+# ---------------------------------------------------------------------------
+
+
+def test_parse_restriction_tags_simple_creature():
+    assert _parse_restriction_tags("Spell.Creature") == {"Creature"}
+
+
+def test_parse_restriction_tags_dragon_with_modifier():
+    assert _parse_restriction_tags("Activated.Dragon+inZoneBattlefield") == {"Dragon"}
+
+
+def test_parse_restriction_tags_compound_creature_dragon():
+    assert _parse_restriction_tags("Spell.Creature+Dragon") == {"Creature", "Dragon"}
+
+
+def test_parse_restriction_tags_multiple_comma_tribes():
+    assert _parse_restriction_tags(
+        "Spell.Demon,Spell.Cleric,Spell.Vampire"
+    ) == {"Demon", "Cleric", "Vampire"}
+
+
+def test_parse_restriction_tags_drops_runtime_modifiers():
+    # cmcGE5 / wasCastFromYourGraveyard / CostContainsX are runtime
+    # — they can't be matched against commander identity tags.
+    assert _parse_restriction_tags("Spell.cmcGE5") == set()
+    assert _parse_restriction_tags("Spell.wasCastFromYourGraveyard") == set()
+    assert _parse_restriction_tags("CostContainsX") == set()
+    assert _parse_restriction_tags("CumulativeUpkeep") == set()
+
+
+def test_parse_restriction_tags_empty_or_none():
+    assert _parse_restriction_tags("") == set()
+    assert _parse_restriction_tags(None) == set()  # type: ignore[arg-type]
+
+
+def test_commander_synergy_tags_ignores_static_subtypes():
+    """Critical Phase D2 invariant: literal cards.subtypes does NOT
+    contribute to the tag set. Only filter-derived tags qualify, so
+    Kaalia (literal subtype Cleric) does NOT match Spell.Cleric mana
+    fixers via her static identity. The cards-row argument is unused
+    today and the function tolerates an empty list.
+    """
+    cmdr_ports = []
+    tags = _commander_synergy_tags(cmdr_ports, [])
+    assert tags == set()
+
+
+def test_commander_synergy_tags_picks_up_filter_subtypes():
+    # Edgar Markov-shape: trigger filter ``Card.Vampire+Other`` should
+    # surface Vampire as a synergy tag.
+    cmdr_ports = [
+        {"port_type": "trigger", "valid_filter": "Card.Vampire+Other"},
+    ]
+    tags = _commander_synergy_tags(cmdr_ports, [])
+    assert "Vampire" in tags
+
+
+def test_commander_synergy_tags_splits_comma_separated_filter():
+    # Talrand-shape: ValidCard$ Instant,Sorcery — comma split required.
+    cmdr_ports = [
+        {"port_type": "trigger", "valid_filter": "Instant,Sorcery"},
+    ]
+    tags = _commander_synergy_tags(cmdr_ports, [])
+    assert "Instant" in tags
+    assert "Sorcery" in tags
+
+
+def test_find_mana_restriction_against_full_db_talrand():
+    """Integration: Talrand should pick up Spell.Instant,Spell.Sorcery
+    restrictions via his SpellCast trigger filter (no static identity
+    crutch needed). Skips if /tmp/synergy_full.db isn't built yet."""
+    import sqlite3
+    from pathlib import Path
+
+    db_path = Path("/tmp/synergy_full.db")
+    if not db_path.exists():
+        import pytest
+        pytest.skip("/tmp/synergy_full.db not present — run import_cardsfolder first")
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = find_mana_restriction_matches(conn, ["Talrand, Sky Summoner"])
+    finally:
+        conn.close()
+
+    assert rows, "expected at least one mana-restriction match for Talrand"
+    # Every match must have surfaced via Instant or Sorcery — no static
+    # subtype leakage (Talrand's literal Merfolk / Wizard subtypes must
+    # NOT contribute).
+    for r in rows:
+        assert {"Instant", "Sorcery"} & set(r["matched_tags"]), (
+            f"unexpected match {r}"
+        )
+
+
+def test_find_mana_restriction_kaalia_does_not_explode():
+    """Regression: Kaalia of the Vast must NOT match generic Legendary /
+    Cleric restrictions via her literal type line. Her trigger valid
+    filter is ``Card.Self`` (no synergy tags), and her ChangeType$
+    Angel/Demon/Dragon list lives in an SVar that the matcher does not
+    parse, so the expected result is an empty match list — better to
+    miss real matches than to flood with false positives.
+    """
+    import sqlite3
+    from pathlib import Path
+
+    db_path = Path("/tmp/synergy_full.db")
+    if not db_path.exists():
+        import pytest
+        pytest.skip("/tmp/synergy_full.db not present — run import_cardsfolder first")
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = find_mana_restriction_matches(conn, ["Kaalia of the Vast"])
+    finally:
+        conn.close()
+
+    cands = {r["candidate"] for r in rows}
+    # Specifically Plaza of Heroes / Delighted Halfling / Untaidake were
+    # the false positives that regressed her −0.038 NDCG before the
+    # static-subtype removal.
+    forbidden = {"Plaza of Heroes", "Delighted Halfling", "Untaidake, the Cloud Keeper"}
+    assert not (cands & forbidden), (
+        f"Kaalia must not match generic Legendary fixers: {sorted(cands & forbidden)}"
     )

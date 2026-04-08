@@ -1487,6 +1487,161 @@ def internal_synergy_boost(
     return min(matches * 6, 30)
 
 
+# ---------------------------------------------------------------------------
+# Phase D2 — mana restriction matcher (positive boost only)
+# ---------------------------------------------------------------------------
+
+
+def _parse_restriction_tags(restriction: str) -> set[str]:
+    """Parse a Forge ``RestrictValid$`` value into a set of identity tags
+    that the mana would be useful for.
+
+    Examples:
+
+    - ``Spell.Creature``                  → ``{"Creature"}``
+    - ``Spell.Dragon``                    → ``{"Dragon"}``
+    - ``Spell.Creature+Dragon``           → ``{"Creature", "Dragon"}``
+    - ``Spell.Instant,Spell.Sorcery``     → ``{"Instant", "Sorcery"}``
+    - ``Spell.Demon,Spell.Cleric,Spell.Vampire`` → ``{"Demon","Cleric","Vampire"}``
+    - ``Activated.Dragon+inZoneBattlefield``  → ``{"Dragon"}``
+    - ``CostContainsX``, ``CumulativeUpkeep`` (no ``.``) → ``set()``
+
+    Tokens whose first segment isn't a clean alphabetic class/type name
+    (``cmcGE5``, ``wasCastFromYourGraveyard``, ...) are dropped — they
+    are runtime modifiers, not synergy tags.
+    """
+    tags: set[str] = set()
+    if not restriction:
+        return tags
+    for raw in restriction.split(","):
+        token = raw.strip()
+        if not token or "." not in token:
+            continue
+        _, rest = token.split(".", 1)
+        # ``+`` separates AND-modifiers — both ``Creature`` and ``Dragon``
+        # in ``Spell.Creature+Dragon`` are meaningful synergy tags.
+        for piece in rest.split("+"):
+            piece = piece.strip()
+            if piece.isalpha() and piece[:1].isupper():
+                tags.add(piece)
+    return tags
+
+
+def _commander_synergy_tags(
+    cmdr_ports: list[PortRow],
+    cmdr_card_rows: Sequence[sqlite3.Row],  # noqa: ARG001
+) -> set[str]:
+    """Phase D2: tag set for the commander used by the mana-restriction
+    matcher.
+
+    The tag set is built **only** from the commander's own port filters
+    (``valid_filter`` and ``affected_scope``) — NOT from the literal
+    ``cards.subtypes`` / ``card_types`` / ``supertypes`` columns. This
+    is the principled distinction:
+
+    - A subtype that appears in a trigger / static filter (Edgar
+      Markov's ``Card.Vampire+Other`` trigger, Ur-Dragon's
+      ``Dragon.Other`` static cost reducer) is mechanical evidence that
+      the deck PLANS to cast lots of that subtype — exactly what a
+      restricted-mana fixer wants.
+    - A subtype on the literal type line alone is just what the
+      commander HAPPENS to be (Kaalia is a Cleric, Rakdos is a Demon,
+      every commander is Legendary). It doesn't mean the deck wants
+      Cleric / Demon / Legendary fixers, and matching on it floods
+      tribal commanders with generic-Legendary mana rocks (Kaalia
+      regressed −0.038 NDCG when the literal subtypes were included).
+
+    Filters can be comma-separated (Talrand's ``Instant,Sorcery``) so
+    we split on commas before calling :func:`explode_filter`, which
+    only knows about ``+`` and ``.``.
+
+    The unused ``cmdr_card_rows`` parameter is kept on the signature so
+    callers don't need to be rewritten if a future phase wants to add
+    a curated subset of static identity tags back.
+    """
+    tags: set[str] = set()
+    for p in cmdr_ports:
+        for f in (p.get("valid_filter"), p.get("affected_scope")):
+            if not f:
+                continue
+            for chunk in f.split(","):
+                chunk = chunk.strip()
+                if not chunk:
+                    continue
+                for attr in explode_filter(chunk):
+                    if attr.get("attr_kind") in ("subtype", "type", "supertype"):
+                        val = attr.get("attr_value")
+                        if val:
+                            tags.add(val)
+    return tags
+
+
+def find_mana_restriction_matches(
+    conn: sqlite3.Connection,
+    commander_set: Sequence[str],
+) -> list[dict[str, Any]]:
+    """Phase D2: cards whose ``DB$ Mana RestrictValid$`` permits exactly
+    the spells / abilities the commander wants to cast / activate.
+
+    Examples:
+    - Talrand        → Baral (Spell.Instant,Spell.Sorcery)
+    - The Ur-Dragon  → Dragon's Hoard (Spell.Dragon,Activated.Dragon+...)
+    - Animar         → Cavern of Souls (Spell.Creature+ChosenType — the
+      ChosenType modifier is runtime so we strip it; the Creature tag
+      still matches Animar's creature card_type)
+    - Edgar Markov   → Spell.Demon,Spell.Cleric,Spell.Vampire restrictions
+
+    Note: this is a positive-only boost. The conflict case (restriction
+    on a card that does NOT match the commander identity, e.g. Cavern
+    of Souls in a non-creature deck) is not penalised here — that would
+    need a separate phase that adds it to the penalty layer.
+    """
+    rows = conn.execute(
+        "SELECT name, subtypes, card_types, supertypes "
+        "FROM cards WHERE name IN ({})".format(
+            ",".join("?" * len(commander_set))
+        ),
+        tuple(commander_set),
+    ).fetchall()
+    if not rows:
+        return []
+
+    cmdr_ports = load_ports_for_set(conn, commander_set)
+    cmdr_tags = _commander_synergy_tags(cmdr_ports, rows)
+    if not cmdr_tags:
+        return []
+
+    cmdr_set = set(commander_set)
+    cur = conn.execute(
+        "SELECT card_name, mana_restriction, branch_kind, is_conditional "
+        "FROM card_ports "
+        "WHERE port_type = 'effect' AND event_class = 'Mana' "
+        "AND mana_restriction IS NOT NULL AND mana_restriction != ''"
+    )
+
+    matches: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for r in cur.fetchall():
+        cand = r["card_name"]
+        if cand in cmdr_set or cand in seen:
+            continue
+        rtags = _parse_restriction_tags(r["mana_restriction"] or "")
+        overlap = rtags & cmdr_tags
+        if not overlap:
+            continue
+        seen.add(cand)
+        matches.append(
+            {
+                "candidate":        cand,
+                "mana_restriction": r["mana_restriction"],
+                "matched_tags":     sorted(overlap),
+                "branch_kind":      r["branch_kind"] or "root",
+                "is_conditional":   bool(r["is_conditional"]),
+            }
+        )
+    return matches
+
+
 def _zone_overlap(
     replacement_origin: str,
     replacement_dest: str,
