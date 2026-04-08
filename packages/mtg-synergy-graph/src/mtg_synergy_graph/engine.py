@@ -316,6 +316,63 @@ class SynergyEngine:
             explanation=explanation,
         )
 
+    def resolve_oracle_id(self, oracle_id: str) -> str:
+        """Return the ``cards.name`` row that matches ``oracle_id``.
+
+        Raises ``LookupError`` when the oracle_id is not present in
+        ``synergy.db``. Callers can catch this distinctly from
+        :class:`ValueError` (which ``page()`` raises for unknown
+        commander *names*) to distinguish "card not in Forge source"
+        from "name lookup failed".
+        """
+        row = self._conn.execute(
+            "SELECT name FROM cards WHERE oracle_id = ? LIMIT 1",
+            (oracle_id,),
+        ).fetchone()
+        if row is None:
+            raise LookupError(
+                f"oracle_id {oracle_id!r} is not in synergy.db "
+                "(card absent from the Forge cardsfolder source)"
+            )
+        return row["name"]
+
+    def page_by_oracle_id(
+        self,
+        oracle_id: str | Sequence[str],
+        *,
+        offset: int = 0,
+        limit: int = 100,
+        include_explanations: bool = False,
+    ) -> RecommendationPage:
+        """Paginate by Scryfall oracle_id instead of Forge card name.
+
+        Resolves each oracle_id → synergy.db card name via
+        :meth:`resolve_oracle_id`, then delegates to :meth:`page`. This is
+        the preferred entry point for callers that already hold Scryfall
+        identifiers (e.g. EDHREC comparison harnesses, API clients that
+        key on oracle_id). For DFC commanders it sidesteps the
+        front-face-vs-combined-name mismatch entirely.
+
+        ``oracle_id`` may be a single string or a sequence for partner
+        pairs.
+
+        Raises:
+            LookupError: when any supplied oracle_id is not in synergy.db.
+        """
+        if isinstance(oracle_id, str):
+            oids: tuple[str, ...] = (oracle_id,)
+        else:
+            oids = tuple(oracle_id)
+        if not oids:
+            raise ValueError("at least one oracle_id is required")
+        names = [self.resolve_oracle_id(oid) for oid in oids]
+        return self.page(
+            names,
+            offset=offset,
+            limit=limit,
+            include_explanations=include_explanations,
+        )
+
     def page(
         self,
         commander: str | Sequence[str],

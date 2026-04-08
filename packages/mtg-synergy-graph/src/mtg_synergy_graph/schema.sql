@@ -6,6 +6,8 @@
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS cards (
     name            TEXT PRIMARY KEY,
+    oracle_id       TEXT,            -- Scryfall canonical oracle_id; NULL only for cards the
+                                     -- import-time resolver could not match against tags.db
     mana_cost       TEXT,
     cmc             REAL,
     types           TEXT,            -- space-separated "Creature Human Cleric"
@@ -27,6 +29,11 @@ CREATE TABLE IF NOT EXISTS cards (
     rarity          TEXT,
     set_code        TEXT
 );
+
+-- Partial unique index: one Forge card per Scryfall oracle_id, but NULLs are
+-- unconstrained (unresolved cards can coexist until a newer tags.db fills them in).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cards_oracle_id
+    ON cards(oracle_id) WHERE oracle_id IS NOT NULL;
 
 -- ---------------------------------------------------------------------------
 -- §4.2 card_ports

@@ -20,7 +20,7 @@ def db(tmp_path):
 
 
 def test_imports_all_fixtures(db):
-    cards, ports = import_cards_folder(db, FIXTURES)
+    cards, ports = import_cards_folder(db, FIXTURES, scryfall_db=None)
     # 5 Phase-1 reference cards + 4 Phase-2 Korvold-test cards
     # + Sol Ring & Urza Lord High Artificer (resource-density fixtures).
     assert cards == 11
@@ -43,7 +43,7 @@ def test_imports_all_fixtures(db):
 
 
 def test_korvold_chain_persists_branch_metadata(db):
-    import_cards_folder(db, FIXTURES)
+    import_cards_folder(db, FIXTURES, scryfall_db=None)
     row = db.execute(
         "SELECT branch_kind, source_svar, chain_depth, is_conditional "
         "FROM card_ports WHERE card_name = ? AND event_class = 'Draw'",
@@ -57,7 +57,7 @@ def test_korvold_chain_persists_branch_metadata(db):
 
 
 def test_scute_swarm_branches_marked_conditional(db):
-    import_cards_folder(db, FIXTURES)
+    import_cards_folder(db, FIXTURES, scryfall_db=None)
     rows = db.execute(
         "SELECT event_class, branch_kind, is_conditional "
         "FROM card_ports WHERE card_name = ? AND event_class IN ('Token','CopyPermanent')",
@@ -71,7 +71,7 @@ def test_scute_swarm_branches_marked_conditional(db):
 
 
 def test_port_attributes_explode_creature_youctrl(db):
-    import_cards_folder(db, FIXTURES)
+    import_cards_folder(db, FIXTURES, scryfall_db=None)
     # Cathars' trigger filter is "Creature.YouCtrl" → 2 attribute rows.
     rows = db.execute(
         """

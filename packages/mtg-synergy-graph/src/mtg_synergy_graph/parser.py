@@ -161,7 +161,10 @@ def _parse_card_block(block_lines: list[str], card: dict[str, Any], *, is_altern
     """Parse one face of a Forge .txt file into ``card``.
 
     For the front face we set every key. For the back face we only merge
-    abilities / keywords / svars — identity fields stay on the front face.
+    abilities / keywords / svars — identity fields stay on the front face,
+    except for the back-face ``Name:`` which is recorded in
+    ``card["alternate_name"]`` so the importer can do DFC composite
+    matching against Scryfall's ``A // B`` canonical form.
     """
     for raw in block_lines:
         line = raw.strip()
@@ -173,7 +176,10 @@ def _parse_card_block(block_lines: list[str], card: dict[str, Any], *, is_altern
             if not line.startswith(prefix):
                 continue
             if is_alternate:
-                # Identity fields belong to the front face only.
+                # Identity fields belong to the front face only — except
+                # the back-face Name, which we preserve for DFC resolution.
+                if key == "name":
+                    card["alternate_name"] = line[plen:]
                 matched = True
                 break
             value = line[plen:]
@@ -228,6 +234,7 @@ def parse_card_text(text: str) -> dict[str, Any]:
     """
     card: dict[str, Any] = {
         "name": "",
+        "alternate_name": None,  # populated for DFC/MDFC back faces
         "abilities": [],
         "svars": {},
         "keywords": [],

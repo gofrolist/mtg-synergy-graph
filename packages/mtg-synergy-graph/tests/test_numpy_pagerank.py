@@ -79,7 +79,7 @@ def test_numpy_pagerank_runs_on_fixture_graph(tmp_path):
 
     db_path = tmp_path / "synergy.db"
     conn = open_db(db_path)
-    import_cards_folder(conn, FIXTURES)
+    import_cards_folder(conn, FIXTURES, scryfall_db=None)
     adj = build_causal_graph(conn)
     pr = numpy_personalised_pagerank(adj, "Korvold, Fae-Cursed King", iterations=20)
     conn.close()

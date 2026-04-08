@@ -28,7 +28,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 def populated_db(tmp_path_factory):
     db_path = tmp_path_factory.mktemp("graphcache") / "synergy.db"
     conn = open_db(db_path)
-    import_cards_folder(conn, FIXTURES)
+    import_cards_folder(conn, FIXTURES, scryfall_db=None)
     conn.close()
     return db_path
 

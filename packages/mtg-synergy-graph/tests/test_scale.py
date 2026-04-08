@@ -33,7 +33,9 @@ pytestmark = pytest.mark.skipif(
 def imported_db(tmp_path_factory):
     db_path = tmp_path_factory.mktemp("scale") / "synergy.db"
     conn = open_db(db_path)
-    cards, ports = import_cards_folder(conn, FORGE_FOLDER, limit=500)
+    cards, ports = import_cards_folder(
+        conn, FORGE_FOLDER, scryfall_db=None, limit=500,
+    )
     conn.close()
     assert cards == 500
     assert ports > 0

@@ -163,7 +163,7 @@ def test_compare_to_edhrec_counts_per_section(fake_edhrec_db):
 def golden_set_db(tmp_path_factory):
     db_path = tmp_path_factory.mktemp("golden") / "synergy.db"
     conn = open_db(db_path)
-    import_cards_folder(conn, FIXTURES)
+    import_cards_folder(conn, FIXTURES, scryfall_db=None)
     conn.close()
     return db_path
 
