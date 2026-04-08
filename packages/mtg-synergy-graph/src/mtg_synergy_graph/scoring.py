@@ -39,6 +39,7 @@ from .graph_engine import (
     find_amplifier_matches,
     find_catchall_card_matches,
     find_chain_matches,
+    find_counter_producer_payoff,
     find_deckhints_matches,
     find_etb_self_matches,
     find_lord_matches,
@@ -108,6 +109,7 @@ PORT_MATCH_WEIGHT       = 10
 CATCH_ALL_WEIGHT        = 1   # weak per-card; v3 halved from 2
 COST_FEED_WEIGHT        = 6   # v3 raised from 4 — strong signal
 SACRIFICE_SYNERGY_WEIGHT = 4  # Phase D1 — additive on top of cost_feed
+COUNTER_SYNERGY_WEIGHT   = 4  # Phase F1 — +1/+1 counter producer → payoff commander
 MANA_RESTRICTION_WEIGHT  = 2  # Phase D2 — folds into cost_synergy bucket
 SCALING_WEIGHT          = 6   # v3 raised from 5
 DECKHINTS_WEIGHT        = 4   # v3 raised from 3 — Forge's own annotations
@@ -232,6 +234,7 @@ BUCKETS: tuple[str, ...] = (
     "catchall",
     "cost_synergy",
     "sacrifice_synergy",   # Phase D1 — outlet ↔ payoff cluster
+    "counter_synergy",     # Phase F1 — P1P1 producer ↔ counter-payoff cmdr
     "scaling",
     "deck_hints",
     "chain",
@@ -576,6 +579,35 @@ def _score_sacrifice_synergies(
             scores, matches, row["candidate"], "sacrifice_synergy",
             SACRIFICE_SYNERGY_WEIGHT * weight,
             {**row, "bucket": "sacrifice_synergy"},
+        )
+
+
+def _score_counter_producer_payoff(
+    conn: sqlite3.Connection,
+    commander_set: Sequence[str],
+    scores: dict[str, BucketDict],
+    matches: dict[str, MatchList],
+) -> None:
+    """Phase F1 — +1/+1 counter producer ↔ counter-payoff commander.
+
+    Gated on :func:`find_counter_producer_payoff` (itself gated on
+    :func:`_commander_is_p1p1_payoff`). Awards
+    :data:`COUNTER_SYNERGY_WEIGHT` once per candidate for commanders
+    like Kyler, Bess, Grakmaw, Hallar and Qala — the 14 legendary
+    creatures whose mechanic reads the ``CardCounters.P1P1`` or
+    ``CardCounters.ALL + PutCounter(P1P1)`` signature.
+
+    The bucket closes a long-standing gap where cards like Maester
+    Seymour (targeted P1P1 pump) and Hardened Scales (replacement
+    doubler) were credited only by the weak ``port_match`` path, even
+    though they are the central mechanical engines for counter decks.
+    """
+    for row in find_counter_producer_payoff(conn, commander_set):
+        weight = _branch_weight(row.get("branch_kind"))
+        _add_bucket(
+            scores, matches, row["candidate"], "counter_synergy",
+            COUNTER_SYNERGY_WEIGHT * weight,
+            {**row, "bucket": "counter_synergy"},
         )
 
 
@@ -1605,6 +1637,7 @@ def score_all_candidates(
     _score_staples(conn, commander_set, scores, matches)
     _score_replacements(conn, commander_set, scores, matches)
     _score_sacrifice_synergies(conn, commander_set, scores, matches)
+    _score_counter_producer_payoff(conn, commander_set, scores, matches)
     _score_mana_restriction(conn, commander_set, scores, matches)
     # Phase D4 (find_flicker_loop_matches) is intentionally NOT wired
     # in here. The matcher correctly identifies flicker-source clusters

@@ -130,18 +130,18 @@
     },
     {
       "commander": "Animar, Soul of Elements",
-      "ndcg30": 0.129406,
+      "ndcg30": 0.180063,
       "top10": [
+        "Benevolent Hydra",
+        "Ozolith, the Shattered Spire",
+        "The Earth Crystal",
+        "Merfolk Skydiver",
+        "Roalesk, Apex Hybrid",
         "Mystic Remora",
         "Sol Ring",
         "Arcane Signet",
         "Counterspell",
-        "Cyclonic Rift",
-        "Heroic Intervention",
-        "Nature's Lore",
-        "Sylvan Library",
-        "Thought Vessel",
-        "Beast Within"
+        "Cyclonic Rift"
       ]
     },
     {

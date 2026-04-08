@@ -2063,3 +2063,137 @@ def find_sacrifice_synergies(
         )
 
     return matches
+
+
+# ---------------------------------------------------------------------------
+# §7.x — +1/+1 counter producer → counter-payoff commander
+# ---------------------------------------------------------------------------
+#
+# The existing trigger-feeder matcher joins candidate effects to commander
+# triggers by event_class match. That misses the Maester Seymour + Kyler
+# family: Seymour's combat trigger puts N P1P1 counters on a target
+# creature (can be Kyler), Kyler's static scales other Humans by the
+# counters on itself. Neither side is an event-feed of the other — it's
+# a "counter producer meets counter payoff" pattern.
+#
+# The matcher gates on a commander-level payoff signature so it does not
+# flood every creature commander with generic +1/+1 counter cards.
+
+
+def _commander_is_p1p1_payoff(cmdr_ports: list[PortRow]) -> bool:
+    """Return True when the commander mechanically cares about *+1/+1*
+    counters specifically (not charge / verse / spore / timer / etc.).
+
+    Two accepted signatures, either one sufficient:
+
+    1. ``scales_with CardCounters.P1P1`` — the commander has a SVar
+       that explicitly reads the ``P1P1`` counter pool. Bess, Soul
+       Nourisher and Qala, Ajani's Pridemate land here.
+
+    2. ``scales_with CardCounters.ALL`` combined with ``effect
+       PutCounter (P1P1)`` on the same card. ALL is the generic
+       "any counter" expression — ambiguous on its own — but when
+       paired with a P1P1-producing effect on the same card it
+       resolves to "this card counts its own P1P1 counters to do
+       something". Kyler's ChangesZone chain hits this.
+
+    Deliberately *rejected*:
+
+    * Commanders that only put P1P1 counters on Self without a
+      scales_with row (Korvold uses a flavor counter, never reads it).
+    * Commanders that scale with non-P1P1 counters (Thelon/spore,
+      Toxrill/slime, Zimone/dice, Sarulf/… actually Sarulf passes the
+      gate and is a weak but legitimate inclusion).
+    * Proliferate-only commanders (Atraxa). Proliferate already has
+      its own bucket via ``replacement_resonance``.
+    """
+    has_p1p1_effect = False
+    scales_p1p1 = False
+    scales_all = False
+    for p in cmdr_ports:
+        ptype = p.get("port_type")
+        ev = (p.get("event_class") or "").strip()
+        if ptype == "effect" and ev in ("PutCounter", "PutCounterAll"):
+            if (p.get("counter_type") or "").strip() == "P1P1":
+                has_p1p1_effect = True
+        elif ptype == "scales_with":
+            if ev == "CardCounters.P1P1":
+                scales_p1p1 = True
+            elif ev == "CardCounters.ALL":
+                scales_all = True
+    return scales_p1p1 or (scales_all and has_p1p1_effect)
+
+
+#: Candidate ports whose ``valid_filter`` mentions ``OppCtrl`` or
+#: ``Opponent`` put counters on the *opponent's* creatures. Those are
+#: anti-synergy — e.g. Dictate of Erebos rejects Viconia's side. Empty
+#: filter passes (unscoped = targets anything, which for a PutCounter
+#: effect in practice means "the controller picks friendly").
+def _counter_effect_is_friendly(valid_filter: str | None) -> bool:
+    if not valid_filter:
+        return True
+    if "OppCtrl" in valid_filter or "Opponent" in valid_filter:
+        return False
+    return True
+
+
+#: The friendly filter above is necessary but not sufficient — a card
+#: that puts P1P1 counters on an ``Artifact`` or ``Land`` (rare, but it
+#: happens with ``ValidCards$ Artifact.YouCtrl`` style effects) is not
+#: a creature-counter-payoff card. We require the filter to either be
+#: empty (unscoped; the controller picks friendly creatures by default)
+#: or explicitly mention ``Creature`` / ``Permanent``.
+def _counter_effect_hits_creatures(valid_filter: str | None) -> bool:
+    if not valid_filter:
+        return True
+    return "Creature" in valid_filter or "Permanent" in valid_filter
+
+
+def find_counter_producer_payoff(
+    conn: sqlite3.Connection,
+    commander_set: Sequence[str],
+) -> list[dict[str, Any]]:
+    """Return (candidate, branch_kind) rows describing +1/+1 counter
+    producers that feed the commander's counter-payoff mechanic.
+
+    Gated on :func:`_commander_is_p1p1_payoff`. For each candidate whose
+    ``card_ports`` has an ``effect PutCounter`` / ``PutCounterAll`` row
+    with ``counter_type='P1P1'`` and a friendly, creature-hitting
+    ``valid_filter``, one row is emitted. Multiple matching rows per
+    candidate collapse into a single emission — the bucket is a flat
+    bonus, not an accumulator.
+    """
+    cmdr_ports = load_ports_for_set(conn, commander_set)
+    if not _commander_is_p1p1_payoff(cmdr_ports):
+        return []
+
+    cmdr_set = set(commander_set)
+    seen: set[str] = set()
+    results: list[dict[str, Any]] = []
+
+    cur = conn.execute(
+        "SELECT DISTINCT card_name, valid_filter, branch_kind, is_conditional "
+        "FROM card_ports "
+        "WHERE port_type = 'effect' "
+        "AND event_class IN ('PutCounter', 'PutCounterAll') "
+        "AND counter_type = 'P1P1'"
+    )
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name in cmdr_set or name in seen:
+            continue
+        vf = r["valid_filter"]
+        if not _counter_effect_is_friendly(vf):
+            continue
+        if not _counter_effect_hits_creatures(vf):
+            continue
+        seen.add(name)
+        results.append(
+            {
+                "candidate":      name,
+                "branch_kind":    r["branch_kind"] or "root",
+                "is_conditional": bool(r["is_conditional"]),
+                "valid_filter":   vf,
+            }
+        )
+    return results
