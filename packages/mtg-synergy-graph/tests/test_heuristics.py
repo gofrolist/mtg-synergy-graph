@@ -80,86 +80,19 @@ def test_evaluate_strategic_rules_token_for_sacrifice_korvold(korvold, scute_swa
     assert any("sacrifice" in r.lower() for r in reasons)
 
 
-# ---------------------------------------------------------------------------
-# Phase D3 — combat modifier rule
-# ---------------------------------------------------------------------------
+# Phase D3's combat-modifier rule was reverted — every tuning cost
+# Hi-Syn on the golden set for zero NDCG gain. See the comment block
+# above ``_COMBAT_MODIFIER_STATICS`` in heuristics.py for details.
 
 
-def test_combat_modifier_rule_fires_for_attacks_trigger_commander():
-    # Yuriko-shape: Attacks trigger with ValidCard$ Ninja.YouCtrl.
-    cmdr_ports = [
-        {
-            "port_type":   "trigger",
-            "event_class": "Attacks",
-            "valid_filter": "Ninja.YouCtrl",
-        },
-    ]
-    active_names = {r["name"] for r in active_rules_for_commander(cmdr_ports)}
-    assert "combat_modifier_for_attack_triggers" in active_names
-
-
-def test_combat_modifier_rule_fires_for_combat_damage_trigger_commander():
-    # Brago-shape: DamageDone with CombatDamage flag, no "Player" in filter.
-    cmdr_ports = [
-        {
-            "port_type":   "trigger",
-            "event_class": "DamageDone",
-            "valid_filter": "Card.Self",
-            "is_combat":    True,
-        },
-    ]
-    active_names = {r["name"] for r in active_rules_for_commander(cmdr_ports)}
-    assert "combat_modifier_for_attack_triggers" in active_names
-
-
-def test_combat_modifier_rule_does_not_fire_for_non_combat_commander():
-    # Korvold: Sacrificed / Attacks-but-wrong-shape... actually Korvold
-    # DOES have an Attacks trigger (card drawn on sacrifice chain), so
-    # use Talrand-style SpellCast commander as the no-fire case.
-    cmdr_ports = [
-        {"port_type": "trigger", "event_class": "SpellCast"},
-    ]
-    active_names = {r["name"] for r in active_rules_for_commander(cmdr_ports)}
-    assert "combat_modifier_for_attack_triggers" not in active_names
-
-
-def test_combat_modifier_boost_matches_rogue_passage_pattern():
-    # Rogue's Passage: Land with CantBlockBy static, cmc 0.
-    cmdr_ports = [
-        {"port_type": "trigger", "event_class": "Attacks",
-         "valid_filter": "Card.Self"},
-    ]
-    cand_ports = [
-        {"port_type": "static", "event_class": "CantBlockBy"},
-    ]
-    active = active_rules_for_commander(cmdr_ports)
-    weight, reasons = evaluate_strategic_rules(
-        active,
-        {"card": {"cmc": 0, "keywords": "[]"}, "ports": cand_ports},
+def test_combat_modifier_rule_not_in_strategic_rules():
+    """Regression guard: if anyone re-adds the D3 combat modifier rule
+    without re-tuning, the tests should catch it and force a re-check
+    against the golden set."""
+    assert all(
+        r["name"] != "combat_modifier_for_attack_triggers"
+        for r in STRATEGIC_RULES
     )
-    # D3 rule is weight=1 — so at least 1 point from it must appear.
-    assert weight >= 1
-    assert any("combat modifier" in r.lower() for r in reasons)
-
-
-def test_combat_modifier_boost_cmc_cutoff():
-    # cmc > 4 disqualifies — big slow enchantments with CantBlockBy
-    # shouldn't flood the top-30.
-    cmdr_ports = [
-        {"port_type": "trigger", "event_class": "Attacks",
-         "valid_filter": "Card.Self"},
-    ]
-    cand_ports = [
-        {"port_type": "static", "event_class": "CantBlockBy"},
-    ]
-    active = active_rules_for_commander(cmdr_ports)
-    weight, _ = evaluate_strategic_rules(
-        active,
-        {"card": {"cmc": 5, "keywords": "[]"}, "ports": cand_ports},
-    )
-    # Only the D3 rule would have fired; at cmc=5 it's rejected, so
-    # the total contribution is 0.
-    assert weight == 0
 
 
 def test_anti_stax_rule_negative_weight():
