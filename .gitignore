@@ -17,3 +17,7 @@ main.py
 
 # SQLite database
 mtg_synergy.db
+.pytest_cache/
+.ruff_cache/
+.ecc/
+logs/

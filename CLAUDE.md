@@ -110,6 +110,143 @@ Use `scripts/compare_edhrec.py --commander "Name"`, `--top 100`, or `--all` to e
 - Post-Phase-1 baseline (commit `63b7ca9`): NDCG@30 ~ 0.5691
 - Post-Phase-1.5b (commit `a0734b4`): NDCG@30 = 0.5707 (+0.0016)
 
+## Deterministic Forge-DSL Graph Engine (`packages/mtg-synergy-graph`)
+
+Parallel experimental engine replacing the LightGBM pipeline with a rule-based,
+deterministic scorer that joins Forge DSL ports directly. No training, no
+EDHREC labels at inference, day-1 new card support, fully explainable.
+
+### Architecture
+
+```
+Forge card DSL  →  importer.py  →  synergy.db (cards + card_ports)
+                                                  ↓
+                SynergyEngine(db).page(commander, limit=N)
+                                                  ↓
+  score_all_candidates() orchestrates these matchers/buckets:
+    port_match          trigger feeders (§7.1)
+    cost_synergy        candidate costs feeding commander triggers
+    catch_all           card-identity matches (subtype / keyword)
+    scaling             Count$Valid subtype overlap
+    deck_hints          Forge has/hints/needs bidirectional (§round 5)
+    chain_match         SubAbility chain walks (branch-aware §7.2)
+    lord                static Continuous anthem tribal gates
+    amplifier           trigger↔trigger bidirectional (Panharmonicon, Yarok)
+    etb_self            candidate-as-event-source (Wall of Omens / Arcades)
+    graph_metrics       optional PageRank / neighbour overlap
+    strategic           heuristic rules (gated by mechanical signal)
+    resource_density    §7.5 — card-type anchor × cmc gradient × recursion
+    effect_resonance    §7.6 — Proliferate/Mill/Surveil compounding
+    replacement_resonance §7.7 — Doubling Season-class doublers
+    staple              static STAPLES list
+    replacement         anti-synergy
+  Post-scoring penalties (penalties.py) apply hard filters / multipliers.
+```
+
+Branches resolved at parse time (`ChainNode` with `branch_kind`), discounted in
+scoring via `BRANCH_MULTIPLIER` (true/false/win/otherwise = 0.5; static/
+replacement conditions = 0.75). See `docs/SPEC.md` v1.2.2.
+
+### Resource-density layer (§7.5) — anchor-quality (2026-04-08)
+
+`_extract_commander_anchors()` returns `dict[str, int | None]` mapping each
+anchor type (Creature, Artifact, …) to a cmc cap based on the channel that
+produced it:
+
+- **Consuming cost events** (`sacrifice`, `exile_from_grave`,
+  `exile_from_hand`) → cap=3. Korvold's `Sacrificed | Permanent` expands to
+  `{Creature, Artifact}` and both inherit cap=3 — previously Korvold's page
+  was flooded by mid-range value artifacts.
+- **Non-consuming cost events** (`tap_type`, `untap_type`, `return`) →
+  uncapped. Urza's `tapXType<1/Artifact>` still scores Mystic Forge.
+- **Trigger anchors** (`Sacrificed`, `ChangesZone` BF→GY) → cap=3.
+- **Cost-reduction channel** → uncapped (Animar reduce-cost skips broad
+  Creature anyway).
+
+Within a capped anchor:
+
+1. **CMC gradient**: `max(0, cap − cmc)` extra points — cmc=0 fodder wins
+   by +3 over cmc=3 fodder.
+2. **Recursion bonus** (`RECURSION_ANCHOR_BONUS = 4`) — cards that
+   come back from the graveyard get top-tier fodder treatment:
+   - **Keyword-based**: Undying, Persist, Unearth, Embalm, Eternalize,
+     Escape, Encore, Scavenge (queried from `port_type='keyword'`)
+   - **Effect-based**: any `ChangeZone | Graveyard → Battlefield` port
+     (catches Bloodghast's landfall, Reassembling Skeleton's activated
+     ability, Nether Traitor, Gravecrawler). Load-bearing cmc cap filters
+     false positives like Sun Titan (cmc≥5); revisit if the cap is ever
+     raised.
+
+Impact on Meren of Clan Nel Toth:
+- Bloodghast **811 → 91**, Reassembling Skeleton **1425 → 108**,
+  Nether Traitor **1310 → 102**, Young Wolf +recursion boost.
+
+### Performance (2026-04-08)
+
+cProfile-driven optimization round on the deterministic engine:
+
+| Metric                   | Baseline | After    | Delta  |
+|--------------------------|----------|----------|--------|
+| Meren `computed`         | 2.06s    | 1.53s    | **-26%** |
+| `computed` p50           | 1.27s    | 0.93s    | -27%   |
+| `computed` p95           | 2.06s    | 1.53s    | -26%   |
+| Test suite (162 tests)   | 62.97s   | 45.91s   | -27%   |
+| Golden set check (25)    | 28.05s   | 20.72s   | -26%   |
+| Aggregate NDCG@30        | 0.160316 | 0.160316 | none   |
+
+Key changes in `graph_engine.py` + `scoring.py`:
+- `_row_to_dict` rewritten as `dict(zip(row.keys(), tuple(row)))` — **5x
+  faster** than the sqlite3.Row dict-comprehension (measured: 3.11s → 0.61s
+  on a 10k × 31-col fetch). Per-key `sqlite3.Row.__getitem__` was the
+  bottleneck.
+- New `_rows_to_dicts(rows)` bulk helper pulls `row.keys()` once per
+  cursor, reused across 5 batch call sites and inside `_score_strategic`.
+- `_score_strategic` signal gate unrolled from
+  `any(buckets[k] != 0 for k in BUCKETS)` to a flat `for`/`break` —
+  self time 0.386s → 0.043s (-89%).
+
+Remaining wall-time budget is dominated by inherent `sqlite3.Cursor.fetchall`
+cost (~0.81s on Meren); further gains would need prepared-statement caching
+or pool pre-loading.
+
+### Common commands
+
+```bash
+# Import cards into a fresh DB (uses Forge forge/res/cardsfolder source)
+uv run python packages/mtg-synergy-graph/scripts/import_cardsfolder.py \
+    --db /tmp/synergy_full.db \
+    --cards-folder data/forge/res/cardsfolder
+
+# Recommend
+uv run python packages/mtg-synergy-graph/scripts/recommend.py \
+    --db /tmp/synergy_full.db \
+    --commander "Korvold, Fae-Cursed King" \
+    --top 30 --explain
+
+# Compare against EDHREC
+uv run python packages/mtg-synergy-graph/scripts/compare_edhrec.py \
+    --db /tmp/synergy_full.db \
+    --edhrec-db data/tags.db \
+    --commanders packages/mtg-synergy-graph/tests/fixtures/golden_set.json \
+    --top 50
+
+# Golden Set regression check (runs in ~20s after perf round)
+uv run python packages/mtg-synergy-graph/scripts/golden_set_track.py \
+    --db /tmp/synergy_full.db \
+    --edhrec-db data/tags.db \
+    --baseline packages/mtg-synergy-graph/tests/fixtures/golden_set_run.json
+
+# Tests (162 tests, ~46s)
+uv run pytest packages/mtg-synergy-graph/tests/ -q
+```
+
+### Latest golden set snapshot (2026-04-08)
+
+- 25 commanders, aggregate NDCG@30 = **0.160316**
+- compare_edhrec top-50: avg Hi-Syn **16.2%**, avg OnPage **40.1%**
+- Cumulative progress since the engine was bootstrapped on 2026-04-07:
+  NDCG 0.095 → **0.160** (+69%), Hi-Syn 5.7% → **16.2%** (+184%)
+
 ## Common Commands
 
 ```bash

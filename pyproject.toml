@@ -1,5 +1,5 @@
 [project]
-name = "mtg-synergy-graph"
+name = "mtg-synergy-workspace"
 version = "0.1.0"
 description = "MTG EDH/Commander deck synergy analysis — workspace root"
 requires-python = ">=3.12,<3.14"
@@ -13,6 +13,7 @@ members = ["packages/*"]
 [tool.uv.sources]
 mtg-synergy = { workspace = true }
 mtg-synergy-train = { workspace = true }
+mtg-synergy-graph = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -20,4 +21,5 @@ dev = [
     "vulture>=2.16",
     "mtg-synergy",
     "mtg-synergy-train",
+    "mtg-synergy-graph",
 ]

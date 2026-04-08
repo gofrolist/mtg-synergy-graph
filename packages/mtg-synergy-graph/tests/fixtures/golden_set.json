@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "description": "Phase 4.2 Golden Set — 25 well-known commanders spanning archetypes (sacrifice, tokens, counters, voltron, spellslinger, control, blink, mill, lifegain, partner pairs).",
+  "commanders": [
+    "Korvold, Fae-Cursed King",
+    "Krenko, Mob Boss",
+    "Atraxa, Praetors' Voice",
+    "Edgar Markov",
+    "Meren of Clan Nel Toth",
+    "Kaalia of the Vast",
+    "Yuriko, the Tiger's Shadow",
+    "The Ur-Dragon",
+    "Animar, Soul of Elements",
+    "Brago, King Eternal",
+    "Yarok, the Desecrated",
+    "Gitrog, Horror of Zhava",
+    "Niv-Mizzet, Parun",
+    "Talrand, Sky Summoner",
+    "Karador, Ghost Chieftain",
+    "Saskia the Unyielding",
+    "Marrow-Gnawer",
+    "Lathril, Blade of the Elves",
+    "Slimefoot, the Stowaway",
+    "Vito, Thorn of the Dusk Rose",
+    "Rakdos, Lord of Riots",
+    "Sliver Overlord",
+    "Yidris, Maelstrom Wielder",
+    "Nekusar, the Mindrazer",
+    "Phenax, God of Deception"
+  ]
+}

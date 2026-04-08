@@ -1,0 +1,22 @@
+[project]
+name = "mtg-synergy-graph"
+version = "0.1.0"
+description = "Deterministic Forge-DSL graph engine for MTG EDH/Commander synergy (SPEC v1.2.2)"
+requires-python = ">=3.12,<3.14"
+dependencies = []
+
+[project.optional-dependencies]
+# Phase 4.6: numpy unlocks fast personalised PageRank for graph_metrics.
+# Without it the engine still works — graph_metrics just falls back to the
+# pure-Python CSR path which is too slow at 32k+ scale.
+graph = ["numpy>=1.24"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mtg_synergy_graph"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

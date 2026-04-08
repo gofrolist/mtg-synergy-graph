@@ -59,6 +59,46 @@ FORGE MODEL (--recommend): Zero oracle text, pure mechanical synergy
   NDCG@30 = 0.5707 (EDHREC_FREE, Phase 1.5b) | Works for 3,141+ commanders | Day-1 new card evaluation
 ```
 
+## Deterministic Forge-DSL Graph Engine (experimental)
+
+A parallel, rule-based engine lives under `packages/mtg-synergy-graph/`. It
+replaces the LightGBM pipeline with a deterministic scorer that joins Forge
+DSL ports directly — no training, no EDHREC labels at inference, day-1
+support for new cards, and fully explainable per-bucket scores. Full design
+in `docs/SPEC.md` (v1.2.2).
+
+```bash
+# Build a synergy DB from Forge cardsfolder
+uv run python packages/mtg-synergy-graph/scripts/import_cardsfolder.py \
+    --db /tmp/synergy_full.db --cards-folder data/forge/res/cardsfolder
+
+# Recommend
+uv run python packages/mtg-synergy-graph/scripts/recommend.py \
+    --db /tmp/synergy_full.db --commander "Korvold, Fae-Cursed King" --top 30
+
+# Tests (162 tests, ~46s)
+uv run pytest packages/mtg-synergy-graph/tests/ -q
+```
+
+**Latest measurements (2026-04-08):** aggregate NDCG@30 on the 25-commander
+Golden Set = **0.160316**, compare_edhrec top-50 avg Hi-Syn 16.2%, avg OnPage
+40.1%. After the 2026-04-08 anchor-quality round + perf pass, Meren-class
+commanders compute in **~1.5s** (down from 2.06s, −26%); test suite 46s
+(down from 63s, −27%).
+
+Key 2026-04-08 changes:
+- **Anchor quality (§7.5)** — per-channel cmc cap propagation so Korvold's
+  sacrifice trigger caps both Creature and Artifact anchors at cmc=3. Plus a
+  cmc gradient (`max(0, cap − cmc)`) and a recursion bonus that boosts
+  Undying/Persist/Unearth/Embalm/Eternalize/Escape/Encore keyworded
+  creatures *and* effect-based self-returners (Bloodghast, Reassembling
+  Skeleton, Nether Traitor). Bloodghast's rank for Meren: 811 → 91.
+- **Performance pass** — `_row_to_dict` rewritten as
+  `dict(zip(row.keys(), tuple(row)))` after benchmarking showed it's 5×
+  faster than the sqlite3.Row dict-comp (3.11s → 0.61s on 10k × 31-col).
+  New bulk `_rows_to_dicts()` helper shared across matchers. `_score_strategic`
+  self-time dropped 89% (0.386s → 0.043s).
+
 ## Recent Improvements
 
 **Phase 1.5b (2026-04-07) — Static ability `Mode$` semantics**
