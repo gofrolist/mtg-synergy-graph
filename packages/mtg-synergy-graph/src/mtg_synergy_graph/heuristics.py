@@ -18,7 +18,7 @@ layer is curated manually; it's not meant to capture mechanical synergy.
 from __future__ import annotations
 
 import json
-from typing import Any, Callable
+from typing import Any
 
 PortRow = dict[str, Any]
 CandidateRecord = dict[str, Any]  # {"card": cards-row dict, "ports": list[PortRow]}
@@ -60,16 +60,6 @@ def _cmdr_wants_combat_damage(cmdr_ports: list[PortRow]) -> bool:
         and "Player" in (p.get("valid_filter") or "")
         for p in cmdr_ports
     )
-
-
-# Phase D3's ``_cmdr_wants_combat`` + ``combat_modifier_for_attack_triggers``
-# strategic rule was reverted. Every tuning (weight 1/2/3, broad/narrow
-# condition) cost ~0.5pp Hi-Syn on the 25-commander golden set for zero
-# NDCG gain — the rule fires for 5+ commanders (Yuriko, Brago, Saskia,
-# Lathril, Yidris) and the tribal ones lose tribal-lord slots to cheap
-# evasion enablers. The ``_COMBAT_MODIFIER_STATICS`` constant below is
-# retained as curated vocabulary for any future density-gated phase E
-# rule that might reuse it.
 
 
 def _evasion_boost(cand: CandidateRecord) -> bool:
@@ -152,38 +142,17 @@ def _tribal_density_boost(cand: CandidateRecord) -> bool:
     )
 
 
-#: Phase D3: static-mode event_class values that grant evasion or force
-#: the opponent's board into suboptimal combat positions. Only cards with
-#: at least one port in this set qualify for the combat-modifier rule.
-_COMBAT_MODIFIER_STATICS: frozenset[str] = frozenset({
-    "CantBlockBy",   # 350 corpus cards — grants evasion to matching creatures
-    "MustAttack",    #  97 corpus cards — forces opponent's attackers (goad-class)
-    "MustBlock",     #   8 corpus cards — pairs with deathtouch lockdown
-})
-
-
-def _combat_modifier_boost(cand: CandidateRecord) -> bool:
-    """Phase D3: card has a static combat modifier that enables the
-    commander's combat-damage or attack triggers.
-
-    Gated by cmc ≤ 4 so expensive enchantments / creatures with niche
-    force-combat effects don't flood the strategic bucket — the goal is
-    to surface cheap enablers (Rogue's Passage cmc 0, Whispersilk Cloak
-    cmc 3, Curse of Opulence cmc 1, Bident of Thassa cmc 3) not
-    slow-roll win conditions.
-    """
-    card = cand["card"]
-    try:
-        cmc = float(card.get("cmc") or 0)
-    except (TypeError, ValueError):
-        cmc = 0
-    if cmc > 4:
-        return False
-    return any(
-        p.get("port_type") == "static"
-        and (p.get("event_class") or "") in _COMBAT_MODIFIER_STATICS
-        for p in cand["ports"]
-    )
+# Phase D3 combat modifier helpers were removed alongside the reverted
+# ``combat_modifier_for_attack_triggers`` rule — every tuning cost
+# ~0.5pp Hi-Syn on the golden set for zero NDCG gain. The regression
+# guard in tests/test_heuristics.py
+# (``test_combat_modifier_rule_not_in_strategic_rules``) ensures the
+# rule can't be re-introduced without being caught. If a future phase
+# wants to resurrect the underlying vocabulary, the set to use is::
+#
+#     {"CantBlockBy", "MustAttack", "MustBlock"}
+#
+# — 350 / 97 / 8 corpus cards respectively.
 
 
 def _anti_stax_self_hose(cand: CandidateRecord) -> bool:

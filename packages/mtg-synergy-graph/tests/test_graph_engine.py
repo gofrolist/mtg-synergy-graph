@@ -10,6 +10,7 @@ Includes the Korvold acceptance scenario from §12 Phase 2:
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,18 @@ from mtg_synergy_graph import (
     score_one,
 )
 from mtg_synergy_graph.db import open_db
+from mtg_synergy_graph.graph_engine import (
+    _card_has_flicker_chain,
+    _commander_death_signature,
+    _commander_synergy_tags,
+    _is_substitution_blocking_result,
+    _is_unhelpful_payoff_trigger,
+    _parse_restriction_tags,
+    _zone_overlap,
+    find_flicker_loop_matches,
+    find_mana_restriction_matches,
+    find_sacrifice_synergies,
+)
 from mtg_synergy_graph.importer import import_cards_folder
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -213,17 +226,7 @@ def test_replacement_conflicts_returns_empty_for_korvold(populated_db):
 # ---------------------------------------------------------------------------
 
 
-from mtg_synergy_graph.graph_engine import (
-    _card_has_flicker_chain,
-    _commander_death_signature,
-    _commander_synergy_tags,
-    _is_unhelpful_payoff_trigger,
-    _parse_restriction_tags,
-    _zone_overlap,
-    find_flicker_loop_matches,
-    find_mana_restriction_matches,
-    find_sacrifice_synergies,
-)
+# Phase D1/D2/D4 helpers/matchers are imported at the top of the file.
 
 
 def test_zone_overlap_grafdiggers_cage_matches_reanimator():
@@ -349,8 +352,6 @@ def test_find_sacrifice_synergies_korvold_picks_up_outlets_against_full_db():
     Skips if the DB isn't present so the test doesn't fail in fresh
     environments — it's a smoke check, not a property test.
     """
-    import sqlite3
-    from pathlib import Path
 
     db_path = Path("/tmp/synergy_full.db")
     if not db_path.exists():
@@ -454,8 +455,6 @@ def test_find_mana_restriction_against_full_db_talrand():
     """Integration: Talrand should pick up Spell.Instant,Spell.Sorcery
     restrictions via his SpellCast trigger filter (no static identity
     crutch needed). Skips if /tmp/synergy_full.db isn't built yet."""
-    import sqlite3
-    from pathlib import Path
 
     db_path = Path("/tmp/synergy_full.db")
     if not db_path.exists():
@@ -533,8 +532,6 @@ def test_find_flicker_loop_matches_brago_against_full_db():
     flicker-source partners (Conjurer's Closet, Eldrazi Displacer)
     so phase E density rules can use it.
     """
-    import sqlite3
-    from pathlib import Path
 
     db_path = Path("/tmp/synergy_full.db")
     if not db_path.exists():
@@ -557,8 +554,6 @@ def test_find_flicker_loop_matches_brago_against_full_db():
 
 
 def test_find_flicker_loop_matches_returns_empty_for_non_flicker_commander():
-    import sqlite3
-    from pathlib import Path
 
     db_path = Path("/tmp/synergy_full.db")
     if not db_path.exists():
@@ -580,7 +575,7 @@ def test_find_flicker_loop_matches_returns_empty_for_non_flicker_commander():
 # ---------------------------------------------------------------------------
 
 
-from mtg_synergy_graph.graph_engine import _is_substitution_blocking_result
+# _is_substitution_blocking_result is imported at the top of the file.
 
 
 def test_substitution_blocking_rest_in_peace_pattern():
@@ -615,8 +610,6 @@ def test_find_replacement_conflicts_flags_rest_in_peace_for_meren():
     Moved+Exile substitution. Karador has no triggers at all so the
     matcher returns nothing for him — confirming the trigger gate works.
     """
-    import sqlite3
-    from pathlib import Path
 
     db_path = Path("/tmp/synergy_full.db")
     if not db_path.exists():
@@ -654,8 +647,6 @@ def test_find_mana_restriction_kaalia_does_not_explode():
     parse, so the expected result is an empty match list — better to
     miss real matches than to flood with false positives.
     """
-    import sqlite3
-    from pathlib import Path
 
     db_path = Path("/tmp/synergy_full.db")
     if not db_path.exists():
