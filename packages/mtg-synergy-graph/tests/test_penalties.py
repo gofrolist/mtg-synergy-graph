@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -10,16 +9,10 @@ import pytest
 from mtg_synergy_graph.db import open_db
 from mtg_synergy_graph.importer import import_cards_folder
 from mtg_synergy_graph.penalties import (
-    EXCLUDED_SUBTYPES_MULT,
     HARD_FILTER_SCORE,
     NICHE_COUNTERS,
     NICHE_COUNTER_MULT,
-    NON_COUNTER_CREATURE_MULT,
-    OPPONENT_MILL_MULT,
-    UNMET_ABILITY_MULT,
     UNMET_TYPE_MULT,
-    WRONG_COUNTER_TYPE_MULT,
-    WRONG_TOKEN_TYPE_MULT,
     PenaltyContext,
     _exclusion_tokens,
     _token_subtype,

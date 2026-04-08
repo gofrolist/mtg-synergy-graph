@@ -16,7 +16,6 @@ from typing import Any
 from .parser import (
     CHAIN_KEYS,
     ChainNode,
-    parse_forge_line,
     walk_svar_chain,
 )
 

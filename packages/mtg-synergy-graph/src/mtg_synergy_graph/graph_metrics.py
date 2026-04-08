@@ -37,7 +37,6 @@ from .graph_engine import (
     CATCH_ALL_TRIGGERS,
     COST_FEEDS_TRIGGER,
     EVENT_MATCH_MAP,
-    match_event,
 )
 
 #: Phase 4.6: detect numpy at import time. The numpy-backed personalised

@@ -52,7 +52,6 @@ from .graph_engine import (
 )
 from .graph_metrics import (
     HAS_NUMPY,
-    HAS_SCIPY,
     ScipyPRContext,
     build_causal_graph,
     card_hub_scores,

@@ -276,37 +276,6 @@ def _trigger_only_matches_self(valid_filter: str | None) -> bool:
     return True
 
 
-_PRIMARY_TYPES_FOR_FILTER: frozenset[str] = frozenset({
-    "Artifact", "Creature", "Enchantment", "Instant", "Land",
-    "Planeswalker", "Sorcery", "Tribal", "Battle",
-})
-
-
-def _trigger_required_card_types(valid_filter: str | None) -> frozenset[str]:
-    """Return the set of primary card types this trigger filter requires.
-
-    Pulls every comma-separated alternative that ISN'T ``Card.Self``,
-    explodes its filter expression, and collects the type-kind attributes.
-    Self-only triggers are already skipped before this is called; for
-    mixed self+other triggers we use only the other-card alternatives so
-    we don't accidentally allow every type.
-    """
-    if not valid_filter:
-        return frozenset()
-    types: set[str] = set()
-    for alt in valid_filter.split(","):
-        alt = alt.strip()
-        if not alt or alt.startswith("Card.Self"):
-            continue
-        for attr in explode_filter(alt):
-            if attr["attr_kind"] != "type" or attr["is_negated"]:
-                continue
-            value = attr["attr_value"]
-            if value in _PRIMARY_TYPES_FOR_FILTER:
-                types.add(value)
-    return frozenset(types)
-
-
 # Effect events that *can* produce / move cards onto the battlefield. We
 # only need to do produced-type checking for these; anything else (Mill,
 # Damage, Draw, ...) shouldn't satisfy an ETB-trigger filter at all.

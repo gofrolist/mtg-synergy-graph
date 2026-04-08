@@ -24,7 +24,6 @@ import logging
 import sqlite3
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any
 
 from .graph_metrics import build_causal_graph, card_hub_scores, global_pagerank
 

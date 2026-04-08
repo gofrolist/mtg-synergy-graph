@@ -28,10 +28,6 @@ CandidateRecord = dict[str, Any]  # {"card": cards-row dict, "ports": list[PortR
 # ---------------------------------------------------------------------------
 
 
-def _has_trigger(ports: list[PortRow], event: str) -> bool:
-    return any(p.get("port_type") == "trigger" and p.get("event_class") == event for p in ports)
-
-
 def _has_effect(ports: list[PortRow], event: str) -> bool:
     return any(p.get("port_type") == "effect" and p.get("event_class") == event for p in ports)
 
