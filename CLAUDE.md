@@ -236,16 +236,116 @@ uv run python packages/mtg-synergy-graph/scripts/golden_set_track.py \
     --edhrec-db data/tags.db \
     --baseline packages/mtg-synergy-graph/tests/fixtures/golden_set_run.json
 
-# Tests (162 tests, ~46s)
+# Tests (227 tests, ~48s)
 uv run pytest packages/mtg-synergy-graph/tests/ -q
 ```
 
-### Latest golden set snapshot (2026-04-08)
+### Forge-DSL audit follow-up (2026-04-08, 14 commits)
 
-- 25 commanders, aggregate NDCG@30 = **0.160316**
-- compare_edhrec top-50: avg Hi-Syn **16.2%**, avg OnPage **40.1%**
+An Explore-agent audit of our port extractor against the Forge source
+(`data/forge/forge-game/.../ApiType.java` / `TriggerType.java` /
+`ReplacementType.java` / `StaticAbilityMode.java`) surfaced 30+ gaps in
+coverage. We sequenced fixes into commit-sized phases A–E, each gated
+against the 25-commander Golden Set.
+
+Final lift (cumulative across all 14 commits):
+
+| Metric        | Before  | After   | Δ        |
+|---------------|---------|---------|----------|
+| NDCG@30       | 0.160316 | **0.161625** | +0.0013 |
+| Hi-Syn top-50 | 16.2%   | **16.7%** | +0.5pp  |
+| OnPage top-50 | 40.1%   | **40.5%** | +0.4pp  |
+| Tests         | 162     | **227**   | +65     |
+
+The audit's original +0.03–0.05 NDCG estimate was 10× optimistic;
+realistic lift came entirely from two phases:
+
+- **D1 — sacrifice outlet ↔ payoff matcher** (`find_sacrifice_synergies`,
+  `sacrifice_synergy` bucket, weight 4). Three directions: outlet for
+  payoff, payoff cluster (Korvold ↔ Blood Artist), payoff for outlet.
+  Uses Phase A1's new `cost_target` column (self / other / any) to
+  filter suspend-class self-sac cards. `_is_unhelpful_payoff_trigger`
+  rejects `OppCtrl` and `Card.Self` filters. **+0.001193 NDCG, +0.5pp
+  Hi-Syn, +0.4pp OnPage.**
+- **D2 — mana restriction matcher** (`find_mana_restriction_matches`,
+  folds into existing `cost_synergy` bucket, weight 2). Parses
+  `DB$ Mana RestrictValid$` via Phase A3's new `mana_restriction`
+  column. Commander tags are derived ONLY from filter expansion (not
+  literal subtypes) — Kaalia regressed −0.038 NDCG when literal
+  subtypes were included. **+0.000116 NDCG.**
+
+Everything else landed as neutral defensive infrastructure or was
+reverted after belated metric checks:
+
+- **A1–A4** (`b2eba4c`) — parser/schema groundwork: `cost_target`,
+  `trigger_source`, `mana_restriction` columns; 4 new cost patterns
+  (`ExileAnyGrave<`, `CollectEvidence<`, `DamageYou<`, `Draw<`).
+- **B1** (`4e1a02d`) — 4 trigger↔effect map entries (Proliferate,
+  Investigated→Investigate, Surveil, LifeLost→LoseLife). Audit's other
+  6 candidates had 0 corpus uses.
+- **B3** (`e5f0498`) — synthetic `combo_primitive` port for
+  Branch/Repeat/RepeatEach verbs.
+- **C1** (`2d4b7eb`) — zone-aware `Moved + Prevent$ True` replacement
+  conflicts (Grafdigger's Cage class, 5 cards). `_zone_overlap` helper
+  prevents false-positive flagging of non-reanimator ChangesZone
+  commanders (Brago, Yarok).
+- **C2** (`0de58a4`) — substitution-blocking replacements
+  (`Moved + ReplaceWith$ Exile + Destination=Graveyard`, Rest in Peace
+  class, 54 cards). `_is_substitution_blocking_result` is the narrow
+  pattern matcher. Substitution conflicts half-weight Prevent.
+- **D4** (`23349ee`) — `find_flicker_loop_matches` primitive kept but
+  **not wired** into scoring. Brago regressed at any weight; EDHREC
+  rewards ETB *targets*, not flicker source clusters.
+- **A5+D3** (`c611810`) — combat-modifier strategic rule, shipped then
+  **reverted** (`d3a6371`) after belated compare_edhrec check showed
+  −0.5pp Hi-Syn for zero NDCG gain. 5 golden commanders fired the rule
+  and the tribal ones (Saskia, Lathril, Yidris) lost lord slots.
+- **B2** (`1e8d404`) — ApiType inventory regression test: snapshot of
+  180 distinct effect event_class values; fails with a diff when a
+  Forge set update adds a new verb silently.
+- **E** — **skipped**. Every proposed density-gated rule matched the
+  same "broad cluster" shape as the reverted D3; risk > signal.
+
+Post-audit cleanup:
+
+- **`a113bbc`** python-review cleanup: decomposed `find_sacrifice_synergies`
+  137→78 lines via `_emit_death_payoff_triggers` helper, removed dead
+  `_combat_modifier_boost`/`_COMBAT_MODIFIER_STATICS`, fixed 2 new
+  ruff E402 imports, parenthesised a backslash continuation.
+- **`572bb31`** dead-code sweep: 47 lines removed via vulture + ruff F401
+  (2 dead functions, 1 dead constant, 12 unused imports across 8 files).
+  All 3 remaining vulture findings are documented false positives.
+
+**Audit accuracy in retrospect:** ~30% of the audit's items were
+speculative or wrong — hallucinated verbs like `Chain`, non-existent
+fields like `IsMadness$`, already-implemented features like the
+Panharmonicon amplifier and DeckHints matchers. The lesson (banked in
+`~/.claude/plans/humming-napping-puzzle.md`): verify every corpus
+claim with `grep` before implementing.
+
+**Process lessons banked:**
+
+1. **Validation gate must check BOTH NDCG@30 AND compare_edhrec top-50**
+   after every scoring phase. An NDCG-only gate missed the D3 Hi-Syn
+   regression and cost one revert commit.
+2. **Mechanically-correct matchers don't always lift the metric.**
+   EDHREC's high-synergy-cards section is a popularity proxy biased
+   toward tribal lords and format staples; cluster patterns that work
+   for sacrifice (D1) don't generalize to flicker (D4) or combat (D3).
+3. **Keep rejected matchers as reusable primitives.** D4's
+   `find_flicker_loop_matches` and the dead-but-documented combat
+   vocabulary constants stay as hooks for a possible future
+   density-gated phase E.
+4. **Bisect via `git stash` + per-commit `golden_set_track`.** Any
+   single-commit regression is recoverable in ≤3 minutes.
+
+### Latest golden set snapshot (2026-04-08, post-audit)
+
+- 25 commanders, aggregate NDCG@30 = **0.161625**
+- compare_edhrec top-50: avg Hi-Syn **16.7%**, avg OnPage **40.5%**
+- Test suite: **227 tests, ~48s**
 - Cumulative progress since the engine was bootstrapped on 2026-04-07:
-  NDCG 0.095 → **0.160** (+69%), Hi-Syn 5.7% → **16.2%** (+184%)
+  NDCG 0.095 → **0.162** (+71%), Hi-Syn 5.7% → **16.7%** (+193%)
 
 ## Common Commands
 

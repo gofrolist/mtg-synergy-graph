@@ -76,15 +76,14 @@ uv run python packages/mtg-synergy-graph/scripts/import_cardsfolder.py \
 uv run python packages/mtg-synergy-graph/scripts/recommend.py \
     --db /tmp/synergy_full.db --commander "Korvold, Fae-Cursed King" --top 30
 
-# Tests (162 tests, ~46s)
+# Tests (227 tests, ~48s)
 uv run pytest packages/mtg-synergy-graph/tests/ -q
 ```
 
-**Latest measurements (2026-04-08):** aggregate NDCG@30 on the 25-commander
-Golden Set = **0.160316**, compare_edhrec top-50 avg Hi-Syn 16.2%, avg OnPage
-40.1%. After the 2026-04-08 anchor-quality round + perf pass, Meren-class
-commanders compute in **~1.5s** (down from 2.06s, −26%); test suite 46s
-(down from 63s, −27%).
+**Latest measurements (2026-04-08, post-audit):** aggregate NDCG@30 on the
+25-commander Golden Set = **0.161625**, compare_edhrec top-50 avg Hi-Syn
+**16.7%**, avg OnPage **40.5%**. Meren-class commanders compute in ~1.5s;
+test suite ~48s.
 
 Key 2026-04-08 changes:
 - **Anchor quality (§7.5)** — per-channel cmc cap propagation so Korvold's
@@ -98,6 +97,21 @@ Key 2026-04-08 changes:
   faster than the sqlite3.Row dict-comp (3.11s → 0.61s on 10k × 31-col).
   New bulk `_rows_to_dicts()` helper shared across matchers. `_score_strategic`
   self-time dropped 89% (0.386s → 0.043s).
+- **Forge-DSL audit follow-up (14 commits)** — NDCG 0.160316 → 0.161625
+  (+0.0013), Hi-Syn 16.2% → 16.7% (+0.5pp), OnPage 40.1% → 40.5% (+0.4pp),
+  162 → 227 tests. Realistic lift came from two phases: **D1** sacrifice
+  outlet ↔ payoff matcher (`find_sacrifice_synergies` bucket — 3 directions
+  including the Korvold ↔ Blood Artist cluster missed by the generic
+  cost-feeds matcher) and **D2** mana restriction matcher (parses
+  `DB$ Mana RestrictValid$` so Talrand picks up Baral-class instants/sorceries
+  and The Ur-Dragon picks up Dragon's Hoard). Other phases (B1 trigger map,
+  B3 combo primitive, C1/C2 replacement anti-synergies, B2 ApiType inventory
+  snapshot test) shipped as neutral defensive infrastructure. D4 flicker
+  loop detector and D3 combat modifier rule were mechanically correct but
+  regressed tribal commanders on EDHREC's high-synergy metric — D4 kept as
+  unwired primitive, D3 reverted. See `docs/SPEC.md` and the commit history
+  (`git log --oneline d1f70ee..HEAD`) for the full trail including the
+  post-review cleanup passes.
 
 ## Recent Improvements
 
