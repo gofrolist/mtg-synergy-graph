@@ -31,9 +31,15 @@ PortRow = dict[str, Any]
 #: variants must come before their containing prefix (``ExileFromGrave`` before
 #: ``Exile``).
 COST_PATTERNS: tuple[tuple[str, str], ...] = (
+    # Phase A4: order matters — more-specific prefixes must come before
+    # their substring variants. ``ExileAnyGrave`` must precede ``Exile``;
+    # ``CollectEvidence`` is its own prefix. ``Draw`` is safe at the end
+    # because cost_str is a cost-token string and never contains the
+    # ``Drawn`` trigger or ``DrawCards`` effect verb.
     ("ExileFromGrave", "exile_from_grave"),
     ("ExileFromHand",  "exile_from_hand"),
     ("ExileFromTop",   "exile_from_top"),
+    ("ExileAnyGrave<", "exile_any_grave"),    # A4: 14 cards (delve-class)
     ("Exile",          "exile"),
     ("SubCounter",     "remove_counter"),
     ("AddCounter",     "add_counter"),
@@ -47,7 +53,64 @@ COST_PATTERNS: tuple[tuple[str, str], ...] = (
     ("PayEnergy",      "pay_energy"),
     ("Mill",           "mill"),
     ("Exert",          "exert"),
+    # A4: require trailing ``<`` so the substring match cannot fire on
+    # tokens like ``Discard<1/LastDrawn>`` (which contains ``Draw``).
+    ("CollectEvidence<","collect_evidence"),   # A4: 17 cards
+    ("DamageYou<",      "damage_self"),        # A4: 18 cards
+    ("Draw<",           "draw_cost"),          # A4: 45 cards
 )
+
+#: Cost types that take a ``<count/typespec[/desc]>`` payload describing
+#: which permanents the controller picks. These are the only costs where
+#: the self / other distinction is meaningful — `PayLife`, `tap_type` etc.
+#: have no permanent picker, so they default to ``cost_target=None``.
+#: Phase A1 (SPEC §5.5).
+_COST_TARGETED_TYPES: frozenset[str] = frozenset({
+    "sacrifice",
+    "discard",
+    "exile",
+    "exile_from_grave",
+    "exile_from_hand",
+    "return",
+})
+
+
+def _classify_cost_target(subtype: str) -> str | None:
+    """Classify a cost-payload typespec as ``self``, ``other``, or ``any``.
+
+    The Forge cost format is ``<count/typespec[/desc]>`` where ``typespec`` is
+    a ``;``-separated list of single-card filters such as
+    ``Creature.Other``, ``CARDNAME``, ``Permanent.YouCtrl``,
+    ``Artifact;Creature;Land``.
+
+    - ``self``  — the source card is the only valid pick (typespec is exactly
+      ``CARDNAME`` / ``Card.Self``). Suspend-style sac.
+    - ``other`` — every alternative carries a ``.Other`` qualifier (the source
+      cannot be picked). True "outlet for other creatures" pattern.
+    - ``any``   — neither: the source MAY be picked alongside other matches
+      (Viscera Seer's ``Sac<1/Creature>``, Goblin Bombardment, Greater
+      Gargadon's ``Sac<1/Artifact;Creature;Land>``).
+
+    Returns ``None`` for empty / unparseable payloads so non-targeted cost
+    types fall through cleanly.
+    """
+    if not subtype:
+        return None
+    # Strip the leading ``count/`` and the trailing ``/desc`` if present.
+    parts = subtype.split("/", 2)
+    if len(parts) < 2:
+        return None
+    typespec = parts[1].strip()
+    if not typespec:
+        return None
+    alts = [a.strip() for a in typespec.split(";") if a.strip()]
+    if not alts:
+        return None
+    if all(a in ("CARDNAME", "Card.Self") for a in alts):
+        return "self"
+    if all(".Other" in a for a in alts):
+        return "other"
+    return "any"
 
 
 def _branch_defaults(
@@ -102,12 +165,21 @@ def extract_cost_ports(
             bracket_end = cost_str.find(">", bracket_start)
             if bracket_end != -1:
                 subtype = cost_str[bracket_start + 1 : bracket_end]
+        # Phase A1: classify the source/other distinction for the cost types
+        # whose payload picks a permanent. A bare ``Sacrifice`` (no bracket,
+        # used by suspend-style abilities like Greater Gargadon's keyword
+        # form) defaults to ``self`` because the rules text "sacrifice
+        # CARDNAME" is implicit.
+        cost_target: str | None = None
+        if cost_type in _COST_TARGETED_TYPES:
+            cost_target = _classify_cost_target(subtype) or "self"
         ports.append(
             {
                 "card_name":    card_name,
                 "port_type":    "cost",
                 "event_class":  cost_type,
                 "cost_subtype": subtype,
+                "cost_target":  cost_target,
                 "raw_line":     cost_str,
                 **branch,
             }
@@ -119,6 +191,7 @@ def extract_cost_ports(
                 "card_name":   card_name,
                 "port_type":   "cost",
                 "event_class": "tap",
+                "cost_target": None,
                 "raw_line":    cost_str,
                 **branch,
             }
@@ -183,6 +256,15 @@ def extract_effect_ports(
         is_conditional=is_conditional,
     )
 
+    # Phase A3: Mana effects with ``RestrictValid$`` restrict spending of
+    # the produced mana (e.g., Cavern of Souls "spend only on creatures of
+    # the chosen type", Nexos "spend only on costs that contain {X}").
+    # The restriction is the synergy signal — store it on the effect port
+    # so D2's mana-restriction matcher can join on it.
+    mana_restriction = (
+        parsed.get("RestrictValid", "") if verb == "Mana" else ""
+    )
+
     port: PortRow = {
         "card_name":        card_name,
         "port_type":        "effect",
@@ -195,6 +277,7 @@ def extract_effect_ports(
         "granted_keyword":  parsed.get("KW", ""),
         "duration":         parsed.get("Duration", ""),
         "is_curse":         parsed.get("IsCurse", "") == "True",
+        "mana_restriction": mana_restriction,
         "raw_line":         repr(parsed),
         **branch,
     }
@@ -237,18 +320,34 @@ def extract_trigger_ports(
     parsed: dict[str, Any],
     svars: dict[str, str],
 ) -> list[PortRow]:
-    """Convert a parsed T: line into card_port rows."""
+    """Convert a parsed T: line into card_port rows.
+
+    Phase A2: ``FirstTime$ True`` is recorded as
+    ``trigger_source='first_time'`` so cadence-sensitive matchers can
+    distinguish "first time each turn" triggers from any-time. The
+    ``BecomesTarget`` ``ValidTarget$`` reordering originally planned for
+    A2 was deferred — bisect showed it removed port_attribute cardinality
+    that downstream matchers depend on. It will land together with the D3
+    combat-modifier matcher whose new joins offset the cardinality drop.
+    """
+    valid_filter = parsed.get("ValidCard") or parsed.get("ValidSource", "")
+
+    trigger_source: str | None = None
+    if parsed.get("FirstTime", "") == "True":
+        trigger_source = "first_time"
+
     trigger_port: PortRow = {
         "card_name":        card_name,
         "port_type":        "trigger",
         "event_class":      parsed.get("Mode", ""),
-        "valid_filter":     parsed.get("ValidCard") or parsed.get("ValidSource", ""),
+        "valid_filter":     valid_filter,
         "zone_origin":      parsed.get("Origin", ""),
         "zone_destination": parsed.get("Destination", ""),
         "phase":            parsed.get("Phase", ""),
         "is_optional":      "OptionalDecider" in parsed,
         "is_combat":        parsed.get("CombatDamage", "") == "True",
         "execute_ref":      parsed.get("Execute", ""),
+        "trigger_source":   trigger_source,
         "raw_line":         repr(parsed),
         **_branch_defaults(),
     }

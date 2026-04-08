@@ -43,6 +43,9 @@ CREATE TABLE IF NOT EXISTS card_ports (
     affected_scope     TEXT,
     effect_zone        TEXT,
     cost_subtype       TEXT,
+    cost_target        TEXT,             -- self|other|any (Phase A1)
+    trigger_source     TEXT,             -- first_time, etc. (Phase A2)
+    mana_restriction   TEXT,             -- DB$ Mana RestrictValid$ (Phase A3)
     amount             TEXT,
     counter_type       TEXT,
     granted_keyword    TEXT,

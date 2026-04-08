@@ -181,7 +181,9 @@ INSERT OR REPLACE INTO cards (
 _PORT_COLUMNS = (
     "card_name", "port_type", "event_class", "valid_filter",
     "zone_origin", "zone_destination", "phase", "affected_scope",
-    "effect_zone", "cost_subtype", "amount", "counter_type",
+    "effect_zone", "cost_subtype", "cost_target",
+    "trigger_source", "mana_restriction",
+    "amount", "counter_type",
     "granted_keyword", "granted_ability", "execute_ref", "sub_ability_ref",
     "is_conditional", "branch_kind", "branch_parent", "source_svar",
     "chain_depth", "scaling_expression", "is_optional", "is_combat",

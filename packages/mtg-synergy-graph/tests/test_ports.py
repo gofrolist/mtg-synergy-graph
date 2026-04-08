@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mtg_synergy_graph import extract_all_ports
+from mtg_synergy_graph import extract_all_ports, extract_cost_ports
 
 
 def _by_type(ports, port_type):
@@ -141,3 +141,172 @@ def test_scute_swarm_scaling_port_for_landfall_x(scute_swarm):
     assert s["event_class"] == "Valid"
     assert s["valid_filter"] == "Land.YouCtrl"
     assert s["source_svar"] == "X"
+
+
+# ---------------------------------------------------------------------------
+# Phase A1 — sacrifice / discard / exile / return cost target classification
+# ---------------------------------------------------------------------------
+
+
+def _sac_port(cost_str: str) -> dict:
+    ports = extract_cost_ports("X", cost_str)
+    sac = [p for p in ports if p["event_class"] == "sacrifice"]
+    assert len(sac) == 1, f"expected exactly one sacrifice port for {cost_str!r}"
+    return sac[0]
+
+
+def test_cost_target_self_when_typespec_is_cardname():
+    # Suspend-style "Sacrifice CARDNAME" — only the source qualifies.
+    p = _sac_port("Sac<1/CARDNAME>")
+    assert p["cost_target"] == "self"
+
+
+def test_cost_target_other_when_typespec_carries_dot_other():
+    # Korvold-class outlet that explicitly excludes the source.
+    p = _sac_port("Sac<1/Creature.Other>")
+    assert p["cost_target"] == "other"
+
+
+def test_cost_target_any_for_viscera_seer_pattern():
+    # ``Sac<1/Creature>`` — Viscera Seer / Goblin Bombardment. The source
+    # MAY pick itself, so it's a generic outlet (`any`), not strictly other.
+    p = _sac_port("Sac<1/Creature>")
+    assert p["cost_target"] == "any"
+
+
+def test_cost_target_any_for_greater_gargadon_multi_typespec():
+    # Multiple alternatives separated by ``;`` plus a description suffix.
+    p = _sac_port("Sac<1/Artifact;Creature;Land/artifact, creature or land>")
+    assert p["cost_target"] == "any"
+
+
+def test_cost_target_self_for_bare_sacrifice_keyword():
+    # Plain ``Sacrifice`` with no bracket — keyword form, e.g. inside a K:
+    # line that has been promoted to a cost. Defaults to ``self`` per the
+    # implicit "sacrifice CARDNAME" rule.
+    p = _sac_port("Sacrifice")
+    assert p["cost_target"] == "self"
+
+
+def test_cost_target_propagates_to_discard_exile_return():
+    cost_str = "Discard<1/Card.Other> Return<1/Creature.YouCtrl+inGY> ExileFromGrave<1/CARDNAME>"
+    ports = extract_cost_ports("X", cost_str)
+    by_class = {p["event_class"]: p for p in ports}
+    assert by_class["discard"]["cost_target"] == "other"
+    # ``Creature.YouCtrl`` has no ``.Other`` and isn't CARDNAME → any.
+    assert by_class["return"]["cost_target"] == "any"
+    assert by_class["exile_from_grave"]["cost_target"] == "self"
+
+
+def test_cost_target_none_for_non_targeted_costs():
+    # PayLife / tap have no permanent picker — cost_target stays unset.
+    paylife = extract_cost_ports("X", "PayLife<2>")
+    assert paylife and paylife[0]["cost_target"] is None
+    tap = extract_cost_ports("X", "T")
+    assert tap and tap[0]["cost_target"] is None
+
+
+def test_korvold_sacrifice_trigger_cost_target_recorded(korvold):
+    # Korvold's activated sac outlet is ``Sacrificed`` trigger, not a cost
+    # itself; just verify any cost ports we *do* extract carry the new field
+    # so downstream matchers can rely on it being present (even if None).
+    ports = extract_all_ports(korvold)
+    cost_ports = [p for p in ports if p["port_type"] == "cost"]
+    for p in cost_ports:
+        assert "cost_target" in p
+
+
+# ---------------------------------------------------------------------------
+# Phase A2 — trigger metadata: ValidTarget$ + FirstTime$
+# ---------------------------------------------------------------------------
+
+
+from mtg_synergy_graph import (
+    extract_effect_ports,
+    extract_trigger_ports,
+)
+
+
+def test_becomes_target_first_time_records_trigger_source():
+    # Real Forge trigger from valiant_rescuer.txt. FirstTime$ True must
+    # surface as ``trigger_source='first_time'``. The ValidTarget$ pivot
+    # is deferred to ship with D3 — see extract_trigger_ports docstring.
+    parsed = {
+        "Mode":          "BecomesTarget",
+        "ValidTarget":   "Card.Self",
+        "ValidSource":   "SpellAbility.YouCtrl",
+        "TriggerZones":  "Battlefield",
+        "FirstTime":     "True",
+        "Execute":       "TrigToken",
+    }
+    ports = extract_trigger_ports("Valiant Rescuer", parsed, {})
+    trig = ports[0]
+    assert trig["trigger_source"] == "first_time"
+
+
+def test_trigger_first_time_flag_recorded():
+    parsed = {"Mode": "DiscardedAll", "ValidPlayer": "You", "FirstTime": "True"}
+    ports = extract_trigger_ports("X", parsed, {})
+    assert ports[0]["trigger_source"] == "first_time"
+
+
+def test_trigger_no_first_time_leaves_source_none():
+    parsed = {"Mode": "ChangesZone", "ValidCard": "Creature.YouCtrl"}
+    ports = extract_trigger_ports("X", parsed, {})
+    assert ports[0]["trigger_source"] is None
+    assert ports[0]["valid_filter"] == "Creature.YouCtrl"
+
+
+# ---------------------------------------------------------------------------
+# Phase A3 — DB$ Mana RestrictValid$
+# ---------------------------------------------------------------------------
+
+
+def test_mana_effect_captures_restrict_valid():
+    # Real Nexos card: AB$ Mana | Cost$ T | Produced$ C | RestrictValid$ CostContainsX
+    parsed = {
+        "_verb":         "Mana",
+        "Cost":          "T",
+        "Produced":      "C",
+        "Amount":        "2",
+        "RestrictValid": "CostContainsX",
+    }
+    ports = extract_effect_ports("Nexos", parsed, {})
+    effect = next(p for p in ports if p["port_type"] == "effect")
+    assert effect["mana_restriction"] == "CostContainsX"
+
+
+def test_non_mana_effect_has_empty_restriction():
+    parsed = {"_verb": "Draw", "NumCards": "1"}
+    ports = extract_effect_ports("X", parsed, {})
+    assert ports[0]["mana_restriction"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Phase A4 — additional cost types from corpus inventory
+# ---------------------------------------------------------------------------
+
+
+def test_cost_pattern_draw():
+    p = extract_cost_ports("X", "Draw<1>")
+    assert any(c["event_class"] == "draw_cost" for c in p)
+
+
+def test_cost_pattern_damage_you():
+    p = extract_cost_ports("X", "DamageYou<2>")
+    assert any(c["event_class"] == "damage_self" for c in p)
+
+
+def test_cost_pattern_collect_evidence():
+    p = extract_cost_ports("X", "CollectEvidence<6>")
+    assert any(c["event_class"] == "collect_evidence" for c in p)
+
+
+def test_cost_pattern_exile_any_grave_does_not_collide_with_exile_from_grave():
+    # ``ExileAnyGrave`` is the delve-class "from any graveyard" cost.
+    # ``ExileFromGrave`` is the older "from your graveyard" cost. Both
+    # must be detected independently — neither is a substring of the other.
+    p = extract_cost_ports("X", "ExileAnyGrave<1/Creature>")
+    classes = {c["event_class"] for c in p}
+    assert "exile_any_grave" in classes
+    assert "exile_from_grave" not in classes
