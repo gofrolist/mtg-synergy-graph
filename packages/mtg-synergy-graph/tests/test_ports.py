@@ -302,6 +302,28 @@ def test_cost_pattern_collect_evidence():
     assert any(c["event_class"] == "collect_evidence" for c in p)
 
 
+def test_scute_swarm_emits_combo_primitive_for_branch_verb(scute_swarm):
+    # Phase B3: any card whose effect verb is in COMBO_PRIMITIVE_VERBS
+    # also gets a synthetic ``event_class='combo_primitive'`` port. Scute
+    # Swarm uses ``DB$ Branch`` for its landfall true/false split.
+    ports = extract_all_ports(scute_swarm)
+    primitives = [p for p in ports if p["event_class"] == "combo_primitive"]
+    assert len(primitives) == 1
+    p = primitives[0]
+    assert p["port_type"] == "effect"
+    assert p["granted_ability"] == "Branch"
+
+
+def test_combo_primitive_only_emitted_for_known_verbs():
+    # Sanity: a non-combo verb doesn't get the synthetic port.
+    ports = extract_effect_ports(
+        "X",
+        {"_verb": "Draw", "NumCards": "1"},
+        {},
+    )
+    assert not any(p["event_class"] == "combo_primitive" for p in ports)
+
+
 def test_cost_pattern_exile_any_grave_does_not_collide_with_exile_from_grave():
     # ``ExileAnyGrave`` is the delve-class "from any graveyard" cost.
     # ``ExileFromGrave`` is the older "from your graveyard" cost. Both

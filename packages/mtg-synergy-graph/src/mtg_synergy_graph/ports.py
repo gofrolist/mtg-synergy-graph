@@ -204,6 +204,20 @@ def extract_cost_ports(
 # Effect ports (§5.5)
 # ---------------------------------------------------------------------------
 
+#: Phase B3: effect verbs that are pure flow-control / iteration primitives.
+#: They are still emitted as their own ``event_class`` (so the chain walker
+#: keeps following ``TrueSubAbility$`` / ``RepeatSubAbility$`` etc.), but
+#: extract_effect_ports also emits an extra synthetic port with
+#: ``event_class='combo_primitive'`` to give downstream matchers a single
+#: SQL key for "this card has loop / branch combo potential".
+#: ``Chain`` was in the audit's list but has zero corpus uses — verified
+#: with grep against data/forge/forge-gui/res/cardsfolder.
+COMBO_PRIMITIVE_VERBS: frozenset[str] = frozenset({
+    "Branch",      # 115 cards
+    "Repeat",      # 57  cards
+    "RepeatEach",  # 347 cards
+})
+
 
 def _amount_from(parsed: dict[str, Any]) -> str:
     """Pick the first amount-style field present in a parsed segment."""
@@ -307,7 +321,25 @@ def extract_effect_ports(
         for sub_node in chain:
             sub_ports.extend(extract_effect_ports(card_name, sub_node, svars))
 
-    return [port] + cost_ports + sub_ports
+    # Phase B3: emit a synthetic combo_primitive port alongside the original
+    # Branch / Repeat / RepeatEach effect so SQL queries can find combo
+    # cards via a single ``event_class='combo_primitive'`` key. The original
+    # port is preserved so the chain walker (which keys on the verb name)
+    # still works.
+    extra_ports: list[PortRow] = []
+    if verb in COMBO_PRIMITIVE_VERBS:
+        extra_ports.append(
+            {
+                "card_name":       card_name,
+                "port_type":       "effect",
+                "event_class":     "combo_primitive",
+                "granted_ability": verb,
+                "raw_line":        repr(parsed),
+                **branch,
+            }
+        )
+
+    return [port] + cost_ports + sub_ports + extra_ports
 
 
 # ---------------------------------------------------------------------------
