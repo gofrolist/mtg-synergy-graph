@@ -125,6 +125,11 @@ def main() -> int:
     parser.add_argument("--commanders", type=Path,
                         help="JSON list of commanders (alternative to --commander)")
     parser.add_argument("--top", type=int, default=50)
+    parser.add_argument("--graph-metrics", action="store_true",
+                        help="Enable SPEC §6.8 causal graph metrics "
+                             "(graph_neighbor_overlap, graph_pagerank). "
+                             "Cold start is ~30s slower but subsequent "
+                             "pages reuse the adjacency cache.")
     args = parser.parse_args()
 
     if not args.commander and not args.commanders:
@@ -153,7 +158,7 @@ def main() -> int:
     skipped_unknown = 0
     skipped_missing_in_forge = 0
 
-    with SynergyEngine(args.db) as engine:
+    with SynergyEngine(args.db, graph_metrics=args.graph_metrics) as engine:
         for spec in commanders:
             cmdr = _normalise(spec)
             label = " + ".join(cmdr)[:40]
