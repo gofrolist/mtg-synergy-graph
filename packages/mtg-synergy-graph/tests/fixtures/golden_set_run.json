@@ -18,7 +18,7 @@
     },
     {
       "commander": "Krenko, Mob Boss",
-      "ndcg30": 0.454393,
+      "ndcg30": 0.458125,
       "top10": [
         "Goblin King",
         "Rundvelt Hordemaster",
@@ -34,23 +34,23 @@
     },
     {
       "commander": "Atraxa, Praetors' Voice",
-      "ndcg30": 0.123824,
+      "ndcg30": 0.132105,
       "top10": [
         "Merfolk Skydiver",
+        "Brimaz, Blight of Oreskos",
+        "Contaminant Grafter",
         "Roalesk, Apex Hybrid",
         "Ozolith, the Shattered Spire",
         "Contagion Clasp",
         "Benevolent Hydra",
         "Lulu, Stern Guardian",
         "Grim Affliction",
-        "Courage in Crisis",
-        "Yawgmoth, Thran Physician",
-        "Brimaz, Blight of Oreskos"
+        "Courage in Crisis"
       ]
     },
     {
       "commander": "Edgar Markov",
-      "ndcg30": 0.354657,
+      "ndcg30": 0.357073,
       "top10": [
         "Legion Lieutenant",
         "Vampire Nocturnus",
@@ -59,9 +59,9 @@
         "Captivating Vampire",
         "Stromkirk Captain",
         "Bloodline Keeper",
-        "Halving Season",
         "Markov Baron",
-        "Crossway Troublemakers"
+        "Crossway Troublemakers",
+        "Order of Sacred Dusk"
       ]
     },
     {
@@ -98,7 +98,7 @@
     },
     {
       "commander": "Yuriko, the Tiger's Shadow",
-      "ndcg30": 0.269263,
+      "ndcg30": 0.269943,
       "top10": [
         "Silver-Fur Master",
         "A-Silver-Fur Master",
@@ -210,8 +210,9 @@
     },
     {
       "commander": "Talrand, Sky Summoner",
-      "ndcg30": 0.042384,
+      "ndcg30": 0.027601,
       "top10": [
+        "Namor the Sub-Mariner",
         "Counterspell",
         "Cyclonic Rift",
         "Fierce Guardianship",
@@ -220,8 +221,7 @@
         "Arcane Signet",
         "Thought Vessel",
         "Master of the Pearl Trident",
-        "Rhystic Study",
-        "Academy Manufactor"
+        "Rhystic Study"
       ]
     },
     {
@@ -258,23 +258,23 @@
     },
     {
       "commander": "Marrow-Gnawer",
-      "ndcg30": 0.594395,
+      "ndcg30": 0.634875,
       "top10": [
         "Ogre Slumlord",
         "Piper of the Swarm",
         "Karumonix, the Rat King",
         "Voracious Vermin",
+        "Pack Rat",
+        "Rat Colony",
+        "Persistent Marshstalker",
+        "Ashcoat of the Shadow Swarm",
         "Twisted Sewer-Witch",
-        "Sol Ring",
-        "Arcane Signet",
-        "Thought Vessel",
-        "Demonic Tutor",
-        "Feed the Swarm"
+        "Sol Ring"
       ]
     },
     {
       "commander": "Lathril, Blade of the Elves",
-      "ndcg30": 0.521693,
+      "ndcg30": 0.556729,
       "top10": [
         "Elvish Archdruid",
         "Dwynen, Gilt-Leaf Daen",
@@ -290,27 +290,27 @@
     },
     {
       "commander": "Slimefoot, the Stowaway",
-      "ndcg30": 0.121039,
+      "ndcg30": 0.213695,
       "top10": [
-        "Bolas's Citadel",
         "Propagator Drone",
-        "Beast Within",
         "Gothmog, Morgul Lieutenant",
         "Sporoloth Ancient",
+        "Bolas's Citadel",
+        "Beast Within",
+        "The Mycotyrant",
         "Sol Ring",
         "Arcane Signet",
         "Thought Vessel",
-        "Nature's Lore",
-        "Heroic Intervention"
+        "Nature's Lore"
       ]
     },
     {
       "commander": "Vito, Thorn of the Dusk Rose",
-      "ndcg30": 0.103987,
+      "ndcg30": 0.105347,
       "top10": [
         "Restless Bloodseeker",
-        "Necropotence",
         "Glass-Cast Heart",
+        "Necropotence",
         "Profane Prayers",
         "Malakir Bloodwitch",
         "Sorin, Imperious Bloodlord",

@@ -400,6 +400,19 @@ def _score_scaling(
 #: relevant cards. We weight reverse half as much as forward.
 DECKHINTS_REVERSE_WEIGHT = 2
 
+#: Phase F2 — multi-source combo bonus. When a candidate hits BOTH a
+#: forward source (``hints`` or ``needs``) AND a reverse source
+#: (``has_has`` or ``wants_has``), Forge is effectively annotating the
+#: match from both ends: the card advertises it wants the commander's
+#: identity AND independently advertises it provides what the commander
+#: needs. This is a stronger signal than either single-source match,
+#: so we add one flat bonus the first time both halves are present for
+#: a given candidate.
+DECKHINTS_COMBO_WEIGHT = 2
+
+_FORWARD_DECKHINTS_SOURCES = frozenset({"hints", "needs"})
+_REVERSE_DECKHINTS_SOURCES = frozenset({"has_has", "wants_has"})
+
 
 def _score_deckhints(
     conn: sqlite3.Connection,
@@ -407,7 +420,8 @@ def _score_deckhints(
     scores: dict[str, BucketDict],
     matches: dict[str, MatchList],
 ) -> None:
-    """Award the deck_hints bucket once per ``(candidate, source)`` pair.
+    """Award the deck_hints bucket once per ``(candidate, source)`` pair,
+    plus a one-off combo bonus for forward+reverse pair matches.
 
     The bidirectional matcher emits one row per matched tag — a card with
     three different ability matches yields three rows. Without dedupe at
@@ -420,21 +434,55 @@ def _score_deckhints(
     commander's identity). Reverse sources (``has_has``, ``wants_has``)
     get half weight because the broader has-tag universe (Token,
     Counters) tends to flood otherwise.
+
+    Phase F2: if a candidate accumulates at least one forward AND at
+    least one reverse source hit, add :data:`DECKHINTS_COMBO_WEIGHT`
+    exactly once. This lifts Forge's "3-source full-match" cluster
+    (Heronblade Elite / Tuskguard Captain / Abzan Falconer class) above
+    the 1-source counter_synergy tier that was accidentally tied with
+    them in Phase F1.
     """
     seen: set[tuple[str, str]] = set()
-    forward_sources = {"hints", "needs"}
+    fwd_hit: set[str] = set()
+    rev_hit: set[str] = set()
+    combo_awarded: set[str] = set()
     for row in find_deckhints_matches(conn, commander_set):
         key = (row["candidate"], row["source"])
         if key in seen:
             continue
         seen.add(key)
+        candidate = row["candidate"]
+        source = row["source"]
         weight = (
             DECKHINTS_WEIGHT
-            if row["source"] in forward_sources
+            if source in _FORWARD_DECKHINTS_SOURCES
             else DECKHINTS_REVERSE_WEIGHT
         )
-        _add_bucket(scores, matches, row["candidate"], "deck_hints",
+        _add_bucket(scores, matches, candidate, "deck_hints",
                     weight, {**row, "bucket": "deck_hints"})
+
+        if source in _FORWARD_DECKHINTS_SOURCES:
+            fwd_hit.add(candidate)
+        else:
+            rev_hit.add(candidate)
+
+        if (
+            candidate not in combo_awarded
+            and candidate in fwd_hit
+            and candidate in rev_hit
+        ):
+            combo_awarded.add(candidate)
+            _add_bucket(
+                scores, matches, candidate, "deck_hints",
+                DECKHINTS_COMBO_WEIGHT,
+                {
+                    "candidate":  candidate,
+                    "source":     "combo",
+                    "kind":       "pair",
+                    "matched":    ["forward+reverse"],
+                    "bucket":     "deck_hints",
+                },
+            )
 
 
 def _score_chains(
