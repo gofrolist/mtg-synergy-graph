@@ -177,19 +177,19 @@
       ]
     },
     {
-      "commander": "Gitrog, Horror of Zhava",
-      "ndcg30": 0.0,
+      "commander": "The Gitrog Monster",
+      "ndcg30": 0.062893,
       "top10": [
-        "Kodama's Reach",
-        "Command Tower",
-        "Prismatic Vista",
-        "Demolition Field",
-        "Escape Tunnel",
-        "Horizon of Progress",
-        "Shire Terrace",
-        "Volatile Fault",
-        "Promising Vein",
-        "Evolving Wilds"
+        "Sol Ring",
+        "Arcane Signet",
+        "Thought Vessel",
+        "Nature's Lore",
+        "Heroic Intervention",
+        "Demonic Tutor",
+        "Feed the Swarm",
+        "Sylvan Library",
+        "Beast Within",
+        "Kodama's Reach"
       ]
     },
     {
@@ -398,6 +398,406 @@
         "Feed the Swarm",
         "Rhystic Study",
         "Toxic Deluge"
+      ]
+    },
+    {
+      "commander": "Uril, the Miststalker",
+      "ndcg30": 0.027617,
+      "top10": [
+        "Sol Ring",
+        "Swords to Plowshares",
+        "Path to Exile",
+        "Arcane Signet",
+        "Thought Vessel",
+        "Nature's Lore",
+        "Heroic Intervention",
+        "Sylvan Library",
+        "Dockside Extortionist",
+        "Beast Within"
+      ]
+    },
+    {
+      "commander": "Sram, Senior Edificer",
+      "ndcg30": 0.105877,
+      "top10": [
+        "Sol Ring",
+        "Swords to Plowshares",
+        "Path to Exile",
+        "Arcane Signet",
+        "Thought Vessel",
+        "Generous Gift",
+        "Teferi's Protection",
+        "Smothering Tithe",
+        "Command Tower",
+        "Island Sanctuary"
+      ]
+    },
+    {
+      "commander": "Rafiq of the Many",
+      "ndcg30": 0.031958,
+      "top10": [
+        "Sol Ring",
+        "Swords to Plowshares",
+        "Path to Exile",
+        "Mystic Remora",
+        "Arcane Signet",
+        "Counterspell",
+        "Thought Vessel",
+        "Nature's Lore",
+        "Heroic Intervention",
+        "Cyclonic Rift"
+      ]
+    },
+    {
+      "commander": "Urza, Lord High Artificer",
+      "ndcg30": 0.017885,
+      "top10": [
+        "Horn of Gondor",
+        "Sol Ring",
+        "Arcane Signet",
+        "Thought Vessel",
+        "Academy Manufactor",
+        "Stridehangar Automaton",
+        "Damping Sphere",
+        "Roaming Throne",
+        "Panharmonicon",
+        "Maskwood Nexus"
+      ]
+    },
+    {
+      "commander": "Sythis, Harvest's Hand",
+      "ndcg30": 0.032818,
+      "top10": [
+        "Alhammarret's Archive",
+        "Phial of Galadriel",
+        "Cleric Class",
+        "Leyline of Hope",
+        "Boon Reflection",
+        "Knight of Dawn's Light",
+        "Angel of Vitality",
+        "Honor Troll",
+        "The Wind Crystal",
+        "Rhox Faithmender"
+      ]
+    },
+    {
+      "commander": "Alela, Artful Provocateur",
+      "ndcg30": 0.30208,
+      "top10": [
+        "Tegwyll, Duke of Splendor",
+        "Scion of Oona",
+        "Sol Ring",
+        "Mystic Remora",
+        "Arcane Signet",
+        "Thought Vessel",
+        "Rhystic Study",
+        "Necropotence",
+        "Bolas's Citadel",
+        "Swords to Plowshares"
+      ]
+    },
+    {
+      "commander": "Lord Windgrace",
+      "ndcg30": 0.037386,
+      "top10": [
+        "Sol Ring",
+        "Arcane Signet",
+        "Thought Vessel",
+        "Nature's Lore",
+        "Heroic Intervention",
+        "Demonic Tutor",
+        "Feed the Swarm",
+        "Sylvan Library",
+        "Dockside Extortionist",
+        "Beast Within"
+      ]
+    },
+    {
+      "commander": "Tatyova, Benthic Druid",
+      "ndcg30": 0.228859,
+      "top10": [
+        "Kodama's Reach",
+        "Command Tower",
+        "Phial of Galadriel",
+        "Alhammarret's Archive",
+        "Evolving Wilds",
+        "Myriad Landscape",
+        "Terramorphic Expanse",
+        "Fabled Passage",
+        "Prismatic Vista",
+        "Demolition Field"
+      ]
+    },
+    {
+      "commander": "Omnath, Locus of Creation",
+      "ndcg30": 0.105252,
+      "top10": [
+        "Alhammarret's Archive",
+        "Path to Exile",
+        "Kodama's Reach",
+        "Phial of Galadriel",
+        "Command Tower",
+        "Evolving Wilds",
+        "Myriad Landscape",
+        "Terramorphic Expanse",
+        "Fabled Passage",
+        "Prismatic Vista"
+      ]
+    },
+    {
+      "commander": "Chainer, Nightmare Adept",
+      "ndcg30": 0.0,
+      "top10": [
+        "Inquisitive Puppet",
+        "Xathrid Necromancer",
+        "Jerren, Corrupted Bishop",
+        "Riders of the Mark",
+        "Dockside Extortionist",
+        "Dragonmaster Outcast",
+        "Infestation Sage",
+        "Nezumi Linkbreaker",
+        "Akroan Crusader",
+        "Rosnakht, Heir of Rohgahh"
+      ]
+    },
+    {
+      "commander": "Gisa and Geralf",
+      "ndcg30": 0.03322,
+      "top10": [
+        "Raul, Trouble Shooter",
+        "Waterlogged Hulk",
+        "Cruel Somnophage",
+        "The Ancient One",
+        "Inverted Iceberg",
+        "Throne of the Grim Captain",
+        "Fallaji Archaeologist",
+        "Visage of Dread",
+        "Ludevic, Necrogenius",
+        "Devourer of Memory"
+      ]
+    },
+    {
+      "commander": "Purphoros, God of the Forge",
+      "ndcg30": 0.123661,
+      "top10": [
+        "Dockside Extortionist",
+        "Dragonmaster Outcast",
+        "Akroan Crusader",
+        "Rosnakht, Heir of Rohgahh",
+        "Harried Spearguard",
+        "Kessig Wolfrider",
+        "Warbreak Trumpeter",
+        "Embereth Veteran",
+        "Tin Street Cadet",
+        "Young Pyromancer"
+      ]
+    },
+    {
+      "commander": "Ghired, Conclave Exile",
+      "ndcg30": 0.085361,
+      "top10": [
+        "Harmonic Prodigy",
+        "Sol Ring",
+        "Swords to Plowshares",
+        "Path to Exile",
+        "Arcane Signet",
+        "Thought Vessel",
+        "Nature's Lore",
+        "Heroic Intervention",
+        "Sylvan Library",
+        "Dockside Extortionist"
+      ]
+    },
+    {
+      "commander": "Kess, Dissident Mage",
+      "ndcg30": 0.160183,
+      "top10": [
+        "Sol Ring",
+        "Mystic Remora",
+        "Arcane Signet",
+        "Counterspell",
+        "Thought Vessel",
+        "Cyclonic Rift",
+        "Demonic Tutor",
+        "Feed the Swarm",
+        "Dockside Extortionist",
+        "Chaos Warp"
+      ]
+    },
+    {
+      "commander": "Jhoira, Weatherlight Captain",
+      "ndcg30": 0.063325,
+      "top10": [
+        "Sol Ring",
+        "Mystic Remora",
+        "Arcane Signet",
+        "Counterspell",
+        "Thought Vessel",
+        "Cyclonic Rift",
+        "Dockside Extortionist",
+        "Chaos Warp",
+        "Rhystic Study",
+        "Fierce Guardianship"
+      ]
+    },
+    {
+      "commander": "Zur the Enchanter",
+      "ndcg30": 0.126746,
+      "top10": [
+        "Sol Ring",
+        "Swords to Plowshares",
+        "Path to Exile",
+        "Mystic Remora",
+        "Arcane Signet",
+        "Counterspell",
+        "Thought Vessel",
+        "Cyclonic Rift",
+        "Demonic Tutor",
+        "Feed the Swarm"
+      ]
+    },
+    {
+      "commander": "Derevi, Empyrial Tactician",
+      "ndcg30": 0.163662,
+      "top10": [
+        "Naban, Dean of Iteration",
+        "Traveling Chocobo",
+        "Sol Ring",
+        "Swords to Plowshares",
+        "Path to Exile",
+        "Mystic Remora",
+        "Arcane Signet",
+        "Counterspell",
+        "Thought Vessel",
+        "Nature's Lore"
+      ]
+    },
+    {
+      "commander": "Selvala, Heart of the Wilds",
+      "ndcg30": 0.014107,
+      "top10": [
+        "Elvish Warmaster",
+        "Wolverine Riders",
+        "Beast Within",
+        "Grist, Voracious Larva",
+        "Utopia Mycon",
+        "Termagant Swarm",
+        "Flaxen Intruder",
+        "Tukatongue Thallid",
+        "Llanowar Mentor",
+        "Swarm Shambler"
+      ]
+    },
+    {
+      "commander": "Queen Marchesa",
+      "ndcg30": 0.056967,
+      "top10": [
+        "Teysa Karlov",
+        "Ezio Auditore da Firenze",
+        "Mari, the Killing Quill",
+        "Interceptor, Shadow's Hound",
+        "Sol Ring",
+        "Swords to Plowshares",
+        "Path to Exile",
+        "Arcane Signet",
+        "Thought Vessel",
+        "Demonic Tutor"
+      ]
+    },
+    {
+      "commander": "Isshin, Two Heavens as One",
+      "ndcg30": 0.106643,
+      "top10": [
+        "A-Asari Captain",
+        "Asari Captain",
+        "A-Akki Ronin",
+        "A-Eiganjo Exemplar",
+        "Selfless Samurai",
+        "Akki Ronin",
+        "Eiganjo Exemplar",
+        "Cavalry Pegasus",
+        "A-Imperial Subduer",
+        "A-Peerless Samurai"
+      ]
+    },
+    {
+      "commander": "Oloro, Ageless Ascetic",
+      "ndcg30": 0.227429,
+      "top10": [
+        "Swords to Plowshares",
+        "Phial of Galadriel",
+        "Alhammarret's Archive",
+        "Sol Ring",
+        "Path to Exile",
+        "Mystic Remora",
+        "Arcane Signet",
+        "Counterspell",
+        "Thought Vessel",
+        "Cyclonic Rift"
+      ]
+    },
+    {
+      "commander": "The Locust God",
+      "ndcg30": 0.093463,
+      "top10": [
+        "Brudiclad, Telchor Engineer",
+        "Baeloth Barrityl, Entertainer",
+        "Sol Ring",
+        "Mystic Remora",
+        "Arcane Signet",
+        "Counterspell",
+        "Thought Vessel",
+        "Cyclonic Rift",
+        "Dockside Extortionist",
+        "Roar of Resistance"
+      ]
+    },
+    {
+      "commander": "Muldrotha, the Gravetide",
+      "ndcg30": 0.070147,
+      "top10": [
+        "Sol Ring",
+        "Mystic Remora",
+        "Arcane Signet",
+        "Counterspell",
+        "Thought Vessel",
+        "Nature's Lore",
+        "Heroic Intervention",
+        "Cyclonic Rift",
+        "Demonic Tutor",
+        "Feed the Swarm"
+      ]
+    },
+    {
+      "commander": "Prossh, Skyraider of Kher",
+      "ndcg30": 0.022957,
+      "top10": [
+        "Propagator Drone",
+        "Skittering Precursor",
+        "Beast Within",
+        "Keldon Strike Team",
+        "Dragon Whisperer",
+        "Impulsive Pilferer",
+        "Archfiend's Vessel",
+        "Baeloth Barrityl, Entertainer",
+        "Loyal Apprentice",
+        "Magda, Brazen Outlaw"
+      ]
+    },
+    {
+      "commander": "Feather, the Redeemed",
+      "ndcg30": 0.046794,
+      "top10": [
+        "Swords to Plowshares",
+        "Path to Exile",
+        "Chaos Warp",
+        "Generous Gift",
+        "Deflecting Swat",
+        "Teferi's Protection",
+        "Jeska's Will",
+        "Blasphemous Act",
+        "Sol Ring",
+        "Arcane Signet"
       ]
     }
   ],
