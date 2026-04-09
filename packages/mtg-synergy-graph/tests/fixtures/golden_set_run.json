@@ -66,18 +66,18 @@
     },
     {
       "commander": "Meren of Clan Nel Toth",
-      "ndcg30": 0.010825,
+      "ndcg30": 0.015976,
       "top10": [
         "Grist, Voracious Larva",
-        "Jerren, Corrupted Bishop",
         "Seedship Broodtender",
-        "Zabaz, the Glimmerwasp",
-        "Winding Constrictor",
-        "Benevolent Hydra",
-        "Michelangelo, Weirdness to 11",
         "Stitcher's Supplier",
         "Cauldron Familiar",
-        "Ravenous Squirrel"
+        "Patchwork Beastie",
+        "Deathbonnet Sprout",
+        "Excavated Wall",
+        "Festerleech",
+        "A-Cauldron Familiar",
+        "Old Rutstein"
       ]
     },
     {
@@ -226,7 +226,7 @@
     },
     {
       "commander": "Karador, Ghost Chieftain",
-      "ndcg30": 0.001579,
+      "ndcg30": 0.055385,
       "top10": [
         "Sol Ring",
         "Swords to Plowshares",
@@ -551,13 +551,13 @@
         "Inquisitive Puppet",
         "Xathrid Necromancer",
         "Jerren, Corrupted Bishop",
-        "Riders of the Mark",
-        "Dockside Extortionist",
-        "Dragonmaster Outcast",
-        "Infestation Sage",
-        "Nezumi Linkbreaker",
-        "Akroan Crusader",
-        "Rosnakht, Heir of Rohgahh"
+        "Enslaved Horror",
+        "Haunted Dead",
+        "Crypt Champion",
+        "Aclazotz, Deepest Betrayal",
+        "Death Tyrant",
+        "Eyeblight Cullers",
+        "Riders of the Mark"
       ]
     },
     {
@@ -754,7 +754,7 @@
     },
     {
       "commander": "Muldrotha, the Gravetide",
-      "ndcg30": 0.070147,
+      "ndcg30": 0.10382,
       "top10": [
         "Sol Ring",
         "Mystic Remora",

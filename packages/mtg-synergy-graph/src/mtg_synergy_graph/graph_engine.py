@@ -2204,3 +2204,188 @@ def find_counter_producer_payoff(
             }
         )
     return results
+
+
+# ---------------------------------------------------------------------------
+# §7.x — graveyard-value commander matcher (Phase F5)
+# ---------------------------------------------------------------------------
+#
+# The F4 golden-set diagnostic map surfaced graveyard-reanimator as the
+# single biggest blind spot — 5 commanders at NDCG < 0.04 (Chainer,
+# Karador, Meren, Gisa and Geralf, plus sac-graveyard Korvold). None of
+# the existing matchers connect "card that puts stuff in your graveyard"
+# to "commander that cashes cards out of the graveyard".
+#
+# This matcher gates on a commander-level "I care about the graveyard"
+# signature and emits three categories of candidate:
+#
+#   1. library_to_grave — cards whose effect moves cards straight from
+#      library to graveyard (Buried Alive, Entomb, Gravebreaker Lamia).
+#      The highest-precision tier: these are always graveyard fillers.
+#
+#   2. self_mill — cards with ``effect Mill | Defined: You`` (Stitcher's
+#      Supplier, Hedron Crab, Mesmeric Orb, Traumatize). Excludes
+#      opponent-targeting mill.
+#
+#   3. reanimator_cluster — other cards with ``effect ChangeZone
+#      Graveyard→Battlefield`` (Doomed Necromancer, Reassembling
+#      Skeleton, Persist / Unearth / Embalm creatures). Mirror of the
+#      sacrifice_synergy "payoff_cluster" direction: two reanimators
+#      cluster mechanically even when neither feeds the other's event.
+
+
+def _commander_is_graveyard_value(cmdr_ports: list[PortRow]) -> bool:
+    """Return True when the commander mechanically cares about cards
+    being in the graveyard (reanimates, counts grave, or casts from it).
+
+    Four accepted signatures, any one sufficient:
+
+    1. Has an ``effect ChangeZone`` moving cards from ``Graveyard`` to
+       ``Battlefield`` — the cleanest reanimation signal (Meren's
+       death trigger executes a Graveyard→Battlefield ChangeZone).
+
+    2. Has a ``scales_with`` row whose ``event_class`` starts with
+       ``ValidGraveyard`` — the commander reads the grave as a
+       resource (Karador's SVar ``Count$ValidGraveyard Creature.YouCtrl``
+       lands here, as do Ghoulcaller Gisa / Soulflayer variants).
+
+    3. Has a ``static Continuous`` whose ``raw_line`` contains both
+       ``MayPlay`` and ``AffectedZone': 'Graveyard'`` — the "may cast
+       from your graveyard" cluster (Karador's second static, Gisa and
+       Geralf's "during your turn, may cast zombies from graveyard",
+       Muldrotha, The Gitrog Monster, etc.).
+
+    4. Has any port whose ``raw_line`` references ``STYardCast`` — the
+       Forge shared-static-ability name for "may cast from graveyard"
+       cluster. Catches Chainer, Nightmare Adept, whose reanimator
+       mode is stored as a discard-costed ``Effect`` port rather than a
+       top-level Continuous static.
+
+    Deliberately *rejected*:
+
+    * Commanders that merely *put things in* the graveyard without
+      paying them back (Korvold uses sacrifice but doesn't cast from
+      or reanimate from the grave — handled by ``sacrifice_synergy``).
+    * Opponent-mill commanders (Bruvac, Phenax) — they fill the
+      *opponent's* grave, not yours.
+    """
+    for p in cmdr_ports:
+        ptype = p.get("port_type")
+        ev = (p.get("event_class") or "").strip()
+
+        # Signature 1: Graveyard → Battlefield reanimation. The
+        # valid_filter must mention Creature/Permanent/Card (or be
+        # empty) — strictly-artifact reanim (Sharuum, Daretti) and
+        # strictly-land reanim (Crucible of Worlds activations) are
+        # not creature-reanimator shapes and pulling in the 400+
+        # self-mill and reanimator-cluster candidates for them
+        # adds noise without matching EDHREC's Hi-Syn picks.
+        if ptype == "effect" and ev == "ChangeZone":
+            if (
+                (p.get("zone_origin") or "").strip() == "Graveyard"
+                and (p.get("zone_destination") or "").strip() == "Battlefield"
+            ):
+                vf = (p.get("valid_filter") or "")
+                if (
+                    not vf
+                    or "Creature" in vf
+                    or "Permanent" in vf
+                    or vf.startswith("Card")
+                ):
+                    return True
+
+        # Signature 2: ValidGraveyard scales_with.
+        if ptype == "scales_with" and ev.startswith("ValidGraveyard"):
+            return True
+
+        # Signature 3/4: raw_line-based MayPlay + AffectedZone: Graveyard,
+        # or STYardCast reference. We scan each port's raw_line exactly
+        # once — static Continuous ports are the primary target but any
+        # port that carries these markers counts.
+        raw = str(p.get("raw_line") or "")
+        if not raw:
+            continue
+        if "STYardCast" in raw:
+            return True
+        if "'MayPlay'" in raw and "'AffectedZone': 'Graveyard'" in raw:
+            return True
+    return False
+
+
+def find_graveyard_value_synergies(
+    conn: sqlite3.Connection,
+    commander_set: Sequence[str],
+) -> list[dict[str, Any]]:
+    """Return candidate graveyard-filler / reanimator-cluster rows for
+    graveyard-value commanders.
+
+    Gated on :func:`_commander_is_graveyard_value`. Emits one row per
+    candidate (deduped across the three tiers) with a ``direction``
+    field marking which tier caught it, for explain-layer display.
+
+    The ``self_mill`` tier rejects opponent-mill effects by filtering
+    ``valid_filter`` for ``Opp``/``Each``; Bruvac-style cards should
+    never be emitted as "fills YOUR graveyard" candidates.
+    """
+    cmdr_ports = load_ports_for_set(conn, commander_set)
+    if not _commander_is_graveyard_value(cmdr_ports):
+        return []
+
+    cmdr_set = set(commander_set)
+    seen: set[str] = set()
+    results: list[dict[str, Any]] = []
+
+    def _emit(name: str, direction: str, branch_kind: str | None,
+              is_conditional: bool) -> None:
+        if name in cmdr_set or name in seen:
+            return
+        seen.add(name)
+        results.append({
+            "candidate":      name,
+            "direction":      direction,
+            "branch_kind":    branch_kind or "root",
+            "is_conditional": is_conditional,
+        })
+
+    # Tier 1: Library → Graveyard direct placement.
+    cur = conn.execute(
+        "SELECT DISTINCT card_name, branch_kind, is_conditional "
+        "FROM card_ports "
+        "WHERE port_type = 'effect' AND event_class = 'ChangeZone' "
+        "AND zone_origin = 'Library' AND zone_destination = 'Graveyard'"
+    )
+    for r in cur.fetchall():
+        _emit(r["card_name"], "library_to_grave",
+              r["branch_kind"], bool(r["is_conditional"]))
+
+    # Tier 2: Self-mill (Mill effect targeting You, not opponents).
+    cur = conn.execute(
+        "SELECT DISTINCT card_name, valid_filter, branch_kind, is_conditional "
+        "FROM card_ports "
+        "WHERE port_type = 'effect' AND event_class = 'Mill'"
+    )
+    for r in cur.fetchall():
+        vf = (r["valid_filter"] or "")
+        # Mill effects with an explicit target other than You are
+        # opponent-mill (Bruvac) or target-a-player-mill (Maddening
+        # Cacophony). Friendly self-mill has either empty filter,
+        # ``You`` / ``OwnedBy You`` / ``Each``-style wide targets. We
+        # accept empty + You + Each Player and reject anything naming
+        # an opponent.
+        if "Opp" in vf:
+            continue
+        _emit(r["card_name"], "self_mill",
+              r["branch_kind"], bool(r["is_conditional"]))
+
+    # Tier 3: Reanimator cluster — other cards with Graveyard→Battlefield.
+    cur = conn.execute(
+        "SELECT DISTINCT card_name, branch_kind, is_conditional "
+        "FROM card_ports "
+        "WHERE port_type = 'effect' AND event_class = 'ChangeZone' "
+        "AND zone_origin = 'Graveyard' AND zone_destination = 'Battlefield'"
+    )
+    for r in cur.fetchall():
+        _emit(r["card_name"], "reanimator_cluster",
+              r["branch_kind"], bool(r["is_conditional"]))
+
+    return results

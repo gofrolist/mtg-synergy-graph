@@ -42,6 +42,7 @@ from .graph_engine import (
     find_counter_producer_payoff,
     find_deckhints_matches,
     find_etb_self_matches,
+    find_graveyard_value_synergies,
     find_lord_matches,
     find_mana_restriction_matches,
     find_replacement_conflicts,
@@ -110,6 +111,7 @@ CATCH_ALL_WEIGHT        = 1   # weak per-card; v3 halved from 2
 COST_FEED_WEIGHT        = 6   # v3 raised from 4 — strong signal
 SACRIFICE_SYNERGY_WEIGHT = 4  # Phase D1 — additive on top of cost_feed
 COUNTER_SYNERGY_WEIGHT   = 4  # Phase F1 — +1/+1 counter producer → payoff commander
+GRAVEYARD_SYNERGY_WEIGHT = 4  # Phase F5 — graveyard filler → reanimator commander
 MANA_RESTRICTION_WEIGHT  = 2  # Phase D2 — folds into cost_synergy bucket
 SCALING_WEIGHT          = 6   # v3 raised from 5
 DECKHINTS_WEIGHT        = 4   # v3 raised from 3 — Forge's own annotations
@@ -235,6 +237,7 @@ BUCKETS: tuple[str, ...] = (
     "cost_synergy",
     "sacrifice_synergy",   # Phase D1 — outlet ↔ payoff cluster
     "counter_synergy",     # Phase F1 — P1P1 producer ↔ counter-payoff cmdr
+    "graveyard_synergy",   # Phase F5 — grave filler ↔ reanim commander
     "scaling",
     "deck_hints",
     "chain",
@@ -656,6 +659,38 @@ def _score_counter_producer_payoff(
             scores, matches, row["candidate"], "counter_synergy",
             COUNTER_SYNERGY_WEIGHT * weight,
             {**row, "bucket": "counter_synergy"},
+        )
+
+
+def _score_graveyard_value(
+    conn: sqlite3.Connection,
+    commander_set: Sequence[str],
+    scores: dict[str, BucketDict],
+    matches: dict[str, MatchList],
+) -> None:
+    """Phase F5 — graveyard filler / reanimator-cluster bucket.
+
+    Gated on :func:`_commander_is_graveyard_value` (reanimation
+    trigger, ``ValidGraveyard`` scaling, ``MayPlay`` + ``AffectedZone:
+    Graveyard``, or ``STYardCast``). Awards
+    :data:`GRAVEYARD_SYNERGY_WEIGHT` once per candidate across three
+    tiers: ``library_to_grave`` (Buried Alive / Entomb),
+    ``self_mill`` (Stitcher's Supplier / Mesmeric Orb), and
+    ``reanimator_cluster`` (Doomed Necromancer / Reassembling Skeleton
+    / persist creatures).
+
+    Closes the biggest blind spot surfaced by the F4 golden-set
+    diagnostic map: 5 commanders (Chainer, Karador, Meren, Gisa and
+    Geralf, Muldrotha) were at NDCG@30 < 0.04 because no existing
+    matcher connected "fill my graveyard" to "my commander cashes the
+    graveyard out".
+    """
+    for row in find_graveyard_value_synergies(conn, commander_set):
+        weight = _branch_weight(row.get("branch_kind"))
+        _add_bucket(
+            scores, matches, row["candidate"], "graveyard_synergy",
+            GRAVEYARD_SYNERGY_WEIGHT * weight,
+            {**row, "bucket": "graveyard_synergy"},
         )
 
 
@@ -1686,6 +1721,7 @@ def score_all_candidates(
     _score_replacements(conn, commander_set, scores, matches)
     _score_sacrifice_synergies(conn, commander_set, scores, matches)
     _score_counter_producer_payoff(conn, commander_set, scores, matches)
+    _score_graveyard_value(conn, commander_set, scores, matches)
     _score_mana_restriction(conn, commander_set, scores, matches)
     # Phase D4 (find_flicker_loop_matches) is intentionally NOT wired
     # in here. The matcher correctly identifies flicker-source clusters
