@@ -2141,10 +2141,17 @@ def _counter_effect_is_friendly(valid_filter: str | None) -> bool:
 #: that puts P1P1 counters on an ``Artifact`` or ``Land`` (rare, but it
 #: happens with ``ValidCards$ Artifact.YouCtrl`` style effects) is not
 #: a creature-counter-payoff card. We require the filter to either be
-#: empty (unscoped; the controller picks friendly creatures by default)
-#: or explicitly mention ``Creature`` / ``Permanent``.
+#: empty (unscoped; the controller picks friendly creatures by default),
+#: explicitly mention ``Creature`` / ``Permanent``, or be ``Self`` —
+#: the latter is how Forge encodes ``Defined$ Self`` placements
+#: (Champion of Lambholt, every ``CARDNAME enters with N +1/+1
+#: counters`` card). For P1P1 specifically, Self is always a creature
+#: because cards that accumulate charge / loyalty / other counter types
+#: use different counter_type values and are excluded upstream.
 def _counter_effect_hits_creatures(valid_filter: str | None) -> bool:
     if not valid_filter:
+        return True
+    if valid_filter == "Self":
         return True
     return "Creature" in valid_filter or "Permanent" in valid_filter
 

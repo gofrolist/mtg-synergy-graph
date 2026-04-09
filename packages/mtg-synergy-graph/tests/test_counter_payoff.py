@@ -61,6 +61,7 @@ def test_counter_effect_is_friendly(valid_filter, expected):
         ("Creature.YouCtrl",         True),
         ("Creature.YouCtrl+Other",   True),
         ("Permanent.YouCtrl",        True),
+        ("Self",                     True),   # Phase F1.1 — "Defined$ Self"
         ("Artifact.YouCtrl",         False),
         ("Land.YouCtrl",             False),
     ],
@@ -201,6 +202,40 @@ def test_maester_seymour_scores_counter_synergy_for_kyler():
         )
     assert rec.scores.get("counter_synergy", 0) > 0, (
         "counter_synergy bucket did not fire for Maester Seymour + Kyler"
+    )
+
+
+def test_champion_of_lambholt_scores_counter_synergy_for_kyler():
+    """Regression guard for Phase F1.1 (Self-filter fix).
+
+    Champion of Lambholt's raw_line is
+    ``DB$ PutCounter | Defined$ Self | CounterType$ P1P1``, which the
+    importer materialises as ``valid_filter='Self'``. Before the F1.1
+    fix, ``_counter_effect_hits_creatures('Self')`` returned False and
+    Champion was ranked 770 for Kyler despite being EDHREC's #4
+    High Synergy Card (synergy 0.62).
+    """
+    with SynergyEngine(FULL_DB_PATH) as eng:
+        rec = eng.score_one(
+            "Kyler, Sigardian Emissary", "Champion of Lambholt",
+        )
+    assert rec.scores.get("counter_synergy", 0) > 0, (
+        "counter_synergy did not fire for Champion of Lambholt + Kyler. "
+        "Check that _counter_effect_hits_creatures accepts 'Self'."
+    )
+
+
+def test_champion_of_lambholt_lifts_into_kyler_top_200():
+    """The F1.1 fix must lift Champion of Lambholt from its pre-fix
+    rank of ~770 into at least the top 200 for Kyler. We don't assert
+    top 50 because Champion's deck_hints path is reverse-only (2 pts)
+    and it doesn't collect the F2 combo bonus — fixing that would
+    require F3 (see discussion)."""
+    with SynergyEngine(FULL_DB_PATH) as eng:
+        page = eng.page("Kyler, Sigardian Emissary", limit=300)
+    names = [r.card for r in page.items]
+    assert "Champion of Lambholt" in names, (
+        "Champion of Lambholt must land in Kyler's top 300 after F1.1"
     )
 
 
