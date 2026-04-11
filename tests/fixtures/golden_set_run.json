@@ -2,23 +2,53 @@
   "entries": [
     {
       "commander": "Korvold, Fae-Cursed King",
-      "ndcg30": 0.029003,
+      "edhrec_top10": [
+        "Mayhem Devil",
+        "Tireless Provisioner",
+        "Pitiless Plunderer",
+        "Chatterfang, Squirrel General",
+        "Warren Soultrader",
+        "Academy Manufactor",
+        "Diabolic Intent",
+        "Impulsive Pilferer",
+        "Deadly Dispute",
+        "Ruthless Technomancer"
+      ],
+      "hi_syn_hits": 1,
+      "hi_syn_total": 10,
+      "ndcg30": 0.069852,
+      "on_page_hits": 4,
       "top10": [
+        "Baloth Prime",
+        "Breya's Apprentice",
+        "Redrock Sentinel",
         "Witch's Oven",
         "Retrofitter Foundry",
+        "Magda, Brazen Outlaw",
         "Legion Extruder",
         "Fain, the Broker",
         "Hammer of Purphoros",
-        "Transmogrant Altar",
-        "Throne of Geth",
-        "Michelangelo, Weirdness to 11",
-        "The Underworld Cookbook",
-        "Blood Fountain"
+        "Transmogrant Altar"
       ]
     },
     {
       "commander": "Krenko, Mob Boss",
+      "edhrec_top10": [
+        "Goblin Warchief",
+        "Skirk Prospector",
+        "Goblin Matron",
+        "Goblin Chieftain",
+        "Impact Tremors",
+        "Goblin Bombardment",
+        "Pashalik Mons",
+        "Brightstone Ritual",
+        "Goblin King",
+        "Hobgoblin Bandit Lord"
+      ],
+      "hi_syn_hits": 4,
+      "hi_syn_total": 10,
       "ndcg30": 0.458125,
+      "on_page_hits": 22,
       "top10": [
         "Goblin King",
         "Rundvelt Hordemaster",
@@ -34,7 +64,22 @@
     },
     {
       "commander": "Atraxa, Praetors' Voice",
+      "edhrec_top10": [
+        "Tekuthal, Inquiry Dominus",
+        "Evolution Sage",
+        "Karn's Bastion",
+        "Ezuri, Stalker of Spheres",
+        "Vraska, Betrayal's Sting",
+        "Inexorable Tide",
+        "Thrummingbird",
+        "Tezzeret's Gambit",
+        "Flux Channeler",
+        "Vorinclex, Monstrous Raider"
+      ],
+      "hi_syn_hits": 1,
+      "hi_syn_total": 10,
       "ndcg30": 0.132105,
+      "on_page_hits": 15,
       "top10": [
         "Merfolk Skydiver",
         "Brimaz, Blight of Oreskos",
@@ -50,7 +95,22 @@
     },
     {
       "commander": "Edgar Markov",
-      "ndcg30": 0.357073,
+      "edhrec_top10": [
+        "Captivating Vampire",
+        "Cordial Vampire",
+        "Stromkirk Captain",
+        "Blood Artist",
+        "Indulgent Aristocrat",
+        "Legion Lieutenant",
+        "Bloodline Keeper",
+        "Welcoming Vampire",
+        "Sanctum Seeker",
+        "Vito, Thorn of the Dusk Rose"
+      ],
+      "hi_syn_hits": 6,
+      "hi_syn_total": 10,
+      "ndcg30": 0.497035,
+      "on_page_hits": 16,
       "top10": [
         "Legion Lieutenant",
         "Vampire Nocturnus",
@@ -66,23 +126,53 @@
     },
     {
       "commander": "Meren of Clan Nel Toth",
-      "ndcg30": 0.015976,
+      "edhrec_top10": [
+        "Spore Frog",
+        "Plaguecrafter",
+        "Sakura-Tribe Elder",
+        "Gray Merchant of Asphodel",
+        "Viscera Seer",
+        "Eternal Witness",
+        "Buried Alive",
+        "Victimize",
+        "Grim Haruspex",
+        "Accursed Marauder"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.017052,
+      "on_page_hits": 2,
       "top10": [
+        "Jerren, Corrupted Bishop",
         "Grist, Voracious Larva",
-        "Seedship Broodtender",
+        "Xathrid Necromancer",
+        "Falkenrath Forebear",
+        "Eyeblight Cullers",
+        "Vivien on the Hunt",
         "Stitcher's Supplier",
-        "Cauldron Familiar",
-        "Patchwork Beastie",
-        "Deathbonnet Sprout",
-        "Excavated Wall",
-        "Festerleech",
-        "A-Cauldron Familiar",
-        "Old Rutstein"
+        "Undead Butler",
+        "Circle of the Land Druid",
+        "Seedship Broodtender"
       ]
     },
     {
       "commander": "Kaalia of the Vast",
+      "edhrec_top10": [
+        "Gisela, Blade of Goldnight",
+        "Rune-Scarred Demon",
+        "Avacyn, Angel of Hope",
+        "Aurelia, the Warleader",
+        "Sephara, Sky's Blade",
+        "Liesa, Forgotten Archangel",
+        "Master of Cruelties",
+        "Balefire Dragon",
+        "Kaalia, Zenith Seeker",
+        "Vilis, Broker of Blood"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
       "ndcg30": 0.115038,
+      "on_page_hits": 19,
       "top10": [
         "Sol Ring",
         "Swords to Plowshares",
@@ -98,7 +188,22 @@
     },
     {
       "commander": "Yuriko, the Tiger's Shadow",
+      "edhrec_top10": [
+        "Ingenious Infiltrator",
+        "Thousand-Faced Shadow",
+        "Prosperous Thief",
+        "Changeling Outcast",
+        "Mistblade Shinobi",
+        "Tetsuko Umezawa, Fugitive",
+        "Ornithopter",
+        "Ninja of the Deep Hours",
+        "Silver-Fur Master",
+        "Moon-Circuit Hacker"
+      ],
+      "hi_syn_hits": 3,
+      "hi_syn_total": 10,
       "ndcg30": 0.269943,
+      "on_page_hits": 23,
       "top10": [
         "Silver-Fur Master",
         "A-Silver-Fur Master",
@@ -114,7 +219,22 @@
     },
     {
       "commander": "The Ur-Dragon",
+      "edhrec_top10": [
+        "Miirym, Sentinel Wyrm",
+        "Dragon Tempest",
+        "Crux of Fate",
+        "Tiamat",
+        "Atarka, World Render",
+        "Lathliss, Dragon Queen",
+        "Dragonlord Dromoka",
+        "Terror of the Peaks",
+        "Dragonspeaker Shaman",
+        "Old Gnawbone"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
       "ndcg30": 0.181161,
+      "on_page_hits": 24,
       "top10": [
         "Dragon's Disciple",
         "Korlessa, Scale Singer",
@@ -130,7 +250,22 @@
     },
     {
       "commander": "Animar, Soul of Elements",
+      "edhrec_top10": [
+        "Beast Whisperer",
+        "Ancestral Statue",
+        "Forgotten Ancient",
+        "Hardened Scales",
+        "Soul of the Harvest",
+        "Rattleclaw Mystic",
+        "Peregrine Drake",
+        "Ornithopter of Paradise",
+        "Hydroid Krasis",
+        "Mulldrifter"
+      ],
+      "hi_syn_hits": 1,
+      "hi_syn_total": 10,
       "ndcg30": 0.17933,
+      "on_page_hits": 23,
       "top10": [
         "Benevolent Hydra",
         "Ozolith, the Shattered Spire",
@@ -146,7 +281,22 @@
     },
     {
       "commander": "Brago, King Eternal",
+      "edhrec_top10": [
+        "Peregrine Drake",
+        "Aether Channeler",
+        "Panharmonicon",
+        "Soulherder",
+        "Reflector Mage",
+        "Wall of Omens",
+        "Strionic Resonator",
+        "Archaeomancer",
+        "Venser, Shaper Savant",
+        "Reality Acid"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
       "ndcg30": 0.096806,
+      "on_page_hits": 18,
       "top10": [
         "Sol Ring",
         "Swords to Plowshares",
@@ -162,7 +312,22 @@
     },
     {
       "commander": "Yarok, the Desecrated",
+      "edhrec_top10": [
+        "Panharmonicon",
+        "Coiling Oracle",
+        "Mulldrifter",
+        "Lotus Cobra",
+        "Tatyova, Benthic Druid",
+        "Risen Reef",
+        "Reclamation Sage",
+        "Ghostly Flicker",
+        "Tireless Provisioner",
+        "Wood Elves"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
       "ndcg30": 0.052368,
+      "on_page_hits": 17,
       "top10": [
         "Sunderflock",
         "Nissa, Resurgent Animist",
@@ -178,7 +343,22 @@
     },
     {
       "commander": "The Gitrog Monster",
+      "edhrec_top10": [
+        "Ramunap Excavator",
+        "Dakmor Salvage",
+        "Life from the Loam",
+        "Sylvan Safekeeper",
+        "Noose Constrictor",
+        "Lotus Cobra",
+        "Icetill Explorer",
+        "Harrow",
+        "Zuran Orb",
+        "Splendid Reclamation"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
       "ndcg30": 0.062893,
+      "on_page_hits": 17,
       "top10": [
         "Sol Ring",
         "Arcane Signet",
@@ -194,7 +374,22 @@
     },
     {
       "commander": "Niv-Mizzet, Parun",
-      "ndcg30": 0.209142,
+      "edhrec_top10": [
+        "Curiosity",
+        "Ophidian Eye",
+        "Niv-Mizzet, the Firemind",
+        "Tandem Lookout",
+        "Brainstorm",
+        "Guttersnipe",
+        "Niv-Mizzet, Visionary",
+        "Opt",
+        "Izzet Charm",
+        "Goblin Electromancer"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.210748,
+      "on_page_hits": 17,
       "top10": [
         "Counterspell",
         "Cyclonic Rift",
@@ -203,19 +398,34 @@
         "Deflecting Swat",
         "Jeska's Will",
         "Blasphemous Act",
+        "Flame of Anor",
         "Sol Ring",
-        "Mystic Remora",
-        "Arcane Signet"
+        "Mystic Remora"
       ]
     },
     {
       "commander": "Talrand, Sky Summoner",
-      "ndcg30": 0.027601,
+      "edhrec_top10": [
+        "Opt",
+        "Favorable Winds",
+        "Preordain",
+        "Murmuring Mystic",
+        "Winged Words",
+        "Impulse",
+        "Serum Visions",
+        "Consider",
+        "Anticipate",
+        "Wizard's Retort"
+      ],
+      "hi_syn_hits": 1,
+      "hi_syn_total": 10,
+      "ndcg30": 0.064233,
+      "on_page_hits": 9,
       "top10": [
-        "Namor the Sub-Mariner",
         "Counterspell",
         "Cyclonic Rift",
         "Fierce Guardianship",
+        "Namor the Sub-Mariner",
         "Sol Ring",
         "Mystic Remora",
         "Arcane Signet",
@@ -226,23 +436,53 @@
     },
     {
       "commander": "Karador, Ghost Chieftain",
-      "ndcg30": 0.055385,
+      "edhrec_top10": [
+        "Karmic Guide",
+        "Satyr Wayfinder",
+        "Sun Titan",
+        "Stitcher's Supplier",
+        "Eternal Witness",
+        "Sakura-Tribe Elder",
+        "Spore Frog",
+        "Reveillark",
+        "Viscera Seer",
+        "Saffi Eriksdotter"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.053684,
+      "on_page_hits": 18,
       "top10": [
         "Sol Ring",
         "Swords to Plowshares",
         "Path to Exile",
+        "Entomb",
         "Arcane Signet",
         "Thought Vessel",
         "Nature's Lore",
         "Heroic Intervention",
         "Demonic Tutor",
-        "Feed the Swarm",
-        "Sylvan Library"
+        "Feed the Swarm"
       ]
     },
     {
       "commander": "Saskia the Unyielding",
+      "edhrec_top10": [
+        "Gisela, Blade of Goldnight",
+        "Rhythm of the Wild",
+        "Aurelia, the Warleader",
+        "Samut, Voice of Dissent",
+        "Iroas, God of Victory",
+        "Alesha, Who Laughs at Fate",
+        "Boros Charm",
+        "Aurelia, the Law Above",
+        "Adeline, Resplendent Cathar",
+        "General's Enforcer"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
       "ndcg30": 0.14891,
+      "on_page_hits": 20,
       "top10": [
         "Sol Ring",
         "Swords to Plowshares",
@@ -258,7 +498,22 @@
     },
     {
       "commander": "Marrow-Gnawer",
-      "ndcg30": 0.634875,
+      "edhrec_top10": [
+        "Piper of the Swarm",
+        "Pack Rat",
+        "Karumonix, the Rat King",
+        "Rat Colony",
+        "Ogre Slumlord",
+        "Swarmyard",
+        "Lord Skitter, Sewer King",
+        "Ratcatcher",
+        "Herald's Horn",
+        "Ashcoat of the Shadow Swarm"
+      ],
+      "hi_syn_hits": 7,
+      "hi_syn_total": 10,
+      "ndcg30": 0.621995,
+      "on_page_hits": 23,
       "top10": [
         "Ogre Slumlord",
         "Piper of the Swarm",
@@ -274,7 +529,22 @@
     },
     {
       "commander": "Lathril, Blade of the Elves",
+      "edhrec_top10": [
+        "Elvish Archdruid",
+        "Marwyn, the Nurturer",
+        "Imperious Perfect",
+        "Priest of Titania",
+        "Beast Whisperer",
+        "Elvish Warmaster",
+        "Elven Ambush",
+        "Dwynen, Gilt-Leaf Daen",
+        "Elvish Mystic",
+        "Shaman of the Pack"
+      ],
+      "hi_syn_hits": 4,
+      "hi_syn_total": 10,
       "ndcg30": 0.556729,
+      "on_page_hits": 19,
       "top10": [
         "Elvish Archdruid",
         "Dwynen, Gilt-Leaf Daen",
@@ -290,23 +560,53 @@
     },
     {
       "commander": "Slimefoot, the Stowaway",
-      "ndcg30": 0.213695,
+      "edhrec_top10": [
+        "Utopia Mycon",
+        "Deathspore Thallid",
+        "Nemata, Primeval Warden",
+        "Sporemound",
+        "Mycoloth",
+        "Fungal Plots",
+        "Tendershoot Dryad",
+        "Fungal Rebirth",
+        "Verdant Force",
+        "Necrogenesis"
+      ],
+      "hi_syn_hits": 2,
+      "hi_syn_total": 10,
+      "ndcg30": 0.377913,
+      "on_page_hits": 11,
       "top10": [
-        "Propagator Drone",
-        "Gothmog, Morgul Lieutenant",
-        "Sporoloth Ancient",
+        "Deathspore Thallid",
+        "Psychotrope Thallid",
+        "Thallid Germinator",
+        "Thallid Devourer",
+        "Baloth Prime",
+        "Savage Thallid",
+        "Nemata, Grove Guardian",
         "Bolas's Citadel",
-        "Beast Within",
-        "The Mycotyrant",
-        "Sol Ring",
-        "Arcane Signet",
-        "Thought Vessel",
-        "Nature's Lore"
+        "Propagator Drone",
+        "Gothmog, Morgul Lieutenant"
       ]
     },
     {
       "commander": "Vito, Thorn of the Dusk Rose",
+      "edhrec_top10": [
+        "Sanguine Bond",
+        "Vampire Nighthawk",
+        "Marauding Blight-Priest",
+        "Blood Tribute",
+        "Gifted Aetherborn",
+        "Exsanguinate",
+        "Exquisite Blood",
+        "Nighthawk Scavenger",
+        "Creeping Bloodsucker",
+        "Vampire of the Dire Moon"
+      ],
+      "hi_syn_hits": 1,
+      "hi_syn_total": 10,
       "ndcg30": 0.105347,
+      "on_page_hits": 11,
       "top10": [
         "Restless Bloodseeker",
         "Glass-Cast Heart",
@@ -322,7 +622,22 @@
     },
     {
       "commander": "Rakdos, Lord of Riots",
+      "edhrec_top10": [
+        "Spear Spewer",
+        "Thermo-Alchemist",
+        "Stormfist Crusader",
+        "Cryptolith Fragment",
+        "Rune-Scarred Demon",
+        "Creeping Bloodsucker",
+        "Artisan of Kozilek",
+        "Nettle Drone",
+        "Keen Duelist",
+        "Spawn of Mayhem"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
       "ndcg30": 0.074537,
+      "on_page_hits": 18,
       "top10": [
         "Sol Ring",
         "Arcane Signet",
@@ -338,7 +653,22 @@
     },
     {
       "commander": "Sliver Overlord",
+      "edhrec_top10": [
+        "Gemhide Sliver",
+        "Sliver Hivelord",
+        "Manaweft Sliver",
+        "Cloudshredder Sliver",
+        "Crystalline Sliver",
+        "Harmonic Sliver",
+        "Sliver Legion",
+        "The First Sliver",
+        "Quick Sliver",
+        "Galerider Sliver"
+      ],
+      "hi_syn_hits": 3,
+      "hi_syn_total": 10,
       "ndcg30": 0.28605,
+      "on_page_hits": 22,
       "top10": [
         "Magma Sliver",
         "Sliver Legion",
@@ -354,7 +684,22 @@
     },
     {
       "commander": "Yidris, Maelstrom Wielder",
+      "edhrec_top10": [
+        "Averna, the Chaos Bloom",
+        "Maelstrom Wanderer",
+        "Apex Devastator",
+        "Imoti, Celebrant of Bounty",
+        "Wild-Magic Sorcerer",
+        "Abaddon the Despoiler",
+        "Bloodbraid Elf",
+        "Profane Tutor",
+        "Whispersilk Cloak",
+        "Prosper, Tome-Bound"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
       "ndcg30": 0.044985,
+      "on_page_hits": 20,
       "top10": [
         "Sol Ring",
         "Mystic Remora",
@@ -370,7 +715,22 @@
     },
     {
       "commander": "Nekusar, the Mindrazer",
+      "edhrec_top10": [
+        "Underworld Dreams",
+        "Fate Unraveler",
+        "Howling Mine",
+        "Razorkin Needlehead",
+        "Teferi's Puzzle Box",
+        "Windfall",
+        "Jace's Archivist",
+        "Magus of the Wheel",
+        "Spiteful Visions",
+        "Scrawling Crawler"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
       "ndcg30": 0.064895,
+      "on_page_hits": 17,
       "top10": [
         "Sol Ring",
         "Mystic Remora",
@@ -386,23 +746,53 @@
     },
     {
       "commander": "Phenax, God of Deception",
-      "ndcg30": 0.012831,
+      "edhrec_top10": [
+        "Consuming Aberration",
+        "Charix, the Raging Isle",
+        "Ruin Crab",
+        "Maddening Cacophony",
+        "Bruvac the Grandiloquent",
+        "Tree of Perdition",
+        "Mindcrank",
+        "Wight of Precinct Six",
+        "Duskmantle Guildmage",
+        "Wall of Frost"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.14102,
+      "on_page_hits": 4,
       "top10": [
-        "Sol Ring",
-        "Mystic Remora",
-        "Arcane Signet",
-        "Counterspell",
-        "Thought Vessel",
-        "Cyclonic Rift",
-        "Demonic Tutor",
-        "Feed the Swarm",
-        "Rhystic Study",
-        "Toxic Deluge"
+        "The Ancient One",
+        "Nemesis of Reason",
+        "Necron Monolith",
+        "Tolarian Serpent",
+        "Relic Golem",
+        "Egon, God of Death",
+        "Drownyard Amalgam",
+        "Mole Module",
+        "Thassa's Devourer",
+        "Sibsig Host"
       ]
     },
     {
       "commander": "Uril, the Miststalker",
-      "ndcg30": 0.027617,
+      "edhrec_top10": [
+        "Ethereal Armor",
+        "Rancor",
+        "Armadillo Cloak",
+        "Sythis, Harvest's Hand",
+        "Shield of the Oversoul",
+        "All That Glitters",
+        "Ancestral Mask",
+        "Spirit Mantle",
+        "Enchantress's Presence",
+        "Unflinching Courage"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.029654,
+      "on_page_hits": 18,
       "top10": [
         "Sol Ring",
         "Swords to Plowshares",
@@ -418,7 +808,22 @@
     },
     {
       "commander": "Sram, Senior Edificer",
-      "ndcg30": 0.105877,
+      "edhrec_top10": [
+        "Puresteel Paladin",
+        "Danitha Capashen, Paragon",
+        "Sigarda's Aid",
+        "All That Glitters",
+        "Masterwork of Ingenuity",
+        "Colossus Hammer",
+        "Open the Armory",
+        "Accorder's Shield",
+        "Bone Saw",
+        "Cathar's Shield"
+      ],
+      "hi_syn_hits": 2,
+      "hi_syn_total": 10,
+      "ndcg30": 0.133091,
+      "on_page_hits": 18,
       "top10": [
         "Sol Ring",
         "Swords to Plowshares",
@@ -434,7 +839,22 @@
     },
     {
       "commander": "Rafiq of the Many",
+      "edhrec_top10": [
+        "Finest Hour",
+        "Qasali Pridemage",
+        "Sublime Archangel",
+        "Cathedral of War",
+        "Sovereigns of Lost Alara",
+        "Giltspire Avenger",
+        "Steel of the Godhead",
+        "Battlegrace Angel",
+        "Shield of the Oversoul",
+        "Stoic Angel"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
       "ndcg30": 0.031958,
+      "on_page_hits": 18,
       "top10": [
         "Sol Ring",
         "Swords to Plowshares",
@@ -450,7 +870,22 @@
     },
     {
       "commander": "Urza, Lord High Artificer",
+      "edhrec_top10": [
+        "Unwinding Clock",
+        "Dramatic Reversal",
+        "Fabricate",
+        "Isochron Scepter",
+        "Tormod's Crypt",
+        "Whir of Invention",
+        "Winter Orb",
+        "Sensei's Divining Top",
+        "Seat of the Synod",
+        "Mishra's Bauble"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
       "ndcg30": 0.017885,
+      "on_page_hits": 4,
       "top10": [
         "Horn of Gondor",
         "Sol Ring",
@@ -466,23 +901,53 @@
     },
     {
       "commander": "Sythis, Harvest's Hand",
-      "ndcg30": 0.032818,
+      "edhrec_top10": [
+        "Enchantress's Presence",
+        "Sanctum Weaver",
+        "Sterling Grove",
+        "Destiny Spinner",
+        "Jukai Naturalist",
+        "Sigil of the Empty Throne",
+        "Setessan Champion",
+        "Eidolon of Blossoms",
+        "Mesa Enchantress",
+        "Wild Growth"
+      ],
+      "hi_syn_hits": 1,
+      "hi_syn_total": 10,
+      "ndcg30": 0.07425,
+      "on_page_hits": 15,
       "top10": [
         "Alhammarret's Archive",
         "Phial of Galadriel",
         "Cleric Class",
         "Leyline of Hope",
         "Boon Reflection",
-        "Knight of Dawn's Light",
-        "Angel of Vitality",
-        "Honor Troll",
-        "The Wind Crystal",
-        "Rhox Faithmender"
+        "Sylvan Library",
+        "Smothering Tithe",
+        "Jukai Naturalist",
+        "Island Sanctuary",
+        "Abundance"
       ]
     },
     {
       "commander": "Alela, Artful Provocateur",
-      "ndcg30": 0.30208,
+      "edhrec_top10": [
+        "Intangible Virtue",
+        "Obyra, Dreaming Duelist",
+        "Bitterblossom",
+        "Tegwyll, Duke of Splendor",
+        "Favorable Winds",
+        "Bident of Thassa",
+        "Scion of Oona",
+        "Etchings of the Chosen",
+        "All That Glitters",
+        "Skullclamp"
+      ],
+      "hi_syn_hits": 3,
+      "hi_syn_total": 10,
+      "ndcg30": 0.334948,
+      "on_page_hits": 16,
       "top10": [
         "Tegwyll, Duke of Splendor",
         "Scion of Oona",
@@ -492,13 +957,28 @@
         "Thought Vessel",
         "Rhystic Study",
         "Necropotence",
-        "Bolas's Citadel",
-        "Swords to Plowshares"
+        "Spear of Heliod",
+        "Whip of Erebos"
       ]
     },
     {
       "commander": "Lord Windgrace",
+      "edhrec_top10": [
+        "The Gitrog Monster",
+        "Ramunap Excavator",
+        "Lotus Cobra",
+        "Azusa, Lost but Seeking",
+        "Avenger of Zendikar",
+        "Splendid Reclamation",
+        "Omnath, Locus of Rage",
+        "Scute Swarm",
+        "Crucible of Worlds",
+        "Dryad of the Ilysian Grove"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
       "ndcg30": 0.037386,
+      "on_page_hits": 14,
       "top10": [
         "Sol Ring",
         "Arcane Signet",
@@ -514,7 +994,22 @@
     },
     {
       "commander": "Tatyova, Benthic Druid",
+      "edhrec_top10": [
+        "Azusa, Lost but Seeking",
+        "Lotus Cobra",
+        "Harrow",
+        "Rampaging Baloths",
+        "Tireless Provisioner",
+        "Scute Swarm",
+        "Ramunap Excavator",
+        "Retreat to Coralhelm",
+        "Sakura-Tribe Scout",
+        "Avenger of Zendikar"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
       "ndcg30": 0.228859,
+      "on_page_hits": 18,
       "top10": [
         "Kodama's Reach",
         "Command Tower",
@@ -530,7 +1025,22 @@
     },
     {
       "commander": "Omnath, Locus of Creation",
+      "edhrec_top10": [
+        "Lotus Cobra",
+        "Omnath, Locus of Rage",
+        "Tatyova, Benthic Druid",
+        "Azusa, Lost but Seeking",
+        "Scute Swarm",
+        "Ancient Greenwarden",
+        "Avenger of Zendikar",
+        "Ramunap Excavator",
+        "Aesi, Tyrant of Gyre Strait",
+        "Felidar Retreat"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
       "ndcg30": 0.105252,
+      "on_page_hits": 8,
       "top10": [
         "Alhammarret's Archive",
         "Path to Exile",
@@ -546,39 +1056,84 @@
     },
     {
       "commander": "Chainer, Nightmare Adept",
-      "ndcg30": 0.0,
+      "edhrec_top10": [
+        "Doomed Necromancer",
+        "Gravebreaker Lamia",
+        "Magus of the Wheel",
+        "Buried Alive",
+        "Squee, Goblin Nabob",
+        "Apprentice Necromancer",
+        "Living Death",
+        "Faithless Looting",
+        "Feldon of the Third Path",
+        "Archfiend of Ifnir"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.010704,
+      "on_page_hits": 2,
       "top10": [
-        "Inquisitive Puppet",
+        "Aclazotz, Deepest Betrayal",
+        "Eyeblight Cullers",
+        "Horn of Gondor",
         "Xathrid Necromancer",
-        "Jerren, Corrupted Bishop",
         "Enslaved Horror",
         "Haunted Dead",
         "Crypt Champion",
-        "Aclazotz, Deepest Betrayal",
         "Death Tyrant",
-        "Eyeblight Cullers",
-        "Riders of the Mark"
+        "Black Sun's Twilight",
+        "Zero Point Ballad"
       ]
     },
     {
       "commander": "Gisa and Geralf",
-      "ndcg30": 0.03322,
+      "edhrec_top10": [
+        "Diregraf Captain",
+        "Lord of the Accursed",
+        "Gray Merchant of Asphodel",
+        "Rooftop Storm",
+        "Champion of the Perished",
+        "Zombie Apocalypse",
+        "Cemetery Reaper",
+        "Undead Augur",
+        "Fleshbag Marauder",
+        "Mire Triton"
+      ],
+      "hi_syn_hits": 1,
+      "hi_syn_total": 10,
+      "ndcg30": 0.088067,
+      "on_page_hits": 4,
       "top10": [
         "Raul, Trouble Shooter",
-        "Waterlogged Hulk",
-        "Cruel Somnophage",
-        "The Ancient One",
-        "Inverted Iceberg",
-        "Throne of the Grim Captain",
-        "Fallaji Archaeologist",
-        "Visage of Dread",
-        "Ludevic, Necrogenius",
-        "Devourer of Memory"
+        "Stitcher's Supplier",
+        "Paramecia Coloniex",
+        "Crow of Dark Tidings",
+        "Necromancer's Assistant",
+        "Undead Butler",
+        "Returned Reveler",
+        "Forsaken Drifters",
+        "Rotcrown Ghoul",
+        "Festerleech"
       ]
     },
     {
       "commander": "Purphoros, God of the Forge",
+      "edhrec_top10": [
+        "Krenko, Mob Boss",
+        "Norin the Wary",
+        "Impact Tremors",
+        "Siege-Gang Commander",
+        "Hordeling Outburst",
+        "Skullclamp",
+        "Panharmonicon",
+        "Mogg War Marshal",
+        "Dragon Fodder",
+        "Krenko's Command"
+      ],
+      "hi_syn_hits": 1,
+      "hi_syn_total": 10,
       "ndcg30": 0.123661,
+      "on_page_hits": 8,
       "top10": [
         "Dockside Extortionist",
         "Dragonmaster Outcast",
@@ -594,7 +1149,22 @@
     },
     {
       "commander": "Ghired, Conclave Exile",
+      "edhrec_top10": [
+        "Sundering Growth",
+        "Trostani, Selesnya's Voice",
+        "Rootborn Defenses",
+        "Elemental Bond",
+        "Dragonmaster Outcast",
+        "Growing Ranks",
+        "Idol of Oblivion",
+        "Ohran Frostfang",
+        "Second Harvest",
+        "Hour of Reckoning"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
       "ndcg30": 0.085361,
+      "on_page_hits": 17,
       "top10": [
         "Harmonic Prodigy",
         "Sol Ring",
@@ -610,23 +1180,53 @@
     },
     {
       "commander": "Kess, Dissident Mage",
-      "ndcg30": 0.160183,
+      "edhrec_top10": [
+        "Ponder",
+        "Frantic Search",
+        "Faithless Looting",
+        "Brainstorm",
+        "Preordain",
+        "Storm-Kiln Artist",
+        "Archmage Emeritus",
+        "Windfall",
+        "Goblin Electromancer",
+        "Dark Ritual"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.221567,
+      "on_page_hits": 17,
       "top10": [
-        "Sol Ring",
-        "Mystic Remora",
-        "Arcane Signet",
+        "Entomb",
         "Counterspell",
-        "Thought Vessel",
         "Cyclonic Rift",
         "Demonic Tutor",
         "Feed the Swarm",
-        "Dockside Extortionist",
-        "Chaos Warp"
+        "Unmarked Grave",
+        "Quiet Speculation",
+        "Chaos Warp",
+        "Toxic Deluge",
+        "Fierce Guardianship"
       ]
     },
     {
       "commander": "Jhoira, Weatherlight Captain",
+      "edhrec_top10": [
+        "Etherium Sculptor",
+        "Foundry Inspector",
+        "Enthusiastic Mechanaut",
+        "Mystic Forge",
+        "Tormod's Crypt",
+        "Ornithopter",
+        "Paradoxical Outcome",
+        "Mishra's Bauble",
+        "Jhoira's Familiar",
+        "Helm of Awakening"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
       "ndcg30": 0.063325,
+      "on_page_hits": 16,
       "top10": [
         "Sol Ring",
         "Mystic Remora",
@@ -642,7 +1242,22 @@
     },
     {
       "commander": "Zur the Enchanter",
+      "edhrec_top10": [
+        "Grasp of Fate",
+        "All That Glitters",
+        "Ethereal Armor",
+        "Diplomatic Immunity",
+        "Mirrormade",
+        "Steel of the Godhead",
+        "Imprisoned in the Moon",
+        "Darksteel Mutation",
+        "Rest in Peace",
+        "Greater Auramancy"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
       "ndcg30": 0.126746,
+      "on_page_hits": 19,
       "top10": [
         "Sol Ring",
         "Swords to Plowshares",
@@ -658,7 +1273,22 @@
     },
     {
       "commander": "Derevi, Empyrial Tactician",
+      "edhrec_top10": [
+        "Bloom Tender",
+        "Faeburrow Elder",
+        "Birds of Paradise",
+        "Emiel the Blessed",
+        "Aven Mindcensor",
+        "Mockingbird",
+        "Delney, Streetwise Lookout",
+        "Wild Growth",
+        "Mystic Remora",
+        "Chord of Calling"
+      ],
+      "hi_syn_hits": 2,
+      "hi_syn_total": 10,
       "ndcg30": 0.163662,
+      "on_page_hits": 23,
       "top10": [
         "Naban, Dean of Iteration",
         "Traveling Chocobo",
@@ -674,23 +1304,53 @@
     },
     {
       "commander": "Selvala, Heart of the Wilds",
-      "ndcg30": 0.014107,
+      "edhrec_top10": [
+        "Ghalta, Primal Hunger",
+        "Staff of Domination",
+        "Quirion Ranger",
+        "Wirewood Lodge",
+        "Umbral Mantle",
+        "Kogla, the Titan Ape",
+        "Scryb Ranger",
+        "Temur Sabertooth",
+        "Phyrexian Soulgorger",
+        "Hyrax Tower Scout"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.142081,
+      "on_page_hits": 13,
       "top10": [
-        "Elvish Warmaster",
-        "Wolverine Riders",
         "Beast Within",
-        "Grist, Voracious Larva",
-        "Utopia Mycon",
-        "Termagant Swarm",
-        "Flaxen Intruder",
-        "Tukatongue Thallid",
-        "Llanowar Mentor",
-        "Swarm Shambler"
+        "Elven Ambush",
+        "Nissa Revane",
+        "Vivien on the Hunt",
+        "Green Sun's Zenith",
+        "Nature's Rhythm",
+        "Chord of Calling",
+        "Tumbleweed Rising",
+        "Miming Slime",
+        "Elvish Promenade"
       ]
     },
     {
       "commander": "Queen Marchesa",
+      "edhrec_top10": [
+        "Ghostly Prison",
+        "Deflecting Palm",
+        "Court of Grace",
+        "Kardur, Doomscourge",
+        "Mangara, the Diplomat",
+        "Disrupt Decorum",
+        "Breena, the Demagogue",
+        "Inkshield",
+        "Windborn Muse",
+        "Kambal, Consul of Allocation"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
       "ndcg30": 0.056967,
+      "on_page_hits": 13,
       "top10": [
         "Teysa Karlov",
         "Ezio Auditore da Firenze",
@@ -706,7 +1366,22 @@
     },
     {
       "commander": "Isshin, Two Heavens as One",
+      "edhrec_top10": [
+        "Krenko, Tin Street Kingpin",
+        "Etali, Primal Storm",
+        "Sword of the Animist",
+        "Windcrag Siege",
+        "Fervent Charge",
+        "Mardu Ascendancy",
+        "Adeline, Resplendent Cathar",
+        "Skyknight Vanguard",
+        "Captain Lannery Storm",
+        "Anim Pakal, Thousandth Moon"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
       "ndcg30": 0.106643,
+      "on_page_hits": 14,
       "top10": [
         "A-Asari Captain",
         "Asari Captain",
@@ -722,7 +1397,22 @@
     },
     {
       "commander": "Oloro, Ageless Ascetic",
+      "edhrec_top10": [
+        "Sanguine Bond",
+        "Aetherflux Reservoir",
+        "Vito, Thorn of the Dusk Rose",
+        "Soul Warden",
+        "Authority of the Consuls",
+        "Kambal, Consul of Allocation",
+        "Exquisite Blood",
+        "Rhox Faithmender",
+        "Alhammarret's Archive",
+        "Felidar Sovereign"
+      ],
+      "hi_syn_hits": 3,
+      "hi_syn_total": 10,
       "ndcg30": 0.227429,
+      "on_page_hits": 24,
       "top10": [
         "Swords to Plowshares",
         "Phial of Galadriel",
@@ -738,10 +1428,24 @@
     },
     {
       "commander": "The Locust God",
-      "ndcg30": 0.093463,
+      "edhrec_top10": [
+        "Impact Tremors",
+        "Skullclamp",
+        "Psychosis Crawler",
+        "Whirlpool Warrior",
+        "Sage of the Falls",
+        "Tolarian Winds",
+        "Teferi's Ageless Insight",
+        "Ashnod's Altar",
+        "Windfall",
+        "Purphoros, God of the Forge"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.100299,
+      "on_page_hits": 14,
       "top10": [
         "Brudiclad, Telchor Engineer",
-        "Baeloth Barrityl, Entertainer",
         "Sol Ring",
         "Mystic Remora",
         "Arcane Signet",
@@ -749,44 +1453,90 @@
         "Thought Vessel",
         "Cyclonic Rift",
         "Dockside Extortionist",
-        "Roar of Resistance"
+        "Roar of Resistance",
+        "Chaos Warp"
       ]
     },
     {
       "commander": "Muldrotha, the Gravetide",
-      "ndcg30": 0.10382,
+      "edhrec_top10": [
+        "Spore Frog",
+        "Seal of Primordium",
+        "Kaya's Ghostform",
+        "Gravebreaker Lamia",
+        "Secrets of the Dead",
+        "Haywire Mite",
+        "Sakura-Tribe Elder",
+        "Pernicious Deed",
+        "Doc Aurlock, Grizzled Genius",
+        "Siren Stormtamer"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.116548,
+      "on_page_hits": 18,
       "top10": [
         "Sol Ring",
         "Mystic Remora",
+        "Entomb",
+        "Dakra Mystic",
         "Arcane Signet",
         "Counterspell",
         "Thought Vessel",
         "Nature's Lore",
         "Heroic Intervention",
-        "Cyclonic Rift",
-        "Demonic Tutor",
-        "Feed the Swarm"
+        "Cyclonic Rift"
       ]
     },
     {
       "commander": "Prossh, Skyraider of Kher",
-      "ndcg30": 0.022957,
+      "edhrec_top10": [
+        "Impact Tremors",
+        "Zulaport Cutthroat",
+        "Skullclamp",
+        "Goblin Bombardment",
+        "Fecundity",
+        "Blood Artist",
+        "Purphoros, God of the Forge",
+        "Ashnod's Altar",
+        "Chatterfang, Squirrel General",
+        "Mirkwood Bats"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.020198,
+      "on_page_hits": 3,
       "top10": [
         "Propagator Drone",
         "Skittering Precursor",
         "Beast Within",
         "Keldon Strike Team",
+        "Baeloth Barrityl, Entertainer",
+        "Wight",
         "Dragon Whisperer",
         "Impulsive Pilferer",
         "Archfiend's Vessel",
-        "Baeloth Barrityl, Entertainer",
-        "Loyal Apprentice",
-        "Magda, Brazen Outlaw"
+        "Slimefoot, the Stowaway"
       ]
     },
     {
       "commander": "Feather, the Redeemed",
-      "ndcg30": 0.046794,
+      "edhrec_top10": [
+        "Defiant Strike",
+        "Shelter",
+        "Expedite",
+        "Zada, Hedron Grinder",
+        "Fists of Flame",
+        "Gods Willing",
+        "Storm-Kiln Artist",
+        "Young Pyromancer",
+        "Guttersnipe",
+        "Monastery Mentor"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.050728,
+      "on_page_hits": 18,
       "top10": [
         "Swords to Plowshares",
         "Path to Exile",
@@ -798,6 +1548,1556 @@
         "Blasphemous Act",
         "Sol Ring",
         "Arcane Signet"
+      ]
+    },
+    {
+      "commander": "Adeline, Resplendent Cathar",
+      "edhrec_top10": [
+        "Goldnight Commander",
+        "Coppercoat Vanguard",
+        "Champion of the Parish",
+        "Court Street Denizen",
+        "Thalia's Lieutenant",
+        "Beregond of the Guard",
+        "Skullclamp",
+        "Idol of Oblivion",
+        "Cathar Commando",
+        "Cathars' Crusade"
+      ],
+      "hi_syn_hits": 1,
+      "hi_syn_total": 10,
+      "ndcg30": 0.199269,
+      "on_page_hits": 15,
+      "top10": [
+        "Sanctuary Lockdown",
+        "Riders of Gavony",
+        "Bonds of Faith",
+        "Coppercoat Vanguard",
+        "Rick, Steadfast Leader",
+        "Horn of Gondor",
+        "Anointed Procession",
+        "Mondrak, Glory Dominus",
+        "Divine Visitation",
+        "Ojer Taq, Deepest Foundation"
+      ]
+    },
+    {
+      "commander": "Araumi of the Dead Tide",
+      "edhrec_top10": [
+        "Stitcher's Supplier",
+        "Gray Merchant of Asphodel",
+        "Deranged Assistant",
+        "Plaguecrafter",
+        "Solemn Simulacrum",
+        "Massacre Wurm",
+        "Millikin",
+        "Floating-Dream Zubera",
+        "Mulldrifter",
+        "Dread Return"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.024679,
+      "on_page_hits": 14,
+      "top10": [
+        "Sol Ring",
+        "Mystic Remora",
+        "Arcane Signet",
+        "Counterspell",
+        "Thought Vessel",
+        "Cyclonic Rift",
+        "Demonic Tutor",
+        "Feed the Swarm",
+        "Rhystic Study",
+        "Toxic Deluge"
+      ]
+    },
+    {
+      "commander": "Azusa, Lost but Seeking",
+      "edhrec_top10": [
+        "Courser of Kruphix",
+        "Ramunap Excavator",
+        "Scute Swarm",
+        "Oracle of Mul Daya",
+        "Avenger of Zendikar",
+        "Horn of Greed",
+        "Augur of Autumn",
+        "Tireless Tracker",
+        "Crucible of Worlds",
+        "Ancient Greenwarden"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.024125,
+      "on_page_hits": 10,
+      "top10": [
+        "Sol Ring",
+        "Arcane Signet",
+        "Thought Vessel",
+        "Nature's Lore",
+        "Heroic Intervention",
+        "Sylvan Library",
+        "Beast Within",
+        "Kodama's Reach",
+        "Command Tower",
+        "Horn of Gondor"
+      ]
+    },
+    {
+      "commander": "Borborygmos Enraged",
+      "edhrec_top10": [
+        "Creeping Renaissance",
+        "Snake Umbra",
+        "Life from the Loam",
+        "Keen Sense",
+        "Abundance",
+        "Nylea's Intervention",
+        "Pair o' Dice Lost",
+        "Praetor's Counsel",
+        "Groundskeeper",
+        "Mina and Denn, Wildborn"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.024794,
+      "on_page_hits": 15,
+      "top10": [
+        "Sol Ring",
+        "Arcane Signet",
+        "Thought Vessel",
+        "Nature's Lore",
+        "Heroic Intervention",
+        "Sylvan Library",
+        "Dockside Extortionist",
+        "Beast Within",
+        "Chaos Warp",
+        "Kodama's Reach"
+      ]
+    },
+    {
+      "commander": "Breya, Etherium Shaper",
+      "edhrec_top10": [
+        "Sai, Master Thopterist",
+        "Seat of the Synod",
+        "Etherium Sculptor",
+        "Skullclamp",
+        "Thopter Spy Network",
+        "Great Furnace",
+        "Vault of Whispers",
+        "Ancient Den",
+        "Emry, Lurker of the Loch",
+        "Ashnod's Altar"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.042564,
+      "on_page_hits": 7,
+      "top10": [
+        "Clay-Fired Bricks",
+        "Horn of Gondor",
+        "Legion Extruder",
+        "Sanguine Statuette",
+        "Thopter Shop",
+        "Tetzin, Gnome Champion",
+        "Baeloth Barrityl, Entertainer",
+        "Brudiclad, Telchor Engineer",
+        "Inquisitive Puppet",
+        "Smothering Tithe"
+      ]
+    },
+    {
+      "commander": "Bruvac the Grandiloquent",
+      "edhrec_top10": [
+        "Maddening Cacophony",
+        "Traumatize",
+        "Fractured Sanity",
+        "Ruin Crab",
+        "Cut Your Losses",
+        "Memory Erosion",
+        "The Water Crystal",
+        "Psychic Corrosion",
+        "Persistent Petitioners",
+        "The Mindskinner"
+      ],
+      "hi_syn_hits": 2,
+      "hi_syn_total": 10,
+      "ndcg30": 0.117169,
+      "on_page_hits": 17,
+      "top10": [
+        "Sol Ring",
+        "Mystic Remora",
+        "Arcane Signet",
+        "Counterspell",
+        "Thought Vessel",
+        "Cyclonic Rift",
+        "Rhystic Study",
+        "Fierce Guardianship",
+        "Command Tower",
+        "Horn of Gondor"
+      ]
+    },
+    {
+      "commander": "Chatterfang, Squirrel General",
+      "edhrec_top10": [
+        "Chitterspitter",
+        "Toski, Bearer of Secrets",
+        "Hazel of the Rootbloom",
+        "Deep Forest Hermit",
+        "Swarmyard",
+        "Squirrel Nest",
+        "Pitiless Plunderer",
+        "Ravenous Squirrel",
+        "Second Harvest",
+        "Chatterstorm"
+      ],
+      "hi_syn_hits": 2,
+      "hi_syn_total": 10,
+      "ndcg30": 0.301416,
+      "on_page_hits": 10,
+      "top10": [
+        "Chitterspitter",
+        "Earl of Squirrel",
+        "Cache Grab",
+        "Beast Within",
+        "Deep Forest Hermit",
+        "Deranged Hermit",
+        "Squirrel Sovereign",
+        "Nut Collector",
+        "Squirrel Sanctuary",
+        "Trail of Crumbs"
+      ]
+    },
+    {
+      "commander": "Daretti, Scrap Savant",
+      "edhrec_top10": [
+        "Goblin Welder",
+        "Darksteel Citadel",
+        "Scrap Mastery",
+        "Ichor Wellspring",
+        "Great Furnace",
+        "Wurmcoil Engine",
+        "Myr Retriever",
+        "Goblin Engineer",
+        "Myr Battlesphere",
+        "Trash for Treasure"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.076209,
+      "on_page_hits": 19,
+      "top10": [
+        "Sol Ring",
+        "Arcane Signet",
+        "Thought Vessel",
+        "Dockside Extortionist",
+        "Chaos Warp",
+        "Deflecting Swat",
+        "Jeska's Will",
+        "Blasphemous Act",
+        "Command Tower",
+        "Obstinate Familiar"
+      ]
+    },
+    {
+      "commander": "Emry, Lurker of the Loch",
+      "edhrec_top10": [
+        "Mirran Spy",
+        "Etherium Sculptor",
+        "Mishra's Bauble",
+        "Seat of the Synod",
+        "Aether Spellbomb",
+        "Foundry Inspector",
+        "Darksteel Citadel",
+        "Chakram Retriever",
+        "Sai, Master Thopterist",
+        "Codex Shredder"
+      ],
+      "hi_syn_hits": 1,
+      "hi_syn_total": 10,
+      "ndcg30": 0.063724,
+      "on_page_hits": 11,
+      "top10": [
+        "The Everflowing Well",
+        "Naban, Dean of Iteration",
+        "Manic Scribe",
+        "Fallaji Archaeologist",
+        "Song of Stupefaction",
+        "Shadow Kin",
+        "Tolarian Serpent",
+        "Sorcerous Squall",
+        "Sol Ring",
+        "Mystic Remora"
+      ]
+    },
+    {
+      "commander": "Ezuri, Claw of Progress",
+      "edhrec_top10": [
+        "Fathom Mage",
+        "Champion of Lambholt",
+        "Thrummingbird",
+        "Gyre Sage",
+        "Cold-Eyed Selkie",
+        "Kami of Whispered Hopes",
+        "Sage of Hours",
+        "Forgotten Ancient",
+        "Herald of Secret Streams",
+        "Chasm Skulker"
+      ],
+      "hi_syn_hits": 1,
+      "hi_syn_total": 10,
+      "ndcg30": 0.090196,
+      "on_page_hits": 21,
+      "top10": [
+        "Sol Ring",
+        "Mystic Remora",
+        "Arcane Signet",
+        "Counterspell",
+        "Thought Vessel",
+        "Nature's Lore",
+        "Heroic Intervention",
+        "Cyclonic Rift",
+        "Sylvan Library",
+        "Beast Within"
+      ]
+    },
+    {
+      "commander": "Galea, Kindler of Hope",
+      "edhrec_top10": [
+        "Sram, Senior Edificer",
+        "Puresteel Paladin",
+        "Mantle of the Ancients",
+        "Colossus Hammer",
+        "Sword of the Animist",
+        "Danitha Capashen, Paragon",
+        "All That Glitters",
+        "Holy Avenger",
+        "Rancor",
+        "Robe of Stars"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.059147,
+      "on_page_hits": 19,
+      "top10": [
+        "Elvish Guidance",
+        "Golem-Skin Gauntlets",
+        "Sol Ring",
+        "Swords to Plowshares",
+        "Path to Exile",
+        "Mystic Remora",
+        "Arcane Signet",
+        "Counterspell",
+        "Thought Vessel",
+        "Nature's Lore"
+      ]
+    },
+    {
+      "commander": "Ghave, Guru of Spores",
+      "edhrec_top10": [
+        "Slimefoot, the Stowaway",
+        "Ashnod's Altar",
+        "Corpsejack Menace",
+        "Mycoloth",
+        "Skullclamp",
+        "Utopia Mycon",
+        "Cathars' Crusade",
+        "Hardened Scales",
+        "Doubling Season",
+        "Zulaport Cutthroat"
+      ],
+      "hi_syn_hits": 1,
+      "hi_syn_total": 10,
+      "ndcg30": 0.114848,
+      "on_page_hits": 9,
+      "top10": [
+        "Propagator Drone",
+        "King Darien XLVIII",
+        "The Mycotyrant",
+        "Invasion of Tolvada",
+        "Michelangelo, Weirdness to 11",
+        "Herald of Anafenza",
+        "Beast Within",
+        "Bishop of Wings",
+        "Vitu-Ghazi Guildmage",
+        "Wight"
+      ]
+    },
+    {
+      "commander": "Gonti, Lord of Luxury",
+      "edhrec_top10": [
+        "Panharmonicon",
+        "Conjurer's Closet",
+        "Supernatural Stamina",
+        "Undying Malice",
+        "Solemn Simulacrum",
+        "Feign Death",
+        "Undying Evil",
+        "Blade of Selves",
+        "Brainstealer Dragon",
+        "Nasty End"
+      ],
+      "hi_syn_hits": 1,
+      "hi_syn_total": 10,
+      "ndcg30": 0.066835,
+      "on_page_hits": 11,
+      "top10": [
+        "Sol Ring",
+        "Arcane Signet",
+        "Thought Vessel",
+        "Demonic Tutor",
+        "Feed the Swarm",
+        "Toxic Deluge",
+        "Necropotence",
+        "Bolas's Citadel",
+        "Command Tower",
+        "Roaming Throne"
+      ]
+    },
+    {
+      "commander": "Hamza, Guardian of Arashin",
+      "edhrec_top10": [
+        "Inspiring Call",
+        "Armorcraft Judge",
+        "Rishkar, Peema Renegade",
+        "Good-Fortune Unicorn",
+        "Mikaeus, the Lunarch",
+        "Forgotten Ancient",
+        "Abzan Falconer",
+        "Duskshell Crawler",
+        "Conclave Mentor",
+        "Renata, Called to the Hunt"
+      ],
+      "hi_syn_hits": 2,
+      "hi_syn_total": 10,
+      "ndcg30": 0.093846,
+      "on_page_hits": 16,
+      "top10": [
+        "Sol Ring",
+        "Swords to Plowshares",
+        "Path to Exile",
+        "Arcane Signet",
+        "Thought Vessel",
+        "Nature's Lore",
+        "Heroic Intervention",
+        "Sylvan Library",
+        "Beast Within",
+        "Kodama's Reach"
+      ]
+    },
+    {
+      "commander": "Heliod, Sun-Crowned",
+      "edhrec_top10": [
+        "Daxos, Blessed by the Sun",
+        "Walking Ballista",
+        "Soul Warden",
+        "Soul's Attendant",
+        "Voice of the Blessed",
+        "Authority of the Consuls",
+        "Triskelion",
+        "Linden, the Steadfast Queen",
+        "Cleric Class",
+        "Ajani's Pridemate"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.067279,
+      "on_page_hits": 9,
+      "top10": [
+        "Swords to Plowshares",
+        "Bagel and Schmear",
+        "Dawn of a New Age",
+        "Mazemind Tome",
+        "Ajani, Strength of the Pride",
+        "The Wandering Emperor",
+        "Kenrith, the Returned King",
+        "Bounding Felidar",
+        "Ajani, Inspiring Leader",
+        "Fountain of Youth"
+      ]
+    },
+    {
+      "commander": "Jan Jansen, Chaos Crafter",
+      "edhrec_top10": [
+        "Ichor Wellspring",
+        "Academy Manufactor",
+        "Reckless Fireweaver",
+        "Clock of Omens",
+        "Mayhem Devil",
+        "Ingenious Artillerist",
+        "Marionette Apprentice",
+        "Prized Statue",
+        "Myr Retriever",
+        "Ancient Den"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.014815,
+      "on_page_hits": 2,
+      "top10": [
+        "Clay-Fired Bricks",
+        "Hangarback Walker",
+        "Nesting Bot",
+        "Junk Jet",
+        "Legion Extruder",
+        "Sanguine Statuette",
+        "Myr Sire",
+        "Marching Duodrone",
+        "Gleaming Barrier",
+        "Piggy Bank"
+      ]
+    },
+    {
+      "commander": "Jetmir, Nexus of Revels",
+      "edhrec_top10": [
+        "Adeline, Resplendent Cathar",
+        "Artifact Mutation",
+        "Aura Mutation",
+        "Krenko, Tin Street Kingpin",
+        "March of the Multitudes",
+        "Grand Crescendo",
+        "Champion of Lambholt",
+        "Anim Pakal, Thousandth Moon",
+        "Toski, Bearer of Secrets",
+        "Avacyn's Pilgrim"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.034658,
+      "on_page_hits": 18,
+      "top10": [
+        "Sol Ring",
+        "Swords to Plowshares",
+        "Path to Exile",
+        "Arcane Signet",
+        "Thought Vessel",
+        "Nature's Lore",
+        "Heroic Intervention",
+        "Sylvan Library",
+        "Dockside Extortionist",
+        "Beast Within"
+      ]
+    },
+    {
+      "commander": "Judith, the Scourge Diva",
+      "edhrec_top10": [
+        "Reassembling Skeleton",
+        "Midnight Reaper",
+        "Grim Haruspex",
+        "Viscera Seer",
+        "Goblin Bombardment",
+        "Mayhem Devil",
+        "Forsaken Miner",
+        "Carrion Feeder",
+        "Blood Artist",
+        "Skullclamp"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.05344,
+      "on_page_hits": 4,
+      "top10": [
+        "Jerren, Corrupted Bishop",
+        "Krenko, Baron of Tin Street",
+        "Xathrid Necromancer",
+        "Scion of Opulence",
+        "Falkenrath Forebear",
+        "Rat King, Verminister",
+        "Wight",
+        "Weirding Shaman",
+        "Ashnod, Flesh Mechanist",
+        "Woe Strider"
+      ]
+    },
+    {
+      "commander": "Karlov of the Ghost Council",
+      "edhrec_top10": [
+        "Soul Warden",
+        "Soul's Attendant",
+        "Authority of the Consuls",
+        "Kambal, Consul of Allocation",
+        "Auriok Champion",
+        "Suture Priest",
+        "Daxos, Blessed by the Sun",
+        "Aetherflux Reservoir",
+        "Sunscorch Regent",
+        "Heliod, Sun-Crowned"
+      ],
+      "hi_syn_hits": 1,
+      "hi_syn_total": 10,
+      "ndcg30": 0.109809,
+      "on_page_hits": 16,
+      "top10": [
+        "Swords to Plowshares",
+        "Thief of Hope",
+        "Devouring Greed",
+        "Apothecary Geist",
+        "Drogskol Cavalry",
+        "Kami of the Honored Dead",
+        "Sol Ring",
+        "Path to Exile",
+        "Arcane Signet",
+        "Thought Vessel"
+      ]
+    },
+    {
+      "commander": "Kumena, Tyrant of Orazca",
+      "edhrec_top10": [
+        "Merrow Reejerey",
+        "Deeproot Waters",
+        "Master of the Pearl Trident",
+        "Svyelun of Sea and Sky",
+        "Stonybrook Banneret",
+        "Kopala, Warden of Waves",
+        "Emperor Mihail II",
+        "Deeproot Pilgrimage",
+        "Deeproot Elite",
+        "Merrow Commerce"
+      ],
+      "hi_syn_hits": 4,
+      "hi_syn_total": 10,
+      "ndcg30": 0.520557,
+      "on_page_hits": 20,
+      "top10": [
+        "Master of the Pearl Trident",
+        "Vodalian Hexcatcher",
+        "Lord of Atlantis",
+        "Merfolk Mistbinder",
+        "Svyelun of Sea and Sky",
+        "Merfolk Sovereign",
+        "Emperor Mihail II",
+        "Attuma, Atlantean Warlord",
+        "Mist Dancer",
+        "Ozolith, the Shattered Spire"
+      ]
+    },
+    {
+      "commander": "Kykar, Wind's Fury",
+      "edhrec_top10": [
+        "Skullclamp",
+        "Whirlwind of Thought",
+        "Brainstorm",
+        "Impact Tremors",
+        "Harmonic Prodigy",
+        "Ponder",
+        "Opt",
+        "Preordain",
+        "Jeskai Ascendancy",
+        "Kykar, Zephyr Awakener"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.018092,
+      "on_page_hits": 5,
+      "top10": [
+        "Churning Reservoir",
+        "Wedding Announcement",
+        "Herald of Anafenza",
+        "Anim Pakal, Thousandth Moon",
+        "Rayblade Trooper",
+        "Exotic Pets",
+        "Basri's Lieutenant",
+        "Alharu, Solemn Ritualist",
+        "Sanctuary Warden",
+        "Agatha's Soul Cauldron"
+      ]
+    },
+    {
+      "commander": "Lathiel, the Bounteous Dawn",
+      "edhrec_top10": [
+        "Soul Warden",
+        "Essence Warden",
+        "Soul's Attendant",
+        "Cleric Class",
+        "Trelasarra, Moon Dancer",
+        "Conclave Mentor",
+        "Rhox Faithmender",
+        "Abzan Battle Priest",
+        "Sunscorch Regent",
+        "Spike Feeder"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.090154,
+      "on_page_hits": 18,
+      "top10": [
+        "Ozolith, the Shattered Spire",
+        "Benevolent Hydra",
+        "Kami of Whispered Hopes",
+        "Park Heights Maverick",
+        "Hardened Scales",
+        "High Score",
+        "Solid Ground",
+        "Sol Ring",
+        "Swords to Plowshares",
+        "Path to Exile"
+      ]
+    },
+    {
+      "commander": "Maelstrom Wanderer",
+      "edhrec_top10": [
+        "Imoti, Celebrant of Bounty",
+        "Goreclaw, Terror of Qal Sisma",
+        "Etali, Primal Storm",
+        "Apex Devastator",
+        "Genesis Ultimatum",
+        "Averna, the Chaos Bloom",
+        "Skyshroud Claim",
+        "Etali, Primal Conqueror",
+        "Thryx, the Sudden Storm",
+        "Somberwald Sage"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.040656,
+      "on_page_hits": 16,
+      "top10": [
+        "Sol Ring",
+        "Mystic Remora",
+        "Arcane Signet",
+        "Counterspell",
+        "Thought Vessel",
+        "Nature's Lore",
+        "Heroic Intervention",
+        "Cyclonic Rift",
+        "Sylvan Library",
+        "Dockside Extortionist"
+      ]
+    },
+    {
+      "commander": "Marchesa, the Black Rose",
+      "edhrec_top10": [
+        "Unspeakable Symbol",
+        "Iron Apprentice",
+        "Carrion Feeder",
+        "Flayer of the Hatebound",
+        "Uncivil Unrest",
+        "Grim Haruspex",
+        "Thran Vigil",
+        "Ashnod's Altar",
+        "Viscera Seer",
+        "Goblin Bombardment"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.017635,
+      "on_page_hits": 11,
+      "top10": [
+        "Jerren, Corrupted Bishop",
+        "Krenko, Baron of Tin Street",
+        "Scion of Opulence",
+        "Bolas's Citadel",
+        "Xathrid Necromancer",
+        "Sol Ring",
+        "Mystic Remora",
+        "Witch's Oven",
+        "Retrofitter Foundry",
+        "Nurgle's Rot"
+      ]
+    },
+    {
+      "commander": "Mirko Vosk, Mind Drinker",
+      "edhrec_top10": [
+        "Consuming Aberration",
+        "Mind Grind",
+        "Ruin Crab",
+        "Mind Funeral",
+        "Traumatize",
+        "Duskmantle Guildmage",
+        "Fractured Sanity",
+        "Mindcrank",
+        "Maddening Cacophony",
+        "Fraying Sanity"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.008884,
+      "on_page_hits": 14,
+      "top10": [
+        "Sol Ring",
+        "Mystic Remora",
+        "Arcane Signet",
+        "Counterspell",
+        "Thought Vessel",
+        "Cyclonic Rift",
+        "Demonic Tutor",
+        "Feed the Swarm",
+        "Rhystic Study",
+        "Toxic Deluge"
+      ]
+    },
+    {
+      "commander": "Mizzix of the Izmagnus",
+      "edhrec_top10": [
+        "Tezzeret's Gambit",
+        "Reiterate",
+        "Flux Channeler",
+        "Mystic Retrieval",
+        "Comet Storm",
+        "Experimental Augury",
+        "Firemind's Foresight",
+        "Past in Flames",
+        "Stroke of Genius",
+        "Mizzix's Mastery"
+      ],
+      "hi_syn_hits": 1,
+      "hi_syn_total": 10,
+      "ndcg30": 0.145371,
+      "on_page_hits": 14,
+      "top10": [
+        "Counterspell",
+        "Cyclonic Rift",
+        "Chaos Warp",
+        "Fierce Guardianship",
+        "Deflecting Swat",
+        "Jeska's Will",
+        "Blasphemous Act",
+        "Flame of Anor",
+        "Ripples of Potential",
+        "Contentious Plan"
+      ]
+    },
+    {
+      "commander": "Mondrak, Glory Dominus",
+      "edhrec_top10": [
+        "Intangible Virtue",
+        "Ojer Taq, Deepest Foundation",
+        "White Sun's Twilight",
+        "Anointed Procession",
+        "Adeline, Resplendent Cathar",
+        "Divine Visitation",
+        "Secure the Wastes",
+        "Elspeth, Storm Slayer",
+        "Hour of Reckoning",
+        "Martial Coup"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.012174,
+      "on_page_hits": 1,
+      "top10": [
+        "Hangarback Walker",
+        "Nesting Bot",
+        "Marching Duodrone",
+        "Halo Scarab",
+        "Roadkill Rodney",
+        "Clay-Fired Bricks",
+        "Currency Converter",
+        "Myr Sire",
+        "Gleaming Barrier",
+        "Spider-Slayer, Hatred Honed"
+      ]
+    },
+    {
+      "commander": "Narset, Enlightened Master",
+      "edhrec_top10": [
+        "Omniscience",
+        "Time Stretch",
+        "Beacon of Tomorrows",
+        "Karn's Temporal Sundering",
+        "Nexus of Fate",
+        "Brainstorm",
+        "Temporal Mastery",
+        "Seize the Day",
+        "Relentless Assault",
+        "Time Warp"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.090794,
+      "on_page_hits": 20,
+      "top10": [
+        "Sol Ring",
+        "Swords to Plowshares",
+        "Path to Exile",
+        "Mystic Remora",
+        "Arcane Signet",
+        "Counterspell",
+        "Thought Vessel",
+        "Cyclonic Rift",
+        "Dockside Extortionist",
+        "Chaos Warp"
+      ]
+    },
+    {
+      "commander": "Omnath, Locus of Rage",
+      "edhrec_top10": [
+        "Ancient Greenwarden",
+        "Mina and Denn, Wildborn",
+        "Harrow",
+        "Azusa, Lost but Seeking",
+        "Lotus Cobra",
+        "Ramunap Excavator",
+        "Avenger of Zendikar",
+        "Zendikar's Roil",
+        "Titania, Protector of Argoth",
+        "Scute Swarm"
+      ],
+      "hi_syn_hits": 2,
+      "hi_syn_total": 10,
+      "ndcg30": 0.283349,
+      "on_page_hits": 20,
+      "top10": [
+        "Incandescent Soulstoke",
+        "Titania, Nature's Force",
+        "Creeping Trailblazer",
+        "Ashling, the Limitless",
+        "Lumra, Bellow of the Woods",
+        "Thicket Crasher",
+        "Kodama's Reach",
+        "Titania, Protector of Argoth",
+        "Command Tower",
+        "Tomb of Urami"
+      ]
+    },
+    {
+      "commander": "Osgir, the Reconstructor",
+      "edhrec_top10": [
+        "Darksteel Citadel",
+        "Ancient Den",
+        "Great Furnace",
+        "Ichor Wellspring",
+        "Sculpting Steel",
+        "Daretti, Scrap Savant",
+        "Bronze Guardian",
+        "Thousand-Year Elixir",
+        "Combustible Gearhulk",
+        "Triplicate Titan"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.010457,
+      "on_page_hits": 3,
+      "top10": [
+        "Sanguine Statuette",
+        "Smothering Tithe",
+        "Hangarback Walker",
+        "Clown Car",
+        "Witch's Oven",
+        "Currency Converter",
+        "The Underworld Cookbook",
+        "Retrofitter Foundry",
+        "Nesting Bot",
+        "Lightning Coils"
+      ]
+    },
+    {
+      "commander": "Rashmi, Eternities Crafter",
+      "edhrec_top10": [
+        "Wavebreak Hippocamp",
+        "Wilderness Reclamation",
+        "Brainstorm",
+        "Dig Through Time",
+        "Leyline of Anticipation",
+        "Rewind",
+        "Frantic Search",
+        "Sensei's Divining Top",
+        "Hullbreaker Horror",
+        "Unwind"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.109158,
+      "on_page_hits": 15,
+      "top10": [
+        "Sol Ring",
+        "Mystic Remora",
+        "Arcane Signet",
+        "Counterspell",
+        "Thought Vessel",
+        "Nature's Lore",
+        "Heroic Intervention",
+        "Cyclonic Rift",
+        "Sylvan Library",
+        "Beast Within"
+      ]
+    },
+    {
+      "commander": "Rhys the Redeemed",
+      "edhrec_top10": [
+        "Parallel Lives",
+        "Elvish Archdruid",
+        "Imperious Perfect",
+        "Anointed Procession",
+        "Priest of Titania",
+        "Skullclamp",
+        "Doubling Season",
+        "Circle of Dreams Druid",
+        "Second Harvest",
+        "Hour of Reckoning"
+      ],
+      "hi_syn_hits": 2,
+      "hi_syn_total": 10,
+      "ndcg30": 0.32064,
+      "on_page_hits": 18,
+      "top10": [
+        "Elvish Archdruid",
+        "Dwynen, Gilt-Leaf Daen",
+        "Joraga Warcaller",
+        "Herald of Dromoka",
+        "Leaf-Crowned Visionary",
+        "Eladamri, Lord of Leaves",
+        "Imperious Perfect",
+        "Elvish Champion",
+        "Suki, Kyoshi Captain",
+        "Elvish Clancaller"
+      ]
+    },
+    {
+      "commander": "Riku of Two Reflections",
+      "edhrec_top10": [
+        "Rite of Replication",
+        "Progenitor Mimic",
+        "Adrix and Nev, Twincasters",
+        "Twinning Staff",
+        "Double Major",
+        "Clever Impersonator",
+        "Eternal Witness",
+        "Biovisionary",
+        "Mythos of Illuna",
+        "Archmage Emeritus"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.102093,
+      "on_page_hits": 16,
+      "top10": [
+        "Beast Within",
+        "Horn of Gondor",
+        "Xenagos, the Reveler",
+        "Sarkhan Unbroken",
+        "Vivien on the Hunt",
+        "Rally at the Hornburg",
+        "Euroakus",
+        "Counterspell",
+        "Nature's Lore",
+        "Heroic Intervention"
+      ]
+    },
+    {
+      "commander": "Sharuum the Hegemon",
+      "edhrec_top10": [
+        "Magister Sphinx",
+        "Thirst for Knowledge",
+        "Thought Monitor",
+        "Sculpting Steel",
+        "Sphinx Summoner",
+        "Seat of the Synod",
+        "Phyrexian Metamorph",
+        "Solemn Simulacrum",
+        "Ancient Den",
+        "Vault of Whispers"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.012567,
+      "on_page_hits": 18,
+      "top10": [
+        "Sol Ring",
+        "Swords to Plowshares",
+        "Path to Exile",
+        "Mystic Remora",
+        "Arcane Signet",
+        "Counterspell",
+        "Thought Vessel",
+        "Cyclonic Rift",
+        "Demonic Tutor",
+        "Feed the Swarm"
+      ]
+    },
+    {
+      "commander": "Sidisi, Brood Tyrant",
+      "edhrec_top10": [
+        "Dread Return",
+        "Wonder",
+        "Snarling Gorehound",
+        "Skull Prophet",
+        "Syr Konrad, the Grim",
+        "Deranged Assistant",
+        "Stitcher's Supplier",
+        "Wight of the Reliquary",
+        "Nyx Weaver",
+        "Aftermath Analyst"
+      ],
+      "hi_syn_hits": 2,
+      "hi_syn_total": 10,
+      "ndcg30": 0.157391,
+      "on_page_hits": 5,
+      "top10": [
+        "Waterlogged Hulk",
+        "Aftermath Analyst",
+        "Skull Prophet",
+        "Cruel Somnophage",
+        "The Ancient One",
+        "Lluwen, Imperfect Naturalist",
+        "Inverted Iceberg",
+        "Throne of the Grim Captain",
+        "Fallaji Archaeologist",
+        "Visage of Dread"
+      ]
+    },
+    {
+      "commander": "Sigarda, Host of Herons",
+      "edhrec_top10": [
+        "Armadillo Cloak",
+        "Ethereal Armor",
+        "Sythis, Harvest's Hand",
+        "Daybreak Coronet",
+        "Ancestral Mask",
+        "All That Glitters",
+        "Unflinching Courage",
+        "Spirit Mantle",
+        "Shield of the Oversoul",
+        "Rancor"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.044843,
+      "on_page_hits": 19,
+      "top10": [
+        "Sol Ring",
+        "Swords to Plowshares",
+        "Path to Exile",
+        "Arcane Signet",
+        "Thought Vessel",
+        "Nature's Lore",
+        "Heroic Intervention",
+        "Sylvan Library",
+        "Beast Within",
+        "Kodama's Reach"
+      ]
+    },
+    {
+      "commander": "Tergrid, God of Fright",
+      "edhrec_top10": [
+        "Smallpox",
+        "Waste Not",
+        "Dark Deal",
+        "Rankle, Master of Pranks",
+        "Plaguecrafter",
+        "Elderfang Disciple",
+        "Oppression",
+        "Geth's Grimoire",
+        "Liliana's Triumph",
+        "Syphon Mind"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.0,
+      "on_page_hits": 0,
+      "top10": [
+        "Retrofitter Foundry",
+        "Fain, the Broker",
+        "Redrock Sentinel",
+        "Witch's Oven",
+        "The Underworld Cookbook",
+        "Treasure Map",
+        "Spawning Pit",
+        "Transmogrant Altar",
+        "Falkenrath Forebear",
+        "Westvale Abbey"
+      ]
+    },
+    {
+      "commander": "Teysa Karlov",
+      "edhrec_top10": [
+        "Zulaport Cutthroat",
+        "Pitiless Plunderer",
+        "Cruel Celebrant",
+        "Bastion of Remembrance",
+        "Teysa, Orzhov Scion",
+        "Reassembling Skeleton",
+        "Elenda, the Dusk Rose",
+        "Blood Artist",
+        "Doomed Traveler",
+        "Ashnod's Altar"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.041851,
+      "on_page_hits": 7,
+      "top10": [
+        "Horn of Gondor",
+        "Garrison Cat",
+        "Inquisitive Puppet",
+        "Xathrid Necromancer",
+        "Jerren, Corrupted Bishop",
+        "Lossarnach Captain",
+        "White Glove Gourmand",
+        "The Prydwen, Steel Flagship",
+        "Watchful Giant",
+        "Thalia's Lieutenant"
+      ]
+    },
+    {
+      "commander": "The Mimeoplasm",
+      "edhrec_top10": [
+        "Yargle and Multani",
+        "Buried Alive",
+        "Titanoth Rex",
+        "Lord of Extinction",
+        "Consuming Aberration",
+        "Windfall",
+        "Frantic Search",
+        "Necrotic Ooze",
+        "Brawn",
+        "Acidic Slime"
+      ],
+      "hi_syn_hits": 1,
+      "hi_syn_total": 10,
+      "ndcg30": 0.098032,
+      "on_page_hits": 17,
+      "top10": [
+        "Sol Ring",
+        "Mystic Remora",
+        "Entomb",
+        "Dakra Mystic",
+        "Arcane Signet",
+        "Counterspell",
+        "Thought Vessel",
+        "Nature's Lore",
+        "Heroic Intervention",
+        "Cyclonic Rift"
+      ]
+    },
+    {
+      "commander": "Titania, Protector of Argoth",
+      "edhrec_top10": [
+        "Zuran Orb",
+        "Ramunap Excavator",
+        "Sylvan Safekeeper",
+        "Splendid Reclamation",
+        "Harrow",
+        "Azusa, Lost but Seeking",
+        "Scapeshift",
+        "Lotus Field",
+        "Crucible of Worlds",
+        "Lotus Cobra"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.280099,
+      "on_page_hits": 20,
+      "top10": [
+        "Titania, Nature's Force",
+        "Kodama's Reach",
+        "Command Tower",
+        "Tomb of Urami",
+        "Evolving Wilds",
+        "Myriad Landscape",
+        "Terramorphic Expanse",
+        "Fabled Passage",
+        "Prismatic Vista",
+        "Demolition Field"
+      ]
+    },
+    {
+      "commander": "Tuvasa the Sunlit",
+      "edhrec_top10": [
+        "Sythis, Harvest's Hand",
+        "Enchantress's Presence",
+        "Sanctum Weaver",
+        "Eidolon of Blossoms",
+        "Sterling Grove",
+        "Setessan Champion",
+        "Jukai Naturalist",
+        "Mesa Enchantress",
+        "Fertile Ground",
+        "Sigil of the Empty Throne"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.050561,
+      "on_page_hits": 15,
+      "top10": [
+        "Mystic Remora",
+        "Sylvan Library",
+        "Rhystic Study",
+        "Smothering Tithe",
+        "Island Sanctuary",
+        "Archmage Ascension",
+        "Teferi's Ageless Insight",
+        "Abundance",
+        "Zur's Weirding",
+        "Enduring Renewal"
+      ]
+    },
+    {
+      "commander": "Veyran, Voice of Duality",
+      "edhrec_top10": [
+        "Guttersnipe",
+        "Archmage Emeritus",
+        "Storm-Kiln Artist",
+        "Expressive Iteration",
+        "Harmonic Prodigy",
+        "Serum Visions",
+        "Mizzix's Mastery",
+        "Ponder",
+        "Opt",
+        "Talrand, Sky Summoner"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.071972,
+      "on_page_hits": 16,
+      "top10": [
+        "Sol Ring",
+        "Mystic Remora",
+        "Arcane Signet",
+        "Counterspell",
+        "Thought Vessel",
+        "Cyclonic Rift",
+        "Dockside Extortionist",
+        "Chaos Warp",
+        "Rhystic Study",
+        "Fierce Guardianship"
+      ]
+    },
+    {
+      "commander": "Vorel of the Hull Clade",
+      "edhrec_top10": [
+        "Kiora's Follower",
+        "Fathom Mage",
+        "Deepglow Skate",
+        "Gyre Sage",
+        "Simic Ascendancy",
+        "The Millennium Calendar",
+        "Forgotten Ancient",
+        "Evolution Sage",
+        "Master Biomancer",
+        "Karn's Bastion"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.003052,
+      "on_page_hits": 15,
+      "top10": [
+        "Hamlet Vanguard",
+        "Sol Ring",
+        "Mystic Remora",
+        "Arcane Signet",
+        "Counterspell",
+        "Thought Vessel",
+        "Nature's Lore",
+        "Heroic Intervention",
+        "Cyclonic Rift",
+        "Sylvan Library"
+      ]
+    },
+    {
+      "commander": "Wilhelt, the Rotcleaver",
+      "edhrec_top10": [
+        "Diregraf Captain",
+        "Rooftop Storm",
+        "Diregraf Colossus",
+        "Gravecrawler",
+        "Undead Augur",
+        "Death Baron",
+        "Necroduality",
+        "Headless Rider",
+        "Cemetery Reaper",
+        "Lord of the Accursed"
+      ],
+      "hi_syn_hits": 4,
+      "hi_syn_total": 10,
+      "ndcg30": 0.454678,
+      "on_page_hits": 19,
+      "top10": [
+        "Headless Rider",
+        "Diregraf Captain",
+        "Wight",
+        "Cemetery Reaper",
+        "Quest for the Gravelord",
+        "Crowded Crypt",
+        "Liliana's Devotee",
+        "Rotlung Reanimator",
+        "Magus of the Bridge",
+        "Gisa, the Hellraiser"
+      ]
+    },
+    {
+      "commander": "Wort, the Raidmother",
+      "edhrec_top10": [
+        "Dragon Fodder",
+        "Krenko's Command",
+        "Young Pyromancer",
+        "Hordeling Outburst",
+        "Empty the Warrens",
+        "Battle Hymn",
+        "Twinning Staff",
+        "Artifact Mutation",
+        "Storm-Kiln Artist",
+        "Thrill of Possibility"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.032053,
+      "on_page_hits": 13,
+      "top10": [
+        "Goblin King",
+        "Goblin Caves",
+        "Goblin Shrine",
+        "Rundvelt Hordemaster",
+        "Goblin Chieftain",
+        "Howlsquad Heavy",
+        "Conspicuous Snoop",
+        "Goblin Warchief",
+        "Hobgoblin Bandit Lord",
+        "Orcish Siegemaster"
+      ]
+    },
+    {
+      "commander": "Wyleth, Soul of Steel",
+      "edhrec_top10": [
+        "Sigarda's Aid",
+        "Sram, Senior Edificer",
+        "Spirit Mantle",
+        "Blackblade Reforged",
+        "Danitha Capashen, Paragon",
+        "Timely Ward",
+        "Puresteel Paladin",
+        "Unquestioned Authority",
+        "Sunforger",
+        "Sunhome, Fortress of the Legion"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.093474,
+      "on_page_hits": 17,
+      "top10": [
+        "Relic Axe",
+        "Golem-Skin Gauntlets",
+        "Sol Ring",
+        "Swords to Plowshares",
+        "Path to Exile",
+        "Arcane Signet",
+        "Thought Vessel",
+        "Dockside Extortionist",
+        "Chaos Warp",
+        "Generous Gift"
+      ]
+    },
+    {
+      "commander": "Xenagos, God of Revels",
+      "edhrec_top10": [
+        "Goreclaw, Terror of Qal Sisma",
+        "Quartzwood Crasher",
+        "Anzrag, the Quake-Mole",
+        "Ghalta, Primal Hunger",
+        "Ilharg, the Raze-Boar",
+        "Ojer Kaslem, Deepest Growth",
+        "Bloodthirster",
+        "Scourge of the Throne",
+        "Chandra's Ignition",
+        "Selvala, Heart of the Wilds"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.137184,
+      "on_page_hits": 18,
+      "top10": [
+        "Sol Ring",
+        "Arcane Signet",
+        "Thought Vessel",
+        "Nature's Lore",
+        "Heroic Intervention",
+        "Sylvan Library",
+        "Dockside Extortionist",
+        "Beast Within",
+        "Chaos Warp",
+        "Kodama's Reach"
+      ]
+    },
+    {
+      "commander": "Yawgmoth, Thran Physician",
+      "edhrec_top10": [
+        "Nest of Scarabs",
+        "Butcher Ghoul",
+        "Geralf's Messenger",
+        "Zulaport Cutthroat",
+        "Pawn of Ulamog",
+        "Ophiomancer",
+        "Blood Artist",
+        "Bastion of Remembrance",
+        "Pitiless Plunderer",
+        "Deathgreeter"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.010867,
+      "on_page_hits": 4,
+      "top10": [
+        "Voracious Vermin",
+        "Xathrid Necromancer",
+        "Jerren, Corrupted Bishop",
+        "Blightbelly Rat",
+        "Quest for the Gravelord",
+        "Contagion Clasp",
+        "Grim Affliction",
+        "Necropolis of Azar",
+        "Contagion Engine",
+        "Slaughter Specialist"
+      ]
+    },
+    {
+      "commander": "Oona, Queen of the Fae",
+      "edhrec_top10": [
+        "Scion of Oona",
+        "Glen Elendra Liege",
+        "Obyra, Dreaming Duelist",
+        "Bitterblossom",
+        "Spellstutter Sprite",
+        "Oona's Blackguard",
+        "Tegwyll, Duke of Splendor",
+        "Glen Elendra Archmage",
+        "Alela, Cunning Conqueror",
+        "Dire Undercurrents"
+      ],
+      "hi_syn_hits": 2,
+      "hi_syn_total": 10,
+      "ndcg30": 0.287625,
+      "on_page_hits": 17,
+      "top10": [
+        "Tegwyll, Duke of Splendor",
+        "Scion of Oona",
+        "Gothmog, Morgul Lieutenant",
+        "Sol Ring",
+        "Mystic Remora",
+        "Arcane Signet",
+        "Counterspell",
+        "Thought Vessel",
+        "Cyclonic Rift",
+        "Demonic Tutor"
+      ]
+    },
+    {
+      "commander": "Melek, Izzet Paragon",
+      "edhrec_top10": [
+        "Goblin Electromancer",
+        "Jace's Sanctum",
+        "Twinning Staff",
+        "Thousand-Year Storm",
+        "Telling Time",
+        "Guttersnipe",
+        "Seething Song",
+        "Epic Experiment",
+        "Brainstorm",
+        "Reverberate"
+      ],
+      "hi_syn_hits": 0,
+      "hi_syn_total": 10,
+      "ndcg30": 0.015707,
+      "on_page_hits": 14,
+      "top10": [
+        "Counterspell",
+        "Cyclonic Rift",
+        "Chaos Warp",
+        "Fierce Guardianship",
+        "Deflecting Swat",
+        "Jeska's Will",
+        "Blasphemous Act",
+        "Flame of Anor",
+        "Ixidor's Will",
+        "Sol Ring"
       ]
     }
   ],

@@ -4,84 +4,63 @@ Guidance for Claude Code working in this repo.
 
 ## Project Overview
 
-MTG Synergy Graph — analyzes Magic: The Gathering EDH/Commander deck synergies
-using a deterministic, rule-based Forge-DSL Graph Engine.
-
-Rule-based scorer joining Forge DSL ports. No training, no EDHREC at
-inference, fully explainable. Current aggregate NDCG@30 ~ 0.162 on the
-25-commander golden set; avg Hi-Syn 16.7%, OnPage 40.5% (top-50).
-
-```
-Forge card DSL -> importer.py -> synergy.db (cards + card_ports)
-                                         |
-           SynergyEngine(db).page(commander, limit=N)
-                                         |
-  score_all_candidates() buckets:
-    port_match, cost_synergy, catch_all, scaling, deck_hints,
-    chain_match, lord, amplifier, etb_self, graph_metrics,
-    strategic, resource_density, effect_resonance,
-    replacement_resonance, sacrifice_synergy, staple, replacement
-  -> penalties.py applies hard filters / multipliers
-```
-
-- **Chains**: branches resolved at parse time (`ChainNode.branch_kind`),
-  discounted in scoring via `BRANCH_MULTIPLIER`. See `docs/SPEC.md` v1.2.2.
-- **Resource-density layer** (S7.5): `_extract_commander_anchors()` maps
-  each anchor type -> cmc cap based on channel (consuming cost / trigger ->
-  cap=3; non-consuming cost / cost-reduction -> uncapped). Recursion bonus
-  for Undying/Persist/Unearth/... and any `ChangeZone|Graveyard->Battlefield`.
-- **Warm-path perf**: Meren `computed` ~1.5s, test suite (322) ~64s,
-  golden set check (25) ~21s. Bottleneck: `sqlite3.Cursor.fetchall`.
+MTG Synergy Graph — deterministic, rule-based EDH/Commander synergy scorer
+using Forge DSL ports. No training, no EDHREC at inference.
+Current aggregate NDCG@30 ~ 0.149 on the 50-commander golden set.
 
 ## Common Commands
 
 ```bash
-# Import fresh DB
-uv run python scripts/import_cardsfolder.py
-
-# Recommend
+uv run python scripts/import_cardsfolder.py                              # Import fresh DB
 uv run python scripts/recommend.py --commander "Korvold, Fae-Cursed King" --top 30 --explain
-
-# Compare vs EDHREC / golden-set regression
 uv run python scripts/compare_edhrec.py --commanders tests/fixtures/golden_set.json
 uv run python scripts/golden_set_track.py --baseline tests/fixtures/golden_set_run.json
-
-# Tests
-uv run pytest tests/                # 322 tests, ~64s
+uv run pytest tests/                                                     # 318 tests, ~46s
 ```
 
-## DB Schema (`data/tags.db`)
+## Scoring Architecture
 
-| Table | Rows | Purpose |
-|---|---|---|
-| cards | ~36k | Scryfall metadata |
-| edhrec_card_synergy | ~733k | EDHREC synergy for 2,761 commanders (87%) |
-| forge_abilities | ~72k | Raw Forge ability data + SubAbility chain expansions. `static_mode` column holds `Mode$` from S: lines (Continuous, Panharmonicon, ReduceCost...). R: replacements store `ValidPlayer$` in `target`, `verb` NULL. |
-| forge_deck_tags | ~14k | Forge AI: has/hints/needs, 9,868 cards |
-| forge_name_map | ~31k | Forge name -> oracle_id (prefers non-token) |
+Bucket-based scoring in `scoring.py` → `score_all_candidates()`:
 
-## Project Structure
+| Bucket | Weight | Signal |
+|--------|--------|--------|
+| port_match | 10 | Trigger feeder: cmdr trigger ↔ candidate effect |
+| lord | 12 | Tribal lord/anthem matches |
+| amplifier | 10 | Token/counter doublers (Doubling Season) |
+| effect_resonance | 10 | Same effect class resonance (Proliferate, Mill) |
+| replacement_resonance | 10 | Replacement doublers (AddCounter, CreateToken) |
+| resource_density | 8 | Card-type density for cost-anchored commanders |
+| trigger_resonance | 8 | Shared trigger event (Sacrificed, Taps) |
+| cost_synergy | 6 | Cost resource matching |
+| scaling | 6 | scales_with matches |
+| sacrifice_synergy | 6 | Outlet ↔ payoff cluster + token-loop |
+| graveyard_synergy | 6 | Grave filler ↔ reanimator (library_to_grave ×2.0) |
+| stat_scaling | 4 | High-stat candidates (toughness for Phenax) |
+| spellcast_density | 4 | Spell-type density (instants for Talrand) |
+| counter_synergy | 4 | +1/+1 counter producer → payoff commander |
+| deck_hints | 4 | Forge AI annotations |
+| chain | 3 | 2-hop indirect matches |
+| strategic | 2 | Heuristic rules (evasion, mass pump, mana sink) |
+| staple | 1 | Format staples |
+| catchall | 1 | Weak per-card color/type match |
+| replacement | -10 | Conflicting replacement effects |
 
-```
-src/mtg_synergy_graph/    # Library source
-scripts/                  # CLI tools (import, recommend, compare, golden-set)
-tests/                    # 322 tests + fixtures
-docs/                     # SPEC.md design document
-```
+Penalties in `penalties.py`: 12 rules (wrong color identity, wrong token
+type, non-counter creatures for counter cmdrs, etc.).
 
-### Key files -- `mtg_synergy_graph`
+## Key Implementation Details
 
-- `engine.py` -- `SynergyEngine`, `score_all_candidates()`
-- `importer.py` -- Forge DSL parser, DB importer
-- `penalties.py` -- hard filters and multipliers
-- `scoring.py` -- bucket scorers orchestration
-- `graph_metrics.py` -- causal graph: PageRank, hub scores, Jaccard
-- `graph_cache.py` -- precomputed graph cache
-- `validate.py` -- EDHREC comparison utilities
+- **Broad ETB-self dampening**: `Creature.Other+YouCtrl` triggers match 17k
+  cards. Dampened ×0.15 (or ×0.5 for Purphoros-class: only-trigger + payoff).
+- **Branch weighting**: `BRANCH_MULTIPLIER` discounts conditional/branched
+  abilities. See `docs/SPEC.md`.
+- **Death-signature gate**: `_commander_death_signature` skips `Card.Self`
+  triggers to avoid false positives (Locust God).
+- **SpellCast exclusion**: broad types (Creature, Historic, Permanent) excluded
+  from `spellcast_density` to prevent flooding.
 
 ## Conventions
 
-- Cards keyed by Scryfall `oracle_id`. `data/oracle_cards.json` is gitignored.
-- Security: SQL fragment interpolation guarded by `_VALID_*_EXPRS` frozensets +
-  `ValueError` (never `assert` -- stripped by `python -O`); external URLs
-  validated via `urlparse`.
+- Cards keyed by Scryfall `oracle_id`.
+- SQL fragment interpolation guarded by `_VALID_*_EXPRS` frozensets +
+  `ValueError` (never `assert` — stripped by `python -O`).

@@ -448,6 +448,22 @@ class SynergyEngine:
             scipy_pr_context=self._scipy_pr_context,
         )
 
+        # Phase F9: inject sacrifice signal into penalty context so Rule 9
+        # can exempt candidates with sacrifice/trigger-resonance signal.
+        sac_signal: set[str] = set()
+        for cand_name, buckets_src in result.buckets.items():
+            if (
+                buckets_src.get("sacrifice_synergy", 0) > 0
+                or buckets_src.get("trigger_resonance", 0) > 0
+            ):
+                sac_signal.add(cand_name)
+        # frozen=True on PenaltyContext blocks attribute rebinding, but
+        # we can replace the field via object.__setattr__ for this one
+        # injection point.
+        object.__setattr__(
+            penalty_ctx, "candidates_with_sacrifice_signal", frozenset(sac_signal)
+        )
+
         ranked: list[tuple[str, dict[str, float], list[dict[str, Any]]]] = []
         for cand in legal:
             buckets_src = result.buckets.get(cand)

@@ -42,8 +42,12 @@ from .graph_engine import (
     find_counter_producer_payoff,
     find_deckhints_matches,
     find_etb_self_matches,
+    find_etb_value_creatures,
     find_graveyard_value_synergies,
     find_lord_matches,
+    find_opponent_forcing_effects,
+    find_stat_scaling_synergies,
+    find_trigger_resonance,
     find_mana_restriction_matches,
     find_replacement_conflicts,
     find_sacrifice_synergies,
@@ -109,9 +113,21 @@ from .parser import parser_branch_kinds  # noqa: E402, F401
 PORT_MATCH_WEIGHT       = 10
 CATCH_ALL_WEIGHT        = 1   # weak per-card; v3 halved from 2
 COST_FEED_WEIGHT        = 6   # v3 raised from 4 — strong signal
-SACRIFICE_SYNERGY_WEIGHT = 4  # Phase D1 — additive on top of cost_feed
+SACRIFICE_SYNERGY_WEIGHT = 6  # Phase D1 — additive on top of cost_feed (F9: raised from 4)
 COUNTER_SYNERGY_WEIGHT   = 4  # Phase F1 — +1/+1 counter producer → payoff commander
-GRAVEYARD_SYNERGY_WEIGHT = 4  # Phase F5 — graveyard filler → reanimator commander
+GRAVEYARD_SYNERGY_WEIGHT = 6  # Phase F5 — graveyard filler → reanimator (F9: raised from 4)
+ETB_VALUE_WEIGHT         = 4  # Phase F9 — ETB/death value creatures for recursion commanders
+#: Phase F7 — library_to_grave tier multiplier. Entomb / Buried Alive
+#: are the most targeted graveyard enablers (intentional card placement),
+#: significantly stronger signal than generic self-mill or reanimator
+#: cluster cards. The multiplier lifts them above the noise floor without
+#: inflating the other two graveyard tiers.
+GRAVEYARD_LIBRARY_TO_GRAVE_MULT: float = 2.0
+TRIGGER_RESONANCE_WEIGHT = 8  # Phase F6 — shared trigger event (F9: raised from 6)
+STAT_SCALING_WEIGHT      = 4  # Phase F7 — high-stat candidates for stat-scaling commanders
+SPELLCAST_DENSITY_WEIGHT       = 4  # Phase F8 — spell-type density for SpellCast triggers
+SCALES_WITH_DENSITY_WEIGHT     = 8  # Phase F9 — density for scales_with types (Aura for Uril)
+OPPONENT_FORCING_WEIGHT        = 8  # Phase F10 — opponent-forcing effects for opp-trigger commanders
 MANA_RESTRICTION_WEIGHT  = 2  # Phase D2 — folds into cost_synergy bucket
 SCALING_WEIGHT          = 6   # v3 raised from 5
 DECKHINTS_WEIGHT        = 4   # v3 raised from 3 — Forge's own annotations
@@ -238,6 +254,11 @@ BUCKETS: tuple[str, ...] = (
     "sacrifice_synergy",   # Phase D1 — outlet ↔ payoff cluster
     "counter_synergy",     # Phase F1 — P1P1 producer ↔ counter-payoff cmdr
     "graveyard_synergy",   # Phase F5 — grave filler ↔ reanim commander
+    "trigger_resonance",   # Phase F6 — shared trigger event cmdr ↔ candidate
+    "stat_scaling",        # Phase F7 — high-stat candidates for stat-scaling cmdr
+    "etb_value",           # Phase F9 — ETB/death value creatures for recursion cmdrs
+    "spellcast_density",   # Phase F8 — spell-type density for SpellCast-trigger cmdrs
+    "opponent_forcing",    # Phase F10 — opponent-forcing effects for opp-trigger cmdrs
     "scaling",
     "deck_hints",
     "chain",
@@ -348,9 +369,67 @@ def _score_trigger_feeders(
                     {**row, "bucket": bucket})
 
 
+#: Broad ETB-self dampening (Phase F7). When the commander's trigger
+#: filter matches all creatures (``Creature.Other+YouCtrl``), 17k cards
+#: match. Two multiplier levels:
+#:
+#: * ``_LOW`` — commander has alternative scoring axes (graveyard_synergy,
+#:   sacrifice_synergy, etc.) so the broad signal would drown them out.
+#:   Used for Meren, Chainer, Selvala.
+#: * ``_HIGH`` — commander's ONLY mechanical output is the broad trigger
+#:   itself (e.g. Purphoros: creature ETB → 2 damage). Without the ETB-
+#:   self signal, his page is 100% staples.
+BROAD_ETB_SELF_MULT_LOW:  float = 0.15
+BROAD_ETB_SELF_MULT_HIGH: float = 0.5
+
+
+def _cmdr_only_has_broad_creature_trigger(cmdr_ports: list[PortRow]) -> bool:
+    """Return True when the commander's only non-catchall trigger is a
+    broad creature ETB (``Creature.Other+YouCtrl`` etc.) with a direct
+    payoff effect (DealDamage, Token, PumpAll, ...).
+
+    Purphoros: only trigger is ``ChangesZone|Creature → DealDamage`` → True.
+    Meren: has ``ChangesZone|Creature`` AND ``Phase`` → False (multiple axes).
+    Selvala: trigger is ``ChangesZone|Creature`` but no payoff effect → False.
+    """
+    from .graph_engine import CATCH_ALL_TRIGGERS, _trigger_only_matches_self
+
+    _PAYOFF_EFFECTS: frozenset[str] = frozenset({
+        "DealDamage", "Token", "PutCounter", "PutCounterAll",
+        "PumpAll", "LoseLife",
+    })
+
+    has_broad_trigger = False
+    has_other_trigger = False
+    has_payoff = False
+    for p in cmdr_ports:
+        pt = p.get("port_type")
+        ev = (p.get("event_class") or "").strip()
+        vf = p.get("valid_filter") or ""
+        bk = (p.get("branch_kind") or "").strip()
+
+        if pt == "trigger":
+            if ev in CATCH_ALL_TRIGGERS or _trigger_only_matches_self(vf):
+                continue
+            if ev == "ChangesZone":
+                head = vf.split(".")[0].split("+")[0].strip()
+                if head in ("Creature", "Permanent"):
+                    has_broad_trigger = True
+                    continue
+            # Any non-broad, non-catchall trigger → commander has another axis
+            has_other_trigger = True
+
+        if pt == "effect" and bk in ("execute", "subability"):
+            if ev in _PAYOFF_EFFECTS:
+                has_payoff = True
+
+    return has_broad_trigger and has_payoff and not has_other_trigger
+
+
 def _score_etb_self(
     conn: sqlite3.Connection,
     commander_set: Sequence[str],
+    cmdr_ports: list[PortRow],
     scores: dict[str, BucketDict],
     matches: dict[str, MatchList],
 ) -> None:
@@ -358,7 +437,20 @@ def _score_etb_self(
     commander's trigger fires on. Awards :data:`PORT_MATCH_WEIGHT` once per
     matched (candidate, trigger event) pair — the same weight as the trigger
     feeders matcher because the synergy is mechanically equivalent.
+
+    Phase F7: broad-filter matches (``Creature.Other+YouCtrl`` etc.) get
+    dampened so they don't flood the top-30 with 17k creature matches.
+    The dampening level is adaptive — commanders with alternative scoring
+    axes (graveyard, sacrifice) get aggressive dampening; commanders
+    whose only signal is the broad trigger (Purphoros) get lighter
+    dampening.
     """
+    # Use higher multiplier only when the broad creature trigger is
+    # the commander's ONLY non-catchall trigger AND it has a direct
+    # payoff (Purphoros: ETB → DealDamage, no other triggers).
+    only_broad = _cmdr_only_has_broad_creature_trigger(cmdr_ports)
+    broad_mult_val = BROAD_ETB_SELF_MULT_HIGH if only_broad else BROAD_ETB_SELF_MULT_LOW
+
     seen: set[tuple[str, str]] = set()
     for row in find_etb_self_matches(conn, commander_set):
         key = (row["candidate"], row["trigger_event"])
@@ -366,9 +458,10 @@ def _score_etb_self(
             continue
         seen.add(key)
         weight = _branch_weight(row.get("branch_kind"))
+        broad_mult = broad_mult_val if row.get("is_broad") else 1.0
         _add_bucket(
             scores, matches, row["candidate"], "port_match",
-            PORT_MATCH_WEIGHT * weight,
+            PORT_MATCH_WEIGHT * weight * broad_mult,
             {**row, "bucket": "port_match", "match_kind": "etb_self"},
         )
 
@@ -687,11 +780,333 @@ def _score_graveyard_value(
     """
     for row in find_graveyard_value_synergies(conn, commander_set):
         weight = _branch_weight(row.get("branch_kind"))
+        tier_mult = (
+            GRAVEYARD_LIBRARY_TO_GRAVE_MULT
+            if row.get("direction") == "library_to_grave"
+            else 1.0
+        )
         _add_bucket(
             scores, matches, row["candidate"], "graveyard_synergy",
-            GRAVEYARD_SYNERGY_WEIGHT * weight,
+            GRAVEYARD_SYNERGY_WEIGHT * weight * tier_mult,
             {**row, "bucket": "graveyard_synergy"},
         )
+
+
+def _score_etb_value(
+    conn: sqlite3.Connection,
+    commander_set: Sequence[str],
+    scores: dict[str, BucketDict],
+    matches: dict[str, MatchList],
+) -> None:
+    """Phase F9 — ETB/death value creatures for recursion commanders.
+
+    Creatures with self-ETB or self-death triggers that execute valuable
+    effects are prime recursion targets. Spore Frog (sac: Fog), Eternal
+    Witness (ETB: return from graveyard), Plaguecrafter (ETB: each player
+    sacrifices) are all worth recurring repeatedly with Meren/Chainer.
+    """
+    for row in find_etb_value_creatures(conn, commander_set):
+        _add_bucket(
+            scores, matches, row["candidate"], "etb_value",
+            ETB_VALUE_WEIGHT,
+            {**row, "bucket": "etb_value"},
+        )
+
+
+def _score_trigger_resonance(
+    conn: sqlite3.Connection,
+    commander_set: Sequence[str],
+    scores: dict[str, BucketDict],
+    matches: dict[str, MatchList],
+) -> None:
+    """Phase F6 — shared trigger event between commander and candidate.
+
+    When both the commander and a candidate trigger on the same
+    event_class (e.g. both trigger on ``Sacrificed``), they mechanically
+    amplify each other in a deck built around that event. The existing
+    trigger-feeder matcher only connects trigger→effect pairs, missing
+    this trigger→trigger resonance.
+
+    Awards :data:`TRIGGER_RESONANCE_WEIGHT` once per
+    (candidate, matched_event) pair.
+    """
+    for row in find_trigger_resonance(conn, commander_set):
+        weight = _branch_weight(row.get("branch_kind"))
+        _add_bucket(
+            scores, matches, row["candidate"], "trigger_resonance",
+            TRIGGER_RESONANCE_WEIGHT * weight,
+            {**row, "bucket": "trigger_resonance"},
+        )
+
+
+def _score_stat_scaling(
+    conn: sqlite3.Connection,
+    commander_set: Sequence[str],
+    scores: dict[str, BucketDict],
+    matches: dict[str, MatchList],
+) -> None:
+    """Phase F7 — high-stat candidates for stat-scaling commanders.
+
+    Phenax ``scales_with CardToughness`` → high-toughness creatures get
+    a boost proportional to their stat value above the threshold. A
+    toughness-7 Wall of Frost gets more than a toughness-4 creature.
+    """
+    for row in find_stat_scaling_synergies(conn, commander_set):
+        stat_value = row.get("stat_value", 4)
+        # Scale weight by stat value: base weight at stat=4, +50% at 6, +100% at 8
+        scale_factor = min(stat_value / 4.0, 3.0)
+        _add_bucket(
+            scores, matches, row["candidate"], "stat_scaling",
+            STAT_SCALING_WEIGHT * scale_factor,
+            {**row, "bucket": "stat_scaling"},
+        )
+
+
+def _score_opponent_forcing(
+    conn: sqlite3.Connection,
+    commander_set: Sequence[str],
+    scores: dict[str, BucketDict],
+    matches: dict[str, MatchList],
+) -> None:
+    """Phase F10 — opponent-forcing effects for opponent-trigger commanders.
+
+    Tergrid triggers on opponent sacrifice/discard → Smallpox (forces
+    each player to sacrifice + discard) is a premium synergy card.
+    """
+    for row in find_opponent_forcing_effects(conn, commander_set):
+        weight = _branch_weight(row.get("branch_kind"))
+        _add_bucket(
+            scores, matches, row["candidate"], "opponent_forcing",
+            OPPONENT_FORCING_WEIGHT * weight,
+            {**row, "bucket": "opponent_forcing"},
+        )
+
+
+# ---------------------------------------------------------------------------
+# Phase F8 — SpellCast-trigger density
+# ---------------------------------------------------------------------------
+
+#: SpellCast filter tokens that map to card types. Forge uses both
+#: ``Instant`` and ``Card.Instant`` — we normalize to the bare type.
+_SPELLCAST_TYPE_MAP: dict[str, str] = {
+    "Instant":     "Instant",
+    "Sorcery":     "Sorcery",
+    "Enchantment": "Enchantment",
+    "Artifact":    "Artifact",
+    "Creature":    "Creature",
+    "Planeswalker": "Planeswalker",
+    # Subtypes
+    "Aura":        "Aura",
+    "Equipment":   "Equipment",
+}
+
+
+def _extract_spellcast_types(
+    cmdr_ports: list[PortRow],
+) -> set[str]:
+    """Extract card types from ``SpellCast`` trigger filters.
+
+    Parses filters like ``Instant,Sorcery`` (Talrand), ``Enchantment``
+    (Sythis), ``Card.Vampire+Other`` (Edgar — returns ``Vampire``).
+
+    Returns the set of type/subtype tokens from the filter.
+    """
+    types: set[str] = set()
+    for p in cmdr_ports:
+        if p.get("port_type") != "trigger":
+            continue
+        ev = (p.get("event_class") or "").strip()
+        if ev != "SpellCast":
+            continue
+        vf = p.get("valid_filter") or ""
+        if not vf:
+            continue
+        for alt in vf.split(","):
+            alt = alt.strip()
+            if not alt:
+                continue
+            # Strip "Card." prefix: "Card.Instant" → "Instant"
+            if alt.startswith("Card."):
+                alt = alt[5:]
+            # Take the head token before any "+" qualifier
+            head = alt.split("+")[0].split(".")[0].strip()
+            if head and head not in ("Self", "Other", "YouCtrl"):
+                types.add(head)
+    return types
+
+
+def _extract_mayplay_types(cmdr_ports: list[PortRow]) -> set[str]:
+    """Detect card subtypes from ``MayPlay`` static abilities.
+
+    Gisa and Geralf have ``Affected: Zombie.YouCtrl | MayPlay: True``
+    — they let you cast Zombies from graveyard. Extract ``Zombie`` so
+    the spellcast_density layer can boost zombies for them.
+
+    Skips overly broad types (Creature, Permanent, Land, etc.).
+    """
+    _BROAD: frozenset[str] = frozenset({
+        "Creature", "Permanent", "Card", "Land", "Artifact",
+        "Enchantment", "Planeswalker", "Battle",
+    })
+    types: set[str] = set()
+    for p in cmdr_ports:
+        if p.get("port_type") != "static":
+            continue
+        raw = p.get("raw_line") or ""
+        if "MayPlay" not in raw:
+            continue
+        affected = p.get("affected_scope") or ""
+        for alt in affected.split(","):
+            head = alt.strip().split(".")[0].split("+")[0].strip()
+            if head and head not in _BROAD:
+                types.add(head)
+    return types
+
+
+def _extract_scales_with_types(cmdr_ports: list[PortRow]) -> set[str]:
+    """Detect card subtypes from ``scales_with`` ports.
+
+    Uril has ``scales_with Valid Aura.Attached/Times.2`` — he gets +2/+2
+    per aura attached. This function extracts ``Aura`` from such patterns
+    so the spellcast_density layer can boost auras for him even though he
+    has no SpellCast trigger.
+    """
+    types: set[str] = set()
+    for p in cmdr_ports:
+        if p.get("port_type") != "scales_with":
+            continue
+        ev = (p.get("event_class") or "").strip()
+        # "Valid" with raw_line containing Aura/Equipment/Enchantment
+        raw = p.get("raw_line") or ""
+        for sub in ("Aura", "Equipment", "Enchantment"):
+            if sub in raw:
+                types.add(sub)
+    return types
+
+
+def _score_spellcast_density(
+    conn: sqlite3.Connection,
+    commander_set: Sequence[str],
+    cmdr_ports: list[PortRow],
+    scores: dict[str, BucketDict],
+    matches: dict[str, MatchList],
+) -> None:
+    """Phase F8 — spell-type density for SpellCast-trigger commanders.
+
+    When a commander triggers on ``SpellCast | <TypeFilter>``, every
+    card of that type gets a density boost. Also detects scales_with
+    patterns (Uril scales with Aura count) via Phase F9.
+
+    The weight is flat per-type (no cmc scaling) because spell density
+    is about critical mass, not individual card quality.
+    """
+    sc_types = _extract_spellcast_types(cmdr_ports)
+    # Phase F9: also include types from scales_with patterns (Uril + Aura)
+    # and MayPlay graveyard-cast types (Gisa+Geralf → Zombie).
+    scales_types = _extract_scales_with_types(cmdr_ports)
+    mayplay_types = _extract_mayplay_types(cmdr_ports)
+    sc_types |= scales_types | mayplay_types
+    if not sc_types:
+        return
+
+    # Exclude overly broad types — "Creature" matches ~50% of the pool,
+    # "Permanent" / "Card" match everything. Also exclude pseudo-types
+    # like "Historic" that don't map to card_types/subtypes.
+    _BROAD_SPELLCAST_TYPES: frozenset[str] = frozenset({
+        "Creature", "Permanent", "Card", "Historic", "Noncreature",
+    })
+    sc_types -= _BROAD_SPELLCAST_TYPES
+    if not sc_types:
+        return
+
+    cmdr_set = set(commander_set)
+
+    # Partition into card-level types (matched via card_types column)
+    # and subtypes (matched via subtypes column). Types like Aura and
+    # Equipment are subtypes even though they appear in _SPELLCAST_TYPE_MAP.
+    primary_types = sc_types & _PRIMARY_CARD_TYPES
+    subtype_types = sc_types - primary_types
+
+    # Primary card-type matches (Instant, Sorcery, Enchantment, ...)
+    for type_name in sorted(primary_types):
+        w = (SCALES_WITH_DENSITY_WEIGHT
+             if type_name in scales_types or type_name in mayplay_types
+             else SPELLCAST_DENSITY_WEIGHT)
+        cur = conn.execute(
+            "SELECT name FROM cards WHERE card_types LIKE ?",
+            (f"%{type_name}%",),
+        )
+        for row in cur.fetchall():
+            cand = row["name"]
+            if cand in cmdr_set:
+                continue
+            _add_bucket(
+                scores, matches, cand, "spellcast_density",
+                w,
+                {
+                    "bucket":       "spellcast_density",
+                    "matched_type": type_name,
+                    "match_kind":   "card_type",
+                },
+            )
+
+    # Subtype matches (Aura, Equipment, Vampire, ...)
+    for sub in sorted(subtype_types):
+        w = (SCALES_WITH_DENSITY_WEIGHT
+             if sub in scales_types or sub in mayplay_types
+             else SPELLCAST_DENSITY_WEIGHT)
+        cur = conn.execute(
+            "SELECT name FROM cards WHERE subtypes LIKE ?",
+            (f"%{sub}%",),
+        )
+        for row in cur.fetchall():
+            cand = row["name"]
+            if cand in cmdr_set:
+                continue
+            _add_bucket(
+                scores, matches, cand, "spellcast_density",
+                w,
+                {
+                    "bucket":       "spellcast_density",
+                    "matched_type": sub,
+                    "match_kind":   "subtype",
+                },
+            )
+
+    # Cost reducer boost: cards with ReduceCost static whose ValidCard
+    # matches the commander's spellcast types are premium picks for
+    # spellslinger commanders (Goblin Electromancer for Talrand, etc.).
+    # Parse ValidCard from raw_line and check overlap with sc_types.
+    import re
+    _VALID_CARD_RE = re.compile(r"'ValidCard':\s*'([^']+)'")
+    cur = conn.execute(
+        "SELECT card_name, raw_line FROM card_ports "
+        "WHERE port_type = 'static' AND event_class = 'ReduceCost'"
+    )
+    seen_reducer: set[str] = set()
+    for row in cur.fetchall():
+        cand = row["card_name"]
+        if cand in cmdr_set or cand in seen_reducer:
+            continue
+        raw = row["raw_line"] or ""
+        m = _VALID_CARD_RE.search(raw)
+        if not m:
+            continue
+        valid_card = m.group(1)
+        # Check if any sc_type appears in the ValidCard filter
+        # E.g., ValidCard='Instant,Sorcery' → matches {'Instant', 'Sorcery'}
+        valid_types = {t.strip() for t in valid_card.split(",")}
+        if valid_types & sc_types:
+            seen_reducer.add(cand)
+            _add_bucket(
+                scores, matches, cand, "spellcast_density",
+                SCALES_WITH_DENSITY_WEIGHT,  # higher weight — targeted synergy
+                {
+                    "bucket":       "spellcast_density",
+                    "matched_type": valid_card,
+                    "match_kind":   "cost_reducer",
+                },
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1604,6 +2019,30 @@ def _score_effect_resonance(
         ev = (p.get("event_class") or "").strip()
         if ev in _RESONANT_EFFECTS:
             cmdr_resonant.add(ev)
+
+    # Phase F9: detect granted abilities from SVars. Phenax has
+    # static:Continuous with AddAbility='PhenaxMill' and SVar
+    # 'PhenaxMill' = 'AB$ Mill | ...'. Extract the verb and add
+    # it to the resonant set if it's a resonant effect.
+    granted_names: set[str] = set()
+    for p in cmdr_ports:
+        if p.get("port_type") == "static" and p.get("granted_ability"):
+            granted_names.add(p["granted_ability"])
+    if granted_names:
+        placeholders = ",".join("?" * len(commander_set))
+        gn_ph = ",".join("?" * len(granted_names))
+        svar_rows = conn.execute(
+            f"SELECT svar_value FROM card_svars "
+            f"WHERE card_name IN ({placeholders}) AND svar_name IN ({gn_ph})",
+            (*commander_set, *granted_names),
+        ).fetchall()
+        for row in svar_rows:
+            val = row["svar_value"] or ""
+            if val.startswith("AB$ ") or val.startswith("DB$ "):
+                verb = val.split("|")[0].replace("AB$", "").replace("DB$", "").strip()
+                if verb in _RESONANT_EFFECTS:
+                    cmdr_resonant.add(verb)
+
     if not cmdr_resonant:
         return
 
@@ -1692,9 +2131,10 @@ def score_all_candidates(
     """
     scores: dict[str, BucketDict] = {}
     matches: dict[str, MatchList] = {}
+    cmdr_ports = load_ports_for_set(conn, commander_set)
 
     _score_trigger_feeders(conn, commander_set, scores, matches)
-    _score_etb_self(conn, commander_set, scores, matches)
+    _score_etb_self(conn, commander_set, cmdr_ports, scores, matches)
     _score_catchall(conn, commander_set, scores, matches)
     _score_scaling(conn, commander_set, scores, matches)
     _score_deckhints(conn, commander_set, scores, matches)
@@ -1702,8 +2142,6 @@ def score_all_candidates(
         _score_chains(conn, commander_set, scores, matches)
     _score_lords(conn, commander_set, scores, matches)
     _score_amplifiers(conn, commander_set, scores, matches)
-
-    cmdr_ports = load_ports_for_set(conn, commander_set)
     _score_internal_synergy(conn, commander_set, cmdr_ports, scores, matches)
 
     if use_graph_metrics:
@@ -1722,6 +2160,11 @@ def score_all_candidates(
     _score_sacrifice_synergies(conn, commander_set, scores, matches)
     _score_counter_producer_payoff(conn, commander_set, scores, matches)
     _score_graveyard_value(conn, commander_set, scores, matches)
+    _score_etb_value(conn, commander_set, scores, matches)
+    _score_trigger_resonance(conn, commander_set, scores, matches)
+    _score_stat_scaling(conn, commander_set, scores, matches)
+    _score_opponent_forcing(conn, commander_set, scores, matches)
+    _score_spellcast_density(conn, commander_set, cmdr_ports, scores, matches)
     _score_mana_restriction(conn, commander_set, scores, matches)
     # Phase D4 (find_flicker_loop_matches) is intentionally NOT wired
     # in here. The matcher correctly identifies flicker-source clusters

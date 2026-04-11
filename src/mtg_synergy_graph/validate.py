@@ -185,9 +185,13 @@ def edhrec_labels_for_commander(
 
 @dataclass(frozen=True)
 class GoldenSetEntry:
-    commander: str
-    top10:     tuple[str, ...]
-    ndcg30:    float
+    commander:    str
+    top10:        tuple[str, ...]
+    ndcg30:       float
+    hi_syn_total: int              = 0   # EDHREC high-synergy cards available
+    hi_syn_hits:  int              = 0   # how many we ranked in top-30
+    on_page_hits: int              = 0   # how many of our top-30 appear anywhere on EDHREC
+    edhrec_top10: tuple[str, ...]  = ()  # EDHREC's top-10 high-synergy cards for reference
 
 
 @dataclass(frozen=True)
@@ -215,14 +219,46 @@ def _run_one(
     page = engine.page(commander, offset=0, limit=30)
     top10 = tuple(rec.card for rec in page.items[:10])
     ndcg = 0.0
+    hi_syn_total = 0
+    hi_syn_hits = 0
+    on_page_hits = 0
+    edhrec_top10: tuple[str, ...] = ()
+
     if edhrec_conn is not None:
         labels = edhrec_labels_for_commander(edhrec_conn, commander[0])
         ranking = [rec.card for rec in page.items]
         ndcg = compute_ndcg(ranking, labels, k=30)
+
+        # Hi-syn and on-page tracking
+        slug = commander_to_slug(commander[0])
+        sections = _fetch_edhrec_sections(edhrec_conn, slug)
+        hi_syn = sections.get("High Synergy Cards", set())
+        all_on_page: set[str] = set()
+        for cards in sections.values():
+            all_on_page |= cards
+
+        top30 = set(ranking[:30])
+        hi_syn_total = len(hi_syn)
+        hi_syn_hits = len(top30 & hi_syn)
+        on_page_hits = len(top30 & all_on_page)
+
+        # Top-5 hi-syn by synergy score (for reference)
+        hi_syn_rows = edhrec_conn.execute(
+            "SELECT card_name, synergy FROM edhrec_card_synergy "
+            "WHERE commander_slug = ? AND section = 'High Synergy Cards' "
+            "ORDER BY synergy DESC LIMIT 10",
+            (slug,),
+        ).fetchall()
+        edhrec_top10 = tuple(r["card_name"] for r in hi_syn_rows)
+
     return GoldenSetEntry(
         commander=" + ".join(commander),
         top10=top10,
         ndcg30=round(ndcg, 6),
+        hi_syn_total=hi_syn_total,
+        hi_syn_hits=hi_syn_hits,
+        on_page_hits=on_page_hits,
+        edhrec_top10=edhrec_top10,
     )
 
 

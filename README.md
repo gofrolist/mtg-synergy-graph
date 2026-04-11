@@ -32,10 +32,11 @@ Forge card DSL -> importer.py -> synergy.db (cards + card_ports)
            SynergyEngine(db).page(commander, limit=N)
                                          |
   score_all_candidates() buckets:
-    port_match, cost_synergy, catch_all, scaling, deck_hints,
-    chain_match, lord, amplifier, etb_self, graph_metrics,
-    strategic, resource_density, effect_resonance,
-    replacement_resonance, sacrifice_synergy, staple, replacement
+    port_match, cost_synergy, sacrifice_synergy, counter_synergy,
+    graveyard_synergy, trigger_resonance, stat_scaling,
+    spellcast_density, scaling, deck_hints, chain, lord, amplifier,
+    graph_metrics, strategic, resource_density, effect_resonance,
+    replacement_resonance, staple, replacement, catchall
   -> penalties.py applies hard filters / multipliers
 ```
 
@@ -66,13 +67,38 @@ src/mtg_synergy_graph/
   importer.py        # Forge DSL parser, DB importer
   penalties.py       # Hard filters and multipliers
   scoring.py         # Bucket scorers orchestration
+  graph_engine.py    # Port matching, sacrifice/graveyard/trigger matchers
   graph_metrics.py   # Causal graph: PageRank, hub scores, Jaccard
   graph_cache.py     # Precomputed graph cache
   validate.py        # EDHREC comparison utilities
   schema.sql         # SQLite schema
-scripts/             # CLI tools (import, recommend, compare)
-tests/               # 322 tests
+scripts/             # CLI tools (import, recommend, compare, golden-set)
+tests/               # 318 tests + fixtures
+docs/                # SPEC.md design document
 ```
+
+## DB Schema
+
+### `synergy.db` (built by importer)
+
+| Table | Purpose |
+|---|---|
+| cards | Scryfall metadata (~36k) |
+| card_ports | Parsed Forge abilities: triggers, effects, costs, keywords, scales_with |
+| card_svars | Forge SVars (granted abilities, formulas) |
+| synergy_edges | Precomputed pairwise edges |
+| graph_cache | Precomputed PageRank / hub scores |
+| causal_neighbours | Adjacency list for Jaccard overlap |
+
+### `tags.db` (external data)
+
+| Table | Purpose |
+|---|---|
+| cards | Scryfall metadata |
+| edhrec_card_synergy | EDHREC synergy for 2,761 commanders (87% coverage) |
+| forge_abilities | Raw Forge ability data + SubAbility chain expansions |
+| forge_deck_tags | Forge AI: has/hints/needs tags |
+| forge_name_map | Forge name -> oracle_id |
 
 ## Key Design Decisions
 

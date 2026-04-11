@@ -201,6 +201,7 @@ class PenaltyContext:
     cmdr_has_doctor:         bool
     cmdr_counter_types:      frozenset[str]   # P1P1 / M1M1 / TIME / etc.
     cmdr_uses_p1p1:          bool             # has any P1P1 trigger/effect
+    cmdr_p1p1_is_primary:    bool             # P1P1 is primary strategy (scales_with)
     cmdr_self_mill:          bool             # has Mill effect targeting You
     cmdr_has_abilities:      frozenset[str]   # from deck_has + derived
     cmdr_has_types:          frozenset[str]   # from deck_has + derived
@@ -222,6 +223,10 @@ class PenaltyContext:
     candidate_counter_types:    dict[str, set[str]]       = field(default_factory=dict)
     candidate_counters_on_land: dict[str, bool]           = field(default_factory=dict)
     candidate_opp_mill:         dict[str, bool]           = field(default_factory=dict)
+    # Phase F9: candidates with sacrifice/trigger-resonance signal —
+    # exempt from Rule 9 (non-counter creature penalty) because they
+    # are mechanically connected to the sacrifice axis, not counters.
+    candidates_with_sacrifice_signal: frozenset[str]      = field(default_factory=frozenset)
 
 
 # ---------------------------------------------------------------------------
@@ -381,8 +386,12 @@ def build_penalty_context(
     placeholders = ",".join("?" * len(commander_set))
     cmdr_counter_types: set[str] = set()
     cmdr_uses_p1p1 = False
+    cmdr_p1p1_is_primary = False
     cmdr_self_mill = False
     cmdr_token_subtypes: set[str] = set()
+    _has_p1p1_effect = False
+    _scales_p1p1 = False
+    _scales_all = False
 
     for prow in conn.execute(
         f"SELECT port_type, event_class, counter_type, valid_filter, raw_line "
@@ -390,6 +399,7 @@ def build_penalty_context(
         tuple(commander_set),
     ).fetchall():
         ev = (prow["event_class"] or "").strip()
+        pt = (prow["port_type"] or "").strip()
         ct = (prow["counter_type"] or "").strip()
         if ct:
             for tok in ct.split(","):
@@ -399,6 +409,16 @@ def build_penalty_context(
                     if tok in P1P1_ALIASES:
                         cmdr_uses_p1p1 = True
                         cmdr_has_abilities.add("Counters")
+        # Track P1P1 primary strategy via scales_with (same logic as
+        # graph_engine._commander_is_p1p1_payoff).
+        if pt == "effect" and ev in ("PutCounter", "PutCounterAll"):
+            if ct == "P1P1":
+                _has_p1p1_effect = True
+        if pt == "scales_with":
+            if ev == "CardCounters.P1P1":
+                _scales_p1p1 = True
+            elif ev == "CardCounters.ALL":
+                _scales_all = True
         if ev == "Mill" and "You" in (prow["valid_filter"] or ""):
             cmdr_self_mill = True
         if ev == "Token":
@@ -411,6 +431,8 @@ def build_penalty_context(
                     cmdr_has_abilities.add("Token")
         if ev in ("PutCounter", "PutCounterAll", "Proliferate"):
             cmdr_has_abilities.add("Counters")
+
+    cmdr_p1p1_is_primary = _scales_p1p1 or (_scales_all and _has_p1p1_effect)
 
     # Tribal anchor: the commander shares at least one of its own subtypes
     # with the token subtype it generates (Krenko IS a Goblin AND makes
@@ -429,6 +451,7 @@ def build_penalty_context(
         cmdr_has_doctor=_has_doctor_companion_partner(cmdr_rows),
         cmdr_counter_types=frozenset(cmdr_counter_types),
         cmdr_uses_p1p1=cmdr_uses_p1p1,
+        cmdr_p1p1_is_primary=cmdr_p1p1_is_primary,
         cmdr_self_mill=cmdr_self_mill,
         cmdr_has_abilities=frozenset(cmdr_has_abilities),
         cmdr_has_types=frozenset(cmdr_has_types),
@@ -534,14 +557,15 @@ def apply_penalties_ctx(
         score *= COUNTERS_ON_LANDS_MULT
 
     # ----- Rule 9: non-counter creatures for counter commanders ------------
-    # Skipped for tribal commanders: a tribal Edgar / Krenko / Marrow-Gnawer
-    # deck wants the whole tribe regardless of whether each creature puts
-    # +1/+1 counters. Rule 9 only applies to commanders whose PRIMARY
-    # strategy is counter accumulation (no shared tribe with their token
-    # output, no tribal subtype anchor).
+    # Skipped for tribal commanders and for candidates with sacrifice/
+    # trigger-resonance signal (Phase F9). A sacrifice-axis creature
+    # (Mayhem Devil, Pitiless Plunderer) shouldn't be penalized for
+    # lacking +1/+1 counters on a commander like Korvold whose P1P1
+    # is a side-effect reward, not his primary strategy.
     if (
         ctx.cmdr_uses_p1p1
         and not ctx.cmdr_is_tribal
+        and candidate not in ctx.candidates_with_sacrifice_signal
         and "Creature" in (cand["card_types"] or "").split()
         and not (cand_counters & P1P1_ALIASES)
         and "Counters" not in _decoded_has_abilities(cand)

@@ -39,6 +39,8 @@ from mtg_synergy_graph.graph_engine import (
     find_flicker_loop_matches,
     find_mana_restriction_matches,
     find_sacrifice_synergies,
+    find_stat_scaling_synergies,
+    find_trigger_resonance,
 )
 from mtg_synergy_graph.importer import import_cards_folder
 
@@ -668,3 +670,113 @@ def test_find_mana_restriction_kaalia_does_not_explode():
     assert not (cands & forbidden), (
         f"Kaalia must not match generic Legendary fixers: {sorted(cands & forbidden)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase F6 — trigger resonance
+# ---------------------------------------------------------------------------
+
+
+def test_trigger_resonance_korvold_finds_sacrifice_triggers():
+    """Integration: Korvold's ``Sacrificed`` trigger should resonate
+    with other sacrifice-trigger cards like Mayhem Devil.
+    """
+    db_path = Path("data/synergy.db")
+    if not db_path.exists():
+        pytest.skip("data/synergy.db not present")
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = find_trigger_resonance(conn, ["Korvold, Fae-Cursed King"])
+    finally:
+        conn.close()
+
+    candidates = {r["candidate"] for r in rows}
+    events = {r["matched_event"] for r in rows}
+
+    assert "Sacrificed" in events
+    assert "Mayhem Devil" in candidates
+    # Should not include broad-event matches.
+    assert "ChangesZone" not in events
+    assert "Phase" not in events
+
+
+def test_trigger_resonance_empty_for_etb_only_commander():
+    """Commanders whose only triggers are ChangesZone (broad) or
+    Card.Self (self-only) should get zero resonance matches."""
+    db_path = Path("data/synergy.db")
+    if not db_path.exists():
+        pytest.skip("data/synergy.db not present")
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        # Slimefoot has only ChangesZone|Card.Self — excluded by both
+        # self-only gate and broad-event gate.
+        rows = find_trigger_resonance(conn, ["Slimefoot, the Stowaway"])
+    finally:
+        conn.close()
+
+    assert len(rows) == 0
+
+
+# ---------------------------------------------------------------------------
+# Phase F7 — token_loop, graveyard boost, stat scaling, death sig fix
+# ---------------------------------------------------------------------------
+
+
+def test_sacrifice_synergies_token_loop_finds_pitiless_plunderer():
+    """Pitiless Plunderer makes tokens AND has a death trigger — it
+    should appear as a token_loop candidate for Korvold."""
+    db_path = Path("data/synergy.db")
+    if not db_path.exists():
+        pytest.skip("data/synergy.db not present")
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = find_sacrifice_synergies(conn, ["Korvold, Fae-Cursed King"])
+    finally:
+        conn.close()
+
+    token_loop_cards = {r["candidate"] for r in rows if r["direction"] == "token_loop"}
+    assert "Pitiless Plunderer" in token_loop_cards
+    assert "Impulsive Pilferer" in token_loop_cards
+
+
+def test_locust_god_no_sacrifice_synergies():
+    """Locust God's only dies trigger is Card.Self (return to hand) —
+    should NOT produce sacrifice synergies."""
+    db_path = Path("data/synergy.db")
+    if not db_path.exists():
+        pytest.skip("data/synergy.db not present")
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = find_sacrifice_synergies(conn, ["The Locust God"])
+    finally:
+        conn.close()
+
+    assert len(rows) == 0
+
+
+def test_stat_scaling_phenax_finds_high_toughness():
+    """Phenax scales_with CardToughness — high-toughness creatures and
+    Defenders should be returned."""
+    db_path = Path("data/synergy.db")
+    if not db_path.exists():
+        pytest.skip("data/synergy.db not present")
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = find_stat_scaling_synergies(conn, ["Phenax, God of Deception"])
+    finally:
+        conn.close()
+
+    candidates = {r["candidate"] for r in rows}
+    assert "Tree of Perdition" in candidates
+    assert "Wall of Frost" in candidates
+    assert len(rows) > 50  # should find many high-toughness creatures

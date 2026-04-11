@@ -82,6 +82,16 @@ def main() -> int:
             )
             print(f"  entries:  {len(report.entries)}")
             print(f"  agg NDCG: {report.aggregate_ndcg}")
+            # Hi-syn summary
+            total_hs = sum(e.hi_syn_total for e in report.entries)
+            total_hits = sum(e.hi_syn_hits for e in report.entries)
+            total_onpage = sum(e.on_page_hits for e in report.entries)
+            n = len(report.entries)
+            if total_hs:
+                print(f"  avg Hi-Syn:  {total_hits/n:.1f}/{total_hs/n:.0f} per cmdr "
+                      f"({total_hits}/{total_hs} total, {total_hits/total_hs*100:.1f}%)")
+                print(f"  avg OnPage:  {total_onpage/n:.1f}/30 per cmdr "
+                      f"({total_onpage/n/30*100:.1f}%)")
             return 0
 
         if not args.baseline.exists():
