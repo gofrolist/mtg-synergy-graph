@@ -1,25 +1,22 @@
 [project]
-name = "mtg-synergy-workspace"
+name = "mtg-synergy-graph"
 version = "0.1.0"
-description = "MTG EDH/Commander deck synergy analysis — workspace root"
+description = "Deterministic Forge-DSL graph engine for MTG EDH/Commander synergy"
 requires-python = ">=3.12,<3.14"
+dependencies = []
 
-[tool.uv]
-package = false
+[project.optional-dependencies]
+graph = ["numpy>=1.24"]
 
-[tool.uv.workspace]
-members = ["packages/*"]
+[build-system]
+requires = ["uv_build>=0.11.6,<0.12"]
+build-backend = "uv_build"
 
-[tool.uv.sources]
-mtg-synergy = { workspace = true }
-mtg-synergy-train = { workspace = true }
-mtg-synergy-graph = { workspace = true }
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
     "vulture>=2.16",
-    "mtg-synergy",
-    "mtg-synergy-train",
-    "mtg-synergy-graph",
 ]

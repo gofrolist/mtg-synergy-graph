@@ -1,10 +1,7 @@
 """Run the deterministic synergy engine for one commander.
 
 Usage:
-    uv run python packages/mtg-synergy-graph/scripts/recommend.py \
-        --db /tmp/synergy_full.db \
-        --commander "Korvold, Fae-Cursed King" \
-        --top 20
+    uv run python scripts/recommend.py --commander "Korvold, Fae-Cursed King"
 """
 
 from __future__ import annotations
@@ -18,7 +15,7 @@ from mtg_synergy_graph import SynergyEngine
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--db", required=True, type=Path)
+    parser.add_argument("--db", type=Path, default=Path("data/synergy.db"))
     parser.add_argument("--commander", required=True)
     parser.add_argument("--partner", default=None,
                         help="Optional second commander (partner pair)")

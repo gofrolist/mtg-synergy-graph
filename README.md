@@ -1,287 +1,85 @@
 # MTG Synergy Graph
 
-Analyze Magic: The Gathering EDH/Commander deck synergies using a LightGBM LambdaRank model trained on EDHREC data, powered by Forge game engine mechanics.
+Analyze Magic: The Gathering EDH/Commander deck synergies using a deterministic, rule-based Forge-DSL Graph Engine.
 
-The system extracts card abilities from MTG Forge's game engine, builds a 20M+ edge causal interaction graph, and trains a learning-to-rank model to recommend synergistic cards for any of 3,141+ commanders.
+The system parses card abilities from MTG Forge's game engine DSL, builds a port-matching graph, and scores synergies deterministically — no training, no EDHREC at inference, fully explainable, with day-1 support for new cards.
 
 ## Quick Start
 
 ```bash
-# 1. Download Scryfall bulk data (~150MB)
-python3 scripts/download_cards.py
+# 1. Build a synergy DB from Forge cardsfolder
+uv run python scripts/import_cardsfolder.py
 
-# 2. Import Forge ability data
-python3 scripts/import_forge.py --download --import
-
-# 3. Build causal interaction graph (~20M edges)
-python3 scripts/build_graph.py --rebuild
-
-# 4. Fetch EDHREC synergy data (training labels)
-python3 scripts/fetch_edhrec_all.py --max 500
-
-# 5. Train the model (~7 min)
-python3 scripts/train_fusion_model.py --rebuild-features
-
-# 6. Get recommendations
-uv run mtg-synergy --commander "Krenko, Mob Boss" --recommend
+# 2. Get recommendations
+uv run python scripts/recommend.py --commander "Korvold, Fae-Cursed King" --top 30 --explain
 ```
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.12+
 - [uv](https://docs.astral.sh/uv/) (package manager)
 - No external API keys required (100% local)
 
 ```bash
-# Install dependencies
 uv sync
 ```
 
 ## How It Works
 
 ```
-FORGE MODEL (--recommend): Zero oracle text, pure mechanical synergy
-
-  1. Color-identity filter -> all legal cards for this commander
-  2. LightGBM LambdaRank scores every candidate (98 features, 92 active):
-     - 29 profile fields per card from Forge abilities
-     - Causal graph features (edge counts, hub scores, 2-hop paths, PageRank)
-     - Mechanics cosine similarity (auto-derived concept space)
-     - Graph neighborhood overlap (Jaccard on causal graph neighbors)
-     - Forge deck tag overlap (has/hints/needs)
-     - 33-dim functional fingerprints (produces/requires/amplifies/targets)
-     - Auto-derived mechanics vectors (257 concepts + 80 subtypes)
-     - Counter/anthem/tribal distinction features
-     - Cost-effect alignment, trigger specificity, mech density
-  3. Post-scoring: anti-synergy penalties + mechanical synergy bonus
-  4. Top N results with clickable Scryfall links + mechanics-derived labels
-
-  NDCG@30 = 0.5707 (EDHREC_FREE, Phase 1.5b) | Works for 3,141+ commanders | Day-1 new card evaluation
+Forge card DSL -> importer.py -> synergy.db (cards + card_ports)
+                                         |
+           SynergyEngine(db).page(commander, limit=N)
+                                         |
+  score_all_candidates() buckets:
+    port_match, cost_synergy, catch_all, scaling, deck_hints,
+    chain_match, lord, amplifier, etb_self, graph_metrics,
+    strategic, resource_density, effect_resonance,
+    replacement_resonance, sacrifice_synergy, staple, replacement
+  -> penalties.py applies hard filters / multipliers
 ```
-
-## Deterministic Forge-DSL Graph Engine (experimental)
-
-A parallel, rule-based engine lives under `packages/mtg-synergy-graph/`. It
-replaces the LightGBM pipeline with a deterministic scorer that joins Forge
-DSL ports directly — no training, no EDHREC labels at inference, day-1
-support for new cards, and fully explainable per-bucket scores. Full design
-in `docs/SPEC.md` (v1.2.2).
-
-```bash
-# Build a synergy DB from Forge cardsfolder
-uv run python packages/mtg-synergy-graph/scripts/import_cardsfolder.py \
-    --db /tmp/synergy_full.db --cards-folder data/forge/res/cardsfolder
-
-# Recommend
-uv run python packages/mtg-synergy-graph/scripts/recommend.py \
-    --db /tmp/synergy_full.db --commander "Korvold, Fae-Cursed King" --top 30
-
-# Tests (227 tests, ~48s)
-uv run pytest packages/mtg-synergy-graph/tests/ -q
-```
-
-**Latest measurements (2026-04-08, post-audit):** aggregate NDCG@30 on the
-25-commander Golden Set = **0.161625**, compare_edhrec top-50 avg Hi-Syn
-**16.7%**, avg OnPage **40.5%**. Meren-class commanders compute in ~1.5s;
-test suite ~48s.
-
-Key 2026-04-08 changes:
-- **Anchor quality (§7.5)** — per-channel cmc cap propagation so Korvold's
-  sacrifice trigger caps both Creature and Artifact anchors at cmc=3. Plus a
-  cmc gradient (`max(0, cap − cmc)`) and a recursion bonus that boosts
-  Undying/Persist/Unearth/Embalm/Eternalize/Escape/Encore keyworded
-  creatures *and* effect-based self-returners (Bloodghast, Reassembling
-  Skeleton, Nether Traitor). Bloodghast's rank for Meren: 811 → 91.
-- **Performance pass** — `_row_to_dict` rewritten as
-  `dict(zip(row.keys(), tuple(row)))` after benchmarking showed it's 5×
-  faster than the sqlite3.Row dict-comp (3.11s → 0.61s on 10k × 31-col).
-  New bulk `_rows_to_dicts()` helper shared across matchers. `_score_strategic`
-  self-time dropped 89% (0.386s → 0.043s).
-- **Forge-DSL audit follow-up (14 commits)** — NDCG 0.160316 → 0.161625
-  (+0.0013), Hi-Syn 16.2% → 16.7% (+0.5pp), OnPage 40.1% → 40.5% (+0.4pp),
-  162 → 227 tests. Realistic lift came from two phases: **D1** sacrifice
-  outlet ↔ payoff matcher (`find_sacrifice_synergies` bucket — 3 directions
-  including the Korvold ↔ Blood Artist cluster missed by the generic
-  cost-feeds matcher) and **D2** mana restriction matcher (parses
-  `DB$ Mana RestrictValid$` so Talrand picks up Baral-class instants/sorceries
-  and The Ur-Dragon picks up Dragon's Hoard). Other phases (B1 trigger map,
-  B3 combo primitive, C1/C2 replacement anti-synergies, B2 ApiType inventory
-  snapshot test) shipped as neutral defensive infrastructure. D4 flicker
-  loop detector and D3 combat modifier rule were mechanically correct but
-  regressed tribal commanders on EDHREC's high-synergy metric — D4 kept as
-  unwired primitive, D3 reverted. See `docs/SPEC.md` and the commit history
-  (`git log --oneline d1f70ee..HEAD`) for the full trail including the
-  post-review cleanup passes.
-
-## Recent Improvements
-
-**Phase 1.5b (2026-04-07) — Static ability `Mode$` semantics**
-
-Extracts the ~6,000 cards (19% of corpus) with Forge S: line static abilities into a structured `static_mode` column on `forge_abilities`. Fixes a long-standing verb-column pollution bug where `Mode$` values like `Continuous`, `Panharmonicon`, `ReduceCost` were silently dumped into the `verb` column alongside actual verbs.
-
-Surfaces the new data through two pathways without adding any GBM feature columns:
-- `Static$<mode>` auto-derived deck tags (5 features pick them up via deck_has_overlap, deck_has_to_hints, etc.)
-- Synthetic `("static_mode", lowercased_mode, None, None)` event tuples in the mechanics_vectors produces vector (themes category, ~80 new dims)
-
-Per-commander wins on archetype targets: **+125% Hi-Syn, +34% OnPage** across 5 commanders spanning anthem, ETB-doubler, cost-reduction, and evasion archetypes. Adriana (Static$Continuous anthem) is the standout: 0/6 → 3/18.
-
-**Phase 1 (2026-04-06) — Forge DSL extraction expansions**
-
-- `ValidAttacker$` / `ValidBlocker$` combat trigger filters (~669 cards) now feed `trigger_specificity` (F95)
-- 4 new `cost_types` categories: `subcounter`, `exilegrave`, `taptype`, `return` (~900 cards combined) flow into `cost_feeds_cmdr` (F94)
-- Bisected and reverted a regressing 4:1 + popular-card hard-negative sampling experiment (recovered NDCG from 0.5145 → 0.5707)
-- Phase 1 Task 1 abandoned: original audit specified a `ReplaceWith$` DSL format that did not exist in the corpus; deferred to Phase 1.5 sub-project A with proper SVar resolution at the import layer.
 
 ## Commands
 
-### Data Pipeline
-
 ```bash
-python3 scripts/download_cards.py                    # Refresh Scryfall data (~150MB)
-python3 scripts/import_forge.py --download --import  # Update Forge ability data
-python3 scripts/build_graph.py --rebuild     # Build causal graph (~20M edges)
-```
+# Import
+uv run python scripts/import_cardsfolder.py
 
-### EDHREC Data
+# Recommend
+uv run python scripts/recommend.py --commander "Korvold, Fae-Cursed King" --top 30 --explain
 
-```bash
-python3 scripts/fetch_edhrec_all.py                    # Fetch next 500 new commanders
-python3 scripts/fetch_edhrec_all.py --max 2000         # Fetch up to 2000 new commanders
-python3 scripts/fetch_edhrec_all.py --refresh-top 200  # Re-fetch top 200 popular commanders
-python3 scripts/fetch_edhrec_all.py --stats            # Show coverage stats
-```
+# Compare vs EDHREC
+uv run python scripts/compare_edhrec.py --commanders tests/fixtures/golden_set.json
 
-### Model Training
+# Golden-set regression tracking
+uv run python scripts/golden_set_track.py --baseline tests/fixtures/golden_set_run.json
 
-```bash
-python3 scripts/train_fusion_model.py                     # Train (~3 min, cached features)
-python3 scripts/train_fusion_model.py --rebuild-features  # Rebuild features + train (~7 min)
-python3 scripts/train_fusion_model.py --quick             # Single-fold fast iteration (~2 min)
-python3 scripts/train_fusion_model.py --tune              # Hyperparameter search (~12 min)
-```
-
-### Recommendations
-
-```bash
-uv run mtg-synergy --commander "Krenko, Mob Boss" --recommend       # Top 30 recommendations
-uv run mtg-synergy --commander "Krenko, Mob Boss" --recommend --top 10
-uv run mtg-synergy --commander "Krenko, Mob Boss" --recommend --deck deck.txt  # With deck context
-uv run mtg-synergy --commander "Krenko, Mob Boss" --gems            # Hidden gems (no popularity bias)
-```
-
-### Evaluation
-
-```bash
-python3 scripts/compare_edhrec.py --commander "Krenko, Mob Boss"  # Single commander vs EDHREC
-python3 scripts/compare_edhrec.py --all --quiet                    # All commanders summary
-```
-
-### Tests
-
-```bash
-uv run pytest tests/ -v    # Run all 148 tests
-```
-
-## Architecture
-
-### Enrichment Pipeline
-
-```
-Scryfall API -> scripts/download_cards.py -> data/oracle_cards.json (36k cards)
-                                                  |
-                     scripts/import_forge.py -> forge_abilities + forge_name_map tables
-                                                  |
-                     scripts/build_graph.py --forge -> interaction_edges (20.6M causal edges)
-                                                  |
-                     scripts/fetch_edhrec_all.py -> edhrec_card_synergy (733k pairs, 2,724 cmdrs)
-                                                  |
-                     scripts/train_fusion_model.py -> data/fusion_model_forge.lgb
-                                                  |
-                               uv run mtg-synergy --commander "Name" --recommend
-```
-
-### New-Set Update Workflow
-
-```bash
-python3 scripts/download_cards.py                                          # 1. Refresh Scryfall
-python3 scripts/import_forge.py --download --import                        # 2. Update Forge data
-python3 scripts/build_graph.py --rebuild                           # 3. Rebuild causal graph
-python3 scripts/fetch_edhrec_all.py --max 2000 --refresh-top 200          # 4. Refresh EDHREC
-python3 scripts/train_fusion_model.py --rebuild-features     # 5. Retrain (~7 min, $0)
-```
-
-### DB Schema (data/tags.db)
-
-| Table | Rows | Purpose |
-|---|---|---|
-| cards | ~36k | Card metadata from Scryfall |
-| abilities | ~76k | Parsed oracle text abilities |
-| card_strategies | ~88k | Strategy assignments |
-| interaction_edges | ~21.7M | Causal edges: 30+ event types, synthetic, entity-presence, continuous pump, theme synergy |
-| edhrec_card_synergy | ~733k | EDHREC synergy scores (2,724 commanders, 87% coverage) |
-| forge_abilities | ~72k | Forge ability data + SubAbility chain expansions |
-| forge_deck_tags | ~14k | Forge deck-building AI: has/hints/needs tags |
-| forge_name_map | ~31k | Forge card name -> oracle_id mapping |
-
-### Recommendation Pipeline
-
-```
-1. Candidate selection: color-identity filter -> all legal cards
-2. Score all candidates with GBM (batch predict, ~0.5s for 13k cards)
-3. Post-scoring: anti-synergy penalties + mechanical synergy bonus
-4. Sort and output top N with Scryfall hyperlinks
-Total: ~3.3s CLI wall time (~490 MB RSS, warm cache)
+# Tests
+uv run pytest tests/ -q
 ```
 
 ## Project Structure
 
 ```
-.
-├── scripts/
-│   ├── synergy_graph.py       # CLI entry point (recommend, gems)
-│   ├── train_fusion_model.py  # LightGBM LambdaRank training
-│   ├── compare_edhrec.py      # Evaluate recommendations vs EDHREC
-│   ├── build_graph.py         # Causal interaction graph builder
-│   ├── strategy_detector.py   # Vestigial — see file docstring
-│   ├── download_cards.py      # Scryfall bulk data downloader
-│   ├── import_forge.py        # Forge ability data importer
-│   └── fetch_edhrec_all.py    # EDHREC synergy + avg deck fetcher
-│
-├── src/mtg_synergy/
-│   ├── cli.py                 # CLI dispatcher
-│   ├── config.py              # Paths, thresholds, DB settings
-│   ├── db.py                  # DB connection factory
-│   ├── recommend/
-│   │   ├── engine.py          # recommend_cards() pipeline
-│   │   ├── scoring.py         # Color filter, GBM scoring, mechanical bonus
-│   │   ├── forge_features.py  # 93-feature computation (ForgeFeatureContext)
-│   │   ├── mechanics_vectors.py  # Auto-derived shared concept space (337-dim)
-│   │   ├── hidden_gems.py     # Pure mechanical synergy (no popularity)
-│   │   ├── affinity.py        # Commander affinity scoring
-│   │   └── cmdr_patterns.py   # Commander mechanical flag detection
-│   ├── causal/
-│   │   ├── __init__.py        # DB storage, CausalContext, anti-synergy
-│   │   ├── graph_builder.py   # Build causal edges from parsed abilities
-│   │   ├── forge_graph_builder.py  # Build edges from Forge data
-│   │   ├── indexer.py         # Index cards by events produced/consumed
-│   │   └── verb_event_map.py  # Forge verb -> trigger event mapping
-│   ├── parse/
-│   │   ├── __init__.py        # parse_card() pipeline
-│   │   ├── forge_import.py    # Forge DSL import with SVar resolution
-│   │   └── ...                # AST types, parsers, resolvers
-│   └── analysis/              # Strategy detection + tribal type analysis
-│
-├── tests/                     # 152 tests
-└── data/                      # DB, models, caches (mostly gitignored)
+src/mtg_synergy_graph/
+  engine.py          # SynergyEngine, score_all_candidates()
+  importer.py        # Forge DSL parser, DB importer
+  penalties.py       # Hard filters and multipliers
+  scoring.py         # Bucket scorers orchestration
+  graph_metrics.py   # Causal graph: PageRank, hub scores, Jaccard
+  graph_cache.py     # Precomputed graph cache
+  validate.py        # EDHREC comparison utilities
+  schema.sql         # SQLite schema
+scripts/             # CLI tools (import, recommend, compare)
+tests/               # 322 tests
 ```
 
 ## Key Design Decisions
 
-- **100% Forge-native**: No oracle text parsing, no embeddings, no neural networks. All features derived from Forge game engine data.
-- **LambdaRank**: Learning-to-rank optimizes directly for recommendation ordering (NDCG), not classification.
-- **EDHREC as training signal only**: Model learns from EDHREC synergy scores but can evaluate any commander, including those without EDHREC data. Strategy labels fully eliminated from model.
-- **Day-1 new cards**: Set `EDHREC_FREE=1` for pure mechanical inference (~4% lower NDCG but works for cards with zero play data).
-- **Model versioning**: Sidecar `.meta.json` tracks NDCG, hyperparameters, feature importance, git commit, MD5 hash per training run.
+- **100% Forge-native**: All synergy signals derived from Forge game engine DSL — no oracle text, no embeddings, no neural networks.
+- **Deterministic**: No model training. Same inputs always produce same outputs.
+- **Day-1 new cards**: Works for any card with a Forge DSL definition, including unreleased sets.
+- **Fully explainable**: Every score breaks down into named buckets with per-bucket explanations.
 - **Cards keyed by `oracle_id`**: Scryfall UUID deduplicates across reprints.
 
 ## License

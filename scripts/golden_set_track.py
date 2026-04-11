@@ -10,11 +10,8 @@ Two modes:
   committed baseline. Exits non-zero on regression so CI can gate merges.
 
 Usage:
-    uv run python packages/mtg-synergy-graph/scripts/golden_set_track.py \\
-        --db /tmp/synergy_full.db \\
-        --edhrec-db data/tags.db \\
-        --commanders packages/mtg-synergy-graph/tests/fixtures/golden_set.json \\
-        --baseline   packages/mtg-synergy-graph/tests/fixtures/golden_set_run.json \\
+    uv run python scripts/golden_set_track.py \\
+        --baseline tests/fixtures/golden_set_run.json \\
         --bootstrap
 """
 
@@ -47,9 +44,9 @@ def _load_commanders(path: Path) -> list[object]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--db", required=True, type=Path)
-    parser.add_argument("--edhrec-db", type=Path, default=None,
-                        help="data/tags.db (for NDCG@30 — optional)")
+    parser.add_argument("--db", type=Path, default=Path("data/synergy.db"))
+    parser.add_argument("--edhrec-db", type=Path, default=Path("data/tags.db"),
+                        help="data/tags.db (for NDCG@30)")
     parser.add_argument("--commanders", type=Path,
                         help="JSON list of commanders (string or [a, b] pair)")
     parser.add_argument("--baseline", required=True, type=Path,

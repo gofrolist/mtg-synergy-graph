@@ -8,7 +8,6 @@ data/
 
 # Build artifacts
 *.egg-info/
-packages/mtg-synergy/src/mtg_synergy/_version.py
 main.py
 
 # Environment

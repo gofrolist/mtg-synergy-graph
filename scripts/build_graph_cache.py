@@ -6,9 +6,7 @@ auto-detects the cache when ``graph_metrics=True`` and falls back to live
 computation when it's missing.
 
 Usage:
-    uv run python packages/mtg-synergy-graph/scripts/build_graph_cache.py \\
-        --db /tmp/synergy_full.db \\
-        --neighbour-cap 200
+    uv run python scripts/build_graph_cache.py
 """
 
 from __future__ import annotations
@@ -23,7 +21,7 @@ from mtg_synergy_graph.graph_cache import build_graph_cache
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--db", required=True, type=Path)
+    parser.add_argument("--db", type=Path, default=Path("data/synergy.db"))
     parser.add_argument("--neighbour-cap", type=int, default=200,
                         help="Top-K neighbours to keep per card (None = all)")
     parser.add_argument("--unbounded", action="store_true",

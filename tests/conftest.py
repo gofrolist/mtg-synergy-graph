@@ -1,66 +1,40 @@
-import sqlite3
-import json
-import os
+"""Shared fixtures for the mtg_synergy_graph test suite."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
 import pytest
-import sys
 
-_project_root = os.path.dirname(os.path.dirname(__file__))
-sys.path.insert(0, _project_root)
-sys.path.insert(0, os.path.join(_project_root, "scripts"))
+from mtg_synergy_graph import parse_card_file
 
-@pytest.fixture
-def tmp_db(tmp_path):
-    """Create a temporary SQLite DB with the full schema for testing."""
-    from mtg_synergy_train import tag_db
-    db_path = str(tmp_path / "test_tags.db")
-    conn = sqlite3.connect(db_path)
-    conn.executescript(tag_db.SCHEMA)
-    # Add Forge tables used by tests (forge_abilities is read by many helpers).
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS forge_abilities (
-            card_name TEXT NOT NULL,
-            ability_index INTEGER NOT NULL,
-            ability_type TEXT NOT NULL,
-            verb TEXT,
-            trigger_mode TEXT,
-            trigger_filter TEXT,
-            trigger_origin TEXT,
-            trigger_destination TEXT,
-            trigger_phase TEXT,
-            trigger_zones TEXT,
-            target TEXT,
-            defined TEXT,
-            amount TEXT,
-            cost TEXT,
-            keyword TEXT,
-            token_script TEXT,
-            counter_type TEXT,
-            sub_ability TEXT,
-            unless_cost TEXT,
-            static_mode TEXT,
-            raw_line TEXT NOT NULL,
-            PRIMARY KEY (card_name, ability_index)
-        );
-        CREATE INDEX IF NOT EXISTS idx_forge_ab_name ON forge_abilities(card_name);
-        CREATE TABLE IF NOT EXISTS forge_name_map (
-            forge_name TEXT PRIMARY KEY,
-            oracle_id TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS interaction_edges (
-            source_id TEXT NOT NULL,
-            target_id TEXT NOT NULL,
-            edge_type TEXT NOT NULL,
-            ability_a INTEGER NOT NULL,
-            ability_b INTEGER NOT NULL,
-            strength REAL NOT NULL,
-            detail TEXT NOT NULL,
-            filter_precision TEXT,
-            PRIMARY KEY (source_id, target_id, edge_type, ability_a, ability_b)
-        );
-        CREATE INDEX IF NOT EXISTS idx_edges_source ON interaction_edges(source_id);
-        CREATE INDEX IF NOT EXISTS idx_edges_target ON interaction_edges(target_id);
-    """)
-    conn.commit()
-    yield db_path
-    conn.close()
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
+
+def _load(name: str) -> dict:
+    return parse_card_file(FIXTURES_DIR / name)
+
+
+@pytest.fixture(scope="session")
+def cathars_crusade() -> dict:
+    return _load("cathars_crusade.txt")
+
+
+@pytest.fixture(scope="session")
+def korvold() -> dict:
+    return _load("korvold_fae_cursed_king.txt")
+
+
+@pytest.fixture(scope="session")
+def panharmonicon() -> dict:
+    return _load("panharmonicon.txt")
+
+
+@pytest.fixture(scope="session")
+def rhystic_study() -> dict:
+    return _load("rhystic_study.txt")
+
+
+@pytest.fixture(scope="session")
+def scute_swarm() -> dict:
+    return _load("scute_swarm.txt")

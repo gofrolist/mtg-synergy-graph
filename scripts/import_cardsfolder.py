@@ -1,10 +1,7 @@
 """Import a Forge cardsfolder into a synergy.db.
 
 Usage:
-    uv run python packages/mtg-synergy-graph/scripts/import_cardsfolder.py \
-        --folder      data/forge/forge-gui/res/cardsfolder \
-        --db          /tmp/synergy.db \
-        --scryfall-db data/tags.db
+    uv run python scripts/import_cardsfolder.py
 """
 
 from __future__ import annotations
@@ -20,15 +17,15 @@ from mtg_synergy_graph.importer import import_cards_folder
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--folder", required=True, type=Path,
+    parser.add_argument("--folder", type=Path,
+                        default=Path("data/forge/forge-gui/res/cardsfolder"),
                         help="Path to a Forge cardsfolder/ tree")
-    parser.add_argument("--db", required=True, type=Path,
+    parser.add_argument("--db", type=Path, default=Path("data/synergy.db"),
                         help="Output synergy.db path")
-    parser.add_argument("--scryfall-db", required=True, type=Path,
+    parser.add_argument("--scryfall-db", type=Path,
+                        default=Path("data/tags.db"),
                         help="Scryfall-shaped sqlite DB (e.g. data/tags.db) "
-                             "used to populate cards.oracle_id. Required: "
-                             "hard-fail if missing to prevent silent "
-                             "regression into name-only matching.")
+                             "used to populate cards.oracle_id.")
     parser.add_argument("--limit", type=int, default=None,
                         help="Stop after N .txt files (smoke test)")
     args = parser.parse_args()
