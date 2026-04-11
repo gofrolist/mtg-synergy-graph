@@ -228,19 +228,38 @@ def load_ports_for(conn: sqlite3.Connection, card_name: str) -> list[PortRow]:
     return _rows_to_dicts(cur.fetchall())
 
 
+_ports_cache: dict[tuple[int, tuple[str, ...]], list[PortRow]] = {}
+
+
 def load_ports_for_set(
     conn: sqlite3.Connection,
     card_names: Sequence[str],
 ) -> list[PortRow]:
-    """Union of port rows across multiple cards (partner-pair friendly)."""
+    """Union of port rows across multiple cards (partner-pair friendly).
+
+    Results are cached per (connection-id, names) so the 19+ graph_engine
+    functions that call this for the same commander set share one SQL fetch.
+    Call :func:`clear_ports_cache` between commander runs if needed.
+    """
     if not card_names:
         return []
+    key = (id(conn), tuple(card_names))
+    cached = _ports_cache.get(key)
+    if cached is not None:
+        return cached
     placeholders = ",".join("?" * len(card_names))
     cur = conn.execute(
         f"SELECT * FROM card_ports WHERE card_name IN ({placeholders})",
         tuple(card_names),
     )
-    return _rows_to_dicts(cur.fetchall())
+    result = _rows_to_dicts(cur.fetchall())
+    _ports_cache[key] = result
+    return result
+
+
+def clear_ports_cache() -> None:
+    """Clear the commander-ports cache between runs."""
+    _ports_cache.clear()
 
 
 def _ports_by_type(ports: Iterable[PortRow], port_type: str) -> list[PortRow]:
@@ -461,47 +480,91 @@ def find_trigger_feeders(
 
     cmdr_set = set(commander_set)
 
+    # --- Pre-filter triggers to the usable subset ---
+    usable_triggers: list[tuple[PortRow, frozenset[str], frozenset[str]]] = []
+    needed_effect_classes: set[str] = set()
+    needed_cost_classes: set[str] = set()
+
+    # Reverse COST_FEEDS_TRIGGER: trigger_event → {cost_class, ...}
+    _trigger_fed_by_cost: dict[str, set[str]] = {}
+    for cost_ev, trig_evs in COST_FEEDS_TRIGGER.items():
+        for te in trig_evs:
+            _trigger_fed_by_cost.setdefault(te, set()).add(cost_ev)
+
+    for trig in triggers:
+        t_event = (trig.get("event_class") or "").strip()
+        if t_event in CATCH_ALL_TRIGGERS:
+            continue
+        if _trigger_only_matches_self(trig.get("valid_filter")):
+            continue
+        trig_vf = trig.get("valid_filter") or ""
+        if "OppCtrl" in trig_vf or "OppOwn" in trig_vf:
+            continue
+
+        required, forbidden = _trigger_filter_constraint(trig.get("valid_filter"))
+        usable_triggers.append((trig, required, forbidden))
+
+        # Determine which effect event_classes this trigger can match.
+        targets = EVENT_MATCH_MAP.get(t_event)
+        if targets is None:
+            # Identity match: trigger event == effect event
+            needed_effect_classes.add(t_event)
+        elif "*" not in targets:
+            needed_effect_classes.update(targets.keys())
+        # else: wildcard match — can't narrow, but these are CATCH_ALL
+        # triggers which we already skipped above.
+
+        # Cost classes that feed this trigger
+        cost_classes = _trigger_fed_by_cost.get(t_event)
+        if cost_classes:
+            needed_cost_classes.update(cost_classes)
+
+    if not usable_triggers:
+        return []
+
+    # --- Fetch only relevant ports via SQL IN-clause ---
+    all_needed = needed_effect_classes | needed_cost_classes
+    if not all_needed:
+        return []
+
+    placeholders = ",".join("?" * len(all_needed))
     cur = conn.execute(
-        "SELECT card_name, port_type, event_class, branch_kind, "
-        "is_conditional, raw_line "
-        "FROM card_ports WHERE port_type IN ('effect','cost')"
+        f"SELECT card_name, port_type, event_class, branch_kind, "
+        f"is_conditional, raw_line "
+        f"FROM card_ports WHERE port_type IN ('effect','cost') "
+        f"AND event_class IN ({placeholders})",
+        tuple(all_needed),
     )
     candidate_ports = _rows_to_dicts(cur.fetchall())
 
+    # --- Build index: event_class → [ports] for O(1) lookup ---
+    from collections import defaultdict
+    effects_by_event: dict[str, list[PortRow]] = defaultdict(list)
+    costs_by_event: dict[str, list[PortRow]] = defaultdict(list)
+    for cand in candidate_ports:
+        if cand["card_name"] in cmdr_set:
+            continue
+        ec = (cand.get("event_class") or "").strip()
+        if cand.get("port_type") == "effect":
+            effects_by_event[ec].append(cand)
+        else:
+            costs_by_event[ec].append(cand)
+
+    # --- Match triggers against indexed candidate ports ---
     results: list[dict[str, Any]] = []
-    for trig in triggers:
+    for trig, required, forbidden in usable_triggers:
         t_event = (trig.get("event_class") or "").strip()
-        # Catch-all triggers (SpellCast/Attacks/LandPlayed/...) match the
-        # candidate card itself, not its effect ports — handled separately
-        # by the per-card "is-a-spell" matcher (Phase 2.4). Skip here so
-        # they do not over-credit unrelated effects.
-        if t_event in CATCH_ALL_TRIGGERS:
-            continue
-        # Self-only triggers (commander's own ETB / death / cast triggers
-        # like Urza's ``ChangesZone | Card.Self``) cannot be fed by other
-        # cards — see the regression note on _trigger_only_matches_self.
-        if _trigger_only_matches_self(trig.get("valid_filter")):
-            continue
 
-        # When the trigger has a card-type or subtype filter (Arcades's
-        # ``Creature.withDefender+YouCtrl``, Aesi's ``Land.YouCtrl``,
-        # Aunt May's ``Creature.Other+YouCtrl``, Be'lakor's
-        # ``Demon.YouCtrl+Other``), the candidate's effect must produce
-        # something that satisfies the filter. Without this check, every
-        # ``effect ChangeZone`` cross-links to every ETB trigger — DFCs
-        # like Grist Voracious Larva (with 30 ports) would flood every
-        # creature commander's top page.
-        #
-        # The candidate-as-card case (Wall of Omens *being* a defender
-        # creature for Arcades, Reassembling Skeleton dying for Korvold)
-        # is handled separately by :func:`find_etb_self_matches`.
-        required, forbidden = _trigger_filter_constraint(trig.get("valid_filter"))
+        # Effect matching: look up which effect event_classes can feed this trigger
+        targets = EVENT_MATCH_MAP.get(t_event)
+        if targets is None:
+            # Identity match
+            relevant_effect_classes = [t_event]
+        else:
+            relevant_effect_classes = list(targets.keys())
 
-        for cand in candidate_ports:
-            if cand["card_name"] in cmdr_set:
-                continue
-            ptype = cand.get("port_type")
-            if ptype == "effect":
+        for eff_class in relevant_effect_classes:
+            for cand in effects_by_event.get(eff_class, ()):
                 if not match_event(trig, cand):
                     continue
                 if required or forbidden:
@@ -512,25 +575,34 @@ def find_trigger_feeders(
                         continue
                     if forbidden & produced:
                         continue
-                match_kind = "effect"
-            else:  # cost
-                cost_class = (cand.get("event_class") or "").strip()
-                triggers_fed = COST_FEEDS_TRIGGER.get(cost_class, frozenset())
-                if t_event not in triggers_fed:
-                    continue
-                match_kind = "cost"
+                results.append(
+                    {
+                        "candidate":      cand["card_name"],
+                        "trigger_card":   trig["card_name"],
+                        "trigger_event":  t_event,
+                        "match_kind":     "effect",
+                        "effect_event":   cand.get("event_class"),
+                        "branch_kind":    cand.get("branch_kind") or "root",
+                        "is_conditional": bool(cand.get("is_conditional")),
+                    }
+                )
 
-            results.append(
-                {
-                    "candidate":      cand["card_name"],
-                    "trigger_card":   trig["card_name"],
-                    "trigger_event":  t_event,
-                    "match_kind":     match_kind,
-                    "effect_event":   cand.get("event_class"),
-                    "branch_kind":    cand.get("branch_kind") or "root",
-                    "is_conditional": bool(cand.get("is_conditional")),
-                }
-            )
+        # Cost matching: look up cost classes that feed this trigger
+        feed_cost_classes = _trigger_fed_by_cost.get(t_event)
+        if feed_cost_classes:
+            for cost_class in feed_cost_classes:
+                for cand in costs_by_event.get(cost_class, ()):
+                    results.append(
+                        {
+                            "candidate":      cand["card_name"],
+                            "trigger_card":   trig["card_name"],
+                            "trigger_event":  t_event,
+                            "match_kind":     "cost",
+                            "effect_event":   cand.get("event_class"),
+                            "branch_kind":    cand.get("branch_kind") or "root",
+                            "is_conditional": bool(cand.get("is_conditional")),
+                        }
+                    )
 
     return results
 
@@ -1023,20 +1095,21 @@ def find_etb_self_matches(
         return []
 
     cmdr_set = set(commander_set)
-    cur = conn.execute(
-        "SELECT name, card_types, supertypes, subtypes, keywords, color_identity "
-        "FROM cards"
-    )
-    cards = _rows_to_dicts(cur.fetchall())
 
-    results: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str]] = set()
+    # Pre-compute which triggers use which primary type(s) so we can
+    # use SQL WHERE to narrow the candidate set instead of scanning 27K+.
+    _PRIMARY_TYPES = frozenset({
+        "Creature", "Artifact", "Enchantment", "Land", "Instant",
+        "Sorcery", "Planeswalker",
+    })
+
+    # Parse each trigger's filter into usable alternatives + SQL hint
+    parsed_triggers: list[tuple[PortRow, list[str], bool, set[str]]] = []
+    all_type_hints: set[str] = set()
+    any_needs_full_scan = False
+
     for trig in self_event_triggers:
         valid_filter = trig.get("valid_filter") or ""
-        # Use only the alternatives that aren't ``Card.Self`` — the trigger
-        # source itself is the commander; other-card alternatives are the
-        # real filter (``Card.Self,Creature.Other+YouCtrl`` → match
-        # Creature.Other+YouCtrl).
         usable_alts = [
             alt.strip()
             for alt in valid_filter.split(",")
@@ -1044,14 +1117,55 @@ def find_etb_self_matches(
         ]
         if not usable_alts:
             continue
-        # Phase F7 breadth flag: when every usable alternative resolves
-        # to just a broad primary card type (Creature, Permanent, Card)
-        # without a narrowing subtype, the trigger matches thousands of
-        # cards. We tag the result so the scoring layer can dampen the
-        # weight rather than skipping entirely — Purphoros-class "any
-        # creature ETB" commanders need the signal but at a lower weight
-        # than Arcades-class "specific creature ETB" commanders.
         is_broad = _all_alts_are_broad(usable_alts)
+
+        # Extract primary type hints for SQL pre-filtering.
+        # E.g. "Creature.withDefender+YouCtrl" → {"Creature"}
+        # "Permanent" → {"Creature", "Artifact", "Enchantment", ...} → full scan
+        type_hints: set[str] = set()
+        for alt in usable_alts:
+            base = alt.split(".")[0].split("+")[0].strip()
+            if base in _PRIMARY_TYPES:
+                type_hints.add(base)
+            elif base in ("Permanent", "Card", ""):
+                # Too broad — need full scan for this trigger
+                any_needs_full_scan = True
+                break
+            else:
+                # Subtype (Zombie, Vampire, etc.) — check subtypes column
+                # Can't narrow by card_types; need full scan
+                any_needs_full_scan = True
+                break
+        else:
+            if type_hints:
+                all_type_hints.update(type_hints)
+            else:
+                any_needs_full_scan = True
+
+        parsed_triggers.append((trig, usable_alts, is_broad, type_hints))
+
+    if not parsed_triggers:
+        return []
+
+    # Fetch cards — with SQL pre-filter when possible
+    if any_needs_full_scan or not all_type_hints:
+        cur = conn.execute(
+            "SELECT name, card_types, supertypes, subtypes, keywords, color_identity "
+            "FROM cards"
+        )
+    else:
+        # Build a WHERE clause narrowing to relevant card types
+        where_parts = [f"card_types LIKE '%{t}%'" for t in all_type_hints]
+        cur = conn.execute(
+            f"SELECT name, card_types, supertypes, subtypes, keywords, color_identity "
+            f"FROM cards WHERE {' OR '.join(where_parts)}"
+        )
+    cards = _rows_to_dicts(cur.fetchall())
+
+    results: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for trig, usable_alts, is_broad, _type_hints in parsed_triggers:
+        valid_filter = trig.get("valid_filter") or ""
         for card in cards:
             if card["name"] in cmdr_set:
                 continue
@@ -1981,6 +2095,15 @@ def _commander_death_signature(
             # sacrifice-payoff. Skip them.
             if _trigger_only_matches_self(p.get("valid_filter")):
                 continue
+            # Opponent-scoped triggers (OppCtrl / Opponent) care about
+            # opponents' creatures dying, not yours. Tergrid triggers
+            # on ``Sacrificed|Permanent.OppCtrl`` — she wants opponent-
+            # forcing cards (Phase F10), not own-side sacrifice outlets.
+            # Exclude from death signature so sacrifice_synergy doesn't
+            # flood her results with irrelevant sac outlets.
+            vf = p.get("valid_filter") or ""
+            if "OppCtrl" in vf or "Opponent" in vf:
+                continue
             if ev in ("Sacrificed", "LifeLost"):
                 has_death = True
             elif ev == "ChangesZone":
@@ -2174,7 +2297,7 @@ def _commander_is_p1p1_payoff(cmdr_ports: list[PortRow]) -> bool:
     """Return True when the commander mechanically cares about *+1/+1*
     counters specifically (not charge / verse / spore / timer / etc.).
 
-    Two accepted signatures, either one sufficient:
+    Three accepted signatures, any one sufficient:
 
     1. ``scales_with CardCounters.P1P1`` — the commander has a SVar
        that explicitly reads the ``P1P1`` counter pool. Bess, Soul
@@ -2186,6 +2309,12 @@ def _commander_is_p1p1_payoff(cmdr_ports: list[PortRow]) -> bool:
        paired with a P1P1-producing effect on the same card it
        resolves to "this card counts its own P1P1 counters to do
        something". Kyler's ChangesZone chain hits this.
+
+    3. A trigger whose ``valid_filter`` contains ``counters_GE1_P1P1``
+       — the commander requires a +1/+1 counter as a prerequisite for
+       its trigger to fire. Marchesa, the Black Rose (creatures with
+       P1P1 counters dying get reanimated) needs P1P1 counter sources
+       as enablers.
 
     Deliberately *rejected*:
 
@@ -2200,6 +2329,7 @@ def _commander_is_p1p1_payoff(cmdr_ports: list[PortRow]) -> bool:
     has_p1p1_effect = False
     scales_p1p1 = False
     scales_all = False
+    has_p1p1_prerequisite = False
     for p in cmdr_ports:
         ptype = p.get("port_type")
         ev = (p.get("event_class") or "").strip()
@@ -2211,7 +2341,12 @@ def _commander_is_p1p1_payoff(cmdr_ports: list[PortRow]) -> bool:
                 scales_p1p1 = True
             elif ev == "CardCounters.ALL":
                 scales_all = True
-    return scales_p1p1 or (scales_all and has_p1p1_effect)
+        elif ptype == "trigger":
+            # Signature 3: trigger requires P1P1 counters as prerequisite.
+            vf = (p.get("valid_filter") or "")
+            if "counters_GE1_P1P1" in vf:
+                has_p1p1_prerequisite = True
+    return scales_p1p1 or (scales_all and has_p1p1_effect) or has_p1p1_prerequisite
 
 
 #: Candidate ports whose ``valid_filter`` mentions ``OppCtrl`` or
@@ -2297,7 +2432,195 @@ def find_counter_producer_payoff(
 
 
 # ---------------------------------------------------------------------------
-# §7.x — graveyard-value commander matcher (Phase F5)
+# §7.x — counter-ecosystem reverse matcher (Phase F11)
+# ---------------------------------------------------------------------------
+#
+# The existing find_counter_producer_payoff finds P1P1 producers for
+# counter-payoff commanders. This reverse matcher finds counter-PAYOFF
+# cards for counter-PRODUCER commanders — Vorel (MultiplyCounter),
+# Yawgmoth (PutCounter M1M1 + Proliferate), Atraxa (Proliferate).
+#
+# A commander is a "counter producer" when it has effects that create or
+# multiply counters, or proliferates. The matcher finds candidates that
+# care about counters: triggers on CounterAdded/CounterAddedOnce,
+# scales_with CardCounters.*, or have MultiplyCounter/Proliferate effects
+# (clustering signal — two proliferate cards amplify each other).
+
+
+def _commander_is_counter_producer(cmdr_ports: list[PortRow]) -> str | None:
+    """Return the counter type the commander produces, or None.
+
+    Accepted signatures:
+    1. ``effect PutCounter/PutCounterAll`` with a specific counter_type
+       (P1P1, M1M1, CHARGE, etc.) — the commander places counters.
+    2. ``effect Proliferate`` — the commander proliferates (type-agnostic).
+    3. ``effect MultiplyCounter`` — the commander doubles/multiplies counters.
+
+    Returns the dominant counter_type (e.g. "P1P1", "M1M1") or "ANY" for
+    proliferate/multiply. Returns None if no counter-producer signature.
+
+    Rejects commanders that *only* have self-targeting PutCounter (enters
+    with N counters) without also having a broader counter effect — the
+    ``valid_filter='Self'`` gate catches this.
+    """
+    counter_types: dict[str, int] = {}
+    has_proliferate = False
+    has_multiply = False
+    has_non_self_counter = False
+
+    # Known broad card-type tokens — when a PutCounter effect targets one
+    # of these (or an empty filter), it's a general counter-producer.
+    # Subtypes like "Merfolk", "Zombie", "Goblin" indicate tribal focus
+    # where counter placement is secondary — skip them.
+    _BROAD_COUNTER_TARGETS = frozenset({
+        "", "Self", "Creature", "Permanent", "Card",
+    })
+
+    for p in cmdr_ports:
+        if p.get("port_type") != "effect":
+            continue
+        ev = (p.get("event_class") or "").strip()
+        if ev == "Proliferate":
+            has_proliferate = True
+        elif ev == "MultiplyCounter":
+            has_multiply = True
+        elif ev in ("PutCounter", "PutCounterAll"):
+            ct = (p.get("counter_type") or "").strip()
+            vf = (p.get("valid_filter") or "").strip()
+            bk = (p.get("branch_kind") or "root").strip()
+            if ct:
+                counter_types[ct] = counter_types.get(ct, 0) + 1
+                # Only count when the PutCounter is a primary ability (root
+                # or subability), not when it's an execute chain of another
+                # trigger (e.g. Heliod's LifeGained → PutCounter is a
+                # lifegain payoff, not a counter strategy).
+                if bk == "execute":
+                    continue
+                # Extract the base type token before any qualifier
+                # (``Creature.YouCtrl`` → ``Creature``, ``Merfolk.YouCtrl`` → ``Merfolk``).
+                base_type = vf.split(".")[0].split("+")[0].strip() if vf else ""
+                if base_type in _BROAD_COUNTER_TARGETS:
+                    if base_type != "Self":
+                        has_non_self_counter = True
+
+    if has_proliferate or has_multiply:
+        return "ANY"
+    if has_non_self_counter and counter_types:
+        # Return the most common counter type
+        return max(counter_types, key=counter_types.get)  # type: ignore[arg-type]
+    return None
+
+
+def find_counter_ecosystem_payoffs(
+    conn: sqlite3.Connection,
+    commander_set: Sequence[str],
+) -> list[dict[str, Any]]:
+    """Return cards that benefit from the commander's counter production
+    (Phase F11 — reverse of Phase F1).
+
+    Three tiers of candidates:
+
+    1. **counter_trigger** — cards with ``trigger CounterAddedOnce`` or
+       ``CounterAdded`` (Nest of Scarabs, Fathom Mage, Armorcraft Judge).
+       Highest precision: these literally trigger when counters are placed.
+
+    2. **counter_scales** — cards with ``scales_with CardCounters.*``
+       (Gyre Sage, Herald of Secret Streams, Simic Ascendancy). These
+       read counter counts as a resource.
+
+    3. **counter_cluster** — other cards with ``effect Proliferate`` or
+       ``MultiplyCounter`` (Evolution Sage, Deepglow Skate). Clustering
+       signal: two proliferate cards amplify each other's work.
+
+    Gated on :func:`_commander_is_counter_producer`. When the commander
+    produces a specific counter type (P1P1), tier 1 and 2 are filtered
+    to matching or compatible types. When "ANY" (proliferate), all
+    counter types are accepted.
+    """
+    cmdr_ports = load_ports_for_set(conn, commander_set)
+    counter_type = _commander_is_counter_producer(cmdr_ports)
+    if counter_type is None:
+        return []
+
+    # Skip if already handled by the forward matcher (P1P1 payoff commanders)
+    # — don't double-count. The forward matcher handles P1P1 payoff commanders
+    # that ALSO produce P1P1 (Kyler). The reverse matcher handles commanders
+    # that produce counters but aren't themselves counter-payoff.
+    if _commander_is_p1p1_payoff(cmdr_ports) and counter_type == "P1P1":
+        return []
+
+    cmdr_set = set(commander_set)
+    seen: set[str] = set()
+    results: list[dict[str, Any]] = []
+
+    def _emit(name: str, direction: str, bk: str | None,
+              is_cond: bool) -> None:
+        if name in cmdr_set or name in seen:
+            return
+        seen.add(name)
+        results.append({
+            "candidate": name,
+            "direction": direction,
+            "branch_kind": bk or "root",
+            "is_conditional": is_cond,
+        })
+
+    # Tier 1: Cards that trigger on counter placement.
+    cur = conn.execute(
+        "SELECT DISTINCT card_name, branch_kind, is_conditional, counter_type "
+        "FROM card_ports "
+        "WHERE port_type = 'trigger' "
+        "AND event_class IN ('CounterAddedOnce', 'CounterAdded', 'CounterAddedAll')"
+    )
+    for r in cur.fetchall():
+        # For specific counter types, filter compatible triggers.
+        # P1P1 counters trigger CounterAddedOnce cards that check P1P1.
+        # If counter_type is ANY (proliferate), accept all.
+        if counter_type != "ANY":
+            ct = (r["counter_type"] or "").strip()
+            if ct and ct != counter_type and ct != "ANY":
+                continue
+        _emit(r["card_name"], "counter_trigger",
+              r["branch_kind"], bool(r["is_conditional"]))
+
+    # Tier 2: Cards that scale with counters.
+    if counter_type == "ANY":
+        # Proliferate — accept all CardCounters.* scales_with
+        cur = conn.execute(
+            "SELECT DISTINCT card_name, branch_kind, is_conditional "
+            "FROM card_ports "
+            "WHERE port_type = 'scales_with' "
+            "AND event_class LIKE 'CardCounters.%'"
+        )
+    else:
+        # Specific type — match that type or ALL
+        cur = conn.execute(
+            "SELECT DISTINCT card_name, branch_kind, is_conditional "
+            "FROM card_ports "
+            "WHERE port_type = 'scales_with' "
+            "AND (event_class = ? OR event_class = 'CardCounters.ALL')",
+            (f"CardCounters.{counter_type}",),
+        )
+    for r in cur.fetchall():
+        _emit(r["card_name"], "counter_scales",
+              r["branch_kind"], bool(r["is_conditional"]))
+
+    # Tier 3: Proliferate / MultiplyCounter clustering.
+    cur = conn.execute(
+        "SELECT DISTINCT card_name, branch_kind, is_conditional "
+        "FROM card_ports "
+        "WHERE port_type = 'effect' "
+        "AND event_class IN ('Proliferate', 'MultiplyCounter')"
+    )
+    for r in cur.fetchall():
+        _emit(r["card_name"], "counter_cluster",
+              r["branch_kind"], bool(r["is_conditional"]))
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# §7.x �� graveyard-value commander matcher (Phase F5)
 # ---------------------------------------------------------------------------
 #
 # The F4 golden-set diagnostic map surfaced graveyard-reanimator as the
@@ -2351,6 +2674,11 @@ def _commander_is_graveyard_value(cmdr_ports: list[PortRow]) -> bool:
        mode is stored as a discard-costed ``Effect`` port rather than a
        top-level Continuous static.
 
+    5. Has a ``cost exile_from_grave`` — the commander exiles cards from
+       the graveyard as a resource (Araumi's Encore, Delve commanders,
+       Sevinne's Reclamation-style). Commanders whose cost *consumes*
+       graveyard cards care deeply about filling the graveyard.
+
     Deliberately *rejected*:
 
     * Commanders that merely *put things in* the graveyard without
@@ -2362,6 +2690,11 @@ def _commander_is_graveyard_value(cmdr_ports: list[PortRow]) -> bool:
     for p in cmdr_ports:
         ptype = p.get("port_type")
         ev = (p.get("event_class") or "").strip()
+
+        # Signature 5: exile_from_grave cost — the commander consumes
+        # graveyard cards as a resource (Araumi Encore, Delve).
+        if ptype == "cost" and ev == "exile_from_grave":
+            return True
 
         # Signature 1: Graveyard → Battlefield reanimation. The
         # valid_filter must mention Creature/Permanent/Card (or be
@@ -2789,32 +3122,48 @@ def find_etb_payoff_for_token_commander(
 
     cmdr_set = set(commander_set)
 
-    # Find cards with creature-ETB trigger + payoff effect
+    # Step 1: find cards with creature-ETB triggers
     cur = conn.execute(
-        "SELECT DISTINCT tp.card_name, ep.event_class as payoff_event, "
-        "tp.branch_kind, tp.is_conditional "
-        "FROM card_ports tp "
-        "JOIN card_ports ep ON tp.card_name = ep.card_name "
-        "WHERE tp.port_type = 'trigger' AND tp.event_class = 'ChangesZone' "
-        "AND tp.zone_destination = 'Battlefield' "
-        "AND (tp.valid_filter LIKE '%Creature%' OR tp.valid_filter LIKE '%Permanent%') "
-        "AND ep.port_type = 'effect' AND ep.branch_kind IN ('execute', 'subability') "
-        "AND ep.event_class IN ('DealDamage', 'LoseLife', 'GainLife', 'Draw', "
-        "    'PutCounter', 'Token', 'Mill')"
+        "SELECT DISTINCT card_name, branch_kind, is_conditional "
+        "FROM card_ports "
+        "WHERE port_type = 'trigger' AND event_class = 'ChangesZone' "
+        "AND zone_destination = 'Battlefield' "
+        "AND (valid_filter LIKE '%Creature%' OR valid_filter LIKE '%Permanent%')"
+    )
+    etb_trigger_cards: dict[str, tuple[str, bool]] = {}
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name not in cmdr_set:
+            etb_trigger_cards[name] = (r["branch_kind"] or "root", bool(r["is_conditional"]))
+
+    if not etb_trigger_cards:
+        return []
+
+    # Step 2: find which of those cards also have payoff effects
+    placeholders = ",".join("?" * len(etb_trigger_cards))
+    cur = conn.execute(
+        f"SELECT DISTINCT card_name, event_class "
+        f"FROM card_ports "
+        f"WHERE card_name IN ({placeholders}) "
+        f"AND port_type = 'effect' AND branch_kind IN ('execute', 'subability') "
+        f"AND event_class IN ('DealDamage', 'LoseLife', 'GainLife', 'Draw', "
+        f"    'PutCounter', 'Token', 'Mill')",
+        tuple(etb_trigger_cards.keys()),
     )
 
     seen: set[str] = set()
     results: list[dict[str, Any]] = []
     for r in cur.fetchall():
         name = r["card_name"]
-        if name in cmdr_set or name in seen:
+        if name in seen:
             continue
         seen.add(name)
+        bk, cond = etb_trigger_cards[name]
         results.append({
             "candidate":      name,
-            "payoff_event":   r["payoff_event"],
-            "branch_kind":    r["branch_kind"] or "root",
-            "is_conditional": bool(r["is_conditional"]),
+            "payoff_event":   r["event_class"],
+            "branch_kind":    bk,
+            "is_conditional": cond,
         })
 
     return results
@@ -2903,6 +3252,114 @@ def find_opponent_forcing_effects(
             "forcing_event":  r["event_class"],
             "branch_kind":    r["branch_kind"] or "root",
             "is_conditional": bool(r["is_conditional"]),
+        })
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# §7.x — untap synergy for tap-activated commanders (Phase F12)
+# ---------------------------------------------------------------------------
+
+
+def _commander_has_tap_activation(cmdr_ports: list[PortRow]) -> bool:
+    """Return True when the commander has a tap or tap_type cost that
+    activates a meaningful ability (not just an attack trigger).
+
+    Gated to commanders whose tap ability is a core mechanic, not just
+    an incidental tap.
+    """
+    for p in cmdr_ports:
+        if p.get("port_type") != "cost":
+            continue
+        ev = (p.get("event_class") or "").strip()
+        if ev in ("tap", "tap_type"):
+            return True
+    return False
+
+
+def find_untap_synergies(
+    conn: sqlite3.Connection,
+    commander_set: Sequence[str],
+) -> list[dict[str, Any]]:
+    """Return cards with Untap/UntapAll effects for tap-activated commanders
+    (Phase F12).
+
+    Gated on :func:`_commander_has_tap_activation`. Finds cards whose
+    effects untap permanents — Seedborn Muse, Kiora's Follower,
+    Aphetto Alchemist, Thousand-Year Elixir, etc.
+
+    Filters out self-only untap (combat tricks like "untap target creature"
+    where the card untaps itself after attacking) by requiring the
+    valid_filter to be empty, mention "Creature"/"Permanent"/"Artifact",
+    or be a broad untap-all.
+    """
+    cmdr_ports = load_ports_for_set(conn, commander_set)
+    if not _commander_has_tap_activation(cmdr_ports):
+        return []
+
+    cmdr_set = set(commander_set)
+    seen: set[str] = set()
+    results: list[dict[str, Any]] = []
+
+    # Single-target Untap effects
+    cur = conn.execute(
+        "SELECT DISTINCT card_name, valid_filter, branch_kind, is_conditional "
+        "FROM card_ports "
+        "WHERE port_type = 'effect' AND event_class = 'Untap'"
+    )
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name in cmdr_set or name in seen:
+            continue
+        vf = (r["valid_filter"] or "").strip()
+        # Accept: empty (targets anything), Self (untaps self — relevant if
+        # it's a repeatable untapper), mentions Creature/Permanent/Artifact.
+        # Reject: only "Land" (e.g., Arbor Elf untaps forests, not relevant).
+        if vf and "Land" in vf and "Creature" not in vf and "Permanent" not in vf:
+            continue
+        seen.add(name)
+        results.append({
+            "candidate":      name,
+            "direction":      "untap_source",
+            "branch_kind":    r["branch_kind"] or "root",
+            "is_conditional": bool(r["is_conditional"]),
+        })
+
+    # UntapAll effects (Murkfiend Liege, etc.)
+    cur = conn.execute(
+        "SELECT DISTINCT card_name, branch_kind, is_conditional "
+        "FROM card_ports "
+        "WHERE port_type = 'effect' AND event_class = 'UntapAll'"
+    )
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name in cmdr_set or name in seen:
+            continue
+        seen.add(name)
+        results.append({
+            "candidate":      name,
+            "direction":      "untap_all",
+            "branch_kind":    r["branch_kind"] or "root",
+            "is_conditional": bool(r["is_conditional"]),
+        })
+
+    # Static UntapOtherPlayer (Seedborn Muse, Wilderness Reclamation)
+    cur = conn.execute(
+        "SELECT DISTINCT card_name "
+        "FROM card_ports "
+        "WHERE port_type = 'static' AND event_class = 'UntapOtherPlayer'"
+    )
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name in cmdr_set or name in seen:
+            continue
+        seen.add(name)
+        results.append({
+            "candidate":      name,
+            "direction":      "untap_static",
+            "branch_kind":    "root",
+            "is_conditional": False,
         })
 
     return results

@@ -35,11 +35,14 @@ from .graph_cache import (
 )
 from .graph_engine import (
     _rows_to_dicts,
+    clear_ports_cache,
     detect_internal_synergies,
     find_amplifier_matches,
     find_catchall_card_matches,
     find_chain_matches,
+    find_counter_ecosystem_payoffs,
     find_counter_producer_payoff,
+    find_etb_payoff_for_token_commander,
     find_deckhints_matches,
     find_etb_self_matches,
     find_etb_value_creatures,
@@ -53,6 +56,7 @@ from .graph_engine import (
     find_sacrifice_synergies,
     find_scaling_matches,
     find_trigger_feeders,
+    find_untap_synergies,
     internal_synergy_boost,
     load_ports_for_set,
 )
@@ -115,6 +119,9 @@ CATCH_ALL_WEIGHT        = 1   # weak per-card; v3 halved from 2
 COST_FEED_WEIGHT        = 6   # v3 raised from 4 — strong signal
 SACRIFICE_SYNERGY_WEIGHT = 6  # Phase D1 — additive on top of cost_feed (F9: raised from 4)
 COUNTER_SYNERGY_WEIGHT   = 4  # Phase F1 — +1/+1 counter producer → payoff commander
+COUNTER_ECOSYSTEM_WEIGHT = 6  # Phase F11 — counter-payoff cards for counter-producer cmdr
+UNTAP_SYNERGY_WEIGHT     = 6  # Phase F12 — untap sources for tap-activated commanders
+TOKEN_ETB_PAYOFF_WEIGHT  = 6  # Phase F13 — ETB payoff cards for token-producing commanders
 GRAVEYARD_SYNERGY_WEIGHT = 6  # Phase F5 — graveyard filler → reanimator (F9: raised from 4)
 ETB_VALUE_WEIGHT         = 4  # Phase F9 — ETB/death value creatures for recursion commanders
 #: Phase F7 — library_to_grave tier multiplier. Entomb / Buried Alive
@@ -127,7 +134,7 @@ TRIGGER_RESONANCE_WEIGHT = 8  # Phase F6 — shared trigger event (F9: raised fr
 STAT_SCALING_WEIGHT      = 4  # Phase F7 — high-stat candidates for stat-scaling commanders
 SPELLCAST_DENSITY_WEIGHT       = 4  # Phase F8 — spell-type density for SpellCast triggers
 SCALES_WITH_DENSITY_WEIGHT     = 8  # Phase F9 — density for scales_with types (Aura for Uril)
-OPPONENT_FORCING_WEIGHT        = 8  # Phase F10 — opponent-forcing effects for opp-trigger commanders
+OPPONENT_FORCING_WEIGHT        = 12 # Phase F10 — opponent-forcing effects for opp-trigger commanders
 MANA_RESTRICTION_WEIGHT  = 2  # Phase D2 — folds into cost_synergy bucket
 SCALING_WEIGHT          = 6   # v3 raised from 5
 DECKHINTS_WEIGHT        = 4   # v3 raised from 3 — Forge's own annotations
@@ -222,6 +229,26 @@ _REPLACEMENT_RESONANCE: dict[str, frozenset[str]] = {
 
 REPLACEMENT_RESONANCE_WEIGHT = 10
 
+# §7.7b replacement-wants-producer layer.
+#
+# The REVERSE of replacement_resonance: commander has a replacement doubler
+# (Mondrak has ``replacement:CreateToken``) → find candidates that produce
+# the thing being doubled (``effect:Token``). This is "doubler wants
+# producers" — distinct from "producer wants doublers" above.
+#
+# The mapping is the inverse of _REPLACEMENT_RESONANCE:
+# replacement event → set of effect event_classes that produce the input.
+_REPLACEMENT_WANTS_PRODUCER: dict[str, frozenset[str]] = {
+    "CreateToken":  frozenset({"Token"}),
+    "AddCounter":   frozenset({"PutCounter", "PutCounterAll", "Proliferate"}),
+    "Draw":         frozenset({"Draw"}),
+    "DrawCards":    frozenset({"Draw"}),
+    "GainLife":     frozenset({"GainLife"}),
+    "ProduceMana":  frozenset({"Mana"}),
+}
+
+REPLACEMENT_PRODUCER_WEIGHT = 4  # lower than resonance — broad signal
+
 
 # §7.6 effect-resonance layer.
 #
@@ -238,11 +265,22 @@ REPLACEMENT_RESONANCE_WEIGHT = 10
 _RESONANT_EFFECTS: frozenset[str] = frozenset({
     "Proliferate",
     "Mill",
+    "DigUntil",         # Forge's mill-until-X (Mirko Vosk)
     "Scry",
     "Surveil",
     "Untap",
     "Investigate",
 })
+
+#: Effect families: effects in the same family resonate with each other.
+#: DigUntil (mill-until-lands) resonates with Mill (mill N cards) since both
+#: fill the graveyard / deplete the library. The mapping is asymmetric:
+#: DigUntil commanders (Mirko) find Mill cards, but Mill commanders
+#: (Phenax) don't pull in all 147 DigUntil cards (many are cascade/
+#: polymorph effects that aren't mill-themed).
+_RESONANT_EFFECT_FAMILY: dict[str, frozenset[str]] = {
+    "DigUntil": frozenset({"DigUntil", "Mill"}),
+}
 
 EFFECT_RESONANCE_WEIGHT = 10
 
@@ -253,6 +291,9 @@ BUCKETS: tuple[str, ...] = (
     "cost_synergy",
     "sacrifice_synergy",   # Phase D1 — outlet ↔ payoff cluster
     "counter_synergy",     # Phase F1 — P1P1 producer ↔ counter-payoff cmdr
+    "counter_ecosystem",   # Phase F11 — counter-payoff for counter-producer cmdr
+    "untap_synergy",       # Phase F12 — untap sources for tap-activated commanders
+    "token_etb_payoff",    # Phase F13 — ETB payoff for token-producing commanders
     "graveyard_synergy",   # Phase F5 — grave filler ↔ reanim commander
     "trigger_resonance",   # Phase F6 — shared trigger event cmdr ↔ candidate
     "stat_scaling",        # Phase F7 — high-stat candidates for stat-scaling cmdr
@@ -270,6 +311,7 @@ BUCKETS: tuple[str, ...] = (
     "resource_density",
     "effect_resonance",
     "replacement_resonance",
+    "replacement_producer",  # §7.7b — doubler wants producers
     "staple",
     "replacement",
 )
@@ -755,6 +797,27 @@ def _score_counter_producer_payoff(
         )
 
 
+def _score_counter_ecosystem(
+    conn: sqlite3.Connection,
+    commander_set: Sequence[str],
+    scores: dict[str, BucketDict],
+    matches: dict[str, MatchList],
+) -> None:
+    """Phase F11 — counter-payoff cards for counter-producer commanders.
+
+    Reverse of Phase F1. For commanders that produce/proliferate/multiply
+    counters, finds cards that trigger on counter placement, scale with
+    counters, or also proliferate/multiply (clustering).
+    """
+    for row in find_counter_ecosystem_payoffs(conn, commander_set):
+        weight = _branch_weight(row.get("branch_kind"))
+        _add_bucket(
+            scores, matches, row["candidate"], "counter_ecosystem",
+            COUNTER_ECOSYSTEM_WEIGHT * weight,
+            {**row, "bucket": "counter_ecosystem"},
+        )
+
+
 def _score_graveyard_value(
     conn: sqlite3.Connection,
     commander_set: Sequence[str],
@@ -879,6 +942,46 @@ def _score_opponent_forcing(
             scores, matches, row["candidate"], "opponent_forcing",
             OPPONENT_FORCING_WEIGHT * weight,
             {**row, "bucket": "opponent_forcing"},
+        )
+
+
+def _score_untap_synergy(
+    conn: sqlite3.Connection,
+    commander_set: Sequence[str],
+    scores: dict[str, BucketDict],
+    matches: dict[str, MatchList],
+) -> None:
+    """Phase F12 — untap sources for tap-activated commanders.
+
+    Vorel, Arcanis, Krenko, etc. benefit enormously from Seedborn Muse,
+    Thousand-Year Elixir, and similar untap effects.
+    """
+    for row in find_untap_synergies(conn, commander_set):
+        weight = _branch_weight(row.get("branch_kind"))
+        _add_bucket(
+            scores, matches, row["candidate"], "untap_synergy",
+            UNTAP_SYNERGY_WEIGHT * weight,
+            {**row, "bucket": "untap_synergy"},
+        )
+
+
+def _score_token_etb_payoff(
+    conn: sqlite3.Connection,
+    commander_set: Sequence[str],
+    scores: dict[str, BucketDict],
+    matches: dict[str, MatchList],
+) -> None:
+    """Phase F13 — ETB payoff cards for token-producing commanders.
+
+    Kykar/Prossh create creature tokens → Impact Tremors, Purphoros,
+    and similar ETB-trigger payoff cards are premium synergy.
+    """
+    for row in find_etb_payoff_for_token_commander(conn, commander_set):
+        weight = _branch_weight(row.get("branch_kind"))
+        _add_bucket(
+            scores, matches, row["candidate"], "token_etb_payoff",
+            TOKEN_ETB_PAYOFF_WEIGHT * weight,
+            {**row, "bucket": "token_etb_payoff"},
         )
 
 
@@ -1675,11 +1778,16 @@ def _extract_commander_anchors(
     # Channel 2 — trigger anchors. Both ``Sacrificed`` triggers and
     # ``ChangesZone`` (Battlefield → Graveyard) triggers reward the
     # destruction of a card-typed resource → cap=3 for all matched types.
+    # Exclude opponent-scoped triggers (OppCtrl/OppOwn) — Tergrid's
+    # ``Sacrificed|Permanent.OppCtrl`` means *opponents'* permanents, not
+    # ours. Resource density should only fire for own-side triggers.
     trigger_event_placeholders = ",".join("?" * len(_TRIGGER_ANCHOR_EVENTS))
     cur = conn.execute(
         f"SELECT valid_filter FROM card_ports "
         f"WHERE card_name IN ({placeholders}) "
         f"  AND port_type = 'trigger' "
+        f"  AND valid_filter NOT LIKE '%OppCtrl%' "
+        f"  AND valid_filter NOT LIKE '%OppOwn%' "
         f"  AND ("
         f"      event_class IN ({trigger_event_placeholders}) "
         f"      OR ("
@@ -1960,10 +2068,20 @@ def _score_replacement_resonance(
     """
     target_replacements: set[str] = set()
     for p in cmdr_ports:
-        if p.get("port_type") != "effect":
-            continue
+        ptype = p.get("port_type")
         ev = (p.get("event_class") or "").strip()
-        target_replacements |= _REPLACEMENT_RESONANCE.get(ev, frozenset())
+        if ptype == "effect":
+            target_replacements |= _REPLACEMENT_RESONANCE.get(ev, frozenset())
+        elif ptype == "replacement":
+            # Commander IS a doubler — find other doublers of the same type.
+            # Mondrak (replacement:CreateToken) clusters with Anointed
+            # Procession, Parallel Lives (also replacement:CreateToken).
+            # Only cluster on actual doubling effects, not protection
+            # effects like Counter (can't be countered) or Moved (can't
+            # be exiled/destroyed) or DamageDone (damage prevention).
+            if ev in ("CreateToken", "AddCounter", "Draw", "DrawCards",
+                      "GainLife", "ProduceMana"):
+                target_replacements.add(ev)
     if not target_replacements:
         return
 
@@ -1985,6 +2103,76 @@ def _score_replacement_resonance(
             {
                 "bucket":            "replacement_resonance",
                 "replacement_event": row["replacement_event"],
+            },
+        )
+
+
+def _score_replacement_producer(
+    conn: sqlite3.Connection,
+    commander_set: Sequence[str],
+    cmdr_ports: list[PortRow],
+    scores: dict[str, BucketDict],
+    matches: dict[str, MatchList],
+) -> None:
+    """§7.7b — find producer candidates for the commander's replacement
+    doubler effect.
+
+    Mondrak (``replacement:CreateToken``) wants cards with ``effect:Token``.
+    Hardened Scales (``replacement:AddCounter``) wants cards with
+    ``effect:PutCounter``.
+
+    Gated: for CreateToken specifically, only fire when the commander has
+    no non-catch-all triggers (i.e., the replacement IS the primary
+    mechanic). Chatterfang has replacement:CreateToken but also has
+    sacrifice costs and gets strong signals from sacrifice_synergy —
+    adding 2847 token producers at weight 4 would just flood his results.
+    """
+    # Gate: for CreateToken, only fire when the commander's replacement is
+    # the primary mechanic (no non-catch-all triggers). Commanders like
+    # Chatterfang that have triggers + sacrifice costs already get strong
+    # signals from other matchers — adding 2847 token producers would flood.
+    from .graph_engine import CATCH_ALL_TRIGGERS as _CAT
+    has_meaningful_trigger = False
+    for p in cmdr_ports:
+        if p.get("port_type") == "trigger":
+            ev = (p.get("event_class") or "").strip()
+            if ev and ev not in _CAT:
+                has_meaningful_trigger = True
+                break
+
+    # Collect commander replacement events
+    target_effects: set[str] = set()
+    for p in cmdr_ports:
+        if p.get("port_type") != "replacement":
+            continue
+        ev = (p.get("event_class") or "").strip()
+        # Skip CreateToken producers when commander has strong triggers
+        if ev == "CreateToken" and has_meaningful_trigger:
+            continue
+        producers = _REPLACEMENT_WANTS_PRODUCER.get(ev)
+        if producers:
+            target_effects.update(producers)
+
+    if not target_effects:
+        return
+
+    cmdr_set = set(commander_set)
+    placeholders = ",".join("?" * len(target_effects))
+    cur = conn.execute(
+        f"SELECT DISTINCT card_name, event_class FROM card_ports "
+        f"WHERE port_type = 'effect' AND event_class IN ({placeholders})",
+        tuple(target_effects),
+    )
+    for row in cur.fetchall():
+        cand = row["card_name"]
+        if cand in cmdr_set:
+            continue
+        _add_bucket(
+            scores, matches, cand, "replacement_producer",
+            REPLACEMENT_PRODUCER_WEIGHT,
+            {
+                "bucket":       "replacement_producer",
+                "effect_event": row["event_class"],
             },
         )
 
@@ -2046,12 +2234,22 @@ def _score_effect_resonance(
     if not cmdr_resonant:
         return
 
+    # Expand resonant effects to include family members.
+    # DigUntil (Mirko) should also find Mill cards, and vice versa.
+    search_effects: set[str] = set()
+    for ev in cmdr_resonant:
+        family = _RESONANT_EFFECT_FAMILY.get(ev)
+        if family:
+            search_effects.update(family)
+        else:
+            search_effects.add(ev)
+
     cmdr_set = set(commander_set)
-    placeholders = ",".join("?" * len(cmdr_resonant))
+    placeholders = ",".join("?" * len(search_effects))
     cur = conn.execute(
         f"SELECT DISTINCT card_name, event_class FROM card_ports "
         f"WHERE port_type = 'effect' AND event_class IN ({placeholders})",
-        tuple(cmdr_resonant),
+        tuple(search_effects),
     )
     for row in cur.fetchall():
         cand = row["card_name"]
@@ -2129,6 +2327,7 @@ def score_all_candidates(
     The bucket dicts are owned by the caller — mutating them does not
     affect future invocations.
     """
+    clear_ports_cache()  # fresh cache per commander run
     scores: dict[str, BucketDict] = {}
     matches: dict[str, MatchList] = {}
     cmdr_ports = load_ports_for_set(conn, commander_set)
@@ -2155,15 +2354,19 @@ def score_all_candidates(
     _score_resource_density(conn, commander_set, scores, matches)
     _score_effect_resonance(conn, commander_set, cmdr_ports, scores, matches)
     _score_replacement_resonance(conn, commander_set, cmdr_ports, scores, matches)
+    _score_replacement_producer(conn, commander_set, cmdr_ports, scores, matches)
     _score_staples(conn, commander_set, scores, matches)
     _score_replacements(conn, commander_set, scores, matches)
     _score_sacrifice_synergies(conn, commander_set, scores, matches)
     _score_counter_producer_payoff(conn, commander_set, scores, matches)
+    _score_counter_ecosystem(conn, commander_set, scores, matches)
     _score_graveyard_value(conn, commander_set, scores, matches)
     _score_etb_value(conn, commander_set, scores, matches)
     _score_trigger_resonance(conn, commander_set, scores, matches)
     _score_stat_scaling(conn, commander_set, scores, matches)
     _score_opponent_forcing(conn, commander_set, scores, matches)
+    _score_untap_synergy(conn, commander_set, scores, matches)
+    _score_token_etb_payoff(conn, commander_set, scores, matches)
     _score_spellcast_density(conn, commander_set, cmdr_ports, scores, matches)
     _score_mana_restriction(conn, commander_set, scores, matches)
     # Phase D4 (find_flicker_loop_matches) is intentionally NOT wired
