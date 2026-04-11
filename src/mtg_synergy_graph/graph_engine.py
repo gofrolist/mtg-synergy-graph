@@ -462,7 +462,9 @@ def find_trigger_feeders(
     cmdr_set = set(commander_set)
 
     cur = conn.execute(
-        "SELECT * FROM card_ports WHERE port_type IN ('effect','cost')"
+        "SELECT card_name, port_type, event_class, branch_kind, "
+        "is_conditional, raw_line "
+        "FROM card_ports WHERE port_type IN ('effect','cost')"
     )
     candidate_ports = _rows_to_dicts(cur.fetchall())
 

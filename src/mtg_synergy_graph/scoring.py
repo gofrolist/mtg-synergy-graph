@@ -933,7 +933,7 @@ def _score_strategic(
 
     placeholders = ",".join("?" * len(candidates_with_signal))
     card_rows = conn.execute(
-        f"SELECT * FROM cards WHERE name IN ({placeholders})",
+        f"SELECT name, keywords, cmc FROM cards WHERE name IN ({placeholders})",
         tuple(candidates_with_signal),
     ).fetchall()
     cand_cards = {row["name"]: row for row in _rows_to_dicts(card_rows)}
