@@ -336,6 +336,14 @@ class SynergyEngine:
             )
         return row["name"]
 
+    def oracle_id_for_name(self, name: str) -> str | None:
+        """Return the ``oracle_id`` for a card name, or ``None`` if not found."""
+        row = self._conn.execute(
+            "SELECT oracle_id FROM cards WHERE name = ? LIMIT 1",
+            (name,),
+        ).fetchone()
+        return row["oracle_id"] if row else None
+
     def page_by_oracle_id(
         self,
         oracle_id: str | Sequence[str],
