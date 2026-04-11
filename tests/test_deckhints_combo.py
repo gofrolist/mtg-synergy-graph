@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 
-from mtg_synergy_graph import SynergyEngine
 from mtg_synergy_graph.scoring import (
     DECKHINTS_COMBO_WEIGHT,
     DECKHINTS_REVERSE_WEIGHT,
@@ -202,15 +201,14 @@ def test_duplicate_source_rows_still_trigger_combo_only_once(monkeypatch):
 
 
 @pytestmark_full_db
-def test_heronblade_elite_beats_maester_seymour_for_kyler():
+def test_heronblade_elite_beats_maester_seymour_for_kyler(full_engine):
     """Regression guard for the concrete case that motivated Path B.
 
     Heronblade Elite is EDHREC's #1 Hi-Syn card for Kyler (synergy
     0.79). Maester Seymour is a mid-tier counter producer. The combo
     bonus must rank Heronblade ABOVE Seymour.
     """
-    with SynergyEngine(FULL_DB_PATH) as eng:
-        page = eng.page("Kyler, Sigardian Emissary", limit=150)
+    page = full_engine.page("Kyler, Sigardian Emissary", limit=150)
     names = [r.card for r in page.items]
     assert "Heronblade Elite" in names
     assert "Maester Seymour" in names
@@ -224,7 +222,7 @@ def test_heronblade_elite_beats_maester_seymour_for_kyler():
 
 
 @pytestmark_full_db
-def test_kyler_fat_deckhints_card_beats_single_source_peer_at_same_port_match():
+def test_kyler_fat_deckhints_card_beats_single_source_peer_at_same_port_match(full_engine):
     """Pair-wise comparison holding port_match + counter_synergy
     fixed. Heronblade Elite (fat, 3-source deckhints, no
     counter_synergy) must beat Maester Seymour (1-source deckhints +
@@ -232,9 +230,8 @@ def test_kyler_fat_deckhints_card_beats_single_source_peer_at_same_port_match():
     (10 deck_hints) strictly beats the counter_synergy+1-source path
     (4 + 4 = 8 combined).
     """
-    with SynergyEngine(FULL_DB_PATH) as eng:
-        heron = eng.score_one("Kyler, Sigardian Emissary", "Heronblade Elite")
-        seymour = eng.score_one("Kyler, Sigardian Emissary", "Maester Seymour")
+    heron = full_engine.score_one("Kyler, Sigardian Emissary", "Heronblade Elite")
+    seymour = full_engine.score_one("Kyler, Sigardian Emissary", "Maester Seymour")
 
     # Both should share port_match=10 (single trigger feed each) so
     # the remaining buckets are the clean comparison.

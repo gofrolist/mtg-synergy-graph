@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 
-from mtg_synergy_graph import SynergyEngine
 from mtg_synergy_graph.db import open_db
 from mtg_synergy_graph.graph_engine import (
     _commander_is_p1p1_payoff,
@@ -73,14 +72,6 @@ def test_counter_effect_hits_creatures(valid_filter, expected):
 # ---------------------------------------------------------------------------
 # Commander payoff signature gate
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture(scope="module")
-def full_conn():
-    conn = sqlite3.connect(FULL_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    yield conn
-    conn.close()
 
 
 @pytest.mark.parametrize("commander", [
@@ -193,19 +184,18 @@ def test_commander_itself_not_emitted(full_conn):
 # ---------------------------------------------------------------------------
 
 
-def test_maester_seymour_scores_counter_synergy_for_kyler():
+def test_maester_seymour_scores_counter_synergy_for_kyler(full_engine):
     """Regression guard for the concrete Kyler+Seymour interaction
     that motivated Phase F1."""
-    with SynergyEngine(FULL_DB_PATH) as eng:
-        rec = eng.score_one(
-            "Kyler, Sigardian Emissary", "Maester Seymour",
-        )
+    rec = full_engine.score_one(
+        "Kyler, Sigardian Emissary", "Maester Seymour",
+    )
     assert rec.scores.get("counter_synergy", 0) > 0, (
         "counter_synergy bucket did not fire for Maester Seymour + Kyler"
     )
 
 
-def test_champion_of_lambholt_scores_counter_synergy_for_kyler():
+def test_champion_of_lambholt_scores_counter_synergy_for_kyler(full_engine):
     """Regression guard for Phase F1.1 (Self-filter fix).
 
     Champion of Lambholt's raw_line is
@@ -215,46 +205,42 @@ def test_champion_of_lambholt_scores_counter_synergy_for_kyler():
     Champion was ranked 770 for Kyler despite being EDHREC's #4
     High Synergy Card (synergy 0.62).
     """
-    with SynergyEngine(FULL_DB_PATH) as eng:
-        rec = eng.score_one(
-            "Kyler, Sigardian Emissary", "Champion of Lambholt",
-        )
+    rec = full_engine.score_one(
+        "Kyler, Sigardian Emissary", "Champion of Lambholt",
+    )
     assert rec.scores.get("counter_synergy", 0) > 0, (
         "counter_synergy did not fire for Champion of Lambholt + Kyler. "
         "Check that _counter_effect_hits_creatures accepts 'Self'."
     )
 
 
-def test_champion_of_lambholt_lifts_into_kyler_top_200():
+def test_champion_of_lambholt_lifts_into_kyler_top_200(full_engine):
     """The F1.1 fix must lift Champion of Lambholt from its pre-fix
     rank of ~770 into at least the top 200 for Kyler. We don't assert
     top 50 because Champion's deck_hints path is reverse-only (2 pts)
     and it doesn't collect the F2 combo bonus — fixing that would
     require F3 (see discussion)."""
-    with SynergyEngine(FULL_DB_PATH) as eng:
-        page = eng.page("Kyler, Sigardian Emissary", limit=300)
+    page = full_engine.page("Kyler, Sigardian Emissary", limit=300)
     names = [r.card for r in page.items]
     assert "Champion of Lambholt" in names, (
         "Champion of Lambholt must land in Kyler's top 300 after F1.1"
     )
 
 
-def test_maester_seymour_reaches_top_100_for_kyler():
+def test_maester_seymour_reaches_top_100_for_kyler(full_engine):
     """The practical headline: Seymour moves from rank ~150 (below the
     window the user asked about) into Kyler's top 100."""
-    with SynergyEngine(FULL_DB_PATH) as eng:
-        page = eng.page("Kyler, Sigardian Emissary", limit=100)
+    page = full_engine.page("Kyler, Sigardian Emissary", limit=100)
     names = [r.card for r in page.items]
     assert "Maester Seymour" in names, (
         "Maester Seymour must appear in Kyler's top 100 after Phase F1"
     )
 
 
-def test_counter_synergy_silent_for_non_payoff_commander():
+def test_counter_synergy_silent_for_non_payoff_commander(full_engine):
     """No candidate should receive a counter_synergy score when the
     commander fails the payoff gate."""
-    with SynergyEngine(FULL_DB_PATH) as eng:
-        page = eng.page("Korvold, Fae-Cursed King", limit=200)
+    page = full_engine.page("Korvold, Fae-Cursed King", limit=200)
     for rec in page.items:
         assert rec.scores.get("counter_synergy", 0) == 0, (
             f"counter_synergy leaked for non-payoff commander: "

@@ -77,8 +77,11 @@ def main() -> int:
                 return 2
             commanders = _load_commanders(args.commanders)
             print(f"bootstrap: {len(commanders)} commanders → {args.baseline}")
+            edhrec_db = args.edhrec_db if args.edhrec_db and args.edhrec_db.exists() else None
             report = bootstrap_golden_set(
-                engine, commanders, args.baseline, edhrec_conn=edhrec_conn,
+                engine, commanders, args.baseline,
+                edhrec_conn=edhrec_conn,
+                edhrec_db_path=edhrec_db,
             )
             print(f"  entries:  {len(report.entries)}")
             print(f"  agg NDCG: {report.aggregate_ndcg}")
@@ -99,10 +102,12 @@ def main() -> int:
                   file=sys.stderr)
             return 2
 
+        edhrec_db = args.edhrec_db if args.edhrec_db and args.edhrec_db.exists() else None
         report = check_golden_set(
             engine,
             args.baseline,
             edhrec_conn=edhrec_conn,
+            edhrec_db_path=edhrec_db,
             jitter=args.jitter,
             ndcg_tolerance=args.ndcg_tolerance,
         )

@@ -147,18 +147,9 @@ def test_token_script_kind_classifies_creature_vs_artifact():
 
 import os  # noqa: E402
 
-FULL_DB_PATH = os.environ.get("MTG_SYNERGY_GRAPH_FULL_DB", "/tmp/synergy_full.db")
-_HAS_FULL_DB = Path(FULL_DB_PATH).exists()
-
-
-@pytest.fixture(scope="module")
-def full_engine():
-    if not _HAS_FULL_DB:
-        pytest.skip(f"full DB not found at {FULL_DB_PATH}")
-    from mtg_synergy_graph.engine import SynergyEngine
-    eng = SynergyEngine(FULL_DB_PATH)
-    yield eng
-    eng.close()
+_HAS_FULL_DB = Path(
+    os.environ.get("MTG_SYNERGY_GRAPH_FULL_DB", "/tmp/synergy_full.db")
+).exists()
 
 
 @pytest.mark.skipif(not _HAS_FULL_DB, reason="full DB not available")

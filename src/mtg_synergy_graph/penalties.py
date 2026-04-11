@@ -175,6 +175,42 @@ def _token_subtype(script: str | None) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Candidate cache — commander-independent bulk data
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CandidateCache:
+    """Commander-independent candidate data that can be reused across pages.
+
+    Building this once and passing it to :func:`build_penalty_context`
+    avoids repeating ~90 ms of SQL on every call — a 9-second saving
+    when running 100 commanders in the golden-set tracker.
+    """
+
+    candidate_rows:             dict[str, dict[str, Any]]
+    creature_static_scopes:     dict[str, list[str]]
+    candidate_excludes:         dict[str, set[str]]
+    candidate_token_types:      dict[str, set[str]]
+    candidate_counter_types:    dict[str, set[str]]
+    candidate_counters_on_land: dict[str, bool]
+    candidate_opp_mill:         dict[str, bool]
+
+
+def build_candidate_cache(conn: sqlite3.Connection) -> CandidateCache:
+    """Load all commander-independent candidate data in one pass."""
+    return CandidateCache(
+        candidate_rows=_bulk_load_candidates(conn),
+        creature_static_scopes=_bulk_load_static_scopes(conn),
+        candidate_excludes=_bulk_load_excludes(conn),
+        candidate_token_types=_bulk_load_token_types(conn),
+        candidate_counter_types=_bulk_load_counter_types(conn),
+        candidate_counters_on_land=_bulk_load_counters_on_lands(conn),
+        candidate_opp_mill=_bulk_load_opp_mill(conn),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Penalty context — bulk-loaded once per page request
 # ---------------------------------------------------------------------------
 
@@ -348,6 +384,8 @@ def _bulk_load_token_types(conn: sqlite3.Connection) -> dict[str, set[str]]:
 def build_penalty_context(
     conn: sqlite3.Connection,
     commander_set: Sequence[str],
+    *,
+    candidate_cache: CandidateCache | None = None,
 ) -> PenaltyContext:
     """Bulk-load everything ``apply_penalties_ctx`` needs for one page."""
     cmdr_rows = conn.execute(
@@ -443,6 +481,8 @@ def build_penalty_context(
     # counter path is already handled by `cmdr_uses_p1p1`.
     cmdr_is_tribal = bool(cmdr_subtypes & cmdr_token_subtypes)
 
+    cc = candidate_cache if candidate_cache is not None else build_candidate_cache(conn)
+
     return PenaltyContext(
         cmdr_identity=_color_identity(cmdr_rows),
         cmdr_subtypes=frozenset(cmdr_subtypes),
@@ -458,13 +498,13 @@ def build_penalty_context(
         cmdr_has_keywords=frozenset(cmdr_has_keywords),
         cmdr_token_subtypes=frozenset(cmdr_token_subtypes),
         cmdr_is_tribal=cmdr_is_tribal,
-        candidate_rows=_bulk_load_candidates(conn),
-        creature_static_scopes=_bulk_load_static_scopes(conn),
-        candidate_excludes=_bulk_load_excludes(conn),
-        candidate_token_types=_bulk_load_token_types(conn),
-        candidate_counter_types=_bulk_load_counter_types(conn),
-        candidate_counters_on_land=_bulk_load_counters_on_lands(conn),
-        candidate_opp_mill=_bulk_load_opp_mill(conn),
+        candidate_rows=cc.candidate_rows,
+        creature_static_scopes=cc.creature_static_scopes,
+        candidate_excludes=cc.candidate_excludes,
+        candidate_token_types=cc.candidate_token_types,
+        candidate_counter_types=cc.candidate_counter_types,
+        candidate_counters_on_land=cc.candidate_counters_on_land,
+        candidate_opp_mill=cc.candidate_opp_mill,
     )
 
 

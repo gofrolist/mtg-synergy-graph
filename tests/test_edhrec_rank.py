@@ -221,38 +221,36 @@ def test_importer_skip_path_leaves_edhrec_rank_null(tmp_path):
 # in test_counter_payoff.py.
 
 
-FULL_DB_PATH = Path("/tmp/synergy_full.db")
 _FULL_DB_SKIP = pytest.mark.skipif(
-    not FULL_DB_PATH.exists(),
+    not Path("/tmp/synergy_full.db").exists(),
     reason="end-to-end tiebreaker tests require /tmp/synergy_full.db",
 )
 
 
 @_FULL_DB_SKIP
-def test_kyler_tied_cluster_is_ordered_by_edhrec_rank():
+def test_kyler_tied_cluster_is_ordered_by_edhrec_rank(full_engine):
     """Within Kyler's 62-card cluster at total=18.0, the ordering must
     be monotone non-decreasing in edhrec_rank (after cmc tiebreak).
     Cards without a rank sort after every ranked card in the cluster."""
-    with SynergyEngine(FULL_DB_PATH) as eng:
-        page = eng.page("Kyler, Sigardian Emissary", limit=300)
-        conn = eng._conn
+    page = full_engine.page("Kyler, Sigardian Emissary", limit=300)
+    conn = full_engine._conn
 
-        cluster = [r for r in page.items if r.total_score == 18.0]
-        assert len(cluster) >= 20, (
-            "Expected the 18.0 cluster to be substantial; adjust the "
-            "fixture if the top-of-page shape has changed."
-        )
+    cluster = [r for r in page.items if r.total_score == 18.0]
+    assert len(cluster) >= 20, (
+        "Expected the 18.0 cluster to be substantial; adjust the "
+        "fixture if the top-of-page shape has changed."
+    )
 
-        # Pull cmc + edhrec_rank in one go.
-        meta: dict[str, tuple[float, int]] = {}
-        for r in cluster:
-            row = conn.execute(
-                "SELECT cmc, edhrec_rank FROM cards WHERE name = ?",
-                (r.card,),
-            ).fetchone()
-            cmc = row["cmc"] if row["cmc"] is not None else 99.0
-            rank = row["edhrec_rank"] if row["edhrec_rank"] is not None else 10**9
-            meta[r.card] = (cmc, rank)
+    # Pull cmc + edhrec_rank in one go.
+    meta: dict[str, tuple[float, int]] = {}
+    for r in cluster:
+        row = conn.execute(
+            "SELECT cmc, edhrec_rank FROM cards WHERE name = ?",
+            (r.card,),
+        ).fetchone()
+        cmc = row["cmc"] if row["cmc"] is not None else 99.0
+        rank = row["edhrec_rank"] if row["edhrec_rank"] is not None else 10**9
+        meta[r.card] = (cmc, rank)
 
     # Group cards in the cluster by cmc, preserving page order inside
     # each bucket. Inside each (total, cmc) group, consecutive page
@@ -266,9 +264,6 @@ def test_kyler_tied_cluster_is_ordered_by_edhrec_rank():
         if len(names) < 2:
             continue
         ranks = [meta[n][1] for n in names]
-        # Pairwise: every earlier card must have rank <= every later
-        # card inside the same cmc group, per the sort key
-        # (-total, cmc, edhrec_rank, name).
         for i in range(len(names) - 1):
             assert ranks[i] <= ranks[i + 1], (
                 f"cmc={cmc} tie group not sorted by rank: "
@@ -278,32 +273,31 @@ def test_kyler_tied_cluster_is_ordered_by_edhrec_rank():
 
 
 @_FULL_DB_SKIP
-def test_kyler_tied_cluster_is_not_purely_alphabetical():
+def test_kyler_tied_cluster_is_not_purely_alphabetical(full_engine):
     """Regression guard against the pre-fix behaviour where
     identical-score clusters degenerated into alphabetical order.
     Take the 18.0 cluster — after filtering to a single cmc bucket,
     the page order must NOT match ``sorted(names)``."""
-    with SynergyEngine(FULL_DB_PATH) as eng:
-        page = eng.page("Kyler, Sigardian Emissary", limit=300)
-        conn = eng._conn
-        cluster = [r.card for r in page.items if r.total_score == 18.0]
+    page = full_engine.page("Kyler, Sigardian Emissary", limit=300)
+    conn = full_engine._conn
+    cluster = [r.card for r in page.items if r.total_score == 18.0]
 
-        # Pick the largest cmc sub-bucket in the cluster so there are
-        # enough cards to disprove alphabetical ordering.
-        from collections import defaultdict
-        by_cmc: dict[float, list[str]] = defaultdict(list)
-        for name in cluster:
-            row = conn.execute(
-                "SELECT cmc FROM cards WHERE name = ?", (name,),
-            ).fetchone()
-            cmc = row["cmc"] if row["cmc"] is not None else 99.0
-            by_cmc[cmc].append(name)
-        biggest_cmc = max(by_cmc, key=lambda k: len(by_cmc[k]))
-        bucket = by_cmc[biggest_cmc]
-        assert len(bucket) >= 5, (
-            "Not enough cards in the largest cmc bucket to disprove "
-            "alphabetical ordering; adjust the fixture."
-        )
+    # Pick the largest cmc sub-bucket in the cluster so there are
+    # enough cards to disprove alphabetical ordering.
+    from collections import defaultdict
+    by_cmc: dict[float, list[str]] = defaultdict(list)
+    for name in cluster:
+        row = conn.execute(
+            "SELECT cmc FROM cards WHERE name = ?", (name,),
+        ).fetchone()
+        cmc = row["cmc"] if row["cmc"] is not None else 99.0
+        by_cmc[cmc].append(name)
+    biggest_cmc = max(by_cmc, key=lambda k: len(by_cmc[k]))
+    bucket = by_cmc[biggest_cmc]
+    assert len(bucket) >= 5, (
+        "Not enough cards in the largest cmc bucket to disprove "
+        "alphabetical ordering; adjust the fixture."
+    )
 
     # The engine's output order must differ from alphabetical, proving
     # that some other signal (edhrec_rank) is breaking the tie.

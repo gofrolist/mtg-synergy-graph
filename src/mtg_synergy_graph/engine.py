@@ -26,8 +26,10 @@ from typing import Any
 from .db import open_db
 from .penalties import (
     HARD_FILTER_SCORE,
+    CandidateCache,
     apply_penalties,
     apply_penalties_ctx,
+    build_candidate_cache,
     build_penalty_context,
 )
 from .scoring import empty_buckets, score_all_candidates
@@ -227,6 +229,8 @@ class SynergyEngine:
         # warm-call cost <1 s.
         self._adjacency_cache: dict[str, set[str]] | None = None
         self._scipy_pr_context: Any = None
+        self._candidate_cache: CandidateCache | None = None
+        self._score_cache: dict[tuple[str, ...], Any] = {}
 
     # ----- lifecycle -------------------------------------------------------
 
@@ -282,14 +286,18 @@ class SynergyEngine:
     ) -> Recommendation:
         cmdr_set = _normalise_commander(commander)
         self._ensure_graph_caches()
-        result = score_all_candidates(
-            self._conn,
-            cmdr_set,
-            use_graph_metrics=self._use_graph_metrics,
-            use_chain_matches=self._use_chain_matches,
-            adjacency_cache=self._adjacency_cache,
-            scipy_pr_context=self._scipy_pr_context,
-        )
+        cache_key = tuple(cmdr_set)
+        result = self._score_cache.get(cache_key)
+        if result is None:
+            result = score_all_candidates(
+                self._conn,
+                cmdr_set,
+                use_graph_metrics=self._use_graph_metrics,
+                use_chain_matches=self._use_chain_matches,
+                adjacency_cache=self._adjacency_cache,
+                scipy_pr_context=self._scipy_pr_context,
+            )
+            self._score_cache[cache_key] = result
         buckets = result.buckets.get(card)
         raw_matches = result.matches.get(card, [])
         if buckets is None:
@@ -416,7 +424,11 @@ class SynergyEngine:
         # Bulk-load the data the penalty layer needs. The same dict is
         # reused below for legality (avoids a second SELECT name FROM cards
         # in legal_cards()).
-        penalty_ctx = build_penalty_context(self._conn, cmdr_set)
+        if self._candidate_cache is None:
+            self._candidate_cache = build_candidate_cache(self._conn)
+        penalty_ctx = build_penalty_context(
+            self._conn, cmdr_set, candidate_cache=self._candidate_cache,
+        )
         legal: set[str] = set()
         for name, row in penalty_ctx.candidate_rows.items():
             if name in cmdr_name_set:
@@ -439,14 +451,18 @@ class SynergyEngine:
                 legal.add(name)
 
         self._ensure_graph_caches()
-        result = score_all_candidates(
-            self._conn,
-            cmdr_set,
-            use_graph_metrics=self._use_graph_metrics,
-            use_chain_matches=self._use_chain_matches,
-            adjacency_cache=self._adjacency_cache,
-            scipy_pr_context=self._scipy_pr_context,
-        )
+        cache_key = tuple(cmdr_set)
+        result = self._score_cache.get(cache_key)
+        if result is None:
+            result = score_all_candidates(
+                self._conn,
+                cmdr_set,
+                use_graph_metrics=self._use_graph_metrics,
+                use_chain_matches=self._use_chain_matches,
+                adjacency_cache=self._adjacency_cache,
+                scipy_pr_context=self._scipy_pr_context,
+            )
+            self._score_cache[cache_key] = result
 
         # Phase F9: inject sacrifice signal into penalty context so Rule 9
         # can exempt candidates with sacrifice/trigger-resonance signal.

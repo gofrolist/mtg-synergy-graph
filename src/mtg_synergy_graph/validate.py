@@ -24,9 +24,11 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import re
 import sqlite3
 from collections.abc import Iterable, Sequence
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -262,12 +264,94 @@ def _run_one(
     )
 
 
+def _worker_run_batch(
+    args: tuple[Path, Path | None, list[list[str]]],
+) -> list[dict[str, Any]]:
+    """Worker process: open its own DB connections and score a batch."""
+    db_path, edhrec_db_path, batch = args
+    edhrec_conn: sqlite3.Connection | None = None
+    if edhrec_db_path is not None:
+        edhrec_conn = sqlite3.connect(edhrec_db_path)
+        edhrec_conn.row_factory = sqlite3.Row
+    results: list[dict[str, Any]] = []
+    with SynergyEngine(db_path) as engine:
+        for cmdr in batch:
+            try:
+                entry = _run_one(engine, cmdr, edhrec_conn)
+                results.append(asdict(entry))
+            except ValueError as exc:
+                results.append({"_error": str(exc), "_cmdr": cmdr})
+    if edhrec_conn is not None:
+        edhrec_conn.close()
+    return results
+
+
+def _max_workers() -> int:
+    """Choose a reasonable worker count (cap at 8 to avoid thrashing)."""
+    return min(os.cpu_count() or 4, 8)
+
+
+def _run_parallel(
+    db_path: Path,
+    edhrec_db_path: Path | None,
+    commander_lists: list[list[str]],
+) -> list[GoldenSetEntry]:
+    """Score commanders across multiple processes, return entries in order."""
+    n_workers = min(_max_workers(), len(commander_lists))
+    if n_workers <= 1:
+        # Fall back to sequential for tiny sets or single-core machines
+        with SynergyEngine(db_path) as engine:
+            edhrec_conn: sqlite3.Connection | None = None
+            if edhrec_db_path is not None:
+                edhrec_conn = sqlite3.connect(edhrec_db_path)
+                edhrec_conn.row_factory = sqlite3.Row
+            entries: list[GoldenSetEntry] = []
+            for cmdr in commander_lists:
+                try:
+                    entries.append(_run_one(engine, cmdr, edhrec_conn))
+                except ValueError as exc:
+                    log.warning("skipping %s: %s", cmdr, exc)
+            if edhrec_conn is not None:
+                edhrec_conn.close()
+            return entries
+
+    # Split into roughly equal batches
+    batches: list[list[list[str]]] = [[] for _ in range(n_workers)]
+    for i, cmdr in enumerate(commander_lists):
+        batches[i % n_workers].append(cmdr)
+
+    work_items = [(db_path, edhrec_db_path, b) for b in batches if b]
+
+    all_results: list[dict[str, Any]] = []
+    with ProcessPoolExecutor(max_workers=n_workers) as pool:
+        for batch_results in pool.map(_worker_run_batch, work_items):
+            all_results.extend(batch_results)
+
+    entries = []
+    for raw in all_results:
+        if "_error" in raw:
+            log.warning("skipping %s: %s", raw["_cmdr"], raw["_error"])
+            continue
+        entries.append(GoldenSetEntry(
+            commander=raw["commander"],
+            top10=tuple(raw["top10"]),
+            ndcg30=raw["ndcg30"],
+            hi_syn_total=raw.get("hi_syn_total", 0),
+            hi_syn_hits=raw.get("hi_syn_hits", 0),
+            on_page_hits=raw.get("on_page_hits", 0),
+            edhrec_top10=tuple(raw.get("edhrec_top10", ())),
+        ))
+    return entries
+
+
 def bootstrap_golden_set(
     engine: SynergyEngine,
     commanders: Sequence[Any],
     output_path: Path,
     *,
     edhrec_conn: sqlite3.Connection | None = None,
+    edhrec_db_path: Path | None = None,
+    parallel: bool = True,
 ) -> GoldenSetReport:
     """Run the engine on each commander and write the result as a baseline.
 
@@ -281,15 +365,23 @@ def bootstrap_golden_set(
                 ...
             ]
         }
+
+    When ``parallel=True`` (default) and there are enough commanders,
+    the work is distributed across multiple processes for ~4-8x speedup.
     """
-    entries: list[GoldenSetEntry] = []
-    for spec in commanders:
-        cmdr = _commander_pair(spec)
-        try:
-            entries.append(_run_one(engine, cmdr, edhrec_conn))
-        except ValueError as exc:
-            log.warning("skipping %s: %s", cmdr, exc)
-            continue
+    commander_lists = [_commander_pair(spec) for spec in commanders]
+
+    if parallel and len(commander_lists) > 4:
+        entries = _run_parallel(
+            engine._db_path, edhrec_db_path, commander_lists,
+        )
+    else:
+        entries = []
+        for cmdr in commander_lists:
+            try:
+                entries.append(_run_one(engine, cmdr, edhrec_conn))
+            except ValueError as exc:
+                log.warning("skipping %s: %s", cmdr, exc)
 
     payload = {
         "version": 1,
@@ -309,8 +401,10 @@ def check_golden_set(
     baseline_path: Path,
     *,
     edhrec_conn: sqlite3.Connection | None = None,
+    edhrec_db_path: Path | None = None,
     jitter: int = 5,
     ndcg_tolerance: float = 0.005,
+    parallel: bool = True,
 ) -> GoldenSetReport:
     """Re-run the engine on the baseline commanders and detect regressions.
 
@@ -329,17 +423,35 @@ def check_golden_set(
         entry["commander"]: entry for entry in payload.get("entries", [])
     }
 
+    commander_lists = [
+        canonical_name.split(" + ")
+        for canonical_name in baseline_entries
+    ]
+
+    if parallel and len(commander_lists) > 4:
+        fresh_all = _run_parallel(
+            engine._db_path, edhrec_db_path, commander_lists,
+        )
+    else:
+        fresh_all = []
+        for cmdr in commander_lists:
+            try:
+                fresh_all.append(_run_one(engine, cmdr, edhrec_conn))
+            except ValueError as exc:
+                log.warning("skipping %s: %s", cmdr, exc)
+
+    # Build lookup for diff comparison
+    fresh_by_name = {e.commander: e for e in fresh_all}
+
     fresh_entries: list[GoldenSetEntry] = []
     drift: list[dict[str, Any]] = []
     ndcg_drops: list[dict[str, Any]] = []
     rank_shifts: list[dict[str, Any]] = []
 
     for canonical_name, baseline in baseline_entries.items():
-        cmdr = canonical_name.split(" + ")
-        try:
-            fresh = _run_one(engine, cmdr, edhrec_conn)
-        except ValueError as exc:
-            drift.append({"commander": canonical_name, "error": str(exc)})
+        fresh = fresh_by_name.get(canonical_name)
+        if fresh is None:
+            drift.append({"commander": canonical_name, "error": "not in fresh results"})
             continue
         fresh_entries.append(fresh)
 

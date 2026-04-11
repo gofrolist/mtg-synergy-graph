@@ -11,17 +11,14 @@ from pathlib import Path
 
 import pytest
 
-from mtg_synergy_graph import SynergyEngine
 from mtg_synergy_graph.graph_engine import (
     _commander_is_graveyard_value,
     find_graveyard_value_synergies,
     load_ports_for_set,
 )
 
-FULL_DB_PATH = Path("/tmp/synergy_full.db")
-
 pytestmark = pytest.mark.skipif(
-    not FULL_DB_PATH.exists(),
+    not Path("/tmp/synergy_full.db").exists(),
     reason="Phase F5 tests require /tmp/synergy_full.db",
 )
 
@@ -29,15 +26,6 @@ pytestmark = pytest.mark.skipif(
 # ---------------------------------------------------------------------------
 # Gate discrimination
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture(scope="module")
-def full_conn():
-    import sqlite3
-    conn = sqlite3.connect(FULL_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    yield conn
-    conn.close()
 
 
 @pytest.mark.parametrize("commander", [
@@ -138,37 +126,34 @@ def test_opponent_mill_effects_not_emitted(full_conn):
 # ---------------------------------------------------------------------------
 
 
-def test_karador_nails_reassembling_skeleton():
+def test_karador_nails_reassembling_skeleton(full_engine):
     """Reassembling Skeleton self-reanimates each turn, so both Karador
     and Reassembling Skeleton fire Graveyard→Battlefield effects. The
     cluster synergy must be captured by the reanimator_cluster tier."""
-    with SynergyEngine(FULL_DB_PATH) as eng:
-        rec = eng.score_one(
-            "Karador, Ghost Chieftain", "Reassembling Skeleton",
-        )
+    rec = full_engine.score_one(
+        "Karador, Ghost Chieftain", "Reassembling Skeleton",
+    )
     assert rec.scores.get("graveyard_synergy", 0) > 0
 
 
-def test_chainer_scores_buried_alive():
+def test_chainer_scores_buried_alive(full_engine):
     """Buried Alive is Chainer's #4 EDHREC Hi-Syn pick. Even though
     F5 weight=4 isn't enough to lift it into the top 30 (it has no
     port_match signal as a sorcery), the bucket must at least fire."""
-    with SynergyEngine(FULL_DB_PATH) as eng:
-        rec = eng.score_one(
-            "Chainer, Nightmare Adept", "Buried Alive",
-        )
+    rec = full_engine.score_one(
+        "Chainer, Nightmare Adept", "Buried Alive",
+    )
     assert rec.scores.get("graveyard_synergy", 0) > 0
 
 
-def test_krenko_does_not_score_graveyard_synergy():
+def test_krenko_does_not_score_graveyard_synergy(full_engine):
     """Krenko is a tribal go-wide commander with no graveyard mechanic.
     Buried Alive must NOT fire graveyard_synergy for him."""
-    with SynergyEngine(FULL_DB_PATH) as eng:
-        rec = eng.score_one("Krenko, Mob Boss", "Buried Alive")
+    rec = full_engine.score_one("Krenko, Mob Boss", "Buried Alive")
     assert rec.scores.get("graveyard_synergy", 0) == 0
 
 
-def test_karador_target_lift_is_substantial():
+def test_karador_target_lift_is_substantial(full_engine):
     """The headline F5 result: Karador's NDCG@30 was 0.002 in the F4
     baseline (essentially zero). F5 must lift it above 0.03 via the
     combination of library_to_grave + self_mill + reanimator_cluster
@@ -181,8 +166,7 @@ def test_karador_target_lift_is_substantial():
     tags.row_factory = sqlite3.Row
     try:
         labels = edhrec_labels_for_commander(tags, "Karador, Ghost Chieftain")
-        with SynergyEngine(FULL_DB_PATH) as eng:
-            page = eng.page("Karador, Ghost Chieftain", limit=30)
+        page = full_engine.page("Karador, Ghost Chieftain", limit=30)
         ranking = [r.card for r in page.items]
         ndcg = compute_ndcg(ranking, labels, k=30)
     finally:
