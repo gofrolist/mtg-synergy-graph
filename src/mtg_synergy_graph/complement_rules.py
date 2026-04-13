@@ -79,8 +79,90 @@ def _invert_cost_feeds() -> dict[str, dict[str, EventCheck]]:
     return out
 
 
+def _cand_trigger_not_self(_cmdr_port: PortRow, cand_port: PortRow) -> bool:
+    """Reject candidate triggers that only fire on Self.
+
+    Used by effect_feeds_trigger: a candidate with 'Card.Self' ETB trigger
+    only fires on itself entering, not on tokens the commander creates.
+    """
+    vf = cand_port.get("valid_filter") or ""
+    return not _trigger_only_matches_self(vf)
+
+
+def _invert_event_match_map() -> dict[str, dict[str, EventCheck]]:
+    """Invert EVENT_MATCH_MAP: effect_event → {trigger_event → check}.
+
+    EVENT_MATCH_MAP is trigger→effect; this produces effect→trigger for
+    the rule where the commander has an **effect** and we look for
+    candidate **triggers** that fire from it.
+
+    Skip catch-all trigger events (SpellCast, LandPlayed, Attacks, etc.)
+    on the candidate side — these match everything and would flood results.
+    Also skip candidate triggers that only fire on Self (Card.Self filter).
+
+    Check functions have their arguments swapped since the original checks
+    are (trigger, effect) but here cmdr=effect and cand=trigger.
+    """
+    def _not_self_and_zones(e: PortRow, t: PortRow) -> bool:
+        return _cand_trigger_not_self(e, t) and _zones_compatible(t, e)
+
+    def _not_self_and_counters(e: PortRow, t: PortRow) -> bool:
+        return _cand_trigger_not_self(e, t) and _counters_compatible(t, e)
+
+    # Zone-change effects produce 900-6600 matches — handled by the
+    # filter-aware _find_effect_feeds_etb() function instead.
+    _EXCLUDED_EFFECT_EVENTS = frozenset({
+        "ChangeZone", "ChangeZoneAll",   # → ChangesZone (1000+ matches)
+        "Token", "CopyPermanent", "Animate",  # → ChangesZone (900+)
+        "DealDamage", "DamageAll",       # → DamageDone (247, dilutes Niv-Mizzet)
+        "Draw",                          # → Drawn (121, dilutes Tuvasa/Sythis)
+    })
+
+    out: dict[str, dict[str, EventCheck]] = {}
+    for trig_ev, effects in EVENT_MATCH_MAP.items():
+        if trig_ev in CATCH_ALL_TRIGGERS:
+            continue
+        if "*" in effects:
+            continue
+        for eff_ev, check in effects.items():
+            if eff_ev in _EXCLUDED_EFFECT_EVENTS:
+                continue
+            # Build a check that (1) rejects self-only candidate triggers
+            # and (2) applies the original compatibility check with swapped args
+            if check is _always:
+                combined: EventCheck = _cand_trigger_not_self
+            elif check is _zones_compatible:
+                combined = _not_self_and_zones
+            elif check is _counters_compatible:
+                combined = _not_self_and_counters
+            else:
+                combined = lambda e, t, _c=check: (
+                    _cand_trigger_not_self(e, t) and _c(t, e)
+                )
+            out.setdefault(eff_ev, {})[trig_ev] = combined
+    return out
+
+
+#: Replacement results that amplify the event rather than prevent it.
+#: These should NOT be treated as anti-synergy — Gisela's DmgTwice
+#: doubles damage triggers, not blocks them.
+_AMPLIFIER_REPLACEMENT_RESULTS: frozenset[str] = frozenset({
+    "DmgTwice", "DmgTriple", "DmgPlus1", "DmgPlus2", "DmgPlus",
+    "Dmg2", "Dmg3", "CreateToken",
+    # DBReplace is used for token enhancements (Chatterfang, Xorn) and
+    # damage halving (Gisela) — neither is a true anti-synergy blocker
+    "DBReplace",
+})
+
+
+def _not_amplifier(_cmdr_port: PortRow, cand_port: PortRow) -> bool:
+    """Reject replacement ports that amplify rather than block."""
+    repl_result = (cand_port.get("replacement_result") or "").strip()
+    return repl_result not in _AMPLIFIER_REPLACEMENT_RESULTS
+
+
 def _invert_replacement_blocks() -> dict[str, dict[str, EventCheck]]:
-    """Invert REPLACEMENT_BLOCKS_TRIGGER: trigger_event → {repl_event → _always}.
+    """Invert REPLACEMENT_BLOCKS_TRIGGER: trigger_event → {repl_event → check}.
 
     REPLACEMENT_BLOCKS_TRIGGER maps replacement_event → trigger_events.
     We need trigger_event → replacement_event for the complement rule.
@@ -97,18 +179,20 @@ def _invert_replacement_blocks() -> dict[str, dict[str, EventCheck]]:
             # Skip ChangesZone ↔ Moved — needs zone-aware filtering
             if trig_ev == "ChangesZone" and repl_ev == "Moved":
                 continue
-            out.setdefault(trig_ev, {})[repl_ev] = _always
+            out.setdefault(trig_ev, {})[repl_ev] = _not_amplifier
     return out
 
 
 # Resonant effects: same effect on commander and candidate compounds
 _RESONANT_EFFECTS: frozenset[str] = frozenset({
     "Proliferate", "Mill", "DigUntil", "Scry", "Surveil",
-    "Untap", "Investigate",
+    "Untap", "TapOrUntap", "Investigate", "BecomeMonarch",
 })
 
 _RESONANT_EFFECT_FAMILY: dict[str, frozenset[str]] = {
     "DigUntil": frozenset({"DigUntil", "Mill"}),
+    "Untap": frozenset({"Untap", "UntapAll", "TapOrUntap"}),
+    "TapOrUntap": frozenset({"Untap", "UntapAll", "TapOrUntap", "Tap", "TapAll"}),
 }
 
 # Replacement resonance: commander effect → candidate replacement that doubles it
@@ -125,11 +209,13 @@ _REPLACEMENT_RESONANCE: dict[str, dict[str, EventCheck]] = {
 # Reverse: commander replacement → candidate effect that produces the input
 _REPLACEMENT_WANTS_PRODUCER: dict[str, dict[str, EventCheck]] = {
     "CreateToken":  {"Token": _always},
-    "AddCounter":   {"PutCounter": _always, "PutCounterAll": _always, "Proliferate": _always},
+    "AddCounter":   {"PutCounter": _always, "PutCounterAll": _always,
+                     "Proliferate": _always, "MultiplyCounter": _always},
     "Draw":         {"Draw": _always},
     "DrawCards":    {"Draw": _always},
     "GainLife":     {"GainLife": _always},
     "ProduceMana":  {"Mana": _always},
+    "Mill":         {"Mill": _always},  # Bruvac doubles mill → find millers
 }
 
 
@@ -243,6 +329,14 @@ COMPLEMENT_RULES: tuple[ComplementRule, ...] = (
         cand_port_type="trigger",
         event_pairs=_build_sacrifice_cluster_pairs(),
     ),
+    # 9. Commander effect → candidate trigger fires from it
+    #    (e.g. commander makes tokens → candidate triggers on ChangesZone)
+    ComplementRule(
+        rule_id="effect_feeds_trigger",
+        cmdr_port_type="effect",
+        cand_port_type="trigger",
+        event_pairs=_invert_event_match_map(),
+    ),
 )
 
 
@@ -334,6 +428,12 @@ def find_all_complements(
         out.extend(_find_spellcast_density_complements(conn, cmdr_ports, cmdr_set))
         out.extend(_find_tribal_density_complements(conn, cmdr_ports, cmdr_set))
         out.extend(_find_changeszone_resonance(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_effect_feeds_etb(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_sacrifice_outlets(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_panharmonicon_complements(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_graveyard_fillers(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_extra_land_plays(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_scales_with_density(conn, cmdr_ports, cmdr_set))
         return out
 
     if not needed_cand:
@@ -369,7 +469,7 @@ def find_all_complements(
     sql = (
         "SELECT card_name, port_type, event_class, valid_filter, "
         "zone_origin, zone_destination, counter_type, branch_kind, "
-        "is_conditional, replacement_event "
+        "is_conditional, replacement_event, replacement_result "
         f"FROM card_ports WHERE {' OR '.join(conditions)}"
     )
     rows = conn.execute(sql, params).fetchall()
@@ -728,6 +828,9 @@ def _find_spellcast_density_complements(
         "Instant", "Sorcery", "Creature", "Artifact", "Enchantment",
         "Planeswalker",
     })
+    _NONCREATURE_TYPES = frozenset({
+        "Instant", "Sorcery", "Artifact", "Enchantment", "Planeswalker",
+    })
     _TOO_BROAD = frozenset({"Creature", "Permanent", "Card"})
 
     wanted_types: set[str] = set()
@@ -745,6 +848,10 @@ def _find_spellcast_density_complements(
         for alt in vf.split(","):
             alt = alt.strip()
             if not alt or alt.startswith("Card.Self"):
+                continue
+            # Handle negative filters: "Card.nonCreature" → all non-creature types
+            if "nonCreature" in alt or "non-Creature" in alt:
+                wanted_types.update(_NONCREATURE_TYPES)
                 continue
             base = alt.split(".")[0].split("+")[0].strip()
             if base in _CASTABLE_TYPES and base not in _TOO_BROAD:
@@ -898,3 +1005,508 @@ def _find_changeszone_resonance(
                 break
 
     return results
+
+
+def _find_effect_feeds_etb(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Filter-aware effect→trigger matching for zone-change effects.
+
+    Connects commander effects that produce permanents (Token, ChangeZone,
+    CopyPermanent, Animate) to candidate ChangesZone triggers, using the
+    type filter to narrow matches.
+
+    Token effects produce creatures entering the battlefield → match
+    ``ChangesZone Creature.*`` triggers (Impact Tremors, Purphoros).
+    ChangeZone effects with ``Land.YouCtrl`` filter → match
+    ``ChangesZone Land.*`` triggers (Lotus Cobra, Tatyova).
+
+    The blanket effect_feeds_trigger rule excludes these events because
+    unfiltered matching produces 900-6600 candidates. This function
+    narrows to ~200-350 by intersecting filter types.
+    """
+    _PRIMARY_TYPES = frozenset({
+        "Creature", "Artifact", "Enchantment", "Land", "Planeswalker",
+    })
+    # Broad filter bases that match too many candidates — skip these
+    _TOO_BROAD_BASES = frozenset({"Card", "Permanent", ""})
+
+    # Collect (base_type, zone_destination) pairs from commander effects
+    # that produce permanents entering zones
+    _ZONE_EFFECT_EVENTS = frozenset({
+        "Token", "ChangeZone", "ChangeZoneAll", "CopyPermanent", "Animate",
+    })
+    cmdr_produces: set[tuple[str, str]] = set()  # (base_type, zone_dest)
+    # Whether to gate Creature ETB by "Other" filter (non-tribal tokens)
+    _needs_creature_other_gate = False
+
+    # Get commander's literal subtypes for tribal gating (batched)
+    cmdr_literal_subtypes: set[str] = set()
+    cmdr_list = list(cmdr_set)
+    for row in conn.execute(
+        "SELECT subtypes FROM cards WHERE name IN ({})".format(
+            ",".join("?" * len(cmdr_list))
+        ),
+        tuple(cmdr_list),
+    ).fetchall():
+        if row["subtypes"]:
+            cmdr_literal_subtypes.update(row["subtypes"].split())
+
+    for p in cmdr_ports:
+        if p.get("port_type") != "effect":
+            continue
+        ev = (p.get("event_class") or "").strip()
+        if ev not in _ZONE_EFFECT_EVENTS:
+            continue
+
+        if ev == "Token":
+            raw = str(p.get("raw_line") or "")
+            m = re.search(r"'TokenScript':\s*'([^']+)'", raw)
+            if m:
+                script = m.group(1)
+                parts = script.lower().split("_")
+                # Artifact tokens always match Artifact ETB triggers
+                if len(parts) >= 4 and parts[3] == "a":
+                    cmdr_produces.add(("Artifact", "Battlefield"))
+                # Tribal gating: only add Creature ETB for non-tribal
+                # token commanders. Krenko (Goblin making Goblins) is
+                # tribal → skip. Locust God (not an Insect making Insects)
+                # is non-tribal → add Creature ETB payoffs.
+                token_sub = _token_subtype(script)
+                if token_sub and token_sub not in cmdr_literal_subtypes:
+                    cmdr_produces.add(("Creature", "Battlefield"))
+                    _needs_creature_other_gate = True
+        else:
+            # ChangeZone/CopyPermanent/Animate — extract type from filter
+            vf = p.get("valid_filter") or ""
+            zd = (p.get("zone_destination") or "").strip()
+            if not zd:
+                zd = "Battlefield"
+            for alt in vf.split(","):
+                base = alt.strip().split(".")[0].split("+")[0].strip()
+                if base in _PRIMARY_TYPES:
+                    cmdr_produces.add((base, zd))
+
+    if not cmdr_produces:
+        return []
+
+    # Preload creature names for the "Other" gate
+    _creature_names: set[str] = set()
+    if _needs_creature_other_gate:
+        _creature_names = {
+            r["name"] for r in conn.execute(
+                "SELECT name FROM cards WHERE card_types LIKE '%Creature%'"
+            ).fetchall()
+        }
+
+    # Fetch candidate ChangesZone triggers (non-self)
+    cur = conn.execute(
+        "SELECT card_name, valid_filter, zone_destination, branch_kind "
+        "FROM card_ports "
+        "WHERE port_type = 'trigger' AND event_class = 'ChangesZone' "
+        "AND valid_filter IS NOT NULL AND valid_filter != ''"
+    )
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+    for r in cur.fetchall():
+        card = r["card_name"]
+        if card in cmdr_set or card in seen:
+            continue
+        vf = r["valid_filter"] or ""
+        if _trigger_only_matches_self(vf):
+            continue
+        cand_zd = (r["zone_destination"] or "").strip()
+        if not cand_zd:
+            cand_zd = "Any"
+
+        # Check if any commander production matches trigger's filter
+        for alt in vf.split(","):
+            base = alt.strip().split(".")[0].split("+")[0].strip()
+            if base in _TOO_BROAD_BASES:
+                continue
+            for cmdr_base, cmdr_zd in cmdr_produces:
+                if base != cmdr_base:
+                    continue
+                # Zone must be compatible
+                if cand_zd != "Any" and cmdr_zd != cand_zd:
+                    continue
+                # Non-tribal Creature tokens: skip creature cards
+                # without "Other" qualifier (they trigger on
+                # themselves, not on tokens the commander creates).
+                # Non-creature cards (Impact Tremors, Aura Shards)
+                # are always genuine payoffs.
+                if cmdr_base == "Creature" and _needs_creature_other_gate:
+                    if "Other" not in vf and card in _creature_names:
+                        continue
+                seen.add(card)
+                results.append(PortComplement(
+                    rule_id="effect_feeds_trigger",
+                    direction="synergy",
+                    candidate=card,
+                    cmdr_event=f"Token_{cmdr_base}" if cmdr_base else "ChangeZone",
+                    cand_event=f"ChangesZone_{base}",
+                    branch_kind=r["branch_kind"] or "root",
+                ))
+                break
+            if card in seen:
+                break
+
+    return results
+
+
+def _find_sacrifice_outlets(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Find sacrifice outlet candidates for commanders with death triggers.
+
+    Commanders with ``ChangesZone`` triggers on ``Battlefield → Graveyard``
+    (dying creatures) want candidates with sacrifice costs — these enable
+    the commander to profit from creature deaths on demand.
+
+    Marchesa triggers when creatures with +1/+1 counters die. Meren
+    triggers when creatures die. Both want Viscera Seer, Ashnod's Altar,
+    etc.
+    """
+    # Check if commander has a ChangesZone death trigger
+    has_death_trigger = False
+    for p in cmdr_ports:
+        if p.get("port_type") != "trigger":
+            continue
+        ev = (p.get("event_class") or "").strip()
+        if ev != "ChangesZone":
+            continue
+        vf = p.get("valid_filter") or ""
+        if _trigger_only_matches_self(vf):
+            continue
+        zd = (p.get("zone_destination") or "").strip()
+        # Death = going to graveyard (from battlefield)
+        if zd == "Graveyard":
+            has_death_trigger = True
+            break
+
+    if not has_death_trigger:
+        return []
+
+    # Find all cards with sacrifice costs
+    cur = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE port_type = 'cost' AND event_class = 'sacrifice'"
+    )
+    results: list[PortComplement] = []
+    for r in cur.fetchall():
+        card = r["card_name"]
+        if card not in cmdr_set:
+            results.append(PortComplement(
+                rule_id="cost_feeds_trigger",
+                direction="synergy",
+                candidate=card,
+                cmdr_event="ChangesZone_death",
+                cand_event="sacrifice",
+            ))
+
+    return results
+
+
+def _find_panharmonicon_complements(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Panharmonicon-style commanders double specific trigger types.
+
+    Yarok doubles ETB triggers. Isshin doubles attack triggers.
+    Teysa doubles death triggers. Every card with a matching non-self
+    trigger type is a complement.
+
+    Reads the ``ValidMode`` from the Panharmonicon port's raw_line to
+    determine which trigger event classes are doubled.
+    """
+    doubled_modes: set[str] = set()
+    doubled_zones: dict[str, str] = {}  # event → zone_destination filter
+
+    for p in cmdr_ports:
+        ev = (p.get("event_class") or "").strip()
+        if ev != "Panharmonicon":
+            continue
+        raw = str(p.get("raw_line") or "")
+        m = re.search(r"'ValidMode':\s*'([^']+)'", raw)
+        if not m:
+            continue
+        modes = [mode.strip() for mode in m.group(1).split(",") if mode.strip()]
+        doubled_modes.update(modes)
+        # Extract zone destination filter (Teysa: Destination=Graveyard)
+        m_dest = re.search(r"'Destination':\s*'([^']+)'", raw)
+        if m_dest:
+            for mode in modes:
+                doubled_zones[mode] = m_dest.group(1)
+
+    if not doubled_modes:
+        return []
+
+    placeholders = ",".join("?" * len(doubled_modes))
+    cur = conn.execute(
+        f"SELECT card_name, event_class, valid_filter, zone_destination, branch_kind "
+        f"FROM card_ports "
+        f"WHERE port_type = 'trigger' AND event_class IN ({placeholders})",
+        tuple(doubled_modes),
+    )
+
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+    for r in cur.fetchall():
+        card = r["card_name"]
+        if card in cmdr_set or card in seen:
+            continue
+        vf = r["valid_filter"] or ""
+        if _trigger_only_matches_self(vf):
+            continue
+        ev = r["event_class"]
+        # Zone filter: Teysa doubles death (dest=Graveyard) only
+        if ev in doubled_zones:
+            cand_zd = (r["zone_destination"] or "").strip()
+            if cand_zd and cand_zd != doubled_zones[ev]:
+                continue
+        seen.add(card)
+        results.append(PortComplement(
+            rule_id="panharmonicon",
+            direction="synergy",
+            candidate=card,
+            cmdr_event=f"Panharmonicon_{ev}",
+            cand_event=ev,
+            branch_kind=r["branch_kind"] or "root",
+        ))
+
+    return results
+
+
+def _find_graveyard_fillers(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Find graveyard fillers for commanders that reanimate or cast from GY.
+
+    Commanders with ChangeZone effects from Graveyard (Meren, Marchesa)
+    or static MayPlay from Graveyard (Karador, Muldrotha, Kess) want
+    cards that fill the graveyard: self-mill, dredge, self-discard, and
+    creatures that put themselves in the graveyard (evoke, self-sacrifice).
+    """
+    wants_gy = False
+
+    # Check for ChangeZone from Graveyard effects (Meren, Marchesa)
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        if pt == "effect" and ev == "ChangeZone":
+            zo = (p.get("zone_origin") or "").strip()
+            if zo == "Graveyard":
+                wants_gy = True
+                break
+        # Static graveyard-cast (Karador, Muldrotha, Kess)
+        if pt == "static" and ev == "Continuous":
+            raw = str(p.get("raw_line") or "")
+            if "'MayPlay'" in raw and "'Graveyard'" in raw:
+                wants_gy = True
+                break
+        # scales_with graveyard (Karador, Mimeoplasm)
+        if pt == "scales_with":
+            if "Graveyard" in ev or "graveyard" in ev:
+                wants_gy = True
+                break
+
+    if not wants_gy:
+        return []
+
+    # Also detect which card types the commander can recast from GY
+    recast_types: set[str] = set()
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        if pt == "static" and ev == "Continuous":
+            raw = str(p.get("raw_line") or "")
+            if "'MayPlay'" in raw and "'Graveyard'" in raw:
+                m = re.search(r"'Affected':\s*'([^']+)'", raw)
+                if m:
+                    for alt in m.group(1).split(","):
+                        base = alt.strip().split(".")[0].split("+")[0].strip()
+                        if base and base[0].isupper() and base != "Card":
+                            recast_types.add(base)
+
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+
+    # Self-mill effects (targeted: cards that specifically mill yourself)
+    cur = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE port_type = 'effect' AND event_class IN ('Mill', 'DigUntil', 'Surveil') "
+        "AND (valid_filter LIKE '%YouCtrl%' OR valid_filter LIKE '%YouOwn%' "
+        "OR valid_filter = 'You' OR valid_filter LIKE 'You.%')"
+    )
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name not in cmdr_set and name not in seen:
+            seen.add(name)
+            results.append(PortComplement(
+                rule_id="trigger_effect",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="graveyard_filler",
+                cand_event="self_mill",
+            ))
+
+    # Recast-type density: Kess wants instants/sorceries, Karador wants
+    # creatures with ETBs. Match cards of the recastable types.
+    _CASTABLE_TYPES = frozenset({"Instant", "Sorcery"})
+    for card_type in recast_types & _CASTABLE_TYPES:
+        cur = conn.execute(
+            "SELECT name FROM cards WHERE card_types LIKE ?",
+            (f"%{card_type}%",),
+        )
+        for r in cur.fetchall():
+            name = r["name"]
+            if name not in cmdr_set and name not in seen:
+                seen.add(name)
+                results.append(PortComplement(
+                    rule_id="spell_density",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="graveyard_cast",
+                    cand_event=card_type,
+                ))
+
+    return results
+
+
+def _find_scales_with_density(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Find cards that contribute to a commander's scaling condition.
+
+    Parses ``scales_with`` event_class to determine what the commander
+    needs more of:
+    - ``CardCounters.P1P1`` → cards that put +1/+1 counters
+    - ``CardToughness`` → high-toughness creatures (Phenax mill-by-toughness)
+    - ``DevotionDual.X.Y`` → permanents with X/Y color pips
+    - ``LifeOppsLostThisTurn`` → damage/drain effects
+    """
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "scales_with":
+            continue
+        ev = (p.get("event_class") or "").strip()
+
+        # CardCounters.P1P1 → find counter producers
+        if "P1P1" in ev:
+            cur = conn.execute(
+                "SELECT DISTINCT card_name FROM card_ports "
+                "WHERE port_type = 'effect' AND event_class IN "
+                "('PutCounter', 'PutCounterAll', 'Proliferate') "
+                "AND (counter_type IS NULL OR counter_type = '' "
+                "OR counter_type = 'P1P1')"
+            )
+            for r in cur.fetchall():
+                name = r["card_name"]
+                if name not in cmdr_set and name not in seen:
+                    seen.add(name)
+                    results.append(PortComplement(
+                        rule_id="scaling",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="scales_P1P1",
+                        cand_event="counter_producer",
+                    ))
+
+        # CardToughness → high-toughness creatures (Phenax mills by toughness).
+        # Toughness isn't directly in cards table; use Defender keyword
+        # as proxy for high-toughness creatures (walls, defenders).
+        elif "CardToughness" in ev:
+            cur = conn.execute(
+                "SELECT DISTINCT card_name FROM card_ports "
+                "WHERE port_type = 'keyword' AND event_class = 'Defender'"
+            )
+            for r in cur.fetchall():
+                name = r["card_name"]
+                if name not in cmdr_set and name not in seen:
+                    seen.add(name)
+                    results.append(PortComplement(
+                        rule_id="scaling",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="scales_toughness",
+                        cand_event="high_toughness",
+                    ))
+
+        # LifeOppsLostThisTurn → drain/damage effects
+        elif "LifeOppsLost" in ev:
+            cur = conn.execute(
+                "SELECT DISTINCT card_name FROM card_ports "
+                "WHERE port_type = 'effect' AND event_class IN "
+                "('LoseLife', 'DealDamage')"
+            )
+            for r in cur.fetchall():
+                name = r["card_name"]
+                if name not in cmdr_set and name not in seen:
+                    seen.add(name)
+                    results.append(PortComplement(
+                        rule_id="scaling",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="scales_opp_life_lost",
+                        cand_event="drain_damage",
+                    ))
+
+    return results
+
+
+def _find_extra_land_plays(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Commanders that play extra lands (Azusa) want landfall triggers."""
+    has_extra_lands = False
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "static":
+            continue
+        raw = str(p.get("raw_line") or "")
+        if "AdjustLandPlays" in raw:
+            has_extra_lands = True
+            break
+
+    if not has_extra_lands:
+        return []
+
+    # Find all landfall triggers (ChangesZone Land)
+    cur = conn.execute(
+        "SELECT card_name, branch_kind FROM card_ports "
+        "WHERE port_type = 'trigger' AND event_class = 'ChangesZone' "
+        "AND valid_filter LIKE '%Land%' "
+        "AND zone_destination = 'Battlefield'"
+    )
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+    for r in cur.fetchall():
+        card = r["card_name"]
+        if card in cmdr_set or card in seen:
+            continue
+        seen.add(card)
+        results.append(PortComplement(
+            rule_id="effect_feeds_trigger",
+            direction="synergy",
+            candidate=card,
+            cmdr_event="extra_land_plays",
+            cand_event="ChangesZone_Land",
+            branch_kind=r["branch_kind"] or "root",
+        ))
+
+    return results
+
+

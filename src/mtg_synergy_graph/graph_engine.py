@@ -82,15 +82,16 @@ EVENT_MATCH_MAP: dict[str, dict[str, EventCheck]] = {
         "PutCounter":    _counters_compatible,
         "PutCounterAll": _counters_compatible,
         "Proliferate":   _always,
+        "MultiplyCounter": _always,  # Vorel, Deepglow Skate (44 cards)
     },
     "SpellCast":      {"*": _always},
-    "DamageDone":     {"DealDamage": _always, "DamageAll": _always},
+    "DamageDone":     {"DealDamage": _always, "DamageAll": _always, "AddPhase": _always},
     "LifeGained":     {"GainLife": _always},
     "Sacrificed":     {"Sacrifice": _always, "SacrificeAll": _always},
     "Discarded":      {"Discard": _always},
     "Drawn":          {"Draw": _always},
-    "Taps":           {"Tap": _always, "TapAll": _always},
-    "Untaps":         {"Untap": _always, "UntapAll": _always},
+    "Taps":           {"Tap": _always, "TapAll": _always, "TapOrUntap": _always},
+    "Untaps":         {"Untap": _always, "UntapAll": _always, "TapOrUntap": _always},
     "LandPlayed":     {"*": _always},
     "Attacks":        {"*": _always},
     "AttackerBlocked": {"*": _always},
@@ -104,6 +105,7 @@ EVENT_MATCH_MAP: dict[str, dict[str, EventCheck]] = {
     "Investigated":   {"Investigate":  _always},  # 2 trigs / 117 effects
     "Surveil":        {"Surveil":      _always},  # 11 trigs / 136 effects
     "LifeLost":       {"LoseLife":     _always},  # 21 trigs / 1000 effects
+    "BecomeMonarch":  {"BecomeMonarch": _always}, # 4 trigs / 47 effects
 }
 
 #: Cost-port event_class → set of trigger event_classes that this cost

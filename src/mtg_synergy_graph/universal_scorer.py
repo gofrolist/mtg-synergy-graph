@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import math
 import sqlite3
-from collections import Counter, defaultdict
+import types
+from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -21,7 +22,7 @@ from .complement_rules import (
     PortComplement,
     find_all_complements,
 )
-from .heuristics import STAPLES, STAPLE_SCORE
+from .heuristics import STAPLES
 from .scoring import BUCKETS
 
 
@@ -45,6 +46,8 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "tribal_density":        "catchall",
     "sacrifice_cluster":     "sacrifice_synergy",
     "zone_resonance":        "trigger_resonance",
+    "effect_feeds_trigger":  "port_match",
+    "panharmonicon":         "port_match",
 }
 
 
@@ -128,6 +131,14 @@ _FLAT_COUNT_RULES: frozenset[str] = frozenset({
     "tribal_density",
 })
 
+#: Per-rule flat weight overrides. Tribal density uses a lower weight
+#: (0.5) because random tribal creatures (Bog Rats, Robber Fly) at 1.0
+#: drown out actual synergy cards. At 0.5, a tribal creature scores
+#: 0.5 while a lord scores 0.5 + lord_IDF ≈ 0.74 — proper discrimination.
+_FLAT_WEIGHT_OVERRIDES: types.MappingProxyType[str, float] = types.MappingProxyType({
+    "tribal_density": 0.5,
+})
+
 
 def _computeidf_weights(
     complements: list[PortComplement],
@@ -151,7 +162,7 @@ def _computeidf_weights(
     for key, candidates in freq.items():
         rule_id = key[0]
         if rule_id in _FLAT_COUNT_RULES:
-            result[key] = 1.0
+            result[key] = _FLAT_WEIGHT_OVERRIDES.get(rule_id, 1.0)
         else:
             result[key] = 1.0 / math.log2(1.0 + len(candidates))
     return result

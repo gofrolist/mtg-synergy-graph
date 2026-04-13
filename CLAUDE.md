@@ -6,7 +6,7 @@ Guidance for Claude Code working in this repo.
 
 MTG Synergy Graph — deterministic, rule-based EDH/Commander synergy scorer
 using Forge DSL ports. No training, no EDHREC at inference.
-Current aggregate NDCG@30 ~ 0.131 on the 100-commander golden set.
+Current aggregate NDCG@30 ~ 0.142, Hi-Syn 102/1000 on the 100-commander golden set.
 
 ## Common Commands
 
@@ -39,12 +39,18 @@ pair creates a synergy. Each wraps an existing mechanical map.
 | replacement_producer | replacement | effect | producer matching |
 | replacement_blocks | trigger | replacement | anti-synergy |
 | sacrifice_cluster | trigger | trigger | death-axis clustering |
+| effect_feeds_trigger | effect | trigger | inverted EVENT_MATCH_MAP |
 | lord | card subtypes | static | tribal lord matching |
 | etb_self | trigger filter | card identity | ETB/dies self-matching |
 | scaling | scales_with | card type | Aura/Equipment density |
 | spell_density | SpellCast filter | card type | spell-type density |
 | tribal_density | token subtypes | card subtype | tribal creature density |
 | zone_resonance | ChangesZone filter | ChangesZone trigger | landfall resonance |
+| sacrifice_outlets | ChangesZone death | sacrifice cost | sac outlets for death cmdr |
+| panharmonicon | Panharmonicon static | doubled trigger type | Yarok/Isshin/Teysa |
+| graveyard_filler | GY-reanimate/cast | self-mill, discard | Meren/Karador/Kess |
+| scales_with_density | scales_with port | density contributors | Phenax/Ezuri/Rakdos |
+| extra_land_plays | AdjustLandPlays static | landfall triggers | Azusa |
 
 ### IDF Weighting (`universal_scorer.py`)
 

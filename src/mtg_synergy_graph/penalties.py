@@ -158,18 +158,35 @@ def _exclusion_tokens(filter_str: str | None) -> set[str]:
 
 
 def _token_subtype(script: str | None) -> str | None:
-    """Best-effort subtype extraction from a Forge TokenScript$ value."""
+    """Best-effort subtype extraction from a Forge TokenScript$ value.
+
+    Forge token scripts come in several layouts:
+
+    * Creature:  ``b_1_1_vampire``  → color, P, T, subtype[, keywords…]
+    * Artifact creature: ``u_1_1_a_thopter_flying`` → color, P, T, ``a``, subtype[, kw…]
+    * Non-creature artifact: ``c_a_treasure_sac`` → color, ``a``, subtype[, modifier]
+    * Named token: ``ashaya_the_awoken_world`` → full name (no numeric P/T)
+
+    Returns the first creature/artifact subtype found, capitalised.
+    """
     if not script:
         return None
     parts = script.lower().split("_")
     if len(parts) < 3:
         return None
-    # Heuristic: if the second segment is a single letter ("a", "c", ...) it's
-    # a non-creature token script and the subtype is parts[2]. Otherwise it's
-    # the creature form and the subtype is parts[3] when present.
+    # Non-creature artifact layout: parts[1] is a single non-digit letter
+    # (the artifact type indicator) → subtype is parts[2].
+    # e.g. ``c_a_treasure_sac`` → "Treasure"
     if len(parts[1]) == 1 and not parts[1].isdigit():
         return parts[2].capitalize()
+    # Creature layout: parts[1..2] are power/toughness digits.
+    # If parts[3] == 'a' it's an artifact creature → subtype at parts[4].
+    # Otherwise subtype is parts[3].
+    # e.g. ``u_1_1_a_thopter_flying`` → "Thopter"
+    # e.g. ``b_1_1_vampire``          → "Vampire"
     if len(parts) >= 4:
+        if parts[3] == "a" and len(parts) >= 5:
+            return parts[4].capitalize()
         return parts[3].capitalize()
     return parts[-1].capitalize()
 
