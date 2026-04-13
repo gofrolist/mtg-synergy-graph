@@ -55,11 +55,6 @@ def main() -> int:
                         help="Write current run as baseline (overwrites)")
     parser.add_argument("--ndcg-tolerance", type=float, default=0.005)
     parser.add_argument("--jitter", type=int, default=5)
-    parser.add_argument("--graph-metrics", action="store_true",
-                        help="Enable SPEC §6.8 causal graph metrics "
-                             "(graph_neighbor_overlap, graph_pagerank). "
-                             "Cold start is ~30s slower but subsequent "
-                             "pages reuse the adjacency cache.")
     args = parser.parse_args()
 
     edhrec_conn: sqlite3.Connection | None = None
@@ -70,7 +65,7 @@ def main() -> int:
             edhrec_conn = sqlite3.connect(args.edhrec_db)
             edhrec_conn.row_factory = sqlite3.Row
 
-    with SynergyEngine(args.db, graph_metrics=args.graph_metrics) as engine:
+    with SynergyEngine(args.db) as engine:
         if args.bootstrap:
             if not args.commanders:
                 print("error: --bootstrap requires --commanders", file=sys.stderr)

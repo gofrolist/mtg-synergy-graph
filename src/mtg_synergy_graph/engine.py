@@ -25,14 +25,11 @@ from typing import Any
 
 from .db import open_db
 from .penalties import (
-    HARD_FILTER_SCORE,
     CandidateCache,
-    apply_penalties,
-    apply_penalties_ctx,
     build_candidate_cache,
     build_penalty_context,
 )
-from .scoring import empty_buckets, score_all_candidates
+from .universal_scorer import score_all_universal
 
 SPEC_VERSION = "1.2.2"
 ENGINE_VERSION = "0.1.0"
@@ -113,79 +110,6 @@ def _color_identity_union(rows: list[sqlite3.Row]) -> list[str]:
     return sorted(pips)
 
 
-_PORT_BUCKETS = frozenset(
-    {"port_match", "cost_synergy", "scaling", "amplifier", "lord", "replacement"}
-)
-_SYNTH_BUCKETS = frozenset(
-    {"catchall", "deck_hints", "chain", "internal_synergy",
-     "resource_density", "effect_resonance", "replacement_resonance"}
-)
-
-
-def _build_contributing_ports(
-    conn: sqlite3.Connection,
-    candidate: str,
-    raw_matches: list[dict[str, Any]],
-) -> list[ContributingPort]:
-    """Hydrate the per-candidate match list into ContributingPort rows.
-
-    For port-derived buckets (``port_match``, ``cost_synergy``, etc.) we
-    look up at most one representative ``card_ports`` row per bucket from
-    a single SQL query, cached locally to avoid the H-7 double-fetch.
-    Synthetic buckets (``catchall``, ``deck_hints``, ``chain``,
-    ``internal_synergy``) don't need a port row.
-    """
-    out: list[ContributingPort] = []
-    seen: set[tuple[str, str, str]] = set()
-
-    needs_port_fetch = any(m.get("bucket") in _PORT_BUCKETS for m in raw_matches)
-    port_rows: list[dict[str, Any]] = []
-    if needs_port_fetch:
-        cur = conn.execute(
-            "SELECT port_type, event_class, valid_filter, branch_kind, raw_line "
-            "FROM card_ports WHERE card_name = ? LIMIT 200",
-            (candidate,),
-        )
-        port_rows = [dict(r) for r in cur.fetchall()]
-
-    for m in raw_matches:
-        bucket = m.get("bucket", "")
-        if bucket in _PORT_BUCKETS:
-            for r in port_rows:
-                key = (bucket, r["port_type"], r["event_class"] or "")
-                if key in seen:
-                    continue
-                seen.add(key)
-                out.append(
-                    ContributingPort(
-                        bucket=bucket,
-                        port_type=r["port_type"],
-                        event_class=r["event_class"] or "",
-                        valid_filter=r["valid_filter"],
-                        branch_kind=r["branch_kind"] or "root",
-                        raw_line=r["raw_line"],
-                    )
-                )
-                # One representative row per bucket is enough — full
-                # detail is in synergy_edges.
-                break
-        elif bucket in _SYNTH_BUCKETS:
-            key = (bucket, "*", "")
-            if key not in seen:
-                seen.add(key)
-                out.append(
-                    ContributingPort(
-                        bucket=bucket,
-                        port_type="*",
-                        event_class=str(m.get("trigger_event") or m.get("event_class") or ""),
-                        valid_filter=None,
-                        branch_kind=str(m.get("branch_kind") or "root"),
-                        raw_line=None,
-                    )
-                )
-    return out
-
-
 class SynergyEngine:
     """Public façade around the deterministic graph engine (§14)."""
 
@@ -193,44 +117,27 @@ class SynergyEngine:
         self,
         db_path: str | Path,
         *,
+        # Legacy params accepted but ignored for backward compat
         graph_metrics: bool = False,
         chain_matches: bool = False,
+        ranking_mode: str = "universal",
+        breadth_factor: float = 0.05,
     ):
         """Open the engine against a synergy.db.
 
-        ``graph_metrics`` defaults to ``False`` because §6.8 causal graph
-        metrics are expensive even with the Phase 4.6 numpy fast path:
-
-        * cold (first call):  ~30 s on a 32 k-card import (graph build +
-                              numpy personalised PageRank + per-pair Jaccard)
-        * warm (cached adj):  ~10 s per page (PR + Jaccard only)
-
-        Enabling it boosts EDHREC Hi-Syn coverage from 9.6 % → 10.8 %
-        (the LightGBM ``graph_pagerank`` feature) but slightly softens
-        OnPage. Use it for power-user / offline analysis runs; the default
-        Round 8 baseline is preserved when this flag is False.
-
-        ``chain_matches`` is similarly opt-in: 2-hop chain detection
-        re-walks the trigger feeders for every intermediate, which is the
-        dominant cost on a full Forge import. Disabled by default; enable
-        explicitly when you need ``chain_score`` populated.
+        Scoring uses the universal port-complement matcher: score = count
+        of distinct mechanical interactions between commander ports and
+        candidate ports, weighted by specificity (IDF). No hand-tuned
+        weights, no global penalties.
         """
         self._db_path = Path(db_path)
         self._conn = open_db(self._db_path)
         self._forge_version: str = self._detect_forge_version()
-        self._use_graph_metrics: bool = graph_metrics
-        self._use_chain_matches: bool = chain_matches
-        # Phase 4.6: when graph_metrics is enabled, the causal graph is
-        # built on first use and reused across page() calls. The build
-        # costs ~17 s on a 32 k-card import — far too expensive to repeat
-        # per request. The cache is per-process; restarting clears it.
-        # Phase 4.7: same idea for the scipy CSR matrix — built once,
-        # reused across commanders. This is what makes graph_metrics
-        # warm-call cost <1 s.
-        self._adjacency_cache: dict[str, set[str]] | None = None
-        self._scipy_pr_context: Any = None
         self._candidate_cache: CandidateCache | None = None
         self._score_cache: dict[tuple[str, ...], Any] = {}
+        # Legacy attributes kept for validate.py backward compat
+        self._ranking_mode = ranking_mode
+        self._breadth_factor = breadth_factor
 
     # ----- lifecycle -------------------------------------------------------
 
@@ -285,32 +192,21 @@ class SynergyEngine:
         include_explanation: bool = False,
     ) -> Recommendation:
         cmdr_set = _normalise_commander(commander)
-        self._ensure_graph_caches()
         cache_key = tuple(cmdr_set)
-        result = self._score_cache.get(cache_key)
-        if result is None:
-            result = score_all_candidates(
-                self._conn,
-                cmdr_set,
-                use_graph_metrics=self._use_graph_metrics,
-                use_chain_matches=self._use_chain_matches,
-                adjacency_cache=self._adjacency_cache,
-                scipy_pr_context=self._scipy_pr_context,
-            )
-            self._score_cache[cache_key] = result
-        buckets = result.buckets.get(card)
-        raw_matches = result.matches.get(card, [])
-        if buckets is None:
+        universal = self._score_cache.get(cache_key)
+        if universal is None:
+            universal = score_all_universal(self._conn, cmdr_set)
+            self._score_cache[cache_key] = universal
+        us = universal.get(card)
+        if us is None:
+            # Deferred: scoring.py → signals.py → scoring.py circular import
+            from .scoring import empty_buckets  # noqa: PLC0415
             scores: dict[str, float] = empty_buckets()
         else:
-            scores = dict(buckets)
+            scores = us.to_legacy_buckets()
 
-        adjusted = apply_penalties(self._conn, cmdr_set, card, scores["total"])
-        scores["total"] = adjusted
-
-        contributing = _build_contributing_ports(self._conn, card, raw_matches)
         explanation = (
-            self._render_explanation(card, scores, contributing)
+            self._render_explanation(card, scores, [])
             if include_explanation
             else None
         )
@@ -318,9 +214,9 @@ class SynergyEngine:
         return Recommendation(
             rank=0,
             card=card,
-            total_score=adjusted,
+            total_score=scores["total"],
             scores=scores,
-            contributing_ports=contributing,
+            contributing_ports=[],
             explanation=explanation,
         )
 
@@ -450,62 +346,7 @@ class SynergyEngine:
             if not (cand_pips - identity_set):
                 legal.add(name)
 
-        self._ensure_graph_caches()
-        cache_key = tuple(cmdr_set)
-        result = self._score_cache.get(cache_key)
-        if result is None:
-            result = score_all_candidates(
-                self._conn,
-                cmdr_set,
-                use_graph_metrics=self._use_graph_metrics,
-                use_chain_matches=self._use_chain_matches,
-                adjacency_cache=self._adjacency_cache,
-                scipy_pr_context=self._scipy_pr_context,
-            )
-            self._score_cache[cache_key] = result
-
-        # Phase F9: inject sacrifice signal into penalty context so Rule 9
-        # can exempt candidates with sacrifice/trigger-resonance signal.
-        sac_signal: set[str] = set()
-        for cand_name, buckets_src in result.buckets.items():
-            if (
-                buckets_src.get("sacrifice_synergy", 0) > 0
-                or buckets_src.get("trigger_resonance", 0) > 0
-            ):
-                sac_signal.add(cand_name)
-        # frozen=True on PenaltyContext blocks attribute rebinding, but
-        # we can replace the field via object.__setattr__ for this one
-        # injection point.
-        object.__setattr__(
-            penalty_ctx, "candidates_with_sacrifice_signal", frozenset(sac_signal)
-        )
-
-        ranked: list[tuple[str, dict[str, float], list[dict[str, Any]]]] = []
-        for cand in legal:
-            buckets_src = result.buckets.get(cand)
-            buckets = dict(buckets_src) if buckets_src is not None else empty_buckets()
-            raw_matches = list(result.matches.get(cand, ()))
-            adjusted = apply_penalties_ctx(penalty_ctx, cand, buckets["total"])
-            if adjusted <= HARD_FILTER_SCORE / 2:
-                continue
-            buckets["total"] = adjusted
-            ranked.append((cand, buckets, raw_matches))
-
-        # Tiebreak in order:
-        #   1. lower mechanical total (reversed to highest-first)
-        #   2. lower CMC — cheaper cards are more flexible
-        #   3. lower edhrec_rank — within mechanically-equal clusters,
-        #      more popular cards rise (pure tiebreaker; never changes
-        #      the displayed mechanical score). Aligned with the
-        #      "EDHREC as tiebreaker only" rule — cards without an
-        #      edhrec_rank slot below every ranked card in the same
-        #      tie rather than being penalised outright.
-        #   4. alphabetical — stable final fallback
-        #
-        # Without (3), the ~62-card clusters that share a total like
-        # 18.0 degenerate into CMC + alphabetical order, which made
-        # the top of the list look arbitrary for counter-payoff
-        # commanders like Kyler.
+        # -- Universal port-complement scoring --------------------------------
         _UNRANKED = 10**9
         cmc_lookup: dict[str, float] = {}
         rank_lookup: dict[str, int] = {}
@@ -513,6 +354,18 @@ class SynergyEngine:
             cmc_lookup[name] = row["cmc"] if row["cmc"] is not None else 99.0
             raw_rank = row.get("edhrec_rank")
             rank_lookup[name] = int(raw_rank) if raw_rank is not None else _UNRANKED
+
+        cache_key = tuple(cmdr_set)
+        universal = self._score_cache.get(cache_key)
+        if universal is None:
+            universal = score_all_universal(self._conn, cmdr_set)
+            self._score_cache[cache_key] = universal
+        ranked: list[tuple[str, dict[str, float]]] = []
+        for cand in legal:
+            us = universal.get(cand)
+            if us is None:
+                continue
+            ranked.append((cand, us.to_legacy_buckets()))
         ranked.sort(
             key=lambda r: (
                 -r[1]["total"],
@@ -521,14 +374,14 @@ class SynergyEngine:
                 r[0],
             )
         )
+
         total = len(ranked)
         window = ranked[offset : offset + limit]
 
         items: list[Recommendation] = []
-        for i, (cand, buckets, raw_matches) in enumerate(window):
-            contributing = _build_contributing_ports(self._conn, cand, raw_matches)
+        for i, (cand, buckets) in enumerate(window):
             explanation = (
-                self._render_explanation(cand, buckets, contributing)
+                self._render_explanation(cand, buckets, [])
                 if include_explanations
                 else None
             )
@@ -538,7 +391,7 @@ class SynergyEngine:
                     card=cand,
                     total_score=buckets["total"],
                     scores=buckets,
-                    contributing_ports=contributing,
+                    contributing_ports=[],
                     explanation=explanation,
                 )
             )
@@ -557,24 +410,6 @@ class SynergyEngine:
         )
 
     # ----- internals -------------------------------------------------------
-
-    def _ensure_graph_caches(self) -> None:
-        """Lazily build the adjacency + scipy CSR caches on first use.
-
-        Both caches are commander-independent so they're built exactly
-        once per ``SynergyEngine`` lifetime. Skipped entirely when
-        ``graph_metrics=False`` (the default).
-        """
-        if not self._use_graph_metrics or self._adjacency_cache is not None:
-            return
-        from .graph_metrics import (
-            HAS_SCIPY,
-            build_causal_graph,
-            build_scipy_pr_context,
-        )
-        self._adjacency_cache = build_causal_graph(self._conn)
-        if HAS_SCIPY:
-            self._scipy_pr_context = build_scipy_pr_context(self._adjacency_cache)
 
     def _fetch_cards(self, names: Sequence[str]) -> list[sqlite3.Row]:
         if not names:

@@ -352,6 +352,23 @@ class ScoredCandidates:
     buckets: dict[str, BucketDict] = field(default_factory=dict)
     matches: dict[str, MatchList]  = field(default_factory=dict)
 
+    def build_signals(self) -> "dict[str, CandidateSignals]":
+        """Build :class:`CandidateSignals` for every candidate in bulk.
+
+        Uses the per-match ``_delta`` stamps left by ``_add_bucket`` so
+        each distinct interaction becomes its own :class:`Signal`. The
+        result is cached-safe: callers may store it and reuse across
+        multiple ``page()`` invocations for the same commander.
+
+        Lazy import avoids circular dependency (signals → scoring).
+        """
+        from .signals import signals_from_scored as _adapter
+
+        return {
+            name: _adapter(self.buckets[name], self.matches.get(name, []))
+            for name in self.buckets
+        }
+
 
 # ---------------------------------------------------------------------------
 # Internal aggregation helpers — each writes into the shared scores/matches
@@ -371,6 +388,9 @@ def _add_bucket(
         scores[candidate] = empty_buckets()
         matches[candidate] = []
     scores[candidate][bucket] += delta
+    # Stash the individual delta so the signal adapter can reconstruct
+    # per-match confidence without reverse-engineering from the bucket sum.
+    match_record["_delta"] = delta
     matches[candidate].append(match_record)
 
 

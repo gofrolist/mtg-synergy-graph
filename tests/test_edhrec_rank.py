@@ -229,16 +229,23 @@ _FULL_DB_SKIP = pytest.mark.skipif(
 
 @_FULL_DB_SKIP
 def test_kyler_tied_cluster_is_ordered_by_edhrec_rank(full_engine):
-    """Within Kyler's 62-card cluster at total=18.0, the ordering must
+    """Within Kyler's largest tied-score cluster, the ordering must
     be monotone non-decreasing in edhrec_rank (after cmc tiebreak).
     Cards without a rank sort after every ranked card in the cluster."""
     page = full_engine.page("Kyler, Sigardian Emissary", limit=300)
     conn = full_engine._conn
 
-    cluster = [r for r in page.items if r.total_score == 18.0]
-    assert len(cluster) >= 20, (
-        "Expected the 18.0 cluster to be substantial; adjust the "
-        "fixture if the top-of-page shape has changed."
+    # Find the largest score cluster (universal uses IDF-weighted scores,
+    # not integer weight sums — cluster at any shared total_score)
+    from collections import Counter
+    score_counts = Counter(round(r.total_score, 4) for r in page.items)
+    if not score_counts:
+        pytest.skip("no items in page")
+    most_common_score = score_counts.most_common(1)[0][0]
+    cluster = [r for r in page.items if round(r.total_score, 4) == most_common_score]
+    assert len(cluster) >= 5, (
+        f"Expected a substantial tied cluster; largest has "
+        f"{len(cluster)} cards at score={most_common_score}"
     )
 
     # Pull cmc + edhrec_rank in one go.
@@ -276,11 +283,14 @@ def test_kyler_tied_cluster_is_ordered_by_edhrec_rank(full_engine):
 def test_kyler_tied_cluster_is_not_purely_alphabetical(full_engine):
     """Regression guard against the pre-fix behaviour where
     identical-score clusters degenerated into alphabetical order.
-    Take the 18.0 cluster — after filtering to a single cmc bucket,
-    the page order must NOT match ``sorted(names)``."""
+    After filtering to a single cmc bucket, the page order must NOT
+    match ``sorted(names)``."""
     page = full_engine.page("Kyler, Sigardian Emissary", limit=300)
     conn = full_engine._conn
-    cluster = [r.card for r in page.items if r.total_score == 18.0]
+    from collections import Counter
+    score_counts = Counter(round(r.total_score, 4) for r in page.items)
+    most_common_score = score_counts.most_common(1)[0][0]
+    cluster = [r.card for r in page.items if round(r.total_score, 4) == most_common_score]
 
     # Pick the largest cmc sub-bucket in the cluster so there are
     # enough cards to disprove alphabetical ordering.

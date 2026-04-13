@@ -431,11 +431,12 @@ def build_penalty_context(
     _scales_p1p1 = False
     _scales_all = False
 
-    for prow in conn.execute(
+    cmdr_port_rows = conn.execute(
         f"SELECT port_type, event_class, counter_type, valid_filter, raw_line "
         f"FROM card_ports WHERE card_name IN ({placeholders})",
         tuple(commander_set),
-    ).fetchall():
+    ).fetchall()
+    for prow in cmdr_port_rows:
         ev = (prow["event_class"] or "").strip()
         pt = (prow["port_type"] or "").strip()
         ct = (prow["counter_type"] or "").strip()
@@ -471,6 +472,32 @@ def build_penalty_context(
             cmdr_has_abilities.add("Counters")
 
     cmdr_p1p1_is_primary = _scales_p1p1 or (_scales_all and _has_p1p1_effect)
+
+    # Inject scales_with types into cmdr_has_types so Rule 11 doesn't
+    # penalize cards that match the commander's scaling strategy. E.g.
+    # Uril scales_with Aura → "Aura" joins cmdr_has_types → Ethereal
+    # Armor's deck_hints Type=Enchantment won't trigger Rule 11.
+    _SCALES_TYPE_TOKENS: frozenset[str] = frozenset({
+        "Aura", "Equipment", "Enchantment", "Artifact", "Land",
+        "Instant", "Sorcery", "Planeswalker",
+    })
+    # Parent types: if the commander scales with a subtype, also add
+    # the parent supertype so Rule 11 doesn't fire on "Enchantment"
+    # when the commander scales with "Aura".
+    _SUBTYPE_TO_PARENT: dict[str, str] = {
+        "Aura": "Enchantment",
+        "Equipment": "Artifact",
+    }
+    for prow in cmdr_port_rows:
+        if (prow["port_type"] or "").strip() == "scales_with":
+            raw = prow["raw_line"] or ""
+            vf = prow["valid_filter"] or ""
+            for tok in _SCALES_TYPE_TOKENS:
+                if tok in raw or tok in vf:
+                    cmdr_has_types.add(tok)
+                    parent = _SUBTYPE_TO_PARENT.get(tok)
+                    if parent:
+                        cmdr_has_types.add(parent)
 
     # Tribal anchor: the commander shares at least one of its own subtypes
     # with the token subtype it generates (Krenko IS a Goblin AND makes
@@ -513,13 +540,22 @@ def build_penalty_context(
 # ---------------------------------------------------------------------------
 
 
+#: Forge filter modifiers that look like subtypes (capitalized) but
+#: are actually scope qualifiers.  Rule 3 should ignore these.
+_SCOPE_MODIFIERS: frozenset[str] = frozenset({
+    "Creature", "YouCtrl", "OppCtrl", "Other",
+    "EnchantedBy", "EquippedBy", "Enchanted", "Equipped",
+    "Attached", "Remembered", "Targeted",
+})
+
+
 def _scope_subtypes(scope: str) -> set[str]:
     return {
         tok
         for tok in (scope or "").replace("+", ".").split(".")
         if tok
         and tok[0].isupper()
-        and tok not in {"Creature", "YouCtrl", "OppCtrl", "Other"}
+        and tok not in _SCOPE_MODIFIERS
         and not tok.startswith("non")
     }
 
@@ -651,3 +687,156 @@ def apply_penalties(
     """Single-shot penalty pass — slow path. Builds a fresh PenaltyContext."""
     ctx = build_penalty_context(conn, commander_set)
     return apply_penalties_ctx(ctx, candidate, score)
+
+
+# ---------------------------------------------------------------------------
+# Signal-native penalties
+# ---------------------------------------------------------------------------
+# Maps each penalty rule to the signal types it most directly affects.
+# Rules not listed here apply their multiplier to ALL signal types.
+_PENALTY_SIGNAL_TARGETS: dict[str, frozenset[str]] = {
+    "rule3_subtype":     frozenset({"lord", "amplifier", "port_match"}),
+    "rule4_excluded":    frozenset({"lord", "effect_resonance", "port_match"}),
+    "rule5_token":       frozenset({"token_etb_payoff", "sacrifice_synergy",
+                                    "resource_density"}),
+    "rule6_counter":     frozenset({"counter_synergy", "counter_ecosystem"}),
+    "rule7_niche":       frozenset({"counter_synergy", "counter_ecosystem"}),
+    "rule8_land_ctr":    frozenset({"counter_synergy", "counter_ecosystem"}),
+    "rule10_opp_mill":   frozenset({"effect_resonance", "trigger_resonance"}),
+    "rule11_type":       frozenset({"deck_hints"}),
+    "rule12_ability":    frozenset({"deck_hints"}),
+}
+
+
+def apply_signal_penalties(
+    ctx: PenaltyContext,
+    candidate: str,
+    signals: "CandidateSignals",
+) -> "CandidateSignals":
+    """Signal-aware penalty pass — reduce specific signal confidences.
+
+    Hard filters (rules 1, 2) return an empty :class:`CandidateSignals`.
+    Targeted soft penalties reduce only the signal types they mechanically
+    affect. Untargeted penalties (rule 9) reduce all signals.
+
+    Returns a *new* :class:`CandidateSignals`; the input is not mutated.
+    """
+    from .signals import CandidateSignals, Signal
+
+    cand = ctx.candidate_rows.get(candidate)
+    if cand is None:
+        return signals
+
+    # -- Hard filters (rules 1, 2) → empty signals -------------------------
+    cand_identity = _parse_csv(cand["color_identity"])
+    if cand_identity - ctx.cmdr_identity:
+        return CandidateSignals()
+
+    cand_subtypes = set((cand["subtypes"] or "").split())
+    if "Background" in cand_subtypes and not ctx.cmdr_allows_background:
+        return CandidateSignals()
+    if "doctor's companion" in (cand["oracle_text"] or "").lower() and not ctx.cmdr_has_doctor:
+        return CandidateSignals()
+
+    # -- Collect soft penalty multipliers per rule --------------------------
+    penalties: list[tuple[str, float]] = []  # (rule_name, multiplier)
+
+    # Rule 3: subtype mismatch
+    static_scopes = ctx.creature_static_scopes.get(candidate, [])
+    if static_scopes and ctx.cmdr_subtypes:
+        for scope in static_scopes:
+            scope_subtypes = _scope_subtypes(scope)
+            if scope_subtypes and not (scope_subtypes & ctx.cmdr_subtypes):
+                penalties.append(("rule3_subtype", SUBTYPE_MISMATCH_MULT))
+                break
+
+    # Rule 4: excluded subtypes
+    excludes = ctx.candidate_excludes.get(candidate, set())
+    if excludes:
+        cmdr_self_tags = ctx.cmdr_subtypes | ctx.cmdr_card_types
+        if excludes & cmdr_self_tags:
+            penalties.append(("rule4_excluded", EXCLUDED_SUBTYPES_MULT))
+
+    # Rule 5: wrong token type
+    cand_tokens = ctx.candidate_token_types.get(candidate, set())
+    if (
+        ctx.cmdr_is_tribal
+        and ctx.cmdr_token_subtypes
+        and cand_tokens
+        and not (cand_tokens & ctx.cmdr_token_subtypes)
+    ):
+        penalties.append(("rule5_token", WRONG_TOKEN_TYPE_MULT))
+
+    # Rule 6: wrong counter type
+    cand_counters = ctx.candidate_counter_types.get(candidate, set())
+    if ctx.cmdr_uses_p1p1 and cand_counters and not (cand_counters & P1P1_ALIASES):
+        non_niche = cand_counters - NICHE_COUNTERS
+        if non_niche:
+            penalties.append(("rule6_counter", WRONG_COUNTER_TYPE_MULT))
+
+    # Rule 7: niche counter
+    if cand_counters and cand_counters.issubset(NICHE_COUNTERS):
+        if not (ctx.cmdr_counter_types & NICHE_COUNTERS):
+            penalties.append(("rule7_niche", NICHE_COUNTER_MULT))
+
+    # Rule 8: counters on lands
+    if ctx.cmdr_uses_p1p1 and ctx.candidate_counters_on_land.get(candidate):
+        penalties.append(("rule8_land_ctr", COUNTERS_ON_LANDS_MULT))
+
+    # Rule 9: non-counter creatures → applies to ALL signals (untargeted)
+    if (
+        ctx.cmdr_uses_p1p1
+        and not ctx.cmdr_is_tribal
+        and candidate not in ctx.candidates_with_sacrifice_signal
+        and "Creature" in (cand["card_types"] or "").split()
+        and not (cand_counters & P1P1_ALIASES)
+        and "Counters" not in _decoded_has_abilities(cand)
+        and not (cand_subtypes & ctx.cmdr_subtypes)
+    ):
+        penalties.append(("rule9_all", NON_COUNTER_CREATURE_MULT))
+
+    # Rule 10: opponent-only mill
+    if ctx.cmdr_self_mill and ctx.candidate_opp_mill.get(candidate):
+        penalties.append(("rule10_opp_mill", OPPONENT_MILL_MULT))
+
+    # Rule 11: unmet type need
+    needs = _decode_json_field(cand["deck_needs"])
+    hints = _decode_json_field(cand["deck_hints"])
+    if needs.get("Type") or hints.get("Type"):
+        wanted_types = set(needs.get("Type", [])) | set(hints.get("Type", []))
+        cmdr_provides = ctx.cmdr_has_types | ctx.cmdr_card_types
+        if wanted_types and not (wanted_types & cmdr_provides):
+            penalties.append(("rule11_type", UNMET_TYPE_MULT))
+
+    # Rule 12: unmet ability need
+    if needs.get("Ability"):
+        wanted = set(needs["Ability"])
+        if wanted and not (wanted & ctx.cmdr_has_abilities):
+            penalties.append(("rule12_ability", UNMET_ABILITY_MULT))
+
+    if not penalties:
+        return signals
+
+    # -- Apply penalties to signal confidences ------------------------------
+    # Build per-signal-type multiplier (compound if multiple rules hit)
+    type_mult: dict[str, float] = {}
+    for rule, mult in penalties:
+        targets = _PENALTY_SIGNAL_TARGETS.get(rule)
+        if targets is None:
+            # Untargeted rule (e.g. rule9_all) → apply to every signal type
+            for s in signals.signals:
+                type_mult[s.signal_type] = type_mult.get(s.signal_type, 1.0) * mult
+        else:
+            for st in targets:
+                type_mult[st] = type_mult.get(st, 1.0) * mult
+
+    adjusted = [
+        Signal(
+            signal_type=s.signal_type,
+            confidence=s.confidence * type_mult.get(s.signal_type, 1.0),
+            tier=s.tier,
+            evidence=s.evidence,
+        )
+        for s in signals.signals
+    ]
+    return CandidateSignals(signals=adjusted)

@@ -299,7 +299,6 @@ def _run_parallel(
     """Score commanders across multiple processes, return entries in order."""
     n_workers = min(_max_workers(), len(commander_lists))
     if n_workers <= 1:
-        # Fall back to sequential for tiny sets or single-core machines
         with SynergyEngine(db_path) as engine:
             edhrec_conn: sqlite3.Connection | None = None
             if edhrec_db_path is not None:

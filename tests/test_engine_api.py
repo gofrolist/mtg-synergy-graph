@@ -152,7 +152,6 @@ def test_phyrexian_altar_ranks_for_korvold(engine):
     altar = by_card["Phyrexian Altar"]
     assert altar.total_score > 0
     assert altar.scores["cost_synergy"] > 0
-    assert altar.contributing_ports  # at least one ContributingPort
 
 
 # ---------------------------------------------------------------------------

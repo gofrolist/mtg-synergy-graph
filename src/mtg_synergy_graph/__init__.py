@@ -73,6 +73,16 @@ from .heuristics import (
     staple_bonus,
 )
 from .penalties import HARD_FILTER_SCORE, apply_penalties
+from .complement_rules import (
+    COMPLEMENT_RULES,
+    ComplementRule,
+    PortComplement,
+    find_all_complements,
+)
+from .universal_scorer import (
+    UniversalScore,
+    score_all_universal,
+)
 from .engine import (
     SPEC_VERSION,
     ENGINE_VERSION,
@@ -149,6 +159,12 @@ __all__ = [
     "staple_bonus",
     "HARD_FILTER_SCORE",
     "apply_penalties",
+    "COMPLEMENT_RULES",
+    "ComplementRule",
+    "PortComplement",
+    "find_all_complements",
+    "UniversalScore",
+    "score_all_universal",
     "SPEC_VERSION",
     "ENGINE_VERSION",
     "ContributingPort",
