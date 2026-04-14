@@ -2302,7 +2302,7 @@ def _find_wheel_synergy(
         if (p.get("event_class") or "").strip() != "Drawn":
             continue
         vf = p.get("valid_filter") or ""
-        if "Opp" in vf or "Player" in vf or "Each" in vf or not vf:
+        if "Opp" in vf or "Player" in vf or "Each" in vf:
             has_drawn_trigger = True
             break
 
@@ -2702,7 +2702,7 @@ def _find_panharmonicon_stacking(
         raw = str(p.get("raw_line") or "")
         m = re.search(r"'ValidMode':\s*'([^']+)'", raw)
         if m:
-            cmdr_pan_modes.update(m.strip() for m in m.group(1).split(",") if m.strip())
+            cmdr_pan_modes.update(mode.strip() for mode in m.group(1).split(",") if mode.strip())
 
     if not cmdr_pan_modes:
         return []
