@@ -15,10 +15,8 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import Any
 
 from .complement_rules import (
-    COMPLEMENT_RULES,
     PortComplement,
     find_all_complements,
 )
@@ -189,107 +187,6 @@ def _computeidf_weights(
         else:
             result[key] = 1.0 / math.log2(1.0 + len(candidates))
     return result
-
-
-#: Effect event classes that indicate a card generates lasting value.
-_RESOURCE_EFFECTS: frozenset[str] = frozenset({
-    "Draw", "Dig", "Investigate", "Surveil", "Scry",          # card advantage
-    "Token", "CopyPermanent", "Animate", "ChangeZone",        # board presence
-    "Destroy", "DestroyAll", "DealDamage", "DamageAll",       # removal
-    "Sacrifice", "SacrificeAll", "Discard", "GainControl",    # disruption
-    "Mill", "Mana",                                            # resource gen
-})
-
-#: Keywords indicating ante-era or fundamentally broken extraction.
-_JUNK_KEYWORDS: frozenset[str] = frozenset({
-    "Remove", "Ante",
-})
-
-
-def _compute_quality_dampeners(
-    conn: sqlite3.Connection,
-    candidate_names: set[str],
-) -> dict[str, float]:
-    """Compute per-card quality dampeners from Forge port data.
-
-    Returns a dict mapping card_name → dampener (1.0 = no penalty, <1.0 = junk).
-    Only cards with detected junk signals are included (missing = 1.0).
-
-    Signals (all from card_ports, no EDHREC dependency):
-    - Ante/ownership keywords → 0.1 (nearly zero out the card)
-    - Port bloat (30+ ports) → 0.3 (extraction artifact)
-    - Cleanup-dominated (>40% of effects are Cleanup) → 0.5
-    - Zero resource effects (no Draw/Token/Destroy/etc.) → 0.7
-    """
-    if not candidate_names:
-        return {}
-
-    dampeners: dict[str, float] = {}
-
-    # Batch query: get port stats for all candidates
-    # Process in batches of 900 (SQLite limit)
-    card_ports_count: dict[str, int] = {}
-    card_cleanup_count: dict[str, int] = {}
-    card_effect_events: dict[str, set[str]] = defaultdict(set)
-    card_keywords: dict[str, set[str]] = defaultdict(set)
-
-    batch_size = 900
-    batch_list = sorted(candidate_names)
-    for i in range(0, len(batch_list), batch_size):
-        batch = batch_list[i : i + batch_size]
-        ph = ",".join("?" * len(batch))
-
-        rows = conn.execute(
-            f"SELECT card_name, port_type, event_class "
-            f"FROM card_ports WHERE card_name IN ({ph})",
-            tuple(batch),
-        ).fetchall()
-
-        for r in rows:
-            name = r["card_name"]
-            pt = r["port_type"] or ""
-            ev = r["event_class"] or ""
-            card_ports_count[name] = card_ports_count.get(name, 0) + 1
-            if pt == "effect":
-                card_effect_events[name].add(ev)
-                if ev == "Cleanup":
-                    card_cleanup_count[name] = card_cleanup_count.get(name, 0) + 1
-            elif pt == "keyword":
-                card_keywords[name].add(ev)
-
-    # Apply penalties
-    for name in candidate_names:
-        d = 1.0
-
-        # Ante/junk keywords
-        if card_keywords.get(name, set()) & _JUNK_KEYWORDS:
-            d *= 0.1
-
-        # Port bloat
-        total = card_ports_count.get(name, 0)
-        if total >= 30:
-            d *= 0.3
-
-        # Cleanup-dominated effects
-        cleanup = card_cleanup_count.get(name, 0)
-        effects = card_effect_events.get(name, set())
-        if cleanup > 0:
-            cleanup_ratio = cleanup / max(total, 1)
-            if cleanup_ratio > 0.4:
-                d *= 0.5
-
-        # Zero resource effects (no Draw/Token/Destroy/etc.)
-        # Also penalize cards with no effect ports at all (stax/keywords only)
-        if not (effects & _RESOURCE_EFFECTS):
-            if effects:
-                d *= 0.7  # has effects but none generate resources
-            elif total > 0:
-                d *= 0.5  # no effect ports at all (pure stax/keywords)
-
-        if d < 1.0:
-            dampeners[name] = d
-
-    return dampeners
 
 
 def score_all_universal(

@@ -31,7 +31,6 @@ from .graph_engine import (
     _zones_compatible,
     explode_filter,
     load_ports_for_set,
-    match_event,
 )
 from .penalties import _token_subtype
 
@@ -2795,58 +2794,6 @@ def _find_evasion_complements(
                 candidate=name,
                 cmdr_event="DamageDone_combat",
                 cand_event="unblockable",
-            ))
-
-    return results
-
-
-# ---------------------------------------------------------------------------
-# §  Exile-play for exile-cast commanders
-# ---------------------------------------------------------------------------
-
-
-def _find_exile_play_complements(
-    conn: sqlite3.Connection,
-    cmdr_ports: list[PortRow],
-    cmdr_set: set[str],
-) -> list[PortComplement]:
-    """Find impulse-draw / MayPlay cards for exile-cast commanders.
-
-    Prosper triggers on SpellCast from exile. Chainer triggers on
-    creatures not cast from hand. Cascade commanders cast from exile.
-    MayPlay-from-exile statics (514 cards) enable this strategy.
-    """
-    # Only fire for commanders with explicit exile-cast triggers
-    # (Prosper: wasCastFromExile). Cascade commanders already get
-    # good recommendations from other rules — adding 514 MayPlay cards
-    # floods their results.
-    wants_exile_cast = False
-    for p in cmdr_ports:
-        pt = (p.get("port_type") or "").strip()
-        vf = p.get("valid_filter") or ""
-        if pt == "trigger" and ("wasCastFromExile" in vf
-                                or "wasCastFromYourLibrary" in vf):
-            wants_exile_cast = True
-            break
-
-    if not wants_exile_cast:
-        return []
-
-    cur = conn.execute(
-        "SELECT DISTINCT card_name FROM card_ports "
-        "WHERE port_type = 'static' AND event_class = 'Continuous' "
-        "AND raw_line LIKE '%MayPlay%'"
-    )
-    results: list[PortComplement] = []
-    for r in cur.fetchall():
-        name = r["card_name"]
-        if name not in cmdr_set:
-            results.append(PortComplement(
-                rule_id="exile_play",
-                direction="synergy",
-                candidate=name,
-                cmdr_event="exile_cast",
-                cand_event="MayPlay",
             ))
 
     return results
