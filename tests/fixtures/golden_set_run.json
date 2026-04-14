@@ -14,21 +14,21 @@
         "Deadly Dispute",
         "Ruthless Technomancer"
       ],
-      "hi_syn_hits": 0,
+      "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.022614,
-      "on_page_hits": 3,
+      "ndcg30": 0.059397,
+      "on_page_hits": 4,
       "top10": [
+        "Savra, Queen of the Golgari",
         "Sanguine Statuette",
         "Gluttonous Guest",
-        "Sanguine Brushstroke",
         "Moonstone Eulogist",
         "Jaws, Relentless Predator",
+        "Sanguine Brushstroke",
         "Ashling, the Limitless",
         "Trail of Crumbs",
-        "Unlucky Cabbage Merchant",
         "Nuka-Cola Vending Machine",
-        "Rapacious Guest"
+        "Unlucky Cabbage Merchant"
       ]
     },
     {
@@ -47,19 +47,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.153977,
-      "on_page_hits": 6,
+      "ndcg30": 0.131259,
+      "on_page_hits": 7,
       "top10": [
+        "The Earth Crystal",
         "Ozolith, the Shattered Spire",
         "Benevolent Hydra",
-        "The Earth Crystal",
-        "Walking Ballista",
-        "Hangarback Walker",
-        "Clown Car",
-        "Marketback Walker",
-        "Cryptic Trilobite",
-        "Omarthis, Ghostfire Initiate",
-        "Snakeskin Veil"
+        "Predatory Hunger",
+        "Gwenna, Eyes of Gaea",
+        "Eshki, Temur's Roar",
+        "Jackal, Genius Geneticist",
+        "Herald of Ilharg",
+        "Primeval Bounty",
+        "Kurgadon"
       ]
     },
     {
@@ -76,10 +76,10 @@
         "Herald's Horn",
         "Ashcoat of the Shadow Swarm"
       ],
-      "hi_syn_hits": 4,
+      "hi_syn_hits": 5,
       "hi_syn_total": 10,
-      "ndcg30": 0.411782,
-      "on_page_hits": 18,
+      "ndcg30": 0.501991,
+      "on_page_hits": 23,
       "top10": [
         "Karumonix, the Rat King",
         "Greedy Freebooter",
@@ -88,9 +88,9 @@
         "Nezumi Linkbreaker",
         "Gnawing Vermin",
         "Engine Rat",
-        "Drainpipe Vermin",
-        "Deadeye Tracker",
-        "Bog Rats"
+        "Burglar Rat",
+        "Blightbelly Rat",
+        "Piper of the Swarm"
       ]
     },
     {
@@ -109,7 +109,7 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.038465,
+      "ndcg30": 0.041448,
       "on_page_hits": 6,
       "top10": [
         "Shield Sphere",
@@ -117,11 +117,11 @@
         "Walking Bulwark",
         "Wall of Runes",
         "Errant, Street Artist",
+        "The Reality Chip",
+        "Spellskite",
+        "Crashing Drawbridge",
         "Steel Wall",
-        "Merfolk Secretkeeper",
-        "Secret Door",
-        "Excavated Wall",
-        "Barrier of Bones"
+        "Fog Bank"
       ]
     },
     {
@@ -140,19 +140,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.184721,
-      "on_page_hits": 15,
+      "ndcg30": 0.210106,
+      "on_page_hits": 14,
       "top10": [
         "Field of the Dead",
-        "Volatile Fault",
-        "Endless Sands",
-        "Safe Haven",
         "Mirrorpool",
         "Littjara Mirrorlake",
         "Waste Land",
-        "Tyrite Sanctum",
-        "Mech Hangar",
-        "Restless Vinestalk"
+        "Evolving Wilds",
+        "Myriad Landscape",
+        "Terramorphic Expanse",
+        "Fabled Passage",
+        "Boseiju, Who Endures",
+        "Prismatic Vista"
       ]
     },
     {
@@ -202,10 +202,9 @@
       ],
       "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.130086,
+      "ndcg30": 0.141308,
       "on_page_hits": 6,
       "top10": [
-        "Bloodspatter Vampire",
         "Academy Manufactor",
         "Peregrin Took",
         "Xorn",
@@ -214,7 +213,8 @@
         "Quina, Qu Gourmet",
         "Parallel Lives",
         "Jolene, the Plunder Queen",
-        "Mirrormind Crown"
+        "Mirrormind Crown",
+        "Doubling Season"
       ]
     },
     {
@@ -233,7 +233,7 @@
       ],
       "hi_syn_hits": 3,
       "hi_syn_total": 10,
-      "ndcg30": 0.299288,
+      "ndcg30": 0.312699,
       "on_page_hits": 15,
       "top10": [
         "Earl of Squirrel",
@@ -243,9 +243,9 @@
         "Squirrel Squatters",
         "Thornvault Forager",
         "Bushy Bodyguard",
-        "Scurrid Colony",
-        "Frog-Squirrels",
-        "Chittering Illuminator"
+        "Honored Dreyleader",
+        "Scurry of Squirrels",
+        "Squirrel Mob"
       ]
     },
     {
@@ -264,14 +264,14 @@
       ],
       "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.190572,
+      "ndcg30": 0.195819,
       "on_page_hits": 11,
       "top10": [
         "Wedding Ring",
         "Qala, Ajani's Pridemate",
         "Zabaz, the Glimmerwasp",
-        "Vizier of Remedies",
         "Lae'zel, Vlaakith's Champion",
+        "Vizier of Remedies",
         "Excalibur II",
         "Dawn of Hope",
         "Ajani's Pridemate",
@@ -357,19 +357,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.035482,
-      "on_page_hits": 4,
+      "ndcg30": 0.052074,
+      "on_page_hits": 5,
       "top10": [
         "Stitcher's Supplier",
         "Grist, Voracious Larva",
+        "Aftermath Analyst",
+        "Skull Prophet",
         "Mental Note",
+        "Perpetual Timepiece",
+        "Grapple with the Past",
         "Patchwork Beastie",
         "Wand of Vertebrae",
-        "Crop Sigil",
-        "Deathbonnet Sprout",
-        "Excavated Wall",
-        "Liliana's Indignation",
-        "Festerleech"
+        "Undead Butler"
       ]
     },
     {
@@ -388,7 +388,7 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.089087,
+      "ndcg30": 0.089047,
       "on_page_hits": 15,
       "top10": [
         "Sol Ring",
@@ -419,8 +419,8 @@
       ],
       "hi_syn_hits": 5,
       "hi_syn_total": 10,
-      "ndcg30": 0.548677,
-      "on_page_hits": 20,
+      "ndcg30": 0.559902,
+      "on_page_hits": 21,
       "top10": [
         "Conspicuous Snoop",
         "Rundvelt Hordemaster",
@@ -481,18 +481,18 @@
       ],
       "hi_syn_hits": 4,
       "hi_syn_total": 10,
-      "ndcg30": 0.443694,
-      "on_page_hits": 22,
+      "ndcg30": 0.435386,
+      "on_page_hits": 20,
       "top10": [
         "Joraga Treespeaker",
         "Joraga Warcaller",
         "Leaf-Crowned Visionary",
         "Eladamri, Lord of Leaves",
-        "Elvish Clancaller",
         "Elvish Archdruid",
         "Imperious Perfect",
         "Elvish Champion",
         "Galadhrim Brigade",
+        "Elvish Clancaller",
         "Morcant's Loyalist"
       ]
     },
@@ -510,10 +510,10 @@
         "Enchantress's Presence",
         "Unflinching Courage"
       ],
-      "hi_syn_hits": 2,
+      "hi_syn_hits": 3,
       "hi_syn_total": 10,
-      "ndcg30": 0.262849,
-      "on_page_hits": 9,
+      "ndcg30": 0.297386,
+      "on_page_hits": 12,
       "top10": [
         "Wild Growth",
         "Utopia Sprawl",
@@ -543,19 +543,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.191814,
-      "on_page_hits": 17,
+      "ndcg30": 0.137837,
+      "on_page_hits": 8,
       "top10": [
         "Field of the Dead",
-        "Volatile Fault",
-        "Endless Sands",
-        "Safe Haven",
         "Mirrorpool",
         "Littjara Mirrorlake",
         "Waste Land",
-        "Tyrite Sanctum",
-        "Mech Hangar",
-        "Restless Vinestalk"
+        "Evolving Wilds",
+        "Myriad Landscape",
+        "Terramorphic Expanse",
+        "Fabled Passage",
+        "Boseiju, Who Endures",
+        "Prismatic Vista"
       ]
     },
     {
@@ -574,19 +574,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.01138,
+      "ndcg30": 0.013177,
       "on_page_hits": 1,
       "top10": [
         "Genji Glove",
         "Finest Hour",
-        "Imoen, Wise Trickster",
-        "Fishing Pole",
         "Mesmeric Orb",
+        "Fishing Pole",
         "Wake Thrasher",
         "The Roaring Toeclaws",
-        "Bruce Banner",
+        "Imoen, Wise Trickster",
         "Paradox Haze",
-        "Illusionist's Gambit"
+        "Illusionist's Gambit",
+        "Bruce Banner"
       ]
     },
     {
@@ -605,8 +605,8 @@
       ],
       "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.066856,
-      "on_page_hits": 15,
+      "ndcg30": 0.074107,
+      "on_page_hits": 16,
       "top10": [
         "Swords to Plowshares",
         "Path to Exile",
@@ -616,8 +616,8 @@
         "Teferi's Protection",
         "Jeska's Will",
         "Blasphemous Act",
-        "Intervention Pact",
-        "Pact of the Titan"
+        "Faithless Looting",
+        "Vandalblast"
       ]
     },
     {
@@ -636,7 +636,7 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.019536,
+      "ndcg30": 0.019675,
       "on_page_hits": 3,
       "top10": [
         "Dragonspark Reactor",
@@ -648,7 +648,7 @@
         "Candy Trail",
         "Experimental Synthesizer",
         "Ransom Note",
-        "Cat Oven"
+        "Lembas"
       ]
     },
     {
@@ -667,19 +667,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.042166,
-      "on_page_hits": 1,
+      "ndcg30": 0.05708,
+      "on_page_hits": 2,
       "top10": [
         "Stridehangar Automaton",
+        "Voltaic Construct",
+        "Phyrexian Ironfoot",
+        "Soliton",
         "Walking Ballista",
         "Hangarback Walker",
         "Marketback Walker",
-        "Phyrexian Marauder",
-        "Chamber Sentry",
-        "Memnite",
-        "Phyrexian Walker",
         "Goldhound",
-        "Iron Apprentice"
+        "Iron Apprentice",
+        "Phyrexian Marauder"
       ]
     },
     {
@@ -698,19 +698,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.004841,
-      "on_page_hits": 1,
+      "ndcg30": 0.0,
+      "on_page_hits": 0,
       "top10": [
         "Harmonic Prodigy",
-        "Goblin Engineer",
-        "Grinning Totem",
-        "Gustha's Scepter",
-        "Portent of Calamity",
-        "Jeweled Bird",
-        "Epic Experiment",
-        "Valakut Exploration",
-        "Intuition",
-        "Struggle for Sanity"
+        "Momentum Breaker",
+        "Goremand",
+        "Vile Mutilator",
+        "Soul-Guide Lantern",
+        "Cauldron Familiar",
+        "Fountainport Bell",
+        "Candy Trail",
+        "Blood Fountain",
+        "Experimental Synthesizer"
       ]
     },
     {
@@ -729,19 +729,19 @@
       ],
       "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.214781,
+      "ndcg30": 0.22319,
       "on_page_hits": 9,
       "top10": [
-        "Chatterfang, Squirrel General",
-        "Queen Allenal of Ruadach",
         "Joraga Treespeaker",
         "Joraga Warcaller",
+        "Chatterfang, Squirrel General",
+        "Queen Allenal of Ruadach",
         "Leaf-Crowned Visionary",
         "Eladamri, Lord of Leaves",
-        "Herald of Dromoka",
-        "Elvish Clancaller",
-        "Kor Blademaster",
-        "Elvish Archdruid"
+        "Elvish Archdruid",
+        "Imperious Perfect",
+        "Elvish Champion",
+        "Galadhrim Brigade"
       ]
     },
     {
@@ -760,13 +760,13 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.238087,
+      "ndcg30": 0.218735,
       "on_page_hits": 16,
       "top10": [
-        "Field of the Dead",
         "Port of Karfell",
         "Sequestered Stash",
-        "The Biblioplex",
+        "Blighted Fen",
+        "Field of the Dead",
         "Takenuma, Abandoned Mire",
         "Argoth, Sanctum of Nature",
         "Eden, Seat of the Sanctum",
@@ -789,10 +789,10 @@
         "Pitiless Plunderer",
         "Deathgreeter"
       ],
-      "hi_syn_hits": 1,
+      "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.075809,
-      "on_page_hits": 3,
+      "ndcg30": 0.137932,
+      "on_page_hits": 6,
       "top10": [
         "Disciple of the Vault",
         "Greedy Freebooter",
@@ -822,13 +822,13 @@
       ],
       "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.207221,
+      "ndcg30": 0.208235,
       "on_page_hits": 11,
       "top10": [
         "Ezuri, Stalker of Spheres",
         "Contagion Dispenser",
-        "Hardened Bonds",
         "Mikey & Leo, Chaos & Order",
+        "Hardened Bonds",
         "Flourishing Defenses",
         "Scheming Aspirant",
         "Voidwing Hybrid",
@@ -884,19 +884,19 @@
       ],
       "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.235859,
+      "ndcg30": 0.241398,
       "on_page_hits": 6,
       "top10": [
         "Shroofus Sproutsire",
         "Sporecrown Thallid",
         "Thelonite Hermit",
         "Tendershoot Dryad",
+        "Dina, Soul Steeper",
         "Peregrin Took",
+        "Wall of Limbs",
         "Chatterfang, Squirrel General",
         "Quina, Qu Gourmet",
-        "Grinning Totem",
-        "Dina, Soul Steeper",
-        "Wall of Limbs"
+        "Ayara, First of Locthwain"
       ]
     },
     {
@@ -915,8 +915,8 @@
       ],
       "hi_syn_hits": 5,
       "hi_syn_total": 10,
-      "ndcg30": 0.508361,
-      "on_page_hits": 22,
+      "ndcg30": 0.517124,
+      "on_page_hits": 23,
       "top10": [
         "Swiftfoot Boots",
         "Lightning Greaves",
@@ -925,9 +925,9 @@
         "Accorder's Shield",
         "Bone Saw",
         "Cathar's Shield",
+        "Skullclamp",
         "Spidersilk Net",
-        "Kite Shield",
-        "Sigil of Distinction"
+        "Basilisk Collar"
       ]
     },
     {
@@ -949,16 +949,16 @@
       "ndcg30": 0.0,
       "on_page_hits": 0,
       "top10": [
+        "Cauldron Familiar",
+        "Goblin Engineer",
+        "Grafted Butcher",
         "Ruthless Technomancer",
-        "Voldaren Bloodcaster",
-        "Death Tyrant",
-        "Krovikan Vampire",
-        "Dreadhound",
-        "Rat King, Verminister",
-        "Shilgengar, Sire of Famine",
-        "Nightmare Shepherd",
-        "Kinzu of the Bleak Coven",
-        "Ayara, First of Locthwain"
+        "Eddie Brock",
+        "A-Cauldron Familiar",
+        "Cavalier of Night",
+        "Daretti, Rocketeer Engineer",
+        "Woe Strider",
+        "Chittering Witch"
       ]
     },
     {
@@ -981,15 +981,15 @@
       "on_page_hits": 0,
       "top10": [
         "Grist, Voracious Larva",
-        "Rampart Architect",
-        "Springheart Nantuko",
-        "Tough Cookie",
-        "Nissa, Vastwood Seer",
-        "Prosperous Innkeeper",
+        "Baloth Prime",
         "Glaring Fleshraker",
-        "Caldaia Guardian",
         "Plane-Merge Elf",
-        "Unlucky Cabbage Merchant"
+        "Springheart Nantuko",
+        "Go-Shintai of Life's Origin",
+        "Titania, Protector of Argoth",
+        "Prosperous Innkeeper",
+        "Golden Guardian",
+        "Feasting Troll King"
       ]
     },
     {
@@ -1008,8 +1008,8 @@
       ],
       "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.298885,
-      "on_page_hits": 9,
+      "ndcg30": 0.324217,
+      "on_page_hits": 11,
       "top10": [
         "Coppercoat Vanguard",
         "Riders of Gavony",
@@ -1039,19 +1039,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.014183,
+      "ndcg30": 0.018257,
       "on_page_hits": 2,
       "top10": [
+        "Leyline Dowser",
         "Mental Note",
+        "Perpetual Timepiece",
         "Wand of Vertebrae",
         "Excavated Wall",
-        "Shard of Broken Glass",
-        "Perpetual Timepiece",
+        "Palant\u00edr of Orthanc",
         "Stillness in Motion",
-        "Cephalid Illusionist",
-        "Fallaji Archaeologist",
-        "Leyline Dowser",
-        "Cephalid Vandal"
+        "Shard of Broken Glass",
+        "The Everflowing Well",
+        "Cephalid Illusionist"
       ]
     },
     {
@@ -1070,7 +1070,7 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.097603,
+      "ndcg30": 0.10135,
       "on_page_hits": 10,
       "top10": [
         "Dockside Extortionist",
@@ -1079,10 +1079,10 @@
         "Smothering Tithe",
         "Hangarback Walker",
         "Clown Car",
-        "Orochi Hatchery",
-        "Pact of the Titan",
         "Ragavan, Nimble Pilferer",
-        "Curse of Opulence"
+        "Curse of Opulence",
+        "Gilded Goose",
+        "Ocelot Pride"
       ]
     },
     {
@@ -1099,21 +1099,21 @@
         "Maddening Cacophony",
         "Fraying Sanity"
       ],
-      "hi_syn_hits": 2,
+      "hi_syn_hits": 3,
       "hi_syn_total": 10,
-      "ndcg30": 0.160729,
-      "on_page_hits": 5,
+      "ndcg30": 0.226984,
+      "on_page_hits": 6,
       "top10": [
         "Demonic Consultation",
-        "Spoils of the Vault",
         "Mind Grind",
         "Empty the Laboratory",
+        "Tasha's Hideous Laughter",
+        "Heirloom Blade",
+        "Chaos Wand",
+        "Spoils of the Vault",
         "Treasure Hunt",
         "Nascent Metamorph",
-        "Divining Witch",
-        "Page, Loose Leaf",
-        "Tasha's Hideous Laughter",
-        "Heirloom Blade"
+        "Divining Witch"
       ]
     },
     {
@@ -1130,21 +1130,21 @@
         "Mythos of Illuna",
         "Archmage Emeritus"
       ],
-      "hi_syn_hits": 0,
+      "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.081494,
-      "on_page_hits": 2,
+      "ndcg30": 0.21527,
+      "on_page_hits": 13,
       "top10": [
         "Harmonic Prodigy",
-        "Grist, Voracious Larva",
-        "Rampart Architect",
-        "Titania, Voice of Gaea",
-        "Rootweaver Druid",
-        "Dubious Challenge",
-        "Bramble Sovereign",
-        "Faerie Artisans",
-        "Genestealer Patriarch",
-        "Vaultborn Tyrant"
+        "Horncaller's Chant",
+        "Random Encounter",
+        "Vengeful Regrowth",
+        "For the Common Good",
+        "Devastating Onslaught",
+        "Full Flowering",
+        "Twinflame",
+        "Molten Duplication",
+        "Doppelgang"
       ]
     },
     {
@@ -1161,21 +1161,21 @@
         "Fertile Ground",
         "Sigil of the Empty Throne"
       ],
-      "hi_syn_hits": 0,
+      "hi_syn_hits": 4,
       "hi_syn_total": 10,
-      "ndcg30": 0.127044,
-      "on_page_hits": 12,
+      "ndcg30": 0.41611,
+      "on_page_hits": 13,
       "top10": [
+        "Sythis, Harvest's Hand",
+        "Enchantress's Presence",
+        "Hallowed Haunting",
+        "Hidden Ancients",
+        "Sigil of the Empty Throne",
+        "Secret Arcade",
+        "Presence of the Master",
         "Island Sanctuary",
         "Archmage Ascension",
-        "Teferi's Ageless Insight",
-        "Abundance",
-        "Zur's Weirding",
-        "Enduring Renewal",
-        "Pursuit of Knowledge",
-        "Parallel Thoughts",
-        "Shared Fate",
-        "Thought Reflection"
+        "Teferi's Ageless Insight"
       ]
     },
     {
@@ -1194,19 +1194,19 @@
       ],
       "hi_syn_hits": 5,
       "hi_syn_total": 10,
-      "ndcg30": 0.423287,
-      "on_page_hits": 16,
+      "ndcg30": 0.48142,
+      "on_page_hits": 18,
       "top10": [
         "Scion of Oona",
         "Tegwyll, Duke of Splendor",
         "Oura, the Imitator",
         "Faerie Seer",
         "Faerie Dreamthief",
+        "Faerie Mastermind",
         "Eye Collector",
-        "Flitterwing Nuisance",
-        "Snaremaster Sprite",
-        "Sleep-Cursed Faerie",
-        "Faerie Impostor"
+        "Cloud of Faeries",
+        "Likeness Looter",
+        "Emrakul's Messenger"
       ]
     },
     {
@@ -1223,10 +1223,10 @@
         "Sanctum Seeker",
         "Vito, Thorn of the Dusk Rose"
       ],
-      "hi_syn_hits": 5,
+      "hi_syn_hits": 6,
       "hi_syn_total": 10,
-      "ndcg30": 0.464794,
-      "on_page_hits": 17,
+      "ndcg30": 0.549511,
+      "on_page_hits": 23,
       "top10": [
         "Falkenrath Gorger",
         "Legion Lieutenant",
@@ -1256,19 +1256,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.048501,
+      "ndcg30": 0.048679,
       "on_page_hits": 5,
       "top10": [
         "Tireless Tracker",
         "Chains of Mephistopheles",
-        "Blood Scrivener",
         "Out of the Tombs",
         "Phial of Galadriel",
+        "Blood Scrivener",
         "Abundance",
         "Uba Mask",
         "Alhammarret's Archive",
         "Underrealm Lich",
-        "Forbidden Crypt"
+        "Asmodeus the Archfiend"
       ]
     },
     {
@@ -1287,13 +1287,13 @@
       ],
       "hi_syn_hits": 3,
       "hi_syn_total": 10,
-      "ndcg30": 0.259225,
+      "ndcg30": 0.2645,
       "on_page_hits": 14,
       "top10": [
         "Moonstone Harbinger",
-        "A-Vampire Scrivener",
         "Vampire Scrivener",
         "Lich's Mastery",
+        "A-Vampire Scrivener",
         "Gonti's Machinations",
         "Exquisite Blood",
         "Bloodthirsty Conqueror",
@@ -1318,8 +1318,8 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.155005,
-      "on_page_hits": 13,
+      "ndcg30": 0.160008,
+      "on_page_hits": 14,
       "top10": [
         "Swiftfoot Boots",
         "Lightning Greaves",
@@ -1327,10 +1327,10 @@
         "Accorder's Shield",
         "Bone Saw",
         "Cathar's Shield",
+        "Skullclamp",
         "Spidersilk Net",
-        "Kite Shield",
-        "Sigil of Distinction",
-        "Skullclamp"
+        "Wild Growth",
+        "Basilisk Collar"
       ]
     },
     {
@@ -1349,19 +1349,19 @@
       ],
       "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.096789,
-      "on_page_hits": 3,
+      "ndcg30": 0.108371,
+      "on_page_hits": 4,
       "top10": [
         "Stitcher's Supplier",
         "Mental Note",
-        "Wand of Vertebrae",
-        "Excavated Wall",
-        "Liliana's Indignation",
-        "Festerleech",
-        "Shard of Broken Glass",
         "Perpetual Timepiece",
+        "Wand of Vertebrae",
         "Undead Butler",
-        "Mire Triton"
+        "Mire Triton",
+        "Excavated Wall",
+        "Polluted Cistern",
+        "Corpse Churn",
+        "Emry, Lurker of the Loch"
       ]
     },
     {
@@ -1380,8 +1380,8 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.045688,
-      "on_page_hits": 3,
+      "ndcg30": 0.064265,
+      "on_page_hits": 4,
       "top10": [
         "Ezio Auditore da Firenze",
         "Mari, the Killing Quill",
@@ -1392,7 +1392,7 @@
         "Knights of the Black Rose",
         "Iridescent Vinelasher",
         "Assassin Initiate",
-        "Hired Poisoner"
+        "Razorkin Needlehead"
       ]
     },
     {
@@ -1411,19 +1411,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.041053,
-      "on_page_hits": 14,
+      "ndcg30": 0.056543,
+      "on_page_hits": 4,
       "top10": [
-        "Sol Ring",
-        "Mystic Remora",
-        "Arcane Signet",
-        "Swiftfoot Boots",
-        "Lightning Greaves",
-        "Counterspell",
-        "Thought Vessel",
-        "Cyclonic Rift",
-        "Demonic Tutor",
-        "Feed the Swarm"
+        "Retrofitter Foundry",
+        "Snap",
+        "Grim Monolith",
+        "Finale of Revelation",
+        "Cloud of Faeries",
+        "Magewright's Stone",
+        "Thaumatic Compass",
+        "Aphetto Alchemist",
+        "Sleep-Cursed Faerie",
+        "Refocus"
       ]
     },
     {
@@ -1442,19 +1442,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.001008,
+      "ndcg30": 0.000516,
       "on_page_hits": 2,
       "top10": [
         "Flourishing Defenses",
         "Grist, Voracious Larva",
-        "Michelangelo, Weirdness to 11",
-        "Rampart Architect",
-        "Day of the Dragons",
+        "Glaring Fleshraker",
+        "Monkey Cage",
+        "Plane-Merge Elf",
         "Springheart Nantuko",
         "Arboreal Alliance",
         "Esika's Chariot",
         "Oko, the Ringleader",
-        "A-Esika's Chariot"
+        "Tamiyo, Compleated Sage"
       ]
     },
     {
@@ -1473,19 +1473,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.077812,
-      "on_page_hits": 2,
+      "ndcg30": 0.117387,
+      "on_page_hits": 5,
       "top10": [
         "Harmonic Prodigy",
-        "Goblin Engineer",
-        "Burning-Rune Demon",
-        "Ayara, First of Locthwain",
+        "Ob Nixilis, Unshackled",
+        "Butcher of Malakir",
+        "Eradicator Valkyrie",
+        "Voldaren Pariah",
+        "Goremand",
+        "Vile Mutilator",
         "Yahenni, Undying Partisan",
         "Sephiroth, Fabled SOLDIER",
-        "Kheru Bloodsucker",
-        "A-Skyclave Shadowcat",
-        "Erebos, Bleak-Hearted",
-        "Skyclave Shadowcat"
+        "Erebos, Bleak-Hearted"
       ]
     },
     {
@@ -1504,8 +1504,8 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.06071,
-      "on_page_hits": 20,
+      "ndcg30": 0.062237,
+      "on_page_hits": 21,
       "top10": [
         "Counterspell",
         "Cyclonic Rift",
@@ -1515,8 +1515,8 @@
         "Jeska's Will",
         "Blasphemous Act",
         "Pact of Negation",
-        "Pact of the Titan",
-        "Indicate"
+        "An Offer You Can't Refuse",
+        "Brainstorm"
       ]
     },
     {
@@ -1535,7 +1535,7 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.000705,
+      "ndcg30": 0.000525,
       "on_page_hits": 1,
       "top10": [
         "Grinding Station",
@@ -1545,9 +1545,9 @@
         "Blood Fountain",
         "Ransom Note",
         "Witching Well",
-        "Grim Bauble",
-        "Sewer-veillance Cam",
-        "Cat Oven"
+        "Lembas",
+        "Cryogen Relic",
+        "Instant Ramen"
       ]
     },
     {
@@ -1566,18 +1566,18 @@
       ],
       "hi_syn_hits": 3,
       "hi_syn_total": 10,
-      "ndcg30": 0.283595,
-      "on_page_hits": 6,
+      "ndcg30": 0.247991,
+      "on_page_hits": 8,
       "top10": [
-        "Harmonic Prodigy",
+        "Spellweaver Volute",
         "Ashling, Flame Dancer",
+        "Harmonic Prodigy",
         "The Twelfth Doctor",
         "Storm-Kiln Artist",
         "Ral, Storm Conduit",
         "Zaffai, Thunder Conductor",
         "Jadzi, Oracle of Arcavios",
         "Spell Satchel",
-        "A-Spell Satchel",
         "Archmage Emeritus"
       ]
     },
@@ -1597,8 +1597,8 @@
       ],
       "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.111071,
-      "on_page_hits": 23,
+      "ndcg30": 0.131071,
+      "on_page_hits": 24,
       "top10": [
         "Counterspell",
         "Cyclonic Rift",
@@ -1608,8 +1608,8 @@
         "Jeska's Will",
         "Blasphemous Act",
         "Pact of Negation",
-        "Pact of the Titan",
-        "Indicate"
+        "An Offer You Can't Refuse",
+        "Brainstorm"
       ]
     },
     {
@@ -1628,19 +1628,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.0,
-      "on_page_hits": 0,
+      "ndcg30": 0.006944,
+      "on_page_hits": 1,
       "top10": [
-        "Ayara, First of Locthwain",
-        "Grist, Voracious Larva",
         "Aftermath Analyst",
         "Seedship Broodtender",
         "Bristlebud Farmer",
+        "Goremand",
+        "Vile Mutilator",
+        "Ayara, First of Locthwain",
         "Sephiroth, Fabled SOLDIER",
         "Buzzard-Wasp Colony",
-        "Rat King, Pale Piper",
-        "Dreadhound",
-        "Burning-Rune Demon"
+        "Grist, Voracious Larva",
+        "Gilded Goose"
       ]
     },
     {
@@ -1690,19 +1690,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.041724,
+      "ndcg30": 0.043597,
       "on_page_hits": 6,
       "top10": [
         "Feed the Swarm",
         "Bolas's Citadel",
         "Walking Ballista",
-        "Chamber Sentry",
         "Reanimate",
         "Vampiric Tutor",
         "Mana Vault",
         "Lightning Bolt",
         "Malakir Rebirth",
-        "Imperial Seal"
+        "Imperial Seal",
+        "Bloodchief Ascension"
       ]
     },
     {
@@ -1721,19 +1721,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.03009,
-      "on_page_hits": 3,
+      "ndcg30": 0.045867,
+      "on_page_hits": 4,
       "top10": [
         "Stridehangar Automaton",
         "Rook Turret",
         "Walking Ballista",
         "Hangarback Walker",
         "Marketback Walker",
+        "Iron Apprentice",
         "Phyrexian Marauder",
-        "Chamber Sentry",
-        "Memnite",
-        "Phyrexian Walker",
-        "Iron Apprentice"
+        "Arcbound Worker",
+        "Steel Overseer",
+        "Millikin"
       ]
     },
     {
@@ -1750,21 +1750,21 @@
         "Dragon Fodder",
         "Krenko's Command"
       ],
-      "hi_syn_hits": 0,
+      "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.05638,
-      "on_page_hits": 5,
+      "ndcg30": 0.198552,
+      "on_page_hits": 13,
       "top10": [
         "Ardoz, Cobbler of War",
-        "Akki Ember-Keeper",
         "Glaring Fleshraker",
         "General Kreat, the Boltbringer",
+        "Slash, Reptile Rampager",
         "Gimli of the Glittering Caves",
-        "Anax, Hardened in the Forge",
-        "Tokka & Rahzar, Unsupervised",
         "Rose Room Treasurer",
-        "Baeloth Barrityl, Entertainer",
-        "Village Pillagers"
+        "Golden Guardian",
+        "Dragonmaster Outcast",
+        "Young Pyromancer",
+        "Akroan Crusader"
       ]
     },
     {
@@ -1783,19 +1783,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.0392,
+      "ndcg30": 0.04168,
       "on_page_hits": 5,
       "top10": [
-        "Path of Mettle",
         "Swashbuckler Extraordinaire",
         "Long-Range Sensor",
+        "Path of Mettle",
         "Squall, Gunblade Duelist",
         "Total War",
-        "Stitcher's Graft",
         "Horn of the Mark",
-        "Lucille",
+        "Stitcher's Graft",
         "Crown of Doom",
-        "Neyali, Suns' Vanguard"
+        "Neyali, Suns' Vanguard",
+        "Lucille"
       ]
     },
     {
@@ -1812,21 +1812,21 @@
         "Crucible of Worlds",
         "Ancient Greenwarden"
       ],
-      "hi_syn_hits": 1,
+      "hi_syn_hits": 3,
       "hi_syn_total": 10,
-      "ndcg30": 0.135544,
-      "on_page_hits": 9,
+      "ndcg30": 0.242509,
+      "on_page_hits": 14,
       "top10": [
         "Sazh's Chocobo",
         "Jaddi Offshoot",
         "Spectrum Sentinel",
         "Adventuring Gear",
-        "Hormagaunt Horde",
-        "Twists and Turns",
-        "Skyclave Pick-Axe",
-        "Scythe Leopard",
         "Lotus Cobra",
-        "Springheart Nantuko"
+        "Hormagaunt Horde",
+        "Springheart Nantuko",
+        "Bristly Bill, Spine Sower",
+        "Druid Class",
+        "Twists and Turns"
       ]
     },
     {
@@ -1845,7 +1845,7 @@
       ],
       "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.205672,
+      "ndcg30": 0.212507,
       "on_page_hits": 10,
       "top10": [
         "Swiftfoot Boots",
@@ -1854,10 +1854,10 @@
         "Accorder's Shield",
         "Bone Saw",
         "Cathar's Shield",
+        "Skullclamp",
         "Spidersilk Net",
-        "Kite Shield",
-        "Sigil of Distinction",
-        "Skullclamp"
+        "Basilisk Collar",
+        "Shadowspear"
       ]
     },
     {
@@ -1888,7 +1888,7 @@
         "Costume Closet",
         "The Ooze",
         "Splinter, the Mentor",
-        "Ninth Bridge Patrol"
+        "Twilight Drover"
       ]
     },
     {
@@ -1905,21 +1905,21 @@
         "Hour of Reckoning",
         "Martial Coup"
       ],
-      "hi_syn_hits": 1,
+      "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.087587,
-      "on_page_hits": 6,
+      "ndcg30": 0.161856,
+      "on_page_hits": 11,
       "top10": [
         "Zabaz, the Glimmerwasp",
-        "Vizier of Remedies",
         "Lae'zel, Vlaakith's Champion",
+        "Vizier of Remedies",
         "Generous Gift",
         "Smothering Tithe",
         "Hangarback Walker",
         "Clown Car",
-        "Orochi Hatchery",
         "Ocelot Pride",
-        "Secure the Wastes"
+        "Secure the Wastes",
+        "Orochi Hatchery"
       ]
     },
     {
@@ -1938,7 +1938,7 @@
       ],
       "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.155036,
+      "ndcg30": 0.155496,
       "on_page_hits": 7,
       "top10": [
         "Lost Monarch of Ifnir",
@@ -1969,19 +1969,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.005282,
-      "on_page_hits": 15,
+      "ndcg30": 0.028816,
+      "on_page_hits": 5,
       "top10": [
         "Hardened Bonds",
         "Flourishing Defenses",
-        "Sol Ring",
-        "Mystic Remora",
-        "Arcane Signet",
-        "Swiftfoot Boots",
-        "Lightning Greaves",
-        "Counterspell",
-        "Thought Vessel",
-        "Nature's Lore"
+        "Legolas's Quick Reflexes",
+        "Quirion Ranger",
+        "Wirewood Symbiote",
+        "Retrofitter Foundry",
+        "Nature's Chosen",
+        "Snap",
+        "Grim Monolith",
+        "Devoted Druid"
       ]
     },
     {
@@ -2031,19 +2031,19 @@
       ],
       "hi_syn_hits": 4,
       "hi_syn_total": 10,
-      "ndcg30": 0.316746,
+      "ndcg30": 0.325522,
       "on_page_hits": 20,
       "top10": [
         "Counterspell",
         "Cyclonic Rift",
         "Fierce Guardianship",
         "Pact of Negation",
-        "Indicate",
         "An Offer You Can't Refuse",
         "Brainstorm",
         "Swan Song",
         "Mystical Tutor",
-        "Ponder"
+        "Ponder",
+        "Pongify"
       ]
     },
     {
@@ -2060,21 +2060,21 @@
         "Quick Sliver",
         "Galerider Sliver"
       ],
-      "hi_syn_hits": 5,
+      "hi_syn_hits": 6,
       "hi_syn_total": 10,
-      "ndcg30": 0.581943,
-      "on_page_hits": 24,
+      "ndcg30": 0.696416,
+      "on_page_hits": 26,
       "top10": [
         "Galerider Sliver",
         "Striking Sliver",
         "Virulent Sliver",
-        "Sidewinder Sliver",
-        "Plated Sliver",
-        "Screeching Sliver",
-        "Mindlash Sliver",
         "Gemhide Sliver",
         "Manaweft Sliver",
-        "Cloudshredder Sliver"
+        "Cloudshredder Sliver",
+        "Sidewinder Sliver",
+        "Crystalline Sliver",
+        "Sentinel Sliver",
+        "Venom Sliver"
       ]
     },
     {
@@ -2091,21 +2091,21 @@
         "Mesa Enchantress",
         "Wild Growth"
       ],
-      "hi_syn_hits": 1,
+      "hi_syn_hits": 4,
       "hi_syn_total": 10,
-      "ndcg30": 0.194306,
-      "on_page_hits": 16,
+      "ndcg30": 0.29039,
+      "on_page_hits": 14,
       "top10": [
         "Cleric Class",
         "Leyline of Hope",
         "Boon Reflection",
-        "Island Sanctuary",
-        "Abundance",
-        "Enduring Renewal",
-        "Pursuit of Knowledge",
-        "Dawn of Hope",
-        "Heliod, Sun-Crowned",
-        "Trudge Garden"
+        "Enchantress's Presence",
+        "Hallowed Haunting",
+        "Hidden Ancients",
+        "Sigil of the Empty Throne",
+        "Secret Arcade",
+        "Presence of the Master",
+        "Island Sanctuary"
       ]
     },
     {
@@ -2130,13 +2130,13 @@
         "Harmonic Prodigy",
         "Rocksteady, Mutant Marauder",
         "Railway Brawler",
-        "Zoo Escapees",
         "Master of Ceremonies",
+        "Zoo Escapees",
         "Workshop Warchief",
         "Razorfield Ripper",
         "Dauntless Escort",
-        "Proud Pack-Rhino",
-        "Solstice Zealot"
+        "Rhox Faithmender",
+        "Proud Pack-Rhino"
       ]
     },
     {
@@ -2155,15 +2155,15 @@
       ],
       "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.19051,
-      "on_page_hits": 14,
+      "ndcg30": 0.231222,
+      "on_page_hits": 17,
       "top10": [
         "Moonstone Harbinger",
         "Wax-Wane Witness",
-        "A-Vampire Scrivener",
         "Vampire Scrivener",
         "Lich's Mastery",
         "Marina Vendrell's Grimoire",
+        "A-Vampire Scrivener",
         "Cleric of Life's Bond",
         "Wedding Ring",
         "Qala, Ajani's Pridemate",
@@ -2186,14 +2186,14 @@
       ],
       "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.08441,
+      "ndcg30": 0.086303,
       "on_page_hits": 5,
       "top10": [
         "Shenanigans",
         "Golgari Brownscale",
         "Moldervine Cloak",
-        "Greater Mossdog",
         "Golgari Grave-Troll",
+        "Greater Mossdog",
         "Dakmor Salvage",
         "Flame Jab",
         "Formless Genesis",
@@ -2217,15 +2217,15 @@
       ],
       "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.289114,
-      "on_page_hits": 14,
+      "ndcg30": 0.304547,
+      "on_page_hits": 15,
       "top10": [
         "Sporecrown Thallid",
         "Shroofus Sproutsire",
         "Thelonite Hermit",
         "Tendershoot Dryad",
-        "Hardened Bonds",
         "Mikey & Leo, Chaos & Order",
+        "Hardened Bonds",
         "Flourishing Defenses",
         "Doubling Season",
         "Primal Vigor",
@@ -2246,10 +2246,10 @@
         "Deeproot Elite",
         "Merrow Commerce"
       ],
-      "hi_syn_hits": 4,
+      "hi_syn_hits": 5,
       "hi_syn_total": 10,
-      "ndcg30": 0.577944,
-      "on_page_hits": 20,
+      "ndcg30": 0.637171,
+      "on_page_hits": 23,
       "top10": [
         "Master of the Pearl Trident",
         "Vodalian Hexcatcher",
@@ -2260,7 +2260,7 @@
         "Merfolk Sovereign",
         "Emperor Mihail II",
         "Deeproot Historian",
-        "Attuma, Atlantean Warlord"
+        "Mist Dancer"
       ]
     },
     {
@@ -2279,7 +2279,7 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.067832,
+      "ndcg30": 0.06931,
       "on_page_hits": 4,
       "top10": [
         "Swiftfoot Boots",
@@ -2288,10 +2288,10 @@
         "Accorder's Shield",
         "Bone Saw",
         "Cathar's Shield",
+        "Skullclamp",
         "Spidersilk Net",
-        "Kite Shield",
-        "Sigil of Distinction",
-        "Skullclamp"
+        "Basilisk Collar",
+        "Shadowspear"
       ]
     },
     {
@@ -2310,7 +2310,7 @@
       ],
       "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.12166,
+      "ndcg30": 0.12791,
       "on_page_hits": 10,
       "top10": [
         "Swiftfoot Boots",
@@ -2319,10 +2319,10 @@
         "Accorder's Shield",
         "Bone Saw",
         "Cathar's Shield",
+        "Skullclamp",
         "Spidersilk Net",
-        "Kite Shield",
-        "Sigil of Distinction",
-        "Skullclamp"
+        "Wild Growth",
+        "Basilisk Collar"
       ]
     },
     {
@@ -2341,8 +2341,8 @@
       ],
       "hi_syn_hits": 4,
       "hi_syn_total": 10,
-      "ndcg30": 0.450793,
-      "on_page_hits": 16,
+      "ndcg30": 0.492223,
+      "on_page_hits": 19,
       "top10": [
         "Tomb Tyrant",
         "Bladestitched Skaab",
@@ -2372,19 +2372,19 @@
       ],
       "hi_syn_hits": 5,
       "hi_syn_total": 10,
-      "ndcg30": 0.457886,
-      "on_page_hits": 19,
+      "ndcg30": 0.489626,
+      "on_page_hits": 20,
       "top10": [
         "Silver-Fur Master",
         "Splinter, Hamato Yoshi",
-        "A-Silver-Fur Master",
         "Throatseeker",
+        "A-Silver-Fur Master",
         "Moon-Circuit Hacker",
         "Skullsnatcher",
         "Dokuchi Silencer",
         "Nashi, Searcher in the Dark",
-        "A-Dokuchi Silencer",
-        "A-Moon-Circuit Hacker"
+        "Nashi, Moon Sage's Scion",
+        "Mistblade Shinobi"
       ]
     },
     {
@@ -2403,19 +2403,19 @@
       ],
       "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.191448,
-      "on_page_hits": 7,
+      "ndcg30": 0.22569,
+      "on_page_hits": 10,
       "top10": [
         "Aftermath Analyst",
         "Seedship Broodtender",
         "Bristlebud Farmer",
         "Stitcher's Supplier",
         "Grist, Voracious Larva",
+        "Skull Prophet",
+        "Perpetual Timepiece",
+        "Grapple with the Past",
         "Patchwork Beastie",
-        "Wand of Vertebrae",
-        "Crop Sigil",
-        "Deathbonnet Sprout",
-        "Excavated Wall"
+        "Wand of Vertebrae"
       ]
     },
     {
@@ -2434,7 +2434,7 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.143369,
+      "ndcg30": 0.143357,
       "on_page_hits": 23,
       "top10": [
         "Harmonic Prodigy",
@@ -2465,19 +2465,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.073503,
-      "on_page_hits": 16,
+      "ndcg30": 0.050344,
+      "on_page_hits": 7,
       "top10": [
         "Faerie Mechanist",
-        "Case of the Pilfered Proof",
+        "Inquisitive Glimmer",
+        "Mana Matrix",
+        "Hallowed Haunting",
+        "Sigil of the Empty Throne",
+        "Secret Arcade",
+        "Presence of the Master",
         "Academy Manufactor",
         "Stridehangar Automaton",
-        "Worldwalker Helm",
-        "Moonlit Meditation",
-        "Anointed Procession",
-        "Mirrormind Crown",
-        "Divine Visitation",
-        "Halving Season"
+        "Worldwalker Helm"
       ]
     },
     {
@@ -2496,8 +2496,8 @@
       ],
       "hi_syn_hits": 5,
       "hi_syn_total": 10,
-      "ndcg30": 0.433486,
-      "on_page_hits": 25,
+      "ndcg30": 0.454032,
+      "on_page_hits": 26,
       "top10": [
         "Counterspell",
         "Cyclonic Rift",
@@ -2532,13 +2532,13 @@
       "top10": [
         "Baxter, Fly in the Ointment",
         "Aberrant Researcher",
-        "Shocker",
-        "Buzz Bots",
         "Circuit Mender",
+        "Shocker",
         "Dragonfly Swarm",
+        "Buzz Bots",
+        "Barbed Shocker",
         "Robber Fly",
         "A-Circuit Mender",
-        "Barbed Shocker",
         "Stockman, Mad Fly-entist"
       ]
     },
@@ -2558,19 +2558,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.104527,
-      "on_page_hits": 5,
+      "ndcg30": 0.115925,
+      "on_page_hits": 6,
       "top10": [
         "Stridehangar Automaton",
         "Ornithopter",
         "Hope of Ghirapur",
-        "Roterothopter",
-        "Phyrexian Ornithopter",
         "Ornithopter of Paradise",
         "Gold-Forged Thopteryx",
         "Liberator, Urza's Battlethopter",
         "Pilgrim's Eye",
-        "Skyscanner"
+        "Roterothopter",
+        "Skyscanner",
+        "Phyrexian Ornithopter"
       ]
     },
     {
@@ -2594,13 +2594,13 @@
       "top10": [
         "Voyager Staff",
         "Sorin of House Markov",
-        "Faceless Devourer",
-        "Slithery Stalker",
         "Sothera, the Supervoid",
         "Jecht, Reluctant Guardian",
         "Conqueror's Galleon",
-        "Portcullis",
         "Sheoldred",
+        "Faceless Devourer",
+        "Portcullis",
+        "Slithery Stalker",
         "Mystifying Maze"
       ]
     },
@@ -2620,19 +2620,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.016747,
-      "on_page_hits": 2,
+      "ndcg30": 0.019909,
+      "on_page_hits": 3,
       "top10": [
+        "Spellweaver Volute",
+        "Inquisitive Glimmer",
+        "Mana Matrix",
+        "Case of the Ransacked Lab",
+        "Primal Amulet",
+        "Jace's Sanctum",
         "Reality Twist",
         "Naked Singularity",
-        "Case of the Pilfered Proof",
-        "Academy Manufactor",
-        "Stridehangar Automaton",
-        "Worldwalker Helm",
-        "Moonlit Meditation",
-        "Anointed Procession",
-        "Mirrormind Crown",
-        "Elspeth, Storm Slayer"
+        "Hallowed Haunting",
+        "Sigil of the Empty Throne"
       ]
     },
     {
@@ -2651,19 +2651,19 @@
       ],
       "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.153849,
-      "on_page_hits": 10,
+      "ndcg30": 0.160151,
+      "on_page_hits": 11,
       "top10": [
         "Ashling, the Limitless",
-        "Incandescent Soulstoke",
         "Creeping Trailblazer",
+        "Incandescent Soulstoke",
         "Thicket Crasher",
-        "Titania, Protector of Argoth",
         "Titania, Voice of Gaea",
-        "Embodiment of Fury",
-        "Embodiment of Insight",
+        "Lumra, Bellow of the Woods",
         "Tempestra, Dame of Games",
-        "Greensleeves, Maro-Sorcerer"
+        "Xorn",
+        "Ancient Greenwarden",
+        "Akoum Hellhound"
       ]
     },
     {
@@ -2682,19 +2682,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.00403,
+      "ndcg30": 0.005798,
       "on_page_hits": 3,
       "top10": [
+        "Rankle, Pitiless Trickster",
         "Ordeal of Erebos",
         "Lich's Tomb",
         "Oath of Lim-D\u00fbl",
         "Gonti's Machinations",
-        "Rankle, Pitiless Trickster",
-        "Gluttonous Guest",
-        "Sanguine Brushstroke",
-        "Moonstone Eulogist",
-        "Mindcrank",
-        "Moonstone Harbinger"
+        "Momentum Breaker",
+        "Voracious Fell Beast",
+        "Taste of Death",
+        "Extract a Confession",
+        "Liliana, Dreadhorde General"
       ]
     },
     {
@@ -2713,7 +2713,7 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.07308,
+      "ndcg30": 0.074164,
       "on_page_hits": 18,
       "top10": [
         "Nature's Lore",
@@ -2725,7 +2725,7 @@
         "Jeska's Will",
         "Blasphemous Act",
         "Summoner's Pact",
-        "Pact of the Titan"
+        "Faithless Looting"
       ]
     },
     {
@@ -2744,8 +2744,8 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.10591,
-      "on_page_hits": 4,
+      "ndcg30": 0.110901,
+      "on_page_hits": 5,
       "top10": [
         "Korlessa, Scale Singer",
         "Rith, Liberated Primeval",
@@ -2753,10 +2753,10 @@
         "Karrthus, Tyrant of Jund",
         "Shivan Devastator",
         "Slumbering Dragon",
-        "A-Dragonborn Looter",
         "Reckless Barbarian",
         "Scaled Nurturer",
-        "Deceptive Frostkite"
+        "Deceptive Frostkite",
+        "Sprite Dragon"
       ]
     },
     {
@@ -2775,7 +2775,7 @@
       ],
       "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.071603,
+      "ndcg30": 0.072896,
       "on_page_hits": 6,
       "top10": [
         "Breath of Fury",
@@ -2783,11 +2783,11 @@
         "Bumi, Unleashed",
         "Bloodthirster",
         "Raphael, Tag Team Tough",
-        "Response",
         "Fear of Missing Out",
+        "Response",
         "Aggravated Assault",
         "Najeela, the Blade-Blossom",
-        "Balthier and Fran"
+        "Relentless Assault"
       ]
     },
     {
@@ -2806,8 +2806,8 @@
       ],
       "hi_syn_hits": 4,
       "hi_syn_total": 10,
-      "ndcg30": 0.282835,
-      "on_page_hits": 11,
+      "ndcg30": 0.30872,
+      "on_page_hits": 12,
       "top10": [
         "Harmonic Prodigy",
         "Faerie Mastermind",
@@ -2844,12 +2844,12 @@
         "Aftermath Analyst",
         "Seedship Broodtender",
         "Bristlebud Farmer",
-        "Campsite Cuisine",
         "Ayara, First of Locthwain",
-        "Bloodspatter Vampire",
+        "Campsite Cuisine",
         "Academy Manufactor",
         "Peregrin Took",
-        "Xorn"
+        "Xorn",
+        "Chatterfang, Squirrel General"
       ]
     },
     {
@@ -2868,18 +2868,18 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.046684,
+      "ndcg30": 0.056486,
       "on_page_hits": 12,
       "top10": [
-        "Obstinate Familiar",
         "Laboratory Maniac",
+        "Obstinate Familiar",
         "Phial of Galadriel",
         "Eruth, Tormented Prophet",
         "Archmage Ascension",
-        "Hullbreacher",
         "Teferi's Ageless Insight",
         "Jace, Wielder of Mysteries",
         "Uba Mask",
+        "Alhammarret's Archive",
         "Zur's Weirding"
       ]
     },
@@ -2899,19 +2899,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.109519,
-      "on_page_hits": 4,
+      "ndcg30": 0.133984,
+      "on_page_hits": 8,
       "top10": [
         "Aftermath Analyst",
         "Seedship Broodtender",
         "Bristlebud Farmer",
         "Stitcher's Supplier",
         "Grist, Voracious Larva",
+        "Skull Prophet",
         "Mental Note",
-        "Patchwork Beastie",
-        "Wand of Vertebrae",
-        "Crop Sigil",
-        "Deathbonnet Sprout"
+        "Perpetual Timepiece",
+        "Grapple with the Past",
+        "Patchwork Beastie"
       ]
     },
     {
@@ -2928,10 +2928,10 @@
         "Persistent Petitioners",
         "The Mindskinner"
       ],
-      "hi_syn_hits": 1,
+      "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.282017,
-      "on_page_hits": 12,
+      "ndcg30": 0.389358,
+      "on_page_hits": 17,
       "top10": [
         "Ruin Crab",
         "Altar of the Brood",
@@ -2941,8 +2941,8 @@
         "Grindstone",
         "Ghoulcaller's Bell",
         "Merfolk Windrobber",
-        "Increasing Confusion",
-        "Mental Note"
+        "Altar of Dementia",
+        "Brain Freeze"
       ]
     },
     {
@@ -2992,19 +2992,19 @@
       ],
       "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.127706,
+      "ndcg30": 0.138954,
       "on_page_hits": 15,
       "top10": [
-        "Hardened Bonds",
         "Mikey & Leo, Chaos & Order",
+        "Hardened Bonds",
         "Flourishing Defenses",
         "Hardened Scales",
-        "Zabaz, the Glimmerwasp",
         "Ozolith, the Shattered Spire",
         "Conclave Mentor",
+        "Zabaz, the Glimmerwasp",
         "Benevolent Hydra",
-        "Vizier of Remedies",
-        "Michelangelo, Weirdness to 11"
+        "Branching Evolution",
+        "Kami of Whispered Hopes"
       ]
     },
     {
@@ -3023,19 +3023,19 @@
       ],
       "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.050646,
-      "on_page_hits": 1,
+      "ndcg30": 0.070331,
+      "on_page_hits": 6,
       "top10": [
-        "Clown Car",
-        "Arcum's Astrolabe",
-        "Lantern of the Lost",
-        "Inquisitive Puppet",
-        "Ichor Wellspring",
-        "Dowsing Dagger",
-        "Prized Statue",
-        "Solar Transformer",
-        "Staff of the Storyteller",
-        "Unstable Amulet"
+        "Retrofitter Foundry",
+        "Grim Monolith",
+        "Fear of Missing Out",
+        "Magewright's Stone",
+        "Thaumatic Compass",
+        "Djeru's Resolve",
+        "Basalt Monolith",
+        "Thousand-Year Elixir",
+        "Staff of Domination",
+        "Patriar's Seal"
       ]
     },
     {
@@ -3054,7 +3054,7 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.068982,
+      "ndcg30": 0.072196,
       "on_page_hits": 7,
       "top10": [
         "Krovikan Vampire",
@@ -3062,11 +3062,11 @@
         "Measure of Wickedness",
         "Scavenger's Talent",
         "Ghoulish Procession",
-        "Yoke of the Damned",
-        "Spectacle of Destruction",
         "Crowded Crypt",
+        "Yoke of the Damned",
+        "Black Market",
         "Vengeful Townsfolk",
-        "Dramatic Finale"
+        "Spectacle of Destruction"
       ]
     },
     {
@@ -3085,7 +3085,7 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.197083,
+      "ndcg30": 0.201923,
       "on_page_hits": 13,
       "top10": [
         "Swiftfoot Boots",
@@ -3094,10 +3094,10 @@
         "Accorder's Shield",
         "Bone Saw",
         "Cathar's Shield",
+        "Skullclamp",
         "Spidersilk Net",
-        "Kite Shield",
-        "Sigil of Distinction",
-        "Skullclamp"
+        "Basilisk Collar",
+        "Shadowspear"
       ]
     }
   ],
