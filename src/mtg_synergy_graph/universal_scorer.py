@@ -48,6 +48,19 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "zone_resonance":        "trigger_resonance",
     "effect_feeds_trigger":  "port_match",
     "panharmonicon":         "port_match",
+    "flicker_synergy":       "port_match",
+    "cost_payoff":           "port_match",
+    "opponent_forcing":      "opponent_forcing",
+    "token_producer":        "port_match",
+    "voltron":               "scaling",
+    "etb_sac_target":        "etb_value",
+    "combat_enhancer":       "port_match",
+    "wheel_synergy":         "port_match",
+    "artifact_recursion":    "graveyard_synergy",
+    "copy_synergy":          "port_match",
+    "token_sac_chain":       "sacrifice_synergy",
+    "evasion":               "port_match",
+    "exile_play":            "port_match",
 }
 
 
@@ -86,7 +99,14 @@ class UniversalScore:
                 if key not in seen_anti:
                     seen_anti.add(key)
                     anti += self.idf_weights.get(key, 1.0)
-        return syn - anti + self.staple_bonus
+        base = syn - anti + self.staple_bonus
+        # Multi-rule bonus: cards matching 3+ distinct rules are
+        # genuinely better synergy picks (Pitiless Plunderer matches
+        # sacrifice_cluster + trigger_effect + effect_feeds_trigger).
+        n_rules = len(self.distinct_rules)
+        if n_rules >= 3:
+            base += 0.05 * min(n_rules - 2, 3)
+        return base
 
     @cached_property
     def distinct_rules(self) -> frozenset[str]:
@@ -129,6 +149,8 @@ _FLAT_COUNT_RULES: frozenset[str] = frozenset({
     "scaling",
     "etb_self",
     "tribal_density",
+    "token_producer",
+    "evasion",
 })
 
 #: Per-rule flat weight overrides. Tribal density uses a lower weight
@@ -137,6 +159,8 @@ _FLAT_COUNT_RULES: frozenset[str] = frozenset({
 #: 0.5 while a lord scores 0.5 + lord_IDF ≈ 0.74 — proper discrimination.
 _FLAT_WEIGHT_OVERRIDES: types.MappingProxyType[str, float] = types.MappingProxyType({
     "tribal_density": 0.5,
+    "token_producer": 0.25,
+    "evasion": 0.15,
 })
 
 
@@ -166,6 +190,113 @@ def _computeidf_weights(
         else:
             result[key] = 1.0 / math.log2(1.0 + len(candidates))
     return result
+
+
+#: Effect event classes that indicate a card generates lasting value.
+_RESOURCE_EFFECTS: frozenset[str] = frozenset({
+    "Draw", "Dig", "Investigate", "Surveil", "Scry",          # card advantage
+    "Token", "CopyPermanent", "Animate", "ChangeZone",        # board presence
+    "Destroy", "DestroyAll", "DealDamage", "DamageAll",       # removal
+    "Sacrifice", "SacrificeAll", "Discard", "GainControl",    # disruption
+    "Mill", "Mana",                                            # resource gen
+})
+
+#: Keywords indicating ante-era or fundamentally broken extraction.
+_JUNK_KEYWORDS: frozenset[str] = frozenset({
+    "Remove", "Ante",
+})
+
+
+def _compute_quality_dampeners(
+    conn: sqlite3.Connection,
+    candidate_names: set[str],
+) -> dict[str, float]:
+    """Compute per-card quality dampeners from Forge port data.
+
+    Returns a dict mapping card_name → dampener (1.0 = no penalty, <1.0 = junk).
+    Only cards with detected junk signals are included (missing = 1.0).
+
+    Signals (all from card_ports, no EDHREC dependency):
+    - Ante/ownership keywords → 0.1 (nearly zero out the card)
+    - Port bloat (30+ ports) → 0.3 (extraction artifact)
+    - Cleanup-dominated (>40% of effects are Cleanup) → 0.5
+    - Zero resource effects (no Draw/Token/Destroy/etc.) → 0.7
+    """
+    if not candidate_names:
+        return {}
+
+    dampeners: dict[str, float] = {}
+
+    # Batch query: get port stats for all candidates
+    placeholders = ",".join("?" * min(len(candidate_names), 999))
+    batches = list(candidate_names)
+
+    # Process in batches of 999 (SQLite limit)
+    card_ports_count: dict[str, int] = {}
+    card_cleanup_count: dict[str, int] = {}
+    card_effect_events: dict[str, set[str]] = defaultdict(set)
+    card_keywords: dict[str, set[str]] = defaultdict(set)
+
+    batch_size = 900
+    batch_list = sorted(candidate_names)
+    for i in range(0, len(batch_list), batch_size):
+        batch = batch_list[i : i + batch_size]
+        ph = ",".join("?" * len(batch))
+
+        rows = conn.execute(
+            f"SELECT card_name, port_type, event_class "
+            f"FROM card_ports WHERE card_name IN ({ph})",
+            tuple(batch),
+        ).fetchall()
+
+        for r in rows:
+            name = r["card_name"]
+            pt = r["port_type"] or ""
+            ev = r["event_class"] or ""
+            card_ports_count[name] = card_ports_count.get(name, 0) + 1
+            if pt == "effect":
+                card_effect_events[name].add(ev)
+                if ev == "Cleanup":
+                    card_cleanup_count[name] = card_cleanup_count.get(name, 0) + 1
+            elif pt == "keyword":
+                card_keywords[name].add(ev)
+
+    # Apply penalties
+    for name in candidate_names:
+        d = 1.0
+
+        # Ante/junk keywords
+        if card_keywords.get(name, set()) & _JUNK_KEYWORDS:
+            d *= 0.1
+
+        # Port bloat
+        total = card_ports_count.get(name, 0)
+        if total >= 30:
+            d *= 0.3
+
+        # Cleanup-dominated effects
+        cleanup = card_cleanup_count.get(name, 0)
+        effects = card_effect_events.get(name, set())
+        effect_total = sum(
+            1 for _ in range(cleanup)  # cleanup count as proxy for total effects
+        ) + len(effects)
+        if effect_total > 0 and cleanup > 0:
+            cleanup_ratio = cleanup / max(total, 1)
+            if cleanup_ratio > 0.4:
+                d *= 0.5
+
+        # Zero resource effects (no Draw/Token/Destroy/etc.)
+        # Also penalize cards with no effect ports at all (stax/keywords only)
+        if not (effects & _RESOURCE_EFFECTS):
+            if effects:
+                d *= 0.7  # has effects but none generate resources
+            elif total > 0:
+                d *= 0.5  # no effect ports at all (pure stax/keywords)
+
+        if d < 1.0:
+            dampeners[name] = d
+
+    return dampeners
 
 
 def score_all_universal(
@@ -204,11 +335,13 @@ def score_all_universal(
     for pip in cmdr_pips | {"C"}:
         staple_names.update(STAPLES.get(pip, ()))
 
-    # Build results with IDF injected
+    # Build results with IDF and quality dampener injected
     results: dict[str, UniversalScore] = {}
     for name, comps in by_candidate.items():
         bonus = 0.01 if name in staple_names else 0.0
-        results[name] = UniversalScore(complements=comps, staple_bonus=bonus, idf_weights=idf)
+        results[name] = UniversalScore(
+            complements=comps, staple_bonus=bonus, idf_weights=idf,
+        )
     for name in staple_names:
         if name not in results and name not in set(commander_set):
             results[name] = UniversalScore(staple_bonus=0.01, idf_weights=idf)

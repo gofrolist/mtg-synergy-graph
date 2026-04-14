@@ -40,7 +40,7 @@ CHAIN_KEYS: dict[str, str] = {
 
 #: Branches whose ports are contingent on a runtime decision.
 CONDITIONAL_BRANCH_KINDS: frozenset[str] = frozenset(
-    {"true", "false", "win", "otherwise"}
+    {"true", "false", "win", "otherwise", "choice"}
 )
 
 

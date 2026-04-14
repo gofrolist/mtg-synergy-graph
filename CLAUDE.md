@@ -6,7 +6,8 @@ Guidance for Claude Code working in this repo.
 
 MTG Synergy Graph — deterministic, rule-based EDH/Commander synergy scorer
 using Forge DSL ports. No training, no EDHREC at inference.
-Current aggregate NDCG@30 ~ 0.142, Hi-Syn 102/1000 on the 100-commander golden set.
+Current aggregate NDCG@30 ~ 0.154, Hi-Syn 110/1000 on the 100-commander golden set.
+Port extraction: 184,106 ports from 32,327 cards (GenericChoice + StaticAbilities$ expansion).
 
 ## Common Commands
 
@@ -44,13 +45,28 @@ pair creates a synergy. Each wraps an existing mechanical map.
 | etb_self | trigger filter | card identity | ETB/dies self-matching |
 | scaling | scales_with | card type | Aura/Equipment density |
 | spell_density | SpellCast filter | card type | spell-type density |
-| tribal_density | token subtypes | card subtype | tribal creature density |
+| tribal_density | token subtypes (gated) | card subtype | tribal density (suppressed for Conspire) |
 | zone_resonance | ChangesZone filter | ChangesZone trigger | landfall resonance |
 | sacrifice_outlets | ChangesZone death | sacrifice cost | sac outlets for death cmdr |
 | panharmonicon | Panharmonicon static | doubled trigger type | Yarok/Isshin/Teysa |
 | graveyard_filler | GY-reanimate/cast | self-mill, discard | Meren/Karador/Kess |
 | scales_with_density | scales_with port | density contributors | Phenax/Ezuri/Rakdos |
 | extra_land_plays | AdjustLandPlays static | landfall triggers | Azusa |
+| flicker_synergy | self-ETB trigger | exile+return effects | Gonti |
+| cost_payoff | typed discard cost | graveyard return, Retrace/Dredge | Borborygmos |
+| opponent_forcing | opp-facing trigger | opponent-targeting effects | Tergrid/Nekusar |
+| token_producer | ChangesZone Creature trigger | Token effects | Purphoros |
+| go_wide | Continuous creature pump | Token effects | Jetmir |
+| voltron | Hexproof/Exalted keyword | Auras and Equipment | Sigarda/Rafiq |
+| etb_sac_target | GY reanimate effect | self-ETB + sacrifice cost creatures | Meren/Karador |
+| combat_enhancer | DamageDone trigger | AddPhase + Double Strike | Saskia |
+| wheel_synergy | Drawn trigger (opp-facing) | Draw+Discard effect cards | Nekusar |
+| artifact_recursion | GY→BF Artifact effect | self-sac artifacts, ETB artifacts | Osgir/Daretti |
+| copy_synergy | CopyPermanent effect | populate targets, ETB creatures | Ghired/Riku |
+| token_sac_chain | Sacrificed trigger | Treasure/Food/Clue/Blood producers | Korvold |
+| panharmonicon (reverse) | cmdr subtype match | candidates doubling cmdr triggers | Kykar+Harmonic Prodigy |
+| panharmonicon (stack) | cmdr Panharmonicon | other Panharmonicon statics | Yarok+Panharmonicon |
+| evasion | DamageDone combat (non-tribal) | self-unblockable creatures | Saskia/Derevi |
 
 ### IDF Weighting (`universal_scorer.py`)
 
@@ -60,6 +76,9 @@ worth more than broad matches (sacrifice cost: N=2000, IDF≈0.09).
 
 Density rules (spell_density, scaling, tribal_density, etb_self) use flat
 weight 1.0 — for these, matching many candidates IS the strategy.
+
+Multi-rule bonus: cards matching 3+ distinct rule_ids get +0.1 per extra rule
+(rewards multi-axis synergy picks like Pitiless Plunderer).
 
 ### Algorithm
 

@@ -16,6 +16,7 @@ from typing import Any
 from .parser import (
     CHAIN_KEYS,
     ChainNode,
+    parse_forge_line,
     walk_svar_chain,
 )
 
@@ -319,6 +320,38 @@ def extract_effect_ports(
         )
         for sub_node in chain:
             sub_ports.extend(extract_effect_ports(card_name, sub_node, svars))
+
+    # GenericChoice modal expansion: walk each choice SVar to extract
+    # the hidden Token/Draw/ChangeZone effects (e.g., Tireless Provisioner
+    # has Choices$ Food,Treasure → Token effects for each).
+    if verb == "GenericChoice":
+        choices_str = parsed.get("Choices", "")
+        for choice_name in choices_str.split(","):
+            choice_name = choice_name.strip()
+            if choice_name and choice_name in svars:
+                chain = walk_svar_chain(
+                    choice_name,
+                    svars,
+                    branch_kind="choice",
+                    branch_parent=source_svar,
+                    chain_depth=chain_depth + 1,
+                )
+                for sub_node in chain:
+                    sub_ports.extend(
+                        extract_effect_ports(card_name, sub_node, svars)
+                    )
+
+    # StaticAbilities$ SVar walking: extract static ports from referenced
+    # SVars (e.g., "StaticAbilities$ Play" → MayPlay continuous static).
+    static_refs = parsed.get("StaticAbilities", "")
+    if static_refs:
+        for ref_name in static_refs.split(","):
+            ref_name = ref_name.strip()
+            if ref_name and ref_name in svars:
+                static_parsed = parse_forge_line(svars[ref_name])
+                sub_ports.extend(
+                    extract_static_ports(card_name, static_parsed)
+                )
 
     # Phase B3: emit a synthetic combo_primitive port alongside the original
     # Branch / Repeat / RepeatEach effect so SQL queries can find combo
