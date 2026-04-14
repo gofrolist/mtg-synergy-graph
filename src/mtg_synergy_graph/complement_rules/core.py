@@ -131,18 +131,21 @@ def _invert_event_match_map() -> dict[str, dict[str, EventCheck]]:
                 continue
             # Build a check that (1) rejects self-only candidate triggers
             # and (2) applies the original compatibility check with swapped args
+            fn: EventCheck
             if check is _always:
-                combined: EventCheck = _cand_trigger_not_self
+                fn = _cand_trigger_not_self
             elif check is _zones_compatible:
-                combined = _not_self_and_zones
+                fn = _not_self_and_zones
             elif check is _counters_compatible:
-                combined = _not_self_and_counters
+                fn = _not_self_and_counters
             else:
 
-                def combined(e: dict, t: dict, _c: Any = check) -> bool:
+                def _make_combined(e: dict, t: dict, _c: Any = check) -> bool:
                     return _cand_trigger_not_self(e, t) and _c(t, e)
 
-            out.setdefault(eff_ev, {})[trig_ev] = combined
+                fn = _make_combined
+
+            out.setdefault(eff_ev, {})[trig_ev] = fn
     return out
 
 

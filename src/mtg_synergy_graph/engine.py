@@ -214,7 +214,7 @@ class SynergyEngine:
         else:
             scores = us.to_legacy_buckets()
 
-        explanation = self._render_explanation(card, scores, []) if include_explanation else None
+        explanation = self._render_explanation(card, scores) if include_explanation else None
 
         return Recommendation(
             rank=0,
@@ -382,7 +382,7 @@ class SynergyEngine:
 
         items: list[Recommendation] = []
         for i, (cand, buckets) in enumerate(window):
-            explanation = self._render_explanation(cand, buckets, []) if include_explanations else None
+            explanation = self._render_explanation(cand, buckets) if include_explanations else None
             items.append(
                 Recommendation(
                     rank=offset + i + 1,
@@ -428,7 +428,6 @@ class SynergyEngine:
         self,
         card: str,
         scores: dict[str, float],
-        contributing: list[ContributingPort],
     ) -> list[str]:
         """Plain-English narrator (§8) — optional, for debug surfaces."""
         lines: list[str] = []

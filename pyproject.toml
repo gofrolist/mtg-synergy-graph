@@ -12,8 +12,22 @@ graph = ["numpy>=2.4"]
 requires = ["uv_build>=0.11.6,<0.12"]
 build-backend = "uv_build"
 
+[tool.pyright]
+pythonVersion = "3.13"
+typeCheckingMode = "basic"
+exclude = ["scripts/", "tests/"]
+reportMissingImports = "warning"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--cov=src/mtg_synergy_graph --cov-fail-under=80"
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__",
+]
 
 [tool.ruff]
 target-version = "py313"
@@ -54,7 +68,9 @@ ignore = [
 [dependency-groups]
 dev = [
     "pre-commit>=4.5",
+    "pyright>=1.1",
     "pytest>=9.0.3",
+    "pytest-cov>=6.1",
     "ruff>=0.15",
     "vulture>=2.16",
     "mtg-synergy-graph[graph]",

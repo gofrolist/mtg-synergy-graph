@@ -118,7 +118,8 @@ def fake_edhrec_db(tmp_path):
         rows,
     )
     conn.commit()
-    return conn
+    yield conn
+    conn.close()
 
 
 def test_edhrec_labels_drops_negative_synergy(fake_edhrec_db):

@@ -495,7 +495,7 @@ def find_trigger_feeders(
     cmdr_set = set(commander_set)
 
     # --- Pre-filter triggers to the usable subset ---
-    usable_triggers: list[tuple[PortRow, frozenset[str], frozenset[str]]] = []
+    usable_triggers: list[tuple[PortRow, set[tuple[str, str]], set[tuple[str, str]]]] = []
     needed_effect_classes: set[str] = set()
     needed_cost_classes: set[str] = set()
 

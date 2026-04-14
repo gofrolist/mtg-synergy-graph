@@ -347,7 +347,8 @@ def numpy_personalised_pagerank(
     n = len(nodes)
     src_idx = index[source]
 
-    np = _np  # local alias for type checkers
+    assert _np is not None  # guarded by HAS_NUMPY check above
+    np = _np
     offsets_arr = np.asarray(offsets, dtype=np.int64)
     neighbours_arr = np.asarray(neighbours, dtype=np.int64)
     out_degree = np.diff(offsets_arr).astype(np.float64)
@@ -416,6 +417,7 @@ def build_scipy_pr_context(adjacency: dict[str, set[str]]) -> ScipyPRContext | N
     """
     if not HAS_SCIPY or not adjacency:
         return None
+    assert _np is not None  # HAS_SCIPY implies HAS_NUMPY
     np = _np
     nodes, index, offsets, neighbours = _adjacency_to_csr(adjacency)
     n = len(nodes)
@@ -433,6 +435,7 @@ def build_scipy_pr_context(adjacency: dict[str, set[str]]) -> ScipyPRContext | N
     data = np.ones(len(neighbours_arr), dtype=np.float64) / safe_degree[edge_source]
     del edge_source
 
+    assert _csr_matrix is not None  # guarded by HAS_SCIPY check above
     transition_csr = _csr_matrix((data, neighbours_arr, offsets_arr), shape=(n, n))
     transition_t = transition_csr.transpose().tocsr()
     del transition_csr  # release the source-major copy ASAP
@@ -463,6 +466,7 @@ def scipy_personalised_pagerank_cached(
     """
     if source not in ctx.index:
         return {}
+    assert _np is not None  # ctx requires numpy
     np = _np
     src_idx = ctx.index[source]
     n = ctx.n
