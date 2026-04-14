@@ -32,6 +32,7 @@ graph = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "mtg-synergy-graph", extra = ["graph"] },
     { name = "pytest" },
     { name = "vulture" },
 ]
@@ -42,6 +43,7 @@ provides-extras = ["graph"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "mtg-synergy-graph", extras = ["graph"] },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "vulture", specifier = ">=2.16" },
 ]
