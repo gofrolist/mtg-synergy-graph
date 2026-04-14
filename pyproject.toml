@@ -20,7 +20,7 @@ reportMissingImports = "warning"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=src/mtg_synergy_graph --cov-fail-under=77"
+addopts = "--cov=src/mtg_synergy_graph --cov-fail-under=80"
 
 [tool.coverage.report]
 exclude_lines = [
