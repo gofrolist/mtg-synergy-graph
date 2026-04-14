@@ -1243,7 +1243,7 @@ def _find_effect_feeds_etb(
     if not cmdr_produces:
         return []
 
-    # Preload creature names for the "Other" gate
+    # Preload creature names for the "Other" gate (used for O(1) membership check)
     _creature_names: set[str] = set()
     if _needs_creature_other_gate:
         _creature_names = {
@@ -1588,7 +1588,6 @@ def _find_scales_with_density(
     needs more of:
     - ``CardCounters.P1P1`` → cards that put +1/+1 counters
     - ``CardToughness`` → high-toughness creatures (Phenax mill-by-toughness)
-    - ``DevotionDual.X.Y`` → permanents with X/Y color pips
     - ``LifeOppsLostThisTurn`` → damage/drain effects
     """
     results: list[PortComplement] = []
@@ -1624,10 +1623,15 @@ def _find_scales_with_density(
                     ))
 
         # CardToughness → high-toughness creatures (Phenax mills by toughness).
-        # Toughness isn't directly in cards table; use Defender keyword
-        # as proxy for high-toughness creatures (walls, defenders).
+        # Match creatures with toughness significantly exceeding power
+        # (wall-like stat line) OR Defender keyword.
         elif "CardToughness" in ev:
             cur = conn.execute(
+                "SELECT DISTINCT name AS card_name FROM cards "
+                "WHERE card_types LIKE '%Creature%' "
+                "AND CAST(toughness AS INTEGER) >= 4 "
+                "AND CAST(toughness AS INTEGER) >= CAST(power AS INTEGER) + 2 "
+                "UNION "
                 "SELECT DISTINCT card_name FROM card_ports "
                 "WHERE port_type = 'keyword' AND event_class = 'Defender'"
             )

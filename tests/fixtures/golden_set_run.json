@@ -109,8 +109,8 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.024601,
-      "on_page_hits": 4,
+      "ndcg30": 0.038465,
+      "on_page_hits": 6,
       "top10": [
         "Shield Sphere",
         "Shifting Wall",
@@ -118,10 +118,10 @@
         "Wall of Runes",
         "Errant, Street Artist",
         "Steel Wall",
+        "Merfolk Secretkeeper",
         "Secret Door",
         "Excavated Wall",
-        "Barrier of Bones",
-        "Monoist Sentry"
+        "Barrier of Bones"
       ]
     },
     {
