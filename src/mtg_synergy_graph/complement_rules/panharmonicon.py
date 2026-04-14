@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 import sqlite3
-from typing import Any
 
 from ..graph_engine import _trigger_only_matches_self
 from .core import PortComplement, PortRow
@@ -57,11 +56,24 @@ def _find_panharmonicon_complements(
     # Collect matching candidates -- both self-ETB and non-self triggers.
     # Self-ETB creatures (Mulldrifter, Coiling Oracle) ARE what Panharmonicon
     # commanders want to double. We gate on valuable effects to avoid flooding.
-    _VALUABLE_EFFECTS = frozenset({
-        "Draw", "Destroy", "DestroyAll", "Token", "GainControl",
-        "DealDamage", "DamageAll", "PutCounter", "Mill", "Dig",
-        "ChangeZone", "Sacrifice", "SacrificeAll", "Mana",
-    })
+    _VALUABLE_EFFECTS = frozenset(
+        {
+            "Draw",
+            "Destroy",
+            "DestroyAll",
+            "Token",
+            "GainControl",
+            "DealDamage",
+            "DamageAll",
+            "PutCounter",
+            "Mill",
+            "Dig",
+            "ChangeZone",
+            "Sacrifice",
+            "SacrificeAll",
+            "Mana",
+        }
+    )
     matched: list[tuple[str, str, str, bool]] = []  # (card, ev, branch_kind, is_self)
     seen: set[str] = set()
     for r in cur.fetchall():
@@ -89,8 +101,7 @@ def _find_panharmonicon_complements(
         batch = card_names[i : i + batch_size]
         ph = ",".join("?" * len(batch))
         rows = conn.execute(
-            f"SELECT card_name, event_class FROM card_ports "
-            f"WHERE card_name IN ({ph}) AND port_type = 'effect'",
+            f"SELECT card_name, event_class FROM card_ports WHERE card_name IN ({ph}) AND port_type = 'effect'",
             tuple(batch),
         ).fetchall()
         for r in rows:
@@ -107,7 +118,7 @@ def _find_panharmonicon_complements(
         if not best_eff:
             continue
 
-        if is_self:
+        if is_self:  # noqa: SIM108
             # Self-ETB: use a single IDF group ("ChangesZone_etb") to avoid
             # tiny per-effect-type groups with artificial high IDF.
             cand_ev = f"{ev}_etb"
@@ -115,14 +126,16 @@ def _find_panharmonicon_complements(
             # Non-self: enrich with effect type for narrower IDF groups.
             cand_ev = f"{ev}_{best_eff}"
 
-        results.append(PortComplement(
-            rule_id="panharmonicon",
-            direction="synergy",
-            candidate=card,
-            cmdr_event=f"Panharmonicon_{ev}",
-            cand_event=cand_ev,
-            branch_kind=bk,
-        ))
+        results.append(
+            PortComplement(
+                rule_id="panharmonicon",
+                direction="synergy",
+                candidate=card,
+                cmdr_event=f"Panharmonicon_{ev}",
+                cand_event=cand_ev,
+                branch_kind=bk,
+            )
+        )
 
     return results
 
@@ -145,9 +158,7 @@ def _find_reverse_panharmonicon(
     cmdr_list = list(cmdr_set)
     cmdr_subtypes: set[str] = set()
     for row in conn.execute(
-        "SELECT subtypes FROM cards WHERE name IN ({})".format(
-            ",".join("?" * len(cmdr_list))
-        ),
+        "SELECT subtypes FROM cards WHERE name IN ({})".format(",".join("?" * len(cmdr_list))),
         tuple(cmdr_list),
     ).fetchall():
         if row["subtypes"]:
@@ -166,8 +177,7 @@ def _find_reverse_panharmonicon(
 
     # Find Panharmonicon statics where the commander matches ValidCard
     cur = conn.execute(
-        "SELECT card_name, raw_line FROM card_ports "
-        "WHERE port_type = 'static' AND event_class = 'Panharmonicon'"
+        "SELECT card_name, raw_line FROM card_ports WHERE port_type = 'static' AND event_class = 'Panharmonicon'"
     )
     results: list[PortComplement] = []
     seen: set[str] = set()
@@ -202,22 +212,20 @@ def _find_reverse_panharmonicon(
 
         # Check ValidMode overlap with commander's triggers
         m_vm = re.search(r"'ValidMode':\s*'([^']+)'", raw)
-        doubled_modes = set()
-        if m_vm:
-            doubled_modes = {m.strip() for m in m_vm.group(1).split(",") if m.strip()}
-        else:
-            doubled_modes = {"any"}
+        doubled_modes = {m.strip() for m in m_vm.group(1).split(",") if m.strip()} if m_vm else {"any"}
 
         # Check if any commander trigger would be doubled
         if "any" in doubled_modes or doubled_modes & cmdr_trigger_events:
             seen.add(card)
-            results.append(PortComplement(
-                rule_id="panharmonicon",
-                direction="synergy",
-                candidate=card,
-                cmdr_event="reverse_panharmonicon",
-                cand_event="doubles_cmdr_triggers",
-            ))
+            results.append(
+                PortComplement(
+                    rule_id="panharmonicon",
+                    direction="synergy",
+                    candidate=card,
+                    cmdr_event="reverse_panharmonicon",
+                    cand_event="doubles_cmdr_triggers",
+                )
+            )
 
     return results
 
@@ -251,8 +259,7 @@ def _find_panharmonicon_stacking(
 
     # Find candidates also having Panharmonicon with overlapping ValidMode
     cur = conn.execute(
-        "SELECT card_name, raw_line FROM card_ports "
-        "WHERE port_type = 'static' AND event_class = 'Panharmonicon'"
+        "SELECT card_name, raw_line FROM card_ports WHERE port_type = 'static' AND event_class = 'Panharmonicon'"
     )
     results: list[PortComplement] = []
     for r in cur.fetchall():
@@ -265,12 +272,14 @@ def _find_panharmonicon_stacking(
             continue
         cand_modes = {mode.strip() for mode in m.group(1).split(",") if mode.strip()}
         if cand_modes & cmdr_pan_modes:
-            results.append(PortComplement(
-                rule_id="panharmonicon",
-                direction="synergy",
-                candidate=card,
-                cmdr_event="Panharmonicon_stack",
-                cand_event="Panharmonicon",
-            ))
+            results.append(
+                PortComplement(
+                    rule_id="panharmonicon",
+                    direction="synergy",
+                    candidate=card,
+                    cmdr_event="Panharmonicon_stack",
+                    cand_event="Panharmonicon",
+                )
+            )
 
     return results

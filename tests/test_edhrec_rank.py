@@ -34,19 +34,19 @@ FIXTURES = Path(__file__).parent / "fixtures"
 #: real data/tags.db shape.
 _RANKED_ROWS = [
     # (oracle_id, name, type_line, edhrec_rank)
-    ("01" * 16, "Cathars' Crusade",          "Enchantment",                             1200),
-    ("02" * 16, "Korvold, Fae-Cursed King",  "Legendary Creature — Dragon",             180),
-    ("03" * 16, "Panharmonicon",             "Artifact",                                260),
-    ("04" * 16, "Rhystic Study",             "Enchantment",                             42),
-    ("05" * 16, "Scute Swarm",               "Creature — Insect",                       3100),
-    ("06" * 16, "Phyrexian Altar",           "Artifact",                                95),
-    ("07" * 16, "Dockside Extortionist",     "Creature — Goblin Pirate",                12),
-    ("08" * 16, "Tireless Tracker",          "Creature — Human Scout",                  880),
-    ("09" * 16, "Wrath of God",              "Sorcery",                                 320),
-    ("0a" * 16, "Sol Ring",                  "Artifact",                                1),
-    ("0b" * 16, "Urza, Lord High Artificer", "Legendary Creature — Human Artificer",    450),
+    ("01" * 16, "Cathars' Crusade", "Enchantment", 1200),
+    ("02" * 16, "Korvold, Fae-Cursed King", "Legendary Creature — Dragon", 180),
+    ("03" * 16, "Panharmonicon", "Artifact", 260),
+    ("04" * 16, "Rhystic Study", "Enchantment", 42),
+    ("05" * 16, "Scute Swarm", "Creature — Insect", 3100),
+    ("06" * 16, "Phyrexian Altar", "Artifact", 95),
+    ("07" * 16, "Dockside Extortionist", "Creature — Goblin Pirate", 12),
+    ("08" * 16, "Tireless Tracker", "Creature — Human Scout", 880),
+    ("09" * 16, "Wrath of God", "Sorcery", 320),
+    ("0a" * 16, "Sol Ring", "Artifact", 1),
+    ("0b" * 16, "Urza, Lord High Artificer", "Legendary Creature — Human Artificer", 450),
     # Obscure: NULL edhrec_rank — must sort below any ranked card.
-    ("0c" * 16, "Phantom Unobscure",         "Creature — Phantom",                      None),
+    ("0c" * 16, "Phantom Unobscure", "Creature — Phantom", None),
 ]
 
 
@@ -55,13 +55,9 @@ def ranked_scryfall_db(tmp_path) -> Path:
     """Minimal Scryfall-shaped sqlite DB with the edhrec_rank column."""
     path = tmp_path / "tags_ranked.db"
     conn = sqlite3.connect(path)
-    conn.execute(
-        "CREATE TABLE cards ("
-        "oracle_id TEXT, name TEXT, type_line TEXT, edhrec_rank INTEGER)"
-    )
+    conn.execute("CREATE TABLE cards (oracle_id TEXT, name TEXT, type_line TEXT, edhrec_rank INTEGER)")
     conn.executemany(
-        "INSERT INTO cards (oracle_id, name, type_line, edhrec_rank) "
-        "VALUES (?, ?, ?, ?)",
+        "INSERT INTO cards (oracle_id, name, type_line, edhrec_rank) VALUES (?, ?, ?, ?)",
         _RANKED_ROWS,
     )
     conn.commit()
@@ -75,9 +71,7 @@ def legacy_scryfall_db(tmp_path) -> Path:
     backward compat with pre-migration fixtures."""
     path = tmp_path / "tags_legacy.db"
     conn = sqlite3.connect(path)
-    conn.execute(
-        "CREATE TABLE cards (oracle_id TEXT, name TEXT, type_line TEXT)"
-    )
+    conn.execute("CREATE TABLE cards (oracle_id TEXT, name TEXT, type_line TEXT)")
     conn.executemany(
         "INSERT INTO cards (oracle_id, name, type_line) VALUES (?, ?, ?)",
         [(oid, name, tl) for (oid, name, tl, _) in _RANKED_ROWS],
@@ -162,9 +156,7 @@ def test_importer_writes_edhrec_rank(ranked_scryfall_db, tmp_path):
     conn = open_db(synergy_path)
     try:
         import_cards_folder(conn, FIXTURES, scryfall_db=ranked_scryfall_db)
-        rows = conn.execute(
-            "SELECT name, edhrec_rank FROM cards ORDER BY name"
-        ).fetchall()
+        rows = conn.execute("SELECT name, edhrec_rank FROM cards ORDER BY name").fetchall()
         by_name = {r["name"]: r["edhrec_rank"] for r in rows}
 
         # Every fixture card whose name appears in _RANKED_ROWS must
@@ -178,7 +170,8 @@ def test_importer_writes_edhrec_rank(ranked_scryfall_db, tmp_path):
 
 
 def test_importer_leaves_edhrec_rank_null_for_legacy_schema(
-    legacy_scryfall_db, tmp_path,
+    legacy_scryfall_db,
+    tmp_path,
 ):
     """oracle_id still populates, but edhrec_rank stays NULL because
     the Scryfall DB did not have the column. Import must not crash."""
@@ -186,9 +179,7 @@ def test_importer_leaves_edhrec_rank_null_for_legacy_schema(
     conn = open_db(synergy_path)
     try:
         import_cards_folder(conn, FIXTURES, scryfall_db=legacy_scryfall_db)
-        rows = conn.execute(
-            "SELECT name, oracle_id, edhrec_rank FROM cards"
-        ).fetchall()
+        rows = conn.execute("SELECT name, oracle_id, edhrec_rank FROM cards").fetchall()
         assert rows
         for r in rows:
             assert r["oracle_id"] is not None
@@ -238,14 +229,14 @@ def test_kyler_tied_cluster_is_ordered_by_edhrec_rank(full_engine):
     # Find the largest score cluster (universal uses IDF-weighted scores,
     # not integer weight sums — cluster at any shared total_score)
     from collections import Counter
+
     score_counts = Counter(round(r.total_score, 4) for r in page.items)
     if not score_counts:
         pytest.skip("no items in page")
     most_common_score = score_counts.most_common(1)[0][0]
     cluster = [r for r in page.items if round(r.total_score, 4) == most_common_score]
     assert len(cluster) >= 5, (
-        f"Expected a substantial tied cluster; largest has "
-        f"{len(cluster)} cards at score={most_common_score}"
+        f"Expected a substantial tied cluster; largest has {len(cluster)} cards at score={most_common_score}"
     )
 
     # Pull cmc + edhrec_rank in one go.
@@ -263,6 +254,7 @@ def test_kyler_tied_cluster_is_ordered_by_edhrec_rank(full_engine):
     # each bucket. Inside each (total, cmc) group, consecutive page
     # positions must have non-decreasing edhrec_rank.
     from collections import defaultdict
+
     by_cmc: dict[float, list[str]] = defaultdict(list)
     for rec in cluster:
         by_cmc[meta[rec.card][0]].append(rec.card)
@@ -288,6 +280,7 @@ def test_kyler_tied_cluster_is_not_purely_alphabetical(full_engine):
     page = full_engine.page("Kyler, Sigardian Emissary", limit=300)
     conn = full_engine._conn
     from collections import Counter
+
     score_counts = Counter(round(r.total_score, 4) for r in page.items)
     most_common_score = score_counts.most_common(1)[0][0]
     cluster = [r.card for r in page.items if round(r.total_score, 4) == most_common_score]
@@ -295,18 +288,19 @@ def test_kyler_tied_cluster_is_not_purely_alphabetical(full_engine):
     # Pick the largest cmc sub-bucket in the cluster so there are
     # enough cards to disprove alphabetical ordering.
     from collections import defaultdict
+
     by_cmc: dict[float, list[str]] = defaultdict(list)
     for name in cluster:
         row = conn.execute(
-            "SELECT cmc FROM cards WHERE name = ?", (name,),
+            "SELECT cmc FROM cards WHERE name = ?",
+            (name,),
         ).fetchone()
         cmc = row["cmc"] if row["cmc"] is not None else 99.0
         by_cmc[cmc].append(name)
     biggest_cmc = max(by_cmc, key=lambda k: len(by_cmc[k]))
     bucket = by_cmc[biggest_cmc]
     assert len(bucket) >= 5, (
-        "Not enough cards in the largest cmc bucket to disprove "
-        "alphabetical ordering; adjust the fixture."
+        "Not enough cards in the largest cmc bucket to disprove alphabetical ordering; adjust the fixture."
     )
 
     # The engine's output order must differ from alphabetical, proving
@@ -329,10 +323,7 @@ def test_page_total_score_unchanged_by_tiebreaker(tmp_path):
         (scryfall_b, lambda _: None),
     ):
         conn = sqlite3.connect(path)
-        conn.execute(
-            "CREATE TABLE cards (oracle_id TEXT, name TEXT, type_line TEXT, "
-            "edhrec_rank INTEGER)"
-        )
+        conn.execute("CREATE TABLE cards (oracle_id TEXT, name TEXT, type_line TEXT, edhrec_rank INTEGER)")
         conn.executemany(
             "INSERT INTO cards VALUES (?, ?, ?, ?)",
             [(oid, name, tl, rank_fn(rank)) for (oid, name, tl, rank) in _RANKED_ROWS],

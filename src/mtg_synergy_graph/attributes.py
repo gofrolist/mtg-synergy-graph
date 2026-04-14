@@ -59,13 +59,9 @@ COMMON_KEYWORDS = frozenset(
     }
 )
 
-CONTROLLER_QUALIFIERS = frozenset(
-    {"YouCtrl", "OppCtrl", "Self", "Other", "Any", "You", "Opponent"}
-)
+CONTROLLER_QUALIFIERS = frozenset({"YouCtrl", "OppCtrl", "Self", "Other", "Any", "You", "Opponent"})
 
-ZONE_QUALIFIERS = frozenset(
-    {"Battlefield", "Graveyard", "Hand", "Library", "Exile", "Stack", "Command"}
-)
+ZONE_QUALIFIERS = frozenset({"Battlefield", "Graveyard", "Hand", "Library", "Exile", "Stack", "Command"})
 
 _CMC_PREFIXES = ("cmcEQ", "cmcLE", "cmcLT", "cmcGE", "cmcGT", "cmcNE")
 _POWER_PREFIXES = ("powerEQ", "powerLE", "powerLT", "powerGE", "powerGT", "powerNE")
@@ -133,7 +129,7 @@ def explode_filter(valid_filter: str) -> list[dict]:
             continue
         rows.append(
             {
-                "attr_kind":  classify_attr_token(token),
+                "attr_kind": classify_attr_token(token),
                 "attr_value": token,
                 "is_negated": negated,
             }

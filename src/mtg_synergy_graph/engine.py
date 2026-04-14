@@ -40,9 +40,16 @@ ENGINE_VERSION = "0.1.0"
 #: ``Murasa``) which have triggers that match commander triggers but
 #: aren't legal deck cards. Empty ``card_types`` is also rejected because
 #: every legitimate EDH card has at least one top-level type.
-NON_EDH_CARD_TYPES: frozenset[str] = frozenset({
-    "Plane", "Phenomenon", "Scheme", "Conspiracy", "Vanguard", "Dungeon",
-})
+NON_EDH_CARD_TYPES: frozenset[str] = frozenset(
+    {
+        "Plane",
+        "Phenomenon",
+        "Scheme",
+        "Conspiracy",
+        "Vanguard",
+        "Dungeon",
+    }
+)
 
 # ---------------------------------------------------------------------------
 # Data classes (§8 + §9)
@@ -53,40 +60,40 @@ NON_EDH_CARD_TYPES: frozenset[str] = frozenset({
 class ContributingPort:
     """A single port-match that fed into a candidate's score (§8)."""
 
-    bucket:       str
-    port_type:    str
-    event_class:  str
+    bucket: str
+    port_type: str
+    event_class: str
     valid_filter: str | None
-    branch_kind:  str
-    raw_line:     str | None
+    branch_kind: str
+    raw_line: str | None
 
 
 @dataclass(frozen=True)
 class Recommendation:
     """A single ranked card in a recommendation page (§9)."""
 
-    rank:               int
-    card:               str
-    total_score:        float
-    scores:             dict[str, float]
+    rank: int
+    card: str
+    total_score: float
+    scores: dict[str, float]
     contributing_ports: list[ContributingPort]
-    explanation:        list[str] | None = None
+    explanation: list[str] | None = None
 
 
 @dataclass(frozen=True)
 class RecommendationPage:
     """A paginated slice of the synergy ranking (§9 + §14)."""
 
-    commander:      list[str]
+    commander: list[str]
     color_identity: list[str]
-    total:          int
-    offset:         int
-    limit:          int
-    generated_at:   str
-    forge_version:  str
-    spec_version:   str
+    total: int
+    offset: int
+    limit: int
+    generated_at: str
+    forge_version: str
+    spec_version: str
     engine_version: str
-    items:          list[Recommendation] = field(default_factory=list)
+    items: list[Recommendation] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +151,7 @@ class SynergyEngine:
     def close(self) -> None:
         self._conn.close()
 
-    def __enter__(self) -> "SynergyEngine":
+    def __enter__(self) -> SynergyEngine:
         return self
 
     def __exit__(self, *exc: Any) -> None:
@@ -154,10 +161,10 @@ class SynergyEngine:
 
     def metadata(self) -> dict[str, str]:
         return {
-            "spec_version":   SPEC_VERSION,
+            "spec_version": SPEC_VERSION,
             "engine_version": ENGINE_VERSION,
-            "forge_version":  self._forge_version,
-            "db_path":        str(self._db_path),
+            "forge_version": self._forge_version,
+            "db_path": str(self._db_path),
         }
 
     def legal_cards(self, commander: str | Sequence[str]) -> list[str]:
@@ -168,8 +175,9 @@ class SynergyEngine:
         cmdr_rows = self._fetch_cards(cmdr_set)
         identity = set(_color_identity_union(cmdr_rows))
         cur = self._conn.execute(
-            "SELECT name, color_identity, card_types FROM cards "
-            "WHERE name NOT IN ({})".format(",".join("?" * len(cmdr_set))),
+            "SELECT name, color_identity, card_types FROM cards WHERE name NOT IN ({})".format(
+                ",".join("?" * len(cmdr_set))
+            ),
             tuple(cmdr_set),
         )
         out = []
@@ -200,16 +208,13 @@ class SynergyEngine:
         us = universal.get(card)
         if us is None:
             # Deferred: scoring.py → signals.py → scoring.py circular import
-            from .scoring import empty_buckets  # noqa: PLC0415
+            from .scoring import empty_buckets
+
             scores: dict[str, float] = empty_buckets()
         else:
             scores = us.to_legacy_buckets()
 
-        explanation = (
-            self._render_explanation(card, scores, [])
-            if include_explanation
-            else None
-        )
+        explanation = self._render_explanation(card, scores, []) if include_explanation else None
 
         return Recommendation(
             rank=0,
@@ -235,8 +240,7 @@ class SynergyEngine:
         ).fetchone()
         if row is None:
             raise LookupError(
-                f"oracle_id {oracle_id!r} is not in synergy.db "
-                "(card absent from the Forge cardsfolder source)"
+                f"oracle_id {oracle_id!r} is not in synergy.db (card absent from the Forge cardsfolder source)"
             )
         return row["name"]
 
@@ -323,7 +327,9 @@ class SynergyEngine:
         if self._candidate_cache is None:
             self._candidate_cache = build_candidate_cache(self._conn)
         penalty_ctx = build_penalty_context(
-            self._conn, cmdr_set, candidate_cache=self._candidate_cache,
+            self._conn,
+            cmdr_set,
+            candidate_cache=self._candidate_cache,
         )
         legal: set[str] = set()
         for name, row in penalty_ctx.candidate_rows.items():
@@ -338,11 +344,7 @@ class SynergyEngine:
                 continue
             if any(t in NON_EDH_CARD_TYPES for t in cand_types):
                 continue
-            cand_pips = {
-                t.strip()
-                for t in (row["color_identity"] or "").split(",")
-                if t.strip()
-            }
+            cand_pips = {t.strip() for t in (row["color_identity"] or "").split(",") if t.strip()}
             if not (cand_pips - identity_set):
                 legal.add(name)
 
@@ -380,11 +382,7 @@ class SynergyEngine:
 
         items: list[Recommendation] = []
         for i, (cand, buckets) in enumerate(window):
-            explanation = (
-                self._render_explanation(cand, buckets, [])
-                if include_explanations
-                else None
-            )
+            explanation = self._render_explanation(cand, buckets, []) if include_explanations else None
             items.append(
                 Recommendation(
                     rank=offset + i + 1,

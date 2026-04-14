@@ -29,38 +29,38 @@ from .scoring import BUCKETS
 #: Tier 3 (weak, original weight 1–3): counts as 0.3 breadth unit.
 SIGNAL_TIER: dict[str, int] = {
     # Tier 1 — strong mechanical signal
-    "port_match":             1,
-    "lord":                   1,
-    "amplifier":              1,
-    "effect_resonance":       1,
-    "replacement_resonance":  1,
-    "opponent_forcing":       1,
-    "resource_density":       1,
-    "trigger_resonance":      1,
-    "scaling":                1,
+    "port_match": 1,
+    "lord": 1,
+    "amplifier": 1,
+    "effect_resonance": 1,
+    "replacement_resonance": 1,
+    "opponent_forcing": 1,
+    "resource_density": 1,
+    "trigger_resonance": 1,
+    "scaling": 1,
     # Tier 2 — moderate signal
-    "cost_synergy":           2,
-    "sacrifice_synergy":      2,
-    "counter_ecosystem":      2,
-    "untap_synergy":          2,
-    "token_etb_payoff":       2,
-    "graveyard_synergy":      2,
-    "counter_synergy":        2,
-    "stat_scaling":           2,
-    "spellcast_density":      2,
-    "etb_value":              2,
-    "replacement_producer":   2,
-    "deck_hints":             2,
+    "cost_synergy": 2,
+    "sacrifice_synergy": 2,
+    "counter_ecosystem": 2,
+    "untap_synergy": 2,
+    "token_etb_payoff": 2,
+    "graveyard_synergy": 2,
+    "counter_synergy": 2,
+    "stat_scaling": 2,
+    "spellcast_density": 2,
+    "etb_value": 2,
+    "replacement_producer": 2,
+    "deck_hints": 2,
     # Tier 3 — weak / contextual
-    "catchall":               3,
-    "chain":                  3,
-    "strategic":              3,
-    "staple":                 3,
-    "internal_synergy":       3,
-    "graph_metrics":          3,
+    "catchall": 3,
+    "chain": 3,
+    "strategic": 3,
+    "staple": 3,
+    "internal_synergy": 3,
+    "graph_metrics": 3,
     # Negative signal — has a tier for completeness but excluded from
     # breadth; subtracts from depth instead.
-    "replacement":            1,
+    "replacement": 1,
 }
 
 #: Breadth contribution per tier.
@@ -70,34 +70,34 @@ TIER_BREADTH_WEIGHT: dict[int, float] = {1: 1.0, 2: 0.7, 3: 0.3}
 #: confidence to 0–1).  Values match the ``*_WEIGHT`` constants in
 #: ``scoring.py``; kept here so signal logic has no circular import.
 _DETECTOR_MAX_DELTA: dict[str, float] = {
-    "port_match":             10.0,
-    "catchall":                1.0,
-    "cost_synergy":            6.0,
-    "sacrifice_synergy":       6.0,
-    "counter_synergy":         4.0,
-    "counter_ecosystem":       6.0,
-    "untap_synergy":           6.0,
-    "token_etb_payoff":        6.0,
-    "graveyard_synergy":       6.0,
-    "etb_value":               4.0,
-    "trigger_resonance":       8.0,
-    "stat_scaling":            4.0,
-    "spellcast_density":       4.0,
-    "opponent_forcing":       12.0,
-    "scaling":                 6.0,
-    "deck_hints":              4.0,
-    "chain":                   3.0,
-    "lord":                   12.0,
-    "amplifier":              10.0,
-    "internal_synergy":        1.0,
-    "graph_metrics":           3.0,  # max of the graph sub-weights
-    "strategic":               2.0,
-    "resource_density":        8.0,
-    "effect_resonance":       10.0,
-    "replacement_resonance":  10.0,
-    "replacement_producer":    4.0,
-    "staple":                  1.0,
-    "replacement":            10.0,  # negative bucket — special handling
+    "port_match": 10.0,
+    "catchall": 1.0,
+    "cost_synergy": 6.0,
+    "sacrifice_synergy": 6.0,
+    "counter_synergy": 4.0,
+    "counter_ecosystem": 6.0,
+    "untap_synergy": 6.0,
+    "token_etb_payoff": 6.0,
+    "graveyard_synergy": 6.0,
+    "etb_value": 4.0,
+    "trigger_resonance": 8.0,
+    "stat_scaling": 4.0,
+    "spellcast_density": 4.0,
+    "opponent_forcing": 12.0,
+    "scaling": 6.0,
+    "deck_hints": 4.0,
+    "chain": 3.0,
+    "lord": 12.0,
+    "amplifier": 10.0,
+    "internal_synergy": 1.0,
+    "graph_metrics": 3.0,  # max of the graph sub-weights
+    "strategic": 2.0,
+    "resource_density": 8.0,
+    "effect_resonance": 10.0,
+    "replacement_resonance": 10.0,
+    "replacement_producer": 4.0,
+    "staple": 1.0,
+    "replacement": 10.0,  # negative bucket — special handling
 }
 
 
@@ -110,9 +110,9 @@ _DETECTOR_MAX_DELTA: dict[str, float] = {
 class Signal:
     """A single detection emitted by a detector."""
 
-    signal_type: str          # bucket name, e.g. "port_match"
-    confidence: float         # 0.0–1.0, normalised per-detector
-    tier: int                 # 1 = strong, 2 = medium, 3 = weak
+    signal_type: str  # bucket name, e.g. "port_match"
+    confidence: float  # 0.0–1.0, normalised per-detector
+    tier: int  # 1 = strong, 2 = medium, 3 = weak
     evidence: dict[str, Any]  # the existing match-record dict
 
 
@@ -168,10 +168,7 @@ class CandidateSignals:
             cur = per_type.get(s.signal_type)
             if cur is None or s.confidence > cur[0]:
                 per_type[s.signal_type] = (s.confidence, s.tier)
-        total = sum(
-            conf * TIER_BREADTH_WEIGHT.get(tier, 0.3)
-            for conf, tier in per_type.values()
-        )
+        total = sum(conf * TIER_BREADTH_WEIGHT.get(tier, 0.3) for conf, tier in per_type.values())
         # Subtract replacement penalty (max confidence of replacement signals)
         repl = max(
             (s.confidence for s in self.signals if s.signal_type == "replacement"),
@@ -274,12 +271,14 @@ def signals_from_scored(
                 # Legacy records without _delta: split bucket total evenly
                 raw = buckets.get(bkt, 0.0)
                 conf = delta_to_confidence(bkt, abs(raw) / max(len(recs), 1))
-            signals.append(Signal(
-                signal_type=bkt,
-                confidence=conf,
-                tier=t,
-                evidence=rec,
-            ))
+            signals.append(
+                Signal(
+                    signal_type=bkt,
+                    confidence=conf,
+                    tier=t,
+                    evidence=rec,
+                )
+            )
         emitted_buckets.add(bkt)
 
     # Fallback: emit one signal for non-zero buckets without match records
@@ -290,11 +289,13 @@ def signals_from_scored(
         if raw == 0.0:
             continue
         conf = delta_to_confidence(bkt, abs(raw))
-        signals.append(Signal(
-            signal_type=bkt,
-            confidence=conf,
-            tier=tier_for(bkt),
-            evidence={"raw_delta": raw},
-        ))
+        signals.append(
+            Signal(
+                signal_type=bkt,
+                confidence=conf,
+                tier=tier_for(bkt),
+                evidence={"raw_delta": raw},
+            )
+        )
 
     return CandidateSignals(signals=signals)

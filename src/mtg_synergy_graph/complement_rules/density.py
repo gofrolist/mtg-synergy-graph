@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import re
 import sqlite3
-from collections.abc import Sequence
-from typing import Any
 
 from ..graph_engine import (
-    CATCH_ALL_TRIGGERS,
     _SELF_EVENT_TRIGGERS,
+    CATCH_ALL_TRIGGERS,
     _filter_card_match,
     _rows_to_dicts,
     _trigger_only_matches_self,
@@ -27,7 +25,9 @@ def _find_lord_complements(
     overlaps with commander's mechanically-relevant subtypes.
     """
     cmdr_subtypes = _commander_subtypes_from_ports(
-        conn, list(cmdr_set), cmdr_ports,
+        conn,
+        list(cmdr_set),
+        cmdr_ports,
     )
     if not cmdr_subtypes:
         return []
@@ -49,14 +49,16 @@ def _find_lord_complements(
         scope_subtypes = {a["attr_value"] for a in attrs if a["attr_kind"] == "subtype"}
         if scope_subtypes & cmdr_subtypes:
             seen.add(card)
-            results.append(PortComplement(
-                rule_id="lord",
-                direction="synergy",
-                candidate=card,
-                cmdr_event="tribal",
-                cand_event="Continuous",
-                branch_kind=r["branch_kind"] or "root",
-            ))
+            results.append(
+                PortComplement(
+                    rule_id="lord",
+                    direction="synergy",
+                    candidate=card,
+                    cmdr_event="tribal",
+                    cand_event="Continuous",
+                    branch_kind=r["branch_kind"] or "root",
+                )
+            )
     return results
 
 
@@ -92,7 +94,8 @@ def _find_etb_self_complements(
     for trig in triggers:
         vf = trig.get("valid_filter") or ""
         alts = [
-            a.strip() for a in vf.split(",")
+            a.strip()
+            for a in vf.split(",")
             if a.strip()
             and not a.strip().startswith("Card.Self")
             and a.strip().split(".")[0].split("+")[0].strip() not in _SKIP_BASES
@@ -105,10 +108,17 @@ def _find_etb_self_complements(
 
     # Pre-compute SQL type hints from trigger filters to avoid full-table scan.
     # E.g. "Creature.Goblin+YouCtrl" -> SQL WHERE card_types LIKE '%Creature%'
-    _PRIMARY_TYPES = frozenset({
-        "Creature", "Artifact", "Enchantment", "Land", "Instant",
-        "Sorcery", "Planeswalker",
-    })
+    _PRIMARY_TYPES = frozenset(
+        {
+            "Creature",
+            "Artifact",
+            "Enchantment",
+            "Land",
+            "Instant",
+            "Sorcery",
+            "Planeswalker",
+        }
+    )
     all_type_hints: set[str] = set()
     needs_full_scan = False
     for _trig, alts in parsed:
@@ -123,18 +133,20 @@ def _find_etb_self_complements(
             break
 
     if needs_full_scan or not all_type_hints:
-        cards = _rows_to_dicts(conn.execute(
-            "SELECT name, card_types, supertypes, subtypes, keywords, color_identity "
-            "FROM cards"
-        ).fetchall())
+        cards = _rows_to_dicts(
+            conn.execute(
+                "SELECT name, card_types, supertypes, subtypes, keywords, color_identity FROM cards"
+            ).fetchall()
+        )
     else:
         params = [f"%{t}%" for t in all_type_hints]
         where = " OR ".join("card_types LIKE ?" for _ in params)
-        cards = _rows_to_dicts(conn.execute(
-            f"SELECT name, card_types, supertypes, subtypes, keywords, color_identity "
-            f"FROM cards WHERE {where}",
-            params,
-        ).fetchall())
+        cards = _rows_to_dicts(
+            conn.execute(
+                f"SELECT name, card_types, supertypes, subtypes, keywords, color_identity FROM cards WHERE {where}",
+                params,
+            ).fetchall()
+        )
 
     results: list[PortComplement] = []
     seen: set[tuple[str, str]] = set()
@@ -149,13 +161,15 @@ def _find_etb_self_complements(
                 continue
             if any(_filter_card_match(alt, card) for alt in alts):
                 seen.add(key)
-                results.append(PortComplement(
-                    rule_id="etb_self",
-                    direction="synergy",
-                    candidate=name,
-                    cmdr_event=ev,
-                    cand_event="card_identity",
-                ))
+                results.append(
+                    PortComplement(
+                        rule_id="etb_self",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event=ev,
+                        cand_event="card_identity",
+                    )
+                )
 
     return results
 
@@ -170,10 +184,18 @@ def _find_scaling_complements(
     Uril scales_with Aura -> every Aura card is a complement.
     """
     # Extract types from scales_with ports
-    _TYPE_TOKENS = frozenset({
-        "Aura", "Equipment", "Enchantment", "Artifact", "Land",
-        "Instant", "Sorcery", "Planeswalker",
-    })
+    _TYPE_TOKENS = frozenset(
+        {
+            "Aura",
+            "Equipment",
+            "Enchantment",
+            "Artifact",
+            "Land",
+            "Instant",
+            "Sorcery",
+            "Planeswalker",
+        }
+    )
     wanted_types: set[str] = set()
     for p in cmdr_ports:
         if (p.get("port_type") or "").strip() != "scales_with":
@@ -204,13 +226,15 @@ def _find_scaling_complements(
             name = r["name"]
             if name not in cmdr_set and name not in seen:
                 seen.add(name)
-                results.append(PortComplement(
-                    rule_id="scaling",
-                    direction="synergy",
-                    candidate=name,
-                    cmdr_event="scales_with",
-                    cand_event=type_name,
-                ))
+                results.append(
+                    PortComplement(
+                        rule_id="scaling",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="scales_with",
+                        cand_event=type_name,
+                    )
+                )
 
     for sub in subtypes:
         cur = conn.execute(
@@ -221,13 +245,15 @@ def _find_scaling_complements(
             name = r["name"]
             if name not in cmdr_set and name not in seen:
                 seen.add(name)
-                results.append(PortComplement(
-                    rule_id="scaling",
-                    direction="synergy",
-                    candidate=name,
-                    cmdr_event="scales_with",
-                    cand_event=sub,
-                ))
+                results.append(
+                    PortComplement(
+                        rule_id="scaling",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="scales_with",
+                        cand_event=sub,
+                    )
+                )
 
     return results
 
@@ -245,13 +271,25 @@ def _find_spellcast_density_complements(
 
     Extracts the type filter from the catch-all trigger's valid_filter.
     """
-    _CASTABLE_TYPES = frozenset({
-        "Instant", "Sorcery", "Creature", "Artifact", "Enchantment",
-        "Planeswalker",
-    })
-    _NONCREATURE_TYPES = frozenset({
-        "Instant", "Sorcery", "Artifact", "Enchantment", "Planeswalker",
-    })
+    _CASTABLE_TYPES = frozenset(
+        {
+            "Instant",
+            "Sorcery",
+            "Creature",
+            "Artifact",
+            "Enchantment",
+            "Planeswalker",
+        }
+    )
+    _NONCREATURE_TYPES = frozenset(
+        {
+            "Instant",
+            "Sorcery",
+            "Artifact",
+            "Enchantment",
+            "Planeswalker",
+        }
+    )
     _TOO_BROAD = frozenset({"Creature", "Permanent", "Card"})
 
     wanted_types: set[str] = set()
@@ -309,13 +347,15 @@ def _find_spellcast_density_complements(
             name = r["name"]
             if name not in cmdr_set and name not in seen:
                 seen.add(name)
-                results.append(PortComplement(
-                    rule_id="spell_density",
-                    direction="synergy",
-                    candidate=name,
-                    cmdr_event="SpellCast",
-                    cand_event=type_name,
-                ))
+                results.append(
+                    PortComplement(
+                        rule_id="spell_density",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="SpellCast",
+                        cand_event=type_name,
+                    )
+                )
 
     for sub in wanted_subtypes:
         cur = conn.execute(
@@ -326,13 +366,15 @@ def _find_spellcast_density_complements(
             name = r["name"]
             if name not in cmdr_set and name not in seen:
                 seen.add(name)
-                results.append(PortComplement(
-                    rule_id="spell_density",
-                    direction="synergy",
-                    candidate=name,
-                    cmdr_event="SpellCast",
-                    cand_event=sub,
-                ))
+                results.append(
+                    PortComplement(
+                        rule_id="spell_density",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="SpellCast",
+                        cand_event=sub,
+                    )
+                )
 
     return results
 
@@ -382,13 +424,15 @@ def _find_tribal_density_complements(
             name = r["name"]
             if name not in cmdr_set and name not in seen:
                 seen.add(name)
-                results.append(PortComplement(
-                    rule_id="tribal_density",
-                    direction="synergy",
-                    candidate=name,
-                    cmdr_event="tribal",
-                    cand_event=sub,
-                ))
+                results.append(
+                    PortComplement(
+                        rule_id="tribal_density",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="tribal",
+                        cand_event=sub,
+                    )
+                )
 
     return results
 
@@ -430,13 +474,15 @@ def _find_scales_with_density(
                 name = r["card_name"]
                 if name not in cmdr_set and name not in seen:
                     seen.add(name)
-                    results.append(PortComplement(
-                        rule_id="scaling",
-                        direction="synergy",
-                        candidate=name,
-                        cmdr_event="scales_P1P1",
-                        cand_event="counter_producer",
-                    ))
+                    results.append(
+                        PortComplement(
+                            rule_id="scaling",
+                            direction="synergy",
+                            candidate=name,
+                            cmdr_event="scales_P1P1",
+                            cand_event="counter_producer",
+                        )
+                    )
 
         # CardToughness -> high-toughness creatures (Phenax mills by toughness).
         # Match creatures with toughness significantly exceeding power
@@ -455,13 +501,15 @@ def _find_scales_with_density(
                 name = r["card_name"]
                 if name not in cmdr_set and name not in seen:
                     seen.add(name)
-                    results.append(PortComplement(
-                        rule_id="scaling",
-                        direction="synergy",
-                        candidate=name,
-                        cmdr_event="scales_toughness",
-                        cand_event="high_toughness",
-                    ))
+                    results.append(
+                        PortComplement(
+                            rule_id="scaling",
+                            direction="synergy",
+                            candidate=name,
+                            cmdr_event="scales_toughness",
+                            cand_event="high_toughness",
+                        )
+                    )
 
         # LifeOppsLostThisTurn -> drain/damage effects
         elif "LifeOppsLost" in ev:
@@ -474,12 +522,14 @@ def _find_scales_with_density(
                 name = r["card_name"]
                 if name not in cmdr_set and name not in seen:
                     seen.add(name)
-                    results.append(PortComplement(
-                        rule_id="scaling",
-                        direction="synergy",
-                        candidate=name,
-                        cmdr_event="scales_opp_life_lost",
-                        cand_event="drain_damage",
-                    ))
+                    results.append(
+                        PortComplement(
+                            rule_id="scaling",
+                            direction="synergy",
+                            candidate=name,
+                            cmdr_event="scales_opp_life_lost",
+                            cand_event="drain_damage",
+                        )
+                    )
 
     return results

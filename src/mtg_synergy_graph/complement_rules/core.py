@@ -14,7 +14,7 @@ import re
 import sqlite3
 from collections import defaultdict
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from ..graph_engine import (
@@ -22,14 +22,10 @@ from ..graph_engine import (
     COST_FEEDS_TRIGGER,
     EVENT_MATCH_MAP,
     REPLACEMENT_BLOCKS_TRIGGER,
-    _SELF_EVENT_TRIGGERS,
     _always,
     _counters_compatible,
-    _filter_card_match,
-    _rows_to_dicts,
     _trigger_only_matches_self,
     _zones_compatible,
-    explode_filter,
     load_ports_for_set,
 )
 from ..penalties import _token_subtype
@@ -53,8 +49,8 @@ class ComplementRule:
     """
 
     rule_id: str
-    cmdr_port_type: str    # port_type to match on commander side
-    cand_port_type: str    # port_type to match on candidate side
+    cmdr_port_type: str  # port_type to match on commander side
+    cand_port_type: str  # port_type to match on candidate side
     event_pairs: dict[str, dict[str, EventCheck]]
     direction: Literal["synergy", "anti_synergy"] = "synergy"
 
@@ -102,6 +98,7 @@ def _invert_event_match_map() -> dict[str, dict[str, EventCheck]]:
     Check functions have their arguments swapped since the original checks
     are (trigger, effect) but here cmdr=effect and cand=trigger.
     """
+
     def _not_self_and_zones(e: PortRow, t: PortRow) -> bool:
         return _cand_trigger_not_self(e, t) and _zones_compatible(t, e)
 
@@ -110,12 +107,18 @@ def _invert_event_match_map() -> dict[str, dict[str, EventCheck]]:
 
     # Zone-change effects produce 900-6600 matches -- handled by the
     # filter-aware _find_effect_feeds_etb() function instead.
-    _EXCLUDED_EFFECT_EVENTS = frozenset({
-        "ChangeZone", "ChangeZoneAll",   # -> ChangesZone (1000+ matches)
-        "Token", "CopyPermanent", "Animate",  # -> ChangesZone (900+)
-        "DealDamage", "DamageAll",       # -> DamageDone (247, dilutes Niv-Mizzet)
-        "Draw",                          # -> Drawn (121, dilutes Tuvasa/Sythis)
-    })
+    _EXCLUDED_EFFECT_EVENTS = frozenset(
+        {
+            "ChangeZone",
+            "ChangeZoneAll",  # -> ChangesZone (1000+ matches)
+            "Token",
+            "CopyPermanent",
+            "Animate",  # -> ChangesZone (900+)
+            "DealDamage",
+            "DamageAll",  # -> DamageDone (247, dilutes Niv-Mizzet)
+            "Draw",  # -> Drawn (121, dilutes Tuvasa/Sythis)
+        }
+    )
 
     out: dict[str, dict[str, EventCheck]] = {}
     for trig_ev, effects in EVENT_MATCH_MAP.items():
@@ -135,9 +138,10 @@ def _invert_event_match_map() -> dict[str, dict[str, EventCheck]]:
             elif check is _counters_compatible:
                 combined = _not_self_and_counters
             else:
-                combined = lambda e, t, _c=check: (
-                    _cand_trigger_not_self(e, t) and _c(t, e)
-                )
+
+                def combined(e: dict, t: dict, _c: Any = check) -> bool:
+                    return _cand_trigger_not_self(e, t) and _c(t, e)
+
             out.setdefault(eff_ev, {})[trig_ev] = combined
     return out
 
@@ -145,13 +149,21 @@ def _invert_event_match_map() -> dict[str, dict[str, EventCheck]]:
 #: Replacement results that amplify the event rather than prevent it.
 #: These should NOT be treated as anti-synergy -- Gisela's DmgTwice
 #: doubles damage triggers, not blocks them.
-_AMPLIFIER_REPLACEMENT_RESULTS: frozenset[str] = frozenset({
-    "DmgTwice", "DmgTriple", "DmgPlus1", "DmgPlus2", "DmgPlus",
-    "Dmg2", "Dmg3", "CreateToken",
-    # DBReplace is used for token enhancements (Chatterfang, Xorn) and
-    # damage halving (Gisela) -- neither is a true anti-synergy blocker
-    "DBReplace",
-})
+_AMPLIFIER_REPLACEMENT_RESULTS: frozenset[str] = frozenset(
+    {
+        "DmgTwice",
+        "DmgTriple",
+        "DmgPlus1",
+        "DmgPlus2",
+        "DmgPlus",
+        "Dmg2",
+        "Dmg3",
+        "CreateToken",
+        # DBReplace is used for token enhancements (Chatterfang, Xorn) and
+        # damage halving (Gisela) -- neither is a true anti-synergy blocker
+        "DBReplace",
+    }
+)
 
 
 def _not_amplifier(_cmdr_port: PortRow, cand_port: PortRow) -> bool:
@@ -183,10 +195,19 @@ def _invert_replacement_blocks() -> dict[str, dict[str, EventCheck]]:
 
 
 # Resonant effects: same effect on commander and candidate compounds
-_RESONANT_EFFECTS: frozenset[str] = frozenset({
-    "Proliferate", "Mill", "DigUntil", "Scry", "Surveil",
-    "Untap", "TapOrUntap", "Investigate", "BecomeMonarch",
-})
+_RESONANT_EFFECTS: frozenset[str] = frozenset(
+    {
+        "Proliferate",
+        "Mill",
+        "DigUntil",
+        "Scry",
+        "Surveil",
+        "Untap",
+        "TapOrUntap",
+        "Investigate",
+        "BecomeMonarch",
+    }
+)
 
 _RESONANT_EFFECT_FAMILY: dict[str, frozenset[str]] = {
     "DigUntil": frozenset({"DigUntil", "Mill"}),
@@ -196,25 +217,24 @@ _RESONANT_EFFECT_FAMILY: dict[str, frozenset[str]] = {
 
 # Replacement resonance: commander effect -> candidate replacement that doubles it
 _REPLACEMENT_RESONANCE: dict[str, dict[str, EventCheck]] = {
-    "PutCounter":    {"AddCounter": _always},
+    "PutCounter": {"AddCounter": _always},
     "PutCounterAll": {"AddCounter": _always},
-    "Proliferate":   {"AddCounter": _always},
-    "Token":         {"CreateToken": _always},
-    "Draw":          {"Draw": _always},
-    "GainLife":      {"GainLife": _always},
-    "Mana":          {"ProduceMana": _always},
+    "Proliferate": {"AddCounter": _always},
+    "Token": {"CreateToken": _always},
+    "Draw": {"Draw": _always},
+    "GainLife": {"GainLife": _always},
+    "Mana": {"ProduceMana": _always},
 }
 
 # Reverse: commander replacement -> candidate effect that produces the input
 _REPLACEMENT_WANTS_PRODUCER: dict[str, dict[str, EventCheck]] = {
-    "CreateToken":  {"Token": _always},
-    "AddCounter":   {"PutCounter": _always, "PutCounterAll": _always,
-                     "Proliferate": _always, "MultiplyCounter": _always},
-    "Draw":         {"Draw": _always},
-    "DrawCards":    {"Draw": _always},
-    "GainLife":     {"GainLife": _always},
-    "ProduceMana":  {"Mana": _always},
-    "Mill":         {"Mill": _always},  # Bruvac doubles mill -> find millers
+    "CreateToken": {"Token": _always},
+    "AddCounter": {"PutCounter": _always, "PutCounterAll": _always, "Proliferate": _always, "MultiplyCounter": _always},
+    "Draw": {"Draw": _always},
+    "DrawCards": {"Draw": _always},
+    "GainLife": {"GainLife": _always},
+    "ProduceMana": {"Mana": _always},
+    "Mill": {"Mill": _always},  # Bruvac doubles mill -> find millers
 }
 
 
@@ -234,11 +254,23 @@ def _build_trigger_resonance_pairs() -> dict[str, dict[str, EventCheck]]:
     Exclude catch-all triggers (SpellCast, Attacks) and ChangesZone
     (handled by ETB-self with filter matching).
     """
-    _RESONANT_TRIGGERS = frozenset({
-        "Sacrificed", "CounterAdded", "DamageDone",
-        "LifeGained", "Discarded", "Drawn", "Taps", "Untaps",
-        "TapsForMana", "LifeLost", "Proliferate", "Investigated", "Surveil",
-    })
+    _RESONANT_TRIGGERS = frozenset(
+        {
+            "Sacrificed",
+            "CounterAdded",
+            "DamageDone",
+            "LifeGained",
+            "Discarded",
+            "Drawn",
+            "Taps",
+            "Untaps",
+            "TapsForMana",
+            "LifeLost",
+            "Proliferate",
+            "Investigated",
+            "Surveil",
+        }
+    )
     return {ev: {ev: _always} for ev in _RESONANT_TRIGGERS}
 
 
@@ -349,10 +381,10 @@ class PortComplement:
     """A single complementary (commander_port, candidate_port) pair."""
 
     rule_id: str
-    direction: str            # "synergy" or "anti_synergy"
-    candidate: str            # candidate card name
-    cmdr_event: str           # commander port event_class
-    cand_event: str           # candidate port event_class
+    direction: str  # "synergy" or "anti_synergy"
+    candidate: str  # candidate card name
+    cmdr_event: str  # commander port event_class
+    cand_event: str  # candidate port event_class
     branch_kind: str = "root"
 
 
@@ -363,11 +395,11 @@ class PortComplement:
 
 #: Commander trigger event -> stax static events that block the strategy.
 _STAX_MAP: list[tuple[frozenset[str], tuple[str, ...]]] = [
-    (frozenset({"ChangesZone"}),  ("DisableTriggers",)),
-    (frozenset({"Sacrificed"}),   ("CantSacrifice",)),
-    (frozenset({"SpellCast"}),    ("RaiseCost", "CantBeCast")),
-    (frozenset({"LifeGained"}),   ("CantGainLife",)),
-    (frozenset({"Drawn"}),        ("CantDraw",)),
+    (frozenset({"ChangesZone"}), ("DisableTriggers",)),
+    (frozenset({"Sacrificed"}), ("CantSacrifice",)),
+    (frozenset({"SpellCast"}), ("RaiseCost", "CantBeCast")),
+    (frozenset({"LifeGained"}), ("CantGainLife",)),
+    (frozenset({"Drawn"}), ("CantDraw",)),
     (frozenset({"CounterAdded"}), ("CantPutCounter",)),
 ]
 
@@ -395,9 +427,9 @@ def _build_stax_exclusion(
         if cmdr_trigger_events & trigger_axes:
             ph = ",".join("?" * len(stax_events))
             excluded.update(
-                r["card_name"] for r in conn.execute(
-                    f"SELECT DISTINCT card_name FROM card_ports "
-                    f"WHERE port_type = 'static' AND event_class IN ({ph})",
+                r["card_name"]
+                for r in conn.execute(
+                    f"SELECT DISTINCT card_name FROM card_ports WHERE port_type = 'static' AND event_class IN ({ph})",
                     stax_events,
                 ).fetchall()
             )
@@ -437,9 +469,7 @@ def _commander_subtypes_from_ports(
        but is literally a Fungus -- the tribal axis is Saproling)
     """
     rows = conn.execute(
-        "SELECT subtypes, types FROM cards WHERE name IN ({})".format(
-            ",".join("?" * len(commander_set))
-        ),
+        "SELECT subtypes, types FROM cards WHERE name IN ({})".format(",".join("?" * len(commander_set))),
         tuple(commander_set),
     ).fetchall()
     literal: set[str] = set()
@@ -453,11 +483,13 @@ def _commander_subtypes_from_ports(
     # Keep literal subtypes mentioned in port data
     relevant: set[str] = set()
     for p in cmdr_ports:
-        haystack = " ".join([
-            p.get("valid_filter") or "",
-            p.get("affected_scope") or "",
-            str(p.get("raw_line") or ""),
-        ])
+        haystack = " ".join(
+            [
+                p.get("valid_filter") or "",
+                p.get("affected_scope") or "",
+                str(p.get("raw_line") or ""),
+            ]
+        )
         for sub in literal:
             if sub in haystack:
                 relevant.add(sub)
@@ -501,10 +533,12 @@ def _commander_subtypes_from_ports(
                 # (Slimefoot has Saproling in a ChangesZone trigger)
                 mentioned = False
                 for p2 in cmdr_ports:
-                    haystack = " ".join([
-                        p2.get("valid_filter") or "",
-                        p2.get("affected_scope") or "",
-                    ])
+                    haystack = " ".join(
+                        [
+                            p2.get("valid_filter") or "",
+                            p2.get("affected_scope") or "",
+                        ]
+                    )
                     if sub in haystack:
                         mentioned = True
                         break
@@ -531,42 +565,42 @@ def _commander_subtypes_from_ports(
 # ---------------------------------------------------------------------------
 
 from .combat import (  # noqa: E402
+    _find_changeszone_resonance,
     _find_combat_enhancers,
     _find_evasion_complements,
     _find_sacrifice_outlets,
-    _find_changeszone_resonance,
 )
 from .density import (  # noqa: E402
-    _find_lord_complements,
     _find_etb_self_complements,
+    _find_lord_complements,
+    _find_scales_with_density,
     _find_scaling_complements,
     _find_spellcast_density_complements,
     _find_tribal_density_complements,
-    _find_scales_with_density,
 )
 from .graveyard import (  # noqa: E402
-    _find_graveyard_fillers,
     _find_artifact_recursion,
     _find_copy_synergy,
     _find_etb_sac_targets,
+    _find_graveyard_fillers,
 )
 from .panharmonicon import (  # noqa: E402
     _find_panharmonicon_complements,
-    _find_reverse_panharmonicon,
     _find_panharmonicon_stacking,
+    _find_reverse_panharmonicon,
 )
 from .tokens import (  # noqa: E402
     _find_effect_feeds_etb,
-    _find_token_producers_for_trigger,
     _find_static_strategy,
+    _find_token_producers_for_trigger,
     _find_token_sac_chain,
 )
 from .utility import (  # noqa: E402
+    _find_cost_payoff_complements,
+    _find_extra_land_plays,
+    _find_flicker_synergy,
     _find_opponent_forcing,
     _find_wheel_synergy,
-    _find_cost_payoff_complements,
-    _find_flicker_synergy,
-    _find_extra_land_plays,
 )
 
 
@@ -663,9 +697,7 @@ def find_all_complements(
         conditions.append(f"port_type IN ({placeholders})")
         params.extend(sorted(has_wildcard_types))
     if specific_pairs:
-        pair_conds = " OR ".join(
-            "(port_type = ? AND event_class = ?)" for _ in specific_pairs
-        )
+        pair_conds = " OR ".join("(port_type = ? AND event_class = ?)" for _ in specific_pairs)
         conditions.append(f"({pair_conds})")
         for pt, ev in specific_pairs:
             params.extend([pt, ev])
@@ -726,14 +758,16 @@ def find_all_complements(
                             continue
                         if check(cp, cand_p):
                             seen.add(key)
-                            results.append(PortComplement(
-                                rule_id=rule.rule_id,
-                                direction=rule.direction,
-                                candidate=cand_p["card_name"],
-                                cmdr_event=cmdr_ev,
-                                cand_event=ev,
-                                branch_kind=(cand_p.get("branch_kind") or "root"),
-                            ))
+                            results.append(
+                                PortComplement(
+                                    rule_id=rule.rule_id,
+                                    direction=rule.direction,
+                                    candidate=cand_p["card_name"],
+                                    cmdr_event=cmdr_ev,
+                                    cand_event=ev,
+                                    branch_kind=(cand_p.get("branch_kind") or "root"),
+                                )
+                            )
             else:
                 for cand_ev, check in targets.items():
                     cand_ports = cand_index.get((rule.cand_port_type, cand_ev), [])
@@ -743,14 +777,16 @@ def find_all_complements(
                             continue
                         if check(cp, cand_p):
                             seen.add(key)
-                            results.append(PortComplement(
-                                rule_id=rule.rule_id,
-                                direction=rule.direction,
-                                candidate=cand_p["card_name"],
-                                cmdr_event=cmdr_ev,
-                                cand_event=cand_ev,
-                                branch_kind=(cand_p.get("branch_kind") or "root"),
-                            ))
+                            results.append(
+                                PortComplement(
+                                    rule_id=rule.rule_id,
+                                    direction=rule.direction,
+                                    candidate=cand_p["card_name"],
+                                    cmdr_event=cmdr_ev,
+                                    cand_event=cand_ev,
+                                    branch_kind=(cand_p.get("branch_kind") or "root"),
+                                )
+                            )
 
     # -- Card-attribute rules -----------------------------------------------
     results.extend(_card_attr_complements())

@@ -166,10 +166,9 @@ def test_filter_matches_required_subtype_missing():
 def test_phyrexian_altar_feeds_korvold_sacrifice_trigger(populated_db):
     feeders = find_trigger_feeders(populated_db, ["Korvold, Fae-Cursed King"])
     altar_rows = [
-        f for f in feeders
-        if f["candidate"] == "Phyrexian Altar"
-        and f["trigger_event"] == "Sacrificed"
-        and f["match_kind"] == "cost"
+        f
+        for f in feeders
+        if f["candidate"] == "Phyrexian Altar" and f["trigger_event"] == "Sacrificed" and f["match_kind"] == "cost"
     ]
     assert altar_rows, "Phyrexian Altar must register as a cost-feed sacrifice match"
 
@@ -235,7 +234,8 @@ def test_zone_overlap_grafdiggers_cage_matches_reanimator():
     # Replacement: Origin=Graveyard,Library Destination=Battlefield
     # Trigger:     Origin=Graveyard           Destination=Battlefield (Karador)
     assert _zone_overlap(
-        "Graveyard,Library", "Battlefield",
+        "Graveyard,Library",
+        "Battlefield",
         [("ChangesZone", "Graveyard", "Battlefield")],
     )
 
@@ -246,7 +246,8 @@ def test_zone_overlap_grafdiggers_cage_does_not_match_blink_commander():
     # *zone* trigger is the flickered creature's ETB which fires on
     # Battlefield→Battlefield. Origin sets disjoint → no overlap.
     assert not _zone_overlap(
-        "Graveyard,Library", "Battlefield",
+        "Graveyard,Library",
+        "Battlefield",
         [("ChangesZone", "Exile", "Battlefield")],
     )
 
@@ -260,14 +261,16 @@ def test_zone_overlap_destination_mismatch_blocks():
     # Replacement only blocks zone changes INTO the battlefield. A trigger
     # firing on Battlefield→Graveyard (death trigger) is unaffected.
     assert not _zone_overlap(
-        "Graveyard", "Battlefield",
+        "Graveyard",
+        "Battlefield",
         [("ChangesZone", "Battlefield", "Graveyard")],
     )
 
 
 def test_zone_overlap_skips_non_changes_zone_triggers():
     assert not _zone_overlap(
-        "Graveyard", "Battlefield",
+        "Graveyard",
+        "Battlefield",
         [("Attacks", "", ""), ("DamageDone", "", "")],
     )
 
@@ -358,6 +361,7 @@ def test_find_sacrifice_synergies_korvold_picks_up_outlets_against_full_db():
     db_path = Path("/tmp/synergy_full.db")
     if not db_path.exists():
         import pytest
+
         pytest.skip("/tmp/synergy_full.db not present — run import_cardsfolder first")
 
     conn = sqlite3.connect(db_path)
@@ -379,9 +383,7 @@ def test_find_sacrifice_synergies_korvold_picks_up_outlets_against_full_db():
 
     # At least one well-known outlet should appear in the result.
     expected_outlets = {"Viscera Seer", "Goblin Bombardment", "Phyrexian Altar"}
-    assert candidates & expected_outlets, (
-        f"expected at least one of {expected_outlets} in {sorted(candidates)[:20]}"
-    )
+    assert candidates & expected_outlets, f"expected at least one of {expected_outlets} in {sorted(candidates)[:20]}"
 
 
 # ---------------------------------------------------------------------------
@@ -402,9 +404,7 @@ def test_parse_restriction_tags_compound_creature_dragon():
 
 
 def test_parse_restriction_tags_multiple_comma_tribes():
-    assert _parse_restriction_tags(
-        "Spell.Demon,Spell.Cleric,Spell.Vampire"
-    ) == {"Demon", "Cleric", "Vampire"}
+    assert _parse_restriction_tags("Spell.Demon,Spell.Cleric,Spell.Vampire") == {"Demon", "Cleric", "Vampire"}
 
 
 def test_parse_restriction_tags_drops_runtime_modifiers():
@@ -461,6 +461,7 @@ def test_find_mana_restriction_against_full_db_talrand():
     db_path = Path("/tmp/synergy_full.db")
     if not db_path.exists():
         import pytest
+
         pytest.skip("/tmp/synergy_full.db not present — run import_cardsfolder first")
 
     conn = sqlite3.connect(db_path)
@@ -475,9 +476,7 @@ def test_find_mana_restriction_against_full_db_talrand():
     # subtype leakage (Talrand's literal Merfolk / Wizard subtypes must
     # NOT contribute).
     for r in rows:
-        assert {"Instant", "Sorcery"} & set(r["matched_tags"]), (
-            f"unexpected match {r}"
-        )
+        assert {"Instant", "Sorcery"} & set(r["matched_tags"]), f"unexpected match {r}"
 
 
 # ---------------------------------------------------------------------------
@@ -490,10 +489,8 @@ def test_find_mana_restriction_against_full_db_talrand():
 def test_card_has_flicker_chain_detects_clean_pair():
     # Soulherder-shape: Battlefield→Exile + Exile→Battlefield.
     ports = [
-        {"port_type": "effect", "event_class": "ChangeZone",
-         "zone_origin": "Battlefield", "zone_destination": "Exile"},
-        {"port_type": "effect", "event_class": "ChangeZone",
-         "zone_origin": "Exile", "zone_destination": "Battlefield"},
+        {"port_type": "effect", "event_class": "ChangeZone", "zone_origin": "Battlefield", "zone_destination": "Exile"},
+        {"port_type": "effect", "event_class": "ChangeZone", "zone_origin": "Exile", "zone_destination": "Battlefield"},
     ]
     assert _card_has_flicker_chain(ports)
 
@@ -502,10 +499,8 @@ def test_card_has_flicker_chain_handles_all_origin():
     # Brago / Conjurer's Closet — return path uses Origin=All because
     # the SVar resolves via Defined$ Remembered (any zone).
     ports = [
-        {"port_type": "effect", "event_class": "ChangeZone",
-         "zone_origin": "Battlefield", "zone_destination": "Exile"},
-        {"port_type": "effect", "event_class": "ChangeZone",
-         "zone_origin": "All", "zone_destination": "Battlefield"},
+        {"port_type": "effect", "event_class": "ChangeZone", "zone_origin": "Battlefield", "zone_destination": "Exile"},
+        {"port_type": "effect", "event_class": "ChangeZone", "zone_origin": "All", "zone_destination": "Battlefield"},
     ]
     assert _card_has_flicker_chain(ports)
 
@@ -513,8 +508,7 @@ def test_card_has_flicker_chain_handles_all_origin():
 def test_card_has_flicker_chain_rejects_one_sided():
     # Bouncing-effect-only (no return path) — Cyclonic Rift, Boomerang.
     ports = [
-        {"port_type": "effect", "event_class": "ChangeZone",
-         "zone_origin": "Battlefield", "zone_destination": "Hand"},
+        {"port_type": "effect", "event_class": "ChangeZone", "zone_origin": "Battlefield", "zone_destination": "Hand"},
     ]
     assert not _card_has_flicker_chain(ports)
 
@@ -522,8 +516,7 @@ def test_card_has_flicker_chain_rejects_one_sided():
 def test_card_has_flicker_chain_rejects_etb_only():
     # Yarok-shape: ETB doubler with no exile/return chain.
     ports = [
-        {"port_type": "trigger", "event_class": "ChangesZone",
-         "zone_origin": "", "zone_destination": "Battlefield"},
+        {"port_type": "trigger", "event_class": "ChangesZone", "zone_origin": "", "zone_destination": "Battlefield"},
     ]
     assert not _card_has_flicker_chain(ports)
 
@@ -538,6 +531,7 @@ def test_find_flicker_loop_matches_brago_against_full_db():
     db_path = Path("/tmp/synergy_full.db")
     if not db_path.exists():
         import pytest
+
         pytest.skip("/tmp/synergy_full.db not present — run import_cardsfolder first")
 
     conn = sqlite3.connect(db_path)
@@ -550,16 +544,14 @@ def test_find_flicker_loop_matches_brago_against_full_db():
     assert rows, "expected at least one flicker cluster match for Brago"
     cands = {r["candidate"] for r in rows}
     expected = {"Conjurer's Closet", "Soulherder", "Eldrazi Displacer"}
-    assert cands & expected, (
-        f"expected at least one of {expected} in {sorted(cands)[:20]}"
-    )
+    assert cands & expected, f"expected at least one of {expected} in {sorted(cands)[:20]}"
 
 
 def test_find_flicker_loop_matches_returns_empty_for_non_flicker_commander():
-
     db_path = Path("/tmp/synergy_full.db")
     if not db_path.exists():
         import pytest
+
         pytest.skip("/tmp/synergy_full.db not present — run import_cardsfolder first")
 
     conn = sqlite3.connect(db_path)
@@ -616,12 +608,14 @@ def test_find_replacement_conflicts_flags_rest_in_peace_for_meren():
     db_path = Path("/tmp/synergy_full.db")
     if not db_path.exists():
         import pytest
+
         pytest.skip("/tmp/synergy_full.db not present — run import_cardsfolder first")
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
         from mtg_synergy_graph.graph_engine import find_replacement_conflicts
+
         meren = find_replacement_conflicts(conn, ["Meren of Clan Nel Toth"])
         karador = find_replacement_conflicts(conn, ["Karador, Ghost Chieftain"])
     finally:
@@ -631,11 +625,11 @@ def test_find_replacement_conflicts_flags_rest_in_peace_for_meren():
     assert meren_subs, "expected at least one substitution flag for Meren"
     meren_cards = {r["anti_synergy_card"] for r in meren_subs}
     expected = {
-        "Rest in Peace", "Leyline of the Void", "Rayami, First of the Fallen",
+        "Rest in Peace",
+        "Leyline of the Void",
+        "Rayami, First of the Fallen",
     }
-    assert meren_cards & expected, (
-        f"expected at least one of {expected}, got {sorted(meren_cards)[:20]}"
-    )
+    assert meren_cards & expected, f"expected at least one of {expected}, got {sorted(meren_cards)[:20]}"
     # Karador has no triggers (his abilities are static + activated),
     # so the matcher's trigger gate returns early.
     assert karador == []
@@ -653,6 +647,7 @@ def test_find_mana_restriction_kaalia_does_not_explode():
     db_path = Path("/tmp/synergy_full.db")
     if not db_path.exists():
         import pytest
+
         pytest.skip("/tmp/synergy_full.db not present — run import_cardsfolder first")
 
     conn = sqlite3.connect(db_path)
@@ -667,9 +662,7 @@ def test_find_mana_restriction_kaalia_does_not_explode():
     # the false positives that regressed her −0.038 NDCG before the
     # static-subtype removal.
     forbidden = {"Plaza of Heroes", "Delighted Halfling", "Untaidake, the Cloud Keeper"}
-    assert not (cands & forbidden), (
-        f"Kaalia must not match generic Legendary fixers: {sorted(cands & forbidden)}"
-    )
+    assert not (cands & forbidden), f"Kaalia must not match generic Legendary fixers: {sorted(cands & forbidden)}"
 
 
 # ---------------------------------------------------------------------------

@@ -35,34 +35,27 @@ FIXTURE_CARDS = [
     # (oracle_id, name, type_line)
     #
     # Normal non-token exact matches — every Forge fixture card by name.
-    ("01" * 16, "Cathars' Crusade",                  "Enchantment"),
-    ("02" * 16, "Korvold, Fae-Cursed King",          "Legendary Creature — Dragon"),
-    ("03" * 16, "Panharmonicon",                     "Artifact"),
-    ("04" * 16, "Rhystic Study",                     "Enchantment"),
-    ("05" * 16, "Scute Swarm",                       "Creature — Insect"),
-    ("06" * 16, "Phyrexian Altar",                   "Artifact"),
-    ("07" * 16, "Dockside Extortionist",             "Creature — Goblin Pirate"),
-    ("08" * 16, "Tireless Tracker",                  "Creature — Human Scout"),
-    ("09" * 16, "Wrath of God",                      "Sorcery"),
-    ("0a" * 16, "Sol Ring",                          "Artifact"),
-    ("0b" * 16, "Urza, Lord High Artificer",         "Legendary Creature — Human Artificer"),
-
+    ("01" * 16, "Cathars' Crusade", "Enchantment"),
+    ("02" * 16, "Korvold, Fae-Cursed King", "Legendary Creature — Dragon"),
+    ("03" * 16, "Panharmonicon", "Artifact"),
+    ("04" * 16, "Rhystic Study", "Enchantment"),
+    ("05" * 16, "Scute Swarm", "Creature — Insect"),
+    ("06" * 16, "Phyrexian Altar", "Artifact"),
+    ("07" * 16, "Dockside Extortionist", "Creature — Goblin Pirate"),
+    ("08" * 16, "Tireless Tracker", "Creature — Human Scout"),
+    ("09" * 16, "Wrath of God", "Sorcery"),
+    ("0a" * 16, "Sol Ring", "Artifact"),
+    ("0b" * 16, "Urza, Lord High Artificer", "Legendary Creature — Human Artificer"),
     # Token fallback: Forge has "Spirit", Scryfall has one non-token and
     # one token row with the same name — non-token must win.
-    ("10" * 16, "Spirit",                            "Creature — Spirit"),
-    ("11" * 16, "Spirit",                            "Token Creature — Spirit"),
-
+    ("10" * 16, "Spirit", "Creature — Spirit"),
+    ("11" * 16, "Spirit", "Token Creature — Spirit"),
     # DFC front-face match: Forge stores "Rona, Herald of Invasion",
     # Scryfall stores the combined DFC canonical form.
-    ("12" * 16,
-     "Rona, Herald of Invasion // Rona, Tolarian Obliterator",
-     "Legendary Creature — Human Wizard"),
-
+    ("12" * 16, "Rona, Herald of Invasion // Rona, Tolarian Obliterator", "Legendary Creature — Human Wizard"),
     # DFC back-face match: Forge alternate_name is "Tolarian Terror",
     # Scryfall stores "Dihada's Ploy // Tolarian Terror" (hypothetical).
-    ("13" * 16,
-     "Dihada's Ploy // Tolarian Terror",
-     "Sorcery // Creature — Horror"),
+    ("13" * 16, "Dihada's Ploy // Tolarian Terror", "Sorcery // Creature — Horror"),
 ]
 
 
@@ -71,10 +64,7 @@ def scryfall_db(tmp_path) -> Path:
     """Minimal Scryfall-shaped sqlite DB for resolver tests."""
     path = tmp_path / "tags.db"
     conn = sqlite3.connect(path)
-    conn.execute(
-        "CREATE TABLE cards ("
-        "oracle_id TEXT, name TEXT, type_line TEXT)"
-    )
+    conn.execute("CREATE TABLE cards (oracle_id TEXT, name TEXT, type_line TEXT)")
     conn.executemany(
         "INSERT INTO cards (oracle_id, name, type_line) VALUES (?, ?, ?)",
         FIXTURE_CARDS,
@@ -119,12 +109,7 @@ def test_parser_captures_back_face_alternate_name():
 
 
 def test_parser_leaves_alternate_name_none_for_single_face_card():
-    text = (
-        "Name:Sol Ring\n"
-        "ManaCost:1\n"
-        "Types:Artifact\n"
-        "Oracle:{T}: Add {C}{C}.\n"
-    )
+    text = "Name:Sol Ring\nManaCost:1\nTypes:Artifact\nOracle:{T}: Add {C}{C}.\n"
     card = parse_card_text(text)
     assert card["name"] == "Sol Ring"
     assert card["alternate_name"] is None
@@ -182,10 +167,7 @@ def test_resolver_dfc_back_face_via_alternate_name(scryfall_db):
         conn.close()
 
     # Forge front name is unknown to Scryfall; alternate_name rescues it.
-    assert (
-        _resolve_oracle_id("Unknown Forge Front", "Tolarian Terror", resolver)
-        == "13" * 16
-    )
+    assert _resolve_oracle_id("Unknown Forge Front", "Tolarian Terror", resolver) == "13" * 16
 
 
 def test_resolver_returns_none_for_missing_card(scryfall_db):
@@ -208,15 +190,15 @@ def test_importer_populates_oracle_id(scryfall_db, tmp_path):
     conn = open_db(synergy_path)
     try:
         cards, _ = import_cards_folder(
-            conn, FIXTURES, scryfall_db=scryfall_db,
+            conn,
+            FIXTURES,
+            scryfall_db=scryfall_db,
         )
         assert cards == 11
 
         # Every fixture card should have an oracle_id set via the
         # exact-name tier (they all exist in the synthetic scryfall DB).
-        rows = conn.execute(
-            "SELECT name, oracle_id FROM cards ORDER BY name"
-        ).fetchall()
+        rows = conn.execute("SELECT name, oracle_id FROM cards ORDER BY name").fetchall()
         by_name = {r["name"]: r["oracle_id"] for r in rows}
         assert by_name["Korvold, Fae-Cursed King"] == "02" * 16
         assert by_name["Sol Ring"] == "0a" * 16
@@ -246,7 +228,8 @@ def test_importer_raises_on_missing_scryfall_db(tmp_path):
     try:
         with pytest.raises(FileNotFoundError):
             import_cards_folder(
-                conn, FIXTURES,
+                conn,
+                FIXTURES,
                 scryfall_db=tmp_path / "does_not_exist.db",
             )
     finally:
@@ -288,10 +271,14 @@ def test_page_by_oracle_id_matches_page_by_name(engine_with_oracle_ids):
     """oracle_id entry point must produce byte-identical rankings to the
     name entry point when both resolve to the same commander."""
     page_oid = engine_with_oracle_ids.page_by_oracle_id(
-        "02" * 16, offset=0, limit=10,
+        "02" * 16,
+        offset=0,
+        limit=10,
     )
     page_name = engine_with_oracle_ids.page(
-        "Korvold, Fae-Cursed King", offset=0, limit=10,
+        "Korvold, Fae-Cursed King",
+        offset=0,
+        limit=10,
     )
     assert [r.card for r in page_oid.items] == [r.card for r in page_name.items]
 

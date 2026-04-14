@@ -21,6 +21,7 @@ indexed lookups keeps the code far easier to audit.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import sqlite3
@@ -54,7 +55,7 @@ def _counters_compatible(trig: PortRow, eff: PortRow) -> bool:
     return e_ct == "" or e_ct == t_ct
 
 
-def _always(trig: PortRow, eff: PortRow) -> bool:  # noqa: ARG001
+def _always(trig: PortRow, eff: PortRow) -> bool:
     return True
 
 
@@ -72,56 +73,56 @@ CATCH_ALL_TRIGGERS: frozenset[str] = frozenset(
 #: Trigger event class → {effect event class | "*": predicate}.
 EVENT_MATCH_MAP: dict[str, dict[str, EventCheck]] = {
     "ChangesZone": {
-        "Token":         lambda t, e: t.get("zone_destination") in ("Battlefield", "", None),
-        "ChangeZone":    _zones_compatible,
+        "Token": lambda t, e: t.get("zone_destination") in ("Battlefield", "", None),
+        "ChangeZone": _zones_compatible,
         "ChangeZoneAll": _zones_compatible,
         "CopyPermanent": lambda t, e: t.get("zone_destination") in ("Battlefield", "", None),
-        "Animate":       lambda t, e: t.get("zone_destination") in ("Battlefield", "", None),
+        "Animate": lambda t, e: t.get("zone_destination") in ("Battlefield", "", None),
     },
     "CounterAdded": {
-        "PutCounter":    _counters_compatible,
+        "PutCounter": _counters_compatible,
         "PutCounterAll": _counters_compatible,
-        "Proliferate":   _always,
+        "Proliferate": _always,
         "MultiplyCounter": _always,  # Vorel, Deepglow Skate (44 cards)
     },
-    "SpellCast":      {"*": _always},
-    "DamageDone":     {"DealDamage": _always, "DamageAll": _always, "AddPhase": _always},
-    "LifeGained":     {"GainLife": _always},
-    "Sacrificed":     {"Sacrifice": _always, "SacrificeAll": _always},
-    "Discarded":      {"Discard": _always},
-    "Drawn":          {"Draw": _always},
-    "Taps":           {"Tap": _always, "TapAll": _always, "TapOrUntap": _always},
-    "Untaps":         {"Untap": _always, "UntapAll": _always, "TapOrUntap": _always},
-    "LandPlayed":     {"*": _always},
-    "Attacks":        {"*": _always},
+    "SpellCast": {"*": _always},
+    "DamageDone": {"DealDamage": _always, "DamageAll": _always, "AddPhase": _always},
+    "LifeGained": {"GainLife": _always},
+    "Sacrificed": {"Sacrifice": _always, "SacrificeAll": _always},
+    "Discarded": {"Discard": _always},
+    "Drawn": {"Draw": _always},
+    "Taps": {"Tap": _always, "TapAll": _always, "TapOrUntap": _always},
+    "Untaps": {"Untap": _always, "UntapAll": _always, "TapOrUntap": _always},
+    "LandPlayed": {"*": _always},
+    "Attacks": {"*": _always},
     "AttackerBlocked": {"*": _always},
-    "TapsForMana":    {"Mana": _always},
-    "BecomesTarget":  {"*": _always},
+    "TapsForMana": {"Mana": _always},
+    "BecomesTarget": {"*": _always},
     # Phase B1: trigger ↔ effect pairs from corpus inventory.
     # Sacrificed/Discarded/Drawn are already covered above; these were
     # missing because the trigger Mode$ value differs from the effect
     # verb name (Investigated vs Investigate, etc.).
-    "Proliferate":    {"Proliferate": _always},   # 7 trigs / 69 effects
-    "Investigated":   {"Investigate":  _always},  # 2 trigs / 117 effects
-    "Surveil":        {"Surveil":      _always},  # 11 trigs / 136 effects
-    "LifeLost":       {"LoseLife":     _always},  # 21 trigs / 1000 effects
-    "BecomeMonarch":  {"BecomeMonarch": _always}, # 4 trigs / 47 effects
+    "Proliferate": {"Proliferate": _always},  # 7 trigs / 69 effects
+    "Investigated": {"Investigate": _always},  # 2 trigs / 117 effects
+    "Surveil": {"Surveil": _always},  # 11 trigs / 136 effects
+    "LifeLost": {"LoseLife": _always},  # 21 trigs / 1000 effects
+    "BecomeMonarch": {"BecomeMonarch": _always},  # 4 trigs / 47 effects
 }
 
 #: Cost-port event_class → set of trigger event_classes that this cost
 #: directly feeds (paying the cost causes the trigger to fire).
 #: §6.3 cost↔trigger feed.
 COST_FEEDS_TRIGGER: dict[str, frozenset[str]] = {
-    "sacrifice":        frozenset({"Sacrificed"}),
-    "discard":          frozenset({"Discarded"}),
-    "exile":            frozenset({"Exiled"}),
+    "sacrifice": frozenset({"Sacrificed"}),
+    "discard": frozenset({"Discarded"}),
+    "exile": frozenset({"Exiled"}),
     "exile_from_grave": frozenset({"Exiled"}),
-    "exile_from_hand":  frozenset({"Exiled"}),
-    "exile_from_top":   frozenset({"Exiled"}),
-    "mill":             frozenset({"Milled"}),
-    "pay_life":         frozenset({"LifeLost"}),
-    "tap":              frozenset({"Taps"}),
-    "tap_type":         frozenset({"Taps"}),
+    "exile_from_hand": frozenset({"Exiled"}),
+    "exile_from_top": frozenset({"Exiled"}),
+    "mill": frozenset({"Milled"}),
+    "pay_life": frozenset({"LifeLost"}),
+    "tap": frozenset({"Taps"}),
+    "tap_type": frozenset({"Taps"}),
 }
 
 
@@ -203,7 +204,7 @@ def _row_to_dict(row: sqlite3.Row) -> PortRow:
     # dict in C without the per-key ``__getitem__`` overhead sqlite3.Row
     # incurs. Measured on a 10k-row, 31-column card_ports fetch:
     # via dict-comp: 3.11s / via dict(row): 3.02s / via zip: 0.61s.
-    return dict(zip(row.keys(), tuple(row)))
+    return dict(zip(row.keys(), tuple(row), strict=False))
 
 
 def _rows_to_dicts(rows: Sequence[sqlite3.Row]) -> list[PortRow]:
@@ -218,7 +219,7 @@ def _rows_to_dicts(rows: Sequence[sqlite3.Row]) -> list[PortRow]:
     if not rows:
         return []
     keys = rows[0].keys()
-    return [dict(zip(keys, tuple(r))) for r in rows]
+    return [dict(zip(keys, tuple(r), strict=False)) for r in rows]
 
 
 def load_ports_for(conn: sqlite3.Connection, card_name: str) -> list[PortRow]:
@@ -300,19 +301,21 @@ def _trigger_only_matches_self(valid_filter: str | None) -> bool:
 # Effect events that *can* produce / move cards onto the battlefield. We
 # only need to do produced-type checking for these; anything else (Mill,
 # Damage, Draw, ...) shouldn't satisfy an ETB-trigger filter at all.
-_PRODUCING_EFFECT_EVENTS: frozenset[str] = frozenset({
-    "Token", "ChangeZone", "ChangeZoneAll", "Animate", "CopyPermanent",
-})
+_PRODUCING_EFFECT_EVENTS: frozenset[str] = frozenset(
+    {
+        "Token",
+        "ChangeZone",
+        "ChangeZoneAll",
+        "Animate",
+        "CopyPermanent",
+    }
+)
 
 # Pulls the ChangeType / Types value out of a parsed Forge dict raw_line.
-_CHANGE_TYPE_RE = re.compile(
-    r"['\"]ChangeType['\"]:\s*['\"]([A-Za-z][A-Za-z0-9.+;]*)"
-)
-_TOKEN_SCRIPT_INLINE_RE = re.compile(
-    r"['\"]TokenScript['\"]:\s*['\"]([A-Za-z0-9_,]+)"
-)
+_CHANGE_TYPE_RE = re.compile(r"['\"]ChangeType['\"]:\s*['\"]([A-Za-z][A-Za-z0-9.+;]*)")
+_TOKEN_SCRIPT_INLINE_RE = re.compile(r"['\"]TokenScript['\"]:\s*['\"]([A-Za-z0-9_,]+)")
 _DESTINATION_RE = re.compile(r"['\"]Destination['\"]:\s*['\"]([A-Za-z]+)")
-_ORIGIN_RE      = re.compile(r"['\"]Origin['\"]:\s*['\"]([A-Za-z]+)")
+_ORIGIN_RE = re.compile(r"['\"]Origin['\"]:\s*['\"]([A-Za-z]+)")
 
 
 def _token_script_subtypes(script: str) -> set[str]:
@@ -331,7 +334,7 @@ def _token_script_subtypes(script: str) -> set[str]:
     m = re.search(r"_(?:\d+|x)_(?:\d+|x)_", s)
     if m is None:
         return set()
-    after = s[m.end():]
+    after = s[m.end() :]
     out: set[str] = set()
     for tok in after.split("_"):
         tok = tok.strip()
@@ -445,8 +448,17 @@ def _classify_token_script(script: str) -> str | None:
         return None
     s = script.lower()
     artifact_keywords = (
-        "_a_", "treasure", "food", "clue", "blood", "gold", "map",
-        "powerstone", "junk", "incubator", "shard",
+        "_a_",
+        "treasure",
+        "food",
+        "clue",
+        "blood",
+        "gold",
+        "map",
+        "powerstone",
+        "junk",
+        "incubator",
+        "shard",
     )
     for kw in artifact_keywords:
         if kw in s:
@@ -541,6 +553,7 @@ def find_trigger_feeders(
 
     # --- Build index: event_class → [ports] for O(1) lookup ---
     from collections import defaultdict
+
     effects_by_event: dict[str, list[PortRow]] = defaultdict(list)
     costs_by_event: dict[str, list[PortRow]] = defaultdict(list)
     for cand in candidate_ports:
@@ -559,11 +572,8 @@ def find_trigger_feeders(
 
         # Effect matching: look up which effect event_classes can feed this trigger
         targets = EVENT_MATCH_MAP.get(t_event)
-        if targets is None:
-            # Identity match
-            relevant_effect_classes = [t_event]
-        else:
-            relevant_effect_classes = list(targets.keys())
+        # Identity match when no EVENT_MATCH_MAP entry exists
+        relevant_effect_classes = [t_event] if targets is None else list(targets.keys())
 
         for eff_class in relevant_effect_classes:
             for cand in effects_by_event.get(eff_class, ()):
@@ -579,12 +589,12 @@ def find_trigger_feeders(
                         continue
                 results.append(
                     {
-                        "candidate":      cand["card_name"],
-                        "trigger_card":   trig["card_name"],
-                        "trigger_event":  t_event,
-                        "match_kind":     "effect",
-                        "effect_event":   cand.get("event_class"),
-                        "branch_kind":    cand.get("branch_kind") or "root",
+                        "candidate": cand["card_name"],
+                        "trigger_card": trig["card_name"],
+                        "trigger_event": t_event,
+                        "match_kind": "effect",
+                        "effect_event": cand.get("event_class"),
+                        "branch_kind": cand.get("branch_kind") or "root",
                         "is_conditional": bool(cand.get("is_conditional")),
                     }
                 )
@@ -596,12 +606,12 @@ def find_trigger_feeders(
                 for cand in costs_by_event.get(cost_class, ()):
                     results.append(
                         {
-                            "candidate":      cand["card_name"],
-                            "trigger_card":   trig["card_name"],
-                            "trigger_event":  t_event,
-                            "match_kind":     "cost",
-                            "effect_event":   cand.get("event_class"),
-                            "branch_kind":    cand.get("branch_kind") or "root",
+                            "candidate": cand["card_name"],
+                            "trigger_card": trig["card_name"],
+                            "trigger_event": t_event,
+                            "match_kind": "cost",
+                            "effect_event": cand.get("event_class"),
+                            "branch_kind": cand.get("branch_kind") or "root",
                             "is_conditional": bool(cand.get("is_conditional")),
                         }
                     )
@@ -626,9 +636,7 @@ def find_lord_matches(
         S:Mode$ Continuous | Affected$ Creature.<Tribe>.YouCtrl | AddPower$ +1 | ...
     """
     rows = conn.execute(
-        "SELECT name, subtypes FROM cards WHERE name IN ({})".format(
-            ",".join("?" * len(commander_set))
-        ),
+        "SELECT name, subtypes FROM cards WHERE name IN ({})".format(",".join("?" * len(commander_set))),
         tuple(commander_set),
     ).fetchall()
     literal_subtypes: set[str] = set()
@@ -669,10 +677,7 @@ def find_lord_matches(
     if not cmdr_subtypes:
         return []
 
-    cur = conn.execute(
-        "SELECT * FROM card_ports "
-        "WHERE port_type = 'static' AND event_class = 'Continuous'"
-    )
+    cur = conn.execute("SELECT * FROM card_ports WHERE port_type = 'static' AND event_class = 'Continuous'")
     cmdr_set = set(commander_set)
 
     # Dedupe per (lord_card, matched_tribes_tuple). Cards like Rick,
@@ -689,18 +694,16 @@ def find_lord_matches(
         if not scope:
             continue
         attrs = explode_filter(scope)
-        scope_subtypes = {
-            a["attr_value"] for a in attrs if a["attr_kind"] == "subtype"
-        }
+        scope_subtypes = {a["attr_value"] for a in attrs if a["attr_kind"] == "subtype"}
         overlap = scope_subtypes & cmdr_subtypes
         if not overlap:
             continue
         match_row = {
-            "lord_card":      port["card_name"],
+            "lord_card": port["card_name"],
             "affected_scope": scope,
             "matched_tribes": sorted(overlap),
-            "amount":         port.get("amount"),
-            "branch_kind":    port.get("branch_kind") or "root",
+            "amount": port.get("amount"),
+            "branch_kind": port.get("branch_kind") or "root",
             "is_conditional": bool(port.get("is_conditional")),
         }
         key = (port["card_name"], tuple(sorted(overlap)))
@@ -709,25 +712,23 @@ def find_lord_matches(
             best[key] = match_row
             continue
         # Prefer the row with the highest branch weight (root > conditional).
-        if _branch_priority(match_row["branch_kind"]) > _branch_priority(
-            existing["branch_kind"]
-        ):
+        if _branch_priority(match_row["branch_kind"]) > _branch_priority(existing["branch_kind"]):
             best[key] = match_row
     return list(best.values())
 
 
 _BRANCH_PRIORITY: dict[str, int] = {
-    "root":                  100,
-    "execute":               90,
-    "subability":            90,
-    "repeat":                85,
-    "change_zone_table":     80,
-    "static_condition":      60,
+    "root": 100,
+    "execute": 90,
+    "subability": 90,
+    "repeat": 85,
+    "change_zone_table": 80,
+    "static_condition": 60,
     "replacement_condition": 60,
-    "true":                  50,
-    "false":                 50,
-    "win":                   50,
-    "otherwise":             50,
+    "true": 50,
+    "false": 50,
+    "win": 50,
+    "otherwise": 50,
 }
 
 
@@ -747,16 +748,18 @@ def _branch_priority(branch_kind: str | None) -> int:
 #: hardcodes ``ChangesZone`` only; the reverse direction (commander IS the
 #: Panharmonicon → match candidate triggers) reads ``ValidMode$`` from the
 #: commander's own static raw_line so it generalises to other modes.
-_AMPLIFIABLE_TRIGGER_EVENTS: frozenset[str] = frozenset({
-    "ChangesZone",
-    "ChangesZoneAll",
-    "Attacks",
-    "Becomes",
-    "DamageDone",
-    "DealDamage",
-    "Crewed",
-    "TapsForMana",
-})
+_AMPLIFIABLE_TRIGGER_EVENTS: frozenset[str] = frozenset(
+    {
+        "ChangesZone",
+        "ChangesZoneAll",
+        "Attacks",
+        "Becomes",
+        "DamageDone",
+        "DealDamage",
+        "Crewed",
+        "TapsForMana",
+    }
+)
 
 
 def _parse_static_valid_modes(raw_line: str | None) -> set[str]:
@@ -779,7 +782,7 @@ def _parse_static_valid_modes(raw_line: str | None) -> set[str]:
         idx = text.find(marker)
     if idx < 0:
         return set()
-    after = text[idx + len(marker):]
+    after = text[idx + len(marker) :]
     # Find the next quoted string after the colon.
     quote = None
     for q in ("'", '"'):
@@ -792,7 +795,7 @@ def _parse_static_valid_modes(raw_line: str | None) -> set[str]:
     end = after.find(qchar, start + 1)
     if end < 0:
         return set()
-    value = after[start + 1:end]
+    value = after[start + 1 : end]
     return {tok.strip() for tok in value.split(",") if tok.strip()} & _AMPLIFIABLE_TRIGGER_EVENTS
 
 
@@ -829,20 +832,19 @@ def find_amplifier_matches(
         for p in cmdr_ports
     )
     if has_etb:
-        cur = conn.execute(
-            "SELECT * FROM card_ports "
-            "WHERE port_type = 'static' AND event_class = 'Panharmonicon'"
-        )
+        cur = conn.execute("SELECT * FROM card_ports WHERE port_type = 'static' AND event_class = 'Panharmonicon'")
         for r in cur.fetchall():
             if r["card_name"] in cmdr_set or r["card_name"] in seen:
                 continue
             seen.add(r["card_name"])
-            matches.append({
-                "amplifier_card": r["card_name"],
-                "branch_kind":    r["branch_kind"] or "root",
-                "is_conditional": bool(r["is_conditional"]),
-                "direction":      "forward",
-            })
+            matches.append(
+                {
+                    "amplifier_card": r["card_name"],
+                    "branch_kind": r["branch_kind"] or "root",
+                    "is_conditional": bool(r["is_conditional"]),
+                    "direction": "forward",
+                }
+            )
 
     # Reverse direction — collect every ``static Panharmonicon`` ValidMode
     # set the commander already provides.
@@ -867,13 +869,15 @@ def find_amplifier_matches(
             if cand in cmdr_set or cand in seen:
                 continue
             seen.add(cand)
-            matches.append({
-                "amplifier_card": cand,
-                "branch_kind":    r["branch_kind"] or "root",
-                "is_conditional": bool(r["is_conditional"]),
-                "direction":      "reverse",
-                "trigger_event":  r["event_class"],
-            })
+            matches.append(
+                {
+                    "amplifier_card": cand,
+                    "branch_kind": r["branch_kind"] or "root",
+                    "is_conditional": bool(r["is_conditional"]),
+                    "direction": "reverse",
+                    "trigger_event": r["event_class"],
+                }
+            )
     return matches
 
 
@@ -884,18 +888,18 @@ def find_amplifier_matches(
 #: Replacement events that, when prevented, block the matching trigger event.
 REPLACEMENT_BLOCKS_TRIGGER: dict[str, frozenset[str]] = {
     "DamageDone": frozenset({"DamageDone"}),
-    "Mill":       frozenset({"Milled"}),
-    "Draw":       frozenset({"Drawn"}),
-    "GainLife":   frozenset({"LifeGained"}),
-    "LoseLife":   frozenset({"LifeLost"}),
-    "Discard":    frozenset({"Discarded"}),
+    "Mill": frozenset({"Milled"}),
+    "Draw": frozenset({"Drawn"}),
+    "GainLife": frozenset({"LifeGained"}),
+    "LoseLife": frozenset({"LifeLost"}),
+    "Discard": frozenset({"Discarded"}),
     # Phase C1: zone-change replacements (Grafdigger's Cage, Soulless
     # Jailer, Kunoros, Worms of the Earth, Weathered Runestone). Pairs
     # with a zone-aware filter in find_replacement_conflicts so the
     # block applies only when the trigger's zone_origin/destination
     # overlap with the replacement's. Without that filter, every
     # ChangesZone trigger commander would be falsely flagged.
-    "Moved":      frozenset({"ChangesZone"}),
+    "Moved": frozenset({"ChangesZone"}),
 }
 
 
@@ -904,7 +908,9 @@ REPLACEMENT_BLOCKS_TRIGGER: dict[str, frozenset[str]] = {
 #: by an effect port. ``card_row`` is a sqlite3.Row from ``cards``.
 def _is_spell(card: PortRow) -> bool:
     types = (card.get("card_types") or "").split()
-    return any(t in {"Instant", "Sorcery", "Creature", "Artifact", "Enchantment", "Planeswalker", "Battle"} for t in types)
+    return any(
+        t in {"Instant", "Sorcery", "Creature", "Artifact", "Enchantment", "Planeswalker", "Battle"} for t in types
+    )
 
 
 def _is_creature(card: PortRow) -> bool:
@@ -916,11 +922,11 @@ def _is_land(card: PortRow) -> bool:
 
 
 CATCH_ALL_PREDICATES: dict[str, Callable[[PortRow], bool]] = {
-    "SpellCast":       _is_spell,
-    "LandPlayed":      _is_land,
-    "Attacks":         _is_creature,
+    "SpellCast": _is_spell,
+    "LandPlayed": _is_land,
+    "Attacks": _is_creature,
     "AttackerBlocked": _is_creature,
-    "BecomesTarget":   lambda c: True,  # any permanent or spell can be targeted
+    "BecomesTarget": lambda c: True,  # any permanent or spell can be targeted
 }
 
 
@@ -970,14 +976,16 @@ def _card_attrs_for_filter(card_row: PortRow) -> list[tuple[str, str]]:
 #: self-event matcher walks every commander port whose ``event_class`` is
 #: in this set and uses the trigger's ``valid_filter`` to find candidates
 #: that match by their static card attributes.
-_SELF_EVENT_TRIGGERS: frozenset[str] = frozenset({
-    "ChangesZone",      # ETB / leaves / dies (zone-direction sensitive)
-    "ChangesZoneAll",
-    "Sacrificed",       # Korvold-class — candidate IS sacrificed
-    "Discarded",
-    "Milled",
-    "Drawn",
-})
+_SELF_EVENT_TRIGGERS: frozenset[str] = frozenset(
+    {
+        "ChangesZone",  # ETB / leaves / dies (zone-direction sensitive)
+        "ChangesZoneAll",
+        "Sacrificed",  # Korvold-class — candidate IS sacrificed
+        "Discarded",
+        "Milled",
+        "Drawn",
+    }
+)
 
 # Backwards-compat alias for the older test set.
 _ETB_TRIGGER_EVENTS = _SELF_EVENT_TRIGGERS
@@ -985,13 +993,35 @@ _ETB_TRIGGER_EVENTS = _SELF_EVENT_TRIGGERS
 #: Filter attribute kinds whose values are runtime states, not static card
 #: attributes. ``Other`` ("not the trigger source") is always satisfied for
 #: any other card; ``attacking`` / ``tapped`` etc. are runtime board states.
-_RUNTIME_SUBTYPE_VALUES: frozenset[str] = frozenset({
-    "Other", "attacking", "tapped", "untapped", "kicked", "blocking",
-    "defending", "blocked", "enchanted", "equipped", "haunted",
-    "monstrous", "renowned", "transformed", "flipped", "exalted",
-    "prowled", "embalmed", "eternal", "sealed", "noToken", "nonToken",
-    "token", "OppCtrl", "YouCtrl",
-})
+_RUNTIME_SUBTYPE_VALUES: frozenset[str] = frozenset(
+    {
+        "Other",
+        "attacking",
+        "tapped",
+        "untapped",
+        "kicked",
+        "blocking",
+        "defending",
+        "blocked",
+        "enchanted",
+        "equipped",
+        "haunted",
+        "monstrous",
+        "renowned",
+        "transformed",
+        "flipped",
+        "exalted",
+        "prowled",
+        "embalmed",
+        "eternal",
+        "sealed",
+        "noToken",
+        "nonToken",
+        "token",
+        "OppCtrl",
+        "YouCtrl",
+    }
+)
 
 
 #: Primary card types that are so numerous they flood ETB-self scoring
@@ -999,17 +1029,29 @@ _RUNTIME_SUBTYPE_VALUES: frozenset[str] = frozenset({
 #: ``Permanent`` (everything non-spell), ``Card`` (everything).
 #: NOT included: ``Land`` (1.1k cards — useful for Tatyova/Omnath),
 #: ``Artifact`` (3k — useful for Urza/Jhoira), ``Enchantment`` (1.5k).
-_BROAD_CARD_TYPES: frozenset[str] = frozenset({
-    "Creature", "Permanent", "Card",
-})
+_BROAD_CARD_TYPES: frozenset[str] = frozenset(
+    {
+        "Creature",
+        "Permanent",
+        "Card",
+    }
+)
 
 #: Qualifier tokens in Forge valid_filters that don't narrow the match
 #: to a specific card subtype. ``Other``, ``YouCtrl``, ``!token``, etc.
-_BROAD_QUALIFIERS: frozenset[str] = frozenset({
-    "Other", "YouCtrl", "OppCtrl", "token", "!token",
-    "inZoneBattlefield", "inZoneGraveyard", "inZoneHand",
-    "!wasCastFromYourHandByYou",
-})
+_BROAD_QUALIFIERS: frozenset[str] = frozenset(
+    {
+        "Other",
+        "YouCtrl",
+        "OppCtrl",
+        "token",
+        "!token",
+        "inZoneBattlefield",
+        "inZoneGraveyard",
+        "inZoneHand",
+        "!wasCastFromYourHandByYou",
+    }
+)
 
 
 def _all_alts_are_broad(usable_alts: list[str]) -> bool:
@@ -1086,7 +1128,7 @@ def find_etb_self_matches(
     for p in cmdr_ports:
         if p.get("port_type") != "trigger":
             continue
-        ev = (p.get("event_class") or "")
+        ev = p.get("event_class") or ""
         if ev not in _SELF_EVENT_TRIGGERS:
             continue
         valid_filter = p.get("valid_filter") or ""
@@ -1100,10 +1142,17 @@ def find_etb_self_matches(
 
     # Pre-compute which triggers use which primary type(s) so we can
     # use SQL WHERE to narrow the candidate set instead of scanning 27K+.
-    _PRIMARY_TYPES = frozenset({
-        "Creature", "Artifact", "Enchantment", "Land", "Instant",
-        "Sorcery", "Planeswalker",
-    })
+    _PRIMARY_TYPES = frozenset(
+        {
+            "Creature",
+            "Artifact",
+            "Enchantment",
+            "Land",
+            "Instant",
+            "Sorcery",
+            "Planeswalker",
+        }
+    )
 
     # Parse each trigger's filter into usable alternatives + SQL hint
     parsed_triggers: list[tuple[PortRow, list[str], bool, set[str]]] = []
@@ -1113,9 +1162,7 @@ def find_etb_self_matches(
     for trig in self_event_triggers:
         valid_filter = trig.get("valid_filter") or ""
         usable_alts = [
-            alt.strip()
-            for alt in valid_filter.split(",")
-            if alt.strip() and not alt.strip().startswith("Card.Self")
+            alt.strip() for alt in valid_filter.split(",") if alt.strip() and not alt.strip().startswith("Card.Self")
         ]
         if not usable_alts:
             continue
@@ -1151,10 +1198,7 @@ def find_etb_self_matches(
 
     # Fetch cards — with SQL pre-filter when possible
     if any_needs_full_scan or not all_type_hints:
-        cur = conn.execute(
-            "SELECT name, card_types, supertypes, subtypes, keywords, color_identity "
-            "FROM cards"
-        )
+        cur = conn.execute("SELECT name, card_types, supertypes, subtypes, keywords, color_identity FROM cards")
     else:
         # Build a WHERE clause narrowing to relevant card types
         where_parts = [f"card_types LIKE '%{t}%'" for t in all_type_hints]
@@ -1179,13 +1223,13 @@ def find_etb_self_matches(
             seen.add(key)
             results.append(
                 {
-                    "candidate":      card["name"],
-                    "trigger_card":   trig["card_name"],
-                    "trigger_event":  trig["event_class"],
-                    "valid_filter":   valid_filter,
-                    "branch_kind":    trig.get("branch_kind") or "root",
+                    "candidate": card["name"],
+                    "trigger_card": trig["card_name"],
+                    "trigger_event": trig["event_class"],
+                    "valid_filter": valid_filter,
+                    "branch_kind": trig.get("branch_kind") or "root",
                     "is_conditional": bool(trig.get("is_conditional")),
-                    "is_broad":       is_broad,
+                    "is_broad": is_broad,
                 }
             )
     return results
@@ -1211,19 +1255,14 @@ def find_catchall_card_matches(
     """
     cmdr_ports = load_ports_for_set(conn, commander_set)
     triggers = _ports_by_type(cmdr_ports, "trigger")
-    catchall_triggers = [
-        t for t in triggers if (t.get("event_class") or "") in CATCH_ALL_PREDICATES
-    ]
+    catchall_triggers = [t for t in triggers if (t.get("event_class") or "") in CATCH_ALL_PREDICATES]
     if not catchall_triggers:
         return []
 
     cmdr_set = set(commander_set)
     # Catch-all predicates need card_types; the filter check needs the
     # full attribute set (subtypes / keywords / colors).
-    cur = conn.execute(
-        "SELECT name, card_types, supertypes, subtypes, keywords, color_identity "
-        "FROM cards"
-    )
+    cur = conn.execute("SELECT name, card_types, supertypes, subtypes, keywords, color_identity FROM cards")
     cards = _rows_to_dicts(cur.fetchall())
 
     results: list[dict[str, Any]] = []
@@ -1246,16 +1285,14 @@ def find_catchall_card_matches(
                 continue
             if not predicate(card):
                 continue
-            if usable_alts and not any(
-                _filter_card_match(alt, card) for alt in usable_alts
-            ):
+            if usable_alts and not any(_filter_card_match(alt, card) for alt in usable_alts):
                 continue
             results.append(
                 {
-                    "candidate":      card["name"],
-                    "trigger_card":   trig["card_name"],
-                    "trigger_event":  t_event,
-                    "branch_kind":    "root",
+                    "candidate": card["name"],
+                    "trigger_card": trig["card_name"],
+                    "trigger_event": t_event,
+                    "branch_kind": "root",
                     "is_conditional": False,
                 }
             )
@@ -1313,9 +1350,7 @@ def find_scaling_matches(
     # card scaling on Count$Valid Goblin. Primary card types are explicitly
     # NOT added; see the regression note above.
     rows = conn.execute(
-        "SELECT subtypes FROM cards WHERE name IN ({})".format(
-            ",".join("?" * len(commander_set))
-        ),
+        "SELECT subtypes FROM cards WHERE name IN ({})".format(",".join("?" * len(commander_set))),
         tuple(commander_set),
     ).fetchall()
     for r in rows:
@@ -1324,9 +1359,7 @@ def find_scaling_matches(
     if not cmdr_tokens:
         return []
 
-    cur = conn.execute(
-        "SELECT * FROM card_ports WHERE port_type = 'scales_with' AND valid_filter <> ''"
-    )
+    cur = conn.execute("SELECT * FROM card_ports WHERE port_type = 'scales_with' AND valid_filter <> ''")
     cmdr_set = set(commander_set)
     matches: list[dict[str, Any]] = []
     for r in cur.fetchall():
@@ -1334,20 +1367,16 @@ def find_scaling_matches(
         if port["card_name"] in cmdr_set:
             continue
         scale_attrs = explode_filter(port.get("valid_filter") or "")
-        scale_tokens = {
-            value
-            for a in scale_attrs
-            if (value := _scaling_subtype(a)) is not None
-        }
+        scale_tokens = {value for a in scale_attrs if (value := _scaling_subtype(a)) is not None}
         overlap = scale_tokens & cmdr_tokens
         if overlap:
             matches.append(
                 {
-                    "scaling_card":     port["card_name"],
+                    "scaling_card": port["card_name"],
                     "scaling_expression": port.get("scaling_expression"),
-                    "matched_tokens":   sorted(overlap),
-                    "branch_kind":      port.get("branch_kind") or "root",
-                    "is_conditional":   bool(port.get("is_conditional")),
+                    "matched_tokens": sorted(overlap),
+                    "branch_kind": port.get("branch_kind") or "root",
+                    "is_conditional": bool(port.get("is_conditional")),
                 }
             )
     return matches
@@ -1398,24 +1427,21 @@ def find_deckhints_matches(
     scoring layer doesn't need to special-case anything.
     """
     rows = conn.execute(
-        "SELECT name, subtypes, keywords, deck_has, deck_hints, deck_needs "
-        "FROM cards WHERE name IN ({})".format(
+        "SELECT name, subtypes, keywords, deck_has, deck_hints, deck_needs FROM cards WHERE name IN ({})".format(
             ",".join("?" * len(commander_set))
         ),
         tuple(commander_set),
     ).fetchall()
-    cmdr_subtypes:      set[str] = set()
-    cmdr_keywords:      set[str] = set()
+    cmdr_subtypes: set[str] = set()
+    cmdr_keywords: set[str] = set()
     cmdr_has_abilities: set[str] = set()
     cmdr_wanted_abilities: set[str] = set()
-    cmdr_wanted_types:     set[str] = set()
-    cmdr_wanted_keywords:  set[str] = set()
+    cmdr_wanted_types: set[str] = set()
+    cmdr_wanted_keywords: set[str] = set()
     for r in rows:
         cmdr_subtypes.update((r["subtypes"] or "").split())
-        try:
+        with contextlib.suppress(ValueError, TypeError):
             cmdr_keywords.update(json.loads(r["keywords"] or "[]"))
-        except (ValueError, TypeError):
-            pass
         # Commander's own deck_has Ability tags (Atraxa: Proliferate,
         # Slimefoot: Token, Glarb: Surveil) feed both forward (matched
         # against candidate hints) AND reverse (matched against candidate
@@ -1437,8 +1463,12 @@ def find_deckhints_matches(
                 cmdr_wanted_keywords.add(kw)
 
     if not (
-        cmdr_subtypes or cmdr_keywords or cmdr_has_abilities
-        or cmdr_wanted_abilities or cmdr_wanted_types or cmdr_wanted_keywords
+        cmdr_subtypes
+        or cmdr_keywords
+        or cmdr_has_abilities
+        or cmdr_wanted_abilities
+        or cmdr_wanted_types
+        or cmdr_wanted_keywords
     ):
         return []
 
@@ -1452,18 +1482,17 @@ def find_deckhints_matches(
             if key in seen:
                 continue
             seen.add(key)
-            matches.append({
-                "candidate": candidate,
-                "source":    source,
-                "kind":      kind,
-                "matched":   [tag],
-            })
+            matches.append(
+                {
+                    "candidate": candidate,
+                    "source": source,
+                    "kind": kind,
+                    "matched": [tag],
+                }
+            )
 
     # ----- Forward direction: candidate hints/needs → commander identity -----
-    cur = conn.execute(
-        "SELECT name, deck_hints, deck_needs, deck_has, subtypes, keywords "
-        "FROM cards"
-    )
+    cur = conn.execute("SELECT name, deck_hints, deck_needs, deck_has, subtypes, keywords FROM cards")
     rows_all = cur.fetchall()
     for r in rows_all:
         if r["name"] in cmdr_set:
@@ -1552,10 +1581,10 @@ def find_chain_matches(
         for s in sub[:max_results_per_intermediate]:
             results.append(
                 {
-                    "candidate":     s["candidate"],
-                    "intermediate":  inter,
+                    "candidate": s["candidate"],
+                    "intermediate": inter,
                     "intermediate_event": s["trigger_event"],
-                    "branch_kind":   s["branch_kind"],
+                    "branch_kind": s["branch_kind"],
                     "is_conditional": s["is_conditional"],
                 }
             )
@@ -1583,9 +1612,7 @@ def detect_internal_synergies(
     # (see CATCH_ALL_TRIGGERS). Excluding them here prevents Tymna's
     # Attacks trigger from matching every partner's effect port.
     triggers = [
-        p
-        for p in _ports_by_type(cmdr_ports, "trigger")
-        if (p.get("event_class") or "") not in CATCH_ALL_TRIGGERS
+        p for p in _ports_by_type(cmdr_ports, "trigger") if (p.get("event_class") or "") not in CATCH_ALL_TRIGGERS
     ]
     effects = _ports_by_type(cmdr_ports, "effect")
     matches: list[dict[str, Any]] = []
@@ -1596,9 +1623,9 @@ def detect_internal_synergies(
             if match_event(trig, eff):
                 matches.append(
                     {
-                        "event_class":    trig.get("event_class"),
-                        "producer":       eff["card_name"],
-                        "consumer":       trig["card_name"],
+                        "event_class": trig.get("event_class"),
+                        "producer": eff["card_name"],
+                        "consumer": trig["card_name"],
                         "match_strength": 1.0,
                     }
                 )
@@ -1618,8 +1645,7 @@ def internal_synergy_boost(
     matches = sum(
         1
         for p in candidate_ports
-        if p.get("port_type") in ("effect", "trigger")
-        and (p.get("event_class") or "") in engine_events
+        if p.get("port_type") in ("effect", "trigger") and (p.get("event_class") or "") in engine_events
     )
     return min(matches * 6, 30)
 
@@ -1666,7 +1692,7 @@ def _parse_restriction_tags(restriction: str | None) -> set[str]:
 
 def _commander_synergy_tags(
     cmdr_ports: list[PortRow],
-    cmdr_card_rows: Sequence[sqlite3.Row],  # noqa: ARG001
+    cmdr_card_rows: Sequence[sqlite3.Row],
 ) -> set[str]:
     """Phase D2: tag set for the commander used by the mana-restriction
     matcher.
@@ -1734,8 +1760,7 @@ def find_mana_restriction_matches(
     need a separate phase that adds it to the penalty layer.
     """
     rows = conn.execute(
-        "SELECT name, subtypes, card_types, supertypes "
-        "FROM cards WHERE name IN ({})".format(
+        "SELECT name, subtypes, card_types, supertypes FROM cards WHERE name IN ({})".format(
             ",".join("?" * len(commander_set))
         ),
         tuple(commander_set),
@@ -1769,11 +1794,11 @@ def find_mana_restriction_matches(
         seen.add(cand)
         matches.append(
             {
-                "candidate":        cand,
+                "candidate": cand,
                 "mana_restriction": r["mana_restriction"],
-                "matched_tags":     sorted(overlap),
-                "branch_kind":      r["branch_kind"] or "root",
-                "is_conditional":   bool(r["is_conditional"]),
+                "matched_tags": sorted(overlap),
+                "branch_kind": r["branch_kind"] or "root",
+                "is_conditional": bool(r["is_conditional"]),
             }
         )
     return matches
@@ -1792,6 +1817,7 @@ def _zone_overlap(
     (treating empty trigger zones as "any" too, since Forge omits them
     when the trigger is unscoped).
     """
+
     def _split(zones: str) -> set[str]:
         return {z.strip() for z in zones.split(",") if z.strip()}
 
@@ -1881,9 +1907,9 @@ def find_flicker_loop_matches(
         info = by_card.setdefault(
             cn,
             {
-                "bf_to_exile":    False,
-                "exile_to_bf":    False,
-                "branch_kind":    r["branch_kind"] or "root",
+                "bf_to_exile": False,
+                "exile_to_bf": False,
+                "branch_kind": r["branch_kind"] or "root",
                 "is_conditional": bool(r["is_conditional"]),
             },
         )
@@ -1902,9 +1928,9 @@ def find_flicker_loop_matches(
         if info["bf_to_exile"] and info["exile_to_bf"]:
             matches.append(
                 {
-                    "candidate":      card,
-                    "direction":      "flicker_cluster",
-                    "branch_kind":    info["branch_kind"],
+                    "candidate": card,
+                    "direction": "flicker_cluster",
+                    "branch_kind": info["branch_kind"],
                     "is_conditional": info["is_conditional"],
                 }
             )
@@ -1937,9 +1963,7 @@ def _is_substitution_blocking_result(
     # Must be replacing an ENTRY into the graveyard (dest=Graveyard).
     # Origin is intentionally unchecked — Rest in Peace uses an empty
     # Origin field meaning "from anywhere".
-    if (zone_destination or "") != "Graveyard":
-        return False
-    return True
+    return (zone_destination or "") == "Graveyard"
 
 
 def find_replacement_conflicts(
@@ -1959,11 +1983,7 @@ def find_replacement_conflicts(
     it relative to Prevent blocks.
     """
     cmdr_ports = load_ports_for_set(conn, commander_set)
-    cmdr_triggers = {
-        (p.get("event_class") or "")
-        for p in cmdr_ports
-        if p.get("port_type") == "trigger"
-    }
+    cmdr_triggers = {(p.get("event_class") or "") for p in cmdr_ports if p.get("port_type") == "trigger"}
     if not cmdr_triggers:
         return []
 
@@ -1974,13 +1994,10 @@ def find_replacement_conflicts(
             (p.get("zone_destination") or ""),
         )
         for p in cmdr_ports
-        if p.get("port_type") == "trigger"
-        and (p.get("event_class") or "") == "ChangesZone"
+        if p.get("port_type") == "trigger" and (p.get("event_class") or "") == "ChangesZone"
     ]
 
-    cur = conn.execute(
-        "SELECT * FROM card_ports WHERE port_type = 'replacement'"
-    )
+    cur = conn.execute("SELECT * FROM card_ports WHERE port_type = 'replacement'")
     conflicts: list[dict[str, Any]] = []
     cmdr_set = set(commander_set)
     for r in cur.fetchall():
@@ -1991,9 +2008,7 @@ def find_replacement_conflicts(
         ev = port.get("replacement_event") or ""
         zone_dest = port.get("zone_destination") or ""
         is_prevent = result == "Prevent"
-        is_substitution = not is_prevent and _is_substitution_blocking_result(
-            ev, result, zone_dest
-        )
+        is_substitution = not is_prevent and _is_substitution_blocking_result(ev, result, zone_dest)
         if not (is_prevent or is_substitution):
             continue
         # Substitutions must also NOT be opponent-scoped — the 11 cards
@@ -2007,23 +2022,26 @@ def find_replacement_conflicts(
         # Phase C1: zone-scope ``Moved`` so it only flags reanimator-style
         # commanders whose ChangesZone triggers actually share an origin
         # / destination with the replacement's filter.
-        if intersect and ev == "Moved":
-            if not _zone_overlap(
+        if (
+            intersect
+            and ev == "Moved"
+            and not _zone_overlap(
                 port.get("zone_origin") or "",
                 port.get("zone_destination") or "",
                 cmdr_zone_triggers,
-            ):
-                continue
+            )
+        ):
+            continue
         if intersect:
             conflicts.append(
                 {
                     "anti_synergy_card": port["card_name"],
                     "replacement_event": ev,
                     "replacement_result": result,
-                    "match_kind":        "substitution" if is_substitution else "prevent",
-                    "blocked_triggers":  sorted(intersect),
-                    "branch_kind":       port.get("branch_kind") or "root",
-                    "is_conditional":    bool(port.get("is_conditional")),
+                    "match_kind": "substitution" if is_substitution else "prevent",
+                    "blocked_triggers": sorted(intersect),
+                    "branch_kind": port.get("branch_kind") or "root",
+                    "is_conditional": bool(port.get("is_conditional")),
                 }
             )
     return conflicts
@@ -2068,9 +2086,7 @@ def _is_unhelpful_payoff_trigger(valid_filter: str | None) -> bool:
     # Check if ALL alternatives are Card.Self (self-only death trigger).
     # If any alternative is NOT Card.Self, the trigger has a real payoff path.
     alts = [a.strip() for a in valid_filter.split(",") if a.strip()]
-    if alts and all(a.startswith("Card.Self") for a in alts):
-        return True
-    return False
+    return bool(alts and all(a.startswith("Card.Self") for a in alts))
 
 
 def _commander_death_signature(
@@ -2237,7 +2253,10 @@ def find_sacrifice_synergies(
     # Rejects opponent-scope triggers via _is_unhelpful_payoff_trigger.
     if has_death:
         _emit_death_payoff_triggers(
-            conn, "payoff_cluster", _emit, include_bf_to_gy=has_bf_to_gy,
+            conn,
+            "payoff_cluster",
+            _emit,
+            include_bf_to_gy=has_bf_to_gy,
         )
 
     # Direction 3: commander outlet cost → candidate payoff trigger.
@@ -2246,7 +2265,10 @@ def find_sacrifice_synergies(
     # them when the commander itself has a BF→GY trigger).
     if has_outlet_cost:
         _emit_death_payoff_triggers(
-            conn, "payoff_for_outlet", _emit, include_bf_to_gy=True,
+            conn,
+            "payoff_for_outlet",
+            _emit,
+            include_bf_to_gy=True,
         )
 
     # Direction 4 (Phase F7): token-loop producers — cards that create
@@ -2345,7 +2367,7 @@ def _commander_is_p1p1_payoff(cmdr_ports: list[PortRow]) -> bool:
                 scales_all = True
         elif ptype == "trigger":
             # Signature 3: trigger requires P1P1 counters as prerequisite.
-            vf = (p.get("valid_filter") or "")
+            vf = p.get("valid_filter") or ""
             if "counters_GE1_P1P1" in vf:
                 has_p1p1_prerequisite = True
     return scales_p1p1 or (scales_all and has_p1p1_effect) or has_p1p1_prerequisite
@@ -2359,9 +2381,7 @@ def _commander_is_p1p1_payoff(cmdr_ports: list[PortRow]) -> bool:
 def _counter_effect_is_friendly(valid_filter: str | None) -> bool:
     if not valid_filter:
         return True
-    if "OppCtrl" in valid_filter or "Opponent" in valid_filter:
-        return False
-    return True
+    return "OppCtrl" not in valid_filter and "Opponent" not in valid_filter
 
 
 #: The friendly filter above is necessary but not sufficient — a card
@@ -2424,10 +2444,10 @@ def find_counter_producer_payoff(
         seen.add(name)
         results.append(
             {
-                "candidate":      name,
-                "branch_kind":    r["branch_kind"] or "root",
+                "candidate": name,
+                "branch_kind": r["branch_kind"] or "root",
                 "is_conditional": bool(r["is_conditional"]),
-                "valid_filter":   vf,
+                "valid_filter": vf,
             }
         )
     return results
@@ -2474,9 +2494,15 @@ def _commander_is_counter_producer(cmdr_ports: list[PortRow]) -> str | None:
     # of these (or an empty filter), it's a general counter-producer.
     # Subtypes like "Merfolk", "Zombie", "Goblin" indicate tribal focus
     # where counter placement is secondary — skip them.
-    _BROAD_COUNTER_TARGETS = frozenset({
-        "", "Self", "Creature", "Permanent", "Card",
-    })
+    _BROAD_COUNTER_TARGETS = frozenset(
+        {
+            "",
+            "Self",
+            "Creature",
+            "Permanent",
+            "Card",
+        }
+    )
 
     for p in cmdr_ports:
         if p.get("port_type") != "effect":
@@ -2501,9 +2527,8 @@ def _commander_is_counter_producer(cmdr_ports: list[PortRow]) -> str | None:
                 # Extract the base type token before any qualifier
                 # (``Creature.YouCtrl`` → ``Creature``, ``Merfolk.YouCtrl`` → ``Merfolk``).
                 base_type = vf.split(".")[0].split("+")[0].strip() if vf else ""
-                if base_type in _BROAD_COUNTER_TARGETS:
-                    if base_type != "Self":
-                        has_non_self_counter = True
+                if base_type in _BROAD_COUNTER_TARGETS and base_type != "Self":
+                    has_non_self_counter = True
 
     if has_proliferate or has_multiply:
         return "ANY"
@@ -2555,17 +2580,18 @@ def find_counter_ecosystem_payoffs(
     seen: set[str] = set()
     results: list[dict[str, Any]] = []
 
-    def _emit(name: str, direction: str, bk: str | None,
-              is_cond: bool) -> None:
+    def _emit(name: str, direction: str, bk: str | None, is_cond: bool) -> None:
         if name in cmdr_set or name in seen:
             return
         seen.add(name)
-        results.append({
-            "candidate": name,
-            "direction": direction,
-            "branch_kind": bk or "root",
-            "is_conditional": is_cond,
-        })
+        results.append(
+            {
+                "candidate": name,
+                "direction": direction,
+                "branch_kind": bk or "root",
+                "is_conditional": is_cond,
+            }
+        )
 
     # Tier 1: Cards that trigger on counter placement.
     cur = conn.execute(
@@ -2582,8 +2608,7 @@ def find_counter_ecosystem_payoffs(
             ct = (r["counter_type"] or "").strip()
             if ct and ct != counter_type and ct != "ANY":
                 continue
-        _emit(r["card_name"], "counter_trigger",
-              r["branch_kind"], bool(r["is_conditional"]))
+        _emit(r["card_name"], "counter_trigger", r["branch_kind"], bool(r["is_conditional"]))
 
     # Tier 2: Cards that scale with counters.
     if counter_type == "ANY":
@@ -2604,8 +2629,7 @@ def find_counter_ecosystem_payoffs(
             (f"CardCounters.{counter_type}",),
         )
     for r in cur.fetchall():
-        _emit(r["card_name"], "counter_scales",
-              r["branch_kind"], bool(r["is_conditional"]))
+        _emit(r["card_name"], "counter_scales", r["branch_kind"], bool(r["is_conditional"]))
 
     # Tier 3: Proliferate / MultiplyCounter clustering.
     cur = conn.execute(
@@ -2615,8 +2639,7 @@ def find_counter_ecosystem_payoffs(
         "AND event_class IN ('Proliferate', 'MultiplyCounter')"
     )
     for r in cur.fetchall():
-        _emit(r["card_name"], "counter_cluster",
-              r["branch_kind"], bool(r["is_conditional"]))
+        _emit(r["card_name"], "counter_cluster", r["branch_kind"], bool(r["is_conditional"]))
 
     return results
 
@@ -2705,19 +2728,15 @@ def _commander_is_graveyard_value(cmdr_ports: list[PortRow]) -> bool:
         # not creature-reanimator shapes and pulling in the 400+
         # self-mill and reanimator-cluster candidates for them
         # adds noise without matching EDHREC's Hi-Syn picks.
-        if ptype == "effect" and ev == "ChangeZone":
-            if (
-                (p.get("zone_origin") or "").strip() == "Graveyard"
-                and (p.get("zone_destination") or "").strip() == "Battlefield"
-            ):
-                vf = (p.get("valid_filter") or "")
-                if (
-                    not vf
-                    or "Creature" in vf
-                    or "Permanent" in vf
-                    or vf.startswith("Card")
-                ):
-                    return True
+        if (
+            ptype == "effect"
+            and ev == "ChangeZone"
+            and (p.get("zone_origin") or "").strip() == "Graveyard"
+            and (p.get("zone_destination") or "").strip() == "Battlefield"
+        ):
+            vf = p.get("valid_filter") or ""
+            if not vf or "Creature" in vf or "Permanent" in vf or vf.startswith("Card"):
+                return True
 
         # Signature 2: ValidGraveyard scales_with.
         if ptype == "scales_with" and ev.startswith("ValidGraveyard"):
@@ -2760,17 +2779,18 @@ def find_graveyard_value_synergies(
     seen: set[str] = set()
     results: list[dict[str, Any]] = []
 
-    def _emit(name: str, direction: str, branch_kind: str | None,
-              is_conditional: bool) -> None:
+    def _emit(name: str, direction: str, branch_kind: str | None, is_conditional: bool) -> None:
         if name in cmdr_set or name in seen:
             return
         seen.add(name)
-        results.append({
-            "candidate":      name,
-            "direction":      direction,
-            "branch_kind":    branch_kind or "root",
-            "is_conditional": is_conditional,
-        })
+        results.append(
+            {
+                "candidate": name,
+                "direction": direction,
+                "branch_kind": branch_kind or "root",
+                "is_conditional": is_conditional,
+            }
+        )
 
     # Tier 1: Library → Graveyard direct placement.
     cur = conn.execute(
@@ -2780,8 +2800,7 @@ def find_graveyard_value_synergies(
         "AND zone_origin = 'Library' AND zone_destination = 'Graveyard'"
     )
     for r in cur.fetchall():
-        _emit(r["card_name"], "library_to_grave",
-              r["branch_kind"], bool(r["is_conditional"]))
+        _emit(r["card_name"], "library_to_grave", r["branch_kind"], bool(r["is_conditional"]))
 
     # Tier 2: Self-mill (Mill effect targeting You, not opponents).
     cur = conn.execute(
@@ -2790,7 +2809,7 @@ def find_graveyard_value_synergies(
         "WHERE port_type = 'effect' AND event_class = 'Mill'"
     )
     for r in cur.fetchall():
-        vf = (r["valid_filter"] or "")
+        vf = r["valid_filter"] or ""
         # Mill effects with an explicit target other than You are
         # opponent-mill (Bruvac) or target-a-player-mill (Maddening
         # Cacophony). Friendly self-mill has either empty filter,
@@ -2799,8 +2818,7 @@ def find_graveyard_value_synergies(
         # an opponent.
         if "Opp" in vf:
             continue
-        _emit(r["card_name"], "self_mill",
-              r["branch_kind"], bool(r["is_conditional"]))
+        _emit(r["card_name"], "self_mill", r["branch_kind"], bool(r["is_conditional"]))
 
     # Tier 3: Reanimator cluster — other cards with Graveyard→Battlefield.
     cur = conn.execute(
@@ -2810,8 +2828,7 @@ def find_graveyard_value_synergies(
         "AND zone_origin = 'Graveyard' AND zone_destination = 'Battlefield'"
     )
     for r in cur.fetchall():
-        _emit(r["card_name"], "reanimator_cluster",
-              r["branch_kind"], bool(r["is_conditional"]))
+        _emit(r["card_name"], "reanimator_cluster", r["branch_kind"], bool(r["is_conditional"]))
 
     return results
 
@@ -2857,12 +2874,14 @@ def find_etb_value_creatures(
         if name in cmdr_set or name in seen:
             continue
         seen.add(name)
-        results.append({
-            "candidate":      name,
-            "trigger_type":   "death",
-            "branch_kind":    "root",
-            "is_conditional": False,
-        })
+        results.append(
+            {
+                "candidate": name,
+                "trigger_type": "death",
+                "branch_kind": "root",
+                "is_conditional": False,
+            }
+        )
 
     return results
 
@@ -2908,15 +2927,19 @@ def find_trigger_resonance(
     # ChangesZoneAll (107), Drawn (120), LifeGained (80), Blocks (124).
     # Kept: Sacrificed (110), Taps (103), Discarded (73), Cycled (77),
     #       TurnFaceUp (125), Countered (50), Exiled (40), etc.
-    _BROAD_TRIGGER_EVENTS: frozenset[str] = frozenset({
-        "ChangesZone", "ChangesZoneAll",
-        "Phase",
-        "DamageDone", "DamageDoneOnce",
-        "AttackersDeclared",
-        "Drawn",       # 120 cards — too generic (every draw-matters deck)
-        "LifeGained",  # 80 cards — too generic (every lifegain deck)
-        "Blocks",      # 124 cards — blocking is fundamental, not strategic
-    })
+    _BROAD_TRIGGER_EVENTS: frozenset[str] = frozenset(
+        {
+            "ChangesZone",
+            "ChangesZoneAll",
+            "Phase",
+            "DamageDone",
+            "DamageDoneOnce",
+            "AttackersDeclared",
+            "Drawn",  # 120 cards — too generic (every draw-matters deck)
+            "LifeGained",  # 80 cards — too generic (every lifegain deck)
+            "Blocks",  # 124 cards — blocking is fundamental, not strategic
+        }
+    )
 
     cmdr_ports = load_ports_for_set(conn, commander_set)
     cmdr_set = set(commander_set)
@@ -2955,13 +2978,15 @@ def find_trigger_resonance(
         if key in seen:
             continue
         seen.add(key)
-        results.append({
-            "candidate":      name,
-            "matched_event":  ev,
-            "cmdr_trigger":   cmdr_trigger_events[ev],
-            "branch_kind":    r.get("branch_kind") or "root",
-            "is_conditional": bool(r.get("is_conditional")),
-        })
+        results.append(
+            {
+                "candidate": name,
+                "matched_event": ev,
+                "cmdr_trigger": cmdr_trigger_events[ev],
+                "branch_kind": r.get("branch_kind") or "root",
+                "is_conditional": bool(r.get("is_conditional")),
+            }
+        )
 
     return results
 
@@ -3034,13 +3059,15 @@ def find_stat_scaling_synergies(
                 toughness = int(r["toughness"])
             except (ValueError, TypeError):
                 continue
-            results.append({
-                "candidate":  name,
-                "stat_type":  "toughness",
-                "stat_value": toughness,
-                "branch_kind": "root",
-                "is_conditional": False,
-            })
+            results.append(
+                {
+                    "candidate": name,
+                    "stat_type": "toughness",
+                    "stat_value": toughness,
+                    "branch_kind": "root",
+                    "is_conditional": False,
+                }
+            )
 
         # Also include Defender creatures (even if toughness < 4) — they
         # tend to be cheap high-toughness bodies ideal for Phenax.
@@ -3058,13 +3085,15 @@ def find_stat_scaling_synergies(
                 toughness = int(r["toughness"])
             except (ValueError, TypeError):
                 continue
-            results.append({
-                "candidate":  name,
-                "stat_type":  "toughness",
-                "stat_value": toughness,
-                "branch_kind": "root",
-                "is_conditional": False,
-            })
+            results.append(
+                {
+                    "candidate": name,
+                    "stat_type": "toughness",
+                    "stat_value": toughness,
+                    "branch_kind": "root",
+                    "is_conditional": False,
+                }
+            )
 
     return results
 
@@ -3095,8 +3124,7 @@ def _commander_makes_creature_tokens(cmdr_ports: list[PortRow]) -> bool:
             has_trigger = True
         if pt == "effect" and ev == "Token" and bk in ("execute", "subability"):
             raw = (p.get("raw_line") or "").lower()
-            if any(kw in raw for kw in ("treasure", "food", "clue", "blood",
-                                         "gold", "map", "powerstone")):
+            if any(kw in raw for kw in ("treasure", "food", "clue", "blood", "gold", "map", "powerstone")):
                 continue
             has_token_in_chain = True
     return has_trigger and has_token_in_chain
@@ -3161,12 +3189,14 @@ def find_etb_payoff_for_token_commander(
             continue
         seen.add(name)
         bk, cond = etb_trigger_cards[name]
-        results.append({
-            "candidate":      name,
-            "payoff_event":   r["event_class"],
-            "branch_kind":    bk,
-            "is_conditional": cond,
-        })
+        results.append(
+            {
+                "candidate": name,
+                "payoff_event": r["event_class"],
+                "branch_kind": bk,
+                "is_conditional": cond,
+            }
+        )
 
     return results
 
@@ -3198,9 +3228,9 @@ def _commander_triggers_on_opponent(cmdr_ports: list[PortRow]) -> dict[str, str]
 #: Maps opponent-trigger events to the candidate effect events that
 #: FORCE opponents to perform that action.
 _OPP_TRIGGER_TO_FORCING_EFFECT: dict[str, tuple[str, ...]] = {
-    "Sacrificed": ("Sacrifice",),      # Plaguecrafter, Smallpox force sacrifice
-    "Discarded":  ("Discard",),        # Dark Deal, Windfall force discard
-    "LifeLost":   ("DealDamage", "LoseLife"),  # damage/life loss effects
+    "Sacrificed": ("Sacrifice",),  # Plaguecrafter, Smallpox force sacrifice
+    "Discarded": ("Discard",),  # Dark Deal, Windfall force discard
+    "LifeLost": ("DealDamage", "LoseLife"),  # damage/life loss effects
 }
 
 
@@ -3249,12 +3279,14 @@ def find_opponent_forcing_effects(
         if name in cmdr_set or name in seen:
             continue
         seen.add(name)
-        results.append({
-            "candidate":      name,
-            "forcing_event":  r["event_class"],
-            "branch_kind":    r["branch_kind"] or "root",
-            "is_conditional": bool(r["is_conditional"]),
-        })
+        results.append(
+            {
+                "candidate": name,
+                "forcing_event": r["event_class"],
+                "branch_kind": r["branch_kind"] or "root",
+                "is_conditional": bool(r["is_conditional"]),
+            }
+        )
 
     return results
 
@@ -3321,12 +3353,14 @@ def find_untap_synergies(
         if vf and "Land" in vf and "Creature" not in vf and "Permanent" not in vf:
             continue
         seen.add(name)
-        results.append({
-            "candidate":      name,
-            "direction":      "untap_source",
-            "branch_kind":    r["branch_kind"] or "root",
-            "is_conditional": bool(r["is_conditional"]),
-        })
+        results.append(
+            {
+                "candidate": name,
+                "direction": "untap_source",
+                "branch_kind": r["branch_kind"] or "root",
+                "is_conditional": bool(r["is_conditional"]),
+            }
+        )
 
     # UntapAll effects (Murkfiend Liege, etc.)
     cur = conn.execute(
@@ -3339,29 +3373,31 @@ def find_untap_synergies(
         if name in cmdr_set or name in seen:
             continue
         seen.add(name)
-        results.append({
-            "candidate":      name,
-            "direction":      "untap_all",
-            "branch_kind":    r["branch_kind"] or "root",
-            "is_conditional": bool(r["is_conditional"]),
-        })
+        results.append(
+            {
+                "candidate": name,
+                "direction": "untap_all",
+                "branch_kind": r["branch_kind"] or "root",
+                "is_conditional": bool(r["is_conditional"]),
+            }
+        )
 
     # Static UntapOtherPlayer (Seedborn Muse, Wilderness Reclamation)
     cur = conn.execute(
-        "SELECT DISTINCT card_name "
-        "FROM card_ports "
-        "WHERE port_type = 'static' AND event_class = 'UntapOtherPlayer'"
+        "SELECT DISTINCT card_name FROM card_ports WHERE port_type = 'static' AND event_class = 'UntapOtherPlayer'"
     )
     for r in cur.fetchall():
         name = r["card_name"]
         if name in cmdr_set or name in seen:
             continue
         seen.add(name)
-        results.append({
-            "candidate":      name,
-            "direction":      "untap_static",
-            "branch_kind":    "root",
-            "is_conditional": False,
-        })
+        results.append(
+            {
+                "candidate": name,
+                "direction": "untap_static",
+                "branch_kind": "root",
+                "is_conditional": False,
+            }
+        )
 
     return results

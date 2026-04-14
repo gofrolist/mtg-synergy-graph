@@ -23,41 +23,40 @@ from .complement_rules import (
 from .heuristics import STAPLES
 from .scoring import BUCKETS
 
-
 # ---------------------------------------------------------------------------
 # §1  UniversalScore — per-candidate result
 # ---------------------------------------------------------------------------
 
 # Map rule_id → legacy bucket name for backward compatibility
 _RULE_TO_BUCKET: dict[str, str] = {
-    "trigger_effect":        "port_match",
-    "cost_feeds_trigger":    "cost_synergy",
-    "trigger_resonance":     "trigger_resonance",
-    "effect_resonance":      "effect_resonance",
+    "trigger_effect": "port_match",
+    "cost_feeds_trigger": "cost_synergy",
+    "trigger_resonance": "trigger_resonance",
+    "effect_resonance": "effect_resonance",
     "replacement_resonance": "replacement_resonance",
-    "replacement_producer":  "replacement_producer",
-    "replacement_blocks":    "replacement",
-    "lord":                  "lord",
-    "scaling":               "scaling",
-    "etb_self":              "port_match",
-    "spell_density":         "spellcast_density",
-    "tribal_density":        "catchall",
-    "sacrifice_cluster":     "sacrifice_synergy",
-    "zone_resonance":        "trigger_resonance",
-    "effect_feeds_trigger":  "port_match",
-    "panharmonicon":         "port_match",
-    "flicker_synergy":       "port_match",
-    "cost_payoff":           "port_match",
-    "opponent_forcing":      "opponent_forcing",
-    "token_producer":        "port_match",
-    "voltron":               "scaling",
-    "etb_sac_target":        "etb_value",
-    "combat_enhancer":       "port_match",
-    "wheel_synergy":         "port_match",
-    "artifact_recursion":    "graveyard_synergy",
-    "copy_synergy":          "port_match",
-    "token_sac_chain":       "sacrifice_synergy",
-    "evasion":               "port_match",
+    "replacement_producer": "replacement_producer",
+    "replacement_blocks": "replacement",
+    "lord": "lord",
+    "scaling": "scaling",
+    "etb_self": "port_match",
+    "spell_density": "spellcast_density",
+    "tribal_density": "catchall",
+    "sacrifice_cluster": "sacrifice_synergy",
+    "zone_resonance": "trigger_resonance",
+    "effect_feeds_trigger": "port_match",
+    "panharmonicon": "port_match",
+    "flicker_synergy": "port_match",
+    "cost_payoff": "port_match",
+    "opponent_forcing": "opponent_forcing",
+    "token_producer": "port_match",
+    "voltron": "scaling",
+    "etb_sac_target": "etb_value",
+    "combat_enhancer": "port_match",
+    "wheel_synergy": "port_match",
+    "artifact_recursion": "graveyard_synergy",
+    "copy_synergy": "port_match",
+    "token_sac_chain": "sacrifice_synergy",
+    "evasion": "port_match",
 }
 
 
@@ -107,9 +106,7 @@ class UniversalScore:
 
     @cached_property
     def distinct_rules(self) -> frozenset[str]:
-        return frozenset(
-            c.rule_id for c in self.complements if c.direction == "synergy"
-        )
+        return frozenset(c.rule_id for c in self.complements if c.direction == "synergy")
 
     def to_legacy_buckets(self) -> dict[str, float]:
         """Map IDF-weighted scores to legacy bucket dict."""
@@ -141,24 +138,28 @@ class UniversalScore:
 
 #: Rules where every match counts equally (density rules — the strategy
 #: IS having many of this type). IDF would penalize these unfairly.
-_FLAT_COUNT_RULES: frozenset[str] = frozenset({
-    "spell_density",
-    "scaling",
-    "etb_self",
-    "tribal_density",
-    "token_producer",
-    "evasion",
-})
+_FLAT_COUNT_RULES: frozenset[str] = frozenset(
+    {
+        "spell_density",
+        "scaling",
+        "etb_self",
+        "tribal_density",
+        "token_producer",
+        "evasion",
+    }
+)
 
 #: Per-rule flat weight overrides. Tribal density uses a lower weight
 #: (0.5) because random tribal creatures (Bog Rats, Robber Fly) at 1.0
 #: drown out actual synergy cards. At 0.5, a tribal creature scores
 #: 0.5 while a lord scores 0.5 + lord_IDF ≈ 0.74 — proper discrimination.
-_FLAT_WEIGHT_OVERRIDES: types.MappingProxyType[str, float] = types.MappingProxyType({
-    "tribal_density": 0.5,
-    "token_producer": 0.25,
-    "evasion": 0.15,
-})
+_FLAT_WEIGHT_OVERRIDES: types.MappingProxyType[str, float] = types.MappingProxyType(
+    {
+        "tribal_density": 0.5,
+        "token_producer": 0.25,
+        "evasion": 0.15,
+    }
+)
 
 
 def _computeidf_weights(
@@ -217,10 +218,7 @@ def score_all_universal(
     ).fetchone()
     cmdr_pips: set[str] = set()
     if cmdr_row:
-        cmdr_pips = {
-            t.strip() for t in (cmdr_row["color_identity"] or "").split(",")
-            if t.strip()
-        }
+        cmdr_pips = {t.strip() for t in (cmdr_row["color_identity"] or "").split(",") if t.strip()}
     staple_names: set[str] = set()
     for pip in cmdr_pips | {"C"}:
         staple_names.update(STAPLES.get(pip, ()))
@@ -230,7 +228,9 @@ def score_all_universal(
     for name, comps in by_candidate.items():
         bonus = 0.01 if name in staple_names else 0.0
         results[name] = UniversalScore(
-            complements=comps, staple_bonus=bonus, idf_weights=idf,
+            complements=comps,
+            staple_bonus=bonus,
+            idf_weights=idf,
         )
     for name in staple_names:
         if name not in results and name not in set(commander_set):

@@ -37,27 +37,27 @@ COST_PATTERNS: tuple[tuple[str, str], ...] = (
     # because cost_str is a cost-token string and never contains the
     # ``Drawn`` trigger or ``DrawCards`` effect verb.
     ("ExileFromGrave", "exile_from_grave"),
-    ("ExileFromHand",  "exile_from_hand"),
-    ("ExileFromTop",   "exile_from_top"),
-    ("ExileAnyGrave<", "exile_any_grave"),    # A4: 14 cards (delve-class)
-    ("Exile",          "exile"),
-    ("SubCounter",     "remove_counter"),
-    ("AddCounter",     "add_counter"),
-    ("tapXType",       "tap_type"),
-    ("untapYType",     "untap_type"),
-    ("Sac",            "sacrifice"),
-    ("Discard",        "discard"),
-    ("Return",         "return"),
-    ("Reveal",         "reveal"),
-    ("PayLife",        "pay_life"),
-    ("PayEnergy",      "pay_energy"),
-    ("Mill",           "mill"),
-    ("Exert",          "exert"),
+    ("ExileFromHand", "exile_from_hand"),
+    ("ExileFromTop", "exile_from_top"),
+    ("ExileAnyGrave<", "exile_any_grave"),  # A4: 14 cards (delve-class)
+    ("Exile", "exile"),
+    ("SubCounter", "remove_counter"),
+    ("AddCounter", "add_counter"),
+    ("tapXType", "tap_type"),
+    ("untapYType", "untap_type"),
+    ("Sac", "sacrifice"),
+    ("Discard", "discard"),
+    ("Return", "return"),
+    ("Reveal", "reveal"),
+    ("PayLife", "pay_life"),
+    ("PayEnergy", "pay_energy"),
+    ("Mill", "mill"),
+    ("Exert", "exert"),
     # A4: require trailing ``<`` so the substring match cannot fire on
     # tokens like ``Discard<1/LastDrawn>`` (which contains ``Draw``).
-    ("CollectEvidence<","collect_evidence"),   # A4: 17 cards
-    ("DamageYou<",      "damage_self"),        # A4: 18 cards
-    ("Draw<",           "draw_cost"),          # A4: 45 cards
+    ("CollectEvidence<", "collect_evidence"),  # A4: 17 cards
+    ("DamageYou<", "damage_self"),  # A4: 18 cards
+    ("Draw<", "draw_cost"),  # A4: 45 cards
 )
 
 #: Cost types that take a ``<count/typespec[/desc]>`` payload describing
@@ -65,14 +65,16 @@ COST_PATTERNS: tuple[tuple[str, str], ...] = (
 #: the self / other distinction is meaningful — `PayLife`, `tap_type` etc.
 #: have no permanent picker, so they default to ``cost_target=None``.
 #: Phase A1 (SPEC §5.5).
-_COST_TARGETED_TYPES: frozenset[str] = frozenset({
-    "sacrifice",
-    "discard",
-    "exile",
-    "exile_from_grave",
-    "exile_from_hand",
-    "return",
-})
+_COST_TARGETED_TYPES: frozenset[str] = frozenset(
+    {
+        "sacrifice",
+        "discard",
+        "exile",
+        "exile_from_grave",
+        "exile_from_hand",
+        "return",
+    }
+)
 
 
 def _classify_cost_target(subtype: str) -> str | None:
@@ -123,10 +125,10 @@ def _branch_defaults(
 ) -> dict[str, Any]:
     """Common branch-metadata fields shared by every port row."""
     return {
-        "branch_kind":    branch_kind,
-        "branch_parent":  branch_parent,
-        "source_svar":    source_svar,
-        "chain_depth":    chain_depth,
+        "branch_kind": branch_kind,
+        "branch_parent": branch_parent,
+        "source_svar": source_svar,
+        "chain_depth": chain_depth,
         "is_conditional": is_conditional,
     }
 
@@ -175,12 +177,12 @@ def extract_cost_ports(
             cost_target = _classify_cost_target(subtype) or "self"
         ports.append(
             {
-                "card_name":    card_name,
-                "port_type":    "cost",
-                "event_class":  cost_type,
+                "card_name": card_name,
+                "port_type": "cost",
+                "event_class": cost_type,
                 "cost_subtype": subtype,
-                "cost_target":  cost_target,
-                "raw_line":     cost_str,
+                "cost_target": cost_target,
+                "raw_line": cost_str,
                 **branch,
             }
         )
@@ -188,11 +190,11 @@ def extract_cost_ports(
     if "T" in cost_str.split():
         ports.append(
             {
-                "card_name":   card_name,
-                "port_type":   "cost",
+                "card_name": card_name,
+                "port_type": "cost",
                 "event_class": "tap",
                 "cost_target": None,
-                "raw_line":    cost_str,
+                "raw_line": cost_str,
                 **branch,
             }
         )
@@ -212,11 +214,13 @@ def extract_cost_ports(
 #: SQL key for "this card has loop / branch combo potential".
 #: ``Chain`` was in the audit's list but has zero corpus uses — verified
 #: with grep against data/forge/forge-gui/res/cardsfolder.
-COMBO_PRIMITIVE_VERBS: frozenset[str] = frozenset({
-    "Branch",      # 115 cards
-    "Repeat",      # 57  cards
-    "RepeatEach",  # 347 cards
-})
+COMBO_PRIMITIVE_VERBS: frozenset[str] = frozenset(
+    {
+        "Branch",  # 115 cards
+        "Repeat",  # 57  cards
+        "RepeatEach",  # 347 cards
+    }
+)
 
 
 def _amount_from(parsed: dict[str, Any]) -> str:
@@ -241,26 +245,20 @@ def extract_effect_ports(
     if isinstance(parsed_or_node, ChainNode):
         node = parsed_or_node
         parsed = node.parsed
-        branch_kind    = node.branch_kind
-        branch_parent  = node.branch_parent
-        source_svar    = node.source_svar
-        chain_depth    = node.chain_depth
+        branch_kind = node.branch_kind
+        branch_parent = node.branch_parent
+        source_svar = node.source_svar
+        chain_depth = node.chain_depth
         is_conditional = node.is_conditional
     else:
         parsed = parsed_or_node
-        branch_kind    = "root"
-        branch_parent  = None
-        source_svar    = None
-        chain_depth    = 0
+        branch_kind = "root"
+        branch_parent = None
+        source_svar = None
+        chain_depth = 0
         is_conditional = False
 
-    verb = (
-        parsed.get("_verb")
-        or parsed.get("DB")
-        or parsed.get("SP")
-        or parsed.get("AB")
-        or ""
-    )
+    verb = parsed.get("_verb") or parsed.get("DB") or parsed.get("SP") or parsed.get("AB") or ""
 
     branch = _branch_defaults(
         branch_kind=branch_kind,
@@ -275,24 +273,22 @@ def extract_effect_ports(
     # the chosen type", Nexos "spend only on costs that contain {X}").
     # The restriction is the synergy signal — store it on the effect port
     # so D2's mana-restriction matcher can join on it.
-    mana_restriction = (
-        parsed.get("RestrictValid", "") if verb == "Mana" else ""
-    )
+    mana_restriction = parsed.get("RestrictValid", "") if verb == "Mana" else ""
 
     port: PortRow = {
-        "card_name":        card_name,
-        "port_type":        "effect",
-        "event_class":      verb,
-        "valid_filter":     parsed.get("ValidTgts") or parsed.get("Defined") or parsed.get("ValidCards", ""),
-        "zone_origin":      parsed.get("Origin", ""),
+        "card_name": card_name,
+        "port_type": "effect",
+        "event_class": verb,
+        "valid_filter": parsed.get("ValidTgts") or parsed.get("Defined") or parsed.get("ValidCards", ""),
+        "zone_origin": parsed.get("Origin", ""),
         "zone_destination": parsed.get("Destination", ""),
-        "amount":           _amount_from(parsed),
-        "counter_type":     parsed.get("CounterType", ""),
-        "granted_keyword":  parsed.get("KW", ""),
-        "duration":         parsed.get("Duration", ""),
-        "is_curse":         parsed.get("IsCurse", "") == "True",
+        "amount": _amount_from(parsed),
+        "counter_type": parsed.get("CounterType", ""),
+        "granted_keyword": parsed.get("KW", ""),
+        "duration": parsed.get("Duration", ""),
+        "is_curse": parsed.get("IsCurse", "") == "True",
         "mana_restriction": mana_restriction,
-        "raw_line":         repr(parsed),
+        "raw_line": repr(parsed),
         **branch,
     }
 
@@ -337,9 +333,7 @@ def extract_effect_ports(
                     chain_depth=chain_depth + 1,
                 )
                 for sub_node in chain:
-                    sub_ports.extend(
-                        extract_effect_ports(card_name, sub_node, svars)
-                    )
+                    sub_ports.extend(extract_effect_ports(card_name, sub_node, svars))
 
     # StaticAbilities$ SVar walking: extract static ports from referenced
     # SVars (e.g., "StaticAbilities$ Play" → MayPlay continuous static).
@@ -349,9 +343,7 @@ def extract_effect_ports(
             ref_name = ref_name.strip()
             if ref_name and ref_name in svars:
                 static_parsed = parse_forge_line(svars[ref_name])
-                sub_ports.extend(
-                    extract_static_ports(card_name, static_parsed)
-                )
+                sub_ports.extend(extract_static_ports(card_name, static_parsed))
 
     # Phase B3: emit a synthetic combo_primitive port alongside the original
     # Branch / Repeat / RepeatEach effect so SQL queries can find combo
@@ -362,16 +354,16 @@ def extract_effect_ports(
     if verb in COMBO_PRIMITIVE_VERBS:
         extra_ports.append(
             {
-                "card_name":       card_name,
-                "port_type":       "effect",
-                "event_class":     "combo_primitive",
+                "card_name": card_name,
+                "port_type": "effect",
+                "event_class": "combo_primitive",
                 "granted_ability": verb,
-                "raw_line":        repr(parsed),
+                "raw_line": repr(parsed),
                 **branch,
             }
         )
 
-    return [port] + cost_ports + sub_ports + extra_ports
+    return [port, *cost_ports, *sub_ports, *extra_ports]
 
 
 # ---------------------------------------------------------------------------
@@ -401,18 +393,18 @@ def extract_trigger_ports(
         trigger_source = "first_time"
 
     trigger_port: PortRow = {
-        "card_name":        card_name,
-        "port_type":        "trigger",
-        "event_class":      parsed.get("Mode", ""),
-        "valid_filter":     valid_filter,
-        "zone_origin":      parsed.get("Origin", ""),
+        "card_name": card_name,
+        "port_type": "trigger",
+        "event_class": parsed.get("Mode", ""),
+        "valid_filter": valid_filter,
+        "zone_origin": parsed.get("Origin", ""),
         "zone_destination": parsed.get("Destination", ""),
-        "phase":            parsed.get("Phase", ""),
-        "is_optional":      "OptionalDecider" in parsed,
-        "is_combat":        parsed.get("CombatDamage", "") == "True",
-        "execute_ref":      parsed.get("Execute", ""),
-        "trigger_source":   trigger_source,
-        "raw_line":         repr(parsed),
+        "phase": parsed.get("Phase", ""),
+        "is_optional": "OptionalDecider" in parsed,
+        "is_combat": parsed.get("CombatDamage", "") == "True",
+        "execute_ref": parsed.get("Execute", ""),
+        "trigger_source": trigger_source,
+        "raw_line": repr(parsed),
         **_branch_defaults(),
     }
     ports: list[PortRow] = [trigger_port]
@@ -447,21 +439,21 @@ def extract_static_ports(card_name: str, parsed: dict[str, Any]) -> list[PortRow
     has_condition = bool(parsed.get("Condition") or parsed.get("IsPresent"))
     return [
         {
-            "card_name":      card_name,
-            "port_type":      "static",
-            "event_class":    parsed.get("Mode", ""),
+            "card_name": card_name,
+            "port_type": "static",
+            "event_class": parsed.get("Mode", ""),
             "affected_scope": parsed.get("Affected", ""),
-            "effect_zone":    parsed.get("EffectZone", ""),
+            "effect_zone": parsed.get("EffectZone", ""),
             "granted_keyword": parsed.get("AddKeyword", ""),
             "granted_ability": parsed.get("AddAbility", ""),
-            "valid_filter":   parsed.get("IsPresent", ""),
-            "amount":         parsed.get("AddPower", ""),
+            "valid_filter": parsed.get("IsPresent", ""),
+            "amount": parsed.get("AddPower", ""),
             "is_conditional": has_condition,
-            "branch_kind":    "static_condition" if has_condition else "root",
-            "branch_parent":  None,
-            "source_svar":    None,
-            "chain_depth":    0,
-            "raw_line":       repr(parsed),
+            "branch_kind": "static_condition" if has_condition else "root",
+            "branch_parent": None,
+            "source_svar": None,
+            "chain_depth": 0,
+            "raw_line": repr(parsed),
         }
     ]
 
@@ -489,21 +481,21 @@ def extract_replacement_ports(card_name: str, parsed: dict[str, Any]) -> list[Po
     # like Brago/Yarok/Yuriko as anti-synergy.
     return [
         {
-            "card_name":          card_name,
-            "port_type":          "replacement",
-            "event_class":        parsed.get("Event", ""),
-            "replacement_event":  parsed.get("Event", ""),
+            "card_name": card_name,
+            "port_type": "replacement",
+            "event_class": parsed.get("Event", ""),
+            "replacement_event": parsed.get("Event", ""),
             "replacement_result": replace_with,
             "replacement_player": parsed.get("ValidPlayer", ""),
-            "valid_filter":       parsed.get("ValidCard") or parsed.get("ValidSource", ""),
-            "zone_origin":        parsed.get("Origin", ""),
-            "zone_destination":   parsed.get("Destination", ""),
-            "is_conditional":     has_condition,
-            "branch_kind":        "replacement_condition" if has_condition else "root",
-            "branch_parent":      None,
-            "source_svar":        None,
-            "chain_depth":        0,
-            "raw_line":           repr(parsed),
+            "valid_filter": parsed.get("ValidCard") or parsed.get("ValidSource", ""),
+            "zone_origin": parsed.get("Origin", ""),
+            "zone_destination": parsed.get("Destination", ""),
+            "is_conditional": has_condition,
+            "branch_kind": "replacement_condition" if has_condition else "root",
+            "branch_parent": None,
+            "source_svar": None,
+            "chain_depth": 0,
+            "raw_line": repr(parsed),
         }
     ]
 
@@ -525,11 +517,11 @@ def extract_keyword_ports(card_name: str, keyword_lines: list[str]) -> list[Port
         keyword = line.split()[0] if line else ""
         ports.append(
             {
-                "card_name":       card_name,
-                "port_type":       "keyword",
-                "event_class":     keyword,
+                "card_name": card_name,
+                "port_type": "keyword",
+                "event_class": keyword,
                 "granted_keyword": keyword,
-                "raw_line":        line,
+                "raw_line": line,
                 **_branch_defaults(),
             }
         )
@@ -564,7 +556,7 @@ def extract_scaling_ports(card_name: str, svars: dict[str, str]) -> list[PortRow
     for svar_name, svar_value in svars.items():
         if not svar_value.startswith("Count$"):
             continue
-        expression = svar_value[len("Count$"):]
+        expression = svar_value[len("Count$") :]
         filter_str = ""
         metric = expression
 
@@ -581,17 +573,17 @@ def extract_scaling_ports(card_name: str, svars: dict[str, str]) -> list[PortRow
 
         ports.append(
             {
-                "card_name":          card_name,
-                "port_type":          "scales_with",
-                "event_class":        metric,
-                "valid_filter":       filter_str,
+                "card_name": card_name,
+                "port_type": "scales_with",
+                "event_class": metric,
+                "valid_filter": filter_str,
                 "scaling_expression": svar_value,
-                "source_svar":        svar_name,
-                "branch_kind":        "root",
-                "branch_parent":      None,
-                "is_conditional":     False,
-                "chain_depth":        0,
-                "raw_line":           f"SVar:{svar_name}:{svar_value}",
+                "source_svar": svar_name,
+                "branch_kind": "root",
+                "branch_parent": None,
+                "is_conditional": False,
+                "chain_depth": 0,
+                "raw_line": f"SVar:{svar_name}:{svar_value}",
             }
         )
     return ports
@@ -600,6 +592,7 @@ def extract_scaling_ports(card_name: str, svars: dict[str, str]) -> list[PortRow
 # ---------------------------------------------------------------------------
 # Top-level dispatch
 # ---------------------------------------------------------------------------
+
 
 # All extractors share the same ``(card_name, parsed, svars)`` signature
 # even when ``svars`` is unused, so the dispatch loop in ``extract_all_ports``
@@ -617,9 +610,9 @@ def _replacement_ext(card: str, parsed: dict[str, Any], svars: dict[str, str]) -
 
 
 _ABILITY_EXTRACTORS = {
-    "trigger":     extract_trigger_ports,
-    "ability":     extract_effect_ports,
-    "static":      _static_ext,
+    "trigger": extract_trigger_ports,
+    "ability": extract_effect_ports,
+    "static": _static_ext,
     "replacement": _replacement_ext,
 }
 

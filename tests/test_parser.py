@@ -8,16 +8,13 @@ from mtg_synergy_graph import (
 )
 from mtg_synergy_graph.parser import parse_card_text
 
-
 # ---------------------------------------------------------------------------
 # parse_forge_line — regression set against v1.1 bugs
 # ---------------------------------------------------------------------------
 
 
 def test_parse_forge_line_uses_dollar_separator():
-    out = parse_forge_line(
-        "Mode$ ChangesZone | ValidCard$ Creature.YouCtrl | Origin$ Any | Destination$ Battlefield"
-    )
+    out = parse_forge_line("Mode$ ChangesZone | ValidCard$ Creature.YouCtrl | Origin$ Any | Destination$ Battlefield")
     assert out["Mode"] == "ChangesZone"
     assert out["ValidCard"] == "Creature.YouCtrl"
     assert out["Origin"] == "Any"
@@ -25,9 +22,7 @@ def test_parse_forge_line_uses_dollar_separator():
 
 
 def test_parse_forge_line_records_db_verb_prefix():
-    out = parse_forge_line(
-        "DB$ PutCounter | Defined$ Self | CounterType$ P1P1 | CounterNum$ 1 | SubAbility$ DBDraw"
-    )
+    out = parse_forge_line("DB$ PutCounter | Defined$ Self | CounterType$ P1P1 | CounterNum$ 1 | SubAbility$ DBDraw")
     assert out["DB"] == "PutCounter"
     assert out["_prefix"] == "DB"
     assert out["_verb"] == "PutCounter"

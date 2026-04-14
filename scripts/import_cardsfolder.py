@@ -17,17 +17,20 @@ from mtg_synergy_graph.importer import import_cards_folder
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--folder", type=Path,
-                        default=Path("data/forge/forge-gui/res/cardsfolder"),
-                        help="Path to a Forge cardsfolder/ tree")
-    parser.add_argument("--db", type=Path, default=Path("data/synergy.db"),
-                        help="Output synergy.db path")
-    parser.add_argument("--scryfall-db", type=Path,
-                        default=Path("data/tags.db"),
-                        help="Scryfall-shaped sqlite DB (e.g. data/tags.db) "
-                             "used to populate cards.oracle_id.")
-    parser.add_argument("--limit", type=int, default=None,
-                        help="Stop after N .txt files (smoke test)")
+    parser.add_argument(
+        "--folder",
+        type=Path,
+        default=Path("data/forge/forge-gui/res/cardsfolder"),
+        help="Path to a Forge cardsfolder/ tree",
+    )
+    parser.add_argument("--db", type=Path, default=Path("data/synergy.db"), help="Output synergy.db path")
+    parser.add_argument(
+        "--scryfall-db",
+        type=Path,
+        default=Path("data/tags.db"),
+        help="Scryfall-shaped sqlite DB (e.g. data/tags.db) used to populate cards.oracle_id.",
+    )
+    parser.add_argument("--limit", type=int, default=None, help="Stop after N .txt files (smoke test)")
     args = parser.parse_args()
 
     if not args.folder.exists():
@@ -49,7 +52,8 @@ def main() -> int:
 
     t0 = time.perf_counter()
     cards, ports = import_cards_folder(
-        conn, args.folder,
+        conn,
+        args.folder,
         scryfall_db=args.scryfall_db,
         limit=args.limit,
     )
@@ -58,16 +62,11 @@ def main() -> int:
     cur = conn.execute("SELECT COUNT(*) FROM port_attributes")
     attrs = cur.fetchone()[0]
 
-    resolved = conn.execute(
-        "SELECT COUNT(*) FROM cards WHERE oracle_id IS NOT NULL"
-    ).fetchone()[0]
-    ranked = conn.execute(
-        "SELECT COUNT(*) FROM cards WHERE edhrec_rank IS NOT NULL"
-    ).fetchone()[0]
+    resolved = conn.execute("SELECT COUNT(*) FROM cards WHERE oracle_id IS NOT NULL").fetchone()[0]
+    ranked = conn.execute("SELECT COUNT(*) FROM cards WHERE edhrec_rank IS NOT NULL").fetchone()[0]
 
     rate = cards / elapsed if elapsed else 0
-    print(f"imported {cards} cards / {ports} ports / {attrs} attributes "
-          f"in {elapsed:.1f}s ({rate:.0f} cards/s)")
+    print(f"imported {cards} cards / {ports} ports / {attrs} attributes in {elapsed:.1f}s ({rate:.0f} cards/s)")
     if cards:
         oid_pct = 100.0 * resolved / cards
         rank_pct = 100.0 * ranked / cards

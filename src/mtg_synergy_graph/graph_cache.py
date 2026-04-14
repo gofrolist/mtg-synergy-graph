@@ -32,11 +32,11 @@ log = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class GraphCacheStats:
-    cards:        int
-    edges:        int
+    cards: int
+    edges: int
     capped_edges: int
-    elapsed_s:    float
-    built_at:     str
+    elapsed_s: float
+    built_at: str
 
 
 def cache_is_populated(conn: sqlite3.Connection) -> bool:
@@ -84,8 +84,7 @@ def build_graph_cache(
         for name, neighbours in adjacency.items()
     ]
     conn.executemany(
-        "INSERT INTO graph_cache (card_name, hub_score, pagerank, degree, built_at) "
-        "VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO graph_cache (card_name, hub_score, pagerank, degree, built_at) VALUES (?, ?, ?, ?, ?)",
         cache_rows,
     )
 
@@ -96,15 +95,9 @@ def build_graph_cache(
         # Sort neighbours by their global pagerank so the cap keeps the
         # most-central ones — that's what the per-pair metrics actually
         # care about.
-        sorted_neighbours = sorted(
-            neighbours, key=lambda n: pr.get(n, 0.0), reverse=True
-        )
+        sorted_neighbours = sorted(neighbours, key=lambda n: pr.get(n, 0.0), reverse=True)
         edge_count += len(sorted_neighbours)
-        kept = (
-            sorted_neighbours[:neighbour_cap]
-            if neighbour_cap is not None
-            else sorted_neighbours
-        )
+        kept = sorted_neighbours[:neighbour_cap] if neighbour_cap is not None else sorted_neighbours
         capped_count += len(kept)
         for neigh in kept:
             neighbour_rows.append((name, neigh))
@@ -113,8 +106,7 @@ def build_graph_cache(
     chunk = 50_000
     for i in range(0, len(neighbour_rows), chunk):
         conn.executemany(
-            "INSERT OR IGNORE INTO causal_neighbours (card_name, neighbour_name) "
-            "VALUES (?, ?)",
+            "INSERT OR IGNORE INTO causal_neighbours (card_name, neighbour_name) VALUES (?, ?)",
             neighbour_rows[i : i + chunk],
         )
 
@@ -122,7 +114,7 @@ def build_graph_cache(
     elapsed = time.perf_counter() - t0
     return GraphCacheStats(
         cards=len(adjacency),
-        edges=edge_count // 2,                # undirected edges
+        edges=edge_count // 2,  # undirected edges
         capped_edges=capped_count // 2,
         elapsed_s=round(elapsed, 2),
         built_at=built_at,
@@ -137,8 +129,8 @@ def build_graph_cache(
 @dataclass(frozen=True)
 class CachedCardMetrics:
     hub_score: float
-    pagerank:  float
-    degree:    int
+    pagerank: float
+    degree: int
 
 
 def load_card_metrics(conn: sqlite3.Connection) -> dict[str, CachedCardMetrics]:
@@ -147,9 +139,7 @@ def load_card_metrics(conn: sqlite3.Connection) -> dict[str, CachedCardMetrics]:
     Returns ``{}`` if the cache is empty so callers can fall back to live
     computation.
     """
-    rows = conn.execute(
-        "SELECT card_name, hub_score, pagerank, degree FROM graph_cache"
-    ).fetchall()
+    rows = conn.execute("SELECT card_name, hub_score, pagerank, degree FROM graph_cache").fetchall()
     return {
         r["card_name"]: CachedCardMetrics(
             hub_score=float(r["hub_score"]),
@@ -170,8 +160,7 @@ def neighbours_of(
         return {}
     placeholders = ",".join("?" * len(names))
     rows = conn.execute(
-        f"SELECT card_name, neighbour_name FROM causal_neighbours "
-        f"WHERE card_name IN ({placeholders})",
+        f"SELECT card_name, neighbour_name FROM causal_neighbours WHERE card_name IN ({placeholders})",
         tuple(names),
     ).fetchall()
     out: dict[str, set[str]] = {n: set() for n in names}
@@ -185,8 +174,4 @@ def commander_neighbours(
     commander_set: Iterable[str],
 ) -> set[str]:
     """Union of neighbour sets for the commander pair."""
-    return {
-        neighbour
-        for cmdr_set in neighbours_of(conn, commander_set).values()
-        for neighbour in cmdr_set
-    }
+    return {neighbour for cmdr_set in neighbours_of(conn, commander_set).values() for neighbour in cmdr_set}

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import Any
 
 from ..graph_engine import _trigger_only_matches_self
 from .core import PortComplement, PortRow, _commander_subtypes_from_ports
@@ -41,37 +40,39 @@ def _find_combat_enhancers(
 
     # Extra combat steps
     cur = conn.execute(
-        "SELECT DISTINCT card_name FROM card_ports "
-        "WHERE port_type = 'effect' AND event_class = 'AddPhase'"
+        "SELECT DISTINCT card_name FROM card_ports WHERE port_type = 'effect' AND event_class = 'AddPhase'"
     )
     for r in cur.fetchall():
         name = r["card_name"]
         if name not in cmdr_set and name not in seen:
             seen.add(name)
-            results.append(PortComplement(
-                rule_id="combat_enhancer",
-                direction="synergy",
-                candidate=name,
-                cmdr_event="DamageDone",
-                cand_event="AddPhase",
-            ))
+            results.append(
+                PortComplement(
+                    rule_id="combat_enhancer",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="DamageDone",
+                    cand_event="AddPhase",
+                )
+            )
 
     # Double Strike keywords
     cur2 = conn.execute(
-        "SELECT DISTINCT card_name FROM card_ports "
-        "WHERE port_type = 'keyword' AND event_class = 'Double Strike'"
+        "SELECT DISTINCT card_name FROM card_ports WHERE port_type = 'keyword' AND event_class = 'Double Strike'"
     )
     for r in cur2.fetchall():
         name = r["card_name"]
         if name not in cmdr_set and name not in seen:
             seen.add(name)
-            results.append(PortComplement(
-                rule_id="combat_enhancer",
-                direction="synergy",
-                candidate=name,
-                cmdr_event="DamageDone",
-                cand_event="DoubleStrike",
-            ))
+            results.append(
+                PortComplement(
+                    rule_id="combat_enhancer",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="DamageDone",
+                    cand_event="DoubleStrike",
+                )
+            )
 
     return results
 
@@ -125,13 +126,15 @@ def _find_evasion_complements(
     for r in cur.fetchall():
         name = r["card_name"]
         if name not in cmdr_set:
-            results.append(PortComplement(
-                rule_id="evasion",
-                direction="synergy",
-                candidate=name,
-                cmdr_event="DamageDone_combat",
-                cand_event="unblockable",
-            ))
+            results.append(
+                PortComplement(
+                    rule_id="evasion",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="DamageDone_combat",
+                    cand_event="unblockable",
+                )
+            )
 
     return results
 
@@ -173,20 +176,21 @@ def _find_sacrifice_outlets(
 
     # Find all cards with sacrifice costs
     cur = conn.execute(
-        "SELECT DISTINCT card_name FROM card_ports "
-        "WHERE port_type = 'cost' AND event_class = 'sacrifice'"
+        "SELECT DISTINCT card_name FROM card_ports WHERE port_type = 'cost' AND event_class = 'sacrifice'"
     )
     results: list[PortComplement] = []
     for r in cur.fetchall():
         card = r["card_name"]
         if card not in cmdr_set:
-            results.append(PortComplement(
-                rule_id="cost_feeds_trigger",
-                direction="synergy",
-                candidate=card,
-                cmdr_event="ChangesZone_death",
-                cand_event="sacrifice",
-            ))
+            results.append(
+                PortComplement(
+                    rule_id="cost_feeds_trigger",
+                    direction="synergy",
+                    candidate=card,
+                    cmdr_event="ChangesZone_death",
+                    cand_event="sacrifice",
+                )
+            )
 
     return results
 
@@ -203,9 +207,15 @@ def _find_changeszone_resonance(
     also trigger on lands entering (landfall payoffs). Omnath triggers
     on ``ChangesZone|Elemental`` -> find elemental-ETB payoffs.
     """
-    _PRIMARY_TYPES = frozenset({
-        "Creature", "Artifact", "Enchantment", "Land", "Planeswalker",
-    })
+    _PRIMARY_TYPES = frozenset(
+        {
+            "Creature",
+            "Artifact",
+            "Enchantment",
+            "Land",
+            "Planeswalker",
+        }
+    )
     cmdr_types: set[str] = set()
     for p in cmdr_ports:
         if p.get("port_type") != "trigger":
@@ -243,14 +253,16 @@ def _find_changeszone_resonance(
             base = alt.strip().split(".")[0].split("+")[0].strip()
             if base in cmdr_types:
                 seen.add(card)
-                results.append(PortComplement(
-                    rule_id="zone_resonance",
-                    direction="synergy",
-                    candidate=card,
-                    cmdr_event="ChangesZone",
-                    cand_event=base,
-                    branch_kind=r["branch_kind"] or "root",
-                ))
+                results.append(
+                    PortComplement(
+                        rule_id="zone_resonance",
+                        direction="synergy",
+                        candidate=card,
+                        cmdr_event="ChangesZone",
+                        cand_event=base,
+                        branch_kind=r["branch_kind"] or "root",
+                    )
+                )
                 break
 
     return results

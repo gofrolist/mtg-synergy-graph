@@ -34,7 +34,10 @@ def imported_db(tmp_path_factory):
     db_path = tmp_path_factory.mktemp("scale") / "synergy.db"
     conn = open_db(db_path)
     cards, ports = import_cards_folder(
-        conn, FORGE_FOLDER, scryfall_db=None, limit=500,
+        conn,
+        FORGE_FOLDER,
+        scryfall_db=None,
+        limit=500,
     )
     conn.close()
     assert cards == 500
@@ -57,8 +60,7 @@ def test_engine_page_returns_results_at_500_cards(imported_db):
     with SynergyEngine(imported_db) as engine:
         # Find a commander-eligible card by querying the schema directly.
         cur = engine._conn.execute(
-            "SELECT name FROM cards WHERE supertypes LIKE '%Legendary%' "
-            "AND card_types LIKE '%Creature%' LIMIT 1"
+            "SELECT name FROM cards WHERE supertypes LIKE '%Legendary%' AND card_types LIKE '%Creature%' LIMIT 1"
         )
         row = cur.fetchone()
         if row is None:
@@ -78,8 +80,7 @@ def test_engine_page_returns_results_at_500_cards(imported_db):
 def test_engine_pagination_at_500_cards(imported_db):
     with SynergyEngine(imported_db) as engine:
         cur = engine._conn.execute(
-            "SELECT name FROM cards WHERE supertypes LIKE '%Legendary%' "
-            "AND card_types LIKE '%Creature%' LIMIT 1"
+            "SELECT name FROM cards WHERE supertypes LIKE '%Legendary%' AND card_types LIKE '%Creature%' LIMIT 1"
         )
         row = cur.fetchone()
         if row is None:

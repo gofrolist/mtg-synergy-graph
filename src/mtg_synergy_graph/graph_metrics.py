@@ -45,6 +45,7 @@ from .graph_engine import (
 #: engine still works — it just falls back to the slow CSR path.
 try:
     import numpy as _np
+
     HAS_NUMPY = True
 except ImportError:  # pragma: no cover - numpy is in dev deps
     _np = None  # type: ignore[assignment]
@@ -56,6 +57,7 @@ except ImportError:  # pragma: no cover - numpy is in dev deps
 #: the 32 k-card causal graph.
 try:
     from scipy.sparse import csr_matrix as _csr_matrix
+
     HAS_SCIPY = True
 except ImportError:  # pragma: no cover
     _csr_matrix = None  # type: ignore[assignment]
@@ -85,10 +87,7 @@ def build_causal_graph(conn: sqlite3.Connection) -> dict[str, set[str]]:
     for the full set. Their semantic is "the candidate card itself is the
     event", which the engine handles via the candidate-identity matcher.
     """
-    cur = conn.execute(
-        "SELECT card_name, port_type, event_class, zone_destination, counter_type "
-        "FROM card_ports"
-    )
+    cur = conn.execute("SELECT card_name, port_type, event_class, zone_destination, counter_type FROM card_ports")
     triggers_by_event: dict[str, list[tuple[str, dict[str, Any]]]] = defaultdict(list)
     effects_by_event: dict[str, list[tuple[str, dict[str, Any]]]] = defaultdict(list)
     costs_by_event: dict[str, list[str]] = defaultdict(list)
@@ -106,9 +105,9 @@ def build_causal_graph(conn: sqlite3.Connection) -> dict[str, set[str]]:
                 (
                     name,
                     {
-                        "event_class":      event,
+                        "event_class": event,
                         "zone_destination": row["zone_destination"],
-                        "counter_type":     row["counter_type"],
+                        "counter_type": row["counter_type"],
                     },
                 )
             )
@@ -119,9 +118,9 @@ def build_causal_graph(conn: sqlite3.Connection) -> dict[str, set[str]]:
                 (
                     name,
                     {
-                        "event_class":      event,
+                        "event_class": event,
                         "zone_destination": row["zone_destination"],
-                        "counter_type":     row["counter_type"],
+                        "counter_type": row["counter_type"],
                     },
                 )
             )
@@ -335,8 +334,11 @@ def numpy_personalised_pagerank(
     """
     if not HAS_NUMPY:
         return personalised_pagerank(
-            adjacency, source,
-            damping=damping, iterations=iterations, tol=tol,
+            adjacency,
+            source,
+            damping=damping,
+            iterations=iterations,
+            tol=tol,
         )
     if not adjacency or source not in adjacency:
         return {}
@@ -397,15 +399,15 @@ class ScipyPRContext:
     transition matrix needed for personalised PageRank.
     """
 
-    nodes:        list[str]
-    index:        dict[str, int]
-    transition_t: "_csr_matrix_typed"
-    n:            int
-    dangling:     "_np_typed.ndarray"
-    reset_zero:   "_np_typed.ndarray"
+    nodes: list[str]
+    index: dict[str, int]
+    transition_t: _csr_matrix_typed
+    n: int
+    dangling: _np_typed.ndarray
+    reset_zero: _np_typed.ndarray
 
 
-def build_scipy_pr_context(adjacency: dict[str, set[str]]) -> "ScipyPRContext | None":
+def build_scipy_pr_context(adjacency: dict[str, set[str]]) -> ScipyPRContext | None:
     """Build a reusable scipy CSR context from an adjacency dict.
 
     Memory footprint at 32 k nodes / 32 M edges: roughly 384 MB for the
@@ -431,9 +433,7 @@ def build_scipy_pr_context(adjacency: dict[str, set[str]]) -> "ScipyPRContext | 
     data = np.ones(len(neighbours_arr), dtype=np.float64) / safe_degree[edge_source]
     del edge_source
 
-    transition_csr = _csr_matrix(
-        (data, neighbours_arr, offsets_arr), shape=(n, n)
-    )
+    transition_csr = _csr_matrix((data, neighbours_arr, offsets_arr), shape=(n, n))
     transition_t = transition_csr.transpose().tocsr()
     del transition_csr  # release the source-major copy ASAP
 
@@ -510,18 +510,27 @@ def scipy_personalised_pagerank(
     """
     if not HAS_SCIPY:
         return numpy_personalised_pagerank(
-            adjacency, source,
-            damping=damping, iterations=iterations, tol=tol,
+            adjacency,
+            source,
+            damping=damping,
+            iterations=iterations,
+            tol=tol,
         )
     ctx = build_scipy_pr_context(adjacency)
     if ctx is None:
         return numpy_personalised_pagerank(
-            adjacency, source,
-            damping=damping, iterations=iterations, tol=tol,
+            adjacency,
+            source,
+            damping=damping,
+            iterations=iterations,
+            tol=tol,
         )
     return scipy_personalised_pagerank_cached(
-        ctx, source,
-        damping=damping, iterations=iterations, tol=tol,
+        ctx,
+        source,
+        damping=damping,
+        iterations=iterations,
+        tol=tol,
     )
 
 
@@ -541,17 +550,26 @@ def fast_personalised_pagerank(
     """
     if HAS_SCIPY:
         return scipy_personalised_pagerank(
-            adjacency, source,
-            damping=damping, iterations=iterations, tol=tol,
+            adjacency,
+            source,
+            damping=damping,
+            iterations=iterations,
+            tol=tol,
         )
     if HAS_NUMPY:
         return numpy_personalised_pagerank(
-            adjacency, source,
-            damping=damping, iterations=iterations, tol=tol,
+            adjacency,
+            source,
+            damping=damping,
+            iterations=iterations,
+            tol=tol,
         )
     return personalised_pagerank(
-        adjacency, source,
-        damping=damping, iterations=iterations, tol=tol,
+        adjacency,
+        source,
+        damping=damping,
+        iterations=iterations,
+        tol=tol,
     )
 
 
@@ -646,9 +664,9 @@ def compute_commander_metrics(
         if cand in cmdr_set:
             continue
         out[cand] = {
-            "card_hub_score":         hubs.get(cand, 0.0),
+            "card_hub_score": hubs.get(cand, 0.0),
             "graph_neighbor_overlap": neighbor_overlap(merged_adj, merged_name, cand),
-            "cmdr_2hop_ratio":        cmdr_two_hop_ratio(merged_adj, merged_name, cand),
-            "graph_pagerank":         (pr.get(cand, 0.0) / max_pr) if max_pr else 0.0,
+            "cmdr_2hop_ratio": cmdr_two_hop_ratio(merged_adj, merged_name, cand),
+            "graph_pagerank": (pr.get(cand, 0.0) / max_pr) if max_pr else 0.0,
         }
     return out

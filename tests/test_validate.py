@@ -73,11 +73,11 @@ def test_ndcg_dcg_formula_matches_definition():
 @pytest.mark.parametrize(
     "name, slug",
     [
-        ("Korvold, Fae-Cursed King",   "korvold-fae-cursed-king"),
-        ("Tymna the Weaver",           "tymna-the-weaver"),
-        ("Atraxa, Praetors' Voice",    "atraxa-praetors-voice"),
-        ("Krenko, Mob Boss",           "krenko-mob-boss"),
-        ("The Doctor",                 "the-doctor"),
+        ("Korvold, Fae-Cursed King", "korvold-fae-cursed-king"),
+        ("Tymna the Weaver", "tymna-the-weaver"),
+        ("Atraxa, Praetors' Voice", "atraxa-praetors-voice"),
+        ("Krenko, Mob Boss", "krenko-mob-boss"),
+        ("The Doctor", "the-doctor"),
     ],
 )
 def test_commander_to_slug(name, slug):
@@ -107,10 +107,10 @@ def fake_edhrec_db(tmp_path):
         """
     )
     rows = [
-        ("korvold-fae-cursed-king", "Phyrexian Altar",       0.40, 5000, 5000, "High Synergy Cards"),
+        ("korvold-fae-cursed-king", "Phyrexian Altar", 0.40, 5000, 5000, "High Synergy Cards"),
         ("korvold-fae-cursed-king", "Dockside Extortionist", 0.35, 8000, 8000, "Top Cards"),
-        ("korvold-fae-cursed-king", "Sol Ring",              0.05, 30000, 30000, "Mana Artifacts"),
-        ("korvold-fae-cursed-king", "Mayhem Devil",          0.49, 14000, 14000, "High Synergy Cards"),
+        ("korvold-fae-cursed-king", "Sol Ring", 0.05, 30000, 30000, "Mana Artifacts"),
+        ("korvold-fae-cursed-king", "Mayhem Devil", 0.49, 14000, 14000, "High Synergy Cards"),
         ("korvold-fae-cursed-king", "Negative Synergy Card", -0.10, 100, 100, "Creatures"),
     ]
     conn.executemany(
@@ -133,22 +133,26 @@ def test_compare_to_edhrec_counts_per_section(fake_edhrec_db):
     from mtg_synergy_graph import Recommendation, RecommendationPage
 
     items = [
-        Recommendation(rank=1, card="Mayhem Devil",          total_score=100, scores={}, contributing_ports=[]),
-        Recommendation(rank=2, card="Phyrexian Altar",       total_score=50,  scores={}, contributing_ports=[]),
-        Recommendation(rank=3, card="Dockside Extortionist", total_score=40,  scores={}, contributing_ports=[]),
+        Recommendation(rank=1, card="Mayhem Devil", total_score=100, scores={}, contributing_ports=[]),
+        Recommendation(rank=2, card="Phyrexian Altar", total_score=50, scores={}, contributing_ports=[]),
+        Recommendation(rank=3, card="Dockside Extortionist", total_score=40, scores={}, contributing_ports=[]),
         Recommendation(rank=4, card="Random Card Not On EDHREC", total_score=10, scores={}, contributing_ports=[]),
     ]
     page = RecommendationPage(
         commander=["Korvold, Fae-Cursed King"],
         color_identity=["B", "G", "R"],
-        total=4, offset=0, limit=10,
+        total=4,
+        offset=0,
+        limit=10,
         generated_at="2026-01-01T00:00:00",
-        forge_version="test", spec_version="1.2.2", engine_version="0.1.0",
+        forge_version="test",
+        spec_version="1.2.2",
+        engine_version="0.1.0",
         items=items,
     )
     cmp = compare_to_edhrec(page, fake_edhrec_db, top_n=10)
-    assert cmp.hi_syn_hits == 2     # Mayhem Devil + Phyrexian Altar
-    assert cmp.top_hits == 1        # Dockside
+    assert cmp.hi_syn_hits == 2  # Mayhem Devil + Phyrexian Altar
+    assert cmp.top_hits == 1  # Dockside
     assert cmp.on_page_hits == 3
     assert cmp.not_edh == 1
     assert cmp.hi_syn_size == 2
@@ -209,10 +213,18 @@ def test_check_detects_top10_drift(golden_set_db, tmp_path):
         "entries": [
             {
                 "commander": "Korvold, Fae-Cursed King",
-                "top10": ["Fictional Card 1", "Fictional Card 2", "Fictional Card 3",
-                          "Fictional Card 4", "Fictional Card 5", "Fictional Card 6",
-                          "Fictional Card 7", "Fictional Card 8", "Fictional Card 9",
-                          "Fictional Card 10"],
+                "top10": [
+                    "Fictional Card 1",
+                    "Fictional Card 2",
+                    "Fictional Card 3",
+                    "Fictional Card 4",
+                    "Fictional Card 5",
+                    "Fictional Card 6",
+                    "Fictional Card 7",
+                    "Fictional Card 8",
+                    "Fictional Card 9",
+                    "Fictional Card 10",
+                ],
                 "ndcg30": 0.95,
             }
         ],

@@ -28,20 +28,18 @@ from typing import Any
 #: Forge SVar reference keys that point to sub-abilities, paired with the
 #: ``branch_kind`` label written to ``card_ports`` rows.
 CHAIN_KEYS: dict[str, str] = {
-    "Execute":             "execute",
-    "SubAbility":          "subability",
-    "TrueSubAbility":      "true",
-    "FalseSubAbility":     "false",
-    "WinSubAbility":       "win",
+    "Execute": "execute",
+    "SubAbility": "subability",
+    "TrueSubAbility": "true",
+    "FalseSubAbility": "false",
+    "WinSubAbility": "win",
     "OtherwiseSubAbility": "otherwise",
-    "RepeatSubAbility":    "repeat",
-    "ChangeZoneTable":     "change_zone_table",
+    "RepeatSubAbility": "repeat",
+    "ChangeZoneTable": "change_zone_table",
 }
 
 #: Branches whose ports are contingent on a runtime decision.
-CONDITIONAL_BRANCH_KINDS: frozenset[str] = frozenset(
-    {"true", "false", "win", "otherwise", "choice"}
-)
+CONDITIONAL_BRANCH_KINDS: frozenset[str] = frozenset({"true", "false", "win", "otherwise", "choice"})
 
 
 @dataclass
@@ -124,16 +122,16 @@ def parse_deck_hints(hint_str: str) -> dict[str, list[str]]:
 # Mapping from line prefix → (key in returned card dict, prefix length, kind)
 # kind is one of: "scalar", "deck_hints", "ability", "keyword", "svar"
 _LINE_DISPATCH: tuple[tuple[str, str, int, str], ...] = (
-    ("Name:",      "name",       5, "scalar"),
-    ("ManaCost:",  "mana_cost",  9, "scalar"),
-    ("Types:",     "types",      6, "scalar"),
-    ("PT:",        "pt",         3, "scalar"),
-    ("Loyalty:",   "loyalty",    8, "scalar"),
-    ("Colors:",    "colors",     7, "scalar"),
-    ("Oracle:",    "oracle",     7, "scalar"),
+    ("Name:", "name", 5, "scalar"),
+    ("ManaCost:", "mana_cost", 9, "scalar"),
+    ("Types:", "types", 6, "scalar"),
+    ("PT:", "pt", 3, "scalar"),
+    ("Loyalty:", "loyalty", 8, "scalar"),
+    ("Colors:", "colors", 7, "scalar"),
+    ("Oracle:", "oracle", 7, "scalar"),
     ("DeckHints:", "deck_hints", 10, "deck_hints"),
     ("DeckNeeds:", "deck_needs", 10, "deck_hints"),
-    ("DeckHas:",   "deck_has",    8, "deck_hints"),
+    ("DeckHas:", "deck_has", 8, "deck_hints"),
 )
 
 #: Map of ability prefixes (``T:``/``A:``/``S:``/``R:``) to the kind label
@@ -241,7 +239,7 @@ def parse_card_text(text: str) -> dict[str, Any]:
     }
 
     front: list[str] = []
-    back:  list[str] = []
+    back: list[str] = []
     seen_alternate = False
     for raw in text.splitlines():
         if raw.strip() == _ALTERNATE_MARKER:

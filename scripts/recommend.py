@@ -17,14 +17,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path, default=Path("data/synergy.db"))
     parser.add_argument("--commander", required=True)
-    parser.add_argument("--partner", default=None,
-                        help="Optional second commander (partner pair)")
+    parser.add_argument("--partner", default=None, help="Optional second commander (partner pair)")
     parser.add_argument("--top", type=int, default=20)
     parser.add_argument("--offset", type=int, default=0)
-    parser.add_argument("--explain", action="store_true",
-                        help="Render plain-English explanations")
-    parser.add_argument("--graph-metrics", action="store_true",
-                        help="Enable Phase 4.6 numpy graph metrics (slow but Hi-Syn boost)")
+    parser.add_argument("--explain", action="store_true", help="Render plain-English explanations")
+    parser.add_argument(
+        "--graph-metrics", action="store_true", help="Enable Phase 4.6 numpy graph metrics (slow but Hi-Syn boost)"
+    )
     args = parser.parse_args()
 
     cmdr: str | list[str]
@@ -45,8 +44,7 @@ def main() -> int:
 
         print(f"commander: {' + '.join(page.commander)}")
         print(f"colour identity: {page.color_identity}")
-        print(f"total candidates: {page.total}  "
-              f"(window {page.offset}-{page.offset + len(page.items)} of {page.total})")
+        print(f"total candidates: {page.total}  (window {page.offset}-{page.offset + len(page.items)} of {page.total})")
         print(f"computed in {elapsed:.2f}s")
         print()
 

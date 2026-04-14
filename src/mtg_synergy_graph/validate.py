@@ -60,11 +60,7 @@ def compute_ndcg(
         return 0.0
 
     def _dcg(scores: Iterable[float]) -> float:
-        return sum(
-            (math.pow(2.0, rel) - 1.0) / math.log2(i + 2)
-            for i, rel in enumerate(scores)
-            if rel > 0
-        )
+        return sum((math.pow(2.0, rel) - 1.0) / math.log2(i + 2) for i, rel in enumerate(scores) if rel > 0)
 
     pred_scores = [float(labels.get(card, 0.0)) for card in predicted[:k]]
     ideal_scores = sorted((float(v) for v in labels.values() if v > 0), reverse=True)[:k]
@@ -84,15 +80,15 @@ def compute_ndcg(
 class EdhrecComparison:
     """Output of :func:`compare_to_edhrec` (matches legacy script columns)."""
 
-    commander:    str
-    top_n:        int
-    hi_syn_hits:  int   # cards in our top-N that are also in High Synergy Cards
-    top_hits:     int   # cards in our top-N that are also in Top Cards
-    on_page_hits: int   # cards in our top-N that appear in any EDHREC section
-    not_edh:      int   # cards in our top-N that don't appear on EDHREC at all
-    hi_syn_size:  int   # size of EDHREC High Synergy Cards section
-    top_size:     int   # size of EDHREC Top Cards section
-    on_page_size: int   # total cards on the EDHREC page
+    commander: str
+    top_n: int
+    hi_syn_hits: int  # cards in our top-N that are also in High Synergy Cards
+    top_hits: int  # cards in our top-N that are also in Top Cards
+    on_page_hits: int  # cards in our top-N that appear in any EDHREC section
+    not_edh: int  # cards in our top-N that don't appear on EDHREC at all
+    hi_syn_size: int  # size of EDHREC High Synergy Cards section
+    top_size: int  # size of EDHREC Top Cards section
+    on_page_size: int  # total cards on the EDHREC page
 
 
 def commander_to_slug(name: str) -> str:
@@ -187,23 +183,23 @@ def edhrec_labels_for_commander(
 
 @dataclass(frozen=True)
 class GoldenSetEntry:
-    commander:    str
-    top10:        tuple[str, ...]
-    ndcg30:       float
-    hi_syn_total: int              = 0   # EDHREC high-synergy cards available
-    hi_syn_hits:  int              = 0   # how many we ranked in top-30
-    on_page_hits: int              = 0   # how many of our top-30 appear anywhere on EDHREC
-    edhrec_top10: tuple[str, ...]  = ()  # EDHREC's top-10 high-synergy cards for reference
+    commander: str
+    top10: tuple[str, ...]
+    ndcg30: float
+    hi_syn_total: int = 0  # EDHREC high-synergy cards available
+    hi_syn_hits: int = 0  # how many we ranked in top-30
+    on_page_hits: int = 0  # how many of our top-30 appear anywhere on EDHREC
+    edhrec_top10: tuple[str, ...] = ()  # EDHREC's top-10 high-synergy cards for reference
 
 
 @dataclass(frozen=True)
 class GoldenSetReport:
-    entries:        tuple[GoldenSetEntry, ...]            = ()
-    drift:          tuple[dict[str, Any], ...]            = ()
-    ndcg_drops:     tuple[dict[str, Any], ...]            = ()
-    rank_shifts:    tuple[dict[str, Any], ...]            = ()
-    aggregate_ndcg: float                                 = 0.0
-    baseline_ndcg:  float                                 = 0.0
+    entries: tuple[GoldenSetEntry, ...] = ()
+    drift: tuple[dict[str, Any], ...] = ()
+    ndcg_drops: tuple[dict[str, Any], ...] = ()
+    rank_shifts: tuple[dict[str, Any], ...] = ()
+    aggregate_ndcg: float = 0.0
+    baseline_ndcg: float = 0.0
 
 
 def _commander_pair(spec: Any) -> list[str]:
@@ -331,15 +327,17 @@ def _run_parallel(
         if "_error" in raw:
             log.warning("skipping %s: %s", raw["_cmdr"], raw["_error"])
             continue
-        entries.append(GoldenSetEntry(
-            commander=raw["commander"],
-            top10=tuple(raw["top10"]),
-            ndcg30=raw["ndcg30"],
-            hi_syn_total=raw.get("hi_syn_total", 0),
-            hi_syn_hits=raw.get("hi_syn_hits", 0),
-            on_page_hits=raw.get("on_page_hits", 0),
-            edhrec_top10=tuple(raw.get("edhrec_top10", ())),
-        ))
+        entries.append(
+            GoldenSetEntry(
+                commander=raw["commander"],
+                top10=tuple(raw["top10"]),
+                ndcg30=raw["ndcg30"],
+                hi_syn_total=raw.get("hi_syn_total", 0),
+                hi_syn_hits=raw.get("hi_syn_hits", 0),
+                on_page_hits=raw.get("on_page_hits", 0),
+                edhrec_top10=tuple(raw.get("edhrec_top10", ())),
+            )
+        )
     return entries
 
 
@@ -372,7 +370,9 @@ def bootstrap_golden_set(
 
     if parallel and len(commander_lists) > 4:
         entries = _run_parallel(
-            engine._db_path, edhrec_db_path, commander_lists,
+            engine._db_path,
+            edhrec_db_path,
+            commander_lists,
         )
     else:
         entries = []
@@ -389,9 +389,7 @@ def bootstrap_golden_set(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
 
-    aggregate = (
-        sum(e.ndcg30 for e in entries) / len(entries) if entries else 0.0
-    )
+    aggregate = sum(e.ndcg30 for e in entries) / len(entries) if entries else 0.0
     return GoldenSetReport(entries=tuple(entries), aggregate_ndcg=round(aggregate, 6))
 
 
@@ -418,18 +416,15 @@ def check_golden_set(
     the whole set.
     """
     payload = json.loads(Path(baseline_path).read_text())
-    baseline_entries = {
-        entry["commander"]: entry for entry in payload.get("entries", [])
-    }
+    baseline_entries = {entry["commander"]: entry for entry in payload.get("entries", [])}
 
-    commander_lists = [
-        canonical_name.split(" + ")
-        for canonical_name in baseline_entries
-    ]
+    commander_lists = [canonical_name.split(" + ") for canonical_name in baseline_entries]
 
     if parallel and len(commander_lists) > 4:
         fresh_all = _run_parallel(
-            engine._db_path, edhrec_db_path, commander_lists,
+            engine._db_path,
+            edhrec_db_path,
+            commander_lists,
         )
     else:
         fresh_all = []
@@ -462,11 +457,11 @@ def check_golden_set(
         if shift_count > jitter:
             rank_shifts.append(
                 {
-                    "commander":  canonical_name,
-                    "added":      new_in_top,
-                    "removed":    out_of_top,
-                    "shift":      shift_count,
-                    "threshold":  jitter,
+                    "commander": canonical_name,
+                    "added": new_in_top,
+                    "removed": out_of_top,
+                    "shift": shift_count,
+                    "threshold": jitter,
                 }
             )
 
@@ -474,22 +469,17 @@ def check_golden_set(
         if fresh.ndcg30 + ndcg_tolerance < baseline_ndcg:
             ndcg_drops.append(
                 {
-                    "commander":  canonical_name,
-                    "baseline":   baseline_ndcg,
-                    "fresh":      fresh.ndcg30,
-                    "delta":      round(fresh.ndcg30 - baseline_ndcg, 6),
-                    "tolerance":  ndcg_tolerance,
+                    "commander": canonical_name,
+                    "baseline": baseline_ndcg,
+                    "fresh": fresh.ndcg30,
+                    "delta": round(fresh.ndcg30 - baseline_ndcg, 6),
+                    "tolerance": ndcg_tolerance,
                 }
             )
 
-    aggregate_fresh = (
-        sum(e.ndcg30 for e in fresh_entries) / len(fresh_entries)
-        if fresh_entries
-        else 0.0
-    )
+    aggregate_fresh = sum(e.ndcg30 for e in fresh_entries) / len(fresh_entries) if fresh_entries else 0.0
     aggregate_baseline = (
-        sum(float(b.get("ndcg30") or 0.0) for b in baseline_entries.values())
-        / len(baseline_entries)
+        sum(float(b.get("ndcg30") or 0.0) for b in baseline_entries.values()) / len(baseline_entries)
         if baseline_entries
         else 0.0
     )
@@ -508,6 +498,4 @@ def regression_failed(report: GoldenSetReport, *, ndcg_tolerance: float = 0.005)
     """Return True if the report should fail a CI check."""
     if report.rank_shifts or report.ndcg_drops:
         return True
-    if report.baseline_ndcg - report.aggregate_ndcg > ndcg_tolerance:
-        return True
-    return False
+    return report.baseline_ndcg - report.aggregate_ndcg > ndcg_tolerance

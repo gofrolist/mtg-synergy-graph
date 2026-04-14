@@ -25,12 +25,21 @@ import sqlite3
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .signals import CandidateSignals
 
 from .graph_cache import (
     cache_is_populated,
+)
+from .graph_cache import (
     commander_neighbours as _cache_commander_neighbours,
+)
+from .graph_cache import (
     load_card_metrics as _load_card_metrics,
+)
+from .graph_cache import (
     neighbours_of as _cache_neighbours_of,
 )
 from .graph_engine import (
@@ -42,20 +51,20 @@ from .graph_engine import (
     find_chain_matches,
     find_counter_ecosystem_payoffs,
     find_counter_producer_payoff,
-    find_etb_payoff_for_token_commander,
     find_deckhints_matches,
+    find_etb_payoff_for_token_commander,
     find_etb_self_matches,
     find_etb_value_creatures,
     find_graveyard_value_synergies,
     find_lord_matches,
-    find_opponent_forcing_effects,
-    find_stat_scaling_synergies,
-    find_trigger_resonance,
     find_mana_restriction_matches,
+    find_opponent_forcing_effects,
     find_replacement_conflicts,
     find_sacrifice_synergies,
     find_scaling_matches,
+    find_stat_scaling_synergies,
     find_trigger_feeders,
+    find_trigger_resonance,
     find_untap_synergies,
     internal_synergy_boost,
     load_ports_for_set,
@@ -86,16 +95,16 @@ MatchList = list[dict[str, Any]]
 # ---------------------------------------------------------------------------
 
 BRANCH_MULTIPLIER: dict[str, float] = {
-    "root":                  1.0,
-    "execute":               1.0,
-    "subability":            1.0,
-    "true":                  0.5,
-    "false":                 0.5,
-    "win":                   0.5,
-    "otherwise":             0.5,
-    "repeat":                1.0,
-    "change_zone_table":     1.0,
-    "static_condition":      0.75,
+    "root": 1.0,
+    "execute": 1.0,
+    "subability": 1.0,
+    "true": 0.5,
+    "false": 0.5,
+    "win": 0.5,
+    "otherwise": 0.5,
+    "repeat": 1.0,
+    "change_zone_table": 1.0,
+    "static_condition": 0.75,
     "replacement_condition": 0.75,
 }
 
@@ -109,21 +118,20 @@ def _branch_weight(branch_kind: str | None) -> float:
 # parser.py where ``CHAIN_KEYS`` is the source of truth.
 from .parser import parser_branch_kinds  # noqa: E402, F401
 
-
 # ---------------------------------------------------------------------------
 # Score weights (§7.1)
 # ---------------------------------------------------------------------------
 
-PORT_MATCH_WEIGHT       = 10
-CATCH_ALL_WEIGHT        = 1   # weak per-card; v3 halved from 2
-COST_FEED_WEIGHT        = 6   # v3 raised from 4 — strong signal
+PORT_MATCH_WEIGHT = 10
+CATCH_ALL_WEIGHT = 1  # weak per-card; v3 halved from 2
+COST_FEED_WEIGHT = 6  # v3 raised from 4 — strong signal
 SACRIFICE_SYNERGY_WEIGHT = 6  # Phase D1 — additive on top of cost_feed (F9: raised from 4)
-COUNTER_SYNERGY_WEIGHT   = 4  # Phase F1 — +1/+1 counter producer → payoff commander
+COUNTER_SYNERGY_WEIGHT = 4  # Phase F1 — +1/+1 counter producer → payoff commander
 COUNTER_ECOSYSTEM_WEIGHT = 6  # Phase F11 — counter-payoff cards for counter-producer cmdr
-UNTAP_SYNERGY_WEIGHT     = 6  # Phase F12 — untap sources for tap-activated commanders
-TOKEN_ETB_PAYOFF_WEIGHT  = 6  # Phase F13 — ETB payoff cards for token-producing commanders
+UNTAP_SYNERGY_WEIGHT = 6  # Phase F12 — untap sources for tap-activated commanders
+TOKEN_ETB_PAYOFF_WEIGHT = 6  # Phase F13 — ETB payoff cards for token-producing commanders
 GRAVEYARD_SYNERGY_WEIGHT = 6  # Phase F5 — graveyard filler → reanimator (F9: raised from 4)
-ETB_VALUE_WEIGHT         = 4  # Phase F9 — ETB/death value creatures for recursion commanders
+ETB_VALUE_WEIGHT = 4  # Phase F9 — ETB/death value creatures for recursion commanders
 #: Phase F7 — library_to_grave tier multiplier. Entomb / Buried Alive
 #: are the most targeted graveyard enablers (intentional card placement),
 #: significantly stronger signal than generic self-mill or reanimator
@@ -131,30 +139,30 @@ ETB_VALUE_WEIGHT         = 4  # Phase F9 — ETB/death value creatures for recur
 #: inflating the other two graveyard tiers.
 GRAVEYARD_LIBRARY_TO_GRAVE_MULT: float = 2.0
 TRIGGER_RESONANCE_WEIGHT = 8  # Phase F6 — shared trigger event (F9: raised from 6)
-STAT_SCALING_WEIGHT      = 4  # Phase F7 — high-stat candidates for stat-scaling commanders
-SPELLCAST_DENSITY_WEIGHT       = 4  # Phase F8 — spell-type density for SpellCast triggers
-SCALES_WITH_DENSITY_WEIGHT     = 8  # Phase F9 — density for scales_with types (Aura for Uril)
-OPPONENT_FORCING_WEIGHT        = 12 # Phase F10 — opponent-forcing effects for opp-trigger commanders
-MANA_RESTRICTION_WEIGHT  = 2  # Phase D2 — folds into cost_synergy bucket
-SCALING_WEIGHT          = 6   # v3 raised from 5
-DECKHINTS_WEIGHT        = 4   # v3 raised from 3 — Forge's own annotations
-CHAIN_WEIGHT            = 3
-LORD_WEIGHT             = 12  # v3 raised from 6 — tribal lord must beat staples
-AMPLIFIER_WEIGHT        = 10  # v3 raised from 7
+STAT_SCALING_WEIGHT = 4  # Phase F7 — high-stat candidates for stat-scaling commanders
+SPELLCAST_DENSITY_WEIGHT = 4  # Phase F8 — spell-type density for SpellCast triggers
+SCALES_WITH_DENSITY_WEIGHT = 8  # Phase F9 — density for scales_with types (Aura for Uril)
+OPPONENT_FORCING_WEIGHT = 12  # Phase F10 — opponent-forcing effects for opp-trigger commanders
+MANA_RESTRICTION_WEIGHT = 2  # Phase D2 — folds into cost_synergy bucket
+SCALING_WEIGHT = 6  # v3 raised from 5
+DECKHINTS_WEIGHT = 4  # v3 raised from 3 — Forge's own annotations
+CHAIN_WEIGHT = 3
+LORD_WEIGHT = 12  # v3 raised from 6 — tribal lord must beat staples
+AMPLIFIER_WEIGHT = 10  # v3 raised from 7
 INTERNAL_SYNERGY_WEIGHT = 1
-REPLACEMENT_WEIGHT      = 10  # negative — applied as -weight per match
+REPLACEMENT_WEIGHT = 10  # negative — applied as -weight per match
 
 # §6.8 graph-metric bucket weights — Round 9 calibration. The personalised
 # PR signal is the LightGBM ``graph_pagerank`` feature (9.2 % importance).
 # CARD_HUB stays at 0 because global popularity biases toward staples.
 GRAPH_NEIGHBOR_OVERLAP_WEIGHT = 3
-GRAPH_PAGERANK_WEIGHT         = 2
-CARD_HUB_WEIGHT               = 0
-CMDR_2HOP_WEIGHT              = 2
+GRAPH_PAGERANK_WEIGHT = 2
+CARD_HUB_WEIGHT = 0
+CMDR_2HOP_WEIGHT = 2
 
 # §7.3 / §7.4
 STRATEGIC_WEIGHT = 2  # v3 raised from 1
-STAPLE_WEIGHT    = 1  # STAPLE_SCORE is already in score units
+STAPLE_WEIGHT = 1  # STAPLE_SCORE is already in score units
 
 # §7.5 — resource-density layer. A commander whose cost consumes a card-typed
 # resource (``tapXType<1/Artifact>`` for Urza, ``Sac<1/Creature>`` for a
@@ -170,9 +178,9 @@ RESOURCE_DENSITY_WEIGHT = 8
 # top of every Korvold-class commander's page above genuine staples. Anchors
 # not listed here use :data:`RESOURCE_DENSITY_WEIGHT`.
 _ANCHOR_WEIGHT: dict[str, int] = {
-    "Creature":     4,   # ~50% of the pool — half weight to avoid flooding
-    "Sorcery":      6,
-    "Instant":      6,
+    "Creature": 4,  # ~50% of the pool — half weight to avoid flooding
+    "Sorcery": 6,
+    "Instant": 6,
 }
 
 #: Anchors that additionally cap their match by cmc. Sacrifice and
@@ -192,11 +200,18 @@ _BROAD_ANCHOR_CMC_CAP: dict[str, int] = {
 #: comparable vanilla creature of the same cmc, but the flat direct-match
 #: weight treats them identically. We add an extra ``RECURSION_BONUS`` on
 #: top of the base anchor weight for cards that carry any of these keywords.
-_RECURSION_KEYWORDS: frozenset[str] = frozenset({
-    "Undying", "Persist", "Unearth",
-    "Embalm", "Eternalize", "Escape",
-    "Encore", "Scavenge",
-})
+_RECURSION_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "Undying",
+        "Persist",
+        "Unearth",
+        "Embalm",
+        "Eternalize",
+        "Escape",
+        "Encore",
+        "Scavenge",
+    }
+)
 RECURSION_ANCHOR_BONUS: int = 4
 
 # §7.7 replacement-resonance layer.
@@ -214,17 +229,17 @@ RECURSION_ANCHOR_BONUS: int = 4
 # event (``AddCounter``).
 _REPLACEMENT_RESONANCE: dict[str, frozenset[str]] = {
     # +1/+1 counter producers and proliferate both add counters
-    "PutCounter":     frozenset({"AddCounter"}),
-    "PutCounterAll":  frozenset({"AddCounter"}),
-    "Proliferate":    frozenset({"AddCounter"}),
+    "PutCounter": frozenset({"AddCounter"}),
+    "PutCounterAll": frozenset({"AddCounter"}),
+    "Proliferate": frozenset({"AddCounter"}),
     # Token producers want token doublers
-    "Token":          frozenset({"CreateToken"}),
+    "Token": frozenset({"CreateToken"}),
     # Card draw doublers (Alhammarret's Archive)
-    "Draw":           frozenset({"Draw", "DrawCards"}),
+    "Draw": frozenset({"Draw", "DrawCards"}),
     # Lifegain doublers (Alhammarret's Archive again)
-    "GainLife":       frozenset({"GainLife"}),
+    "GainLife": frozenset({"GainLife"}),
     # Mana doublers (Mana Reflection, Vorinclex Voice of Hunger)
-    "Mana":           frozenset({"ProduceMana"}),
+    "Mana": frozenset({"ProduceMana"}),
 }
 
 REPLACEMENT_RESONANCE_WEIGHT = 10
@@ -239,12 +254,12 @@ REPLACEMENT_RESONANCE_WEIGHT = 10
 # The mapping is the inverse of _REPLACEMENT_RESONANCE:
 # replacement event → set of effect event_classes that produce the input.
 _REPLACEMENT_WANTS_PRODUCER: dict[str, frozenset[str]] = {
-    "CreateToken":  frozenset({"Token"}),
-    "AddCounter":   frozenset({"PutCounter", "PutCounterAll", "Proliferate"}),
-    "Draw":         frozenset({"Draw"}),
-    "DrawCards":    frozenset({"Draw"}),
-    "GainLife":     frozenset({"GainLife"}),
-    "ProduceMana":  frozenset({"Mana"}),
+    "CreateToken": frozenset({"Token"}),
+    "AddCounter": frozenset({"PutCounter", "PutCounterAll", "Proliferate"}),
+    "Draw": frozenset({"Draw"}),
+    "DrawCards": frozenset({"Draw"}),
+    "GainLife": frozenset({"GainLife"}),
+    "ProduceMana": frozenset({"Mana"}),
 }
 
 REPLACEMENT_PRODUCER_WEIGHT = 4  # lower than resonance — broad signal
@@ -262,15 +277,17 @@ REPLACEMENT_PRODUCER_WEIGHT = 4  # lower than resonance — broad signal
 # token effects), ``Draw`` (every blue commander draws), ``Damage``,
 # ``Sacrifice``. These would create the same flooding bug the trigger
 # feeder Self-only fix removed.
-_RESONANT_EFFECTS: frozenset[str] = frozenset({
-    "Proliferate",
-    "Mill",
-    "DigUntil",         # Forge's mill-until-X (Mirko Vosk)
-    "Scry",
-    "Surveil",
-    "Untap",
-    "Investigate",
-})
+_RESONANT_EFFECTS: frozenset[str] = frozenset(
+    {
+        "Proliferate",
+        "Mill",
+        "DigUntil",  # Forge's mill-until-X (Mirko Vosk)
+        "Scry",
+        "Surveil",
+        "Untap",
+        "Investigate",
+    }
+)
 
 #: Effect families: effects in the same family resonate with each other.
 #: DigUntil (mill-until-lands) resonates with Mill (mill N cards) since both
@@ -289,17 +306,17 @@ BUCKETS: tuple[str, ...] = (
     "port_match",
     "catchall",
     "cost_synergy",
-    "sacrifice_synergy",   # Phase D1 — outlet ↔ payoff cluster
-    "counter_synergy",     # Phase F1 — P1P1 producer ↔ counter-payoff cmdr
-    "counter_ecosystem",   # Phase F11 — counter-payoff for counter-producer cmdr
-    "untap_synergy",       # Phase F12 — untap sources for tap-activated commanders
-    "token_etb_payoff",    # Phase F13 — ETB payoff for token-producing commanders
-    "graveyard_synergy",   # Phase F5 — grave filler ↔ reanim commander
-    "trigger_resonance",   # Phase F6 — shared trigger event cmdr ↔ candidate
-    "stat_scaling",        # Phase F7 — high-stat candidates for stat-scaling cmdr
-    "etb_value",           # Phase F9 — ETB/death value creatures for recursion cmdrs
-    "spellcast_density",   # Phase F8 — spell-type density for SpellCast-trigger cmdrs
-    "opponent_forcing",    # Phase F10 — opponent-forcing effects for opp-trigger cmdrs
+    "sacrifice_synergy",  # Phase D1 — outlet ↔ payoff cluster
+    "counter_synergy",  # Phase F1 — P1P1 producer ↔ counter-payoff cmdr
+    "counter_ecosystem",  # Phase F11 — counter-payoff for counter-producer cmdr
+    "untap_synergy",  # Phase F12 — untap sources for tap-activated commanders
+    "token_etb_payoff",  # Phase F13 — ETB payoff for token-producing commanders
+    "graveyard_synergy",  # Phase F5 — grave filler ↔ reanim commander
+    "trigger_resonance",  # Phase F6 — shared trigger event cmdr ↔ candidate
+    "stat_scaling",  # Phase F7 — high-stat candidates for stat-scaling cmdr
+    "etb_value",  # Phase F9 — ETB/death value creatures for recursion cmdrs
+    "spellcast_density",  # Phase F8 — spell-type density for SpellCast-trigger cmdrs
+    "opponent_forcing",  # Phase F10 — opponent-forcing effects for opp-trigger cmdrs
     "scaling",
     "deck_hints",
     "chain",
@@ -350,9 +367,9 @@ class ScoredCandidates:
     """
 
     buckets: dict[str, BucketDict] = field(default_factory=dict)
-    matches: dict[str, MatchList]  = field(default_factory=dict)
+    matches: dict[str, MatchList] = field(default_factory=dict)
 
-    def build_signals(self) -> "dict[str, CandidateSignals]":
+    def build_signals(self) -> dict[str, CandidateSignals]:
         """Build :class:`CandidateSignals` for every candidate in bulk.
 
         Uses the per-match ``_delta`` stamps left by ``_add_bucket`` so
@@ -364,10 +381,7 @@ class ScoredCandidates:
         """
         from .signals import signals_from_scored as _adapter
 
-        return {
-            name: _adapter(self.buckets[name], self.matches.get(name, []))
-            for name in self.buckets
-        }
+        return {name: _adapter(self.buckets[name], self.matches.get(name, [])) for name in self.buckets}
 
 
 # ---------------------------------------------------------------------------
@@ -427,8 +441,7 @@ def _score_trigger_feeders(
         else:
             bucket = "cost_synergy"
             delta = COST_FEED_WEIGHT * weight
-        _add_bucket(scores, matches, row["candidate"], bucket, delta,
-                    {**row, "bucket": bucket})
+        _add_bucket(scores, matches, row["candidate"], bucket, delta, {**row, "bucket": bucket})
 
 
 #: Broad ETB-self dampening (Phase F7). When the commander's trigger
@@ -441,7 +454,7 @@ def _score_trigger_feeders(
 #: * ``_HIGH`` — commander's ONLY mechanical output is the broad trigger
 #:   itself (e.g. Purphoros: creature ETB → 2 damage). Without the ETB-
 #:   self signal, his page is 100% staples.
-BROAD_ETB_SELF_MULT_LOW:  float = 0.15
+BROAD_ETB_SELF_MULT_LOW: float = 0.15
 BROAD_ETB_SELF_MULT_HIGH: float = 0.5
 
 
@@ -456,10 +469,16 @@ def _cmdr_only_has_broad_creature_trigger(cmdr_ports: list[PortRow]) -> bool:
     """
     from .graph_engine import CATCH_ALL_TRIGGERS, _trigger_only_matches_self
 
-    _PAYOFF_EFFECTS: frozenset[str] = frozenset({
-        "DealDamage", "Token", "PutCounter", "PutCounterAll",
-        "PumpAll", "LoseLife",
-    })
+    _PAYOFF_EFFECTS: frozenset[str] = frozenset(
+        {
+            "DealDamage",
+            "Token",
+            "PutCounter",
+            "PutCounterAll",
+            "PumpAll",
+            "LoseLife",
+        }
+    )
 
     has_broad_trigger = False
     has_other_trigger = False
@@ -481,9 +500,8 @@ def _cmdr_only_has_broad_creature_trigger(cmdr_ports: list[PortRow]) -> bool:
             # Any non-broad, non-catchall trigger → commander has another axis
             has_other_trigger = True
 
-        if pt == "effect" and bk in ("execute", "subability"):
-            if ev in _PAYOFF_EFFECTS:
-                has_payoff = True
+        if pt == "effect" and bk in ("execute", "subability") and ev in _PAYOFF_EFFECTS:
+            has_payoff = True
 
     return has_broad_trigger and has_payoff and not has_other_trigger
 
@@ -522,7 +540,10 @@ def _score_etb_self(
         weight = _branch_weight(row.get("branch_kind"))
         broad_mult = broad_mult_val if row.get("is_broad") else 1.0
         _add_bucket(
-            scores, matches, row["candidate"], "port_match",
+            scores,
+            matches,
+            row["candidate"],
+            "port_match",
             PORT_MATCH_WEIGHT * weight * broad_mult,
             {**row, "bucket": "port_match", "match_kind": "etb_self"},
         )
@@ -535,8 +556,7 @@ def _score_catchall(
     matches: dict[str, MatchList],
 ) -> None:
     for row in find_catchall_card_matches(conn, commander_set):
-        _add_bucket(scores, matches, row["candidate"], "catchall",
-                    CATCH_ALL_WEIGHT, {**row, "bucket": "catchall"})
+        _add_bucket(scores, matches, row["candidate"], "catchall", CATCH_ALL_WEIGHT, {**row, "bucket": "catchall"})
 
 
 def _score_scaling(
@@ -547,8 +567,9 @@ def _score_scaling(
 ) -> None:
     for row in find_scaling_matches(conn, commander_set):
         weight = _branch_weight(row["branch_kind"])
-        _add_bucket(scores, matches, row["scaling_card"], "scaling",
-                    SCALING_WEIGHT * weight, {**row, "bucket": "scaling"})
+        _add_bucket(
+            scores, matches, row["scaling_card"], "scaling", SCALING_WEIGHT * weight, {**row, "bucket": "scaling"}
+        )
 
 
 #: Forward-direction deck_hints (candidate's hints/needs ↔ commander's
@@ -611,34 +632,28 @@ def _score_deckhints(
         seen.add(key)
         candidate = row["candidate"]
         source = row["source"]
-        weight = (
-            DECKHINTS_WEIGHT
-            if source in _FORWARD_DECKHINTS_SOURCES
-            else DECKHINTS_REVERSE_WEIGHT
-        )
-        _add_bucket(scores, matches, candidate, "deck_hints",
-                    weight, {**row, "bucket": "deck_hints"})
+        weight = DECKHINTS_WEIGHT if source in _FORWARD_DECKHINTS_SOURCES else DECKHINTS_REVERSE_WEIGHT
+        _add_bucket(scores, matches, candidate, "deck_hints", weight, {**row, "bucket": "deck_hints"})
 
         if source in _FORWARD_DECKHINTS_SOURCES:
             fwd_hit.add(candidate)
         else:
             rev_hit.add(candidate)
 
-        if (
-            candidate not in combo_awarded
-            and candidate in fwd_hit
-            and candidate in rev_hit
-        ):
+        if candidate not in combo_awarded and candidate in fwd_hit and candidate in rev_hit:
             combo_awarded.add(candidate)
             _add_bucket(
-                scores, matches, candidate, "deck_hints",
+                scores,
+                matches,
+                candidate,
+                "deck_hints",
                 DECKHINTS_COMBO_WEIGHT,
                 {
-                    "candidate":  candidate,
-                    "source":     "combo",
-                    "kind":       "pair",
-                    "matched":    ["forward+reverse"],
-                    "bucket":     "deck_hints",
+                    "candidate": candidate,
+                    "source": "combo",
+                    "kind": "pair",
+                    "matched": ["forward+reverse"],
+                    "bucket": "deck_hints",
                 },
             )
 
@@ -653,8 +668,7 @@ def _score_chains(
     intermediate-rebuild loop is the dominant cost on a 32 k-card import."""
     for row in find_chain_matches(conn, commander_set):
         weight = _branch_weight(row["branch_kind"])
-        _add_bucket(scores, matches, row["candidate"], "chain",
-                    CHAIN_WEIGHT * weight, {**row, "bucket": "chain"})
+        _add_bucket(scores, matches, row["candidate"], "chain", CHAIN_WEIGHT * weight, {**row, "bucket": "chain"})
 
 
 def _score_lords(
@@ -665,8 +679,7 @@ def _score_lords(
 ) -> None:
     for row in find_lord_matches(conn, commander_set):
         weight = _branch_weight(row["branch_kind"])
-        _add_bucket(scores, matches, row["lord_card"], "lord",
-                    LORD_WEIGHT * weight, {**row, "bucket": "lord"})
+        _add_bucket(scores, matches, row["lord_card"], "lord", LORD_WEIGHT * weight, {**row, "bucket": "lord"})
 
 
 def _score_amplifiers(
@@ -677,8 +690,14 @@ def _score_amplifiers(
 ) -> None:
     for row in find_amplifier_matches(conn, commander_set):
         weight = _branch_weight(row["branch_kind"])
-        _add_bucket(scores, matches, row["amplifier_card"], "amplifier",
-                    AMPLIFIER_WEIGHT * weight, {**row, "bucket": "amplifier"})
+        _add_bucket(
+            scores,
+            matches,
+            row["amplifier_card"],
+            "amplifier",
+            AMPLIFIER_WEIGHT * weight,
+            {**row, "bucket": "amplifier"},
+        )
 
 
 def _score_internal_synergy(
@@ -696,15 +715,12 @@ def _score_internal_synergy(
 
     placeholders = ",".join("?" * len(engine_events))
     cur = conn.execute(
-        f"SELECT card_name, port_type, event_class FROM card_ports "
-        f"WHERE event_class IN ({placeholders})",
+        f"SELECT card_name, port_type, event_class FROM card_ports WHERE event_class IN ({placeholders})",
         tuple(engine_events),
     )
     cands_seen: dict[str, list[PortRow]] = defaultdict(list)
     for r in cur.fetchall():
-        cands_seen[r["card_name"]].append(
-            {"port_type": r["port_type"], "event_class": r["event_class"]}
-        )
+        cands_seen[r["card_name"]].append({"port_type": r["port_type"], "event_class": r["event_class"]})
     cmdr_set = set(commander_set)
     sorted_events = sorted(engine_events)
     for cand_name, cand_ports in cands_seen.items():
@@ -713,7 +729,10 @@ def _score_internal_synergy(
         boost = internal_synergy_boost(cand_ports, engine_events)
         if boost:
             _add_bucket(
-                scores, matches, cand_name, "internal_synergy",
+                scores,
+                matches,
+                cand_name,
+                "internal_synergy",
                 boost * INTERNAL_SYNERGY_WEIGHT,
                 {"bucket": "internal_synergy", "engine_events": sorted_events},
             )
@@ -735,7 +754,10 @@ def _score_replacements(
         weight = _branch_weight(row["branch_kind"])
         multiplier = 0.5 if row.get("match_kind") == "substitution" else 1.0
         _add_bucket(
-            scores, matches, row["anti_synergy_card"], "replacement",
+            scores,
+            matches,
+            row["anti_synergy_card"],
+            "replacement",
             -REPLACEMENT_WEIGHT * weight * multiplier,
             {**row, "bucket": "replacement"},
         )
@@ -757,7 +779,10 @@ def _score_mana_restriction(
     for row in find_mana_restriction_matches(conn, commander_set):
         weight = _branch_weight(row.get("branch_kind"))
         _add_bucket(
-            scores, matches, row["candidate"], "cost_synergy",
+            scores,
+            matches,
+            row["candidate"],
+            "cost_synergy",
             MANA_RESTRICTION_WEIGHT * weight,
             {**row, "bucket": "cost_synergy", "match_kind": "mana_restriction"},
         )
@@ -782,7 +807,10 @@ def _score_sacrifice_synergies(
     for row in find_sacrifice_synergies(conn, commander_set):
         weight = _branch_weight(row.get("branch_kind"))
         _add_bucket(
-            scores, matches, row["candidate"], "sacrifice_synergy",
+            scores,
+            matches,
+            row["candidate"],
+            "sacrifice_synergy",
             SACRIFICE_SYNERGY_WEIGHT * weight,
             {**row, "bucket": "sacrifice_synergy"},
         )
@@ -811,7 +839,10 @@ def _score_counter_producer_payoff(
     for row in find_counter_producer_payoff(conn, commander_set):
         weight = _branch_weight(row.get("branch_kind"))
         _add_bucket(
-            scores, matches, row["candidate"], "counter_synergy",
+            scores,
+            matches,
+            row["candidate"],
+            "counter_synergy",
             COUNTER_SYNERGY_WEIGHT * weight,
             {**row, "bucket": "counter_synergy"},
         )
@@ -832,7 +863,10 @@ def _score_counter_ecosystem(
     for row in find_counter_ecosystem_payoffs(conn, commander_set):
         weight = _branch_weight(row.get("branch_kind"))
         _add_bucket(
-            scores, matches, row["candidate"], "counter_ecosystem",
+            scores,
+            matches,
+            row["candidate"],
+            "counter_ecosystem",
             COUNTER_ECOSYSTEM_WEIGHT * weight,
             {**row, "bucket": "counter_ecosystem"},
         )
@@ -863,13 +897,12 @@ def _score_graveyard_value(
     """
     for row in find_graveyard_value_synergies(conn, commander_set):
         weight = _branch_weight(row.get("branch_kind"))
-        tier_mult = (
-            GRAVEYARD_LIBRARY_TO_GRAVE_MULT
-            if row.get("direction") == "library_to_grave"
-            else 1.0
-        )
+        tier_mult = GRAVEYARD_LIBRARY_TO_GRAVE_MULT if row.get("direction") == "library_to_grave" else 1.0
         _add_bucket(
-            scores, matches, row["candidate"], "graveyard_synergy",
+            scores,
+            matches,
+            row["candidate"],
+            "graveyard_synergy",
             GRAVEYARD_SYNERGY_WEIGHT * weight * tier_mult,
             {**row, "bucket": "graveyard_synergy"},
         )
@@ -890,7 +923,10 @@ def _score_etb_value(
     """
     for row in find_etb_value_creatures(conn, commander_set):
         _add_bucket(
-            scores, matches, row["candidate"], "etb_value",
+            scores,
+            matches,
+            row["candidate"],
+            "etb_value",
             ETB_VALUE_WEIGHT,
             {**row, "bucket": "etb_value"},
         )
@@ -916,7 +952,10 @@ def _score_trigger_resonance(
     for row in find_trigger_resonance(conn, commander_set):
         weight = _branch_weight(row.get("branch_kind"))
         _add_bucket(
-            scores, matches, row["candidate"], "trigger_resonance",
+            scores,
+            matches,
+            row["candidate"],
+            "trigger_resonance",
             TRIGGER_RESONANCE_WEIGHT * weight,
             {**row, "bucket": "trigger_resonance"},
         )
@@ -939,7 +978,10 @@ def _score_stat_scaling(
         # Scale weight by stat value: base weight at stat=4, +50% at 6, +100% at 8
         scale_factor = min(stat_value / 4.0, 3.0)
         _add_bucket(
-            scores, matches, row["candidate"], "stat_scaling",
+            scores,
+            matches,
+            row["candidate"],
+            "stat_scaling",
             STAT_SCALING_WEIGHT * scale_factor,
             {**row, "bucket": "stat_scaling"},
         )
@@ -959,7 +1001,10 @@ def _score_opponent_forcing(
     for row in find_opponent_forcing_effects(conn, commander_set):
         weight = _branch_weight(row.get("branch_kind"))
         _add_bucket(
-            scores, matches, row["candidate"], "opponent_forcing",
+            scores,
+            matches,
+            row["candidate"],
+            "opponent_forcing",
             OPPONENT_FORCING_WEIGHT * weight,
             {**row, "bucket": "opponent_forcing"},
         )
@@ -979,7 +1024,10 @@ def _score_untap_synergy(
     for row in find_untap_synergies(conn, commander_set):
         weight = _branch_weight(row.get("branch_kind"))
         _add_bucket(
-            scores, matches, row["candidate"], "untap_synergy",
+            scores,
+            matches,
+            row["candidate"],
+            "untap_synergy",
             UNTAP_SYNERGY_WEIGHT * weight,
             {**row, "bucket": "untap_synergy"},
         )
@@ -999,7 +1047,10 @@ def _score_token_etb_payoff(
     for row in find_etb_payoff_for_token_commander(conn, commander_set):
         weight = _branch_weight(row.get("branch_kind"))
         _add_bucket(
-            scores, matches, row["candidate"], "token_etb_payoff",
+            scores,
+            matches,
+            row["candidate"],
+            "token_etb_payoff",
             TOKEN_ETB_PAYOFF_WEIGHT * weight,
             {**row, "bucket": "token_etb_payoff"},
         )
@@ -1012,15 +1063,15 @@ def _score_token_etb_payoff(
 #: SpellCast filter tokens that map to card types. Forge uses both
 #: ``Instant`` and ``Card.Instant`` — we normalize to the bare type.
 _SPELLCAST_TYPE_MAP: dict[str, str] = {
-    "Instant":     "Instant",
-    "Sorcery":     "Sorcery",
+    "Instant": "Instant",
+    "Sorcery": "Sorcery",
     "Enchantment": "Enchantment",
-    "Artifact":    "Artifact",
-    "Creature":    "Creature",
+    "Artifact": "Artifact",
+    "Creature": "Creature",
     "Planeswalker": "Planeswalker",
     # Subtypes
-    "Aura":        "Aura",
-    "Equipment":   "Equipment",
+    "Aura": "Aura",
+    "Equipment": "Equipment",
 }
 
 
@@ -1067,10 +1118,18 @@ def _extract_mayplay_types(cmdr_ports: list[PortRow]) -> set[str]:
 
     Skips overly broad types (Creature, Permanent, Land, etc.).
     """
-    _BROAD: frozenset[str] = frozenset({
-        "Creature", "Permanent", "Card", "Land", "Artifact",
-        "Enchantment", "Planeswalker", "Battle",
-    })
+    _BROAD: frozenset[str] = frozenset(
+        {
+            "Creature",
+            "Permanent",
+            "Card",
+            "Land",
+            "Artifact",
+            "Enchantment",
+            "Planeswalker",
+            "Battle",
+        }
+    )
     types: set[str] = set()
     for p in cmdr_ports:
         if p.get("port_type") != "static":
@@ -1098,7 +1157,6 @@ def _extract_scales_with_types(cmdr_ports: list[PortRow]) -> set[str]:
     for p in cmdr_ports:
         if p.get("port_type") != "scales_with":
             continue
-        ev = (p.get("event_class") or "").strip()
         # "Valid" with raw_line containing Aura/Equipment/Enchantment
         raw = p.get("raw_line") or ""
         for sub in ("Aura", "Equipment", "Enchantment"):
@@ -1135,9 +1193,15 @@ def _score_spellcast_density(
     # Exclude overly broad types — "Creature" matches ~50% of the pool,
     # "Permanent" / "Card" match everything. Also exclude pseudo-types
     # like "Historic" that don't map to card_types/subtypes.
-    _BROAD_SPELLCAST_TYPES: frozenset[str] = frozenset({
-        "Creature", "Permanent", "Card", "Historic", "Noncreature",
-    })
+    _BROAD_SPELLCAST_TYPES: frozenset[str] = frozenset(
+        {
+            "Creature",
+            "Permanent",
+            "Card",
+            "Historic",
+            "Noncreature",
+        }
+    )
     sc_types -= _BROAD_SPELLCAST_TYPES
     if not sc_types:
         return
@@ -1152,9 +1216,11 @@ def _score_spellcast_density(
 
     # Primary card-type matches (Instant, Sorcery, Enchantment, ...)
     for type_name in sorted(primary_types):
-        w = (SCALES_WITH_DENSITY_WEIGHT
-             if type_name in scales_types or type_name in mayplay_types
-             else SPELLCAST_DENSITY_WEIGHT)
+        w = (
+            SCALES_WITH_DENSITY_WEIGHT
+            if type_name in scales_types or type_name in mayplay_types
+            else SPELLCAST_DENSITY_WEIGHT
+        )
         cur = conn.execute(
             "SELECT name FROM cards WHERE card_types LIKE ?",
             (f"%{type_name}%",),
@@ -1164,20 +1230,21 @@ def _score_spellcast_density(
             if cand in cmdr_set:
                 continue
             _add_bucket(
-                scores, matches, cand, "spellcast_density",
+                scores,
+                matches,
+                cand,
+                "spellcast_density",
                 w,
                 {
-                    "bucket":       "spellcast_density",
+                    "bucket": "spellcast_density",
                     "matched_type": type_name,
-                    "match_kind":   "card_type",
+                    "match_kind": "card_type",
                 },
             )
 
     # Subtype matches (Aura, Equipment, Vampire, ...)
     for sub in sorted(subtype_types):
-        w = (SCALES_WITH_DENSITY_WEIGHT
-             if sub in scales_types or sub in mayplay_types
-             else SPELLCAST_DENSITY_WEIGHT)
+        w = SCALES_WITH_DENSITY_WEIGHT if sub in scales_types or sub in mayplay_types else SPELLCAST_DENSITY_WEIGHT
         cur = conn.execute(
             "SELECT name FROM cards WHERE subtypes LIKE ?",
             (f"%{sub}%",),
@@ -1187,12 +1254,15 @@ def _score_spellcast_density(
             if cand in cmdr_set:
                 continue
             _add_bucket(
-                scores, matches, cand, "spellcast_density",
+                scores,
+                matches,
+                cand,
+                "spellcast_density",
                 w,
                 {
-                    "bucket":       "spellcast_density",
+                    "bucket": "spellcast_density",
                     "matched_type": sub,
-                    "match_kind":   "subtype",
+                    "match_kind": "subtype",
                 },
             )
 
@@ -1201,10 +1271,10 @@ def _score_spellcast_density(
     # spellslinger commanders (Goblin Electromancer for Talrand, etc.).
     # Parse ValidCard from raw_line and check overlap with sc_types.
     import re
+
     _VALID_CARD_RE = re.compile(r"'ValidCard':\s*'([^']+)'")
     cur = conn.execute(
-        "SELECT card_name, raw_line FROM card_ports "
-        "WHERE port_type = 'static' AND event_class = 'ReduceCost'"
+        "SELECT card_name, raw_line FROM card_ports WHERE port_type = 'static' AND event_class = 'ReduceCost'"
     )
     seen_reducer: set[str] = set()
     for row in cur.fetchall():
@@ -1222,12 +1292,15 @@ def _score_spellcast_density(
         if valid_types & sc_types:
             seen_reducer.add(cand)
             _add_bucket(
-                scores, matches, cand, "spellcast_density",
+                scores,
+                matches,
+                cand,
+                "spellcast_density",
                 SCALES_WITH_DENSITY_WEIGHT,  # higher weight — targeted synergy
                 {
-                    "bucket":       "spellcast_density",
+                    "bucket": "spellcast_density",
                     "matched_type": valid_card,
-                    "match_kind":   "cost_reducer",
+                    "match_kind": "cost_reducer",
                 },
             )
 
@@ -1299,27 +1372,27 @@ def _score_graph_metrics_numpy(
             overlap = inter / union if union else 0.0
         else:
             overlap = 0.0
-        two_hop = (
-            len(cmdr_2hop & cand_neighbours) / len(cand_neighbours)
-            if cand_neighbours
-            else 0.0
-        )
+        two_hop = len(cmdr_2hop & cand_neighbours) / len(cand_neighbours) if cand_neighbours else 0.0
         norm_pr = raw_pr / max_pr if max_pr else 0.0
         contribution = (
-            overlap            * GRAPH_NEIGHBOR_OVERLAP_WEIGHT
-            + norm_pr          * GRAPH_PAGERANK_WEIGHT
+            overlap * GRAPH_NEIGHBOR_OVERLAP_WEIGHT
+            + norm_pr * GRAPH_PAGERANK_WEIGHT
             + hubs.get(cand_name, 0.0) * CARD_HUB_WEIGHT
-            + two_hop          * CMDR_2HOP_WEIGHT
+            + two_hop * CMDR_2HOP_WEIGHT
         )
         if contribution > 0:
             _add_bucket(
-                scores, matches, cand_name, "graph_metrics", contribution,
+                scores,
+                matches,
+                cand_name,
+                "graph_metrics",
+                contribution,
                 {
-                    "bucket":                 "graph_metrics",
-                    "graph_pagerank":         norm_pr,
-                    "card_hub_score":         hubs.get(cand_name, 0.0),
+                    "bucket": "graph_metrics",
+                    "graph_pagerank": norm_pr,
+                    "card_hub_score": hubs.get(cand_name, 0.0),
                     "graph_neighbor_overlap": overlap,
-                    "cmdr_2hop_ratio":        two_hop,
+                    "cmdr_2hop_ratio": two_hop,
                 },
             )
 
@@ -1360,26 +1433,26 @@ def _score_graph_metrics_cache(
             overlap = inter / union if union else 0.0
         else:
             overlap = 0.0
-        two_hop = (
-            len(cmdr_2hop & cand_neighbours) / len(cand_neighbours)
-            if cand_neighbours
-            else 0.0
-        )
+        two_hop = len(cmdr_2hop & cand_neighbours) / len(cand_neighbours) if cand_neighbours else 0.0
         contribution = (
-            overlap            * GRAPH_NEIGHBOR_OVERLAP_WEIGHT
-            + cached.pagerank  * GRAPH_PAGERANK_WEIGHT
+            overlap * GRAPH_NEIGHBOR_OVERLAP_WEIGHT
+            + cached.pagerank * GRAPH_PAGERANK_WEIGHT
             + cached.hub_score * CARD_HUB_WEIGHT
-            + two_hop          * CMDR_2HOP_WEIGHT
+            + two_hop * CMDR_2HOP_WEIGHT
         )
         if contribution > 0:
             _add_bucket(
-                scores, matches, cand_name, "graph_metrics", contribution,
+                scores,
+                matches,
+                cand_name,
+                "graph_metrics",
+                contribution,
                 {
-                    "bucket":                 "graph_metrics",
-                    "card_hub_score":         cached.hub_score,
-                    "graph_pagerank":         cached.pagerank,
+                    "bucket": "graph_metrics",
+                    "card_hub_score": cached.hub_score,
+                    "graph_pagerank": cached.pagerank,
                     "graph_neighbor_overlap": overlap,
-                    "cmdr_2hop_ratio":        two_hop,
+                    "cmdr_2hop_ratio": two_hop,
                 },
             )
 
@@ -1397,13 +1470,17 @@ def _score_graph_metrics_pure_python(
     for cand_name, m in metrics.items():
         contribution = (
             m["graph_neighbor_overlap"] * GRAPH_NEIGHBOR_OVERLAP_WEIGHT
-            + m["graph_pagerank"]        * GRAPH_PAGERANK_WEIGHT
-            + m["card_hub_score"]        * CARD_HUB_WEIGHT
-            + m["cmdr_2hop_ratio"]       * CMDR_2HOP_WEIGHT
+            + m["graph_pagerank"] * GRAPH_PAGERANK_WEIGHT
+            + m["card_hub_score"] * CARD_HUB_WEIGHT
+            + m["cmdr_2hop_ratio"] * CMDR_2HOP_WEIGHT
         )
         if contribution > 0:
             _add_bucket(
-                scores, matches, cand_name, "graph_metrics", contribution,
+                scores,
+                matches,
+                cand_name,
+                "graph_metrics",
+                contribution,
                 {"bucket": "graph_metrics", **m},
             )
 
@@ -1420,7 +1497,10 @@ def _score_graph_metrics(
     """Dispatch to numpy → cache → pure-Python in priority order."""
     if HAS_NUMPY:
         _score_graph_metrics_numpy(
-            conn, commander_set, scores, matches,
+            conn,
+            commander_set,
+            scores,
+            matches,
             adjacency_cache=adjacency_cache,
             scipy_pr_context=scipy_pr_context,
         )
@@ -1502,12 +1582,20 @@ def _score_strategic(
             per_reason = delta / len(reasons)
             for reason in reasons:
                 _add_bucket(
-                    scores, matches, cand_name, "strategic", per_reason,
+                    scores,
+                    matches,
+                    cand_name,
+                    "strategic",
+                    per_reason,
                     {"bucket": "strategic", "reason": reason},
                 )
         else:
             _add_bucket(
-                scores, matches, cand_name, "strategic", delta,
+                scores,
+                matches,
+                cand_name,
+                "strategic",
+                delta,
                 {"bucket": "strategic"},
             )
 
@@ -1521,15 +1609,17 @@ def _score_strategic(
 #: excluded because the only common subject is ``Card`` which would match
 #: every card. ``exile`` is excluded for the same reason — its dominant
 #: subject is ``CARDNAME`` (exile self) or ``Card`` (any card).
-_RESOURCE_ANCHOR_EVENTS: frozenset[str] = frozenset({
-    "tap_type",
-    "untap_type",
-    "sacrifice",
-    "exile_from_grave",
-    "exile_from_hand",
-    "exile_from_top",
-    "return",
-})
+_RESOURCE_ANCHOR_EVENTS: frozenset[str] = frozenset(
+    {
+        "tap_type",
+        "untap_type",
+        "sacrifice",
+        "exile_from_grave",
+        "exile_from_hand",
+        "exile_from_top",
+        "return",
+    }
+)
 
 #: Subset of :data:`_RESOURCE_ANCHOR_EVENTS` that *consume* the anchored
 #: resource — the card is physically removed from the battlefield, hand, or
@@ -1540,11 +1630,13 @@ _RESOURCE_ANCHOR_EVENTS: frozenset[str] = frozenset({
 #: Urza wants Mana Vault / Thran Dynamo, and a cap=3 there would delete his
 #: page. ``exile_from_top`` excluded because it targets the library top, not
 #: a card the player controls.
-_CONSUMING_COST_EVENTS: frozenset[str] = frozenset({
-    "sacrifice",
-    "exile_from_grave",
-    "exile_from_hand",
-})
+_CONSUMING_COST_EVENTS: frozenset[str] = frozenset(
+    {
+        "sacrifice",
+        "exile_from_grave",
+        "exile_from_hand",
+    }
+)
 
 #: Trigger ``event_class`` values that mean "commander rewards a card-typed
 #: action". The valid_filter on these triggers tells us *which* type the
@@ -1555,43 +1647,57 @@ _TRIGGER_ANCHOR_EVENTS: frozenset[str] = frozenset({"Sacrificed"})
 #: ``cost_subtype`` head tokens that are NOT card-type anchors. Counters
 #: (LOYALTY/P1P1/CHARGE), self-references (CARDNAME), and the "any card"
 #: catchalls (Card / Random) all match too broadly to be useful.
-_NON_RESOURCE_SUBJECTS: frozenset[str] = frozenset({
-    "CARDNAME",
-    "Card",
-    "Random",
-    "LOYALTY",
-    "P1P1",
-    "M1M1",
-    "CHARGE",
-    "TIME",
-    "EXPERIENCE",
-    "ENERGY",
-    "Mana",
-})
+_NON_RESOURCE_SUBJECTS: frozenset[str] = frozenset(
+    {
+        "CARDNAME",
+        "Card",
+        "Random",
+        "LOYALTY",
+        "P1P1",
+        "M1M1",
+        "CHARGE",
+        "TIME",
+        "EXPERIENCE",
+        "ENERGY",
+        "Mana",
+    }
+)
 
 #: Top-level Magic card types we know how to anchor against
 #: ``cards.card_types``. Subtypes (Goblin, Soldier, ...) are matched via
 #: ``cards.subtypes`` instead.
-_PRIMARY_CARD_TYPES: frozenset[str] = frozenset({
-    "Artifact",
-    "Creature",
-    "Enchantment",
-    "Instant",
-    "Land",
-    "Planeswalker",
-    "Sorcery",
-    "Tribal",
-    "Battle",
-})
+_PRIMARY_CARD_TYPES: frozenset[str] = frozenset(
+    {
+        "Artifact",
+        "Creature",
+        "Enchantment",
+        "Instant",
+        "Land",
+        "Planeswalker",
+        "Sorcery",
+        "Tribal",
+        "Battle",
+    }
+)
 
 
 #: Forge artifact subtypes that are themselves *always* artifacts. When a
 #: trigger valid_filter says ``Treasure.YouCtrl``, the matching anchor is
 #: ``Artifact`` because every Treasure is an artifact card.
-_ARTIFACT_SUBTYPES: frozenset[str] = frozenset({
-    "Treasure", "Food", "Clue", "Blood", "Gold", "Map",
-    "Powerstone", "Junk", "Incubator", "Shard",
-})
+_ARTIFACT_SUBTYPES: frozenset[str] = frozenset(
+    {
+        "Treasure",
+        "Food",
+        "Clue",
+        "Blood",
+        "Gold",
+        "Map",
+        "Powerstone",
+        "Junk",
+        "Incubator",
+        "Shard",
+    }
+)
 
 #: Leading-word matcher used by :func:`_parse_valid_filter_anchor` — pulls
 #: the type token off the head of a Forge filter expression while ignoring
@@ -1602,10 +1708,19 @@ _FILTER_HEAD_RE: re.Pattern[str] = re.compile(r"^([A-Za-z][A-Za-z0-9]*)")
 #: name. Creature tokens carry an explicit power/toughness pair (``b_1_1_zombie``,
 #: ``b_x_x_horror``); artifact subtypes (treasure, food, ...) appear after a
 #: ``_a_`` separator or as a recognised Forge artifact-subtype keyword.
-_TOKEN_SCRIPT_PT_RE:  re.Pattern[str] = re.compile(r"_(?:\d+|x)_(?:\d+|x)_")
+_TOKEN_SCRIPT_PT_RE: re.Pattern[str] = re.compile(r"_(?:\d+|x)_(?:\d+|x)_")
 _TOKEN_SCRIPT_ARTIFACT_KEYWORDS: tuple[str, ...] = (
-    "_a_", "treasure", "food", "clue", "blood", "gold", "map",
-    "powerstone", "junk", "incubator", "shard",
+    "_a_",
+    "treasure",
+    "food",
+    "clue",
+    "blood",
+    "gold",
+    "map",
+    "powerstone",
+    "junk",
+    "incubator",
+    "shard",
 )
 
 
@@ -1719,9 +1834,7 @@ def _parse_resource_anchor(cost_subtype: str | None) -> list[str]:
     return out
 
 
-_REDUCE_COST_VALID_RE: re.Pattern[str] = re.compile(
-    r"['\"]ValidCard['\"]:\s*['\"]([A-Za-z][A-Za-z0-9.+,]*)"
-)
+_REDUCE_COST_VALID_RE: re.Pattern[str] = re.compile(r"['\"]ValidCard['\"]:\s*['\"]([A-Za-z][A-Za-z0-9.+,]*)")
 
 
 #: Per-channel cmc cap for the consuming-resource case. Exposed as a
@@ -1787,11 +1900,7 @@ def _extract_commander_anchors(
         (*commander_set, *_RESOURCE_ANCHOR_EVENTS),
     )
     for row in cur.fetchall():
-        cap = (
-            _CONSUMING_ANCHOR_CMC_CAP
-            if row["event_class"] in _CONSUMING_COST_EVENTS
-            else None
-        )
+        cap = _CONSUMING_ANCHOR_CMC_CAP if row["event_class"] in _CONSUMING_COST_EVENTS else None
         for anchor in _parse_resource_anchor(row["cost_subtype"]):
             _set_cap(anchor, cap)
 
@@ -1873,11 +1982,10 @@ def _producer_weight(anchor: str) -> int:
     """Return the per-anchor token-producer mirror weight (half direct)."""
     return max(_anchor_weight(anchor) // 2, 1)
 
+
 #: TokenScript appears in two raw_line shapes — single-quoted (the typical
 #: parse_forge_line dict repr) and bare. The pattern handles both.
-_TOKEN_SCRIPT_RE: re.Pattern[str] = re.compile(
-    r"['\"]?TokenScript['\"]?\s*[:$]\s*['\"]?([A-Za-z0-9_,]+)"
-)
+_TOKEN_SCRIPT_RE: re.Pattern[str] = re.compile(r"['\"]?TokenScript['\"]?\s*[:$]\s*['\"]?([A-Za-z0-9_,]+)")
 
 
 def _score_resource_density(
@@ -1908,11 +2016,7 @@ def _score_resource_density(
         return
 
     cmdr_set = set(commander_set)
-    primary = {
-        anchor: cap
-        for anchor, cap in anchor_caps.items()
-        if anchor in _PRIMARY_CARD_TYPES
-    }
+    primary = {anchor: cap for anchor, cap in anchor_caps.items() if anchor in _PRIMARY_CARD_TYPES}
     # Subtype anchors (e.g. ``Goblin``) are rarer; we'd add them via
     # ``cards.subtypes`` matching here once a real example shows up.
     if not primary:
@@ -1992,9 +2096,8 @@ def _score_resource_density(
             if anchor not in cand_types:
                 continue
             cand_cmc = row["cmc"]
-            if cmc_cap is not None:
-                if cand_cmc is None or cand_cmc > cmc_cap:
-                    continue
+            if cmc_cap is not None and (cand_cmc is None or cand_cmc > cmc_cap):
+                continue
 
             # Anchor quality — cheaper fodder wins within the cap, and
             # keyworded / effect-based recursion creatures win over
@@ -2015,14 +2118,17 @@ def _score_resource_density(
             quality_bonus = gradient + recursion_bonus
 
             _add_bucket(
-                scores, matches, cand, "resource_density",
+                scores,
+                matches,
+                cand,
+                "resource_density",
                 base_weight + quality_bonus,
                 {
-                    "bucket":       "resource_density",
-                    "anchor_type":  anchor,
-                    "match_kind":   "direct",
-                    "cmc":          cand_cmc,
-                    "cmc_bonus":    gradient,
+                    "bucket": "resource_density",
+                    "anchor_type": anchor,
+                    "match_kind": "direct",
+                    "cmc": cand_cmc,
+                    "cmc_bonus": gradient,
                     "is_recurring": is_recurring,
                 },
             )
@@ -2033,8 +2139,7 @@ def _score_resource_density(
     # an active anchor. This is O(total_tokens) ≈ 5k rows on a 32k import,
     # which is cheaper than running one query per anchor type.
     cur = conn.execute(
-        "SELECT card_name, raw_line FROM card_ports "
-        "WHERE port_type = 'effect' AND event_class = 'Token'"
+        "SELECT card_name, raw_line FROM card_ports WHERE port_type = 'effect' AND event_class = 'Token'"
     )
     seen_producer: set[tuple[str, str]] = set()
     for row in cur.fetchall():
@@ -2056,12 +2161,15 @@ def _score_resource_density(
                 continue
             seen_producer.add(key)
             _add_bucket(
-                scores, matches, cand, "resource_density",
+                scores,
+                matches,
+                cand,
+                "resource_density",
                 _producer_weight(kind),
                 {
-                    "bucket":      "resource_density",
+                    "bucket": "resource_density",
                     "anchor_type": kind,
-                    "match_kind":  "producer",
+                    "match_kind": "producer",
                     "token_script": script,
                 },
             )
@@ -2092,16 +2200,21 @@ def _score_replacement_resonance(
         ev = (p.get("event_class") or "").strip()
         if ptype == "effect":
             target_replacements |= _REPLACEMENT_RESONANCE.get(ev, frozenset())
-        elif ptype == "replacement":
+        elif ptype == "replacement" and ev in (
+            "CreateToken",
+            "AddCounter",
+            "Draw",
+            "DrawCards",
+            "GainLife",
+            "ProduceMana",
+        ):
             # Commander IS a doubler — find other doublers of the same type.
             # Mondrak (replacement:CreateToken) clusters with Anointed
             # Procession, Parallel Lives (also replacement:CreateToken).
             # Only cluster on actual doubling effects, not protection
             # effects like Counter (can't be countered) or Moved (can't
             # be exiled/destroyed) or DamageDone (damage prevention).
-            if ev in ("CreateToken", "AddCounter", "Draw", "DrawCards",
-                      "GainLife", "ProduceMana"):
-                target_replacements.add(ev)
+            target_replacements.add(ev)
     if not target_replacements:
         return
 
@@ -2118,10 +2231,13 @@ def _score_replacement_resonance(
         if cand in cmdr_set:
             continue
         _add_bucket(
-            scores, matches, cand, "replacement_resonance",
+            scores,
+            matches,
+            cand,
+            "replacement_resonance",
             REPLACEMENT_RESONANCE_WEIGHT,
             {
-                "bucket":            "replacement_resonance",
+                "bucket": "replacement_resonance",
                 "replacement_event": row["replacement_event"],
             },
         )
@@ -2152,6 +2268,7 @@ def _score_replacement_producer(
     # Chatterfang that have triggers + sacrifice costs already get strong
     # signals from other matchers — adding 2847 token producers would flood.
     from .graph_engine import CATCH_ALL_TRIGGERS as _CAT
+
     has_meaningful_trigger = False
     for p in cmdr_ports:
         if p.get("port_type") == "trigger":
@@ -2188,10 +2305,13 @@ def _score_replacement_producer(
         if cand in cmdr_set:
             continue
         _add_bucket(
-            scores, matches, cand, "replacement_producer",
+            scores,
+            matches,
+            cand,
+            "replacement_producer",
             REPLACEMENT_PRODUCER_WEIGHT,
             {
-                "bucket":       "replacement_producer",
+                "bucket": "replacement_producer",
                 "effect_event": row["event_class"],
             },
         )
@@ -2240,8 +2360,7 @@ def _score_effect_resonance(
         placeholders = ",".join("?" * len(commander_set))
         gn_ph = ",".join("?" * len(granted_names))
         svar_rows = conn.execute(
-            f"SELECT svar_value FROM card_svars "
-            f"WHERE card_name IN ({placeholders}) AND svar_name IN ({gn_ph})",
+            f"SELECT svar_value FROM card_svars WHERE card_name IN ({placeholders}) AND svar_name IN ({gn_ph})",
             (*commander_set, *granted_names),
         ).fetchall()
         for row in svar_rows:
@@ -2277,10 +2396,13 @@ def _score_effect_resonance(
             continue
         ev = row["event_class"]
         _add_bucket(
-            scores, matches, cand, "effect_resonance",
+            scores,
+            matches,
+            cand,
+            "effect_resonance",
             EFFECT_RESONANCE_WEIGHT,
             {
-                "bucket":      "effect_resonance",
+                "bucket": "effect_resonance",
                 "event_class": ev,
             },
         )
@@ -2317,7 +2439,10 @@ def _score_staples(
                 continue
             seen.add(staple_name)
             _add_bucket(
-                scores, matches, staple_name, "staple",
+                scores,
+                matches,
+                staple_name,
+                "staple",
                 STAPLE_SCORE * STAPLE_WEIGHT,
                 {"bucket": "staple", "score": STAPLE_SCORE},
             )
@@ -2365,7 +2490,10 @@ def score_all_candidates(
 
     if use_graph_metrics:
         _score_graph_metrics(
-            conn, commander_set, scores, matches,
+            conn,
+            commander_set,
+            scores,
+            matches,
             adjacency_cache=adjacency_cache,
             scipy_pr_context=scipy_pr_context,
         )

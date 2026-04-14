@@ -11,7 +11,6 @@ from mtg_synergy_graph import (
     staple_bonus,
 )
 
-
 # ---------------------------------------------------------------------------
 # §7.4 staples
 # ---------------------------------------------------------------------------
@@ -89,10 +88,7 @@ def test_combat_modifier_rule_not_in_strategic_rules():
     """Regression guard: if anyone re-adds the D3 combat modifier rule
     without re-tuning, the tests should catch it and force a re-check
     against the golden set."""
-    assert all(
-        r["name"] != "combat_modifier_for_attack_triggers"
-        for r in STRATEGIC_RULES
-    )
+    assert all(r["name"] != "combat_modifier_for_attack_triggers" for r in STRATEGIC_RULES)
 
 
 def test_anti_stax_rule_negative_weight():

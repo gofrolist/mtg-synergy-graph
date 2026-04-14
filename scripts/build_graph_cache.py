@@ -22,12 +22,11 @@ from mtg_synergy_graph.graph_cache import build_graph_cache
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path, default=Path("data/synergy.db"))
-    parser.add_argument("--neighbour-cap", type=int, default=200,
-                        help="Top-K neighbours to keep per card (None = all)")
-    parser.add_argument("--unbounded", action="store_true",
-                        help="Keep every edge (warning: 32M rows on full Forge import)")
-    parser.add_argument("--iterations", type=int, default=25,
-                        help="PageRank power-iteration count")
+    parser.add_argument("--neighbour-cap", type=int, default=200, help="Top-K neighbours to keep per card (None = all)")
+    parser.add_argument(
+        "--unbounded", action="store_true", help="Keep every edge (warning: 32M rows on full Forge import)"
+    )
+    parser.add_argument("--iterations", type=int, default=25, help="PageRank power-iteration count")
     args = parser.parse_args()
 
     if not args.db.exists():

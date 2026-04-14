@@ -39,7 +39,10 @@ import re
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .signals import CandidateSignals
 
 log = logging.getLogger(__name__)
 
@@ -49,16 +52,16 @@ HARD_FILTER_SCORE = -1e9
 
 # Multipliers — keep these as named constants so calibration can be done
 # without spelunking through helper functions.
-SUBTYPE_MISMATCH_MULT       = 0.4   # rule 3
-EXCLUDED_SUBTYPES_MULT      = 0.3   # rule 4
-WRONG_TOKEN_TYPE_MULT       = 0.5   # rule 5
-WRONG_COUNTER_TYPE_MULT     = 0.4   # rule 6
-NICHE_COUNTER_MULT          = 0.4   # rule 7
-COUNTERS_ON_LANDS_MULT      = 0.4   # rule 8
-NON_COUNTER_CREATURE_MULT   = 0.6   # rule 9
-OPPONENT_MILL_MULT          = 0.3   # rule 10
-UNMET_TYPE_MULT             = 0.3   # rule 11
-UNMET_ABILITY_MULT          = 0.85  # rule 12
+SUBTYPE_MISMATCH_MULT = 0.4  # rule 3
+EXCLUDED_SUBTYPES_MULT = 0.3  # rule 4
+WRONG_TOKEN_TYPE_MULT = 0.5  # rule 5
+WRONG_COUNTER_TYPE_MULT = 0.4  # rule 6
+NICHE_COUNTER_MULT = 0.4  # rule 7
+COUNTERS_ON_LANDS_MULT = 0.4  # rule 8
+NON_COUNTER_CREATURE_MULT = 0.6  # rule 9
+OPPONENT_MILL_MULT = 0.3  # rule 10
+UNMET_TYPE_MULT = 0.3  # rule 11
+UNMET_ABILITY_MULT = 0.85  # rule 12
 
 #: Counter types that are "niche" — only useful in specific archetypes.
 NICHE_COUNTERS: frozenset[str] = frozenset({"TIME", "EXPERIENCE", "ENERGY"})
@@ -139,7 +142,7 @@ def _exclusion_tokens(filter_str: str | None) -> set[str]:
     for segment in filter_str.replace("+", ".").split("."):
         seg = segment.strip()
         if seg.startswith(_NON_PREFIX) and len(seg) > len(_NON_PREFIX) and seg[len(_NON_PREFIX)].isupper():
-            out.add(seg[len(_NON_PREFIX):])
+            out.add(seg[len(_NON_PREFIX) :])
     return out
 
 
@@ -205,13 +208,13 @@ class CandidateCache:
     when running 100 commanders in the golden-set tracker.
     """
 
-    candidate_rows:             dict[str, dict[str, Any]]
-    creature_static_scopes:     dict[str, list[str]]
-    candidate_excludes:         dict[str, set[str]]
-    candidate_token_types:      dict[str, set[str]]
-    candidate_counter_types:    dict[str, set[str]]
+    candidate_rows: dict[str, dict[str, Any]]
+    creature_static_scopes: dict[str, list[str]]
+    candidate_excludes: dict[str, set[str]]
+    candidate_token_types: dict[str, set[str]]
+    candidate_counter_types: dict[str, set[str]]
     candidate_counters_on_land: dict[str, bool]
-    candidate_opp_mill:         dict[str, bool]
+    candidate_opp_mill: dict[str, bool]
 
 
 def build_candidate_cache(conn: sqlite3.Connection) -> CandidateCache:
@@ -247,39 +250,39 @@ class PenaltyContext:
     """
 
     # Commander-side state ---------------------------------------------------
-    cmdr_identity:           frozenset[str]
-    cmdr_subtypes:           frozenset[str]
-    cmdr_card_types:         frozenset[str]
-    cmdr_allows_background:  bool
-    cmdr_has_doctor:         bool
-    cmdr_counter_types:      frozenset[str]   # P1P1 / M1M1 / TIME / etc.
-    cmdr_uses_p1p1:          bool             # has any P1P1 trigger/effect
-    cmdr_p1p1_is_primary:    bool             # P1P1 is primary strategy (scales_with)
-    cmdr_self_mill:          bool             # has Mill effect targeting You
-    cmdr_has_abilities:      frozenset[str]   # from deck_has + derived
-    cmdr_has_types:          frozenset[str]   # from deck_has + derived
-    cmdr_has_keywords:       frozenset[str]
-    cmdr_token_subtypes:     frozenset[str]   # token types the commander makes
-    cmdr_is_tribal:          bool             # commander has a tribal anchor:
-                                              # at least one of its own subtypes
-                                              # appears as a token-subtype it
-                                              # generates (Krenko makes Goblins,
-                                              # IS a Goblin) — see
-                                              # build_penalty_context for the
-                                              # exact heuristic
+    cmdr_identity: frozenset[str]
+    cmdr_subtypes: frozenset[str]
+    cmdr_card_types: frozenset[str]
+    cmdr_allows_background: bool
+    cmdr_has_doctor: bool
+    cmdr_counter_types: frozenset[str]  # P1P1 / M1M1 / TIME / etc.
+    cmdr_uses_p1p1: bool  # has any P1P1 trigger/effect
+    cmdr_p1p1_is_primary: bool  # P1P1 is primary strategy (scales_with)
+    cmdr_self_mill: bool  # has Mill effect targeting You
+    cmdr_has_abilities: frozenset[str]  # from deck_has + derived
+    cmdr_has_types: frozenset[str]  # from deck_has + derived
+    cmdr_has_keywords: frozenset[str]
+    cmdr_token_subtypes: frozenset[str]  # token types the commander makes
+    cmdr_is_tribal: bool  # commander has a tribal anchor:
+    # at least one of its own subtypes
+    # appears as a token-subtype it
+    # generates (Krenko makes Goblins,
+    # IS a Goblin) — see
+    # build_penalty_context for the
+    # exact heuristic
 
     # Candidate-side state ---------------------------------------------------
-    candidate_rows:             dict[str, dict[str, Any]] = field(default_factory=dict)
-    creature_static_scopes:     dict[str, list[str]]      = field(default_factory=dict)
-    candidate_excludes:         dict[str, set[str]]       = field(default_factory=dict)
-    candidate_token_types:      dict[str, set[str]]       = field(default_factory=dict)
-    candidate_counter_types:    dict[str, set[str]]       = field(default_factory=dict)
-    candidate_counters_on_land: dict[str, bool]           = field(default_factory=dict)
-    candidate_opp_mill:         dict[str, bool]           = field(default_factory=dict)
+    candidate_rows: dict[str, dict[str, Any]] = field(default_factory=dict)
+    creature_static_scopes: dict[str, list[str]] = field(default_factory=dict)
+    candidate_excludes: dict[str, set[str]] = field(default_factory=dict)
+    candidate_token_types: dict[str, set[str]] = field(default_factory=dict)
+    candidate_counter_types: dict[str, set[str]] = field(default_factory=dict)
+    candidate_counters_on_land: dict[str, bool] = field(default_factory=dict)
+    candidate_opp_mill: dict[str, bool] = field(default_factory=dict)
     # Phase F9: candidates with sacrifice/trigger-resonance signal —
     # exempt from Rule 9 (non-counter creature penalty) because they
     # are mechanically connected to the sacrifice axis, not counters.
-    candidates_with_sacrifice_signal: frozenset[str]      = field(default_factory=frozenset)
+    candidates_with_sacrifice_signal: frozenset[str] = field(default_factory=frozenset)
 
 
 # ---------------------------------------------------------------------------
@@ -294,16 +297,16 @@ def _bulk_load_candidates(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]
         "       cmc, deck_needs, deck_hints, deck_has, edhrec_rank FROM cards"
     ).fetchall():
         out[row["name"]] = {
-            "name":           row["name"],
+            "name": row["name"],
             "color_identity": row["color_identity"],
-            "subtypes":       row["subtypes"],
-            "oracle_text":    row["oracle_text"],
-            "card_types":     row["card_types"],
-            "cmc":            row["cmc"],
-            "deck_needs":     row["deck_needs"],
-            "deck_hints":     row["deck_hints"],
-            "deck_has":       row["deck_has"],
-            "edhrec_rank":    row["edhrec_rank"],
+            "subtypes": row["subtypes"],
+            "oracle_text": row["oracle_text"],
+            "card_types": row["card_types"],
+            "cmc": row["cmc"],
+            "deck_needs": row["deck_needs"],
+            "deck_hints": row["deck_hints"],
+            "deck_has": row["deck_has"],
+            "edhrec_rank": row["edhrec_rank"],
         }
     return out
 
@@ -329,8 +332,7 @@ def _bulk_load_excludes(conn: sqlite3.Connection) -> dict[str, set[str]]:
     """
     excludes: dict[str, set[str]] = {}
     for row in conn.execute(
-        "SELECT card_name, affected_scope FROM card_ports "
-        "WHERE port_type = 'static' AND affected_scope LIKE '%non%'"
+        "SELECT card_name, affected_scope FROM card_ports WHERE port_type = 'static' AND affected_scope LIKE '%non%'"
     ).fetchall():
         tokens = _exclusion_tokens(row["affected_scope"])
         if tokens:
@@ -385,8 +387,7 @@ def _bulk_load_token_types(conn: sqlite3.Connection) -> dict[str, set[str]]:
     """Per-card set of token subtypes the card creates (parsed from raw_line)."""
     out: dict[str, set[str]] = {}
     for row in conn.execute(
-        "SELECT card_name, raw_line FROM card_ports "
-        "WHERE port_type = 'effect' AND event_class = 'Token'"
+        "SELECT card_name, raw_line FROM card_ports WHERE port_type = 'effect' AND event_class = 'Token'"
     ).fetchall():
         raw = row["raw_line"] or ""
         # raw_line is repr(parsed_dict). Look for TokenScript$ value.
@@ -467,9 +468,8 @@ def build_penalty_context(
                         cmdr_has_abilities.add("Counters")
         # Track P1P1 primary strategy via scales_with (same logic as
         # graph_engine._commander_is_p1p1_payoff).
-        if pt == "effect" and ev in ("PutCounter", "PutCounterAll"):
-            if ct == "P1P1":
-                _has_p1p1_effect = True
+        if pt == "effect" and ev in ("PutCounter", "PutCounterAll") and ct == "P1P1":
+            _has_p1p1_effect = True
         if pt == "scales_with":
             if ev == "CardCounters.P1P1":
                 _scales_p1p1 = True
@@ -494,10 +494,18 @@ def build_penalty_context(
     # penalize cards that match the commander's scaling strategy. E.g.
     # Uril scales_with Aura → "Aura" joins cmdr_has_types → Ethereal
     # Armor's deck_hints Type=Enchantment won't trigger Rule 11.
-    _SCALES_TYPE_TOKENS: frozenset[str] = frozenset({
-        "Aura", "Equipment", "Enchantment", "Artifact", "Land",
-        "Instant", "Sorcery", "Planeswalker",
-    })
+    _SCALES_TYPE_TOKENS: frozenset[str] = frozenset(
+        {
+            "Aura",
+            "Equipment",
+            "Enchantment",
+            "Artifact",
+            "Land",
+            "Instant",
+            "Sorcery",
+            "Planeswalker",
+        }
+    )
     # Parent types: if the commander scales with a subtype, also add
     # the parent supertype so Rule 11 doesn't fire on "Enchantment"
     # when the commander scales with "Aura".
@@ -559,21 +567,28 @@ def build_penalty_context(
 
 #: Forge filter modifiers that look like subtypes (capitalized) but
 #: are actually scope qualifiers.  Rule 3 should ignore these.
-_SCOPE_MODIFIERS: frozenset[str] = frozenset({
-    "Creature", "YouCtrl", "OppCtrl", "Other",
-    "EnchantedBy", "EquippedBy", "Enchanted", "Equipped",
-    "Attached", "Remembered", "Targeted",
-})
+_SCOPE_MODIFIERS: frozenset[str] = frozenset(
+    {
+        "Creature",
+        "YouCtrl",
+        "OppCtrl",
+        "Other",
+        "EnchantedBy",
+        "EquippedBy",
+        "Enchanted",
+        "Equipped",
+        "Attached",
+        "Remembered",
+        "Targeted",
+    }
+)
 
 
 def _scope_subtypes(scope: str) -> set[str]:
     return {
         tok
         for tok in (scope or "").replace("+", ".").split(".")
-        if tok
-        and tok[0].isupper()
-        and tok not in _SCOPE_MODIFIERS
-        and not tok.startswith("non")
+        if tok and tok[0].isupper() and tok not in _SCOPE_MODIFIERS and not tok.startswith("non")
     }
 
 
@@ -620,12 +635,7 @@ def apply_penalties_ctx(
 
     # ----- Rule 5: wrong token type ----------------------------------------
     cand_tokens = ctx.candidate_token_types.get(candidate, set())
-    if (
-        ctx.cmdr_is_tribal
-        and ctx.cmdr_token_subtypes
-        and cand_tokens
-        and not (cand_tokens & ctx.cmdr_token_subtypes)
-    ):
+    if ctx.cmdr_is_tribal and ctx.cmdr_token_subtypes and cand_tokens and not (cand_tokens & ctx.cmdr_token_subtypes):
         score *= WRONG_TOKEN_TYPE_MULT
 
     # ----- Rule 6: wrong counter type --------------------------------------
@@ -641,9 +651,8 @@ def apply_penalties_ctx(
             score *= WRONG_COUNTER_TYPE_MULT
 
     # ----- Rule 7: niche counter --------------------------------------------
-    if cand_counters and cand_counters.issubset(NICHE_COUNTERS):
-        if not (ctx.cmdr_counter_types & NICHE_COUNTERS):
-            score *= NICHE_COUNTER_MULT
+    if cand_counters and cand_counters.issubset(NICHE_COUNTERS) and not (ctx.cmdr_counter_types & NICHE_COUNTERS):
+        score *= NICHE_COUNTER_MULT
 
     # ----- Rule 8: counters on lands ---------------------------------------
     if ctx.cmdr_uses_p1p1 and ctx.candidate_counters_on_land.get(candidate):
@@ -712,24 +721,23 @@ def apply_penalties(
 # Maps each penalty rule to the signal types it most directly affects.
 # Rules not listed here apply their multiplier to ALL signal types.
 _PENALTY_SIGNAL_TARGETS: dict[str, frozenset[str]] = {
-    "rule3_subtype":     frozenset({"lord", "amplifier", "port_match"}),
-    "rule4_excluded":    frozenset({"lord", "effect_resonance", "port_match"}),
-    "rule5_token":       frozenset({"token_etb_payoff", "sacrifice_synergy",
-                                    "resource_density"}),
-    "rule6_counter":     frozenset({"counter_synergy", "counter_ecosystem"}),
-    "rule7_niche":       frozenset({"counter_synergy", "counter_ecosystem"}),
-    "rule8_land_ctr":    frozenset({"counter_synergy", "counter_ecosystem"}),
-    "rule10_opp_mill":   frozenset({"effect_resonance", "trigger_resonance"}),
-    "rule11_type":       frozenset({"deck_hints"}),
-    "rule12_ability":    frozenset({"deck_hints"}),
+    "rule3_subtype": frozenset({"lord", "amplifier", "port_match"}),
+    "rule4_excluded": frozenset({"lord", "effect_resonance", "port_match"}),
+    "rule5_token": frozenset({"token_etb_payoff", "sacrifice_synergy", "resource_density"}),
+    "rule6_counter": frozenset({"counter_synergy", "counter_ecosystem"}),
+    "rule7_niche": frozenset({"counter_synergy", "counter_ecosystem"}),
+    "rule8_land_ctr": frozenset({"counter_synergy", "counter_ecosystem"}),
+    "rule10_opp_mill": frozenset({"effect_resonance", "trigger_resonance"}),
+    "rule11_type": frozenset({"deck_hints"}),
+    "rule12_ability": frozenset({"deck_hints"}),
 }
 
 
 def apply_signal_penalties(
     ctx: PenaltyContext,
     candidate: str,
-    signals: "CandidateSignals",
-) -> "CandidateSignals":
+    signals: CandidateSignals,
+) -> CandidateSignals:
     """Signal-aware penalty pass — reduce specific signal confidences.
 
     Hard filters (rules 1, 2) return an empty :class:`CandidateSignals`.
@@ -776,12 +784,7 @@ def apply_signal_penalties(
 
     # Rule 5: wrong token type
     cand_tokens = ctx.candidate_token_types.get(candidate, set())
-    if (
-        ctx.cmdr_is_tribal
-        and ctx.cmdr_token_subtypes
-        and cand_tokens
-        and not (cand_tokens & ctx.cmdr_token_subtypes)
-    ):
+    if ctx.cmdr_is_tribal and ctx.cmdr_token_subtypes and cand_tokens and not (cand_tokens & ctx.cmdr_token_subtypes):
         penalties.append(("rule5_token", WRONG_TOKEN_TYPE_MULT))
 
     # Rule 6: wrong counter type
@@ -792,9 +795,8 @@ def apply_signal_penalties(
             penalties.append(("rule6_counter", WRONG_COUNTER_TYPE_MULT))
 
     # Rule 7: niche counter
-    if cand_counters and cand_counters.issubset(NICHE_COUNTERS):
-        if not (ctx.cmdr_counter_types & NICHE_COUNTERS):
-            penalties.append(("rule7_niche", NICHE_COUNTER_MULT))
+    if cand_counters and cand_counters.issubset(NICHE_COUNTERS) and not (ctx.cmdr_counter_types & NICHE_COUNTERS):
+        penalties.append(("rule7_niche", NICHE_COUNTER_MULT))
 
     # Rule 8: counters on lands
     if ctx.cmdr_uses_p1p1 and ctx.candidate_counters_on_land.get(candidate):

@@ -33,10 +33,7 @@ def _has_effect(ports: list[PortRow], event: str) -> bool:
 
 
 def _has_effect_in(ports: list[PortRow], events: frozenset[str]) -> bool:
-    return any(
-        p.get("port_type") == "effect" and (p.get("event_class") or "") in events
-        for p in ports
-    )
+    return any(p.get("port_type") == "effect" and (p.get("event_class") or "") in events for p in ports)
 
 
 def _card_keywords(card: dict[str, Any]) -> list[str]:
@@ -67,10 +64,7 @@ def _evasion_boost(cand: CandidateRecord) -> bool:
     if cmc > 3:
         return False
     keywords = set(_card_keywords(card))
-    return bool(
-        keywords
-        & {"Flying", "Menace", "Shadow", "Fear", "Intimidate", "Skulk", "Horsemanship"}
-    )
+    return bool(keywords & {"Flying", "Menace", "Shadow", "Fear", "Intimidate", "Skulk", "Horsemanship"})
 
 
 def _mass_pump_boost(cand: CandidateRecord) -> bool:
@@ -123,9 +117,7 @@ def _mana_sink_boost(cand: CandidateRecord) -> bool:
 
 def _lki_scaling_boost(cand: CandidateRecord) -> bool:
     return any(
-        p.get("port_type") == "scales_with"
-        and "LKI" in (p.get("scaling_expression") or "")
-        for p in cand["ports"]
+        p.get("port_type") == "scales_with" and "LKI" in (p.get("scaling_expression") or "") for p in cand["ports"]
     )
 
 
@@ -165,52 +157,51 @@ StrategicRule = dict[str, Any]
 # a test or a script raises rather than silently mutating shared state.
 STRATEGIC_RULES: tuple[StrategicRule, ...] = (
     {
-        "name":      "evasion_for_combat_damage",
+        "name": "evasion_for_combat_damage",
         "condition": _cmdr_wants_combat_damage,
-        "boost":     _evasion_boost,
-        "weight":    5,
-        "reason":    "Low-cost evasion enables combat damage triggers",
+        "boost": _evasion_boost,
+        "weight": 5,
+        "reason": "Low-cost evasion enables combat damage triggers",
     },
     {
-        "name":      "mass_pump_for_tokens",
+        "name": "mass_pump_for_tokens",
         "condition": lambda cmdr_ports: _has_effect(cmdr_ports, "Token"),
-        "boost":     _mass_pump_boost,
-        "weight":    4,
-        "reason":    "Mass pump closes games with token armies",
+        "boost": _mass_pump_boost,
+        "weight": 4,
+        "reason": "Mass pump closes games with token armies",
     },
     {
-        "name":      "selfmill_for_graveyard",
+        "name": "selfmill_for_graveyard",
         "condition": lambda cmdr_ports: any(
             p.get("port_type") == "trigger"
             and p.get("event_class") == "ChangesZone"
             and p.get("zone_destination") == "Graveyard"
             for p in cmdr_ports
         ),
-        "boost":     _selfmill_boost,
-        "weight":    4,
-        "reason":    "Self-mill fills graveyard for commander synergy",
+        "boost": _selfmill_boost,
+        "weight": 4,
+        "reason": "Self-mill fills graveyard for commander synergy",
     },
     {
-        "name":      "tokens_for_sacrifice",
+        "name": "tokens_for_sacrifice",
         "condition": lambda cmdr_ports: any(
-            p.get("port_type") in ("trigger", "cost")
-            and (p.get("event_class") or "") in {"Sacrificed", "sacrifice"}
+            p.get("port_type") in ("trigger", "cost") and (p.get("event_class") or "") in {"Sacrificed", "sacrifice"}
             for p in cmdr_ports
         ),
-        "boost":     _token_boost,
-        "weight":    5,
-        "reason":    "Token production provides sacrifice fodder",
+        "boost": _token_boost,
+        "weight": 5,
+        "reason": "Token production provides sacrifice fodder",
     },
     {
-        "name":      "proliferate_for_counters",
+        "name": "proliferate_for_counters",
         "condition": lambda cmdr_ports: any(
             p.get("port_type") in ("trigger", "effect")
             and (p.get("event_class") or "") in {"PutCounter", "CounterAdded", "PutCounterAll"}
             for p in cmdr_ports
         ),
-        "boost":     _proliferate_boost,
-        "weight":    4,
-        "reason":    "Proliferate multiplies counter synergies",
+        "boost": _proliferate_boost,
+        "weight": 4,
+        "reason": "Proliferate multiplies counter synergies",
     },
     {
         # Atraxa-class: commander proliferates → wants any card that PUTS
@@ -218,34 +209,30 @@ STRATEGIC_RULES: tuple[StrategicRule, ...] = (
         # proliferate_for_counters above. Low weight because the
         # PutCounter universe is huge — this is a tiebreaker, not a
         # primary signal.
-        "name":      "counters_for_proliferate",
+        "name": "counters_for_proliferate",
         "condition": lambda cmdr_ports: any(
-            p.get("port_type") in ("trigger", "effect")
-            and (p.get("event_class") or "") == "Proliferate"
+            p.get("port_type") in ("trigger", "effect") and (p.get("event_class") or "") == "Proliferate"
             for p in cmdr_ports
         ),
-        "boost":     lambda cand: any(
-            p.get("port_type") == "effect"
-            and (p.get("event_class") or "") in {"PutCounter", "PutCounterAll"}
+        "boost": lambda cand: any(
+            p.get("port_type") == "effect" and (p.get("event_class") or "") in {"PutCounter", "PutCounterAll"}
             for p in cand["ports"]
         ),
-        "weight":    2,
-        "reason":    "Counter producers feed the commander's proliferate",
+        "weight": 2,
+        "reason": "Counter producers feed the commander's proliferate",
     },
     {
         # ``Token`` was removed from the condition: half the legal pool
         # creates tokens, so it made the rule fire on every commander.
         # Treasure stays because Treasure decks (Korvold, Prosper) genuinely
         # accumulate spare mana that an X-cost sink can convert.
-        "name":      "mana_sink",
+        "name": "mana_sink",
         "condition": lambda cmdr_ports: any(
-            p.get("port_type") == "effect"
-            and (p.get("event_class") or "") in {"Mana", "Treasure"}
-            for p in cmdr_ports
+            p.get("port_type") == "effect" and (p.get("event_class") or "") in {"Mana", "Treasure"} for p in cmdr_ports
         ),
-        "boost":     _mana_sink_boost,
-        "weight":    4,
-        "reason":    "Commander generates excess resources; X-cost sinks convert them to value",
+        "boost": _mana_sink_boost,
+        "weight": 4,
+        "reason": "Commander generates excess resources; X-cost sinks convert them to value",
     },
     {
         # ``ChangesZone`` was removed: every commander has a
@@ -253,32 +240,27 @@ STRATEGIC_RULES: tuple[StrategicRule, ...] = (
         # used to fire on essentially every commander. The intent is
         # "commander cares about permanents leaving the battlefield",
         # which is captured by sacrifice events alone.
-        "name":      "lki_scaling",
+        "name": "lki_scaling",
         "condition": lambda cmdr_ports: any(
-            (p.get("event_class") or "") in {"Sacrifice", "Sacrificed"}
-            for p in cmdr_ports
+            (p.get("event_class") or "") in {"Sacrifice", "Sacrificed"} for p in cmdr_ports
         ),
-        "boost":     _lki_scaling_boost,
-        "weight":    4,
-        "reason":    "LKI scaling stays correct when permanents leave play",
+        "boost": _lki_scaling_boost,
+        "weight": 4,
+        "reason": "LKI scaling stays correct when permanents leave play",
     },
     {
-        "name":      "tribal_density",
-        "condition": lambda cmdr_ports: any(
-            (p.get("valid_filter") or "").startswith("Creature") for p in cmdr_ports
-        ),
-        "boost":     _tribal_density_boost,
-        "weight":    3,
-        "reason":    "Tribal support from noncreature static lines",
+        "name": "tribal_density",
+        "condition": lambda cmdr_ports: any((p.get("valid_filter") or "").startswith("Creature") for p in cmdr_ports),
+        "boost": _tribal_density_boost,
+        "weight": 3,
+        "reason": "Tribal support from noncreature static lines",
     },
     {
-        "name":      "anti_stax_activated_abilities",
-        "condition": lambda cmdr_ports: _has_effect_in(
-            cmdr_ports, frozenset({"Tap", "Untap", "Mana"})
-        ),
-        "boost":     _anti_stax_self_hose,
-        "weight":    -4,
-        "reason":    "Avoid self-hosing stax pieces for activated-ability commanders",
+        "name": "anti_stax_activated_abilities",
+        "condition": lambda cmdr_ports: _has_effect_in(cmdr_ports, frozenset({"Tap", "Untap", "Mana"})),
+        "boost": _anti_stax_self_hose,
+        "weight": -4,
+        "reason": "Avoid self-hosing stax pieces for activated-ability commanders",
     },
 )
 

@@ -68,7 +68,8 @@ def _resolve_name_to_oracle_id(
     Scryfall DB stores a card under.
     """
     row = scryfall_conn.execute(
-        "SELECT oracle_id FROM cards WHERE name = ? LIMIT 1", (name,),
+        "SELECT oracle_id FROM cards WHERE name = ? LIMIT 1",
+        (name,),
     ).fetchone()
     if row is not None:
         return row["oracle_id"]
@@ -116,14 +117,16 @@ def main() -> int:
     parser.add_argument("--db", type=Path, default=Path("data/synergy.db"))
     parser.add_argument("--edhrec-db", type=Path, default=Path("data/tags.db"))
     parser.add_argument("--commander", help="single commander name")
-    parser.add_argument("--commanders", type=Path,
-                        help="JSON list of commanders (alternative to --commander)")
+    parser.add_argument("--commanders", type=Path, help="JSON list of commanders (alternative to --commander)")
     parser.add_argument("--top", type=int, default=50)
-    parser.add_argument("--graph-metrics", action="store_true",
-                        help="Enable SPEC §6.8 causal graph metrics "
-                             "(graph_neighbor_overlap, graph_pagerank). "
-                             "Cold start is ~30s slower but subsequent "
-                             "pages reuse the adjacency cache.")
+    parser.add_argument(
+        "--graph-metrics",
+        action="store_true",
+        help="Enable SPEC §6.8 causal graph metrics "
+        "(graph_neighbor_overlap, graph_pagerank). "
+        "Cold start is ~30s slower but subsequent "
+        "pages reuse the adjacency cache.",
+    )
     args = parser.parse_args()
 
     if not args.commander and not args.commanders:
@@ -136,14 +139,9 @@ def main() -> int:
     edhrec_conn = sqlite3.connect(args.edhrec_db)
     edhrec_conn.row_factory = sqlite3.Row
 
-    commanders = (
-        [args.commander] if args.commander else _load_commanders(args.commanders)
-    )
+    commanders = [args.commander] if args.commander else _load_commanders(args.commanders)
 
-    header = (
-        f"{'commander':40}  {'hi-syn':>8}  {'top':>5}  "
-        f"{'on-page':>8}  {'not-edh':>8}"
-    )
+    header = f"{'commander':40}  {'hi-syn':>8}  {'top':>5}  {'on-page':>8}  {'not-edh':>8}"
     print(header)
     print("-" * len(header))
 
@@ -165,7 +163,9 @@ def main() -> int:
 
             try:
                 page = engine.page_by_oracle_id(
-                    oids, offset=0, limit=args.top,
+                    oids,
+                    offset=0,
+                    limit=args.top,
                 )
             except LookupError as exc:
                 print(f"{label:40}  skipped (not in Forge source: {exc})")
@@ -193,10 +193,7 @@ def main() -> int:
     if on_pcts:
         print(f"avg OnPage  : {mean(on_pcts) * 100:.1f}%")
     if skipped_unknown or skipped_missing_in_forge:
-        print(
-            f"skipped: {skipped_unknown} unknown commander(s), "
-            f"{skipped_missing_in_forge} not in Forge source"
-        )
+        print(f"skipped: {skipped_unknown} unknown commander(s), {skipped_missing_in_forge} not in Forge source")
 
     edhrec_conn.close()
     return 0

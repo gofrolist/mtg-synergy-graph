@@ -11,8 +11,9 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from .attributes import explode_filter
 from .parser import parse_card_file
@@ -40,8 +41,8 @@ log = logging.getLogger(__name__)
 _RESOLVER_TIERS = (
     "exact_non_token",
     "exact_any",
-    "dfc_front_face",     # Forge stores "A", Scryfall stores "A // B"
-    "dfc_back_face",      # Forge has alternate_name "B", Scryfall stores "A // B"
+    "dfc_front_face",  # Forge stores "A", Scryfall stores "A // B"
+    "dfc_back_face",  # Forge has alternate_name "B", Scryfall stores "A // B"
 )
 
 #: Value type produced by the resolver: ``(oracle_id, edhrec_rank)``.
@@ -152,6 +153,7 @@ def _resolve_oracle_id(
     hit = _resolve_scryfall_meta(forge_name, alternate_name, resolver)
     return hit[0] if hit is not None else None
 
+
 # ---------------------------------------------------------------------------
 # Card row construction
 # ---------------------------------------------------------------------------
@@ -168,9 +170,9 @@ _MANA_PIPS = {"W", "U", "B", "R", "G"}
 # only colour-identity source.
 _COLOR_WORD_TO_PIP = {
     "white": "W",
-    "blue":  "U",
+    "blue": "U",
     "black": "B",
-    "red":   "R",
+    "red": "R",
     "green": "G",
 }
 
@@ -225,13 +227,29 @@ def _derive_colors(mana_cost: str | None, colors_line: str | None) -> str:
 # ``card_types`` so the engine's legality filter can hard-exclude them
 # instead of treating them as ``card_types=''`` colourless permanents that
 # slip through every check.
-_LEGAL_CARD_TYPES = frozenset({
-    "Artifact", "Creature", "Enchantment", "Instant",
-    "Land", "Planeswalker", "Sorcery", "Tribal", "Battle",
-})
-_NONLEGAL_CARD_TYPES = frozenset({
-    "Plane", "Phenomenon", "Scheme", "Conspiracy", "Vanguard", "Dungeon",
-})
+_LEGAL_CARD_TYPES = frozenset(
+    {
+        "Artifact",
+        "Creature",
+        "Enchantment",
+        "Instant",
+        "Land",
+        "Planeswalker",
+        "Sorcery",
+        "Tribal",
+        "Battle",
+    }
+)
+_NONLEGAL_CARD_TYPES = frozenset(
+    {
+        "Plane",
+        "Phenomenon",
+        "Scheme",
+        "Conspiracy",
+        "Vanguard",
+        "Dungeon",
+    }
+)
 _ALL_CARD_TYPES = _LEGAL_CARD_TYPES | _NONLEGAL_CARD_TYPES
 
 
@@ -270,28 +288,28 @@ def _card_row(card: dict[str, Any]) -> dict[str, Any]:
     colors = _derive_colors(card.get("mana_cost"), card.get("colors"))
 
     return {
-        "name":           card.get("name", ""),
-        "oracle_id":      card.get("oracle_id"),
-        "mana_cost":      card.get("mana_cost"),
-        "cmc":            _derive_cmc(card.get("mana_cost")),
-        "types":          raw_types,
-        "supertypes":     supertypes,
-        "subtypes":       subtypes,
-        "card_types":     card_types,
-        "colors":         colors,
+        "name": card.get("name", ""),
+        "oracle_id": card.get("oracle_id"),
+        "mana_cost": card.get("mana_cost"),
+        "cmc": _derive_cmc(card.get("mana_cost")),
+        "types": raw_types,
+        "supertypes": supertypes,
+        "subtypes": subtypes,
+        "card_types": card_types,
+        "colors": colors,
         "color_identity": colors,  # placeholder until full identity logic lands
-        "power":          power or None,
-        "toughness":      toughness or None,
-        "loyalty":        card.get("loyalty"),
-        "keywords":       keywords_json,
-        "oracle_text":    card.get("oracle"),
-        "is_commander":   False,
-        "deck_hints":     deck_hints_json,
-        "deck_needs":     deck_needs_json,
-        "deck_has":       deck_has_json,
-        "edhrec_rank":    card.get("edhrec_rank"),
-        "rarity":         None,
-        "set_code":       None,
+        "power": power or None,
+        "toughness": toughness or None,
+        "loyalty": card.get("loyalty"),
+        "keywords": keywords_json,
+        "oracle_text": card.get("oracle"),
+        "is_commander": False,
+        "deck_hints": deck_hints_json,
+        "deck_needs": deck_needs_json,
+        "deck_has": deck_has_json,
+        "edhrec_rank": card.get("edhrec_rank"),
+        "rarity": None,
+        "set_code": None,
     }
 
 
@@ -312,16 +330,39 @@ INSERT OR REPLACE INTO cards (
 # Every column on card_ports that the extractors may emit. Missing keys are
 # bound as NULL via dict.get().
 _PORT_COLUMNS = (
-    "card_name", "port_type", "event_class", "valid_filter",
-    "zone_origin", "zone_destination", "phase", "affected_scope",
-    "effect_zone", "cost_subtype", "cost_target",
-    "trigger_source", "mana_restriction",
-    "amount", "counter_type",
-    "granted_keyword", "granted_ability", "execute_ref", "sub_ability_ref",
-    "is_conditional", "branch_kind", "branch_parent", "source_svar",
-    "chain_depth", "scaling_expression", "is_optional", "is_combat",
-    "is_curse", "replacement_event", "replacement_result",
-    "replacement_player", "duration", "raw_line",
+    "card_name",
+    "port_type",
+    "event_class",
+    "valid_filter",
+    "zone_origin",
+    "zone_destination",
+    "phase",
+    "affected_scope",
+    "effect_zone",
+    "cost_subtype",
+    "cost_target",
+    "trigger_source",
+    "mana_restriction",
+    "amount",
+    "counter_type",
+    "granted_keyword",
+    "granted_ability",
+    "execute_ref",
+    "sub_ability_ref",
+    "is_conditional",
+    "branch_kind",
+    "branch_parent",
+    "source_svar",
+    "chain_depth",
+    "scaling_expression",
+    "is_optional",
+    "is_combat",
+    "is_curse",
+    "replacement_event",
+    "replacement_result",
+    "replacement_player",
+    "duration",
+    "raw_line",
 )
 
 _PORT_INSERT_SQL = (
@@ -362,8 +403,7 @@ def import_card(
     # Order matters: port_attributes references card_ports(id), so we must
     # delete attributes before clearing the parent ports.
     conn.execute(
-        "DELETE FROM port_attributes WHERE port_id IN "
-        "(SELECT id FROM card_ports WHERE card_name = ?)",
+        "DELETE FROM port_attributes WHERE port_id IN (SELECT id FROM card_ports WHERE card_name = ?)",
         (name,),
     )
     conn.execute("DELETE FROM card_ports WHERE card_name = ?", (name,))
@@ -371,7 +411,9 @@ def import_card(
 
     if oracle_id_resolver is not None and not card.get("oracle_id"):
         hit = _resolve_scryfall_meta(
-            name, card.get("alternate_name"), oracle_id_resolver,
+            name,
+            card.get("alternate_name"),
+            oracle_id_resolver,
         )
         if hit is not None:
             card["oracle_id"] = hit[0]
@@ -386,8 +428,7 @@ def import_card(
 
     for svar_name, svar_value in card.get("svars", {}).items():
         conn.execute(
-            "INSERT OR REPLACE INTO card_svars (card_name, svar_name, svar_value) "
-            "VALUES (?, ?, ?)",
+            "INSERT OR REPLACE INTO card_svars (card_name, svar_name, svar_value) VALUES (?, ?, ?)",
             (name, svar_name, svar_value),
         )
 
@@ -418,7 +459,9 @@ def import_cards(
     with conn:
         for card in cards:
             total_ports += import_card(
-                conn, card, oracle_id_resolver=oracle_id_resolver,
+                conn,
+                card,
+                oracle_id_resolver=oracle_id_resolver,
             )
     return total_ports
 
@@ -452,9 +495,7 @@ def import_cards_folder(
     if scryfall_db is not None:
         scryfall_path = Path(scryfall_db)
         if not scryfall_path.exists():
-            raise FileNotFoundError(
-                f"scryfall_db does not exist: {scryfall_path}"
-            )
+            raise FileNotFoundError(f"scryfall_db does not exist: {scryfall_path}")
         scryfall_conn = sqlite3.connect(scryfall_path)
         try:
             resolver = _build_oracle_id_resolver(scryfall_conn)
@@ -462,7 +503,8 @@ def import_cards_folder(
             scryfall_conn.close()
         log.info(
             "oracle_id resolver built from %s: %d name keys",
-            scryfall_path, len(resolver),
+            scryfall_path,
+            len(resolver),
         )
 
     card_count = 0
@@ -486,7 +528,9 @@ def import_cards_folder(
             if not name:
                 continue
             port_count += import_card(
-                conn, card, oracle_id_resolver=resolver,
+                conn,
+                card,
+                oracle_id_resolver=resolver,
             )
             card_count += 1
             if resolver is not None:
@@ -499,22 +543,26 @@ def import_cards_folder(
         pct = (100.0 * resolved / card_count) if card_count else 0.0
         log.info(
             "oracle_id coverage: %d/%d cards resolved (%.1f%%)",
-            resolved, card_count, pct,
+            resolved,
+            card_count,
+            pct,
         )
-        ranked = conn.execute(
-            "SELECT COUNT(*) FROM cards WHERE edhrec_rank IS NOT NULL"
-        ).fetchone()[0]
+        ranked = conn.execute("SELECT COUNT(*) FROM cards WHERE edhrec_rank IS NOT NULL").fetchone()[0]
         rank_pct = (100.0 * ranked / card_count) if card_count else 0.0
         log.info(
             "edhrec_rank coverage: %d/%d cards ranked (%.1f%%)",
-            ranked, card_count, rank_pct,
+            ranked,
+            card_count,
+            rank_pct,
         )
         if unresolved:
             head = ", ".join(unresolved[:5])
             suffix = "" if len(unresolved) <= 5 else f" (+{len(unresolved) - 5} more)"
             log.warning(
                 "%d cards have no oracle_id: %s%s",
-                len(unresolved), head, suffix,
+                len(unresolved),
+                head,
+                suffix,
             )
 
     return card_count, port_count

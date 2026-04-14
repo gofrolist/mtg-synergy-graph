@@ -10,8 +10,8 @@ from mtg_synergy_graph.db import open_db
 from mtg_synergy_graph.importer import import_cards_folder
 from mtg_synergy_graph.penalties import (
     HARD_FILTER_SCORE,
-    NICHE_COUNTERS,
     NICHE_COUNTER_MULT,
+    NICHE_COUNTERS,
     UNMET_TYPE_MULT,
     PenaltyContext,
     _exclusion_tokens,
@@ -56,7 +56,7 @@ def test_token_subtype_parses_forge_script():
 
 
 def test_niche_counters_set_matches_spec():
-    assert NICHE_COUNTERS == frozenset({"TIME", "EXPERIENCE", "ENERGY"})
+    assert frozenset({"TIME", "EXPERIENCE", "ENERGY"}) == NICHE_COUNTERS
 
 
 # ---------------------------------------------------------------------------
@@ -117,12 +117,11 @@ def test_rule_4_does_not_fire_on_trigger_filter_exclusions(populated_db):
     Fixture set doesn't include Mystic Remora, but we can simulate the
     bulk-loader semantics: only static affected_scope contributes."""
     from mtg_synergy_graph.penalties import _bulk_load_excludes
+
     excludes = _bulk_load_excludes(populated_db)
     # No fixture card should produce a 'Creature' exclusion via this loader.
     for card_name, tokens in excludes.items():
-        assert "Creature" not in tokens, (
-            f"{card_name} produced 'Creature' exclusion — rule 4 over-fires"
-        )
+        assert "Creature" not in tokens, f"{card_name} produced 'Creature' exclusion — rule 4 over-fires"
 
 
 # ---------------------------------------------------------------------------
@@ -345,6 +344,4 @@ def test_rule_7_niche_counter_penalises_when_commander_does_not_use_them():
         },
         candidate_counter_types={"Energy Engine": {"ENERGY"}},
     )
-    assert apply_penalties_ctx(ctx, "Energy Engine", 100.0) == pytest.approx(
-        100.0 * NICHE_COUNTER_MULT
-    )
+    assert apply_penalties_ctx(ctx, "Energy Engine", 100.0) == pytest.approx(100.0 * NICHE_COUNTER_MULT)

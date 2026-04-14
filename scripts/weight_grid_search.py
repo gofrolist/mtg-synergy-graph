@@ -3,24 +3,24 @@
 Optimized: computes complements ONCE per commander, then re-scores
 with different flat weights. ~100x faster than naive approach.
 """
+
 from __future__ import annotations
 
 import itertools
 import json
 import math
 import sqlite3
-import types
 from collections import defaultdict
 from pathlib import Path
 
-from mtg_synergy_graph.complement_rules import find_all_complements, PortComplement
-from mtg_synergy_graph.graph_engine import load_ports_for_set, clear_ports_cache
+from mtg_synergy_graph import universal_scorer as us
+from mtg_synergy_graph.complement_rules import PortComplement, find_all_complements
+from mtg_synergy_graph.graph_engine import clear_ports_cache
 from mtg_synergy_graph.validate import (
     _fetch_edhrec_sections,
     commander_to_slug,
     compute_ndcg,
 )
-from mtg_synergy_graph import universal_scorer as us
 
 
 def _score_with_weights(
@@ -103,7 +103,7 @@ def main() -> None:
             for card in on_page - hi_cards:
                 labels[card] = 1.0
             cmdr_data.append((cmdr, comps, labels))
-        except Exception:
+        except Exception:  # noqa: S110
             pass
     print(f"  Done. {len(cmdr_data)} commanders loaded.")
 
@@ -123,14 +123,14 @@ def main() -> None:
     results: list[tuple[float, int, dict[str, float]]] = []
 
     for i, combo in enumerate(combos):
-        overrides = dict(zip(keys, combo))
+        overrides = dict(zip(keys, combo, strict=False))
         # Remove default values to keep overrides clean
         clean = {k: v for k, v in overrides.items() if not (k in ("spell_density", "scaling") and v == 1.0)}
 
         total_ndcg = 0.0
         total_hi = 0
         count = 0
-        for cmdr, comps, labels in cmdr_data:
+        for _cmdr, comps, labels in cmdr_data:
             scores = _score_with_weights(comps, flat_rules, clean)
             # Sort by score descending
             ranked = sorted(scores.items(), key=lambda x: -x[1])[:30]
@@ -146,21 +146,21 @@ def main() -> None:
 
         if (i + 1) % 20 == 0:
             best = max(r[0] for r in results)
-            print(f"  {i+1}/{len(combos)}: current={avg_ndcg:.4f}, best={best:.4f}")
+            print(f"  {i + 1}/{len(combos)}: current={avg_ndcg:.4f}, best={best:.4f}")
 
     results.sort(key=lambda x: -x[0])
-    print(f"\n=== TOP 10 ===")
+    print("\n=== TOP 10 ===")
     for ndcg, hi, ov in results[:10]:
         print(f"  NDCG={ndcg:.4f}  Hi-Syn={hi}  weights={ov}")
 
-    print(f"\n=== CURRENT (baseline) ===")
+    print("\n=== CURRENT (baseline) ===")
     current = {"tribal_density": 0.5, "token_producer": 0.25}
     for ndcg, hi, ov in results:
         if ov == current:
             print(f"  NDCG={ndcg:.4f}  Hi-Syn={hi}  weights={ov}")
             break
 
-    print(f"\n=== BOTTOM 3 ===")
+    print("\n=== BOTTOM 3 ===")
     for ndcg, hi, ov in results[-3:]:
         print(f"  NDCG={ndcg:.4f}  Hi-Syn={hi}  weights={ov}")
 

@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import re
 import sqlite3
-from typing import Any
 
 from ..graph_engine import _trigger_only_matches_self
 from .core import PortComplement, PortRow
-
 
 # ---------------------------------------------------------------------------
 # Opponent-forcing constants (used only by _find_opponent_forcing)
@@ -21,11 +18,19 @@ _OPPONENT_TRIGGER_TO_EFFECT: dict[str, tuple[str, ...]] = {
 }
 
 #: valid_filter values that indicate opponent-targeting (not self-targeting).
-_OPPONENT_FILTERS: frozenset[str] = frozenset({
-    "Opponent", "Player", "Player.Opponent", "Targeted",
-    "TargetedPlayer", "TriggeredPlayer", "TriggeredDefendingPlayer",
-    "TriggeredTarget", "TargetedController",
-})
+_OPPONENT_FILTERS: frozenset[str] = frozenset(
+    {
+        "Opponent",
+        "Player",
+        "Player.Opponent",
+        "Targeted",
+        "TargetedPlayer",
+        "TriggeredPlayer",
+        "TriggeredDefendingPlayer",
+        "TriggeredTarget",
+        "TargetedController",
+    }
+)
 
 
 def _find_opponent_forcing(
@@ -88,13 +93,15 @@ def _find_opponent_forcing(
             name = r["card_name"]
             if name not in cmdr_set and name not in seen:
                 seen.add(name)
-                results.append(PortComplement(
-                    rule_id="opponent_forcing",
-                    direction="synergy",
-                    candidate=name,
-                    cmdr_event=trigger_ev,
-                    cand_event=f"force_{effect_ev}",
-                ))
+                results.append(
+                    PortComplement(
+                        rule_id="opponent_forcing",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event=trigger_ev,
+                        cand_event=f"force_{effect_ev}",
+                    )
+                )
 
     return results
 
@@ -141,13 +148,15 @@ def _find_wheel_synergy(
     for r in cur.fetchall():
         name = r["card_name"]
         if name not in cmdr_set:
-            results.append(PortComplement(
-                rule_id="wheel_synergy",
-                direction="synergy",
-                candidate=name,
-                cmdr_event="Drawn",
-                cand_event="wheel",
-            ))
+            results.append(
+                PortComplement(
+                    rule_id="wheel_synergy",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="Drawn",
+                    cand_event="wheel",
+                )
+            )
 
     return results
 
@@ -201,47 +210,51 @@ def _find_cost_payoff_complements(
             name = r["card_name"]
             if name not in cmdr_set and name not in seen:
                 seen.add(name)
-                results.append(PortComplement(
-                    rule_id="cost_payoff",
-                    direction="synergy",
-                    candidate=name,
-                    cmdr_event=f"discard_{dtype}",
-                    cand_event="graveyard_return",
-                ))
+                results.append(
+                    PortComplement(
+                        rule_id="cost_payoff",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event=f"discard_{dtype}",
+                        cand_event="graveyard_return",
+                    )
+                )
 
     # Retrace keyword (cast from graveyard by discarding a land)
     cur = conn.execute(
-        "SELECT DISTINCT card_name FROM card_ports "
-        "WHERE port_type = 'keyword' AND event_class = 'Retrace'"
+        "SELECT DISTINCT card_name FROM card_ports WHERE port_type = 'keyword' AND event_class = 'Retrace'"
     )
     for r in cur.fetchall():
         name = r["card_name"]
         if name not in cmdr_set and name not in seen:
             seen.add(name)
-            results.append(PortComplement(
-                rule_id="cost_payoff",
-                direction="synergy",
-                candidate=name,
-                cmdr_event="discard_Land",
-                cand_event="Retrace",
-            ))
+            results.append(
+                PortComplement(
+                    rule_id="cost_payoff",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="discard_Land",
+                    cand_event="Retrace",
+                )
+            )
 
     # Dredge keyword (self-mill to return, keeps lands flowing)
     cur = conn.execute(
-        "SELECT DISTINCT card_name FROM card_ports "
-        "WHERE port_type = 'keyword' AND event_class LIKE 'Dredge%'"
+        "SELECT DISTINCT card_name FROM card_ports WHERE port_type = 'keyword' AND event_class LIKE 'Dredge%'"
     )
     for r in cur.fetchall():
         name = r["card_name"]
         if name not in cmdr_set and name not in seen:
             seen.add(name)
-            results.append(PortComplement(
-                rule_id="cost_payoff",
-                direction="synergy",
-                candidate=name,
-                cmdr_event="discard_Land",
-                cand_event="Dredge",
-            ))
+            results.append(
+                PortComplement(
+                    rule_id="cost_payoff",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="discard_Land",
+                    cand_event="Dredge",
+                )
+            )
 
     return results
 
@@ -269,9 +282,13 @@ def _find_flicker_synergy(
     # not their main strategy.
     has_self_etb = False
     etb_effect_count = 0
-    _HIGH_VALUE_EFFECTS = frozenset({
-        "Dig", "GenericChoice", "GainControl",
-    })
+    _HIGH_VALUE_EFFECTS = frozenset(
+        {
+            "Dig",
+            "GenericChoice",
+            "GainControl",
+        }
+    )
     for p in cmdr_ports:
         pt = (p.get("port_type") or "").strip()
         ev = (p.get("event_class") or "").strip()
@@ -315,13 +332,15 @@ def _find_flicker_synergy(
     results: list[PortComplement] = []
     for name in sorted(flicker_names):
         if name not in cmdr_set:
-            results.append(PortComplement(
-                rule_id="flicker_synergy",
-                direction="synergy",
-                candidate=name,
-                cmdr_event="self_etb",
-                cand_event="flicker",
-            ))
+            results.append(
+                PortComplement(
+                    rule_id="flicker_synergy",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="self_etb",
+                    cand_event="flicker",
+                )
+            )
 
     return results
 
@@ -358,13 +377,15 @@ def _find_extra_land_plays(
         if card in cmdr_set or card in seen:
             continue
         seen.add(card)
-        results.append(PortComplement(
-            rule_id="effect_feeds_trigger",
-            direction="synergy",
-            candidate=card,
-            cmdr_event="extra_land_plays",
-            cand_event="ChangesZone_Land",
-            branch_kind=r["branch_kind"] or "root",
-        ))
+        results.append(
+            PortComplement(
+                rule_id="effect_feeds_trigger",
+                direction="synergy",
+                candidate=card,
+                cmdr_event="extra_land_plays",
+                cand_event="ChangesZone_Land",
+                branch_kind=r["branch_kind"] or "root",
+            )
+        )
 
     return results

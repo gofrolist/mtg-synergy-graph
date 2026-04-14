@@ -47,7 +47,7 @@ def test_scute_swarm_branch_walker_emits_two_branches(scute_swarm):
 
 
 def test_conditional_branch_kinds_constant_matches_spec():
-    assert CONDITIONAL_BRANCH_KINDS == frozenset({"true", "false", "win", "otherwise", "choice"})
+    assert frozenset({"true", "false", "win", "otherwise", "choice"}) == CONDITIONAL_BRANCH_KINDS
 
 
 def test_walker_terminates_on_unknown_svar():

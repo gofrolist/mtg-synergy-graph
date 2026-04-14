@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from mtg_synergy_graph import extract_all_ports, extract_cost_ports
+from mtg_synergy_graph import (
+    extract_all_ports,
+    extract_cost_ports,
+    extract_effect_ports,
+    extract_trigger_ports,
+)
 
 
 def _by_type(ports, port_type):
@@ -221,23 +226,17 @@ def test_korvold_sacrifice_trigger_cost_target_recorded(korvold):
 # ---------------------------------------------------------------------------
 
 
-from mtg_synergy_graph import (
-    extract_effect_ports,
-    extract_trigger_ports,
-)
-
-
 def test_becomes_target_first_time_records_trigger_source():
     # Real Forge trigger from valiant_rescuer.txt. FirstTime$ True must
     # surface as ``trigger_source='first_time'``. The ValidTarget$ pivot
     # is deferred to ship with D3 — see extract_trigger_ports docstring.
     parsed = {
-        "Mode":          "BecomesTarget",
-        "ValidTarget":   "Card.Self",
-        "ValidSource":   "SpellAbility.YouCtrl",
-        "TriggerZones":  "Battlefield",
-        "FirstTime":     "True",
-        "Execute":       "TrigToken",
+        "Mode": "BecomesTarget",
+        "ValidTarget": "Card.Self",
+        "ValidSource": "SpellAbility.YouCtrl",
+        "TriggerZones": "Battlefield",
+        "FirstTime": "True",
+        "Execute": "TrigToken",
     }
     ports = extract_trigger_ports("Valiant Rescuer", parsed, {})
     trig = ports[0]
@@ -265,10 +264,10 @@ def test_trigger_no_first_time_leaves_source_none():
 def test_mana_effect_captures_restrict_valid():
     # Real Nexos card: AB$ Mana | Cost$ T | Produced$ C | RestrictValid$ CostContainsX
     parsed = {
-        "_verb":         "Mana",
-        "Cost":          "T",
-        "Produced":      "C",
-        "Amount":        "2",
+        "_verb": "Mana",
+        "Cost": "T",
+        "Produced": "C",
+        "Amount": "2",
         "RestrictValid": "CostContainsX",
     }
     ports = extract_effect_ports("Nexos", parsed, {})

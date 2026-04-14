@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 import sqlite3
-from typing import Any
 
 from ..graph_engine import _trigger_only_matches_self
 from ..penalties import _token_subtype
@@ -31,17 +30,29 @@ def _find_effect_feeds_etb(
     unfiltered matching produces 900-6600 candidates. This function
     narrows to ~200-350 by intersecting filter types.
     """
-    _PRIMARY_TYPES = frozenset({
-        "Creature", "Artifact", "Enchantment", "Land", "Planeswalker",
-    })
+    _PRIMARY_TYPES = frozenset(
+        {
+            "Creature",
+            "Artifact",
+            "Enchantment",
+            "Land",
+            "Planeswalker",
+        }
+    )
     # Broad filter bases that match too many candidates -- skip these
     _TOO_BROAD_BASES = frozenset({"Card", "Permanent", ""})
 
     # Collect (base_type, zone_destination) pairs from commander effects
     # that produce permanents entering zones
-    _ZONE_EFFECT_EVENTS = frozenset({
-        "Token", "ChangeZone", "ChangeZoneAll", "CopyPermanent", "Animate",
-    })
+    _ZONE_EFFECT_EVENTS = frozenset(
+        {
+            "Token",
+            "ChangeZone",
+            "ChangeZoneAll",
+            "CopyPermanent",
+            "Animate",
+        }
+    )
     cmdr_produces: set[tuple[str, str]] = set()  # (base_type, zone_dest)
     # Whether to gate Creature ETB by "Other" filter (non-tribal tokens)
     _needs_creature_other_gate = False
@@ -50,9 +61,7 @@ def _find_effect_feeds_etb(
     cmdr_literal_subtypes: set[str] = set()
     cmdr_list = list(cmdr_set)
     for row in conn.execute(
-        "SELECT subtypes FROM cards WHERE name IN ({})".format(
-            ",".join("?" * len(cmdr_list))
-        ),
+        "SELECT subtypes FROM cards WHERE name IN ({})".format(",".join("?" * len(cmdr_list))),
         tuple(cmdr_list),
     ).fetchall():
         if row["subtypes"]:
@@ -100,9 +109,7 @@ def _find_effect_feeds_etb(
     _creature_names: set[str] = set()
     if _needs_creature_other_gate:
         _creature_names = {
-            r["name"] for r in conn.execute(
-                "SELECT name FROM cards WHERE card_types LIKE '%Creature%'"
-            ).fetchall()
+            r["name"] for r in conn.execute("SELECT name FROM cards WHERE card_types LIKE '%Creature%'").fetchall()
         }
 
     # Fetch candidate ChangesZone triggers (non-self)
@@ -141,18 +148,24 @@ def _find_effect_feeds_etb(
                 # themselves, not on tokens the commander creates).
                 # Non-creature cards (Impact Tremors, Aura Shards)
                 # are always genuine payoffs.
-                if cmdr_base == "Creature" and _needs_creature_other_gate:
-                    if "Other" not in vf and card in _creature_names:
-                        continue
+                if (
+                    cmdr_base == "Creature"
+                    and _needs_creature_other_gate
+                    and "Other" not in vf
+                    and card in _creature_names
+                ):
+                    continue
                 seen.add(card)
-                results.append(PortComplement(
-                    rule_id="effect_feeds_trigger",
-                    direction="synergy",
-                    candidate=card,
-                    cmdr_event=f"Token_{cmdr_base}" if cmdr_base else "ChangeZone",
-                    cand_event=f"ChangesZone_{base}",
-                    branch_kind=r["branch_kind"] or "root",
-                ))
+                results.append(
+                    PortComplement(
+                        rule_id="effect_feeds_trigger",
+                        direction="synergy",
+                        candidate=card,
+                        cmdr_event=f"Token_{cmdr_base}" if cmdr_base else "ChangeZone",
+                        cand_event=f"ChangesZone_{base}",
+                        branch_kind=r["branch_kind"] or "root",
+                    )
+                )
                 break
             if card in seen:
                 break
@@ -172,9 +185,14 @@ def _find_token_producers_for_trigger(
     only looks for commander EFFECTS, not triggers. This function fills
     that gap for trigger-based ETB commanders.
     """
-    _PRIMARY_TYPES = frozenset({
-        "Creature", "Artifact", "Enchantment", "Land",
-    })
+    _PRIMARY_TYPES = frozenset(
+        {
+            "Creature",
+            "Artifact",
+            "Enchantment",
+            "Land",
+        }
+    )
 
     # Find ChangesZone triggers with type filter (non-self).
     # Only match triggers that accept tokens (no `.!token` filter).
@@ -204,23 +222,22 @@ def _find_token_producers_for_trigger(
         return []
 
     # Find token producers (cards with Token effects)
-    cur = conn.execute(
-        "SELECT DISTINCT card_name FROM card_ports "
-        "WHERE port_type = 'effect' AND event_class = 'Token'"
-    )
+    cur = conn.execute("SELECT DISTINCT card_name FROM card_ports WHERE port_type = 'effect' AND event_class = 'Token'")
     results: list[PortComplement] = []
     seen: set[str] = set()
     for r in cur.fetchall():
         name = r["card_name"]
         if name not in cmdr_set and name not in seen:
             seen.add(name)
-            results.append(PortComplement(
-                rule_id="token_producer",
-                direction="synergy",
-                candidate=name,
-                cmdr_event="ChangesZone_Creature",
-                cand_event="Token",
-            ))
+            results.append(
+                PortComplement(
+                    rule_id="token_producer",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="ChangesZone_Creature",
+                    cand_event="Token",
+                )
+            )
 
     return results
 
@@ -242,9 +259,13 @@ def _find_static_strategy(
     has_voltron = False
     # Only Hexproof/Shroud and Exalted indicate voltron strategy.
     # Indestructible is too broad (Heliod, Xenagos have it but aren't voltron).
-    _VOLTRON_KEYWORDS = frozenset({
-        "Hexproof", "Shroud", "Exalted",
-    })
+    _VOLTRON_KEYWORDS = frozenset(
+        {
+            "Hexproof",
+            "Shroud",
+            "Exalted",
+        }
+    )
 
     for p in cmdr_ports:
         pt = (p.get("port_type") or "").strip()
@@ -256,9 +277,10 @@ def _find_static_strategy(
         # a go-wide strategy -- the commander wants ANY creatures, not MORE of them.
         if pt == "static" and ev == "Continuous":
             affected = p.get("affected_scope") or ""
-            if "Creature.YouCtrl" in affected or "Creature.YouCtrl" in raw:
-                if "'AddPower'" in raw or "'AddToughness'" in raw:
-                    has_creature_pump = True
+            if ("Creature.YouCtrl" in affected or "Creature.YouCtrl" in raw) and (
+                "'AddPower'" in raw or "'AddToughness'" in raw
+            ):
+                has_creature_pump = True
 
         # Voltron: self-protection keywords
         if pt == "keyword" and ev in _VOLTRON_KEYWORDS:
@@ -270,38 +292,40 @@ def _find_static_strategy(
     # Go-wide: find token producers
     if has_creature_pump:
         cur = conn.execute(
-            "SELECT DISTINCT card_name FROM card_ports "
-            "WHERE port_type = 'effect' AND event_class = 'Token'"
+            "SELECT DISTINCT card_name FROM card_ports WHERE port_type = 'effect' AND event_class = 'Token'"
         )
         for r in cur.fetchall():
             name = r["card_name"]
             if name not in cmdr_set and name not in seen:
                 seen.add(name)
-                results.append(PortComplement(
-                    rule_id="token_producer",
-                    direction="synergy",
-                    candidate=name,
-                    cmdr_event="creature_pump",
-                    cand_event="Token",
-                ))
+                results.append(
+                    PortComplement(
+                        rule_id="token_producer",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="creature_pump",
+                        cand_event="Token",
+                    )
+                )
 
     # Voltron: find Auras and Equipment
     if has_voltron:
         cur = conn.execute(
-            "SELECT DISTINCT name FROM cards "
-            "WHERE subtypes LIKE '%Aura%' OR subtypes LIKE '%Equipment%'"
+            "SELECT DISTINCT name FROM cards WHERE subtypes LIKE '%Aura%' OR subtypes LIKE '%Equipment%'"
         )
         for r in cur.fetchall():
             name = r["name"]
             if name not in cmdr_set and name not in seen:
                 seen.add(name)
-                results.append(PortComplement(
-                    rule_id="voltron",
-                    direction="synergy",
-                    candidate=name,
-                    cmdr_event="self_protection",
-                    cand_event="Aura_Equipment",
-                ))
+                results.append(
+                    PortComplement(
+                        rule_id="voltron",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="self_protection",
+                        cand_event="Aura_Equipment",
+                    )
+                )
 
     return results
 
@@ -339,8 +363,7 @@ def _find_token_sac_chain(
     _SAC_TOKEN_PATTERNS = ("treasure", "food", "clue", "blood")
 
     cur = conn.execute(
-        "SELECT card_name, raw_line FROM card_ports "
-        "WHERE port_type = 'effect' AND event_class = 'Token'"
+        "SELECT card_name, raw_line FROM card_ports WHERE port_type = 'effect' AND event_class = 'Token'"
     )
     results: list[PortComplement] = []
     seen: set[str] = set()
@@ -356,13 +379,15 @@ def _find_token_sac_chain(
         for pattern in _SAC_TOKEN_PATTERNS:
             if pattern in script:
                 seen.add(name)
-                results.append(PortComplement(
-                    rule_id="token_sac_chain",
-                    direction="synergy",
-                    candidate=name,
-                    cmdr_event="Sacrificed",
-                    cand_event=f"Token_{pattern}",
-                ))
+                results.append(
+                    PortComplement(
+                        rule_id="token_sac_chain",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="Sacrificed",
+                        cand_event=f"Token_{pattern}",
+                    )
+                )
                 break
 
     return results

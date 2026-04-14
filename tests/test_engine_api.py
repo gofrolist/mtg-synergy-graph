@@ -8,9 +8,9 @@ import pytest
 
 from mtg_synergy_graph import (
     HARD_FILTER_SCORE,
+    SPEC_VERSION,
     Recommendation,
     RecommendationPage,
-    SPEC_VERSION,
     SynergyEngine,
 )
 from mtg_synergy_graph.db import open_db

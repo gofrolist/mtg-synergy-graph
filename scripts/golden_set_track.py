@@ -45,14 +45,10 @@ def _load_commanders(path: Path) -> list[object]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path, default=Path("data/synergy.db"))
-    parser.add_argument("--edhrec-db", type=Path, default=Path("data/tags.db"),
-                        help="data/tags.db (for NDCG@30)")
-    parser.add_argument("--commanders", type=Path,
-                        help="JSON list of commanders (string or [a, b] pair)")
-    parser.add_argument("--baseline", required=True, type=Path,
-                        help="Output / input baseline JSON")
-    parser.add_argument("--bootstrap", action="store_true",
-                        help="Write current run as baseline (overwrites)")
+    parser.add_argument("--edhrec-db", type=Path, default=Path("data/tags.db"), help="data/tags.db (for NDCG@30)")
+    parser.add_argument("--commanders", type=Path, help="JSON list of commanders (string or [a, b] pair)")
+    parser.add_argument("--baseline", required=True, type=Path, help="Output / input baseline JSON")
+    parser.add_argument("--bootstrap", action="store_true", help="Write current run as baseline (overwrites)")
     parser.add_argument("--ndcg-tolerance", type=float, default=0.005)
     parser.add_argument("--jitter", type=int, default=5)
     args = parser.parse_args()
@@ -74,7 +70,9 @@ def main() -> int:
             print(f"bootstrap: {len(commanders)} commanders → {args.baseline}")
             edhrec_db = args.edhrec_db if args.edhrec_db and args.edhrec_db.exists() else None
             report = bootstrap_golden_set(
-                engine, commanders, args.baseline,
+                engine,
+                commanders,
+                args.baseline,
                 edhrec_conn=edhrec_conn,
                 edhrec_db_path=edhrec_db,
             )
@@ -86,15 +84,15 @@ def main() -> int:
             total_onpage = sum(e.on_page_hits for e in report.entries)
             n = len(report.entries)
             if total_hs:
-                print(f"  avg Hi-Syn:  {total_hits/n:.1f}/{total_hs/n:.0f} per cmdr "
-                      f"({total_hits}/{total_hs} total, {total_hits/total_hs*100:.1f}%)")
-                print(f"  avg OnPage:  {total_onpage/n:.1f}/30 per cmdr "
-                      f"({total_onpage/n/30*100:.1f}%)")
+                print(
+                    f"  avg Hi-Syn:  {total_hits / n:.1f}/{total_hs / n:.0f} per cmdr "
+                    f"({total_hits}/{total_hs} total, {total_hits / total_hs * 100:.1f}%)"
+                )
+                print(f"  avg OnPage:  {total_onpage / n:.1f}/30 per cmdr ({total_onpage / n / 30 * 100:.1f}%)")
             return 0
 
         if not args.baseline.exists():
-            print(f"error: baseline {args.baseline} does not exist (use --bootstrap)",
-                  file=sys.stderr)
+            print(f"error: baseline {args.baseline} does not exist (use --bootstrap)", file=sys.stderr)
             return 2
 
         edhrec_db = args.edhrec_db if args.edhrec_db and args.edhrec_db.exists() else None

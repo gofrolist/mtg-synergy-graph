@@ -64,6 +64,7 @@ def test_personalised_pagerank_csr_returns_same_shape():
 def test_build_graph_cache_populates_tables(populated_db, tmp_path):
     # Copy the populated DB so we don't mutate the module-scoped fixture.
     import shutil
+
     db_path = tmp_path / "synergy.db"
     shutil.copy(populated_db, db_path)
 
@@ -87,6 +88,7 @@ def test_build_graph_cache_populates_tables(populated_db, tmp_path):
 
 def test_clear_graph_cache_removes_rows(populated_db, tmp_path):
     import shutil
+
     db_path = tmp_path / "synergy.db"
     shutil.copy(populated_db, db_path)
 
@@ -101,6 +103,7 @@ def test_clear_graph_cache_removes_rows(populated_db, tmp_path):
 
 def test_neighbours_of_returns_cached_adjacency(populated_db, tmp_path):
     import shutil
+
     db_path = tmp_path / "synergy.db"
     shutil.copy(populated_db, db_path)
 
@@ -152,6 +155,7 @@ def test_engine_graph_metrics_uses_cache(populated_db, tmp_path):
 
 def test_engine_graph_metrics_falls_back_when_cache_missing(populated_db, tmp_path):
     import shutil
+
     db_path = tmp_path / "synergy.db"
     shutil.copy(populated_db, db_path)
     # Note: no build_graph_cache here — engine should still work via the
@@ -168,6 +172,7 @@ def test_engine_graph_metrics_falls_back_when_cache_missing(populated_db, tmp_pa
 
 def test_cache_neighbours_match_live_adjacency(populated_db, tmp_path):
     import shutil
+
     db_path = tmp_path / "synergy.db"
     shutil.copy(populated_db, db_path)
 

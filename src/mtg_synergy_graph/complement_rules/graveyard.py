@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
-from typing import Any
 
-from ..graph_engine import _trigger_only_matches_self
 from .core import PortComplement, PortRow
 
 
@@ -40,10 +38,9 @@ def _find_graveyard_fillers(
                 wants_gy = True
                 break
         # scales_with graveyard (Karador, Mimeoplasm)
-        if pt == "scales_with":
-            if "Graveyard" in ev or "graveyard" in ev:
-                wants_gy = True
-                break
+        if pt == "scales_with" and ("Graveyard" in ev or "graveyard" in ev):
+            wants_gy = True
+            break
 
     if not wants_gy:
         return []
@@ -77,13 +74,15 @@ def _find_graveyard_fillers(
         name = r["card_name"]
         if name not in cmdr_set and name not in seen:
             seen.add(name)
-            results.append(PortComplement(
-                rule_id="trigger_effect",
-                direction="synergy",
-                candidate=name,
-                cmdr_event="graveyard_filler",
-                cand_event="self_mill",
-            ))
+            results.append(
+                PortComplement(
+                    rule_id="trigger_effect",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="graveyard_filler",
+                    cand_event="self_mill",
+                )
+            )
 
     # Recast-type density: Kess wants instants/sorceries, Karador wants
     # creatures with ETBs. Match cards of the recastable types.
@@ -97,13 +96,15 @@ def _find_graveyard_fillers(
             name = r["name"]
             if name not in cmdr_set and name not in seen:
                 seen.add(name)
-                results.append(PortComplement(
-                    rule_id="spell_density",
-                    direction="synergy",
-                    candidate=name,
-                    cmdr_event="graveyard_cast",
-                    cand_event=card_type,
-                ))
+                results.append(
+                    PortComplement(
+                        rule_id="spell_density",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="graveyard_cast",
+                        cand_event=card_type,
+                    )
+                )
 
     return results
 
@@ -132,9 +133,8 @@ def _find_artifact_recursion(
             zo = (p.get("zone_origin") or "").strip()
             if zo == "Graveyard" and "Artifact" in vf:
                 wants_artifact_gy = True
-        if pt == "effect" and ev == "CopyPermanent":
-            if "Artifact" in vf or "Artifact" in raw:
-                wants_artifact_copy = True
+        if pt == "effect" and ev == "CopyPermanent" and ("Artifact" in vf or "Artifact" in raw):
+            wants_artifact_copy = True
 
     if not wants_artifact_gy and not wants_artifact_copy:
         return []
@@ -153,13 +153,15 @@ def _find_artifact_recursion(
         name = r["card_name"]
         if name not in cmdr_set and name not in seen:
             seen.add(name)
-            results.append(PortComplement(
-                rule_id="artifact_recursion",
-                direction="synergy",
-                candidate=name,
-                cmdr_event="graveyard_artifact",
-                cand_event="sac_artifact",
-            ))
+            results.append(
+                PortComplement(
+                    rule_id="artifact_recursion",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="graveyard_artifact",
+                    cand_event="sac_artifact",
+                )
+            )
 
     # Artifacts with self-ETB + valuable effects (for copy commanders)
     if wants_artifact_copy:
@@ -179,13 +181,15 @@ def _find_artifact_recursion(
             name = r["card_name"]
             if name not in cmdr_set and name not in seen:
                 seen.add(name)
-                results.append(PortComplement(
-                    rule_id="artifact_recursion",
-                    direction="synergy",
-                    candidate=name,
-                    cmdr_event="copy_artifact",
-                    cand_event="etb_artifact",
-                ))
+                results.append(
+                    PortComplement(
+                        rule_id="artifact_recursion",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="copy_artifact",
+                        cand_event="etb_artifact",
+                    )
+                )
 
     return results
 
@@ -224,26 +228,33 @@ def _find_copy_synergy(
     # Populate: find token producers (more targets to copy)
     if has_populate:
         cur = conn.execute(
-            "SELECT DISTINCT card_name FROM card_ports "
-            "WHERE port_type = 'effect' AND event_class = 'Token'"
+            "SELECT DISTINCT card_name FROM card_ports WHERE port_type = 'effect' AND event_class = 'Token'"
         )
         for r in cur.fetchall():
             name = r["card_name"]
             if name not in cmdr_set and name not in seen:
                 seen.add(name)
-                results.append(PortComplement(
-                    rule_id="copy_synergy",
-                    direction="synergy",
-                    candidate=name,
-                    cmdr_event="CopyPermanent_populate",
-                    cand_event="Token",
-                ))
+                results.append(
+                    PortComplement(
+                        rule_id="copy_synergy",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="CopyPermanent_populate",
+                        cand_event="Token",
+                    )
+                )
 
     # Creature copy: find creatures with self-ETB + valuable effects
     if has_creature_copy:
         _VALUABLE_LIST = (
-            "Draw", "Destroy", "DestroyAll", "Token", "GainControl",
-            "DealDamage", "ChangeZone", "Mana",
+            "Draw",
+            "Destroy",
+            "DestroyAll",
+            "Token",
+            "GainControl",
+            "DealDamage",
+            "ChangeZone",
+            "Mana",
         )
         _val_ph = ",".join("?" * len(_VALUABLE_LIST))
         cur2 = conn.execute(
@@ -263,13 +274,15 @@ def _find_copy_synergy(
             name = r["card_name"]
             if name not in cmdr_set and name not in seen:
                 seen.add(name)
-                results.append(PortComplement(
-                    rule_id="copy_synergy",
-                    direction="synergy",
-                    candidate=name,
-                    cmdr_event="CopyPermanent_creature",
-                    cand_event="etb_creature",
-                ))
+                results.append(
+                    PortComplement(
+                        rule_id="copy_synergy",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="CopyPermanent_creature",
+                        cand_event="etb_creature",
+                    )
+                )
 
     return results
 
@@ -332,12 +345,14 @@ def _find_etb_sac_targets(
     for r in cur.fetchall():
         name = r["card_name"]
         if name not in cmdr_set:
-            results.append(PortComplement(
-                rule_id="etb_sac_target",
-                direction="synergy",
-                candidate=name,
-                cmdr_event="graveyard_reanimate",
-                cand_event="etb_sac_creature",
-            ))
+            results.append(
+                PortComplement(
+                    rule_id="etb_sac_target",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="graveyard_reanimate",
+                    cand_event="etb_sac_creature",
+                )
+            )
 
     return results

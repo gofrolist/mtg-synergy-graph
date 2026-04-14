@@ -6,21 +6,19 @@ and verifies each _find_* function produces expected results.
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
 import pytest
 
-from mtg_synergy_graph.complement_rules.core import (
-    PortComplement,
-    _build_stax_exclusion,
-    _commander_subtypes_from_ports,
-    find_all_complements,
-)
 from mtg_synergy_graph.complement_rules.combat import (
     _find_combat_enhancers,
     _find_evasion_complements,
     _find_sacrifice_outlets,
+)
+from mtg_synergy_graph.complement_rules.core import (
+    PortComplement,
+    _build_stax_exclusion,
+    find_all_complements,
 )
 from mtg_synergy_graph.complement_rules.density import (
     _find_scales_with_density,
@@ -107,9 +105,7 @@ class TestFindAllComplements:
     def test_korvold_excludes_wrath_of_god(self, populated_db):
         """Wrath of God (DestroyAll) should NOT be a synergy match for Korvold."""
         results = find_all_complements(populated_db, ["Korvold, Fae-Cursed King"])
-        synergy_candidates = {
-            r.candidate for r in results if r.direction == "synergy"
-        }
+        synergy_candidates = {r.candidate for r in results if r.direction == "synergy"}
         assert "Wrath of God" not in synergy_candidates
 
 
@@ -124,7 +120,9 @@ class TestFindTokenSacChain:
         which creates Treasure tokens (self-sacrificing)."""
         cmdr_ports = load_ports_for_set(populated_db, ["Korvold, Fae-Cursed King"])
         results = _find_token_sac_chain(
-            populated_db, cmdr_ports, {"Korvold, Fae-Cursed King"},
+            populated_db,
+            cmdr_ports,
+            {"Korvold, Fae-Cursed King"},
         )
         candidates = _candidates(results)
         assert "Dockside Extortionist" in candidates
@@ -133,7 +131,9 @@ class TestFindTokenSacChain:
         """Results should have rule_id 'token_sac_chain'."""
         cmdr_ports = load_ports_for_set(populated_db, ["Korvold, Fae-Cursed King"])
         results = _find_token_sac_chain(
-            populated_db, cmdr_ports, {"Korvold, Fae-Cursed King"},
+            populated_db,
+            cmdr_ports,
+            {"Korvold, Fae-Cursed King"},
         )
         assert all(r.rule_id == "token_sac_chain" for r in results)
 
@@ -141,7 +141,9 @@ class TestFindTokenSacChain:
         """Rhystic Study has no Sacrificed trigger -- should return empty."""
         cmdr_ports = load_ports_for_set(populated_db, ["Rhystic Study"])
         results = _find_token_sac_chain(
-            populated_db, cmdr_ports, {"Rhystic Study"},
+            populated_db,
+            cmdr_ports,
+            {"Rhystic Study"},
         )
         assert results == []
 
@@ -157,7 +159,9 @@ class TestFindSacrificeOutlets:
         not death (Destination=Graveyard). Should not match sacrifice_outlets."""
         cmdr_ports = load_ports_for_set(populated_db, ["Korvold, Fae-Cursed King"])
         results = _find_sacrifice_outlets(
-            populated_db, cmdr_ports, {"Korvold, Fae-Cursed King"},
+            populated_db,
+            cmdr_ports,
+            {"Korvold, Fae-Cursed King"},
         )
         # Korvold's ChangesZone is self-ETB (Card.Self, Destination=Battlefield)
         # which is NOT a death trigger. Sacrifice outlets need a non-self
@@ -168,7 +172,9 @@ class TestFindSacrificeOutlets:
         """Sol Ring has no ChangesZone death trigger -- returns empty."""
         cmdr_ports = load_ports_for_set(populated_db, ["Sol Ring"])
         results = _find_sacrifice_outlets(
-            populated_db, cmdr_ports, {"Sol Ring"},
+            populated_db,
+            cmdr_ports,
+            {"Sol Ring"},
         )
         assert results == []
 
@@ -183,7 +189,9 @@ class TestFindPanharmoniconStacking:
         """Korvold has no Panharmonicon static -- should return empty."""
         cmdr_ports = load_ports_for_set(populated_db, ["Korvold, Fae-Cursed King"])
         results = _find_panharmonicon_stacking(
-            populated_db, cmdr_ports, {"Korvold, Fae-Cursed King"},
+            populated_db,
+            cmdr_ports,
+            {"Korvold, Fae-Cursed King"},
         )
         assert results == []
 
@@ -191,7 +199,9 @@ class TestFindPanharmoniconStacking:
         """Sol Ring has no Panharmonicon -- should return empty."""
         cmdr_ports = load_ports_for_set(populated_db, ["Sol Ring"])
         results = _find_panharmonicon_stacking(
-            populated_db, cmdr_ports, {"Sol Ring"},
+            populated_db,
+            cmdr_ports,
+            {"Sol Ring"},
         )
         assert results == []
 
@@ -201,7 +211,9 @@ class TestFindPanharmoniconStacking:
         with overlapping modes (if any exist in fixtures)."""
         cmdr_ports = load_ports_for_set(populated_db, ["Panharmonicon"])
         results = _find_panharmonicon_stacking(
-            populated_db, cmdr_ports, {"Panharmonicon"},
+            populated_db,
+            cmdr_ports,
+            {"Panharmonicon"},
         )
         # Panharmonicon itself is the only card with Panharmonicon static
         # in our fixtures, so it should not find itself.
@@ -219,7 +231,9 @@ class TestFindScalesWithDensity:
         Should return empty since its scales_with is not P1P1-related."""
         cmdr_ports = load_ports_for_set(populated_db, ["Tireless Tracker"])
         results = _find_scales_with_density(
-            populated_db, cmdr_ports, {"Tireless Tracker"},
+            populated_db,
+            cmdr_ports,
+            {"Tireless Tracker"},
         )
         # Tireless Tracker doesn't have a scales_with port at all in Forge data
         # (its scaling is implicit in the trigger). So this should be empty.
@@ -229,7 +243,9 @@ class TestFindScalesWithDensity:
         """Rhystic Study has no scales_with port -- should return empty."""
         cmdr_ports = load_ports_for_set(populated_db, ["Rhystic Study"])
         results = _find_scales_with_density(
-            populated_db, cmdr_ports, {"Rhystic Study"},
+            populated_db,
+            cmdr_ports,
+            {"Rhystic Study"},
         )
         assert results == []
 
@@ -246,7 +262,9 @@ class TestFindSpellcastDensity:
         spell density matches (Card is in _TOO_BROAD)."""
         cmdr_ports = load_ports_for_set(populated_db, ["Rhystic Study"])
         results = _find_spellcast_density_complements(
-            populated_db, cmdr_ports, {"Rhystic Study"},
+            populated_db,
+            cmdr_ports,
+            {"Rhystic Study"},
         )
         # Rhystic Study's SpellCast has ValidCard=Card which is _TOO_BROAD
         # so no spell_density complements should be generated.
@@ -256,7 +274,9 @@ class TestFindSpellcastDensity:
         """Sol Ring has no SpellCast trigger -- should return empty."""
         cmdr_ports = load_ports_for_set(populated_db, ["Sol Ring"])
         results = _find_spellcast_density_complements(
-            populated_db, cmdr_ports, {"Sol Ring"},
+            populated_db,
+            cmdr_ports,
+            {"Sol Ring"},
         )
         assert results == []
 
@@ -271,7 +291,9 @@ class TestFindCombatEnhancers:
         """Korvold triggers on Sacrificed, not DamageDone. Should return empty."""
         cmdr_ports = load_ports_for_set(populated_db, ["Korvold, Fae-Cursed King"])
         results = _find_combat_enhancers(
-            populated_db, cmdr_ports, {"Korvold, Fae-Cursed King"},
+            populated_db,
+            cmdr_ports,
+            {"Korvold, Fae-Cursed King"},
         )
         assert results == []
 
@@ -279,7 +301,9 @@ class TestFindCombatEnhancers:
         """Sol Ring has no DamageDone trigger -- should return empty."""
         cmdr_ports = load_ports_for_set(populated_db, ["Sol Ring"])
         results = _find_combat_enhancers(
-            populated_db, cmdr_ports, {"Sol Ring"},
+            populated_db,
+            cmdr_ports,
+            {"Sol Ring"},
         )
         assert results == []
 
@@ -294,7 +318,9 @@ class TestFindEvasionComplements:
         """Korvold has no DamageDone trigger -- should return empty."""
         cmdr_ports = load_ports_for_set(populated_db, ["Korvold, Fae-Cursed King"])
         results = _find_evasion_complements(
-            populated_db, cmdr_ports, {"Korvold, Fae-Cursed King"},
+            populated_db,
+            cmdr_ports,
+            {"Korvold, Fae-Cursed King"},
         )
         assert results == []
 
@@ -302,7 +328,9 @@ class TestFindEvasionComplements:
         """Rhystic Study has no DamageDone trigger."""
         cmdr_ports = load_ports_for_set(populated_db, ["Rhystic Study"])
         results = _find_evasion_complements(
-            populated_db, cmdr_ports, {"Rhystic Study"},
+            populated_db,
+            cmdr_ports,
+            {"Rhystic Study"},
         )
         assert results == []
 
@@ -321,7 +349,9 @@ class TestFindEffectFeedsEtb:
         on ChangesZone Creature entering Battlefield."""
         cmdr_ports = load_ports_for_set(populated_db, ["Dockside Extortionist"])
         results = _find_effect_feeds_etb(
-            populated_db, cmdr_ports, {"Dockside Extortionist"},
+            populated_db,
+            cmdr_ports,
+            {"Dockside Extortionist"},
         )
         candidates = _candidates(results)
         assert "Cathars' Crusade" in candidates
@@ -330,7 +360,9 @@ class TestFindEffectFeedsEtb:
         """Results should have rule_id 'effect_feeds_trigger'."""
         cmdr_ports = load_ports_for_set(populated_db, ["Dockside Extortionist"])
         results = _find_effect_feeds_etb(
-            populated_db, cmdr_ports, {"Dockside Extortionist"},
+            populated_db,
+            cmdr_ports,
+            {"Dockside Extortionist"},
         )
         assert all(r.rule_id == "effect_feeds_trigger" for r in results)
 
@@ -338,7 +370,9 @@ class TestFindEffectFeedsEtb:
         """Sol Ring has no Token/ChangeZone effect -- returns empty."""
         cmdr_ports = load_ports_for_set(populated_db, ["Sol Ring"])
         results = _find_effect_feeds_etb(
-            populated_db, cmdr_ports, {"Sol Ring"},
+            populated_db,
+            cmdr_ports,
+            {"Sol Ring"},
         )
         assert results == []
 
@@ -346,7 +380,9 @@ class TestFindEffectFeedsEtb:
         """Dockside should not appear in its own results."""
         cmdr_ports = load_ports_for_set(populated_db, ["Dockside Extortionist"])
         results = _find_effect_feeds_etb(
-            populated_db, cmdr_ports, {"Dockside Extortionist"},
+            populated_db,
+            cmdr_ports,
+            {"Dockside Extortionist"},
         )
         assert "Dockside Extortionist" not in _candidates(results)
 
@@ -356,6 +392,8 @@ class TestFindEffectFeedsEtb:
         commander's literal subtype."""
         cmdr_ports = load_ports_for_set(populated_db, ["Scute Swarm"])
         results = _find_effect_feeds_etb(
-            populated_db, cmdr_ports, {"Scute Swarm"},
+            populated_db,
+            cmdr_ports,
+            {"Scute Swarm"},
         )
         assert results == []
