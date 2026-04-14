@@ -118,8 +118,20 @@ def test_score_includes_staple_bonus():
     assert abs(us.score - 0.51) < 1e-9
 
 
+def test_score_multi_rule_bonus_2_rules():
+    """2 distinct synergy rules get +0.02 bonus."""
+    comps = [
+        _comp(rule_id="trigger_effect", cmdr_event="A", cand_event="X"),
+        _comp(rule_id="cost_feeds_trigger", cmdr_event="B", cand_event="Y"),
+    ]
+    idf = {(c.rule_id, c.cmdr_event, c.cand_event, c.filter_group): 1.0 for c in comps}
+    us = UniversalScore(complements=comps, staple_bonus=0.0, idf_weights=idf)
+    # 2 rules -> +0.02 * min(2-1, 4) = +0.02
+    assert abs(us.score - 2.02) < 1e-9
+
+
 def test_score_multi_rule_bonus_3_rules():
-    """3 distinct synergy rules get +0.05 bonus."""
+    """3 distinct synergy rules get +0.04 bonus."""
     comps = [
         _comp(rule_id="trigger_effect", cmdr_event="A", cand_event="X"),
         _comp(rule_id="cost_feeds_trigger", cmdr_event="B", cand_event="Y"),
@@ -127,12 +139,12 @@ def test_score_multi_rule_bonus_3_rules():
     ]
     idf = {(c.rule_id, c.cmdr_event, c.cand_event, c.filter_group): 1.0 for c in comps}
     us = UniversalScore(complements=comps, staple_bonus=0.0, idf_weights=idf)
-    # 3 rules -> +0.05 * min(3-2, 3) = +0.05
-    assert abs(us.score - 3.05) < 1e-9
+    # 3 rules -> +0.02 * min(3-1, 4) = +0.04
+    assert abs(us.score - 3.04) < 1e-9
 
 
 def test_score_multi_rule_bonus_5_rules_capped():
-    """5 distinct synergy rules get capped bonus of +0.15."""
+    """5 distinct synergy rules get capped bonus of +0.08."""
     comps = [
         _comp(rule_id="trigger_effect", cmdr_event="A", cand_event="1"),
         _comp(rule_id="cost_feeds_trigger", cmdr_event="B", cand_event="2"),
@@ -142,19 +154,16 @@ def test_score_multi_rule_bonus_5_rules_capped():
     ]
     idf = {(c.rule_id, c.cmdr_event, c.cand_event, c.filter_group): 1.0 for c in comps}
     us = UniversalScore(complements=comps, staple_bonus=0.0, idf_weights=idf)
-    # 5 rules -> +0.05 * min(5-2, 3) = +0.15
-    assert abs(us.score - 5.15) < 1e-9
+    # 5 rules -> +0.02 * min(5-1, 4) = +0.08
+    assert abs(us.score - 5.08) < 1e-9
 
 
-def test_score_multi_rule_bonus_not_applied_for_2_rules():
-    """2 distinct synergy rules get no multi-rule bonus."""
-    comps = [
-        _comp(rule_id="trigger_effect", cmdr_event="A", cand_event="X"),
-        _comp(rule_id="cost_feeds_trigger", cmdr_event="B", cand_event="Y"),
-    ]
-    idf = {(c.rule_id, c.cmdr_event, c.cand_event, c.filter_group): 1.0 for c in comps}
-    us = UniversalScore(complements=comps, staple_bonus=0.0, idf_weights=idf)
-    assert us.score == 2.0
+def test_score_multi_rule_bonus_not_applied_for_1_rule():
+    """1 rule gets no multi-rule bonus."""
+    c = _comp()
+    key = (c.rule_id, c.cmdr_event, c.cand_event, c.filter_group)
+    us = UniversalScore(complements=[c], staple_bonus=0.0, idf_weights={key: 1.0})
+    assert us.score == 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -226,8 +235,8 @@ def test_to_legacy_buckets_unknown_rule_goes_to_catchall():
     assert buckets["catchall"] == 0.7
 
 
-def test_to_legacy_buckets_total_sums_all():
-    """Total equals sum of all bucket values."""
+def test_to_legacy_buckets_total_matches_score():
+    """Total in legacy buckets matches the score property."""
     comps = [
         _comp(rule_id="trigger_effect", cmdr_event="A", cand_event="1"),
         _comp(rule_id="lord", cmdr_event="B", cand_event="2"),
@@ -235,8 +244,7 @@ def test_to_legacy_buckets_total_sums_all():
     idf = {(c.rule_id, c.cmdr_event, c.cand_event, c.filter_group): 1.0 for c in comps}
     us = UniversalScore(complements=comps, staple_bonus=0.01, idf_weights=idf)
     buckets = us.to_legacy_buckets()
-    expected_total = sum(buckets[b] for b in buckets if b != "total")
-    assert abs(buckets["total"] - expected_total) < 1e-9
+    assert abs(buckets["total"] - us.score) < 1e-9
 
 
 # ---------------------------------------------------------------------------

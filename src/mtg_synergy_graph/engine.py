@@ -123,12 +123,6 @@ class SynergyEngine:
     def __init__(
         self,
         db_path: str | Path,
-        *,
-        # Legacy params accepted but ignored for backward compat
-        graph_metrics: bool = False,
-        chain_matches: bool = False,
-        ranking_mode: str = "universal",
-        breadth_factor: float = 0.05,
     ):
         """Open the engine against a synergy.db.
 
@@ -142,9 +136,6 @@ class SynergyEngine:
         self._forge_version: str = self._detect_forge_version()
         self._candidate_cache: CandidateCache | None = None
         self._score_cache: dict[tuple[str, ...], Any] = {}
-        # Legacy attributes kept for validate.py backward compat
-        self._ranking_mode = ranking_mode
-        self._breadth_factor = breadth_factor
 
     # ----- lifecycle -------------------------------------------------------
 

@@ -1693,7 +1693,6 @@ def _parse_restriction_tags(restriction: str | None) -> set[str]:
 
 def _commander_synergy_tags(
     cmdr_ports: list[PortRow],
-    cmdr_card_rows: Sequence[sqlite3.Row],
 ) -> set[str]:
     """Phase D2: tag set for the commander used by the mana-restriction
     matcher.
@@ -1718,10 +1717,6 @@ def _commander_synergy_tags(
     Filters can be comma-separated (Talrand's ``Instant,Sorcery``) so
     we split on commas before calling :func:`explode_filter`, which
     only knows about ``+`` and ``.``.
-
-    The unused ``cmdr_card_rows`` parameter is kept on the signature so
-    callers don't need to be rewritten if a future phase wants to add
-    a curated subset of static identity tags back.
     """
     tags: set[str] = set()
     for p in cmdr_ports:
@@ -1770,7 +1765,7 @@ def find_mana_restriction_matches(
         return []
 
     cmdr_ports = load_ports_for_set(conn, commander_set)
-    cmdr_tags = _commander_synergy_tags(cmdr_ports, rows)
+    cmdr_tags = _commander_synergy_tags(cmdr_ports)
     if not cmdr_tags:
         return []
 

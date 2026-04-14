@@ -386,7 +386,7 @@ def test_commander_synergy_tags_ignores_static_subtypes():
     today and the function tolerates an empty list.
     """
     cmdr_ports = []
-    tags = _commander_synergy_tags(cmdr_ports, [])
+    tags = _commander_synergy_tags(cmdr_ports)
     assert tags == set()
 
 
@@ -396,7 +396,7 @@ def test_commander_synergy_tags_picks_up_filter_subtypes():
     cmdr_ports = [
         {"port_type": "trigger", "valid_filter": "Card.Vampire+Other"},
     ]
-    tags = _commander_synergy_tags(cmdr_ports, [])
+    tags = _commander_synergy_tags(cmdr_ports)
     assert "Vampire" in tags
 
 
@@ -405,7 +405,7 @@ def test_commander_synergy_tags_splits_comma_separated_filter():
     cmdr_ports = [
         {"port_type": "trigger", "valid_filter": "Instant,Sorcery"},
     ]
-    tags = _commander_synergy_tags(cmdr_ports, [])
+    tags = _commander_synergy_tags(cmdr_ports)
     assert "Instant" in tags
     assert "Sorcery" in tags
 

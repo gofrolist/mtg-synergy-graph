@@ -21,15 +21,12 @@ def main() -> int:
     parser.add_argument("--top", type=int, default=20)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--explain", action="store_true", help="Render plain-English explanations")
-    parser.add_argument(
-        "--graph-metrics", action="store_true", help="Enable Phase 4.6 numpy graph metrics (slow but Hi-Syn boost)"
-    )
     args = parser.parse_args()
 
     cmdr: str | list[str]
     cmdr = [args.commander, args.partner] if args.partner else args.commander
 
-    with SynergyEngine(args.db, graph_metrics=args.graph_metrics) as engine:
+    with SynergyEngine(args.db) as engine:
         meta = engine.metadata()
         print(f"engine: spec={meta['spec_version']} db={meta['db_path']}")
 

@@ -145,7 +145,7 @@ def test_engine_graph_metrics_uses_cache(populated_db, tmp_path):
     build_graph_cache(conn, neighbour_cap=50)
     conn.close()
 
-    with SynergyEngine(db_path, graph_metrics=True) as engine:
+    with SynergyEngine(db_path) as engine:
         page = engine.page("Korvold, Fae-Cursed King", offset=0, limit=20)
         assert page.total > 0
         # All page items must have a graph_metrics bucket present (even if 0).
@@ -160,7 +160,7 @@ def test_engine_graph_metrics_falls_back_when_cache_missing(populated_db, tmp_pa
     shutil.copy(populated_db, db_path)
     # Note: no build_graph_cache here — engine should still work via the
     # live build_causal_graph fallback.
-    with SynergyEngine(db_path, graph_metrics=True) as engine:
+    with SynergyEngine(db_path) as engine:
         page = engine.page("Cathars' Crusade", offset=0, limit=10)
         assert page.total > 0
 

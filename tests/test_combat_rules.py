@@ -462,7 +462,8 @@ class TestFindChangeszoneResonance:
         assert len(results) == 1
         assert results[0].candidate == "Lotus Cobra"
         assert results[0].rule_id == "zone_resonance"
-        assert results[0].cand_event == "Land"
+        assert results[0].cand_event == "Land_Battlefield"
+        assert results[0].filter_group == "Land"
 
     def test_excludes_commander_from_resonance(self, conn: sqlite3.Connection) -> None:
         """Commander excluded from candidate results (line 247)."""
@@ -499,7 +500,8 @@ class TestFindChangeszoneResonance:
         )
         results = _find_changeszone_resonance(conn, ports, {"Omnath"})
         assert len(results) == 1
-        assert results[0].cand_event == "Creature"
+        assert results[0].cand_event == "Creature_Battlefield"
+        assert results[0].filter_group == "Creature"
         assert results[0].branch_kind == "sub"
 
     def test_multi_type_valid_filter(self, conn: sqlite3.Connection) -> None:
@@ -508,7 +510,7 @@ class TestFindChangeszoneResonance:
         _insert_port(conn, "Cand1", "trigger", "ChangesZone", valid_filter="Land.YouCtrl")
         results = _find_changeszone_resonance(conn, ports, {"Cmdr"})
         assert len(results) == 1
-        assert results[0].cand_event == "Land"
+        assert results[0].cand_event == "Land_Battlefield"
 
     def test_no_matching_type_returns_empty(self, conn: sqlite3.Connection) -> None:
         """Candidate's type doesn't match commander's -> empty."""

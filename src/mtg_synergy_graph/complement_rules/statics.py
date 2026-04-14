@@ -1,0 +1,213 @@
+"""Static ability complement matchers (cost reduction, graveyard play, edicts)."""
+
+from __future__ import annotations
+
+import re
+import sqlite3
+
+from ..graph_engine import _trigger_only_matches_self
+from .core import PortComplement, PortRow
+
+#: valid_filter values indicating edict-style sacrifice targeting.
+_EDICT_FILTERS: tuple[str, ...] = (
+    "Player",
+    "Opponent",
+    "Player.Opponent",
+    "TriggeredPlayer",
+    "TriggeredDefendingPlayer",
+    "Player.Other",
+)
+
+
+def _find_cost_reduction_synergy(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Find cost reducers for commanders with SpellCast triggers.
+
+    Talrand triggers on Instant/Sorcery cast -> Goblin Electromancer
+    reduces Instant/Sorcery costs, letting you cast more spells per turn.
+    Jhoira triggers on Artifact cast -> Etherium Sculptor reduces
+    Artifact costs.
+
+    Only matches when the cost reducer's ValidCard type overlaps the
+    commander's spell trigger filter type.
+    """
+    # Collect spell types the commander cares about
+    wanted_types: set[str] = set()
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        if pt == "trigger" and ev == "SpellCast":
+            vf = p.get("valid_filter") or ""
+            for alt in vf.split(","):
+                base = alt.strip().split(".")[0].split("+")[0].strip()
+                if base in ("Instant", "Sorcery", "Creature", "Artifact", "Enchantment", "Aura", "Equipment"):
+                    wanted_types.add(base)
+            # "nonCreature" -> Instant/Sorcery/Artifact/Enchantment
+            if "nonCreature" in vf:
+                wanted_types.update(("Instant", "Sorcery", "Artifact", "Enchantment"))
+
+    if not wanted_types:
+        return []
+
+    # Find ReduceCost statics that affect the wanted types
+    cur = conn.execute(
+        "SELECT DISTINCT card_name, raw_line FROM card_ports "
+        "WHERE port_type = 'static' AND event_class = 'ReduceCost' "
+        "AND raw_line NOT LIKE '%ValidCard%Card.Self%' "
+        "AND raw_line NOT LIKE '%ValidTarget%Card.Self%'"
+    )
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name in cmdr_set or name in seen:
+            continue
+        raw = r["raw_line"] or ""
+        # Extract ValidCard types
+        m = re.search(r"'ValidCard':\s*'([^']+)'", raw)
+        if not m:
+            m = re.search(r"'ValidTarget':\s*'([^']+)'", raw)
+        if not m:
+            continue
+        valid_card = m.group(1)
+        # Check overlap: prefer specific type match, fall back to generic "Card"
+        matched_type = next((wt for wt in sorted(wanted_types) if wt in valid_card), "")
+        if not matched_type and valid_card.split(".")[0].split(",")[0].strip() == "Card":
+            matched_type = next(iter(sorted(wanted_types)))
+        if not matched_type:
+            continue
+        seen.add(name)
+        results.append(
+            PortComplement(
+                rule_id="cost_reducer",
+                direction="synergy",
+                candidate=name,
+                cmdr_event=f"SpellCast_{matched_type}",
+                cand_event=f"ReduceCost_{matched_type}",
+                filter_group=matched_type,
+            )
+        )
+
+    return results
+
+
+def _find_graveyard_play_synergy(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Find MayPlay-from-Graveyard enablers for landfall/GY commanders.
+
+    Omnath triggers on Land entering -> Crucible of Worlds lets you play
+    lands from graveyard (more landfall triggers from fetch lands).
+    Muldrotha wants to cast permanents from GY -> Crucible covers the
+    land slot.
+
+    Narrow: only ~42 cards have MayPlay + Graveyard + Land.
+    """
+    # Detect landfall commanders
+    has_landfall = False
+    has_gy_scale = False
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        vf = p.get("valid_filter") or ""
+        if pt == "trigger" and ev == "ChangesZone" and "Land" in vf:
+            zd = (p.get("zone_destination") or "").strip() or "Battlefield"
+            if zd == "Battlefield":
+                has_landfall = True
+        if pt == "scales_with" and ("Land" in ev or "land" in ev):
+            has_gy_scale = True
+
+    if not has_landfall and not has_gy_scale:
+        return []
+
+    # Find MayPlay + Graveyard + Land statics
+    cur = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE port_type = 'static' AND event_class = 'Continuous' "
+        "AND raw_line LIKE '%MayPlay%' AND raw_line LIKE '%Graveyard%' "
+        "AND raw_line LIKE '%Land%'"
+    )
+    results: list[PortComplement] = []
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name not in cmdr_set:
+            results.append(
+                PortComplement(
+                    rule_id="graveyard_play",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="landfall",
+                    cand_event="MayPlay_Land_GY",
+                )
+            )
+
+    return results
+
+
+def _find_edict_feeders(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Find edict effects for death-trigger commanders.
+
+    Meren triggers on creatures dying -> Plaguecrafter's ETB forces
+    each player to sacrifice a creature, feeding Meren's trigger.
+    Korvold triggers on Sacrificed -> Grave Pact forces opponents
+    to sacrifice when your creatures die.
+
+    Edicts are Sacrifice/SacrificeAll effects targeting Player/Opponent/Each.
+    N ≈ 100-200 (edict effects in Magic).
+    """
+    # Detect death-trigger commanders
+    has_death_trigger = False
+    has_sacrificed_trigger = False
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        if pt != "trigger":
+            continue
+        if ev == "ChangesZone":
+            zd = (p.get("zone_destination") or "").strip()
+            vf = p.get("valid_filter") or ""
+            if zd == "Graveyard" and not _trigger_only_matches_self(vf):
+                has_death_trigger = True
+        if ev == "Sacrificed":
+            has_sacrificed_trigger = True
+
+    if not has_death_trigger and not has_sacrificed_trigger:
+        return []
+
+    cmdr_event = "Sacrificed" if has_sacrificed_trigger else "ChangesZone_death"
+
+    # Find edict effects: Sacrifice/SacrificeAll targeting opponents/each player.
+    # Safety: placeholders are "?,?,..." from len() of a module-level constant;
+    # all values bound via params — no user input enters the SQL string.
+    placeholders = ",".join("?" * len(_EDICT_FILTERS))
+    cur = conn.execute(
+        f"SELECT DISTINCT card_name FROM card_ports "
+        f"WHERE port_type = 'effect' "
+        f"AND event_class IN ('Sacrifice', 'SacrificeAll') "
+        f"AND valid_filter IN ({placeholders})",
+        _EDICT_FILTERS,
+    )
+    results: list[PortComplement] = []
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name not in cmdr_set:
+            results.append(
+                PortComplement(
+                    rule_id="edict_feeder",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event=cmdr_event,
+                    cand_event="Sacrifice_edict",
+                )
+            )
+
+    return results

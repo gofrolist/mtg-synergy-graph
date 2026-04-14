@@ -7,6 +7,9 @@ import sqlite3
 from ..graph_engine import _trigger_only_matches_self
 from .core import PortComplement, PortRow, _commander_subtypes_from_ports
 
+#: Card types used for zone-resonance matching.
+_PRIMARY_TYPES: frozenset[str] = frozenset({"Creature", "Artifact", "Enchantment", "Land", "Planeswalker"})
+
 
 def _find_combat_enhancers(
     conn: sqlite3.Connection,
@@ -207,16 +210,8 @@ def _find_changeszone_resonance(
     also trigger on lands entering (landfall payoffs). Omnath triggers
     on ``ChangesZone|Elemental`` -> find elemental-ETB payoffs.
     """
-    _PRIMARY_TYPES = frozenset(
-        {
-            "Creature",
-            "Artifact",
-            "Enchantment",
-            "Land",
-            "Planeswalker",
-        }
-    )
-    cmdr_types: set[str] = set()
+    # Collect (type, zone_destination) axes from commander triggers
+    cmdr_axes: set[tuple[str, str]] = set()
     for p in cmdr_ports:
         if p.get("port_type") != "trigger":
             continue
@@ -226,43 +221,55 @@ def _find_changeszone_resonance(
         vf = p.get("valid_filter") or ""
         if not vf or _trigger_only_matches_self(vf):
             continue
+        zd = (p.get("zone_destination") or "").strip() or "Battlefield"
         for alt in vf.split(","):
             base = alt.strip().split(".")[0].split("+")[0].strip()
             if base in _PRIMARY_TYPES:
-                cmdr_types.add(base)
+                cmdr_axes.add((base, zd))
 
-    if not cmdr_types:
+    if not cmdr_axes:
         return []
 
+    cmdr_types = {t for t, _ in cmdr_axes}
+
     cur = conn.execute(
-        "SELECT card_name, valid_filter, branch_kind "
+        "SELECT card_name, valid_filter, zone_destination, branch_kind "
         "FROM card_ports "
         "WHERE port_type = 'trigger' AND event_class = 'ChangesZone' "
         "AND valid_filter IS NOT NULL AND valid_filter != ''"
     )
     results: list[PortComplement] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()  # (card, type_zd) to allow multi-axis
     for r in cur.fetchall():
         card = r["card_name"]
-        if card in cmdr_set or card in seen:
+        if card in cmdr_set:
             continue
         vf = r["valid_filter"] or ""
         if _trigger_only_matches_self(vf):
             continue
+        cand_zd = (r["zone_destination"] or "").strip() or "Battlefield"
         for alt in vf.split(","):
             base = alt.strip().split(".")[0].split("+")[0].strip()
-            if base in cmdr_types:
-                seen.add(card)
-                results.append(
-                    PortComplement(
-                        rule_id="zone_resonance",
-                        direction="synergy",
-                        candidate=card,
-                        cmdr_event="ChangesZone",
-                        cand_event=base,
-                        branch_kind=r["branch_kind"] or "root",
-                    )
+            if base not in cmdr_types:
+                continue
+            # Match zone_destination: ETB↔ETB, death↔death
+            if (base, cand_zd) not in cmdr_axes:
+                continue
+            dedup_key = (card, f"{base}_{cand_zd}")
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
+            results.append(
+                PortComplement(
+                    rule_id="zone_resonance",
+                    direction="synergy",
+                    candidate=card,
+                    cmdr_event="ChangesZone",
+                    cand_event=f"{base}_{cand_zd}",
+                    filter_group=base,
+                    branch_kind=r["branch_kind"] or "root",
                 )
-                break
+            )
+            break
 
     return results

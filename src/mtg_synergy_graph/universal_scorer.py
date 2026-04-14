@@ -58,7 +58,34 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "evasion": "port_match",
     "spellcast_resonance": "spellcast_density",
     "untap_synergy": "port_match",
+    "cost_reducer": "spellcast_density",
+    "graveyard_play": "port_match",
+    "edict_feeder": "sacrifice_synergy",
 }
+
+# ---------------------------------------------------------------------------
+# §1b  Circuit detection — rule direction classification
+# ---------------------------------------------------------------------------
+
+#: Rules where the candidate feeds the commander (candidate → commander).
+_FEEDS_COMMANDER_RULES: frozenset[str] = frozenset(
+    {
+        "cost_feeds_trigger",
+        "trigger_effect",
+        "sacrifice_cluster",
+        "token_sac_chain",
+    }
+)
+
+#: Rules where the commander actively feeds the candidate (commander → candidate).
+#: Excludes broad identity matches (etb_self, zone_resonance) — only rules
+#: where the commander's effect directly enables the candidate.
+_FED_BY_COMMANDER_RULES: frozenset[str] = frozenset(
+    {
+        "effect_feeds_trigger",
+        "etb_sac_target",
+    }
+)
 
 
 @dataclass
@@ -78,6 +105,9 @@ class UniversalScore:
     staple_bonus: float = 0.0
     # IDF weights per (rule_id, cmdr_event, cand_event, filter_group) — injected by scorer
     idf_weights: dict[tuple[str, str, str, str], float] = field(default_factory=dict)
+    circuit_bonus: float = 0.0
+    cmc_bonus: float = 0.0
+    rank_bonus: float = 0.0
 
     @cached_property
     def score(self) -> float:
@@ -101,8 +131,9 @@ class UniversalScore:
         # genuinely better synergy picks (Pitiless Plunderer matches
         # sacrifice_cluster + trigger_effect + effect_feeds_trigger).
         n_rules = len(self.distinct_rules)
-        if n_rules >= 3:
-            base += 0.05 * min(n_rules - 2, 3)
+        if n_rules >= 2:
+            base += 0.02 * min(n_rules - 1, 4)
+        base += self.circuit_bonus + self.cmc_bonus + self.rank_bonus
         return base
 
     @cached_property
@@ -129,6 +160,10 @@ class UniversalScore:
         if self.staple_bonus:
             buckets["staple"] = self.staple_bonus
         buckets["total"] = sum(buckets[b] for b in BUCKETS)
+        n_rules = len(self.distinct_rules)
+        if n_rules >= 2:
+            buckets["total"] += 0.02 * min(n_rules - 1, 4)
+        buckets["total"] += self.circuit_bonus + self.cmc_bonus + self.rank_bonus
         return buckets
 
 
@@ -244,17 +279,43 @@ def score_all_universal(
     for pip in cmdr_pips | {"C"}:
         staple_names.update(STAPLES.get(pip, ()))
 
+    # Detect circuit candidates (match rules from both directions)
+    circuit_candidates: set[str] = set()
+    for name, comps in by_candidate.items():
+        rules_hit = {c.rule_id for c in comps if c.direction == "synergy"}
+        if (rules_hit & _FEEDS_COMMANDER_RULES) and (rules_hit & _FED_BY_COMMANDER_RULES):
+            circuit_candidates.add(name)
+
+    # Bulk-load CMC and edhrec_rank for micro-scores
+    cmc_data: dict[str, float] = {}
+    rank_data: dict[str, int] = {}
+    for row in conn.execute("SELECT name, cmc, edhrec_rank FROM cards"):
+        cmc_data[row["name"]] = row["cmc"] if row["cmc"] is not None else 99.0
+        rank_data[row["name"]] = row["edhrec_rank"] if row["edhrec_rank"] is not None else 99999
+
     # Build results with IDF and quality dampener injected
     results: dict[str, UniversalScore] = {}
     for name, comps in by_candidate.items():
         bonus = 0.01 if name in staple_names else 0.0
+        cmc = cmc_data.get(name, 99.0)
+        rank = rank_data.get(name, 99999)
         results[name] = UniversalScore(
             complements=comps,
             staple_bonus=bonus,
             idf_weights=idf,
+            circuit_bonus=0.05 if name in circuit_candidates else 0.0,
+            cmc_bonus=0.01 * max(0.0, (7.0 - cmc)) / 7.0,
+            rank_bonus=0.005 * max(0.0, 1.0 - rank / 30000.0),
         )
     for name in staple_names:
         if name not in results and name not in set(commander_set):
-            results[name] = UniversalScore(staple_bonus=0.01, idf_weights=idf)
+            cmc = cmc_data.get(name, 99.0)
+            rank = rank_data.get(name, 99999)
+            results[name] = UniversalScore(
+                staple_bonus=0.01,
+                idf_weights=idf,
+                cmc_bonus=0.01 * max(0.0, (7.0 - cmc)) / 7.0,
+                rank_bonus=0.005 * max(0.0, 1.0 - rank / 30000.0),
+            )
 
     return results

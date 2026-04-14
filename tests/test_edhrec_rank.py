@@ -212,11 +212,10 @@ def test_importer_skip_path_leaves_edhrec_rank_null(tmp_path):
 # in test_counter_payoff.py.
 
 
-def test_page_total_score_unchanged_by_tiebreaker(tmp_path):
-    """Tiebreaker must never modify the displayed ``total_score``.
+def test_page_rank_bonus_is_bounded(tmp_path):
+    """edhrec_rank micro-bonus must be small and bounded (max 0.005).
     Two runs — one with ranks populated, one with all ranks NULL —
-    must produce identical score values for every card. Only the
-    intra-tie ordering is allowed to differ."""
+    must produce scores that differ by at most the rank_bonus cap."""
     scryfall_a = tmp_path / "ranked.db"
     scryfall_b = tmp_path / "unranked.db"
     for path, rank_fn in (
@@ -245,5 +244,8 @@ def test_page_total_score_unchanged_by_tiebreaker(tmp_path):
 
     scores_a = _scores_for(scryfall_a)
     scores_b = _scores_for(scryfall_b)
-    # Same keys, same values.
-    assert scores_a == scores_b
+    common = set(scores_a) & set(scores_b)
+    assert common, "Should have overlapping candidates"
+    for card in common:
+        diff = abs(scores_a[card] - scores_b[card])
+        assert diff <= 0.005 + 1e-9, f"{card}: rank bonus diff {diff} exceeds 0.005"

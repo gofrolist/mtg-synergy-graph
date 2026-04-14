@@ -387,7 +387,7 @@ class PortComplement:
     """A single complementary (commander_port, candidate_port) pair."""
 
     rule_id: str
-    direction: str  # "synergy" or "anti_synergy"
+    direction: Literal["synergy", "anti_synergy"]
     candidate: str  # candidate card name
     cmdr_event: str  # commander port event_class
     cand_event: str  # candidate port event_class
@@ -599,6 +599,11 @@ from .panharmonicon import (  # noqa: E402
     _find_panharmonicon_stacking,
     _find_reverse_panharmonicon,
 )
+from .statics import (  # noqa: E402
+    _find_cost_reduction_synergy,
+    _find_edict_feeders,
+    _find_graveyard_play_synergy,
+)
 from .tokens import (  # noqa: E402
     _find_effect_feeds_etb,
     _find_static_strategy,
@@ -748,6 +753,9 @@ def find_all_complements(
         out.extend(_find_evasion_complements(conn, cmdr_ports, cmdr_set))
         out.extend(_find_spellcast_resonance(conn, cmdr_ports, cmdr_set))
         out.extend(_find_untap_synergy(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_cost_reduction_synergy(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_graveyard_play_synergy(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_edict_feeders(conn, cmdr_ports, cmdr_set))
         return out
 
     if not needed_cand:
