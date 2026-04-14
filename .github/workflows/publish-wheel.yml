@@ -1,17 +1,9 @@
 name: Publish wheel
 
 on:
-  workflow_dispatch:
-    inputs:
-      bump:
-        description: "Version bump type"
-        required: true
-        default: "patch"
-        type: choice
-        options:
-          - major
-          - minor
-          - patch
+  push:
+    tags:
+      - "v*"
 
 permissions:
   contents: write
@@ -20,14 +12,11 @@ jobs:
   build-and-release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
 
-      - uses: astral-sh/setup-uv@v6
-
-      - name: Bump version
-        env:
-          BUMP: ${{ inputs.bump }}
-        run: uv version --bump "$BUMP" --no-sync
+      - uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57  # v8.0.0
 
       - name: Read version
         id: version
@@ -36,24 +25,17 @@ jobs:
       - name: Build wheel
         run: uv build
 
-      - name: Commit, tag, and push
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml
-          git commit -m "chore: bump version to ${VERSION}"
-          git tag "v${VERSION}"
-          git push origin HEAD "v${VERSION}"
+      - name: Generate changelog
+        run: uvx git-cliff --latest --strip header -o RELEASE_NOTES.md
 
       - name: Create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          gh release create "v${VERSION}" \
+          gh release create "$TAG" \
             dist/*.whl \
             --title "mtg-synergy-graph ${VERSION}" \
-            --notes "Built from $(git rev-parse --short HEAD)" \
+            --notes-file RELEASE_NOTES.md \
             --latest

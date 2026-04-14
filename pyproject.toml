@@ -33,7 +33,6 @@ select = [
 ]
 ignore = [
     "S101",  # allow assert in tests
-    "S608",  # SQL injection — we use frozenset-guarded interpolation, not user input
     "S108",  # temp file usage is intentional in scripts
     "E501",  # line length handled by formatter
     "RUF002", # ambiguous unicode in strings (MTG card names use special chars)
@@ -43,6 +42,14 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]
 "scripts/**" = ["S101"]
+# S608: all SQL uses ? placeholders; f-strings only interpolate placeholder counts
+"src/mtg_synergy_graph/engine.py" = ["S608"]
+"src/mtg_synergy_graph/graph_engine.py" = ["S608"]
+"src/mtg_synergy_graph/graph_cache.py" = ["S608"]
+"src/mtg_synergy_graph/importer.py" = ["S608"]
+"src/mtg_synergy_graph/scoring.py" = ["S608"]
+"src/mtg_synergy_graph/penalties.py" = ["S608"]
+"src/mtg_synergy_graph/complement_rules/*.py" = ["S608"]
 
 [dependency-groups]
 dev = [

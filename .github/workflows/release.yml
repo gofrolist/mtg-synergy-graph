@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        default: "patch"
+        type: choice
+        options:
+          - major
+          - minor
+          - patch
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57  # v8.0.0
+
+      - name: Bump version
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: uv version --bump "$BUMP" --no-sync
+
+      - name: Read version
+        id: version
+        run: echo "version=$(uv version --short)" >> "$GITHUB_OUTPUT"
+
+      - name: Update changelog
+        run: uvx git-cliff -o CHANGELOG.md
+
+      - name: Create release PR with auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          BRANCH="release/v${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add pyproject.toml CHANGELOG.md
+          git commit -m "chore: release v${VERSION}"
+          git push origin "$BRANCH"
+          gh pr create \
+            --title "chore: release v${VERSION}" \
+            --body "Automated release — bumps version to ${VERSION} and updates CHANGELOG.md." \
+            --head "$BRANCH" \
+            --base main
+          gh pr merge "$BRANCH" --auto --squash

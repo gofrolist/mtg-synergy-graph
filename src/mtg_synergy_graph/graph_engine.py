@@ -1201,10 +1201,11 @@ def find_etb_self_matches(
         cur = conn.execute("SELECT name, card_types, supertypes, subtypes, keywords, color_identity FROM cards")
     else:
         # Build a WHERE clause narrowing to relevant card types
-        where_parts = [f"card_types LIKE '%{t}%'" for t in all_type_hints]
+        params = [f"%{t}%" for t in all_type_hints]
+        where = " OR ".join("card_types LIKE ?" for _ in params)
         cur = conn.execute(
-            f"SELECT name, card_types, supertypes, subtypes, keywords, color_identity "
-            f"FROM cards WHERE {' OR '.join(where_parts)}"
+            f"SELECT name, card_types, supertypes, subtypes, keywords, color_identity FROM cards WHERE {where}",
+            params,
         )
     cards = _rows_to_dicts(cur.fetchall())
 
