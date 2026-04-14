@@ -20,3 +20,4 @@ mtg_synergy.db
 .ruff_cache/
 .ecc/
 logs/
+.coverage

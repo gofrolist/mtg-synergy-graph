@@ -43,6 +43,7 @@
 - Wheel_synergy empty-filter bug, variable shadowing in panharmonicon
 - Address code review — docstring, toughness proxy, creature_names comment
 - Correct REPO_ROOT path in test_scale.py (parents[3] → parents[1])
+- Lower coverage threshold to 77% for CI compatibility
 
 ### 🚜 Refactor
 
@@ -75,6 +76,7 @@
 - *(mtg-synergy-graph)* B2 ApiType effect-verb inventory regression
 - *(mtg-synergy-graph)* F4 golden set 25 → 50, fix Gitrog data gap
 - Add 26 unit tests for complement rule functions
+- Increase coverage to 83% for CI 80% threshold
 
 ### ⚙️ Miscellaneous Tasks
 
@@ -87,6 +89,8 @@
 - *(mtg-synergy-graph)* --graph-metrics opt-in flag (not default)
 - Add graph optional extra to dev dependencies
 - Migrate to Python 3.13, add pre-commit/ruff/CI/publish workflow
+- Add automated release pipeline, security fixes, changelog
+- Add pyright, 80% test coverage, fix type errors and resource leaks
 
 ### ◀️ Revert
 

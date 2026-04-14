@@ -1,6 +1,6 @@
 [project]
 name = "mtg-synergy-graph"
-version = "0.2.0"
+version = "0.3.0"
 description = "Deterministic Forge-DSL graph engine for MTG EDH/Commander synergy"
 requires-python = ">=3.13,<3.15"
 dependencies = []
