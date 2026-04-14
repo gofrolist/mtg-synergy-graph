@@ -20,7 +20,7 @@ from mtg_synergy_graph import SynergyEngine
 from mtg_synergy_graph.db import open_db
 from mtg_synergy_graph.importer import import_cards_folder
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[1]
 FORGE_FOLDER = REPO_ROOT / "data" / "forge" / "forge-gui" / "res" / "cardsfolder"
 
 pytestmark = pytest.mark.skipif(
