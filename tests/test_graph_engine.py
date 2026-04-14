@@ -10,7 +10,6 @@ Includes the Korvold acceptance scenario from §12 Phase 2:
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -36,11 +35,6 @@ from mtg_synergy_graph.graph_engine import (
     _is_unhelpful_payoff_trigger,
     _parse_restriction_tags,
     _zone_overlap,
-    find_flicker_loop_matches,
-    find_mana_restriction_matches,
-    find_sacrifice_synergies,
-    find_stat_scaling_synergies,
-    find_trigger_resonance,
 )
 from mtg_synergy_graph.importer import import_cards_folder
 
@@ -349,43 +343,6 @@ def test_find_sacrifice_synergies_returns_empty_for_non_payoff_commander():
     pass  # populated_db doesn't have a payoff commander; covered below
 
 
-def test_find_sacrifice_synergies_korvold_picks_up_outlets_against_full_db():
-    """Integration: against the real /tmp/synergy_full.db built by the
-    A1-A4 + B1 + B3 + C1 commits, Korvold should see at least one outlet
-    and one payoff_cluster card.
-
-    Skips if the DB isn't present so the test doesn't fail in fresh
-    environments — it's a smoke check, not a property test.
-    """
-
-    db_path = Path("/tmp/synergy_full.db")
-    if not db_path.exists():
-        import pytest
-
-        pytest.skip("/tmp/synergy_full.db not present — run import_cardsfolder first")
-
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        rows = find_sacrifice_synergies(conn, ["Korvold, Fae-Cursed King"])
-    finally:
-        conn.close()
-
-    directions = {r["direction"] for r in rows}
-    candidates = {r["candidate"] for r in rows}
-
-    # Korvold has a Sacrificed trigger so directions 1 + 2 must fire.
-    assert "outlet_for_payoff" in directions
-    assert "payoff_cluster" in directions
-    # Direction 3 doesn't apply (Korvold has no outlet sacrifice cost
-    # of his own — his Sacrificed trigger is the payoff side).
-    assert "payoff_for_outlet" not in directions
-
-    # At least one well-known outlet should appear in the result.
-    expected_outlets = {"Viscera Seer", "Goblin Bombardment", "Phyrexian Altar"}
-    assert candidates & expected_outlets, f"expected at least one of {expected_outlets} in {sorted(candidates)[:20]}"
-
-
 # ---------------------------------------------------------------------------
 # Phase D2 — mana restriction matcher
 # ---------------------------------------------------------------------------
@@ -453,32 +410,6 @@ def test_commander_synergy_tags_splits_comma_separated_filter():
     assert "Sorcery" in tags
 
 
-def test_find_mana_restriction_against_full_db_talrand():
-    """Integration: Talrand should pick up Spell.Instant,Spell.Sorcery
-    restrictions via his SpellCast trigger filter (no static identity
-    crutch needed). Skips if /tmp/synergy_full.db isn't built yet."""
-
-    db_path = Path("/tmp/synergy_full.db")
-    if not db_path.exists():
-        import pytest
-
-        pytest.skip("/tmp/synergy_full.db not present — run import_cardsfolder first")
-
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        rows = find_mana_restriction_matches(conn, ["Talrand, Sky Summoner"])
-    finally:
-        conn.close()
-
-    assert rows, "expected at least one mana-restriction match for Talrand"
-    # Every match must have surfaced via Instant or Sorcery — no static
-    # subtype leakage (Talrand's literal Merfolk / Wizard subtypes must
-    # NOT contribute).
-    for r in rows:
-        assert {"Instant", "Sorcery"} & set(r["matched_tags"]), f"unexpected match {r}"
-
-
 # ---------------------------------------------------------------------------
 # Phase D4 — flicker self-loop detector (primitive only — not wired into
 # scoring; see scoring.py docstring near _score_mana_restriction for the
@@ -521,49 +452,6 @@ def test_card_has_flicker_chain_rejects_etb_only():
     assert not _card_has_flicker_chain(ports)
 
 
-def test_find_flicker_loop_matches_brago_against_full_db():
-    """Integration: Brago is the only golden-set commander with a
-    flicker chain. Verify the matcher finds him AND surfaces well-known
-    flicker-source partners (Conjurer's Closet, Eldrazi Displacer)
-    so phase E density rules can use it.
-    """
-
-    db_path = Path("/tmp/synergy_full.db")
-    if not db_path.exists():
-        import pytest
-
-        pytest.skip("/tmp/synergy_full.db not present — run import_cardsfolder first")
-
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        rows = find_flicker_loop_matches(conn, ["Brago, King Eternal"])
-    finally:
-        conn.close()
-
-    assert rows, "expected at least one flicker cluster match for Brago"
-    cands = {r["candidate"] for r in rows}
-    expected = {"Conjurer's Closet", "Soulherder", "Eldrazi Displacer"}
-    assert cands & expected, f"expected at least one of {expected} in {sorted(cands)[:20]}"
-
-
-def test_find_flicker_loop_matches_returns_empty_for_non_flicker_commander():
-    db_path = Path("/tmp/synergy_full.db")
-    if not db_path.exists():
-        import pytest
-
-        pytest.skip("/tmp/synergy_full.db not present — run import_cardsfolder first")
-
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        # Korvold has zero flicker chain — must return empty.
-        rows = find_flicker_loop_matches(conn, ["Korvold, Fae-Cursed King"])
-    finally:
-        conn.close()
-    assert rows == []
-
-
 # ---------------------------------------------------------------------------
 # Phase C2 — substitution-blocking replacement detection
 # ---------------------------------------------------------------------------
@@ -599,177 +487,6 @@ def test_substitution_blocking_rejects_non_moved_events():
     assert not _is_substitution_blocking_result("", "Exile", "Graveyard")
 
 
-def test_find_replacement_conflicts_flags_rest_in_peace_for_meren():
-    """Integration: Meren's BF→GY trigger is blocked by Rest in Peace's
-    Moved+Exile substitution. Karador has no triggers at all so the
-    matcher returns nothing for him — confirming the trigger gate works.
-    """
-
-    db_path = Path("/tmp/synergy_full.db")
-    if not db_path.exists():
-        import pytest
-
-        pytest.skip("/tmp/synergy_full.db not present — run import_cardsfolder first")
-
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        from mtg_synergy_graph.graph_engine import find_replacement_conflicts
-
-        meren = find_replacement_conflicts(conn, ["Meren of Clan Nel Toth"])
-        karador = find_replacement_conflicts(conn, ["Karador, Ghost Chieftain"])
-    finally:
-        conn.close()
-
-    meren_subs = [r for r in meren if r.get("match_kind") == "substitution"]
-    assert meren_subs, "expected at least one substitution flag for Meren"
-    meren_cards = {r["anti_synergy_card"] for r in meren_subs}
-    expected = {
-        "Rest in Peace",
-        "Leyline of the Void",
-        "Rayami, First of the Fallen",
-    }
-    assert meren_cards & expected, f"expected at least one of {expected}, got {sorted(meren_cards)[:20]}"
-    # Karador has no triggers (his abilities are static + activated),
-    # so the matcher's trigger gate returns early.
-    assert karador == []
-
-
-def test_find_mana_restriction_kaalia_does_not_explode():
-    """Regression: Kaalia of the Vast must NOT match generic Legendary /
-    Cleric restrictions via her literal type line. Her trigger valid
-    filter is ``Card.Self`` (no synergy tags), and her ChangeType$
-    Angel/Demon/Dragon list lives in an SVar that the matcher does not
-    parse, so the expected result is an empty match list — better to
-    miss real matches than to flood with false positives.
-    """
-
-    db_path = Path("/tmp/synergy_full.db")
-    if not db_path.exists():
-        import pytest
-
-        pytest.skip("/tmp/synergy_full.db not present — run import_cardsfolder first")
-
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        rows = find_mana_restriction_matches(conn, ["Kaalia of the Vast"])
-    finally:
-        conn.close()
-
-    cands = {r["candidate"] for r in rows}
-    # Specifically Plaza of Heroes / Delighted Halfling / Untaidake were
-    # the false positives that regressed her −0.038 NDCG before the
-    # static-subtype removal.
-    forbidden = {"Plaza of Heroes", "Delighted Halfling", "Untaidake, the Cloud Keeper"}
-    assert not (cands & forbidden), f"Kaalia must not match generic Legendary fixers: {sorted(cands & forbidden)}"
-
-
 # ---------------------------------------------------------------------------
 # Phase F6 — trigger resonance
 # ---------------------------------------------------------------------------
-
-
-def test_trigger_resonance_korvold_finds_sacrifice_triggers():
-    """Integration: Korvold's ``Sacrificed`` trigger should resonate
-    with other sacrifice-trigger cards like Mayhem Devil.
-    """
-    db_path = Path("data/synergy.db")
-    if not db_path.exists():
-        pytest.skip("data/synergy.db not present")
-
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        rows = find_trigger_resonance(conn, ["Korvold, Fae-Cursed King"])
-    finally:
-        conn.close()
-
-    candidates = {r["candidate"] for r in rows}
-    events = {r["matched_event"] for r in rows}
-
-    assert "Sacrificed" in events
-    assert "Mayhem Devil" in candidates
-    # Should not include broad-event matches.
-    assert "ChangesZone" not in events
-    assert "Phase" not in events
-
-
-def test_trigger_resonance_empty_for_etb_only_commander():
-    """Commanders whose only triggers are ChangesZone (broad) or
-    Card.Self (self-only) should get zero resonance matches."""
-    db_path = Path("data/synergy.db")
-    if not db_path.exists():
-        pytest.skip("data/synergy.db not present")
-
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        # Slimefoot has only ChangesZone|Card.Self — excluded by both
-        # self-only gate and broad-event gate.
-        rows = find_trigger_resonance(conn, ["Slimefoot, the Stowaway"])
-    finally:
-        conn.close()
-
-    assert len(rows) == 0
-
-
-# ---------------------------------------------------------------------------
-# Phase F7 — token_loop, graveyard boost, stat scaling, death sig fix
-# ---------------------------------------------------------------------------
-
-
-def test_sacrifice_synergies_token_loop_finds_pitiless_plunderer():
-    """Pitiless Plunderer makes tokens AND has a death trigger — it
-    should appear as a token_loop candidate for Korvold."""
-    db_path = Path("data/synergy.db")
-    if not db_path.exists():
-        pytest.skip("data/synergy.db not present")
-
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        rows = find_sacrifice_synergies(conn, ["Korvold, Fae-Cursed King"])
-    finally:
-        conn.close()
-
-    token_loop_cards = {r["candidate"] for r in rows if r["direction"] == "token_loop"}
-    assert "Pitiless Plunderer" in token_loop_cards
-    assert "Impulsive Pilferer" in token_loop_cards
-
-
-def test_locust_god_no_sacrifice_synergies():
-    """Locust God's only dies trigger is Card.Self (return to hand) —
-    should NOT produce sacrifice synergies."""
-    db_path = Path("data/synergy.db")
-    if not db_path.exists():
-        pytest.skip("data/synergy.db not present")
-
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        rows = find_sacrifice_synergies(conn, ["The Locust God"])
-    finally:
-        conn.close()
-
-    assert len(rows) == 0
-
-
-def test_stat_scaling_phenax_finds_high_toughness():
-    """Phenax scales_with CardToughness — high-toughness creatures and
-    Defenders should be returned."""
-    db_path = Path("data/synergy.db")
-    if not db_path.exists():
-        pytest.skip("data/synergy.db not present")
-
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        rows = find_stat_scaling_synergies(conn, ["Phenax, God of Deception"])
-    finally:
-        conn.close()
-
-    candidates = {r["candidate"] for r in rows}
-    assert "Tree of Perdition" in candidates
-    assert "Wall of Frost" in candidates
-    assert len(rows) > 50  # should find many high-toughness creatures

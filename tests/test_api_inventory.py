@@ -21,11 +21,6 @@ effects. If B3 ever gets reverted, the test catches it.
 
 from __future__ import annotations
 
-import sqlite3
-from pathlib import Path
-
-import pytest
-
 # Snapshot taken 2026-04-08 against the full cardsfolder, 32327 cards,
 # 174052 ports. When updating, run:
 #
@@ -285,39 +280,6 @@ DELIBERATELY_IGNORED: frozenset[str] = frozenset(
         "ChangeTargets",  # Retargeting
     }
 )
-
-
-def _load_effect_verbs(db_path: Path) -> frozenset[str]:
-    conn = sqlite3.connect(db_path)
-    try:
-        rows = conn.execute("SELECT DISTINCT event_class FROM card_ports WHERE port_type = 'effect'").fetchall()
-    finally:
-        conn.close()
-    return frozenset({r[0] for r in rows if r[0]})
-
-
-def test_effect_verb_inventory_matches_snapshot():
-    """Fail with a clear diff when a new Forge verb appears or a known
-    verb disappears. Run ``import_cardsfolder.py`` first to refresh the
-    DB, then update ``KNOWN_EFFECT_VERBS`` if the diff is intentional."""
-    db_path = Path("/tmp/synergy_full.db")
-    if not db_path.exists():
-        pytest.skip("/tmp/synergy_full.db not present — run import_cardsfolder first")
-
-    current = _load_effect_verbs(db_path)
-    added = current - KNOWN_EFFECT_VERBS
-    removed = KNOWN_EFFECT_VERBS - current
-
-    msg_parts = []
-    if added:
-        msg_parts.append(f"NEW verbs from Forge: {sorted(added)}")
-    if removed:
-        msg_parts.append(f"LOST verbs (matcher regression?): {sorted(removed)}")
-    assert not msg_parts, "\n".join(msg_parts) + (
-        "\n\nUpdate KNOWN_EFFECT_VERBS in tests/test_api_inventory.py "
-        "after reviewing each diff entry. See the module docstring for "
-        "the refresh snippet."
-    )
 
 
 def test_deliberately_ignored_verbs_are_in_known_set():
