@@ -287,6 +287,35 @@ def _find_copy_synergy(
     return results
 
 
+def _wants_graveyard_recursion(
+    cmdr_ports: list[PortRow],
+) -> bool:
+    """Check if the commander recurs its own cards from graveyard.
+
+    True when the commander has a ChangeZone effect from Graveyard
+    (Meren, Karador) or a MayPlay-from-Graveyard static (Kess, Muldrotha).
+
+    False for steal-only commanders like Tergrid whose ChangeZone from
+    Graveyard targets ``TriggeredCard`` (opponent's permanents). If a
+    commander has both self-recursion AND steal, self-recursion wins.
+    """
+    has_self_recursion = False
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        if pt == "effect" and ev == "ChangeZone":
+            zo = (p.get("zone_origin") or "").strip()
+            vf = p.get("valid_filter") or ""
+            # TriggeredCard = steal from opponent (Tergrid), skip
+            if zo == "Graveyard" and "TriggeredCard" not in vf:
+                has_self_recursion = True
+        if pt == "static" and ev == "Continuous":
+            raw = str(p.get("raw_line") or "")
+            if "'MayPlay'" in raw and "'Graveyard'" in raw:
+                has_self_recursion = True
+    return has_self_recursion
+
+
 def _find_etb_sac_targets(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
@@ -300,36 +329,8 @@ def _find_etb_sac_targets(
 
     Narrow intersection: self-ETB trigger AND sacrifice cost -> ~200-400 cards.
     """
-    wants_gy = False
-    for p in cmdr_ports:
-        pt = (p.get("port_type") or "").strip()
-        ev = (p.get("event_class") or "").strip()
-        if pt == "effect" and ev == "ChangeZone":
-            zo = (p.get("zone_origin") or "").strip()
-            if zo == "Graveyard":
-                wants_gy = True
-                break
-        if pt == "static" and ev == "Continuous":
-            raw = str(p.get("raw_line") or "")
-            if "'MayPlay'" in raw and "'Graveyard'" in raw:
-                wants_gy = True
-                break
-
-    if not wants_gy:
+    if not _wants_graveyard_recursion(cmdr_ports):
         return []
-
-    # Gate: the ChangeZone from Graveyard must target the commander's OWN
-    # creatures (reanimation), not opponent's permanents (Tergrid steals).
-    # "TriggeredCard" filter means it targets whatever triggered the ability
-    # (opponent's permanent) -- not a reanimation pattern.
-    for p in cmdr_ports:
-        pt = (p.get("port_type") or "").strip()
-        ev = (p.get("event_class") or "").strip()
-        if pt == "effect" and ev == "ChangeZone":
-            zo = (p.get("zone_origin") or "").strip()
-            vf = p.get("valid_filter") or ""
-            if zo == "Graveyard" and "TriggeredCard" in vf:
-                return []
 
     cur = conn.execute(
         "SELECT DISTINCT a.card_name FROM card_ports a "

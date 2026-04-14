@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import math
 import sqlite3
-import types
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -57,6 +56,8 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "copy_synergy": "port_match",
     "token_sac_chain": "sacrifice_synergy",
     "evasion": "port_match",
+    "spellcast_resonance": "spellcast_density",
+    "untap_synergy": "port_match",
 }
 
 
@@ -75,18 +76,18 @@ class UniversalScore:
 
     complements: list[PortComplement] = field(default_factory=list)
     staple_bonus: float = 0.0
-    # IDF weights per (rule_id, cmdr_event, cand_event) — injected by scorer
-    idf_weights: dict[tuple[str, str, str], float] = field(default_factory=dict)
+    # IDF weights per (rule_id, cmdr_event, cand_event, filter_group) — injected by scorer
+    idf_weights: dict[tuple[str, str, str, str], float] = field(default_factory=dict)
 
     @cached_property
     def score(self) -> float:
         """IDF-weighted synergy score minus anti-synergy."""
         syn = 0.0
         anti = 0.0
-        seen_syn: set[tuple[str, str, str]] = set()
-        seen_anti: set[tuple[str, str, str]] = set()
+        seen_syn: set[tuple[str, str, str, str]] = set()
+        seen_anti: set[tuple[str, str, str, str]] = set()
         for c in self.complements:
-            key = (c.rule_id, c.cmdr_event, c.cand_event)
+            key = (c.rule_id, c.cmdr_event, c.cand_event, c.filter_group)
             if c.direction == "synergy":
                 if key not in seen_syn:
                     seen_syn.add(key)
@@ -112,14 +113,14 @@ class UniversalScore:
         """Map IDF-weighted scores to legacy bucket dict."""
         buckets: dict[str, float] = dict.fromkeys(BUCKETS, 0.0)
         buckets["total"] = 0.0
-        seen: set[tuple[str, str, str, str]] = set()
+        seen: set[tuple[str, str, str, str, str]] = set()
         for c in self.complements:
-            key = (c.rule_id, c.cmdr_event, c.cand_event, c.direction)
+            key = (c.rule_id, c.cmdr_event, c.cand_event, c.filter_group, c.direction)
             if key in seen:
                 continue
             seen.add(key)
             bucket = _RULE_TO_BUCKET.get(c.rule_id, "catchall")
-            idf_key = (c.rule_id, c.cmdr_event, c.cand_event)
+            idf_key = (c.rule_id, c.cmdr_event, c.cand_event, c.filter_group)
             weight = self.idf_weights.get(idf_key, 1.0)
             if c.direction == "anti_synergy":
                 buckets[bucket] -= weight
@@ -149,44 +150,64 @@ _FLAT_COUNT_RULES: frozenset[str] = frozenset(
     }
 )
 
-#: Per-rule flat weight overrides. Tribal density uses a lower weight
-#: (0.5) because random tribal creatures (Bog Rats, Robber Fly) at 1.0
-#: drown out actual synergy cards. At 0.5, a tribal creature scores
-#: 0.5 while a lord scores 0.5 + lord_IDF ≈ 0.74 — proper discrimination.
-_FLAT_WEIGHT_OVERRIDES: types.MappingProxyType[str, float] = types.MappingProxyType(
-    {
-        "tribal_density": 0.5,
-        "token_producer": 0.25,
-        "evasion": 0.15,
-    }
-)
+#: Per-rule flat weight overrides. Density rules use flat weights
+#: because matching many candidates IS the strategy (Talrand wants
+#: every instant). But weights must stay comparable to IDF-weighted
+#: rules (median IDF ≈ 0.09–0.15) so density doesn't drown synergy.
+#:
+#: etb_self uses size-based dampening (see _compute_idf_weights) rather
+#: than a flat override: large Creature groups (N=17k) are dampened so
+#: synergy rules can compete, while small groups (Land N=1.1k) keep
+#: full weight of 1.0.
+_FLAT_WEIGHT_OVERRIDES: dict[str, float] = {
+    "tribal_density": 0.5,
+    "token_producer": 0.25,
+    "evasion": 0.15,
+}
 
 
-def _computeidf_weights(
+def _compute_idf_weights(
     complements: list[PortComplement],
-) -> dict[tuple[str, str, str], float]:
+) -> dict[tuple[str, str, str, str], float]:
     """Compute IDF weights: ``1 / log2(1 + N)`` where N is how many
-    distinct candidates match each ``(rule_id, cmdr_event, cand_event)``
-    tuple.
+    distinct candidates match each
+    ``(rule_id, cmdr_event, cand_event, filter_group)`` tuple.
 
-    Specific matches (Saproling lord: N=3) get IDF ~0.50.
-    Broad matches (sacrifice cost: N=2000) get IDF ~0.09.
+    The ``filter_group`` dimension segments broad matches by the
+    commander's valid_filter context: a commander triggering on
+    ``Creature.Goblin.YouCtrl`` computes IDF against only
+    Goblin-producing candidates (N≈3, IDF≈0.50), not all creatures
+    (N≈2000, IDF≈0.09).
 
-    Density rules (spell_density, scaling) use flat weight of 1.0 per
+    Density rules (spell_density, scaling) use flat weight per
     match — for these rules, matching many candidates IS the strategy
     (Talrand wants EVERY instant), so IDF would incorrectly penalize.
     """
-    freq: dict[tuple[str, str, str], set[str]] = defaultdict(set)
+    freq: dict[tuple[str, str, str, str], set[str]] = defaultdict(set)
     for c in complements:
-        key = (c.rule_id, c.cmdr_event, c.cand_event)
+        key = (c.rule_id, c.cmdr_event, c.cand_event, c.filter_group)
         freq[key].add(c.candidate)
-    result: dict[tuple[str, str, str], float] = {}
+
+    result: dict[tuple[str, str, str, str], float] = {}
     for key, candidates in freq.items():
         rule_id = key[0]
         if rule_id in _FLAT_COUNT_RULES:
-            result[key] = _FLAT_WEIGHT_OVERRIDES.get(rule_id, 1.0)
+            override = _FLAT_WEIGHT_OVERRIDES.get(rule_id)
+            if override is not None:
+                result[key] = override
+            elif rule_id == "etb_self":
+                # etb_self matches every card of a type against the
+                # commander's ChangesZone filter. For Creature triggers
+                # (N=17k) this drowns out actual synergy picks. Dampen
+                # large groups so synergy rules can compete, while
+                # small groups (Land N=1.1k) keep full weight.
+                n = len(candidates)
+                result[key] = 1.0 / math.log2(max(n / 1000, 2.0)) if n > 2000 else 1.0
+            else:
+                result[key] = 1.0
         else:
-            result[key] = 1.0 / math.log2(1.0 + len(candidates))
+            n = len(candidates)
+            result[key] = 1.0 / math.log2(1.0 + n)
     return result
 
 
@@ -204,7 +225,7 @@ def score_all_universal(
     complement rule.
     """
     complements = find_all_complements(conn, commander_set)
-    idf = _computeidf_weights(complements)
+    idf = _compute_idf_weights(complements)
 
     # Group complements by candidate
     by_candidate: dict[str, list[PortComplement]] = defaultdict(list)

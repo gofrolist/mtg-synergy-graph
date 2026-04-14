@@ -258,6 +258,104 @@ def _find_scaling_complements(
     return results
 
 
+def _find_spellcast_resonance(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """SpellCast trigger resonance: find candidates that also trigger on
+    the same spell type as the commander.
+
+    Sythis triggers on Enchantment cast -> Eidolon of Blossoms also
+    triggers on Enchantment entering -> resonance. These enchantress-
+    style payoffs are more synergistic than random enchantments.
+
+    Unlike spell_density (flat weight for every card of the type),
+    this uses IDF weighting so rare payoffs (Enchantment: N=23,
+    IDF~0.22) score higher than common ones (Instant: N=186, IDF~0.13).
+    """
+    _CASTABLE_TYPES = frozenset(
+        {
+            "Instant",
+            "Sorcery",
+            "Creature",
+            "Artifact",
+            "Enchantment",
+            "Planeswalker",
+        }
+    )
+
+    # Extract type filters from commander SpellCast triggers
+    cmdr_types: set[str] = set()
+    cmdr_subtypes: set[str] = set()
+    for p in cmdr_ports:
+        if p.get("port_type") != "trigger":
+            continue
+        ev = (p.get("event_class") or "").strip()
+        if ev not in ("SpellCast", "SpellCastOrCopy"):
+            continue
+        vf = p.get("valid_filter") or ""
+        if not vf:
+            continue
+        for alt in vf.split(","):
+            alt = alt.strip()
+            if not alt or alt.startswith("Card.Self"):
+                continue
+            if "nonCreature" in alt or "non-Creature" in alt:
+                cmdr_types.update({"Instant", "Sorcery", "Artifact", "Enchantment", "Planeswalker"})
+                continue
+            base = alt.split(".")[0].split("+")[0].strip()
+            if base in _CASTABLE_TYPES:
+                cmdr_types.add(base)
+            elif base and base[0].isupper() and base not in ("Card", "Permanent"):
+                cmdr_subtypes.add(base)
+
+    if not cmdr_types and not cmdr_subtypes:
+        return []
+
+    # Find candidate SpellCast triggers with overlapping type filters
+    cur = conn.execute(
+        "SELECT DISTINCT card_name, valid_filter FROM card_ports "
+        "WHERE port_type = 'trigger' "
+        "AND event_class IN ('SpellCast', 'SpellCastOrCopy') "
+        "AND valid_filter IS NOT NULL AND valid_filter != ''"
+    )
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+    for r in cur.fetchall():
+        card = r["card_name"]
+        if card in cmdr_set or card in seen:
+            continue
+        vf = r["valid_filter"] or ""
+        if vf.startswith("Card.Self"):
+            continue
+        # Extract candidate's type filter — find the best matching type
+        # (check all alts so Instant,Sorcery matches a Sorcery-only commander)
+        matched_type = ""
+        for alt in vf.split(","):
+            base = alt.strip().split(".")[0].split("+")[0].strip()
+            if base in cmdr_types:
+                matched_type = base
+                break
+            if base in cmdr_subtypes:
+                matched_type = base
+                break
+        if matched_type and card not in seen:
+            seen.add(card)
+            results.append(
+                PortComplement(
+                    rule_id="spellcast_resonance",
+                    direction="synergy",
+                    candidate=card,
+                    cmdr_event="SpellCast",
+                    cand_event=f"SpellCast_{matched_type}",
+                    filter_group=matched_type,
+                )
+            )
+
+    return results
+
+
 def _find_spellcast_density_complements(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],

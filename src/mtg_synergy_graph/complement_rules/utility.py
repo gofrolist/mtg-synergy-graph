@@ -389,3 +389,48 @@ def _find_extra_land_plays(
         )
 
     return results
+
+
+def _find_untap_synergy(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Find untap effects for commanders with tap-activated abilities.
+
+    Selvala taps for mana -> Quirion Ranger untaps her -> tap again.
+    Krenko taps to make Goblins -> Thousand-Year Elixir lets him untap.
+    Emry taps to cast from graveyard -> Mirran Spy untaps her.
+
+    Matches creature-targeted and unfiltered Untap effects against
+    commanders with tap costs. N ≈ 150, IDF ≈ 0.14.
+    """
+    has_tap_cost = any(
+        (p.get("port_type") or "").strip() == "cost" and (p.get("event_class") or "").strip() == "tap"
+        for p in cmdr_ports
+    )
+    if not has_tap_cost:
+        return []
+
+    # Find Untap effects that can target creatures (commander is a creature)
+    cur = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE port_type = 'effect' AND event_class = 'Untap' "
+        "AND (valid_filter LIKE '%Creature%' "
+        "     OR valid_filter = '' OR valid_filter IS NULL)"
+    )
+    results: list[PortComplement] = []
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name not in cmdr_set:
+            results.append(
+                PortComplement(
+                    rule_id="untap_synergy",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="tap_ability",
+                    cand_event="Untap",
+                )
+            )
+
+    return results

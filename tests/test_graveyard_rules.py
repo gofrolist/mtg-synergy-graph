@@ -975,8 +975,8 @@ class TestFindEtbSacTargets:
         results = _find_etb_sac_targets(conn, cmdr_ports, {"Cmdr"})
         assert results == []
 
-    def test_triggered_card_blocks_even_with_other_gy_port(self, conn) -> None:
-        """If any ChangeZone GY port has TriggeredCard, the whole function returns empty."""
+    def test_self_recursion_wins_over_steal(self, conn) -> None:
+        """Self-recursion port wins over steal port — both present should still match."""
         _insert_card(conn, "Cmdr")
         _insert_card(conn, "Sakura-Tribe Elder")
         _insert_port(
@@ -995,7 +995,8 @@ class TestFindEtbSacTargets:
             _port("Cmdr", "effect", "ChangeZone", zone_origin="Graveyard", valid_filter="TriggeredCard"),
         ]
         results = _find_etb_sac_targets(conn, cmdr_ports, {"Cmdr"})
-        assert results == []
+        assert len(results) == 1
+        assert results[0].candidate == "Sakura-Tribe Elder"
 
     def test_result_events(self, conn) -> None:
         """Results have correct cmdr_event and cand_event."""

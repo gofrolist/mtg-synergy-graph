@@ -17,13 +17,16 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from ..attributes import classify_attr_token, explode_filter
 from ..graph_engine import (
+    _PRODUCING_EFFECT_EVENTS,
     CATCH_ALL_TRIGGERS,
     COST_FEEDS_TRIGGER,
     EVENT_MATCH_MAP,
     REPLACEMENT_BLOCKS_TRIGGER,
     _always,
     _counters_compatible,
+    _effect_produced_attrs,
     _trigger_only_matches_self,
     _zones_compatible,
     load_ports_for_set,
@@ -388,6 +391,7 @@ class PortComplement:
     candidate: str  # candidate card name
     cmdr_event: str  # commander port event_class
     cand_event: str  # candidate port event_class
+    filter_group: str = ""  # filter context from commander's valid_filter
     branch_kind: str = "root"
 
 
@@ -428,6 +432,8 @@ def _build_stax_exclusion(
 
     for trigger_axes, stax_events in _STAX_MAP:
         if cmdr_trigger_events & trigger_axes:
+            # Safety: ph is "?,?,..." placeholders only; stax_events are
+            # internal string constants from _STAX_MAP, never user input.
             ph = ",".join("?" * len(stax_events))
             excluded.update(
                 r["card_name"]
@@ -579,6 +585,7 @@ from .density import (  # noqa: E402
     _find_scales_with_density,
     _find_scaling_complements,
     _find_spellcast_density_complements,
+    _find_spellcast_resonance,
     _find_tribal_density_complements,
 )
 from .graveyard import (  # noqa: E402
@@ -603,8 +610,69 @@ from .utility import (  # noqa: E402
     _find_extra_land_plays,
     _find_flicker_synergy,
     _find_opponent_forcing,
+    _find_untap_synergy,
     _find_wheel_synergy,
 )
+
+
+def _extract_filter_group(valid_filter: str) -> str:
+    """Extract the most specific type/subtype from a port's valid_filter.
+
+    Used to segment IDF groups: a commander triggering on
+    ``Creature.Goblin.YouCtrl`` gets filter_group ``"Goblin"`` so its IDF
+    is computed against only Goblin-producing candidates, not all creatures.
+
+    Priority: subtype > type (more specific wins).
+    Returns ``""`` when the filter is empty or has no useful type info.
+    """
+    if not valid_filter:
+        return ""
+    best_subtype = ""
+    best_type = ""
+    for attr in explode_filter(valid_filter):
+        if attr["is_negated"]:
+            continue
+        kind = attr["attr_kind"]
+        if kind == "subtype" and not best_subtype:
+            best_subtype = attr["attr_value"]
+        elif kind == "type" and not best_type:
+            best_type = attr["attr_value"]
+    return best_subtype or best_type
+
+
+#: Effect events that cannot feed a combat-damage trigger. Burn spells
+#: deal damage from a spell/ability source, not from a creature attacking.
+_NON_COMBAT_DAMAGE_EFFECTS: frozenset[str] = frozenset({"DealDamage", "DamageAll"})
+
+#: Filter groups that are too broad to usefully filter candidates.
+_GENERIC_FILTER_GROUPS: frozenset[str] = frozenset({"Card", "Permanent", "Spell", "You", "OppOwn", "YouOwn"})
+
+
+def _effect_matches_filter_group(effect_port: PortRow, filter_group: str) -> bool:
+    """Check if a candidate effect produces something matching the filter_group.
+
+    Only applied to producing effects (Token, ChangeZone, etc.). For
+    non-producing effects, always returns True (no filtering).
+
+    This is the candidate-side counterpart to ``_extract_filter_group``:
+    the commander's trigger says "I care about Creatures" and this
+    function checks "does this Token effect actually produce a Creature?"
+    """
+    ev = (effect_port.get("event_class") or "").strip()
+    if ev not in _PRODUCING_EFFECT_EVENTS:
+        return True
+
+    produced = _effect_produced_attrs(effect_port)
+    if produced is None:
+        # Ambiguous — give benefit of the doubt
+        return True
+    if not produced:
+        # Non-producing effect (e.g. Animate)
+        return False
+
+    # Classify filter_group to know what kind of attr to check
+    fg_kind = classify_attr_token(filter_group)
+    return (fg_kind, filter_group) in produced
 
 
 def find_all_complements(
@@ -678,6 +746,8 @@ def find_all_complements(
         out.extend(_find_reverse_panharmonicon(conn, cmdr_ports, cmdr_set))
         out.extend(_find_panharmonicon_stacking(conn, cmdr_ports, cmdr_set))
         out.extend(_find_evasion_complements(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_spellcast_resonance(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_untap_synergy(conn, cmdr_ports, cmdr_set))
         return out
 
     if not needed_cand:
@@ -708,10 +778,14 @@ def find_all_complements(
     if not conditions:
         return _card_attr_complements()
 
+    # Safety: conditions are string literals like "port_type IN (?,?)" or
+    # "(port_type = ? AND event_class = ?)" built from internal rule data.
+    # All values are passed via params; no user input is interpolated.
     sql = (
         "SELECT card_name, port_type, event_class, valid_filter, "
         "zone_origin, zone_destination, counter_type, branch_kind, "
-        "is_conditional, replacement_event, replacement_result, amount "
+        "is_conditional, replacement_event, replacement_result, amount, "
+        "raw_line "
         f"FROM card_ports WHERE {' OR '.join(conditions)}"
     )
     rows = conn.execute(sql, params).fetchall()
@@ -749,17 +823,30 @@ def find_all_complements(
             if targets is None:
                 continue
 
+            # Extract filter context for IDF segmentation and candidate filtering
+            fg = _extract_filter_group(cp.get("valid_filter") or "")
+            # Only apply candidate-side filter for meaningful filter groups
+            apply_cand_filter = fg != "" and fg not in _GENERIC_FILTER_GROUPS and rule.cand_port_type == "effect"
+            # Combat-damage triggers (is_combat=1) cannot be fed by
+            # DealDamage/DamageAll effects — burn spells don't cause
+            # creatures to deal combat damage.
+            is_combat = bool(cp.get("is_combat"))
+
             if "*" in targets:
                 # Wildcard: check every candidate port of this type
                 check = targets["*"]
                 for (pt, ev), cand_ports in cand_index.items():
                     if pt != rule.cand_port_type:
                         continue
+                    if is_combat and ev in _NON_COMBAT_DAMAGE_EFFECTS:
+                        continue
                     for cand_p in cand_ports:
                         key = (rule.rule_id, cmdr_ev, cand_p["card_name"], ev)
                         if key in seen:
                             continue
                         if check(cp, cand_p):
+                            if apply_cand_filter and not _effect_matches_filter_group(cand_p, fg):
+                                continue
                             seen.add(key)
                             results.append(
                                 PortComplement(
@@ -768,17 +855,22 @@ def find_all_complements(
                                     candidate=cand_p["card_name"],
                                     cmdr_event=cmdr_ev,
                                     cand_event=ev,
+                                    filter_group=fg,
                                     branch_kind=(cand_p.get("branch_kind") or "root"),
                                 )
                             )
             else:
                 for cand_ev, check in targets.items():
+                    if is_combat and cand_ev in _NON_COMBAT_DAMAGE_EFFECTS:
+                        continue
                     cand_ports = cand_index.get((rule.cand_port_type, cand_ev), [])
                     for cand_p in cand_ports:
                         key = (rule.rule_id, cmdr_ev, cand_p["card_name"], cand_ev)
                         if key in seen:
                             continue
                         if check(cp, cand_p):
+                            if apply_cand_filter and not _effect_matches_filter_group(cand_p, fg):
+                                continue
                             seen.add(key)
                             results.append(
                                 PortComplement(
@@ -787,6 +879,7 @@ def find_all_complements(
                                     candidate=cand_p["card_name"],
                                     cmdr_event=cmdr_ev,
                                     cand_event=cand_ev,
+                                    filter_group=fg,
                                     branch_kind=(cand_p.get("branch_kind") or "root"),
                                 )
                             )
