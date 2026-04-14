@@ -1,0 +1,485 @@
+"""Density-based complement matchers (lord, ETB-self, scaling, spell, tribal)."""
+
+from __future__ import annotations
+
+import re
+import sqlite3
+from collections.abc import Sequence
+from typing import Any
+
+from ..graph_engine import (
+    CATCH_ALL_TRIGGERS,
+    _SELF_EVENT_TRIGGERS,
+    _filter_card_match,
+    _rows_to_dicts,
+    _trigger_only_matches_self,
+    explode_filter,
+)
+from .core import PortComplement, PortRow, _commander_subtypes_from_ports
+
+
+def _find_lord_complements(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Lord matching: candidate static Continuous ports whose affected_scope
+    overlaps with commander's mechanically-relevant subtypes.
+    """
+    cmdr_subtypes = _commander_subtypes_from_ports(
+        conn, list(cmdr_set), cmdr_ports,
+    )
+    if not cmdr_subtypes:
+        return []
+
+    cur = conn.execute(
+        "SELECT card_name, affected_scope, branch_kind "
+        "FROM card_ports "
+        "WHERE port_type = 'static' AND event_class = 'Continuous' "
+        "AND affected_scope IS NOT NULL AND affected_scope != ''"
+    )
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+    for r in cur.fetchall():
+        card = r["card_name"]
+        if card in cmdr_set or card in seen:
+            continue
+        scope = r["affected_scope"] or ""
+        attrs = explode_filter(scope)
+        scope_subtypes = {a["attr_value"] for a in attrs if a["attr_kind"] == "subtype"}
+        if scope_subtypes & cmdr_subtypes:
+            seen.add(card)
+            results.append(PortComplement(
+                rule_id="lord",
+                direction="synergy",
+                candidate=card,
+                cmdr_event="tribal",
+                cand_event="Continuous",
+                branch_kind=r["branch_kind"] or "root",
+            ))
+    return results
+
+
+def _find_etb_self_complements(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """ETB-self: candidate card's identity (type/subtype) satisfies
+    a commander trigger's valid_filter.
+    """
+    # Collect commander self-event triggers with valid_filters
+    triggers: list[PortRow] = []
+    for p in cmdr_ports:
+        if p.get("port_type") != "trigger":
+            continue
+        ev = (p.get("event_class") or "").strip()
+        if ev not in _SELF_EVENT_TRIGGERS:
+            continue
+        vf = p.get("valid_filter") or ""
+        if not vf or _trigger_only_matches_self(vf):
+            continue
+        triggers.append(p)
+
+    if not triggers:
+        return []
+
+    # Parse each trigger's usable alternatives.
+    # Skip overly broad types -- Permanent/Card match nearly everything
+    # and produce IDF ~ 0.07, adding noise without signal.
+    _SKIP_BASES = frozenset({"Permanent", "Card"})
+    parsed: list[tuple[PortRow, list[str]]] = []
+    for trig in triggers:
+        vf = trig.get("valid_filter") or ""
+        alts = [
+            a.strip() for a in vf.split(",")
+            if a.strip()
+            and not a.strip().startswith("Card.Self")
+            and a.strip().split(".")[0].split("+")[0].strip() not in _SKIP_BASES
+        ]
+        if alts:
+            parsed.append((trig, alts))
+
+    if not parsed:
+        return []
+
+    # Pre-compute SQL type hints from trigger filters to avoid full-table scan.
+    # E.g. "Creature.Goblin+YouCtrl" -> SQL WHERE card_types LIKE '%Creature%'
+    _PRIMARY_TYPES = frozenset({
+        "Creature", "Artifact", "Enchantment", "Land", "Instant",
+        "Sorcery", "Planeswalker",
+    })
+    all_type_hints: set[str] = set()
+    needs_full_scan = False
+    for _trig, alts in parsed:
+        for alt in alts:
+            base = alt.split(".")[0].split("+")[0].strip()
+            if base in _PRIMARY_TYPES:
+                all_type_hints.add(base)
+            else:
+                needs_full_scan = True
+                break
+        if needs_full_scan:
+            break
+
+    if needs_full_scan or not all_type_hints:
+        cards = _rows_to_dicts(conn.execute(
+            "SELECT name, card_types, supertypes, subtypes, keywords, color_identity "
+            "FROM cards"
+        ).fetchall())
+    else:
+        params = [f"%{t}%" for t in all_type_hints]
+        where = " OR ".join("card_types LIKE ?" for _ in params)
+        cards = _rows_to_dicts(conn.execute(
+            f"SELECT name, card_types, supertypes, subtypes, keywords, color_identity "
+            f"FROM cards WHERE {where}",
+            params,
+        ).fetchall())
+
+    results: list[PortComplement] = []
+    seen: set[tuple[str, str]] = set()
+    for trig, alts in parsed:
+        ev = (trig.get("event_class") or "").strip()
+        for card in cards:
+            name = card["name"]
+            if name in cmdr_set:
+                continue
+            key = (name, ev)
+            if key in seen:
+                continue
+            if any(_filter_card_match(alt, card) for alt in alts):
+                seen.add(key)
+                results.append(PortComplement(
+                    rule_id="etb_self",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event=ev,
+                    cand_event="card_identity",
+                ))
+
+    return results
+
+
+def _find_scaling_complements(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Scaling: commander scales_with a type -> candidates of that type.
+
+    Uril scales_with Aura -> every Aura card is a complement.
+    """
+    # Extract types from scales_with ports
+    _TYPE_TOKENS = frozenset({
+        "Aura", "Equipment", "Enchantment", "Artifact", "Land",
+        "Instant", "Sorcery", "Planeswalker",
+    })
+    wanted_types: set[str] = set()
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "scales_with":
+            continue
+        raw = str(p.get("raw_line") or "")
+        vf = p.get("valid_filter") or ""
+        for tok in _TYPE_TOKENS:
+            if tok in raw or tok in vf:
+                wanted_types.add(tok)
+
+    if not wanted_types:
+        return []
+
+    # Primary types go to card_types, subtypes to subtypes column
+    _PRIMARY = frozenset({"Enchantment", "Artifact", "Land", "Instant", "Sorcery", "Planeswalker"})
+    primary = wanted_types & _PRIMARY
+    subtypes = wanted_types - _PRIMARY  # Aura, Equipment
+
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+
+    for type_name in primary:
+        cur = conn.execute(
+            "SELECT name FROM cards WHERE card_types LIKE ?",
+            (f"%{type_name}%",),
+        )
+        for r in cur.fetchall():
+            name = r["name"]
+            if name not in cmdr_set and name not in seen:
+                seen.add(name)
+                results.append(PortComplement(
+                    rule_id="scaling",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="scales_with",
+                    cand_event=type_name,
+                ))
+
+    for sub in subtypes:
+        cur = conn.execute(
+            "SELECT name FROM cards WHERE subtypes LIKE ?",
+            (f"%{sub}%",),
+        )
+        for r in cur.fetchall():
+            name = r["name"]
+            if name not in cmdr_set and name not in seen:
+                seen.add(name)
+                results.append(PortComplement(
+                    rule_id="scaling",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="scales_with",
+                    cand_event=sub,
+                ))
+
+    return results
+
+
+def _find_spellcast_density_complements(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """SpellCast/LandPlayed density: commanders with catch-all triggers
+    want cards of the type they trigger on.
+
+    Talrand triggers on Instant/Sorcery -> every Instant/Sorcery is a
+    complement. Edgar triggers on Vampire -> every Vampire creature.
+
+    Extracts the type filter from the catch-all trigger's valid_filter.
+    """
+    _CASTABLE_TYPES = frozenset({
+        "Instant", "Sorcery", "Creature", "Artifact", "Enchantment",
+        "Planeswalker",
+    })
+    _NONCREATURE_TYPES = frozenset({
+        "Instant", "Sorcery", "Artifact", "Enchantment", "Planeswalker",
+    })
+    _TOO_BROAD = frozenset({"Creature", "Permanent", "Card"})
+
+    wanted_types: set[str] = set()
+    wanted_subtypes: set[str] = set()
+
+    # Conspire-granting statics imply spell density need (Wort grants
+    # Conspire to Instant/Sorcery -> wants instant/sorcery density).
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        raw = str(p.get("raw_line") or "")
+        if pt == "static" and ev == "Continuous" and "'Conspire'" in raw:
+            m = re.search(r"'Affected':\s*'([^']+)'", raw)
+            if m:
+                for alt in m.group(1).split(","):
+                    base = alt.strip().split(".")[0].split("+")[0].strip()
+                    if base in _CASTABLE_TYPES and base not in _TOO_BROAD:
+                        wanted_types.add(base)
+
+    for p in cmdr_ports:
+        if p.get("port_type") != "trigger":
+            continue
+        ev = (p.get("event_class") or "").strip()
+        if ev not in CATCH_ALL_TRIGGERS:
+            continue
+        vf = p.get("valid_filter") or ""
+        if not vf:
+            continue
+        for alt in vf.split(","):
+            alt = alt.strip()
+            if not alt or alt.startswith("Card.Self"):
+                continue
+            # Handle negative filters: "Card.nonCreature" -> all non-creature types
+            if "nonCreature" in alt or "non-Creature" in alt:
+                wanted_types.update(_NONCREATURE_TYPES)
+                continue
+            base = alt.split(".")[0].split("+")[0].strip()
+            if base in _CASTABLE_TYPES and base not in _TOO_BROAD:
+                wanted_types.add(base)
+            elif base not in _TOO_BROAD and base and base[0].isupper():
+                wanted_subtypes.add(base)
+
+    if not wanted_types and not wanted_subtypes:
+        return []
+
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+
+    for type_name in wanted_types:
+        cur = conn.execute(
+            "SELECT name FROM cards WHERE card_types LIKE ?",
+            (f"%{type_name}%",),
+        )
+        for r in cur.fetchall():
+            name = r["name"]
+            if name not in cmdr_set and name not in seen:
+                seen.add(name)
+                results.append(PortComplement(
+                    rule_id="spell_density",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="SpellCast",
+                    cand_event=type_name,
+                ))
+
+    for sub in wanted_subtypes:
+        cur = conn.execute(
+            "SELECT name FROM cards WHERE subtypes LIKE ?",
+            (f"%{sub}%",),
+        )
+        for r in cur.fetchall():
+            name = r["name"]
+            if name not in cmdr_set and name not in seen:
+                seen.add(name)
+                results.append(PortComplement(
+                    rule_id="spell_density",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="SpellCast",
+                    cand_event=sub,
+                ))
+
+    return results
+
+
+def _find_tribal_density_complements(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Tribal density: every creature of the commander's tribe is a
+    complement.
+
+    Krenko is a Goblin commander -> every Goblin creature is a complement.
+    Sliver Overlord -> every Sliver. Marrow-Gnawer -> every Rat.
+
+    Uses the same subtype extraction as the lord rule (includes token
+    subtypes like Saproling for Slimefoot).
+    """
+    # Suppress tribal density for spell-copy commanders (Wort). Their
+    # token subtypes pass the tribal gate (Goblin IS a literal subtype)
+    # but the strategy is Conspire/spell-copying, not Goblin tribal.
+    # spell_density is the correct axis for these commanders.
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        raw = str(p.get("raw_line") or "")
+        if pt == "effect" and ev == "CopySpellAbility":
+            return []
+        if pt == "keyword" and ev == "Conspire":
+            return []
+        # Wort grants Conspire via static Continuous AddKeyword
+        if pt == "static" and "'Conspire'" in raw:
+            return []
+
+    subtypes = _commander_subtypes_from_ports(conn, list(cmdr_set), cmdr_ports)
+    if not subtypes:
+        return []
+
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+    for sub in subtypes:
+        cur = conn.execute(
+            "SELECT name FROM cards WHERE subtypes LIKE ? AND card_types LIKE '%Creature%'",
+            (f"%{sub}%",),
+        )
+        for r in cur.fetchall():
+            name = r["name"]
+            if name not in cmdr_set and name not in seen:
+                seen.add(name)
+                results.append(PortComplement(
+                    rule_id="tribal_density",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="tribal",
+                    cand_event=sub,
+                ))
+
+    return results
+
+
+def _find_scales_with_density(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Find cards that contribute to a commander's scaling condition.
+
+    Parses ``scales_with`` event_class to determine what the commander
+    needs more of:
+    - ``CardCounters.P1P1`` -> cards that put +1/+1 counters
+    - ``CardToughness`` -> high-toughness creatures (Phenax mill-by-toughness)
+    - ``LifeOppsLostThisTurn`` -> damage/drain effects
+    """
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "scales_with":
+            continue
+        ev = (p.get("event_class") or "").strip()
+
+        # CardCounters.P1P1 -> find counter producers
+        # Also matches Valid with P1P1 in valid_filter (Hamza:
+        # scales_with Valid filter=Creature.YouCtrl+counters_GE1_P1P1)
+        vf = (p.get("valid_filter") or "").strip()
+        if "P1P1" in ev or "P1P1" in vf:
+            cur = conn.execute(
+                "SELECT DISTINCT card_name FROM card_ports "
+                "WHERE port_type = 'effect' AND event_class IN "
+                "('PutCounter', 'PutCounterAll', 'Proliferate') "
+                "AND (counter_type IS NULL OR counter_type = '' "
+                "OR counter_type = 'P1P1')"
+            )
+            for r in cur.fetchall():
+                name = r["card_name"]
+                if name not in cmdr_set and name not in seen:
+                    seen.add(name)
+                    results.append(PortComplement(
+                        rule_id="scaling",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="scales_P1P1",
+                        cand_event="counter_producer",
+                    ))
+
+        # CardToughness -> high-toughness creatures (Phenax mills by toughness).
+        # Match creatures with toughness significantly exceeding power
+        # (wall-like stat line) OR Defender keyword.
+        elif "CardToughness" in ev:
+            cur = conn.execute(
+                "SELECT DISTINCT name AS card_name FROM cards "
+                "WHERE card_types LIKE '%Creature%' "
+                "AND CAST(toughness AS INTEGER) >= 4 "
+                "AND CAST(toughness AS INTEGER) >= CAST(power AS INTEGER) + 2 "
+                "UNION "
+                "SELECT DISTINCT card_name FROM card_ports "
+                "WHERE port_type = 'keyword' AND event_class = 'Defender'"
+            )
+            for r in cur.fetchall():
+                name = r["card_name"]
+                if name not in cmdr_set and name not in seen:
+                    seen.add(name)
+                    results.append(PortComplement(
+                        rule_id="scaling",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="scales_toughness",
+                        cand_event="high_toughness",
+                    ))
+
+        # LifeOppsLostThisTurn -> drain/damage effects
+        elif "LifeOppsLost" in ev:
+            cur = conn.execute(
+                "SELECT DISTINCT card_name FROM card_ports "
+                "WHERE port_type = 'effect' AND event_class IN "
+                "('LoseLife', 'DealDamage')"
+            )
+            for r in cur.fetchall():
+                name = r["card_name"]
+                if name not in cmdr_set and name not in seen:
+                    seen.add(name)
+                    results.append(PortComplement(
+                        rule_id="scaling",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="scales_opp_life_lost",
+                        cand_event="drain_damage",
+                    ))
+
+    return results
