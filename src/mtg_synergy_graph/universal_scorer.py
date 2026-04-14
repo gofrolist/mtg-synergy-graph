@@ -60,7 +60,6 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "copy_synergy":          "port_match",
     "token_sac_chain":       "sacrifice_synergy",
     "evasion":               "port_match",
-    "exile_play":            "port_match",
 }
 
 
@@ -228,10 +227,7 @@ def _compute_quality_dampeners(
     dampeners: dict[str, float] = {}
 
     # Batch query: get port stats for all candidates
-    placeholders = ",".join("?" * min(len(candidate_names), 999))
-    batches = list(candidate_names)
-
-    # Process in batches of 999 (SQLite limit)
+    # Process in batches of 900 (SQLite limit)
     card_ports_count: dict[str, int] = {}
     card_cleanup_count: dict[str, int] = {}
     card_effect_events: dict[str, set[str]] = defaultdict(set)
@@ -277,10 +273,7 @@ def _compute_quality_dampeners(
         # Cleanup-dominated effects
         cleanup = card_cleanup_count.get(name, 0)
         effects = card_effect_events.get(name, set())
-        effect_total = sum(
-            1 for _ in range(cleanup)  # cleanup count as proxy for total effects
-        ) + len(effects)
-        if effect_total > 0 and cleanup > 0:
+        if cleanup > 0:
             cleanup_ratio = cleanup / max(total, 1)
             if cleanup_ratio > 0.4:
                 d *= 0.5

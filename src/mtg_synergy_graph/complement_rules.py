@@ -362,6 +362,17 @@ class PortComplement:
 # ---------------------------------------------------------------------------
 
 
+#: Commander trigger event → stax static events that block the strategy.
+_STAX_MAP: list[tuple[frozenset[str], tuple[str, ...]]] = [
+    (frozenset({"ChangesZone"}),  ("DisableTriggers",)),
+    (frozenset({"Sacrificed"}),   ("CantSacrifice",)),
+    (frozenset({"SpellCast"}),    ("RaiseCost", "CantBeCast")),
+    (frozenset({"LifeGained"}),   ("CantGainLife",)),
+    (frozenset({"Drawn"}),        ("CantDraw",)),
+    (frozenset({"CounterAdded"}), ("CantPutCounter",)),
+]
+
+
 def _build_stax_exclusion(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
@@ -380,16 +391,6 @@ def _build_stax_exclusion(
     for p in cmdr_ports:
         if (p.get("port_type") or "").strip() == "trigger":
             cmdr_trigger_events.add((p.get("event_class") or "").strip())
-
-    # Map: commander strategy → stax events that block it
-    _STAX_MAP: list[tuple[set[str], tuple[str, ...]]] = [
-        ({"ChangesZone"},     ("DisableTriggers",)),
-        ({"Sacrificed"},      ("CantSacrifice",)),
-        ({"SpellCast"},       ("RaiseCost", "CantBeCast")),
-        ({"LifeGained"},      ("CantGainLife",)),
-        ({"Drawn"},           ("CantDraw",)),
-        ({"CounterAdded"},    ("CantPutCounter",)),
-    ]
 
     for trigger_axes, stax_events in _STAX_MAP:
         if cmdr_trigger_events & trigger_axes:
@@ -828,10 +829,12 @@ def _find_etb_self_complements(
             "FROM cards"
         ).fetchall())
     else:
-        where = " OR ".join(f"card_types LIKE '%{t}%'" for t in all_type_hints)
+        params = [f"%{t}%" for t in all_type_hints]
+        where = " OR ".join("card_types LIKE ?" for _ in params)
         cards = _rows_to_dicts(conn.execute(
             f"SELECT name, card_types, supertypes, subtypes, keywords, color_identity "
-            f"FROM cards WHERE {where}"
+            f"FROM cards WHERE {where}",
+            params,
         ).fetchall())
 
     results: list[PortComplement] = []
@@ -2473,7 +2476,11 @@ def _find_copy_synergy(
 
     # Creature copy: find creatures with self-ETB + valuable effects
     if has_creature_copy:
-        _VALUABLE = "('Draw', 'Destroy', 'DestroyAll', 'Token', 'GainControl', 'DealDamage', 'ChangeZone', 'Mana')"
+        _VALUABLE_LIST = (
+            "Draw", "Destroy", "DestroyAll", "Token", "GainControl",
+            "DealDamage", "ChangeZone", "Mana",
+        )
+        _val_ph = ",".join("?" * len(_VALUABLE_LIST))
         cur2 = conn.execute(
             "SELECT DISTINCT cp.card_name FROM card_ports cp "
             "JOIN cards c ON cp.card_name = c.name "
@@ -2481,10 +2488,11 @@ def _find_copy_synergy(
             "AND cp.valid_filter LIKE '%Card.Self%' "
             "AND cp.zone_destination = 'Battlefield' "
             "AND c.card_types LIKE '%Creature%' "
-            f"AND cp.card_name IN ("
-            f"  SELECT card_name FROM card_ports WHERE port_type = 'effect' "
-            f"  AND event_class IN {_VALUABLE}"
-            f")"
+            "AND cp.card_name IN ("
+            "  SELECT card_name FROM card_ports WHERE port_type = 'effect' "
+            f"  AND event_class IN ({_val_ph})"
+            ")",
+            _VALUABLE_LIST,
         )
         for r in cur2.fetchall():
             name = r["card_name"]
