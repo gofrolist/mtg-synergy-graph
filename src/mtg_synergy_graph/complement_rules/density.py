@@ -179,6 +179,21 @@ def _find_etb_self_complements(
     return results
 
 
+def _token_present_without_non_prefix(token: str, text: str) -> bool:
+    """Return True if ``token`` appears in ``text`` without a 'non' prefix.
+
+    Avoids matching 'nonLand' as containing 'Land', 'nonCreature' as
+    containing 'Creature', etc.
+    """
+    idx = text.find(token)
+    while idx != -1:
+        prefix = text[max(0, idx - 3) : idx].lower()
+        if not prefix.endswith("non"):
+            return True
+        idx = text.find(token, idx + 1)
+    return False
+
+
 def _find_scaling_complements(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
@@ -208,7 +223,7 @@ def _find_scaling_complements(
         raw = str(p.get("raw_line") or "")
         vf = p.get("valid_filter") or ""
         for tok in _TYPE_TOKENS:
-            if tok in raw or tok in vf:
+            if _token_present_without_non_prefix(tok, raw) or _token_present_without_non_prefix(tok, vf):
                 wanted_types.add(tok)
 
     if not wanted_types:
@@ -536,6 +551,134 @@ def _find_tribal_density_complements(
                         cand_event=sub,
                     )
                 )
+
+    return results
+
+
+def _find_power_matters_density(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Find high-power creatures for power-matters commanders.
+
+    Selvala scales_with greatestPower -- she wants big creatures because
+    her tap ability draws cards and adds mana equal to greatest power.
+    Goreclaw, Ghalta similarly want high-power density.
+
+    Tiered by power to give IDF differentiation:
+    - power >= 7: narrow (413 cards, high IDF)
+    - power >= 5: broader (2091 cards, lower IDF)
+    """
+    has_power_scaling = False
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        if pt != "scales_with":
+            continue
+        ev = (p.get("event_class") or "").strip()
+        vf = p.get("valid_filter") or ""
+        if "Power" in ev or "Power" in vf or "greatestPower" in vf:
+            has_power_scaling = True
+            break
+
+    if not has_power_scaling:
+        return []
+
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+    # Tier 1: power >= 7 (premium picks)
+    for row in conn.execute(
+        "SELECT name FROM cards WHERE card_types LIKE '%Creature%' AND CAST(power AS INTEGER) >= 7"
+    ).fetchall():
+        name = row["name"]
+        if name not in cmdr_set:
+            seen.add(name)
+            results.append(
+                PortComplement(
+                    rule_id="power_matters",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="scales_with_power",
+                    cand_event="power_7plus",
+                )
+            )
+    # Tier 2: power 5-6 (good but broader)
+    for row in conn.execute(
+        "SELECT name FROM cards WHERE card_types LIKE '%Creature%' AND CAST(power AS INTEGER) >= 5 AND CAST(power AS INTEGER) < 7"
+    ).fetchall():
+        name = row["name"]
+        if name not in cmdr_set and name not in seen:
+            seen.add(name)
+            results.append(
+                PortComplement(
+                    rule_id="power_matters",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="scales_with_power",
+                    cand_event="power_5plus",
+                )
+            )
+
+    return results
+
+
+def _find_proliferate_synergy(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Find proliferate effects for counter-caring commanders.
+
+    Mizzix (experience counters), Ezuri (experience + P1P1), Vorel
+    (counter doubling), Atraxa (superfriends) — all benefit from
+    proliferate effects that add counters to permanents/players.
+
+    Fires when commander has:
+    - scales_with YourCountersExperience (experience counter commanders)
+    - P1P1 counter interest (from _has_counter_interest)
+    - effect MultiplyCounter (Vorel)
+    - keyword Proliferate (Atraxa — find MORE proliferate cards)
+    """
+    wants_proliferate = False
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        if pt == "scales_with" and "Experience" in ev:
+            wants_proliferate = True
+            break
+        if pt == "effect" and ev == "MultiplyCounter":
+            wants_proliferate = True
+            break
+        if ev == "Proliferate":
+            wants_proliferate = True
+            break
+
+    # Also check P1P1 counter interest
+    if not wants_proliferate and _has_counter_interest(cmdr_ports):
+        wants_proliferate = True
+
+    if not wants_proliferate:
+        return []
+
+    # Find all cards that actively proliferate (effect or trigger, not cost)
+    cur = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE event_class = 'Proliferate' "
+        "AND port_type IN ('effect', 'trigger')"
+    )
+    results: list[PortComplement] = []
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name not in cmdr_set:
+            results.append(
+                PortComplement(
+                    rule_id="proliferate_synergy",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="counter_scaling",
+                    cand_event="proliferate",
+                )
+            )
 
     return results
 

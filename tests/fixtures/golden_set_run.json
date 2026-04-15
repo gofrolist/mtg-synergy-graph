@@ -47,19 +47,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.128328,
-      "on_page_hits": 7,
+      "ndcg30": 0.091595,
+      "on_page_hits": 4,
       "top10": [
         "The Earth Crystal",
         "Ozolith, the Shattered Spire",
         "Benevolent Hydra",
         "Lonis, Genetics Expert",
         "Renegade Krasis",
-        "Predatory Hunger",
-        "Gwenna, Eyes of Gaea",
-        "Eshki, Temur's Roar",
-        "Jackal, Genius Geneticist",
-        "Herald of Ilharg"
+        "Thrummingbird",
+        "Ripples of Potential",
+        "Experimental Augury",
+        "Unnatural Restoration",
+        "Contagion Clasp"
       ]
     },
     {
@@ -450,19 +450,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.053868,
-      "on_page_hits": 19,
+      "ndcg30": 0.091588,
+      "on_page_hits": 16,
       "top10": [
-        "Command Tower",
-        "Exotic Orchard",
-        "Reliquary Tower",
-        "Path of Ancestry",
-        "Evolving Wilds",
-        "Rogue's Passage",
-        "Myriad Landscape",
-        "Bojuka Bog",
-        "Terramorphic Expanse",
-        "Polluted Delta"
+        "Sol Ring",
+        "Swords to Plowshares",
+        "Path to Exile",
+        "Mystic Remora",
+        "Arcane Signet",
+        "Swiftfoot Boots",
+        "Lightning Greaves",
+        "Counterspell",
+        "Thought Vessel",
+        "Cyclonic Rift"
       ]
     },
     {
@@ -791,9 +791,10 @@
       ],
       "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.137932,
+      "ndcg30": 0.12688,
       "on_page_hits": 6,
       "top10": [
+        "Scheming Aspirant",
         "Disciple of the Vault",
         "Greedy Freebooter",
         "Dockside Chef",
@@ -802,8 +803,7 @@
         "Blood Celebrant",
         "Assassin Initiate",
         "Valgavoth's Faithful",
-        "Thieves' Guild Enforcer",
-        "Forsworn Paladin"
+        "Thieves' Guild Enforcer"
       ]
     },
     {
@@ -820,21 +820,21 @@
         "Flux Channeler",
         "Vorinclex, Monstrous Raider"
       ],
-      "hi_syn_hits": 1,
+      "hi_syn_hits": 4,
       "hi_syn_total": 10,
-      "ndcg30": 0.208235,
-      "on_page_hits": 11,
+      "ndcg30": 0.424232,
+      "on_page_hits": 20,
       "top10": [
         "Ezuri, Stalker of Spheres",
         "Contagion Dispenser",
-        "Mikey & Leo, Chaos & Order",
-        "Hardened Bonds",
-        "Flourishing Defenses",
         "Scheming Aspirant",
         "Voidwing Hybrid",
         "Venser, Corpse Puppet",
         "Ichor Aberration",
-        "Hardened Scales"
+        "Mikey & Leo, Chaos & Order",
+        "Hardened Bonds",
+        "Flourishing Defenses",
+        "Whisper of the Dross"
       ]
     },
     {
@@ -853,19 +853,19 @@
       ],
       "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.108006,
+      "ndcg30": 0.112151,
       "on_page_hits": 5,
       "top10": [
-        "Prototype X-8",
-        "Roil Elemental",
         "Elvish Warmaster",
+        "Satoru, the Infiltrator",
         "Cloakwood Swarmkeeper",
+        "Naban, Dean of Iteration",
+        "Elvish Archivist",
+        "Traveling Chocobo",
         "Woodland Champion",
+        "Underhanded Designs",
         "Kotis, Sibsig Champion",
-        "Tainted Aether",
-        "Monkey Cage",
-        "Nature's Wrath",
-        "Spreading Plague"
+        "Panharmonicon"
       ]
     },
     {
@@ -977,19 +977,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.0,
-      "on_page_hits": 0,
+      "ndcg30": 0.012873,
+      "on_page_hits": 1,
       "top10": [
-        "Grist, Voracious Larva",
         "Baloth Prime",
+        "Grist, Voracious Larva",
+        "Titania, Protector of Argoth",
         "Glaring Fleshraker",
+        "Feasting Troll King",
         "Plane-Merge Elf",
         "Springheart Nantuko",
-        "Go-Shintai of Life's Origin",
-        "Titania, Protector of Argoth",
-        "Prosperous Innkeeper",
-        "Golden Guardian",
-        "Feasting Troll King"
+        "Hunted Troll",
+        "Hydra Broodmaster",
+        "Terastodon"
       ]
     },
     {
@@ -1442,19 +1442,19 @@
       ],
       "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.070116,
-      "on_page_hits": 6,
+      "ndcg30": 0.063905,
+      "on_page_hits": 5,
       "top10": [
         "Flourishing Defenses",
         "Michelangelo, Weirdness to 11",
         "Grist, Voracious Larva",
         "Scurry Oak",
+        "Recon Craft Theta",
         "Glaring Fleshraker",
         "Monkey Cage",
         "Plane-Merge Elf",
         "Springheart Nantuko",
-        "Arboreal Alliance",
-        "Esika's Chariot"
+        "Arboreal Alliance"
       ]
     },
     {
@@ -1502,21 +1502,21 @@
         "Stroke of Genius",
         "Mizzix's Mastery"
       ],
-      "hi_syn_hits": 0,
+      "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.062237,
-      "on_page_hits": 21,
+      "ndcg30": 0.291383,
+      "on_page_hits": 25,
       "top10": [
-        "Counterspell",
-        "Cyclonic Rift",
-        "Chaos Warp",
-        "Fierce Guardianship",
-        "Deflecting Swat",
-        "Jeska's Will",
-        "Blasphemous Act",
-        "Pact of Negation",
-        "An Offer You Can't Refuse",
-        "Brainstorm"
+        "Ripples of Potential",
+        "Experimental Augury",
+        "Contentious Plan",
+        "Serum Snare",
+        "Reject Imperfection",
+        "Steady Progress",
+        "Volt Charge",
+        "Tezzeret's Gambit",
+        "Radstorm",
+        "Fuel for the Cause"
       ]
     },
     {
@@ -1564,21 +1564,21 @@
         "Opt",
         "Talrand, Sky Summoner"
       ],
-      "hi_syn_hits": 3,
+      "hi_syn_hits": 5,
       "hi_syn_total": 10,
-      "ndcg30": 0.247991,
-      "on_page_hits": 8,
+      "ndcg30": 0.397297,
+      "on_page_hits": 17,
       "top10": [
         "Spellweaver Volute",
-        "Ashling, Flame Dancer",
         "Harmonic Prodigy",
-        "The Twelfth Doctor",
-        "Storm-Kiln Artist",
-        "Ral, Storm Conduit",
-        "Zaffai, Thunder Conductor",
-        "Jadzi, Oracle of Arcavios",
         "Spell Satchel",
-        "Archmage Emeritus"
+        "Storm-Kiln Artist",
+        "Archmage Emeritus",
+        "Ashling, Flame Dancer",
+        "Ral, Storm Conduit",
+        "Prismari Apprentice",
+        "Zaffai, Thunder Conductor",
+        "A-Spell Satchel"
       ]
     },
     {
@@ -1783,19 +1783,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.04168,
-      "on_page_hits": 5,
+      "ndcg30": 0.072624,
+      "on_page_hits": 7,
       "top10": [
-        "Swashbuckler Extraordinaire",
-        "Long-Range Sensor",
-        "Path of Mettle",
-        "Squall, Gunblade Duelist",
-        "Total War",
+        "Explorer's Scope",
+        "Legion's Landing",
+        "Dollmaker's Shop",
+        "Adaptive Omnitool",
         "Horn of the Mark",
-        "Stitcher's Graft",
-        "Crown of Doom",
-        "Neyali, Suns' Vanguard",
-        "Lucille"
+        "Conjurer's Mantle",
+        "Obsessive Pursuit",
+        "Connecting the Dots",
+        "Akiri, Fearless Voyager",
+        "Breena, the Demagogue"
       ]
     },
     {
@@ -1967,21 +1967,21 @@
         "Master Biomancer",
         "Karn's Bastion"
       ],
-      "hi_syn_hits": 0,
+      "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.028816,
-      "on_page_hits": 5,
+      "ndcg30": 0.197505,
+      "on_page_hits": 14,
       "top10": [
         "Hardened Bonds",
         "Flourishing Defenses",
-        "Legolas's Quick Reflexes",
-        "Quirion Ranger",
-        "Wirewood Symbiote",
-        "Retrofitter Foundry",
-        "Nature's Chosen",
-        "Snap",
-        "Grim Monolith",
-        "Devoted Druid"
+        "Staff of Compleation",
+        "Thrummingbird",
+        "Ripples of Potential",
+        "Experimental Augury",
+        "Unnatural Restoration",
+        "Contagion Clasp",
+        "Contentious Plan",
+        "Throne of Geth"
       ]
     },
     {
@@ -2525,21 +2525,21 @@
         "Windfall",
         "Purphoros, God of the Forge"
       ],
-      "hi_syn_hits": 0,
+      "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.0,
-      "on_page_hits": 0,
+      "ndcg30": 0.024272,
+      "on_page_hits": 1,
       "top10": [
-        "Aberrant Researcher",
-        "Baxter, Fly in the Ointment",
-        "Circuit Mender",
-        "Shocker",
-        "Dragonfly Swarm",
-        "Buzz Bots",
-        "Barbed Shocker",
-        "Robber Fly",
-        "A-Circuit Mender",
-        "Stockman, Mad Fly-entist"
+        "Currency Converter",
+        "Bag of Holding",
+        "Glint-Horn Buccaneer",
+        "Mary Read and Anne Bonny",
+        "Geth's Grimoire",
+        "Invasion of Kaldheim",
+        "Shipwreck Sifters",
+        "All-Seeing Arbiter",
+        "Soul-Guide Lantern",
+        "Fountainport Bell"
       ]
     },
     {
@@ -2651,10 +2651,11 @@
       ],
       "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.160151,
+      "ndcg30": 0.205404,
       "on_page_hits": 11,
       "top10": [
         "Ashling, the Limitless",
+        "Ancient Greenwarden",
         "Creeping Trailblazer",
         "Incandescent Soulstoke",
         "Thicket Crasher",
@@ -2662,7 +2663,6 @@
         "Lumra, Bellow of the Woods",
         "Tempestra, Dame of Games",
         "Xorn",
-        "Ancient Greenwarden",
         "Akoum Hellhound"
       ]
     },
@@ -2959,21 +2959,21 @@
         "Conclave Mentor",
         "Renata, Called to the Hunt"
       ],
-      "hi_syn_hits": 1,
+      "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.111905,
-      "on_page_hits": 8,
+      "ndcg30": 0.07504,
+      "on_page_hits": 6,
       "top10": [
         "Renegade Krasis",
         "Ozolith, the Shattered Spire",
         "Benevolent Hydra",
         "The Earth Crystal",
-        "Walking Ballista",
-        "Hangarback Walker",
-        "Clown Car",
-        "Marketback Walker",
-        "Cryptic Trilobite",
-        "Omarthis, Ghostfire Initiate"
+        "Unnatural Restoration",
+        "Contagion Clasp",
+        "Metastatic Evangel",
+        "Grateful Apparition",
+        "Throne of Geth",
+        "Smell Fear"
       ]
     },
     {
@@ -3054,19 +3054,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.072196,
+      "ndcg30": 0.088785,
       "on_page_hits": 7,
       "top10": [
-        "Krovikan Vampire",
-        "Avarice Amulet",
-        "Measure of Wickedness",
         "Scavenger's Talent",
+        "Vraan, Executioner Thane",
+        "Ajani, Nacatl Pariah",
+        "Sand Scout",
         "Ghoulish Procession",
+        "Polluted Cistern",
+        "Morbid Opportunist",
         "Crowded Crypt",
-        "Yoke of the Damned",
-        "Black Market",
-        "Vengeful Townsfolk",
-        "Spectacle of Destruction"
+        "Unshakable Tail",
+        "Thopter Shop"
       ]
     },
     {

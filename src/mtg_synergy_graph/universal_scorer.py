@@ -65,6 +65,9 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "counter_keyword": "counter_synergy",
     "damage_synergy": "port_match",
     "mana_doubler": "port_match",
+    "power_matters": "scaling",  # IDF-weighted (not in _FLAT_COUNT_RULES); bucket is display-only
+    "landfall_enabler": "port_match",
+    "proliferate_synergy": "counter_synergy",
     "value_engine": "spellcast_density",
 }
 
@@ -288,6 +291,15 @@ def _compute_idf_weights(
                 result[key] = 1.0
         else:
             n = len(candidates)
+            # For forward panharmonicon matches, apply minimum N=10 floor.
+            # Very rare effects (SacrificeAll N=1) get inflated IDF that
+            # doesn't reflect true synergy quality — Krovikan Vampire at
+            # IDF=1.0 shouldn't outrank Zulaport Cutthroat at IDF=0.17.
+            # Exclude reverse_panharmonicon and panharmonicon_stack which
+            # have genuinely unique high-value matches (Harmonic Prodigy).
+            cmdr_event = key[1]
+            if rule_id == "panharmonicon" and n < 10 and "reverse" not in cmdr_event and "stack" not in cmdr_event:
+                n = 10
             w = 1.0 / math.log2(1.0 + n)
             # Apply quality multiplier: cost-based rules are boosted,
             # broad effect rules are dampened.

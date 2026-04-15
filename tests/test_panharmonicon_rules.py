@@ -135,14 +135,14 @@ class TestFindPanharmoniconComplements:
         )
         conn.execute(
             "INSERT INTO card_ports (card_name, port_type, event_class) VALUES (?, ?, ?)",
-            ("Soul Warden", "effect", "GainLife"),  # not in _VALUABLE_EFFECTS
+            ("Soul Warden", "effect", "GainLife"),  # GainLife is in _VALUABLE_EFFECTS
         )
         conn.commit()
 
         results = _find_panharmonicon_complements(conn, cmdr_ports, {"Yarok"})
         candidates = {r.candidate for r in results}
-        # GainLife is not in _VALUABLE_EFFECTS, so should not match
-        assert "Soul Warden" not in candidates
+        # GainLife IS in _VALUABLE_EFFECTS, so Soul Warden should match
+        assert "Soul Warden" in candidates
 
     def test_no_panharmonicon_ports_returns_empty(self, conn):
         """Commander without Panharmonicon event_class returns empty."""

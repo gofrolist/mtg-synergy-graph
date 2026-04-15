@@ -464,6 +464,22 @@ def _filter_cmdr_port(port: PortRow) -> bool:
     return True
 
 
+#: Trigger event classes that indicate a non-creature primary strategy.
+#: Used by gate 4 in _commander_subtypes_from_ports to suppress tribal
+#: density for incidental token producers (Locust God makes Insects but
+#: cares about Drawn, not Insect tribal).
+_NONCREATURE_TRIGGERS: frozenset[str] = frozenset({"Drawn", "SpellCast", "DamageDone", "CounterAdded"})
+
+
+def _has_any_noncreature_trigger(cmdr_ports: list[PortRow]) -> bool:
+    """Return True if commander has any non-creature trigger (Drawn, SpellCast, etc.)."""
+    return any(
+        (p.get("port_type") or "").strip() == "trigger"
+        and (p.get("event_class") or "").strip() in _NONCREATURE_TRIGGERS
+        for p in cmdr_ports
+    )
+
+
 def _commander_subtypes_from_ports(
     conn: sqlite3.Connection,
     commander_set: Sequence[str],
@@ -562,6 +578,14 @@ def _commander_subtypes_from_ports(
                     continue
                 if _cmdr_is_planeswalker:
                     continue
+                # Gate 4: skip when tokens are incidental byproduct of
+                # another strategy. Locust God triggers on Drawn and makes
+                # Insects, but doesn't care about Insects being Insects.
+                # Detect: the Token effect is produced by a non-creature
+                # trigger (Drawn, SpellCast, DamageDone) and the commander
+                # has no other connection to the token subtype.
+                if _has_any_noncreature_trigger(cmdr_ports):
+                    continue
                 # Passed all gates -- token IS the strategy
                 relevant.add(sub)
 
@@ -584,6 +608,8 @@ from .density import (  # noqa: E402
     _find_counter_keyword_synergy,
     _find_etb_self_complements,
     _find_lord_complements,
+    _find_power_matters_density,
+    _find_proliferate_synergy,
     _find_scales_with_density,
     _find_scaling_complements,
     _find_spellcast_density_complements,
@@ -618,6 +644,7 @@ from .utility import (  # noqa: E402
     _find_damage_effect_synergy,
     _find_extra_land_plays,
     _find_flicker_synergy,
+    _find_landfall_enablers,
     _find_mana_doubler_synergy,
     _find_opponent_forcing,
     _find_untap_synergy,
@@ -741,6 +768,7 @@ def find_all_complements(
         out.extend(_find_panharmonicon_complements(conn, cmdr_ports, cmdr_set))
         out.extend(_find_graveyard_fillers(conn, cmdr_ports, cmdr_set))
         out.extend(_find_extra_land_plays(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_landfall_enablers(conn, cmdr_ports, cmdr_set))
         out.extend(_find_scales_with_density(conn, cmdr_ports, cmdr_set))
         out.extend(_find_flicker_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_cost_payoff_complements(conn, cmdr_ports, cmdr_set))
@@ -764,6 +792,8 @@ def find_all_complements(
         out.extend(_find_value_engine_density(conn, cmdr_ports, cmdr_set))
         out.extend(_find_counter_doubler_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_counter_keyword_synergy(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_power_matters_density(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_proliferate_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_damage_effect_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_mana_doubler_synergy(conn, cmdr_ports, cmdr_set))
         return out

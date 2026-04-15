@@ -72,6 +72,8 @@ def _find_panharmonicon_complements(
             "Sacrifice",
             "SacrificeAll",
             "Mana",
+            "LoseLife",
+            "GainLife",
         }
     )
     matched: list[tuple[str, str, str, bool]] = []  # (card, ev, branch_kind, is_self)
@@ -93,22 +95,21 @@ def _find_panharmonicon_complements(
     if not matched:
         return []
 
-    # Batch-load effects for matched candidates to filter on quality
+    # Load effects for matched candidates to filter on quality.
+    # Single query — SQLite handles large IN clauses efficiently and
+    # avoids 12+ round-trip batches (1.15s → ~0.1s for Yarok).
     card_names = [m[0] for m in matched]
     effect_by_card: dict[str, str] = {}
-    batch_size = 500
-    for i in range(0, len(card_names), batch_size):
-        batch = card_names[i : i + batch_size]
-        ph = ",".join("?" * len(batch))
-        rows = conn.execute(
-            f"SELECT card_name, event_class FROM card_ports WHERE card_name IN ({ph}) AND port_type = 'effect'",
-            tuple(batch),
-        ).fetchall()
-        for r in rows:
-            cn = r["card_name"]
-            eff = r["event_class"]
-            if eff in _VALUABLE_EFFECTS and cn not in effect_by_card:
-                effect_by_card[cn] = eff
+    ph = ",".join("?" * len(card_names))
+    rows = conn.execute(
+        f"SELECT card_name, event_class FROM card_ports WHERE card_name IN ({ph}) AND port_type = 'effect'",
+        tuple(card_names),
+    ).fetchall()
+    for r in rows:
+        cn = r["card_name"]
+        eff = r["event_class"]
+        if eff in _VALUABLE_EFFECTS and cn not in effect_by_card:
+            effect_by_card[cn] = eff
 
     results: list[PortComplement] = []
     for card, ev, bk, is_self in matched:

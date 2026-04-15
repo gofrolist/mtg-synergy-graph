@@ -392,6 +392,85 @@ def _find_extra_land_plays(
     return results
 
 
+def _find_landfall_enablers(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Find land-play enablers for landfall trigger commanders.
+
+    Tatyova/Titania/Omnath trigger on lands entering -- they want cards
+    that let you play extra lands (Azusa, Exploration) or replay lands
+    from the graveyard (Ramunap Excavator, Crucible of Worlds).
+
+    Reverse of _find_extra_land_plays: that finds landfall triggers for
+    extra-land commanders; this finds extra-land candidates for landfall
+    commanders.
+    """
+    # Detect: commander has a ChangesZone Land trigger to battlefield
+    has_landfall = False
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        vf = p.get("valid_filter") or ""
+        zd = (p.get("zone_destination") or "").strip()
+        if pt == "trigger" and ev == "ChangesZone" and "Land" in vf and zd == "Battlefield":
+            has_landfall = True
+            break
+
+    if not has_landfall:
+        return []
+
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+
+    # Find candidates with AdjustLandPlays (Azusa, Exploration, Oracle)
+    cur = conn.execute(
+        "SELECT card_name FROM card_ports "
+        "WHERE port_type = 'static' AND event_class = 'Continuous' "
+        "AND raw_line LIKE '%AdjustLandPlays%'"
+    )
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name not in cmdr_set and name not in seen:
+            seen.add(name)
+            results.append(
+                PortComplement(
+                    rule_id="landfall_enabler",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="landfall_trigger",
+                    cand_event="extra_land_plays",
+                )
+            )
+
+    # Find candidates with MayPlay Land from Graveyard (Ramunap, Crucible).
+    # Require Affected to start with 'Land' to exclude cards like
+    # Abandoned Sarcophagus (Card.nonLand) or Chainer (Creature.nonLand).
+    cur2 = conn.execute(
+        "SELECT card_name FROM card_ports "
+        "WHERE port_type = 'static' AND event_class = 'Continuous' "
+        "AND raw_line LIKE '%MayPlay%' "
+        "AND raw_line LIKE '%''Affected'':%Land.%' "
+        "AND raw_line LIKE '%Graveyard%'"
+    )
+    for r in cur2.fetchall():
+        name = r["card_name"]
+        if name not in cmdr_set and name not in seen:
+            seen.add(name)
+            results.append(
+                PortComplement(
+                    rule_id="landfall_enabler",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="landfall_trigger",
+                    cand_event="land_from_graveyard",
+                )
+            )
+
+    return results
+
+
 def _find_untap_synergy(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
