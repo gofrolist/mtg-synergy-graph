@@ -13,12 +13,15 @@ import sqlite3
 import pytest
 
 from mtg_synergy_graph.complement_rules.density import (
+    _find_counter_doubler_synergy,
+    _find_counter_keyword_synergy,
     _find_etb_self_complements,
     _find_lord_complements,
     _find_scales_with_density,
     _find_scaling_complements,
     _find_spellcast_density_complements,
     _find_tribal_density_complements,
+    _find_value_engine_density,
 )
 
 # ---------------------------------------------------------------------------
@@ -913,3 +916,281 @@ class TestFindScalesWithDensity:
         ]
         results = _find_scales_with_density(conn, cmdr_ports, {"P1P1Cmdr3"})
         assert "Mass Counters" in _candidates(results)
+
+
+# ---------------------------------------------------------------------------
+# _find_counter_doubler_synergy
+# ---------------------------------------------------------------------------
+
+
+class TestCounterDoublerSynergy:
+    def test_counter_trigger_finds_doubler(self, conn):
+        """CounterAdded trigger -> finds Hardened Scales (replacement AddCounter)."""
+        _insert_card(conn, "Marchesa", card_types="Creature")
+        _insert_port(conn, "Marchesa", "trigger", "CounterAdded", counter_type="P1P1")
+        _insert_port(
+            conn,
+            "Hardened Scales",
+            "replacement",
+            "AddCounter",
+            raw_line="{'Event': 'AddCounter', 'ValidCard': 'Creature.YouCtrl'}",
+        )
+        # Ensure replacement_event is set
+        conn.execute("UPDATE card_ports SET replacement_event = 'AddCounter' WHERE card_name = 'Hardened Scales'")
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Marchesa",)).fetchall()
+        ]
+        results = _find_counter_doubler_synergy(conn, cmdr_ports, {"Marchesa"})
+        assert len(results) == 1
+        assert results[0].candidate == "Hardened Scales"
+        assert results[0].rule_id == "counter_doubler"
+
+    def test_scales_with_p1p1_also_triggers(self, conn):
+        """scales_with P1P1 -> also detects counter interest."""
+        _insert_card(conn, "Ezuri", card_types="Creature")
+        _insert_port(conn, "Ezuri", "scales_with", "CardCounters.P1P1")
+        _insert_port(
+            conn,
+            "Doubling Season",
+            "replacement",
+            "AddCounter",
+            raw_line="{'Event': 'AddCounter', 'ValidCard': 'Permanent.YouCtrl'}",
+        )
+        conn.execute("UPDATE card_ports SET replacement_event = 'AddCounter' WHERE card_name = 'Doubling Season'")
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Ezuri",)).fetchall()
+        ]
+        results = _find_counter_doubler_synergy(conn, cmdr_ports, {"Ezuri"})
+        assert len(results) == 1
+
+    def test_p1p1_in_valid_filter_triggers(self, conn):
+        """Marchesa pattern: trigger valid_filter with P1P1 -> detects counter interest."""
+        _insert_card(conn, "MarchesaLike", card_types="Creature")
+        _insert_port(
+            conn,
+            "MarchesaLike",
+            "trigger",
+            "ChangesZone",
+            valid_filter="Card.YouCtrl+counters_GE1_P1P1",
+        )
+        _insert_port(
+            conn,
+            "Branching Evo",
+            "replacement",
+            "AddCounter",
+            raw_line="{'Event': 'AddCounter', 'ValidCard': 'Creature.YouCtrl'}",
+        )
+        conn.execute("UPDATE card_ports SET replacement_event = 'AddCounter' WHERE card_name = 'Branching Evo'")
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("MarchesaLike",)).fetchall()
+        ]
+        results = _find_counter_doubler_synergy(conn, cmdr_ports, {"MarchesaLike"})
+        assert len(results) == 1
+
+    def test_self_only_doubler_skipped(self, conn):
+        """Counter doubler targeting Card.Self should be skipped."""
+        _insert_card(conn, "Cmdr", card_types="Creature")
+        _insert_port(conn, "Cmdr", "trigger", "CounterAdded", counter_type="P1P1")
+        _insert_port(
+            conn,
+            "SelfDoubler",
+            "replacement",
+            "AddCounter",
+            raw_line="{'Event': 'AddCounter', 'ValidCard': 'Card.Self'}",
+        )
+        conn.execute("UPDATE card_ports SET replacement_event = 'AddCounter' WHERE card_name = 'SelfDoubler'")
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Cmdr",)).fetchall()
+        ]
+        results = _find_counter_doubler_synergy(conn, cmdr_ports, {"Cmdr"})
+        assert results == []
+
+    def test_no_counter_interest_returns_empty(self, conn):
+        """Commander without counter interest gets no matches."""
+        _insert_card(conn, "Talrand", card_types="Creature")
+        _insert_port(conn, "Talrand", "trigger", "SpellCast")
+        _insert_port(
+            conn,
+            "Hardened Scales",
+            "replacement",
+            "AddCounter",
+            raw_line="{'Event': 'AddCounter'}",
+        )
+        conn.execute("UPDATE card_ports SET replacement_event = 'AddCounter' WHERE card_name = 'Hardened Scales'")
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Talrand",)).fetchall()
+        ]
+        results = _find_counter_doubler_synergy(conn, cmdr_ports, {"Talrand"})
+        assert results == []
+
+    def test_excludes_commander(self, conn):
+        _insert_card(conn, "Cmdr2", card_types="Creature")
+        _insert_port(conn, "Cmdr2", "trigger", "CounterAdded", counter_type="P1P1")
+        _insert_port(
+            conn,
+            "Cmdr2",
+            "replacement",
+            "AddCounter",
+            raw_line="{'Event': 'AddCounter'}",
+        )
+        conn.execute("UPDATE card_ports SET replacement_event = 'AddCounter' WHERE card_name = 'Cmdr2'")
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Cmdr2",)).fetchall()
+        ]
+        results = _find_counter_doubler_synergy(conn, cmdr_ports, {"Cmdr2"})
+        assert results == []
+
+
+# ---------------------------------------------------------------------------
+# _find_counter_keyword_synergy
+# ---------------------------------------------------------------------------
+
+
+class TestCounterKeywordSynergy:
+    def test_counter_trigger_finds_modular(self, conn):
+        """CounterAdded trigger -> finds Modular creature."""
+        _insert_card(conn, "Marchesa", card_types="Creature")
+        _insert_port(conn, "Marchesa", "trigger", "CounterAdded", counter_type="P1P1")
+        _insert_port(conn, "Arcbound Ravager", "keyword", "Modular")
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Marchesa",)).fetchall()
+        ]
+        results = _find_counter_keyword_synergy(conn, cmdr_ports, {"Marchesa"})
+        assert len(results) == 1
+        assert results[0].candidate == "Arcbound Ravager"
+        assert results[0].rule_id == "counter_keyword"
+        assert results[0].cand_event == "Modular"
+
+    def test_finds_undying_and_persist(self, conn):
+        """Multiple counter keywords are matched."""
+        _insert_card(conn, "Cmdr", card_types="Creature")
+        _insert_port(conn, "Cmdr", "trigger", "CounterAdded", counter_type="P1P1")
+        _insert_port(conn, "Geralf's Messenger", "keyword", "Undying")
+        _insert_port(conn, "Kitchen Finks", "keyword", "Persist")
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Cmdr",)).fetchall()
+        ]
+        results = _find_counter_keyword_synergy(conn, cmdr_ports, {"Cmdr"})
+        assert len(results) == 2
+        assert _candidates(results) == {"Geralf's Messenger", "Kitchen Finks"}
+
+    def test_no_counter_interest_returns_empty(self, conn):
+        """Commander without counter interest gets no matches."""
+        _insert_card(conn, "Talrand", card_types="Creature")
+        _insert_port(conn, "Talrand", "trigger", "SpellCast")
+        _insert_port(conn, "Arcbound Worker", "keyword", "Modular")
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Talrand",)).fetchall()
+        ]
+        results = _find_counter_keyword_synergy(conn, cmdr_ports, {"Talrand"})
+        assert results == []
+
+    def test_excludes_commander(self, conn):
+        _insert_card(conn, "Cmdr3", card_types="Creature")
+        _insert_port(conn, "Cmdr3", "trigger", "CounterAdded", counter_type="P1P1")
+        _insert_port(conn, "Cmdr3", "keyword", "Undying")
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Cmdr3",)).fetchall()
+        ]
+        results = _find_counter_keyword_synergy(conn, cmdr_ports, {"Cmdr3"})
+        assert results == []
+
+    def test_deduplicates_multi_keyword(self, conn):
+        """Card with multiple counter keywords only appears once."""
+        _insert_card(conn, "Cmdr4", card_types="Creature")
+        _insert_port(conn, "Cmdr4", "trigger", "CounterAdded", counter_type="P1P1")
+        _insert_port(conn, "DualKeyword", "keyword", "Modular")
+        _insert_port(conn, "DualKeyword", "keyword", "Fabricate")
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Cmdr4",)).fetchall()
+        ]
+        results = _find_counter_keyword_synergy(conn, cmdr_ports, {"Cmdr4"})
+        assert len(results) == 1
+
+
+# ---------------------------------------------------------------------------
+# _find_value_engine_density
+# ---------------------------------------------------------------------------
+
+
+class TestValueEngineDensity:
+    def test_changetype_subtype_matches(self, conn):
+        """Kaalia pattern: ChangeType with Creature.Angel -> finds Angels."""
+        _insert_card(conn, "Kaalia", card_types="Creature")
+        _insert_port(
+            conn,
+            "Kaalia",
+            "effect",
+            "ChangeZone",
+            raw_line="{'ChangeType': 'Creature.Angel+YouCtrl,Creature.Demon+YouCtrl'}",
+        )
+        _insert_card(conn, "Avacyn", card_types="Creature", subtypes="Angel")
+        _insert_card(conn, "Goblin", card_types="Creature", subtypes="Goblin")
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Kaalia",)).fetchall()
+        ]
+        results = _find_value_engine_density(conn, cmdr_ports, {"Kaalia"})
+        assert "Avacyn" in _candidates(results)
+        assert "Goblin" not in _candidates(results)
+        assert all(r.rule_id == "value_engine" for r in results)
+
+    def test_changetype_base_type_matches(self, conn):
+        """Zur pattern: ChangeType Enchantment.cmcLE3 -> finds Enchantments."""
+        _insert_card(conn, "Zur", card_types="Creature")
+        _insert_port(
+            conn,
+            "Zur",
+            "effect",
+            "ChangeZone",
+            raw_line="{'ChangeType': 'Enchantment.cmcLE3'}",
+        )
+        _insert_card(conn, "Grasp of Fate", card_types="Enchantment")
+        _insert_card(conn, "Lightning Bolt", card_types="Instant")
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Zur",)).fetchall()
+        ]
+        results = _find_value_engine_density(conn, cmdr_ports, {"Zur"})
+        assert "Grasp of Fate" in _candidates(results)
+        assert "Lightning Bolt" not in _candidates(results)
+
+    def test_historic_spellcast_matches_artifacts(self, conn):
+        """Jhoira pattern: SpellCast Card.Historic -> finds Artifacts."""
+        _insert_card(conn, "Jhoira", card_types="Creature")
+        _insert_port(conn, "Jhoira", "trigger", "SpellCast", valid_filter="Card.Historic")
+        _insert_card(conn, "Sol Ring", card_types="Artifact")
+        _insert_card(conn, "Lightning Bolt", card_types="Instant")
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Jhoira",)).fetchall()
+        ]
+        results = _find_value_engine_density(conn, cmdr_ports, {"Jhoira"})
+        assert "Sol Ring" in _candidates(results)
+        assert "Lightning Bolt" not in _candidates(results)
+
+    def test_no_changetype_returns_empty(self, conn):
+        """Commander without ChangeType or Historic gets no matches."""
+        _insert_card(conn, "Talrand", card_types="Creature")
+        _insert_port(conn, "Talrand", "trigger", "SpellCast", valid_filter="Instant")
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Talrand",)).fetchall()
+        ]
+        results = _find_value_engine_density(conn, cmdr_ports, {"Talrand"})
+        assert results == []
+
+    def test_excludes_commander(self, conn):
+        _insert_card(conn, "Cmdr", card_types="Creature", subtypes="Angel")
+        _insert_port(
+            conn,
+            "Cmdr",
+            "effect",
+            "ChangeZone",
+            raw_line="{'ChangeType': 'Creature.Angel+YouCtrl'}",
+        )
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Cmdr",)).fetchall()
+        ]
+        results = _find_value_engine_density(conn, cmdr_ports, {"Cmdr"})
+        assert results == []

@@ -12,8 +12,10 @@ import pytest
 
 from mtg_synergy_graph.complement_rules.utility import (
     _find_cost_payoff_complements,
+    _find_damage_effect_synergy,
     _find_extra_land_plays,
     _find_flicker_synergy,
+    _find_mana_doubler_synergy,
     _find_opponent_forcing,
     _find_wheel_synergy,
 )
@@ -815,3 +817,96 @@ class TestFindExtraLandPlays:
         results = _find_extra_land_plays(conn, cmdr_ports, set())
         assert len(results) == 1
         assert results[0].branch_kind == "root"
+
+
+# ---------------------------------------------------------------------------
+# _find_draw_synergy
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# _find_damage_effect_synergy
+# ---------------------------------------------------------------------------
+
+
+class TestDamageEffectSynergy:
+    def test_noncombat_damage_trigger_finds_dealerdamage(self, conn):
+        """Niv-Mizzet (DamageDone, non-combat) -> finds DealDamage effects."""
+        _add_port(conn, "Guttersnipe", port_type="effect", event_class="DealDamage")
+        cmdr_ports = [_port_row(port_type="trigger", event_class="DamageDone", valid_filter="", raw_line="")]
+        results = _find_damage_effect_synergy(conn, cmdr_ports, set())
+        assert len(results) == 1
+        assert results[0].candidate == "Guttersnipe"
+        assert results[0].rule_id == "damage_synergy"
+
+    def test_combat_damage_trigger_skipped(self, conn):
+        """Combat-only DamageDone trigger should NOT match (uses combat_enhancer)."""
+        _add_port(conn, "Guttersnipe", port_type="effect", event_class="DealDamage")
+        cmdr_ports = [
+            _port_row(
+                port_type="trigger",
+                event_class="DamageDone",
+                valid_filter="Creature.YouCtrl",
+                raw_line="{'CombatDamage': 'True'}",
+            )
+        ]
+        results = _find_damage_effect_synergy(conn, cmdr_ports, set())
+        assert results == []
+
+    def test_self_only_trigger_skipped(self, conn):
+        """Card.Self DamageDone trigger should NOT match."""
+        _add_port(conn, "Guttersnipe", port_type="effect", event_class="DealDamage")
+        cmdr_ports = [_port_row(port_type="trigger", event_class="DamageDone", valid_filter="Card.Self")]
+        results = _find_damage_effect_synergy(conn, cmdr_ports, set())
+        assert results == []
+
+    def test_also_finds_damageall(self, conn):
+        """DamageAll effects should also be found."""
+        _add_port(conn, "Earthquake", port_type="effect", event_class="DamageAll")
+        cmdr_ports = [_port_row(port_type="trigger", event_class="DamageDone")]
+        results = _find_damage_effect_synergy(conn, cmdr_ports, set())
+        assert len(results) == 1
+
+    def test_no_damage_trigger_returns_empty(self, conn):
+        _add_port(conn, "Guttersnipe", port_type="effect", event_class="DealDamage")
+        cmdr_ports = [_port_row(port_type="trigger", event_class="SpellCast")]
+        results = _find_damage_effect_synergy(conn, cmdr_ports, set())
+        assert results == []
+
+    def test_excludes_commander(self, conn):
+        _add_port(conn, "Cmdr", port_type="effect", event_class="DealDamage")
+        cmdr_ports = [_port_row(port_type="trigger", event_class="DamageDone")]
+        results = _find_damage_effect_synergy(conn, cmdr_ports, {"Cmdr"})
+        assert results == []
+
+
+# ---------------------------------------------------------------------------
+# _find_mana_doubler_synergy
+# ---------------------------------------------------------------------------
+
+
+class TestManaDoublerSynergy:
+    def test_tapsformana_finds_produce_mana_replacement(self, conn):
+        """TapsForMana trigger -> finds ProduceMana replacement."""
+        _add_port(
+            conn, "Mana Reflection", port_type="replacement", event_class="ProduceMana", replacement_event="ProduceMana"
+        )
+        cmdr_ports = [_port_row(port_type="trigger", event_class="TapsForMana")]
+        results = _find_mana_doubler_synergy(conn, cmdr_ports, set())
+        assert len(results) == 1
+        assert results[0].candidate == "Mana Reflection"
+        assert results[0].rule_id == "mana_doubler"
+
+    def test_no_mana_trigger_returns_empty(self, conn):
+        _add_port(
+            conn, "Mana Reflection", port_type="replacement", event_class="ProduceMana", replacement_event="ProduceMana"
+        )
+        cmdr_ports = [_port_row(port_type="trigger", event_class="SpellCast")]
+        results = _find_mana_doubler_synergy(conn, cmdr_ports, set())
+        assert results == []
+
+    def test_excludes_commander(self, conn):
+        _add_port(conn, "Cmdr", port_type="replacement", event_class="ProduceMana", replacement_event="ProduceMana")
+        cmdr_ports = [_port_row(port_type="trigger", event_class="TapsForMana")]
+        results = _find_mana_doubler_synergy(conn, cmdr_ports, {"Cmdr"})
+        assert results == []

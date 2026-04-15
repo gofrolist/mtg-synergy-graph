@@ -61,6 +61,11 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "cost_reducer": "spellcast_density",
     "graveyard_play": "port_match",
     "edict_feeder": "sacrifice_synergy",
+    "counter_doubler": "counter_synergy",
+    "counter_keyword": "counter_synergy",
+    "damage_synergy": "port_match",
+    "mana_doubler": "port_match",
+    "value_engine": "spellcast_density",
 }
 
 # ---------------------------------------------------------------------------
@@ -111,9 +116,16 @@ class UniversalScore:
 
     @cached_property
     def score(self) -> float:
-        """IDF-weighted synergy score minus anti-synergy."""
+        """IDF-weighted synergy score minus anti-synergy.
+
+        Applies signal concentration dampening: when >70% of a card's
+        synergy score comes from a single rule, the score is reduced.
+        This prevents broad density axes (etb_self N=17k) from creating
+        a high baseline that drowns out differences on secondary axes.
+        """
         syn = 0.0
         anti = 0.0
+        syn_by_rule: dict[str, float] = {}
         seen_syn: set[tuple[str, str, str, str]] = set()
         seen_anti: set[tuple[str, str, str, str]] = set()
         for c in self.complements:
@@ -121,11 +133,28 @@ class UniversalScore:
             if c.direction == "synergy":
                 if key not in seen_syn:
                     seen_syn.add(key)
-                    syn += self.idf_weights.get(key, 1.0)
+                    w = self.idf_weights.get(key, 1.0)
+                    syn += w
+                    syn_by_rule[c.rule_id] = syn_by_rule.get(c.rule_id, 0.0) + w
             else:
                 if key not in seen_anti:
                     seen_anti.add(key)
                     anti += self.idf_weights.get(key, 1.0)
+
+        # Signal concentration dampening: if one rule dominates >70% of
+        # the synergy score AND the card matches 2+ distinct keys, compress
+        # the total. This prevents broad density axes (etb_self N=17k) from
+        # creating a uniform baseline that drowns real score differences.
+        # Cards with only 1 complement key are not penalized — single-axis
+        # matches are genuine (e.g., a specific lord with one match axis).
+        if syn > 0 and len(syn_by_rule) >= 2:
+            max_rule_frac = max(syn_by_rule.values()) / syn
+            if max_rule_frac > 0.7:
+                # Reduce by up to 30% based on how concentrated the signal is.
+                # At 70% concentration: no penalty. At 100%: -30%.
+                penalty = 0.3 * (max_rule_frac - 0.7) / 0.3
+                syn *= 1.0 - penalty
+
         base = syn - anti + self.staple_bonus
         # Multi-rule bonus: cards matching 3+ distinct rules are
         # genuinely better synergy picks (Pitiless Plunderer matches
@@ -200,6 +229,23 @@ _FLAT_WEIGHT_OVERRIDES: dict[str, float] = {
     "evasion": 0.15,
 }
 
+#: Quality multiplier applied to IDF weights based on the mechanical
+#: nature of the interaction. Broad effect-only matches (Draw,
+#: DealDamage) are dampened — they're staple utility rather than synergy.
+#: Quality multiplier for IDF weights. Dampens broad effect-only
+#: rules and enabler-on-enabler trigger-trigger matches.
+_RULE_QUALITY_MULTIPLIER: dict[str, float] = {
+    "damage_synergy": 0.5,
+    # Trigger-trigger resonance is weaker than trigger-effect: finding
+    # another card that triggers on the same event (enabler for enabler)
+    # is less valuable than finding a payoff that feeds the trigger.
+    "trigger_resonance": 0.7,
+    # Value engine matches many cards of a type (Angel, Artifact, etc.).
+    # IDF already dampens based on N, but the signal is inherently weaker
+    # than mechanical synergy — "be the right type" is a density signal.
+    "value_engine": 0.5,
+}
+
 
 def _compute_idf_weights(
     complements: list[PortComplement],
@@ -242,7 +288,11 @@ def _compute_idf_weights(
                 result[key] = 1.0
         else:
             n = len(candidates)
-            result[key] = 1.0 / math.log2(1.0 + n)
+            w = 1.0 / math.log2(1.0 + n)
+            # Apply quality multiplier: cost-based rules are boosted,
+            # broad effect rules are dampened.
+            mult = _RULE_QUALITY_MULTIPLIER.get(rule_id, 1.0)
+            result[key] = w * mult
     return result
 
 

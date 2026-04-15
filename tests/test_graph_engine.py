@@ -23,12 +23,9 @@ from mtg_synergy_graph import (
     find_trigger_feeders,
     match_event,
     parser_branch_kinds,
-    score_all_candidates,
-    score_one,
 )
 from mtg_synergy_graph.db import open_db
 from mtg_synergy_graph.graph_engine import (
-    _card_has_flicker_chain,
     _commander_death_signature,
     _commander_synergy_tags,
     _is_substitution_blocking_result,
@@ -173,36 +170,10 @@ def test_wrath_of_god_does_not_feed_korvold(populated_db):
     assert wrath == []
 
 
-def test_korvold_score_phyrexian_altar_beats_wrath(populated_db):
-    altar = score_one(populated_db, ["Korvold, Fae-Cursed King"], "Phyrexian Altar")
-    wrath = score_one(populated_db, ["Korvold, Fae-Cursed King"], "Wrath of God")
-    assert altar["total"] > 0
-    assert altar["cost_synergy"] > 0
-    assert wrath["total"] == 0
-
-
-def test_score_all_candidates_includes_altar_for_korvold(populated_db):
-    result = score_all_candidates(populated_db, ["Korvold, Fae-Cursed King"])
-    assert "Phyrexian Altar" in result.buckets
-    assert result.buckets["Phyrexian Altar"]["total"] > 0
-    assert result.matches["Phyrexian Altar"]  # contributing matches present
-
-
-# ---------------------------------------------------------------------------
-# §6.2.3 — Panharmonicon amplifies Cathars' Crusade
-# ---------------------------------------------------------------------------
-
-
 def test_panharmonicon_amplifies_cathars_etb_trigger(populated_db):
     rows = find_amplifier_matches(populated_db, ["Cathars' Crusade"])
     cards = {r["amplifier_card"] for r in rows}
     assert "Panharmonicon" in cards
-
-
-def test_cathars_amplifier_score_is_positive(populated_db):
-    scores = score_one(populated_db, ["Cathars' Crusade"], "Panharmonicon")
-    assert scores["amplifier"] > 0
-    assert scores["total"] > 0
 
 
 # ---------------------------------------------------------------------------
@@ -337,12 +308,6 @@ def test_commander_death_signature_self_only_sac_does_not_qualify():
     assert _commander_death_signature(cmdr_ports) == (False, False, False)
 
 
-def test_find_sacrifice_synergies_returns_empty_for_non_payoff_commander():
-    # Use Cathars' Crusade as a fixture commander — no death triggers,
-    # no outlet costs. populated_db is the test fixture from this file.
-    pass  # populated_db doesn't have a payoff commander; covered below
-
-
 # ---------------------------------------------------------------------------
 # Phase D2 — mana restriction matcher
 # ---------------------------------------------------------------------------
@@ -408,48 +373,6 @@ def test_commander_synergy_tags_splits_comma_separated_filter():
     tags = _commander_synergy_tags(cmdr_ports)
     assert "Instant" in tags
     assert "Sorcery" in tags
-
-
-# ---------------------------------------------------------------------------
-# Phase D4 — flicker self-loop detector (primitive only — not wired into
-# scoring; see scoring.py docstring near _score_mana_restriction for the
-# rationale on why the bucket boost is deferred to phase E)
-# ---------------------------------------------------------------------------
-
-
-def test_card_has_flicker_chain_detects_clean_pair():
-    # Soulherder-shape: Battlefield→Exile + Exile→Battlefield.
-    ports = [
-        {"port_type": "effect", "event_class": "ChangeZone", "zone_origin": "Battlefield", "zone_destination": "Exile"},
-        {"port_type": "effect", "event_class": "ChangeZone", "zone_origin": "Exile", "zone_destination": "Battlefield"},
-    ]
-    assert _card_has_flicker_chain(ports)
-
-
-def test_card_has_flicker_chain_handles_all_origin():
-    # Brago / Conjurer's Closet — return path uses Origin=All because
-    # the SVar resolves via Defined$ Remembered (any zone).
-    ports = [
-        {"port_type": "effect", "event_class": "ChangeZone", "zone_origin": "Battlefield", "zone_destination": "Exile"},
-        {"port_type": "effect", "event_class": "ChangeZone", "zone_origin": "All", "zone_destination": "Battlefield"},
-    ]
-    assert _card_has_flicker_chain(ports)
-
-
-def test_card_has_flicker_chain_rejects_one_sided():
-    # Bouncing-effect-only (no return path) — Cyclonic Rift, Boomerang.
-    ports = [
-        {"port_type": "effect", "event_class": "ChangeZone", "zone_origin": "Battlefield", "zone_destination": "Hand"},
-    ]
-    assert not _card_has_flicker_chain(ports)
-
-
-def test_card_has_flicker_chain_rejects_etb_only():
-    # Yarok-shape: ETB doubler with no exile/return chain.
-    ports = [
-        {"port_type": "trigger", "event_class": "ChangesZone", "zone_origin": "", "zone_destination": "Battlefield"},
-    ]
-    assert not _card_has_flicker_chain(ports)
 
 
 # ---------------------------------------------------------------------------

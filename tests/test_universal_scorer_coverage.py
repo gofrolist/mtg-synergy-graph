@@ -187,6 +187,65 @@ def test_distinct_rules_empty():
     assert us.distinct_rules == frozenset()
 
 
+def test_to_legacy_buckets_excludes_concentration_dampening():
+    """to_legacy_buckets total does NOT include concentration dampening.
+
+    The ranking surface (to_legacy_buckets) intentionally omits
+    concentration dampening to avoid regression on tested commanders.
+    The score property includes it for internal quality measurement.
+    """
+    c1 = _comp(rule_id="trigger_effect", cmdr_event="A", cand_event="X")
+    c2 = _comp(rule_id="cost_feeds_trigger", cmdr_event="B", cand_event="Y")
+    idf = {
+        ("trigger_effect", "A", "X", ""): 0.9,
+        ("cost_feeds_trigger", "B", "Y", ""): 0.1,
+    }
+    us = UniversalScore(complements=[c1, c2], staple_bonus=0.0, idf_weights=idf)
+    buckets = us.to_legacy_buckets()
+    # Buckets total = 1.0 + 0.02 multi-rule = 1.02 (no dampening)
+    assert abs(buckets["total"] - 1.02) < 1e-9
+    # score includes dampening: 0.82
+    assert us.score < buckets["total"]
+
+
+def test_concentration_dampening_kicks_in():
+    """Cards with 2+ rules where one dominates >70% get dampened."""
+    # Rule A contributes 0.9, rule B contributes 0.1 → 90% concentration
+    c1 = _comp(rule_id="trigger_effect", cmdr_event="A", cand_event="X")
+    c2 = _comp(rule_id="cost_feeds_trigger", cmdr_event="B", cand_event="Y")
+    idf = {
+        ("trigger_effect", "A", "X", ""): 0.9,
+        ("cost_feeds_trigger", "B", "Y", ""): 0.1,
+    }
+    us = UniversalScore(complements=[c1, c2], staple_bonus=0.0, idf_weights=idf)
+    # Without dampening: 1.0 + 0.02 multi-rule = 1.02
+    # Concentration: 90% > 70% → penalty = 0.3 * (0.9 - 0.7) / 0.3 = 0.2
+    # Dampened syn: 1.0 * 0.8 = 0.8 + 0.02 = 0.82
+    assert abs(us.score - 0.82) < 1e-9
+
+
+def test_concentration_no_dampening_balanced():
+    """Cards with balanced rules are not dampened."""
+    c1 = _comp(rule_id="trigger_effect", cmdr_event="A", cand_event="X")
+    c2 = _comp(rule_id="cost_feeds_trigger", cmdr_event="B", cand_event="Y")
+    idf = {
+        ("trigger_effect", "A", "X", ""): 0.5,
+        ("cost_feeds_trigger", "B", "Y", ""): 0.5,
+    }
+    us = UniversalScore(complements=[c1, c2], staple_bonus=0.0, idf_weights=idf)
+    # 50/50 split, no dampening: 1.0 + 0.02 = 1.02
+    assert abs(us.score - 1.02) < 1e-9
+
+
+def test_concentration_single_rule_not_dampened():
+    """Cards with only 1 rule are not dampened (even at 100% concentration)."""
+    c = _comp()
+    key = (c.rule_id, c.cmdr_event, c.cand_event, c.filter_group)
+    us = UniversalScore(complements=[c], staple_bonus=0.0, idf_weights={key: 0.5})
+    # Single rule → len(syn_by_rule) == 1, skip dampening
+    assert abs(us.score - 0.5) < 1e-9
+
+
 # ---------------------------------------------------------------------------
 # UniversalScore.to_legacy_buckets  — duplicate skip (line 119)
 #                                   — anti_synergy branch (line 125)

@@ -303,7 +303,8 @@ def _find_flicker_synergy(
     if not has_self_etb or etb_effect_count == 0:
         return []
 
-    # True flicker: ChangeZone Battlefield->Exile AND Exile->Battlefield
+    # True flicker: ChangeZone Battlefield->Exile AND (Exile|All)->Battlefield
+    # Some cards (Conjurer's Closet) use zone_origin='All' for the return step.
     flicker_names: set[str] = set()
     cur = conn.execute(
         "SELECT DISTINCT card_name FROM card_ports "
@@ -312,7 +313,7 @@ def _find_flicker_synergy(
         "AND card_name IN ("
         "  SELECT card_name FROM card_ports "
         "  WHERE port_type = 'effect' AND event_class = 'ChangeZone' "
-        "  AND zone_origin = 'Exile' AND zone_destination = 'Battlefield'"
+        "  AND zone_origin IN ('Exile', 'All') AND zone_destination = 'Battlefield'"
         ")"
     )
     flicker_names.update(r["card_name"] for r in cur.fetchall())
@@ -430,6 +431,104 @@ def _find_untap_synergy(
                     candidate=name,
                     cmdr_event="tap_ability",
                     cand_event="Untap",
+                )
+            )
+
+    return results
+
+
+def _find_damage_effect_synergy(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Find DealDamage/DamageAll effects for non-combat damage commanders.
+
+    Niv-Mizzet triggers on DamageDone (any damage, not just combat) ->
+    wants ping effects like Guttersnipe, Electrostatic Field.
+    Toralf triggers on excess damage -> wants mass damage effects.
+
+    Skips combat-damage-only commanders (Saskia, Derevi) -- those use
+    combat_enhancer. Also skips self-only damage triggers.
+    DealDamage/DamageAll effects are excluded from the generic
+    trigger_effect rule to prevent dilution.
+    N ~ 300.
+    """
+    has_noncombat_damage_trigger = False
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "trigger":
+            continue
+        if (p.get("event_class") or "").strip() != "DamageDone":
+            continue
+        vf = p.get("valid_filter") or ""
+        if _trigger_only_matches_self(vf):
+            continue
+        raw = str(p.get("raw_line") or "")
+        # Skip combat-damage-only triggers (handled by combat_enhancer)
+        if "'CombatDamage': 'True'" in raw:
+            continue
+        has_noncombat_damage_trigger = True
+        break
+
+    if not has_noncombat_damage_trigger:
+        return []
+
+    cur = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE port_type = 'effect' AND event_class IN ('DealDamage', 'DamageAll')"
+    )
+    results: list[PortComplement] = []
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name not in cmdr_set:
+            results.append(
+                PortComplement(
+                    rule_id="damage_synergy",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="DamageDone",
+                    cand_event="DealDamage",
+                )
+            )
+
+    return results
+
+
+def _find_mana_doubler_synergy(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Find mana doublers for TapsForMana trigger commanders.
+
+    Selvala triggers on TapsForMana -> Mana Reflection doubles output.
+    Kinnan triggers on TapsForMana -> Nyxbloom Ancient triples mana.
+
+    Matches replacement effects with ProduceMana (mana doublers/triplers).
+    Very narrow: N ~ 15-30 (excellent IDF).
+    """
+    has_mana_trigger = any(
+        (p.get("port_type") or "").strip() == "trigger" and (p.get("event_class") or "").strip() == "TapsForMana"
+        for p in cmdr_ports
+    )
+    if not has_mana_trigger:
+        return []
+
+    cur = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE port_type = 'replacement' AND replacement_event = 'ProduceMana'"
+    )
+    results: list[PortComplement] = []
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name not in cmdr_set:
+            results.append(
+                PortComplement(
+                    rule_id="mana_doubler",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="TapsForMana",
+                    cand_event="ProduceMana_doubler",
                 )
             )
 

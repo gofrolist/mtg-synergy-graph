@@ -70,7 +70,7 @@ from .parser import (
     parse_forge_line,
     walk_svar_chain,
 )
-from .penalties import HARD_FILTER_SCORE, apply_penalties
+from .penalties import HARD_FILTER_SCORE
 from .ports import (
     extract_all_ports,
     extract_cost_ports,
@@ -84,8 +84,6 @@ from .ports import (
 from .scoring import (
     BRANCH_MULTIPLIER,
     parser_branch_kinds,
-    score_all_candidates,
-    score_one,
 )
 from .universal_scorer import (
     UniversalScore,
@@ -132,7 +130,6 @@ __all__ = [
     "SynergyEngine",
     "UniversalScore",
     "active_rules_for_commander",
-    "apply_penalties",
     "bootstrap_golden_set",
     "build_causal_graph",
     "build_graph_cache",
@@ -176,9 +173,7 @@ __all__ = [
     "parser_branch_kinds",
     "personalised_pagerank",
     "regression_failed",
-    "score_all_candidates",
     "score_all_universal",
-    "score_one",
     "staple_bonus",
     "walk_svar_chain",
 ]

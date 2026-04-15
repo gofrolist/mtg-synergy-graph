@@ -16,6 +16,11 @@ from ..graph_engine import (
 from .core import PortComplement, PortRow, _commander_subtypes_from_ports
 
 
+def _escape_like(value: str) -> str:
+    """Escape SQL LIKE wildcard characters (%, _) in a value."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _find_lord_complements(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
@@ -139,8 +144,8 @@ def _find_etb_self_complements(
             ).fetchall()
         )
     else:
-        params = [f"%{t}%" for t in all_type_hints]
-        where = " OR ".join("card_types LIKE ?" for _ in params)
+        params = [f"%{_escape_like(t)}%" for t in all_type_hints]
+        where = " OR ".join("card_types LIKE ? ESCAPE '\\'" for _ in params)
         cards = _rows_to_dicts(
             conn.execute(
                 f"SELECT name, card_types, supertypes, subtypes, keywords, color_identity FROM cards WHERE {where}",
@@ -219,8 +224,8 @@ def _find_scaling_complements(
 
     for type_name in primary:
         cur = conn.execute(
-            "SELECT name FROM cards WHERE card_types LIKE ?",
-            (f"%{type_name}%",),
+            "SELECT name FROM cards WHERE card_types LIKE ? ESCAPE '\\'",
+            (f"%{_escape_like(type_name)}%",),
         )
         for r in cur.fetchall():
             name = r["name"]
@@ -238,8 +243,8 @@ def _find_scaling_complements(
 
     for sub in subtypes:
         cur = conn.execute(
-            "SELECT name FROM cards WHERE subtypes LIKE ?",
-            (f"%{sub}%",),
+            "SELECT name FROM cards WHERE subtypes LIKE ? ESCAPE '\\'",
+            (f"%{_escape_like(sub)}%",),
         )
         for r in cur.fetchall():
             name = r["name"]
@@ -438,8 +443,8 @@ def _find_spellcast_density_complements(
 
     for type_name in wanted_types:
         cur = conn.execute(
-            "SELECT name FROM cards WHERE card_types LIKE ?",
-            (f"%{type_name}%",),
+            "SELECT name FROM cards WHERE card_types LIKE ? ESCAPE '\\'",
+            (f"%{_escape_like(type_name)}%",),
         )
         for r in cur.fetchall():
             name = r["name"]
@@ -457,8 +462,8 @@ def _find_spellcast_density_complements(
 
     for sub in wanted_subtypes:
         cur = conn.execute(
-            "SELECT name FROM cards WHERE subtypes LIKE ?",
-            (f"%{sub}%",),
+            "SELECT name FROM cards WHERE subtypes LIKE ? ESCAPE '\\'",
+            (f"%{_escape_like(sub)}%",),
         )
         for r in cur.fetchall():
             name = r["name"]
@@ -629,5 +634,220 @@ def _find_scales_with_density(
                             cand_event="drain_damage",
                         )
                     )
+
+    return results
+
+
+def _find_value_engine_density(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Find cards matching a commander's typed value engine.
+
+    Covers commanders whose strategy is "put/find/cheat specific card
+    types" but whose triggers are too broad for generic port matching:
+
+    Kaalia: Attacks → puts Angel/Demon/Dragon from hand.
+    Zur: Attacks → tutors CMC≤3 Enchantment to battlefield.
+    Jhoira: SpellCast Historic → draws. Wants Artifacts.
+    Xenagos: Pump Creature.Other → wants high-power creatures.
+
+    Extracts type requirements from ChangeZone ``ChangeType`` in
+    raw_line, or from ``Card.Historic`` in valid_filter.
+    """
+    _VALUE_CARD_TYPES = frozenset({"Creature", "Instant", "Sorcery", "Artifact", "Enchantment", "Planeswalker", "Land"})
+    # Track types/subtypes with their source pattern label
+    wanted: list[tuple[str, str, str]] = []  # (kind, name, label)
+
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        vf = (p.get("valid_filter") or "").strip()
+        raw = str(p.get("raw_line") or "")
+
+        # Pattern 1: ChangeZone effect with typed ChangeType (Kaalia, Zur)
+        # Kaalia: 'Creature.Angel+YouCtrl,Creature.Demon+YouCtrl'
+        #   → extract subtypes Angel, Demon, Dragon (not base 'Creature')
+        # Zur: 'Enchantment.cmcLE3' → extract type Enchantment
+        if pt == "effect" and ev == "ChangeZone" and "ChangeType" in raw:
+            m = re.search(r"'ChangeType':\s*'([^']+)'", raw)
+            if m:
+                for part in m.group(1).split(","):
+                    segments = part.strip().split("+")[0].split(".")
+                    base = segments[0].strip()
+                    # If there's a subtype after the dot, prefer it
+                    subtype = segments[1].strip() if len(segments) > 1 else ""
+                    if (
+                        subtype
+                        and subtype[0].isupper()
+                        and not subtype.startswith("cmc")
+                        and subtype not in ("YouCtrl", "YouOwn")
+                    ):
+                        wanted.append(("subtype", subtype, "value_engine"))
+                    elif base in _VALUE_CARD_TYPES and base not in ("Card", "Permanent"):
+                        wanted.append(("type", base, "value_engine"))
+
+        # Pattern 2: SpellCast Card.Historic (Jhoira) → Artifacts
+        if pt == "trigger" and ev == "SpellCast" and "Historic" in vf:
+            wanted.append(("type", "Artifact", "historic"))
+
+    if not wanted:
+        return []
+
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+
+    _ALLOWED_COLS: dict[str, str] = {"type": "card_types", "subtype": "subtypes"}
+    for kind, target, label in sorted(wanted):
+        safe = _escape_like(target)
+        # Safety: col is from a hardcoded allowlist, not from external data.
+        col = _ALLOWED_COLS.get(kind)
+        if col is None:
+            continue
+        cur = conn.execute(
+            f"SELECT name FROM cards WHERE {col} LIKE ? ESCAPE '\\'",
+            (f"%{safe}%",),
+        )
+        for r in cur.fetchall():
+            name = r["name"]
+            if name not in cmdr_set and name not in seen:
+                seen.add(name)
+                results.append(
+                    PortComplement(
+                        rule_id="value_engine",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event=label,
+                        cand_event=target,
+                        filter_group=target,
+                    )
+                )
+
+    return results
+
+
+#: Keywords that cause creatures to enter with or gain +1/+1 counters.
+_COUNTER_KEYWORDS: tuple[str, ...] = (
+    "Modular",
+    "Undying",
+    "Persist",
+    "Evolve",
+    "Fabricate",
+    "Riot",
+)
+
+
+def _has_counter_interest(cmdr_ports: list[PortRow]) -> bool:
+    """Return True if commander cares about +1/+1 counters.
+
+    Detects CounterAdded triggers with P1P1 counter_type, scales_with
+    P1P1, or trigger valid_filters referencing P1P1. Does NOT match
+    experience counters, charge counters, or generic counter references.
+    """
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        vf = (p.get("valid_filter") or "").strip()
+        ct = (p.get("counter_type") or "").strip()
+        if (
+            pt == "trigger"
+            and ev in ("CounterAdded", "CounterAddedOnce", "CounterAddedAll")
+            and (not ct or ct == "P1P1")
+        ):
+            return True
+        # scales_with must explicitly reference P1P1 (not Experience, Charge, etc.)
+        if pt == "scales_with" and ("P1P1" in ev or "P1P1" in vf):
+            return True
+        # Marchesa pattern: trigger valid_filter references P1P1 counters
+        if pt == "trigger" and "P1P1" in vf:
+            return True
+        # Ezuri pattern: effect PutCounter with P1P1 on non-self targets.
+        # Only if the commander also has a non-self valid_filter (putting
+        # counters on OTHER creatures = counter strategy, not secondary bonus).
+        if pt == "effect" and ev in ("PutCounter", "PutCounterAll") and ct == "P1P1" and vf and "Other" in vf:
+            return True
+    return False
+
+
+def _find_counter_doubler_synergy(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Find counter doublers for +1/+1 counter commanders.
+
+    Marchesa triggers on CounterAdded -> Hardened Scales adds extra
+    +1/+1 counters. Ezuri scales with P1P1 counters -> Doubling Season
+    doubles counter placement.
+
+    Matches static Continuous abilities that add or multiply counters.
+    N ~ 30-50 (Hardened Scales, Doubling Season, Winding Constrictor, etc.)
+    """
+    if not _has_counter_interest(cmdr_ports):
+        return []
+
+    # Counter doublers are replacement effects with AddCounter event.
+    # Hardened Scales, Doubling Season, Winding Constrictor, Branching Evolution.
+    cur = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE port_type = 'replacement' AND replacement_event = 'AddCounter' "
+        "AND (raw_line NOT LIKE '%ValidCard%Card.Self%')"
+    )
+    results: list[PortComplement] = []
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name not in cmdr_set:
+            results.append(
+                PortComplement(
+                    rule_id="counter_doubler",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="CounterAdded_P1P1",
+                    cand_event="counter_doubler",
+                )
+            )
+
+    return results
+
+
+def _find_counter_keyword_synergy(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Find creatures with counter-matters keywords for +1/+1 counter commanders.
+
+    Marchesa triggers on CounterAdded -> Modular creatures enter with
+    counters and move them on death. Ezuri puts counters on creatures ->
+    Undying creatures return with +1/+1 counters when they die.
+
+    Keywords: Modular, Undying, Persist, Evolve, Fabricate, Riot.
+    N ~ 80-120.
+    """
+    if not _has_counter_interest(cmdr_ports):
+        return []
+
+    placeholders = ",".join("?" * len(_COUNTER_KEYWORDS))
+    cur = conn.execute(
+        f"SELECT DISTINCT card_name, event_class FROM card_ports "
+        f"WHERE port_type = 'keyword' AND event_class IN ({placeholders})",
+        _COUNTER_KEYWORDS,
+    )
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name not in cmdr_set and name not in seen:
+            seen.add(name)
+            results.append(
+                PortComplement(
+                    rule_id="counter_keyword",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="CounterAdded_P1P1",
+                    cand_event=r["event_class"],
+                )
+            )
 
     return results

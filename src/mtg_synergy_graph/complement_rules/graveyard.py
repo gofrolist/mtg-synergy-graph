@@ -88,9 +88,12 @@ def _find_graveyard_fillers(
     # creatures with ETBs. Match cards of the recastable types.
     _CASTABLE_TYPES = frozenset({"Instant", "Sorcery"})
     for card_type in recast_types & _CASTABLE_TYPES:
+        # card_type is from _CASTABLE_TYPES frozenset — safe, but escape
+        # LIKE wildcards for defense-in-depth.
+        safe_ct = card_type.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         cur = conn.execute(
-            "SELECT name FROM cards WHERE card_types LIKE ?",
-            (f"%{card_type}%",),
+            "SELECT name FROM cards WHERE card_types LIKE ? ESCAPE '\\'",
+            (f"%{safe_ct}%",),
         )
         for r in cur.fetchall():
             name = r["name"]

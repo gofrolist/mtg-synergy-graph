@@ -580,6 +580,8 @@ from .combat import (  # noqa: E402
     _find_sacrifice_outlets,
 )
 from .density import (  # noqa: E402
+    _find_counter_doubler_synergy,
+    _find_counter_keyword_synergy,
     _find_etb_self_complements,
     _find_lord_complements,
     _find_scales_with_density,
@@ -587,6 +589,7 @@ from .density import (  # noqa: E402
     _find_spellcast_density_complements,
     _find_spellcast_resonance,
     _find_tribal_density_complements,
+    _find_value_engine_density,
 )
 from .graveyard import (  # noqa: E402
     _find_artifact_recursion,
@@ -612,8 +615,10 @@ from .tokens import (  # noqa: E402
 )
 from .utility import (  # noqa: E402
     _find_cost_payoff_complements,
+    _find_damage_effect_synergy,
     _find_extra_land_plays,
     _find_flicker_synergy,
+    _find_mana_doubler_synergy,
     _find_opponent_forcing,
     _find_untap_synergy,
     _find_wheel_synergy,
@@ -756,6 +761,11 @@ def find_all_complements(
         out.extend(_find_cost_reduction_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_graveyard_play_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_edict_feeders(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_value_engine_density(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_counter_doubler_synergy(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_counter_keyword_synergy(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_damage_effect_synergy(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_mana_doubler_synergy(conn, cmdr_ports, cmdr_set))
         return out
 
     if not needed_cand:
