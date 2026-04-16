@@ -303,19 +303,25 @@ def extract_effect_ports(
     )
 
     sub_ports: list[PortRow] = []
-    for key, child_branch_kind in CHAIN_KEYS.items():
-        ref_name = parsed.get(key)
-        if not ref_name:
-            continue
-        chain = walk_svar_chain(
-            ref_name,
-            svars,
-            branch_kind=child_branch_kind,
-            branch_parent=source_svar,
-            chain_depth=chain_depth + 1,
-        )
-        for sub_node in chain:
-            sub_ports.extend(extract_effect_ports(card_name, sub_node, svars))
+    # When invoked with a ChainNode, walk_svar_chain has already flattened
+    # the entire SubAbility tree — re-walking here causes 2^N port explosion
+    # (see test_akroma_vision_of_ixidor_does_not_explode). Only the
+    # top-level raw-dict entry path walks the chain.
+    is_chain_node = isinstance(parsed_or_node, ChainNode)
+    if not is_chain_node:
+        for key, child_branch_kind in CHAIN_KEYS.items():
+            ref_name = parsed.get(key)
+            if not ref_name:
+                continue
+            chain = walk_svar_chain(
+                ref_name,
+                svars,
+                branch_kind=child_branch_kind,
+                branch_parent=source_svar,
+                chain_depth=chain_depth + 1,
+            )
+            for sub_node in chain:
+                sub_ports.extend(extract_effect_ports(card_name, sub_node, svars))
 
     # GenericChoice modal expansion: walk each choice SVar to extract
     # the hidden Token/Draw/ChangeZone effects (e.g., Tireless Provisioner

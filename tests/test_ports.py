@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from mtg_synergy_graph import (
     extract_all_ports,
     extract_cost_ports,
     extract_effect_ports,
     extract_trigger_ports,
+    parse_card_file,
 )
 
 
@@ -331,3 +334,33 @@ def test_cost_pattern_exile_any_grave_does_not_collide_with_exile_from_grave():
     classes = {c["event_class"] for c in p}
     assert "exile_any_grave" in classes
     assert "exile_from_grave" not in classes
+
+
+# ---------------------------------------------------------------------------
+# Exponential SubAbility re-walk regression tests (A1)
+# ---------------------------------------------------------------------------
+
+FORGE_CARDSFOLDER = Path(__file__).parent.parent / "data" / "forge" / "forge-gui" / "res" / "cardsfolder"
+
+
+def test_akroma_vision_of_ixidor_does_not_explode():
+    card_path = FORGE_CARDSFOLDER / "a" / "akroma_vision_of_ixidor.txt"
+    card = parse_card_file(card_path)
+    ports = extract_all_ports(card)
+    pump_all_ports = [p for p in ports if p["port_type"] == "effect" and p["event_class"] == "PumpAll"]
+    assert len(pump_all_ports) == 14
+    assert len(ports) < 50
+
+
+def test_nature_demands_an_offering_does_not_explode():
+    card_path = FORGE_CARDSFOLDER / "n" / "nature_demands_an_offering.txt"
+    card = parse_card_file(card_path)
+    ports = extract_all_ports(card)
+    assert len(ports) < 30
+
+
+def test_largepox_does_not_explode():
+    card_path = FORGE_CARDSFOLDER / "l" / "largepox.txt"
+    card = parse_card_file(card_path)
+    ports = extract_all_ports(card)
+    assert len(ports) < 30
