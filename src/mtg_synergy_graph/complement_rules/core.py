@@ -480,6 +480,29 @@ def _has_any_noncreature_trigger(cmdr_ports: list[PortRow]) -> bool:
     )
 
 
+#: Base card types (not creature subtypes). Used when extracting
+#: creature-subtype identity from filter strings or MayPlay ``Affected``
+#: fields — these tokens are recognised card types, not tribes.
+_BASE_TYPES: frozenset[str] = frozenset(
+    {
+        "Creature",
+        "Artifact",
+        "Enchantment",
+        "Land",
+        "Planeswalker",
+        "Card",
+        "Permanent",
+        "Spell",
+        "Aura",
+        "Equipment",
+        "Instant",
+        "Sorcery",
+        "Battle",
+        "Vehicle",
+    }
+)
+
+
 def _commander_subtypes_from_ports(
     conn: sqlite3.Connection,
     commander_set: Sequence[str],
@@ -518,6 +541,25 @@ def _commander_subtypes_from_ports(
         for sub in literal:
             if sub in haystack:
                 relevant.add(sub)
+
+    # Extract subtypes from MayPlay statics (Gisa and Geralf grant
+    # MayPlay for Zombie.YouCtrl from graveyard — "Zombie" is the tribal
+    # identity even though the card itself is Human Wizard).
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        if pt == "static" and ev == "Continuous":
+            raw = str(p.get("raw_line") or "")
+            if "'MayPlay'" not in raw:
+                continue
+            m = re.search(r"'Affected':\s*'([^']+)'", raw)
+            if not m:
+                continue
+            for part in m.group(1).split(","):
+                base = part.strip().split(".")[0].split("+")[0].strip()
+                # Only include creature subtypes (not a base type)
+                if base and base[0].isupper() and base not in _BASE_TYPES:
+                    relevant.add(base)
 
     # Extract token subtypes from TokenScript -- but only when the
     # commander genuinely cares about that creature type.
@@ -592,6 +634,38 @@ def _commander_subtypes_from_ports(
     return relevant
 
 
+def _cost_filter_group(cost_port: PortRow) -> str:
+    """Classify a cost port for IDF sub-grouping.
+
+    Splits sacrifice costs into meaningful sub-pools:
+
+    * ``free_outlet`` — sacrifices other permanents with no mana cost
+      (Viscera Seer, Ashnod's Altar). N≈305, IDF≈0.12.
+    * ``paid_outlet`` — sacrifices other permanents but requires mana
+      (Attrition, Birthing Pod). N≈400, IDF≈0.11.
+    * ``self_sac`` — sacrifices itself (Spore Frog, Sakura-Tribe Elder).
+      N≈1064, IDF≈0.10.
+
+    Non-sacrifice costs return empty string (no sub-grouping).
+    """
+    ev = (cost_port.get("event_class") or "").strip()
+    if ev != "sacrifice":
+        return ""
+    target = (cost_port.get("cost_target") or "").strip()
+    if target == "self":
+        return "self_sac"
+    # For 'any' and 'other': check if activation requires mana
+    raw = str(cost_port.get("raw_line") or "")
+    # Remove the Sac<...> portion; check remaining for mana symbols
+    without_sac = re.sub(r"Sac<[^>]+>", "", raw).strip()
+    # Remove tap cost (T) — tap is free
+    without_tap = re.sub(r"\bT\b", "", without_sac).strip()
+    # Any remaining digit or WUBRG means mana is required
+    if re.search(r"[0-9WUBRGP]", without_tap):
+        return "paid_outlet"
+    return "free_outlet"
+
+
 # ---------------------------------------------------------------------------
 # Submodule imports (placed after PortRow/PortComplement/_commander_subtypes
 # are defined to avoid circular imports — submodules import from this module)
@@ -604,16 +678,20 @@ from .combat import (  # noqa: E402
     _find_sacrifice_outlets,
 )
 from .density import (  # noqa: E402
+    _find_cheat_cmc_bonus,
+    _find_cost_reduction_targets,
     _find_counter_doubler_synergy,
     _find_counter_keyword_synergy,
     _find_etb_self_complements,
     _find_lord_complements,
+    _find_pinger_synergy,
     _find_power_matters_density,
     _find_proliferate_synergy,
     _find_scales_with_density,
     _find_scaling_complements,
     _find_spellcast_density_complements,
     _find_spellcast_resonance,
+    _find_toughness_matters,
     _find_tribal_density_complements,
     _find_value_engine_density,
 )
@@ -622,9 +700,11 @@ from .graveyard import (  # noqa: E402
     _find_copy_synergy,
     _find_etb_sac_targets,
     _find_graveyard_fillers,
+    _find_graveyard_sac_value,
 )
 from .panharmonicon import (  # noqa: E402
     _find_panharmonicon_complements,
+    _find_panharmonicon_density,
     _find_panharmonicon_stacking,
     _find_reverse_panharmonicon,
 )
@@ -640,9 +720,11 @@ from .tokens import (  # noqa: E402
     _find_token_sac_chain,
 )
 from .utility import (  # noqa: E402
+    _find_cascade_value,
     _find_cost_payoff_complements,
     _find_damage_effect_synergy,
     _find_extra_land_plays,
+    _find_flicker_payoffs,
     _find_flicker_synergy,
     _find_landfall_enablers,
     _find_mana_doubler_synergy,
@@ -790,12 +872,20 @@ def find_all_complements(
         out.extend(_find_graveyard_play_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_edict_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_value_engine_density(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_cheat_cmc_bonus(conn, cmdr_ports, cmdr_set))
         out.extend(_find_counter_doubler_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_counter_keyword_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_power_matters_density(conn, cmdr_ports, cmdr_set))
         out.extend(_find_proliferate_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_damage_effect_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_mana_doubler_synergy(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_panharmonicon_density(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_graveyard_sac_value(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_cost_reduction_targets(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_pinger_synergy(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_toughness_matters(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_cascade_value(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_flicker_payoffs(conn, cmdr_ports, cmdr_set))
         return out
 
     if not needed_cand:
@@ -833,7 +923,7 @@ def find_all_complements(
         "SELECT card_name, port_type, event_class, valid_filter, "
         "zone_origin, zone_destination, counter_type, branch_kind, "
         "is_conditional, replacement_event, replacement_result, amount, "
-        "raw_line "
+        "cost_target, raw_line "
         f"FROM card_ports WHERE {' OR '.join(conditions)}"
     )
     rows = conn.execute(sql, params).fetchall()
@@ -880,6 +970,11 @@ def find_all_complements(
             # creatures to deal combat damage.
             is_combat = bool(cp.get("is_combat"))
 
+            # For cost_feeds_trigger, enrich filter_group with cost
+            # metadata (free_outlet / paid_outlet / self_sac) to create
+            # sub-IDF groups within the broad sacrifice pool.
+            enrich_cost = rule.rule_id == "cost_feeds_trigger"
+
             if "*" in targets:
                 # Wildcard: check every candidate port of this type
                 check = targets["*"]
@@ -896,6 +991,8 @@ def find_all_complements(
                             if apply_cand_filter and not _effect_matches_filter_group(cand_p, fg):
                                 continue
                             seen.add(key)
+                            cfp = _cost_filter_group(cand_p) if enrich_cost else ""
+                            enriched_fg = f"{fg}_{cfp}" if fg and cfp else (fg or cfp)
                             results.append(
                                 PortComplement(
                                     rule_id=rule.rule_id,
@@ -903,7 +1000,7 @@ def find_all_complements(
                                     candidate=cand_p["card_name"],
                                     cmdr_event=cmdr_ev,
                                     cand_event=ev,
-                                    filter_group=fg,
+                                    filter_group=enriched_fg,
                                     branch_kind=(cand_p.get("branch_kind") or "root"),
                                 )
                             )
@@ -920,6 +1017,8 @@ def find_all_complements(
                             if apply_cand_filter and not _effect_matches_filter_group(cand_p, fg):
                                 continue
                             seen.add(key)
+                            cfp = _cost_filter_group(cand_p) if enrich_cost else ""
+                            enriched_fg = f"{fg}_{cfp}" if fg and cfp else (fg or cfp)
                             results.append(
                                 PortComplement(
                                     rule_id=rule.rule_id,
@@ -927,7 +1026,7 @@ def find_all_complements(
                                     candidate=cand_p["card_name"],
                                     cmdr_event=cmdr_ev,
                                     cand_event=cand_ev,
-                                    filter_group=fg,
+                                    filter_group=enriched_fg,
                                     branch_kind=(cand_p.get("branch_kind") or "root"),
                                 )
                             )

@@ -346,6 +346,70 @@ def _find_flicker_synergy(
     return results
 
 
+def _find_flicker_payoffs(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """ETB creatures with valuable effects for flicker commanders.
+
+    Brago, Aminatou, Emiel exile and return permanents → wants creatures
+    whose ETB triggers are valuable (Mulldrifter draws 2, Peregrine Drake
+    untaps 5 lands, Aether Channeler modal ETB).
+
+    Detected by commander effect: ChangeZone Battlefield→Exile with a
+    paired Exile/All→Battlefield effect (true flicker, not bounce).
+    N≈1902 ETB creatures with valuable effects.
+    """
+    has_flicker_effect = False
+    cmdr_has_exile = False
+    cmdr_has_return = False
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        if pt != "effect" or ev != "ChangeZone":
+            continue
+        zo = (p.get("zone_origin") or "").strip()
+        zd = (p.get("zone_destination") or "").strip()
+        if zo == "Battlefield" and zd == "Exile":
+            cmdr_has_exile = True
+        if zo in ("Exile", "All") and zd == "Battlefield":
+            cmdr_has_return = True
+    has_flicker_effect = cmdr_has_exile and cmdr_has_return
+
+    if not has_flicker_effect:
+        return []
+
+    cur = conn.execute(
+        "SELECT DISTINCT a.card_name FROM card_ports a "
+        "JOIN cards c ON a.card_name = c.name "
+        "WHERE a.port_type = 'trigger' AND a.event_class = 'ChangesZone' "
+        "AND a.valid_filter LIKE '%Card.Self%' "
+        "AND a.zone_destination = 'Battlefield' "
+        "AND c.card_types LIKE '%Creature%' "
+        "AND a.card_name IN ("
+        "  SELECT card_name FROM card_ports "
+        "  WHERE port_type = 'effect' AND event_class IN "
+        "  ('Draw', 'Destroy', 'GainControl', 'Dig', 'ChangeZone', "
+        "   'Mana', 'Token', 'Untap', 'Mill')"
+        ")"
+    )
+    results: list[PortComplement] = []
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name not in cmdr_set:
+            results.append(
+                PortComplement(
+                    rule_id="flicker_payoff",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="flicker_effect",
+                    cand_event="etb_creature",
+                )
+            )
+    return results
+
+
 def _find_extra_land_plays(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
@@ -489,29 +553,93 @@ def _find_untap_synergy(
         (p.get("port_type") or "").strip() == "cost" and (p.get("event_class") or "").strip() == "tap"
         for p in cmdr_ports
     )
-    if not has_tap_cost:
-        return []
 
-    # Find Untap effects that can target creatures (commander is a creature)
-    cur = conn.execute(
-        "SELECT DISTINCT card_name FROM card_ports "
-        "WHERE port_type = 'effect' AND event_class = 'Untap' "
-        "AND (valid_filter LIKE '%Creature%' "
-        "     OR valid_filter = '' OR valid_filter IS NULL)"
-    )
     results: list[PortComplement] = []
-    for r in cur.fetchall():
-        name = r["card_name"]
-        if name not in cmdr_set:
-            results.append(
-                PortComplement(
-                    rule_id="untap_synergy",
-                    direction="synergy",
-                    candidate=name,
-                    cmdr_event="tap_ability",
-                    cand_event="Untap",
+    seen: set[str] = set()
+
+    # Forward: commander has tap cost → find untap effects
+    if has_tap_cost:
+        cur = conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports "
+            "WHERE port_type = 'effect' AND event_class = 'Untap' "
+            "AND (valid_filter LIKE '%Creature%' "
+            "     OR valid_filter = '' OR valid_filter IS NULL)"
+        )
+        for r in cur.fetchall():
+            name = r["card_name"]
+            if name not in cmdr_set:
+                seen.add(name)
+                results.append(
+                    PortComplement(
+                        rule_id="untap_synergy",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="tap_ability",
+                        cand_event="Untap",
+                    )
                 )
-            )
+
+    # Reverse: commander untaps permanents → find mana dorks (tap + Mana)
+    # Derevi untaps permanents on combat damage → Bloom Tender, Birds of
+    # Paradise become repeatable mana sources.  N ≈ 1684, IDF ≈ 0.09.
+    has_untap_effect = any(
+        (p.get("port_type") or "").strip() == "effect"
+        and (p.get("event_class") or "").strip() in ("TapOrUntap", "Untap")
+        for p in cmdr_ports
+    )
+    if has_untap_effect:
+        cur2 = conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports "
+            "WHERE port_type = 'cost' AND event_class = 'tap' "
+            "AND card_name IN ("
+            "  SELECT card_name FROM card_ports "
+            "  WHERE port_type = 'effect' AND event_class = 'Mana'"
+            ")"
+        )
+        for r in cur2.fetchall():
+            name = r["card_name"]
+            if name not in cmdr_set and name not in seen:
+                results.append(
+                    PortComplement(
+                        rule_id="untap_synergy",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="untap_effect",
+                        cand_event="tap_mana",
+                    )
+                )
+
+    # Extended reverse: tap + valuable non-mana effects (Draw, Token, etc.)
+    # Arcanis taps to draw 3, Krenko taps to make tokens — premium untap
+    # targets. Separate IDF group from tap_mana; cards with both effects
+    # get two complements and a multi-rule bonus.  Restrict to high-value
+    # effects only (Draw, Token, Mill) — broader effects (DealDamage,
+    # PutCounter, GainLife) match too many cards (~1600 vs ~400).
+    if has_untap_effect:
+        cur3 = conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports "
+            "WHERE port_type = 'cost' AND event_class = 'tap' "
+            "AND card_name IN ("
+            "  SELECT card_name FROM card_ports "
+            "  WHERE port_type = 'effect' AND event_class IN "
+            "  ('Draw', 'Token', 'Mill', 'Destroy')"
+            ")"
+        )
+        for r in cur3.fetchall():
+            name = r["card_name"]
+            # Intentionally skip `seen` check: cards with both tap+Mana
+            # and tap+Draw get two complements (tap_mana + tap_utility)
+            # in separate IDF groups — this is the desired behaviour.
+            if name not in cmdr_set:
+                results.append(
+                    PortComplement(
+                        rule_id="untap_synergy",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="untap_effect",
+                        cand_event="tap_utility",
+                    )
+                )
 
     return results
 
@@ -611,4 +739,67 @@ def _find_mana_doubler_synergy(
                 )
             )
 
+    return results
+
+
+#: Effects that make a cascade hit valuable (powerful ETB/cast effects).
+_CASCADE_VALUE_EFFECTS: tuple[str, ...] = (
+    "Draw",
+    "Destroy",
+    "DestroyAll",
+    "Token",
+    "ChangeZone",
+    "ChangeZoneAll",
+    "DealDamage",
+    "GainControl",
+    "Mill",
+    "Mana",
+)
+
+
+def _find_cascade_value(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """High-CMC value spells for Cascade commanders.
+
+    Maelstrom Wanderer cascades twice → wants expensive spells with
+    powerful effects to hit. CMC 7+: ``cascade_high``; CMC 5-6:
+    ``cascade_mid``. Low-CMC spells don't benefit from cascade.
+    """
+    has_cascade = any(
+        (p.get("port_type") or "").strip() == "keyword" and "Cascade" in ((p.get("event_class") or "").strip())
+        for p in cmdr_ports
+    )
+    if not has_cascade:
+        return []
+
+    ph = ",".join("?" * len(_CASCADE_VALUE_EFFECTS))
+    # Cards with CMC 5+ and at least one valuable effect
+    cur = conn.execute(
+        "SELECT DISTINCT c.name, c.cmc FROM cards c "
+        "WHERE c.cmc >= 5 "
+        "AND c.name IN ("
+        f"  SELECT card_name FROM card_ports "
+        f"  WHERE port_type = 'effect' AND event_class IN ({ph})"
+        ")",
+        _CASCADE_VALUE_EFFECTS,
+    )
+    results: list[PortComplement] = []
+    for r in cur.fetchall():
+        name = r["name"]
+        if name in cmdr_set:
+            continue
+        label = "cascade_high" if r["cmc"] >= 7 else "cascade_mid"
+        results.append(
+            PortComplement(
+                rule_id="cascade_value",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="Cascade",
+                cand_event="high_cmc_value",
+                filter_group=label,
+            )
+        )
     return results

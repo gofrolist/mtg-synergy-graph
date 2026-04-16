@@ -118,44 +118,42 @@ def test_score_includes_staple_bonus():
     assert abs(us.score - 0.51) < 1e-9
 
 
-def test_score_multi_rule_bonus_2_rules():
-    """2 distinct synergy rules get +0.02 bonus."""
+def test_score_synergy_pair_bonus():
+    """Synergy pair bonus rewards defined mechanical pairs."""
+    # cost_feeds_trigger + graveyard_play = sac-recur loop (+0.05) + flat (+0.01)
     comps = [
-        _comp(rule_id="trigger_effect", cmdr_event="A", cand_event="X"),
-        _comp(rule_id="cost_feeds_trigger", cmdr_event="B", cand_event="Y"),
+        _comp(rule_id="cost_feeds_trigger", cmdr_event="A", cand_event="X"),
+        _comp(rule_id="graveyard_play", cmdr_event="B", cand_event="Y"),
     ]
     idf = {(c.rule_id, c.cmdr_event, c.cand_event, c.filter_group): 1.0 for c in comps}
     us = UniversalScore(complements=comps, staple_bonus=0.0, idf_weights=idf)
-    # 2 rules -> +0.02 * min(2-1, 4) = +0.02
+    # 2 rules: flat 0.02 + pair 0.05 = +0.07
+    assert abs(us.score - 2.07) < 1e-9
+
+
+def test_score_synergy_pair_bonus_multiple_pairs():
+    """Cards matching multiple synergy pairs accumulate bonuses."""
+    comps = [
+        _comp(rule_id="sacrifice_cluster", cmdr_event="A", cand_event="1"),
+        _comp(rule_id="token_sac_chain", cmdr_event="B", cand_event="2"),
+        _comp(rule_id="effect_feeds_trigger", cmdr_event="C", cand_event="3"),
+    ]
+    idf = {(c.rule_id, c.cmdr_event, c.cand_event, c.filter_group): 1.0 for c in comps}
+    us = UniversalScore(complements=comps, staple_bonus=0.0, idf_weights=idf)
+    # 3 rules: flat 0.02*2=0.04 + pairs (sac+token=0.05 + eff_feeds+sac=0.04) = +0.13
+    assert abs(us.score - 3.13) < 1e-9
+
+
+def test_score_flat_bonus_only_for_undefined_pairs():
+    """Rule combos NOT in _SYNERGY_PAIRS still get small flat bonus."""
+    comps = [
+        _comp(rule_id="etb_self", cmdr_event="A", cand_event="1"),
+        _comp(rule_id="trigger_resonance", cmdr_event="B", cand_event="2"),
+    ]
+    idf = {(c.rule_id, c.cmdr_event, c.cand_event, c.filter_group): 1.0 for c in comps}
+    us = UniversalScore(complements=comps, staple_bonus=0.0, idf_weights=idf)
+    # No defined pair → only flat 0.02
     assert abs(us.score - 2.02) < 1e-9
-
-
-def test_score_multi_rule_bonus_3_rules():
-    """3 distinct synergy rules get +0.04 bonus."""
-    comps = [
-        _comp(rule_id="trigger_effect", cmdr_event="A", cand_event="X"),
-        _comp(rule_id="cost_feeds_trigger", cmdr_event="B", cand_event="Y"),
-        _comp(rule_id="sacrifice_cluster", cmdr_event="C", cand_event="Z"),
-    ]
-    idf = {(c.rule_id, c.cmdr_event, c.cand_event, c.filter_group): 1.0 for c in comps}
-    us = UniversalScore(complements=comps, staple_bonus=0.0, idf_weights=idf)
-    # 3 rules -> +0.02 * min(3-1, 4) = +0.04
-    assert abs(us.score - 3.04) < 1e-9
-
-
-def test_score_multi_rule_bonus_5_rules_capped():
-    """5 distinct synergy rules get capped bonus of +0.08."""
-    comps = [
-        _comp(rule_id="trigger_effect", cmdr_event="A", cand_event="1"),
-        _comp(rule_id="cost_feeds_trigger", cmdr_event="B", cand_event="2"),
-        _comp(rule_id="sacrifice_cluster", cmdr_event="C", cand_event="3"),
-        _comp(rule_id="effect_resonance", cmdr_event="D", cand_event="4"),
-        _comp(rule_id="zone_resonance", cmdr_event="E", cand_event="5"),
-    ]
-    idf = {(c.rule_id, c.cmdr_event, c.cand_event, c.filter_group): 1.0 for c in comps}
-    us = UniversalScore(complements=comps, staple_bonus=0.0, idf_weights=idf)
-    # 5 rules -> +0.02 * min(5-1, 4) = +0.08
-    assert abs(us.score - 5.08) < 1e-9
 
 
 def test_score_multi_rule_bonus_not_applied_for_1_rule():
@@ -202,9 +200,9 @@ def test_to_legacy_buckets_excludes_concentration_dampening():
     }
     us = UniversalScore(complements=[c1, c2], staple_bonus=0.0, idf_weights=idf)
     buckets = us.to_legacy_buckets()
-    # Buckets total = 1.0 + 0.02 multi-rule = 1.02 (no dampening)
+    # No synergy pair bonus; flat bonus 0.02; total = 1.0 + 0.02 = 1.02
     assert abs(buckets["total"] - 1.02) < 1e-9
-    # score includes dampening: 0.82
+    # score includes dampening (concentration >70%): lower than buckets total
     assert us.score < buckets["total"]
 
 
@@ -218,9 +216,8 @@ def test_concentration_dampening_kicks_in():
         ("cost_feeds_trigger", "B", "Y", ""): 0.1,
     }
     us = UniversalScore(complements=[c1, c2], staple_bonus=0.0, idf_weights=idf)
-    # Without dampening: 1.0 + 0.02 multi-rule = 1.02
     # Concentration: 90% > 70% → penalty = 0.3 * (0.9 - 0.7) / 0.3 = 0.2
-    # Dampened syn: 1.0 * 0.8 = 0.8 + 0.02 = 0.82
+    # Dampened syn: 1.0 * 0.8 = 0.8 + flat 0.02 = 0.82
     assert abs(us.score - 0.82) < 1e-9
 
 
@@ -233,7 +230,7 @@ def test_concentration_no_dampening_balanced():
         ("cost_feeds_trigger", "B", "Y", ""): 0.5,
     }
     us = UniversalScore(complements=[c1, c2], staple_bonus=0.0, idf_weights=idf)
-    # 50/50 split, no dampening: 1.0 + 0.02 = 1.02
+    # 50/50 split, no dampening, flat bonus 0.02: 1.02
     assert abs(us.score - 1.02) < 1e-9
 
 
@@ -317,7 +314,7 @@ def test_computeidf_flat_rules():
     c_tribal = _comp(rule_id="tribal_density")
     c_evasion = _comp(rule_id="evasion")
     weights = _compute_idf_weights([c_spell, c_tribal, c_evasion])
-    assert weights[("spell_density", c_spell.cmdr_event, c_spell.cand_event, c_spell.filter_group)] == 1.0
+    assert weights[("spell_density", c_spell.cmdr_event, c_spell.cand_event, c_spell.filter_group)] == 0.3
     assert weights[("tribal_density", c_tribal.cmdr_event, c_tribal.cand_event, c_tribal.filter_group)] == 0.5
     assert weights[("evasion", c_evasion.cmdr_event, c_evasion.cand_event, c_evasion.filter_group)] == 0.15
 

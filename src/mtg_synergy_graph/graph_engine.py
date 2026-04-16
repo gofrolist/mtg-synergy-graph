@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
@@ -238,9 +239,16 @@ def load_ports_for_set(
 ) -> list[PortRow]:
     """Union of port rows across multiple cards (partner-pair friendly).
 
-    Results are cached per (connection-id, names) so the 19+ graph_engine
+    Results are cached per ``(id(conn), names)`` so the 19+ graph_engine
     functions that call this for the same commander set share one SQL fetch.
     Call :func:`clear_ports_cache` between commander runs if needed.
+
+    .. warning::
+
+        The cache key uses ``id(conn)`` (CPython object address), which
+        can be reused after a connection is closed and garbage-collected.
+        Always call :func:`clear_ports_cache` before replacing a
+        connection object to avoid stale results.
     """
     if not card_names:
         return []
@@ -550,8 +558,6 @@ def find_trigger_feeders(
     candidate_ports = _rows_to_dicts(cur.fetchall())
 
     # --- Build index: event_class → [ports] for O(1) lookup ---
-    from collections import defaultdict
-
     effects_by_event: dict[str, list[PortRow]] = defaultdict(list)
     costs_by_event: dict[str, list[PortRow]] = defaultdict(list)
     for cand in candidate_ports:
@@ -901,33 +907,6 @@ REPLACEMENT_BLOCKS_TRIGGER: dict[str, frozenset[str]] = {
 }
 
 
-#: Map catch-all trigger event_class → predicate over a candidate card row.
-#: SPEC §6.1.2: these triggers are fed by the candidate card's identity, not
-#: by an effect port. ``card_row`` is a sqlite3.Row from ``cards``.
-def _is_spell(card: PortRow) -> bool:
-    types = (card.get("card_types") or "").split()
-    return any(
-        t in {"Instant", "Sorcery", "Creature", "Artifact", "Enchantment", "Planeswalker", "Battle"} for t in types
-    )
-
-
-def _is_creature(card: PortRow) -> bool:
-    return "Creature" in (card.get("card_types") or "").split()
-
-
-def _is_land(card: PortRow) -> bool:
-    return "Land" in (card.get("card_types") or "").split()
-
-
-CATCH_ALL_PREDICATES: dict[str, Callable[[PortRow], bool]] = {
-    "SpellCast": _is_spell,
-    "LandPlayed": _is_land,
-    "Attacks": _is_creature,
-    "AttackerBlocked": _is_creature,
-    "BecomesTarget": lambda c: True,  # any permanent or spell can be targeted
-}
-
-
 def _card_attrs_for_filter(card_row: PortRow) -> list[tuple[str, str]]:
     """Build the ``(attr_kind, attr_value)`` pairs for a card row that match
     the format :func:`filter_matches` expects.
@@ -1052,29 +1031,6 @@ _BROAD_QUALIFIERS: frozenset[str] = frozenset(
 )
 
 
-def _all_alts_are_broad(usable_alts: list[str]) -> bool:
-    """Return True when every alternative resolves to just a broad primary
-    type (Creature, Artifact, ...) with no narrowing subtype.
-
-    ``Creature.Other+YouCtrl``  → head=Creature, qualifiers=[Other, YouCtrl] → **broad**
-    ``Creature.withDefender+YouCtrl`` → head=Creature, qualifiers=[withDefender, YouCtrl] → **narrow**
-    ``Demon.YouCtrl+Other``     → head=Demon → **narrow** (Demon is a subtype)
-    ``Permanent``               → head=Permanent → **broad**
-    """
-    for alt in usable_alts:
-        # Split "Creature.Other+YouCtrl+!token" → head="Creature", rest="Other+YouCtrl+!token"
-        head, _, rest = alt.partition(".")
-        if head not in _BROAD_CARD_TYPES:
-            return False  # Head is a subtype (Demon, Goblin, ...) → narrow
-        if rest:
-            # Check each qualifier after the dot
-            for q in rest.split("+"):
-                q = q.strip()
-                if q and q not in _BROAD_QUALIFIERS:
-                    return False  # e.g. "withDefender" → narrow
-    return True
-
-
 def _filter_card_match(valid_filter: str, card_row: PortRow) -> bool:
     """Return True iff a card row's static attributes satisfy the filter,
     treating runtime subtype values (``Other``, ``attacking``, ...) as
@@ -1101,85 +1057,6 @@ def _filter_card_match(valid_filter: str, card_row: PortRow) -> bool:
 # ---------------------------------------------------------------------------
 # Phase D2 — mana restriction matcher (positive boost only)
 # ---------------------------------------------------------------------------
-
-
-def _parse_restriction_tags(restriction: str | None) -> set[str]:
-    """Parse a Forge ``RestrictValid$`` value into a set of identity tags
-    that the mana would be useful for.
-
-    Examples:
-
-    - ``Spell.Creature``                  → ``{"Creature"}``
-    - ``Spell.Dragon``                    → ``{"Dragon"}``
-    - ``Spell.Creature+Dragon``           → ``{"Creature", "Dragon"}``
-    - ``Spell.Instant,Spell.Sorcery``     → ``{"Instant", "Sorcery"}``
-    - ``Spell.Demon,Spell.Cleric,Spell.Vampire`` → ``{"Demon","Cleric","Vampire"}``
-    - ``Activated.Dragon+inZoneBattlefield``  → ``{"Dragon"}``
-    - ``CostContainsX``, ``CumulativeUpkeep`` (no ``.``) → ``set()``
-
-    Tokens whose first segment isn't a clean alphabetic class/type name
-    (``cmcGE5``, ``wasCastFromYourGraveyard``, ...) are dropped — they
-    are runtime modifiers, not synergy tags.
-    """
-    tags: set[str] = set()
-    if not restriction:
-        return tags
-    for raw in restriction.split(","):
-        token = raw.strip()
-        if not token or "." not in token:
-            continue
-        _, rest = token.split(".", 1)
-        # ``+`` separates AND-modifiers — both ``Creature`` and ``Dragon``
-        # in ``Spell.Creature+Dragon`` are meaningful synergy tags.
-        for piece in rest.split("+"):
-            piece = piece.strip()
-            if piece.isalpha() and piece[:1].isupper():
-                tags.add(piece)
-    return tags
-
-
-def _commander_synergy_tags(
-    cmdr_ports: list[PortRow],
-) -> set[str]:
-    """Phase D2: tag set for the commander used by the mana-restriction
-    matcher.
-
-    The tag set is built **only** from the commander's own port filters
-    (``valid_filter`` and ``affected_scope``) — NOT from the literal
-    ``cards.subtypes`` / ``card_types`` / ``supertypes`` columns. This
-    is the principled distinction:
-
-    - A subtype that appears in a trigger / static filter (Edgar
-      Markov's ``Card.Vampire+Other`` trigger, Ur-Dragon's
-      ``Dragon.Other`` static cost reducer) is mechanical evidence that
-      the deck PLANS to cast lots of that subtype — exactly what a
-      restricted-mana fixer wants.
-    - A subtype on the literal type line alone is just what the
-      commander HAPPENS to be (Kaalia is a Cleric, Rakdos is a Demon,
-      every commander is Legendary). It doesn't mean the deck wants
-      Cleric / Demon / Legendary fixers, and matching on it floods
-      tribal commanders with generic-Legendary mana rocks (Kaalia
-      regressed −0.038 NDCG when the literal subtypes were included).
-
-    Filters can be comma-separated (Talrand's ``Instant,Sorcery``) so
-    we split on commas before calling :func:`explode_filter`, which
-    only knows about ``+`` and ``.``.
-    """
-    tags: set[str] = set()
-    for p in cmdr_ports:
-        for f in (p.get("valid_filter"), p.get("affected_scope")):
-            if not f:
-                continue
-            for chunk in f.split(","):
-                chunk = chunk.strip()
-                if not chunk:
-                    continue
-                for attr in explode_filter(chunk):
-                    if attr.get("attr_kind") in ("subtype", "type", "supertype"):
-                        val = attr.get("attr_value")
-                        if val:
-                            tags.add(val)
-    return tags
 
 
 def _zone_overlap(
@@ -1328,11 +1205,6 @@ def find_replacement_conflicts(
 # Phase D1 — sacrifice outlet ↔ payoff matcher
 # ---------------------------------------------------------------------------
 
-#: Cost-target values that qualify a sacrifice cost as a real outlet
-#: (depends on Phase A1 ``cost_target`` field). ``self`` is excluded —
-#: suspend-style ``Sac<1/CARDNAME>`` is not a generic outlet.
-_OUTLET_COST_TARGETS: frozenset[str] = frozenset({"other", "any"})
-
 
 def _is_unhelpful_payoff_trigger(valid_filter: str | None) -> bool:
     """Phase D1: reject trigger filters that are mechanically NOT a
@@ -1364,50 +1236,3 @@ def _is_unhelpful_payoff_trigger(valid_filter: str | None) -> bool:
     # If any alternative is NOT Card.Self, the trigger has a real payoff path.
     alts = [a.strip() for a in valid_filter.split(",") if a.strip()]
     return bool(alts and all(a.startswith("Card.Self") for a in alts))
-
-
-def _commander_death_signature(
-    cmdr_ports: list[PortRow],
-) -> tuple[bool, bool, bool]:
-    """Return ``(has_death_trig, has_bf_to_gy_trig, has_outlet_cost)``.
-
-    A "death trigger" is one of ``Sacrificed``, ``LifeLost`` (which fires
-    on sac-induced life loss for cards like Blood Artist), or
-    ``ChangesZone`` from Battlefield to Graveyard. The BF→GY case is
-    tracked separately so the SQL queries below can lift it without an
-    extra IN-list.
-    """
-    has_death = False
-    has_bf_to_gy = False
-    has_outlet_cost = False
-    for p in cmdr_ports:
-        ptype = p.get("port_type")
-        ev = (p.get("event_class") or "").strip()
-        if ptype == "trigger":
-            # Self-only triggers (Card.Self) fire on the commander's own
-            # death, not other cards dying. Locust God's "when CARDNAME
-            # dies, return to hand" should NOT flag the commander as a
-            # sacrifice-payoff. Skip them.
-            if _trigger_only_matches_self(p.get("valid_filter")):
-                continue
-            # Opponent-scoped triggers (OppCtrl / Opponent) care about
-            # opponents' creatures dying, not yours. Tergrid triggers
-            # on ``Sacrificed|Permanent.OppCtrl`` — she wants opponent-
-            # forcing cards (Phase F10), not own-side sacrifice outlets.
-            # Exclude from death signature so sacrifice_synergy doesn't
-            # flood her results with irrelevant sac outlets.
-            vf = p.get("valid_filter") or ""
-            if "OppCtrl" in vf or "Opponent" in vf:
-                continue
-            if ev in ("Sacrificed", "LifeLost"):
-                has_death = True
-            elif ev == "ChangesZone":
-                orig = (p.get("zone_origin") or "").strip()
-                dest = (p.get("zone_destination") or "").strip()
-                if orig == "Battlefield" and dest == "Graveyard":
-                    has_death = True
-                    has_bf_to_gy = True
-        elif ptype == "cost" and ev == "sacrifice":
-            if (p.get("cost_target") or "") in _OUTLET_COST_TARGETS:
-                has_outlet_cost = True
-    return has_death, has_bf_to_gy, has_outlet_cost

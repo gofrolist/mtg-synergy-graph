@@ -7,6 +7,181 @@ import sqlite3
 
 from .core import PortComplement, PortRow
 
+#: Card types that are spells (not permanents). Used by _find_graveyard_sac_value
+#: to skip commanders that only replay instants/sorceries (e.g. Kess).
+_SPELL_ONLY_TYPES: frozenset[str] = frozenset({"Instant", "Sorcery"})
+
+#: Effect events that indicate a sacrifice cost has a valuable payoff.
+_VALUABLE_SAC_EFFECTS: tuple[str, ...] = (
+    "Mana",
+    "Draw",
+    "Destroy",
+    "GainLife",
+    "ChangeZone",
+    "Token",
+    "Mill",
+    "DealDamage",
+    "PutCounter",
+)
+
+
+#: Cast-from-GY recastable types (subset where spell_density density
+#: signal makes sense — creatures are handled by other rules).
+_CASTABLE_TYPES: frozenset[str] = frozenset({"Instant", "Sorcery"})
+
+
+def _wants_graveyard(cmdr_ports: list[PortRow]) -> bool:
+    """Return True if the commander reanimates/replays from graveyard."""
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        if pt == "effect" and ev == "ChangeZone" and (p.get("zone_origin") or "").strip() == "Graveyard":
+            return True
+        if pt == "static" and ev == "Continuous":
+            raw = str(p.get("raw_line") or "")
+            if "'MayPlay'" in raw and "'Graveyard'" in raw:
+                return True
+        if pt == "scales_with" and ("Graveyard" in ev or "graveyard" in ev):
+            return True
+    return False
+
+
+def _extract_recast_types(cmdr_ports: list[PortRow]) -> set[str]:
+    """Extract card types the commander can recast from graveyard."""
+    recast_types: set[str] = set()
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        if pt != "static" or ev != "Continuous":
+            continue
+        raw = str(p.get("raw_line") or "")
+        if "'MayPlay'" not in raw or "'Graveyard'" not in raw:
+            continue
+        m = re.search(r"'Affected':\s*'([^']+)'", raw)
+        if not m:
+            continue
+        for alt in m.group(1).split(","):
+            base = alt.strip().split(".")[0].split("+")[0].strip()
+            if base and base[0].isupper() and base != "Card":
+                recast_types.add(base)
+    return recast_types
+
+
+def _wants_gy_fill(cmdr_ports: list[PortRow]) -> bool:
+    """Return True if the commander needs entomb/discard GY-fill.
+
+    Only for commanders that actively REANIMATE permanents (ChangeZone
+    GY→BF) or have a discard cost (Chainer). Kess/Locust God care about
+    GY but don't need GY-fill.
+    """
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        if (
+            pt == "effect"
+            and ev == "ChangeZone"
+            and (p.get("zone_origin") or "").strip() == "Graveyard"
+            and (p.get("zone_destination") or "").strip() == "Battlefield"
+        ):
+            return True
+        if pt == "cost" and ev == "discard":
+            return True
+    return False
+
+
+def _emit_filler(
+    rows: list[sqlite3.Row],
+    cand_event: str,
+    cmdr_set: set[str],
+    seen: set[str],
+) -> list[PortComplement]:
+    """Build filler complements from a row iterable, mutating ``seen``."""
+    out: list[PortComplement] = []
+    for r in rows:
+        name = r["card_name"]
+        if name in cmdr_set or name in seen:
+            continue
+        seen.add(name)
+        out.append(
+            PortComplement(
+                rule_id="trigger_effect",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="graveyard_filler",
+                cand_event=cand_event,
+            )
+        )
+    return out
+
+
+def _query_self_mill(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Self-mill effects (Mill / DigUntil / Surveil targeting you)."""
+    return conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE port_type = 'effect' AND event_class IN ('Mill', 'DigUntil', 'Surveil') "
+        "AND (valid_filter LIKE '%YouCtrl%' OR valid_filter LIKE '%YouOwn%' "
+        "OR valid_filter = 'You' OR valid_filter LIKE 'You.%')"
+    ).fetchall()
+
+
+def _query_entomb(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Entomb effects: ChangeZone Library→Graveyard.  N≈49."""
+    return conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE port_type = 'effect' AND event_class IN ('ChangeZone', 'ChangeZoneAll') "
+        "AND zone_origin = 'Library' AND zone_destination = 'Graveyard'"
+    ).fetchall()
+
+
+def _query_self_discard(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Self-discard effects (Faithless Looting fills GY).  N≈423."""
+    return conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE port_type = 'effect' AND event_class = 'Discard' "
+        "AND (valid_filter LIKE '%You%' OR valid_filter = '' OR valid_filter IS NULL "
+        "     OR valid_filter LIKE '%Each%') "
+        "AND valid_filter NOT LIKE '%Opp%'"
+    ).fetchall()
+
+
+def _query_discard_cost(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Discard-as-cost (Cathartic Reunion: pay discard → draw).  N≈490."""
+    return conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports WHERE port_type = 'cost' AND event_class = 'discard'"
+    ).fetchall()
+
+
+def _emit_recast_density(
+    conn: sqlite3.Connection,
+    card_type: str,
+    cmdr_set: set[str],
+    seen: set[str],
+) -> list[PortComplement]:
+    """Emit spell_density complements for cards matching a recastable type."""
+    # card_type is from _CASTABLE_TYPES frozenset — safe, but escape
+    # LIKE wildcards for defense-in-depth.
+    safe_ct = card_type.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    rows = conn.execute(
+        "SELECT name FROM cards WHERE card_types LIKE ? ESCAPE '\\'",
+        (f"%{safe_ct}%",),
+    ).fetchall()
+    out: list[PortComplement] = []
+    for r in rows:
+        name = r["name"]
+        if name in cmdr_set or name in seen:
+            continue
+        seen.add(name)
+        out.append(
+            PortComplement(
+                rule_id="spell_density",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="graveyard_cast",
+                cand_event=card_type,
+            )
+        )
+    return out
+
 
 def _find_graveyard_fillers(
     conn: sqlite3.Connection,
@@ -20,94 +195,25 @@ def _find_graveyard_fillers(
     cards that fill the graveyard: self-mill, dredge, self-discard, and
     creatures that put themselves in the graveyard (evoke, self-sacrifice).
     """
-    wants_gy = False
-
-    # Check for ChangeZone from Graveyard effects (Meren, Marchesa)
-    for p in cmdr_ports:
-        pt = (p.get("port_type") or "").strip()
-        ev = (p.get("event_class") or "").strip()
-        if pt == "effect" and ev == "ChangeZone":
-            zo = (p.get("zone_origin") or "").strip()
-            if zo == "Graveyard":
-                wants_gy = True
-                break
-        # Static graveyard-cast (Karador, Muldrotha, Kess)
-        if pt == "static" and ev == "Continuous":
-            raw = str(p.get("raw_line") or "")
-            if "'MayPlay'" in raw and "'Graveyard'" in raw:
-                wants_gy = True
-                break
-        # scales_with graveyard (Karador, Mimeoplasm)
-        if pt == "scales_with" and ("Graveyard" in ev or "graveyard" in ev):
-            wants_gy = True
-            break
-
-    if not wants_gy:
+    if not _wants_graveyard(cmdr_ports):
         return []
 
-    # Also detect which card types the commander can recast from GY
-    recast_types: set[str] = set()
-    for p in cmdr_ports:
-        pt = (p.get("port_type") or "").strip()
-        ev = (p.get("event_class") or "").strip()
-        if pt == "static" and ev == "Continuous":
-            raw = str(p.get("raw_line") or "")
-            if "'MayPlay'" in raw and "'Graveyard'" in raw:
-                m = re.search(r"'Affected':\s*'([^']+)'", raw)
-                if m:
-                    for alt in m.group(1).split(","):
-                        base = alt.strip().split(".")[0].split("+")[0].strip()
-                        if base and base[0].isupper() and base != "Card":
-                            recast_types.add(base)
-
+    recast_types = _extract_recast_types(cmdr_ports)
     results: list[PortComplement] = []
     seen: set[str] = set()
 
-    # Self-mill effects (targeted: cards that specifically mill yourself)
-    cur = conn.execute(
-        "SELECT DISTINCT card_name FROM card_ports "
-        "WHERE port_type = 'effect' AND event_class IN ('Mill', 'DigUntil', 'Surveil') "
-        "AND (valid_filter LIKE '%YouCtrl%' OR valid_filter LIKE '%YouOwn%' "
-        "OR valid_filter = 'You' OR valid_filter LIKE 'You.%')"
-    )
-    for r in cur.fetchall():
-        name = r["card_name"]
-        if name not in cmdr_set and name not in seen:
-            seen.add(name)
-            results.append(
-                PortComplement(
-                    rule_id="trigger_effect",
-                    direction="synergy",
-                    candidate=name,
-                    cmdr_event="graveyard_filler",
-                    cand_event="self_mill",
-                )
-            )
+    # Self-mill always fires for GY commanders (broad gate)
+    results.extend(_emit_filler(_query_self_mill(conn), "self_mill", cmdr_set, seen))
 
-    # Recast-type density: Kess wants instants/sorceries, Karador wants
-    # creatures with ETBs. Match cards of the recastable types.
-    _CASTABLE_TYPES = frozenset({"Instant", "Sorcery"})
+    # Entomb / self-discard / discard-cost only for reanimators
+    if _wants_gy_fill(cmdr_ports):
+        results.extend(_emit_filler(_query_entomb(conn), "entomb", cmdr_set, seen))
+        results.extend(_emit_filler(_query_self_discard(conn), "self_discard", cmdr_set, seen))
+        results.extend(_emit_filler(_query_discard_cost(conn), "discard_cost", cmdr_set, seen))
+
+    # Recast-type density: Kess wants instants/sorceries.
     for card_type in recast_types & _CASTABLE_TYPES:
-        # card_type is from _CASTABLE_TYPES frozenset — safe, but escape
-        # LIKE wildcards for defense-in-depth.
-        safe_ct = card_type.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        cur = conn.execute(
-            "SELECT name FROM cards WHERE card_types LIKE ? ESCAPE '\\'",
-            (f"%{safe_ct}%",),
-        )
-        for r in cur.fetchall():
-            name = r["name"]
-            if name not in cmdr_set and name not in seen:
-                seen.add(name)
-                results.append(
-                    PortComplement(
-                        rule_id="spell_density",
-                        direction="synergy",
-                        candidate=name,
-                        cmdr_event="graveyard_cast",
-                        cand_event=card_type,
-                    )
-                )
+        results.extend(_emit_recast_density(conn, card_type, cmdr_set, seen))
 
     return results
 
@@ -166,33 +272,53 @@ def _find_artifact_recursion(
                 )
             )
 
-    # Artifacts with self-ETB + valuable effects (for copy commanders)
-    if wants_artifact_copy:
-        cur2 = conn.execute(
-            "SELECT DISTINCT cp.card_name FROM card_ports cp "
-            "JOIN cards c ON cp.card_name = c.name "
-            "WHERE cp.port_type = 'trigger' AND cp.event_class = 'ChangesZone' "
-            "AND cp.valid_filter LIKE '%Card.Self%' "
-            "AND cp.zone_destination = 'Battlefield' "
-            "AND c.card_types LIKE '%Artifact%' "
-            "AND cp.card_name IN ("
-            "  SELECT card_name FROM card_ports WHERE port_type = 'effect' "
-            "  AND event_class IN ('Draw', 'Destroy', 'Token', 'DealDamage', 'Mana')"
-            ")"
-        )
-        for r in cur2.fetchall():
-            name = r["card_name"]
-            if name not in cmdr_set and name not in seen:
-                seen.add(name)
-                results.append(
-                    PortComplement(
-                        rule_id="artifact_recursion",
-                        direction="synergy",
-                        candidate=name,
-                        cmdr_event="copy_artifact",
-                        cand_event="etb_artifact",
-                    )
+    # Artifacts with self-ETB + valuable effects (for recursion AND copy).
+    # Ichor Wellspring draws on ETB + LTB — great for Daretti (recur from
+    # GY) and Osgir (copy from exile).  The early-return above guarantees
+    # at least one of wants_artifact_gy / wants_artifact_copy is True.
+    cmdr_ev = "graveyard_artifact" if wants_artifact_gy else "copy_artifact"
+    cur2 = conn.execute(
+        "SELECT DISTINCT cp.card_name FROM card_ports cp "
+        "JOIN cards c ON cp.card_name = c.name "
+        "WHERE cp.port_type = 'trigger' AND cp.event_class = 'ChangesZone' "
+        "AND cp.valid_filter LIKE '%Card.Self%' "
+        "AND cp.zone_destination = 'Battlefield' "
+        "AND c.card_types LIKE '%Artifact%' "
+        "AND cp.card_name IN ("
+        "  SELECT card_name FROM card_ports WHERE port_type = 'effect' "
+        "  AND event_class IN ('Draw', 'Destroy', 'Token', 'DealDamage', 'Mana')"
+        ")"
+    )
+    for r in cur2.fetchall():
+        name = r["card_name"]
+        if name not in cmdr_set and name not in seen:
+            seen.add(name)
+            results.append(
+                PortComplement(
+                    rule_id="artifact_recursion",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event=cmdr_ev,
+                    cand_event="etb_artifact",
                 )
+            )
+
+    # Artifact lands: free artifacts that increase artifact count
+    # for recursion and copy commanders.  N≈22, high IDF.
+    cur3 = conn.execute("SELECT name FROM cards WHERE card_types LIKE '%Artifact%' AND card_types LIKE '%Land%'")
+    for r in cur3.fetchall():
+        name = r["name"]
+        if name not in cmdr_set and name not in seen:
+            seen.add(name)
+            results.append(
+                PortComplement(
+                    rule_id="artifact_recursion",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event=cmdr_ev,
+                    cand_event="artifact_land",
+                )
+            )
 
     return results
 
@@ -317,6 +443,88 @@ def _wants_graveyard_recursion(
             if "'MayPlay'" in raw and "'Graveyard'" in raw:
                 has_self_recursion = True
     return has_self_recursion
+
+
+def _find_graveyard_sac_value(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Find self-sacrificing permanents for graveyard-replay commanders.
+
+    Muldrotha replays permanents from GY.  Spore Frog (sac: fog),
+    Seal of Primordium (sac: destroy), Sakura-Tribe Elder (sac: ramp)
+    are reusable removal/ramp/protection when replayed every turn.
+
+    The existing ``_find_etb_sac_targets`` requires BOTH self-ETB AND
+    sacrifice cost.  This rule is broader: any permanent with sacrifice
+    cost + valuable effect.  Cards matching both rules get a multi-rule
+    boost (correct — Plaguecrafter with ETB+sac+effect > Spore Frog
+    with sac+effect only).
+
+    N ≈ 1602, IDF ≈ 0.093.
+    """
+    if not _wants_graveyard_recursion(cmdr_ports):
+        return []
+
+    # Only fire for commanders that replay PERMANENTS from GY.
+    # Kess replays Instant/Sorcery — sacrifice permanents are irrelevant.
+    # Check: if the MayPlay static restricts to Instant/Sorcery, skip.
+    replays_permanents = False
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        if pt == "effect" and ev == "ChangeZone":
+            zo = (p.get("zone_origin") or "").strip()
+            vf = p.get("valid_filter") or ""
+            if zo == "Graveyard" and "TriggeredCard" not in vf:
+                # Meren-style: reanimates creatures (permanents) ✓
+                replays_permanents = True
+        if pt == "static" and ev == "Continuous":
+            raw = str(p.get("raw_line") or "")
+            if "'MayPlay'" in raw and "'Graveyard'" in raw:
+                # Parse Affected types — skip if spell-only
+                m = re.search(r"'Affected':\s*'([^']+)'", raw)
+                if m:
+                    affected = {alt.strip().split(".")[0].split("+")[0].strip() for alt in m.group(1).split(",")}
+                    # If ALL affected types are spell-only, skip
+                    non_spell = affected - _SPELL_ONLY_TYPES - {"Card", ""}
+                    if non_spell:
+                        replays_permanents = True
+                else:
+                    # No Affected filter → replays anything (Muldrotha)
+                    replays_permanents = True
+
+    if not replays_permanents:
+        return []
+
+    ph = ",".join("?" * len(_VALUABLE_SAC_EFFECTS))
+    # Use IN-subquery instead of JOIN to avoid a costly self-join on
+    # the 184k-row card_ports table (JOIN was ~58s, subquery is ~0.02s).
+    # Load the best (rarest) effect type per candidate for IDF sub-grouping.
+    cur = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE port_type = 'cost' AND event_class = 'sacrifice' "
+        "AND card_name IN ("
+        "  SELECT card_name FROM card_ports "
+        f"  WHERE port_type = 'effect' AND event_class IN ({ph})"
+        ")",
+        _VALUABLE_SAC_EFFECTS,
+    )
+    results: list[PortComplement] = []
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name not in cmdr_set:
+            results.append(
+                PortComplement(
+                    rule_id="graveyard_play",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="replays_from_gy",
+                    cand_event="self_sacrifice",
+                )
+            )
+    return results
 
 
 def _find_etb_sac_targets(

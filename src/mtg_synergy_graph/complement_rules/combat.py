@@ -5,7 +5,12 @@ from __future__ import annotations
 import sqlite3
 
 from ..graph_engine import _trigger_only_matches_self
-from .core import PortComplement, PortRow, _commander_subtypes_from_ports
+from .core import (
+    PortComplement,
+    PortRow,
+    _commander_subtypes_from_ports,
+    _cost_filter_group,
+)
 
 #: Card types used for zone-resonance matching.
 _PRIMARY_TYPES: frozenset[str] = frozenset({"Creature", "Artifact", "Enchantment", "Land", "Planeswalker"})
@@ -177,23 +182,30 @@ def _find_sacrifice_outlets(
     if not has_death_trigger:
         return []
 
-    # Find all cards with sacrifice costs
+    # Find all cards with sacrifice costs, loading cost metadata for
+    # sub-IDF grouping (free_outlet / paid_outlet / self_sac).
     cur = conn.execute(
-        "SELECT DISTINCT card_name FROM card_ports WHERE port_type = 'cost' AND event_class = 'sacrifice'"
+        "SELECT card_name, event_class, cost_target, raw_line FROM card_ports "
+        "WHERE port_type = 'cost' AND event_class = 'sacrifice'"
     )
     results: list[PortComplement] = []
+    seen: set[str] = set()
     for r in cur.fetchall():
         card = r["card_name"]
-        if card not in cmdr_set:
-            results.append(
-                PortComplement(
-                    rule_id="cost_feeds_trigger",
-                    direction="synergy",
-                    candidate=card,
-                    cmdr_event="ChangesZone_death",
-                    cand_event="sacrifice",
-                )
+        if card in cmdr_set or card in seen:
+            continue
+        seen.add(card)
+        fg = _cost_filter_group(dict(r))
+        results.append(
+            PortComplement(
+                rule_id="cost_feeds_trigger",
+                direction="synergy",
+                candidate=card,
+                cmdr_event="ChangesZone_death",
+                cand_event="sacrifice",
+                filter_group=fg,
             )
+        )
 
     return results
 

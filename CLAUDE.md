@@ -6,7 +6,7 @@ Guidance for Claude Code working in this repo.
 
 MTG Synergy Graph — deterministic, rule-based EDH/Commander synergy scorer
 using Forge DSL ports. No training, no EDHREC at inference.
-Current aggregate NDCG@30 ~ 0.154, Hi-Syn 110/1000 on the 100-commander golden set.
+Current aggregate NDCG@30 ~ 0.194, Hi-Syn 160/1000 on the 100-commander golden set.
 Port extraction: 184,106 ports from 32,327 cards (GenericChoice + StaticAbilities$ expansion).
 
 ## Common Commands
@@ -67,6 +67,11 @@ pair creates a synergy. Each wraps an existing mechanical map.
 | panharmonicon (reverse) | cmdr subtype match | candidates doubling cmdr triggers | Kykar+Harmonic Prodigy |
 | panharmonicon (stack) | cmdr Panharmonicon | other Panharmonicon statics | Yarok+Panharmonicon |
 | evasion | DamageDone combat (non-tribal) | self-unblockable creatures | Saskia/Derevi |
+| cheat_cmc | ChangeZone hand→BF with ChangeType | CMC-bucketed type matches (6+, 4-5) | Kaalia |
+| cost_reduction_target | ReduceCost static | high-CMC creatures (6+) | Rakdos/Animar |
+| pinger | scales_with LifeOppsLost | DealDamage/LoseLife targeting opponents | Rakdos |
+| toughness_synergy | scales_with CardToughness | Defender creatures | Phenax |
+| cascade_value | Cascade keyword | high-CMC spells with valuable effects | Maelstrom Wanderer |
 
 ### IDF Weighting (`universal_scorer.py`)
 
@@ -74,8 +79,9 @@ Each complement's value = `1 / log2(1 + N)` where N = number of candidates
 sharing the same match tuple. Specific matches (Saproling lord: N=3, IDF≈0.50)
 worth more than broad matches (sacrifice cost: N=2000, IDF≈0.09).
 
-Density rules (spell_density, scaling, tribal_density, etb_self) use flat
-weight 1.0 — for these, matching many candidates IS the strategy.
+Density rules use flat weights to prevent IDF from penalizing broad-but-correct
+matching: spell_density 0.3, scaling 0.3, tribal_density 0.5, etb_self 0.01,
+token_producer 0.25, evasion 0.15, pan_density 0.10.
 
 Multi-rule bonus: cards matching 3+ distinct rule_ids get +0.1 per extra rule
 (rewards multi-axis synergy picks like Pitiless Plunderer).

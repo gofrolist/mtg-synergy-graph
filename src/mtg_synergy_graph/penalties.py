@@ -47,9 +47,6 @@ log = logging.getLogger(__name__)
 #: ranking, never shown to the consumer.
 HARD_FILTER_SCORE = -1e9
 
-#: Counter types that are "niche" — only useful in specific archetypes.
-NICHE_COUNTERS: frozenset[str] = frozenset({"TIME", "EXPERIENCE", "ENERGY"})
-
 #: Counter type aliases that all map to "P1P1" for matching purposes.
 P1P1_ALIASES: frozenset[str] = frozenset({"P1P1"})
 

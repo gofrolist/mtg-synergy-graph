@@ -870,6 +870,13 @@ def _find_value_engine_density(
     return results
 
 
+#: Card types eligible for cheat-into-play CMC bonus.
+_CHEAT_TYPES: frozenset[str] = frozenset({"Creature", "Artifact", "Enchantment", "Planeswalker"})
+
+#: Maps (kind → SQL column) for type/subtype LIKE queries.
+_CHEAT_ALLOWED_COLS: dict[str, str] = {"type": "card_types", "subtype": "subtypes"}
+
+
 #: Keywords that cause creatures to enter with or gain +1/+1 counters.
 _COUNTER_KEYWORDS: tuple[str, ...] = (
     "Modular",
@@ -993,4 +1000,241 @@ def _find_counter_keyword_synergy(
                 )
             )
 
+    return results
+
+
+def _find_cheat_cmc_bonus(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """CMC-scaled bonus for cheat-into-play commanders.
+
+    Kaalia puts Angel/Demon/Dragon from hand to battlefield — cheating
+    a CMC-7 Gisela saves 7 mana, while cheating a CMC-2 creature saves
+    almost nothing.  This rule adds complements bucketed by CMC so that
+    high-CMC type matches score substantially higher.
+
+    Only covers commanders that put permanents onto the battlefield
+    WITHOUT paying mana cost (Kaalia, Elvish Piper, Quicksilver
+    Amulet).  MayPlay from graveyard (Karador, Muldrotha) still pays
+    mana cost, so CMC-scaling is wrong for them.
+
+    Skips types with CMC restrictions in ChangeType (e.g. Zur's
+    ``cmcLE3`` — he only cheats cheap enchantments, so high CMC is
+    irrelevant).
+
+    CMC 6+: filter_group="cmc_high", N≈150-200, IDF≈0.14
+    CMC 4-5: filter_group="cmc_mid", N≈100-150, IDF≈0.15
+    CMC 0-3: no complement (cheap cards don't benefit from cheating)
+    """
+    wanted: list[tuple[str, str]] = []  # (kind, target_name)
+
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        raw = str(p.get("raw_line") or "")
+
+        # ChangeZone effect with typed ChangeType (Kaalia-style free cheat)
+        if pt == "effect" and ev == "ChangeZone" and "ChangeType" in raw:
+            zo = (p.get("zone_origin") or "").strip()
+            zd = (p.get("zone_destination") or "").strip()
+            if zd != "Battlefield" or zo not in ("Hand", "Graveyard", "Library"):
+                continue
+            m = re.search(r"'ChangeType':\s*'([^']+)'", raw)
+            if not m:
+                continue
+            # Skip types with CMC restrictions (cmcLE3, cmcGE7, etc.)
+            # Zur cheats cmcLE3 Enchantments — high-CMC bonus is wrong.
+            change_type_str = m.group(1)
+            if re.search(r"cmc[LG]E\d+", change_type_str):
+                continue
+            for part in change_type_str.split(","):
+                segments = part.strip().split("+")[0].split(".")
+                base = segments[0].strip()
+                subtype = segments[1].strip() if len(segments) > 1 else ""
+                if (
+                    subtype
+                    and subtype[0].isupper()
+                    and not subtype.startswith("cmc")
+                    and subtype not in ("YouCtrl", "YouOwn")
+                ):
+                    wanted.append(("subtype", subtype))
+                elif base in _CHEAT_TYPES:
+                    wanted.append(("type", base))
+
+    if not wanted:
+        return []
+
+    return _query_cheat_cmc_brackets(conn, wanted, cmdr_set)
+
+
+#: CMC brackets for cheat-into-play scoring: (min_cmc, max_cmc, label).
+_CMC_BRACKETS: tuple[tuple[int, int | None, str], ...] = (
+    (6, None, "cmc_high"),
+    (4, 6, "cmc_mid"),
+)
+
+
+def _query_cheat_cmc_brackets(
+    conn: sqlite3.Connection,
+    wanted: list[tuple[str, str]],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Query cards matching wanted types within each CMC bracket."""
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+
+    for kind, target in sorted(set(wanted)):
+        col = _CHEAT_ALLOWED_COLS.get(kind)
+        if col is None:
+            continue
+        safe = _escape_like(target)
+
+        for min_cmc, max_cmc, label in _CMC_BRACKETS:
+            if max_cmc is None:
+                sql = f"SELECT name FROM cards WHERE {col} LIKE ? ESCAPE '\\' AND cmc >= ?"
+                params: tuple[str | int, ...] = (f"%{safe}%", min_cmc)
+            else:
+                sql = f"SELECT name FROM cards WHERE {col} LIKE ? ESCAPE '\\' AND cmc >= ? AND cmc < ?"
+                params = (f"%{safe}%", min_cmc, max_cmc)
+
+            for r in conn.execute(sql, params).fetchall():
+                name = r["name"]
+                if name not in cmdr_set and name not in seen:
+                    seen.add(name)
+                    results.append(
+                        PortComplement(
+                            rule_id="cheat_cmc",
+                            direction="synergy",
+                            candidate=name,
+                            cmdr_event="cheat_into_play",
+                            cand_event=target,
+                            filter_group=label,
+                        )
+                    )
+
+    return results
+
+
+def _find_cost_reduction_targets(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """High-CMC creatures for cost-reduction commanders.
+
+    Rakdos reduces creature spell costs by life lost → expensive
+    creatures (Eldrazi, Blightsteel Colossus) benefit most. N ≈ 2249,
+    quality-multiplied 0.5x.
+    """
+    has_reduce_cost = False
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        if pt == "static" and ev == "ReduceCost":
+            raw = str(p.get("raw_line") or "")
+            if "Creature" in raw or "Spell" in raw:
+                has_reduce_cost = True
+                break
+
+    if not has_reduce_cost:
+        return []
+
+    cur = conn.execute("SELECT name FROM cards WHERE card_types LIKE '%Creature%' AND cmc >= 6")
+    results: list[PortComplement] = []
+    for r in cur.fetchall():
+        name = r["name"]
+        if name not in cmdr_set:
+            results.append(
+                PortComplement(
+                    rule_id="cost_reduction_target",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="ReduceCost",
+                    cand_event="high_cmc_creature",
+                )
+            )
+    return results
+
+
+def _find_pinger_synergy(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Repeatable damage effects for damage-scaling commanders.
+
+    Rakdos scales with ``LifeOppsLostThisTurn`` → pingers (Spear
+    Spewer, Thermo-Alchemist) enable casting by dealing damage each
+    turn. N ≈ 1228, IDF ≈ 0.10.
+    """
+    has_damage_scaling = False
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        if pt == "scales_with" and ("LifeOppsLost" in ev or "LifeLost" in ev):
+            has_damage_scaling = True
+            break
+
+    if not has_damage_scaling:
+        return []
+
+    cur = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE port_type = 'effect' "
+        "AND event_class IN ('DealDamage', 'DamageAll', 'LoseLife') "
+        "AND (valid_filter LIKE '%Opp%' OR valid_filter LIKE '%Each%' "
+        "     OR valid_filter = '' OR valid_filter IS NULL)"
+    )
+    results: list[PortComplement] = []
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name not in cmdr_set:
+            results.append(
+                PortComplement(
+                    rule_id="pinger",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="damage_scaling",
+                    cand_event="DealDamage",
+                )
+            )
+    return results
+
+
+def _find_toughness_matters(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Defender creatures for toughness-scaling commanders.
+
+    Phenax taps creatures to mill equal to toughness → Defenders
+    (high toughness, can't attack anyway) are ideal. N ≈ 307,
+    IDF ≈ 0.12.
+    """
+    has_toughness_scaling = any(
+        (p.get("port_type") or "").strip() == "scales_with" and "Toughness" in ((p.get("event_class") or "").strip())
+        for p in cmdr_ports
+    )
+    if not has_toughness_scaling:
+        return []
+
+    cur = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports WHERE port_type = 'keyword' AND event_class = 'Defender'"
+    )
+    results: list[PortComplement] = []
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name not in cmdr_set:
+            results.append(
+                PortComplement(
+                    rule_id="toughness_synergy",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="toughness_scaling",
+                    cand_event="Defender",
+                )
+            )
     return results

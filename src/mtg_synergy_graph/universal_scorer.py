@@ -65,10 +65,17 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "counter_keyword": "counter_synergy",
     "damage_synergy": "port_match",
     "mana_doubler": "port_match",
+    "pan_density": "port_match",
     "power_matters": "scaling",  # IDF-weighted (not in _FLAT_COUNT_RULES); bucket is display-only
     "landfall_enabler": "port_match",
     "proliferate_synergy": "counter_synergy",
     "value_engine": "spellcast_density",
+    "cheat_cmc": "port_match",
+    "cost_reduction_target": "port_match",
+    "pinger": "port_match",
+    "toughness_synergy": "scaling",
+    "cascade_value": "port_match",
+    "flicker_payoff": "port_match",
 }
 
 # ---------------------------------------------------------------------------
@@ -94,6 +101,48 @@ _FED_BY_COMMANDER_RULES: frozenset[str] = frozenset(
         "etb_sac_target",
     }
 )
+
+#: Rule pairs that form mechanical feedback loops.  When a card matches
+#: both rules in a pair, it receives the specified bonus on top of its
+#: IDF-weighted score.  This replaces the old flat multi-rule bonus
+#: (+0.02 per rule) with pair-aware scoring — only mechanically
+#: meaningful combinations are rewarded.
+_SYNERGY_PAIRS: dict[frozenset[str], float] = {
+    # Sacrifice + recursion loop
+    frozenset({"cost_feeds_trigger", "graveyard_play"}): 0.05,
+    frozenset({"cost_feeds_trigger", "etb_sac_target"}): 0.05,
+    # Sacrifice fodder engine
+    frozenset({"sacrifice_cluster", "token_sac_chain"}): 0.05,
+    frozenset({"effect_feeds_trigger", "sacrifice_cluster"}): 0.04,
+    # Bidirectional synergy: feeds and is fed by commander
+    frozenset({"trigger_effect", "effect_feeds_trigger"}): 0.05,
+    # Tribal: lord + is the tribe
+    frozenset({"lord", "tribal_density"}): 0.03,
+    # Panharmonicon: doubled trigger + has the trigger type
+    frozenset({"panharmonicon", "pan_density"}): 0.03,
+    # Toughness: scales + has Defender
+    frozenset({"scaling", "toughness_synergy"}): 0.03,
+    # Cost reduction: big creature + damage enabler
+    frozenset({"cost_reduction_target", "pinger"}): 0.05,
+    # Cheat-into-play: type match + CMC bonus
+    frozenset({"cheat_cmc", "value_engine"}): 0.03,
+    # Graveyard: ETB target + recursion
+    frozenset({"etb_sac_target", "graveyard_play"}): 0.04,
+    # Landfall: land enabler + zone resonance
+    frozenset({"landfall_enabler", "zone_resonance"}): 0.04,
+    # Counter synergies
+    frozenset({"counter_doubler", "counter_keyword"}): 0.03,
+    frozenset({"counter_doubler", "proliferate_synergy"}): 0.03,
+}
+
+
+def _compute_pair_bonus(rules: frozenset[str]) -> float:
+    """Sum bonuses for all synergy pairs present in a card's rule set."""
+    bonus = 0.0
+    for pair, value in _SYNERGY_PAIRS.items():
+        if pair <= rules:
+            bonus += value
+    return bonus
 
 
 @dataclass
@@ -159,12 +208,12 @@ class UniversalScore:
                 syn *= 1.0 - penalty
 
         base = syn - anti + self.staple_bonus
-        # Multi-rule bonus: cards matching 3+ distinct rules are
-        # genuinely better synergy picks (Pitiless Plunderer matches
-        # sacrifice_cluster + trigger_effect + effect_feeds_trigger).
+        # Multi-rule bonus: flat breadth reward (+0.02 per extra rule)
+        # plus pair bonuses for mechanical feedback loops.
         n_rules = len(self.distinct_rules)
         if n_rules >= 2:
             base += 0.02 * min(n_rules - 1, 4)
+        base += _compute_pair_bonus(self.distinct_rules)
         base += self.circuit_bonus + self.cmc_bonus + self.rank_bonus
         return base
 
@@ -195,6 +244,7 @@ class UniversalScore:
         n_rules = len(self.distinct_rules)
         if n_rules >= 2:
             buckets["total"] += 0.02 * min(n_rules - 1, 4)
+        buckets["total"] += _compute_pair_bonus(self.distinct_rules)
         buckets["total"] += self.circuit_bonus + self.cmc_bonus + self.rank_bonus
         return buckets
 
@@ -214,6 +264,7 @@ _FLAT_COUNT_RULES: frozenset[str] = frozenset(
         "tribal_density",
         "token_producer",
         "evasion",
+        "pan_density",
     }
 )
 
@@ -227,15 +278,16 @@ _FLAT_COUNT_RULES: frozenset[str] = frozenset(
 #: synergy rules can compete, while small groups (Land N=1.1k) keep
 #: full weight of 1.0.
 _FLAT_WEIGHT_OVERRIDES: dict[str, float] = {
+    "spell_density": 0.3,
+    "scaling": 0.3,
     "tribal_density": 0.5,
     "token_producer": 0.25,
     "evasion": 0.15,
+    "pan_density": 0.10,
+    "etb_self": 0.01,
 }
 
-#: Quality multiplier applied to IDF weights based on the mechanical
-#: nature of the interaction. Broad effect-only matches (Draw,
-#: DealDamage) are dampened — they're staple utility rather than synergy.
-#: Quality multiplier for IDF weights. Dampens broad effect-only
+#: Quality multiplier applied to IDF weights. Dampens broad effect-only
 #: rules and enabler-on-enabler trigger-trigger matches.
 _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     "damage_synergy": 0.5,
@@ -247,6 +299,7 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # IDF already dampens based on N, but the signal is inherently weaker
     # than mechanical synergy — "be the right type" is a density signal.
     "value_engine": 0.5,
+    "cost_reduction_target": 0.5,
 }
 
 
@@ -277,18 +330,7 @@ def _compute_idf_weights(
         rule_id = key[0]
         if rule_id in _FLAT_COUNT_RULES:
             override = _FLAT_WEIGHT_OVERRIDES.get(rule_id)
-            if override is not None:
-                result[key] = override
-            elif rule_id == "etb_self":
-                # etb_self matches every card of a type against the
-                # commander's ChangesZone filter. For Creature triggers
-                # (N=17k) this drowns out actual synergy picks. Dampen
-                # large groups so synergy rules can compete, while
-                # small groups (Land N=1.1k) keep full weight.
-                n = len(candidates)
-                result[key] = 1.0 / math.log2(max(n / 1000, 2.0)) if n > 2000 else 1.0
-            else:
-                result[key] = 1.0
+            result[key] = override if override is not None else 1.0
         else:
             n = len(candidates)
             # For forward panharmonicon matches, apply minimum N=10 floor.

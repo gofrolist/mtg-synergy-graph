@@ -26,11 +26,8 @@ from mtg_synergy_graph import (
 )
 from mtg_synergy_graph.db import open_db
 from mtg_synergy_graph.graph_engine import (
-    _commander_death_signature,
-    _commander_synergy_tags,
     _is_substitution_blocking_result,
     _is_unhelpful_payoff_trigger,
-    _parse_restriction_tags,
     _zone_overlap,
 )
 from mtg_synergy_graph.importer import import_cards_folder
@@ -261,118 +258,6 @@ def test_unhelpful_payoff_trigger_accepts_friendly_subtype():
     assert not _is_unhelpful_payoff_trigger("Food")
     assert not _is_unhelpful_payoff_trigger(None)
     assert not _is_unhelpful_payoff_trigger("")
-
-
-def test_commander_death_signature_korvold_payoff():
-    # Korvold-shape: Sacrificed trigger → has_death=True, has_bf_to_gy=False
-    cmdr_ports = [
-        {"port_type": "trigger", "event_class": "Sacrificed"},
-        {"port_type": "trigger", "event_class": "Attacks"},
-    ]
-    assert _commander_death_signature(cmdr_ports) == (True, False, False)
-
-
-def test_commander_death_signature_meren_bf_to_gy():
-    cmdr_ports = [
-        {
-            "port_type": "trigger",
-            "event_class": "ChangesZone",
-            "zone_origin": "Battlefield",
-            "zone_destination": "Graveyard",
-        },
-    ]
-    assert _commander_death_signature(cmdr_ports) == (True, True, False)
-
-
-def test_commander_death_signature_marrow_gnawer_outlet():
-    # Marrow-Gnawer activated ability with Sac<4/Rat> → cost_target=any.
-    cmdr_ports = [
-        {
-            "port_type": "cost",
-            "event_class": "sacrifice",
-            "cost_target": "any",
-        },
-    ]
-    assert _commander_death_signature(cmdr_ports) == (False, False, True)
-
-
-def test_commander_death_signature_self_only_sac_does_not_qualify():
-    # Suspend-style Sac<1/CARDNAME> → cost_target=self → not an outlet.
-    cmdr_ports = [
-        {
-            "port_type": "cost",
-            "event_class": "sacrifice",
-            "cost_target": "self",
-        },
-    ]
-    assert _commander_death_signature(cmdr_ports) == (False, False, False)
-
-
-# ---------------------------------------------------------------------------
-# Phase D2 — mana restriction matcher
-# ---------------------------------------------------------------------------
-
-
-def test_parse_restriction_tags_simple_creature():
-    assert _parse_restriction_tags("Spell.Creature") == {"Creature"}
-
-
-def test_parse_restriction_tags_dragon_with_modifier():
-    assert _parse_restriction_tags("Activated.Dragon+inZoneBattlefield") == {"Dragon"}
-
-
-def test_parse_restriction_tags_compound_creature_dragon():
-    assert _parse_restriction_tags("Spell.Creature+Dragon") == {"Creature", "Dragon"}
-
-
-def test_parse_restriction_tags_multiple_comma_tribes():
-    assert _parse_restriction_tags("Spell.Demon,Spell.Cleric,Spell.Vampire") == {"Demon", "Cleric", "Vampire"}
-
-
-def test_parse_restriction_tags_drops_runtime_modifiers():
-    # cmcGE5 / wasCastFromYourGraveyard / CostContainsX are runtime
-    # — they can't be matched against commander identity tags.
-    assert _parse_restriction_tags("Spell.cmcGE5") == set()
-    assert _parse_restriction_tags("Spell.wasCastFromYourGraveyard") == set()
-    assert _parse_restriction_tags("CostContainsX") == set()
-    assert _parse_restriction_tags("CumulativeUpkeep") == set()
-
-
-def test_parse_restriction_tags_empty_or_none():
-    assert _parse_restriction_tags("") == set()
-    assert _parse_restriction_tags(None) == set()  # type: ignore[arg-type]
-
-
-def test_commander_synergy_tags_ignores_static_subtypes():
-    """Critical Phase D2 invariant: literal cards.subtypes does NOT
-    contribute to the tag set. Only filter-derived tags qualify, so
-    Kaalia (literal subtype Cleric) does NOT match Spell.Cleric mana
-    fixers via her static identity. The cards-row argument is unused
-    today and the function tolerates an empty list.
-    """
-    cmdr_ports = []
-    tags = _commander_synergy_tags(cmdr_ports)
-    assert tags == set()
-
-
-def test_commander_synergy_tags_picks_up_filter_subtypes():
-    # Edgar Markov-shape: trigger filter ``Card.Vampire+Other`` should
-    # surface Vampire as a synergy tag.
-    cmdr_ports = [
-        {"port_type": "trigger", "valid_filter": "Card.Vampire+Other"},
-    ]
-    tags = _commander_synergy_tags(cmdr_ports)
-    assert "Vampire" in tags
-
-
-def test_commander_synergy_tags_splits_comma_separated_filter():
-    # Talrand-shape: ValidCard$ Instant,Sorcery — comma split required.
-    cmdr_ports = [
-        {"port_type": "trigger", "valid_filter": "Instant,Sorcery"},
-    ]
-    tags = _commander_synergy_tags(cmdr_ports)
-    assert "Instant" in tags
-    assert "Sorcery" in tags
 
 
 # ---------------------------------------------------------------------------
