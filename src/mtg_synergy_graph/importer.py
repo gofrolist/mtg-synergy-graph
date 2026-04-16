@@ -373,7 +373,16 @@ _PORT_INSERT_SQL = (
 )
 
 
+#: Keys the importer consumes from the port dict but does NOT persist
+#: on card_ports. Producers attach these; import_card must pop them
+#: before calling _normalise_port.
+_TRANSIENT_PORT_KEYS: frozenset[str] = frozenset({"_change_type"})
+
+
 def _normalise_port(port: dict[str, Any]) -> dict[str, Any]:
+    leaked = _TRANSIENT_PORT_KEYS & port.keys()
+    if leaked:
+        raise ValueError(f"transient port keys must be popped before _normalise_port: {sorted(leaked)}")
     return {col: port.get(col) for col in _PORT_COLUMNS}
 
 
@@ -434,7 +443,7 @@ def import_card(
     ports = extract_all_ports(card)
     inserted = 0
     for port in ports:
-        change_type = port.pop("_change_type", "") if "_change_type" in port else ""
+        change_type = port.pop("_change_type", "")
         cur = conn.execute(_PORT_INSERT_SQL, _normalise_port(port))
         port_id = cur.lastrowid
         inserted += 1
