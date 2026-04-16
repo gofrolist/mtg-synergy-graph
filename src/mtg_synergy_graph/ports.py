@@ -97,16 +97,22 @@ def _parse_token_script(script: str) -> list[tuple[str, str]]:
         color = _TOKEN_COLOR_MAP.get(color_letter)
         if color:
             attrs.append(("token_color", color))
-        # Determine subtype position: creature tokens have digit power/
-        # toughness at [1][2], so subtype is at [3]. Artifact tokens like
-        # ``c_a_food_sac`` use ``a`` at [1] with no power/toughness, so
-        # subtype is at [2].
-        if parts[1].isdigit():
-            subtype_raw = parts[3]
+        # Forge TokenScript positions vary by token kind:
+        #   creature        : color _ p _ t _ subtype              (e.g. w_1_1_soldier)
+        #   artifact        : color _ a _ subtype [_ extra]        (e.g. c_a_food_sac)
+        #   artifact-creature: color _ p _ t _ a _ subtype         (e.g. c_0_1_a_egg)
+        #   X/X creature    : color _ x _ x _ subtype              (e.g. b_x_x_demon)
+        # The 'a' marker can sit at [1] (no P/T) or [3] (with P/T).
+        if parts[1].isdigit() or parts[1].lower() == "x":
+            # Has P/T in positions [1] and [2]. Subtype is at [3] unless
+            # [3] is the 'a' artifact marker, in which case subtype is [4].
+            subtype_raw = parts[4] if len(parts) >= 5 and parts[3].lower() == "a" else parts[3]
         elif parts[1].lower() == "a":
+            # No P/T: artifact token. Subtype at [2].
             subtype_raw = parts[2]
         else:
-            subtype_raw = parts[3]
+            # Unknown format; fall back to [3] as best effort.
+            subtype_raw = parts[3] if len(parts) > 3 else ""
         if subtype_raw:
             attrs.append(("token_subtype", subtype_raw.capitalize()))
     return attrs

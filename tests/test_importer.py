@@ -178,3 +178,51 @@ def test_parse_token_script_handles_single_and_multi_choice():
     ]
     assert _parse_token_script("") == []
     assert _parse_token_script("malformed") == []
+
+
+def test_parse_token_script_handles_artifact_creature_format():
+    """Artifact-creature tokens use 'a' at position [3] after P/T;
+    subtype is at [4]. Commanders like Alibou (Thopter) rely on this."""
+    from mtg_synergy_graph.ports import _parse_token_script
+
+    # c_0_1_a_egg  -> Egg at [4], not 'A' at [3]
+    result = _parse_token_script("c_0_1_a_egg")
+    subtypes = [v for k, v in result if k == "token_subtype"]
+    assert subtypes == ["Egg"], f"Expected [Egg], got {subtypes}"
+
+    # c_1_1_a_thopter_flying -> Thopter at [4]
+    result = _parse_token_script("c_1_1_a_thopter_flying")
+    subtypes = [v for k, v in result if k == "token_subtype"]
+    assert subtypes == ["Thopter"], f"Expected [Thopter], got {subtypes}"
+
+    # b_2_2_a_necron_warrior -> Necron at [4]
+    result = _parse_token_script("b_2_2_a_necron_warrior")
+    subtypes = [v for k, v in result if k == "token_subtype"]
+    assert subtypes == ["Necron"], f"Expected [Necron], got {subtypes}"
+
+
+def test_parse_token_script_handles_x_x_creatures():
+    """X/X creature tokens (b_x_x_demon) should extract subtype at [3]."""
+    from mtg_synergy_graph.ports import _parse_token_script
+
+    result = _parse_token_script("b_x_x_demon")
+    subtypes = [v for k, v in result if k == "token_subtype"]
+    assert subtypes == ["Demon"], f"Expected [Demon], got {subtypes}"
+
+
+def test_parse_token_script_preserves_pure_artifact_format():
+    """Regression: c_a_food_sac must still yield Food (not Sac)."""
+    from mtg_synergy_graph.ports import _parse_token_script
+
+    result = _parse_token_script("c_a_food_sac")
+    subtypes = [v for k, v in result if k == "token_subtype"]
+    assert subtypes == ["Food"], f"Expected [Food], got {subtypes}"
+
+
+def test_parse_token_script_preserves_creature_format():
+    """Regression: w_1_1_soldier must still yield Soldier."""
+    from mtg_synergy_graph.ports import _parse_token_script
+
+    result = _parse_token_script("w_1_1_soldier")
+    subtypes = [v for k, v in result if k == "token_subtype"]
+    assert subtypes == ["Soldier"], f"Expected [Soldier], got {subtypes}"
