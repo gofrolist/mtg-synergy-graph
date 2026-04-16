@@ -59,6 +59,69 @@ class ComplementRule:
 
 
 # ---------------------------------------------------------------------------
+# §1c  Player-scope compatibility for player-centric trigger/effect pairs
+# ---------------------------------------------------------------------------
+# A commander trigger whose valid_filter names a specific player (OppCtrl,
+# YouCtrl) should only match candidate effects that act on that same player.
+# Tergrid's trigger fires on OPPONENT sacrificing; Lich's Tomb sacs YOUR
+# permanents — no complement.
+
+#: Candidate effect events where an empty valid_filter implies the controller
+#: (you) performs / receives the effect. For Sacrifice / Discard / Draw /
+#: GainLife, Forge's default actor is the ability's controller.
+_IMPLICIT_YOU_EFFECT_DEFAULTS: frozenset[str] = frozenset({"Sacrifice", "Discard", "Draw", "GainLife"})
+
+
+def _parse_scope_string(vf: str) -> str:
+    """Classify a Forge valid_filter string as opp / you / any."""
+    s = vf.strip()
+    if not s:
+        return "any"
+    # Opponent markers take precedence over You (a filter like
+    # "Card.YouCtrl+OppOwn" shouldn't exist, but if it did "opp" wins
+    # because the event scope is the active player of the trigger).
+    if "OppCtrl" in s or "OppOwn" in s or "Player.Opponent" in s or "+Opp" in s or s == "Opponent":
+        return "opp"
+    if "YouCtrl" in s or "YouOwn" in s or "+You" in s or "Player.You" in s or s == "You":
+        return "you"
+    # Bare "Player", "Each*", "Remembered", "Triggered*", "Targeted" —
+    # each-player or context-dependent. Be permissive.
+    return "any"
+
+
+def _parse_trigger_scope(trigger_port: PortRow) -> str:
+    """Classify the player-scope of a commander trigger port."""
+    vf = trigger_port.get("valid_filter") or ""
+    return _parse_scope_string(vf)
+
+
+def _parse_cand_scope(cand_port: PortRow) -> str:
+    """Classify the player-scope of a candidate effect port.
+
+    For Sacrifice / Discard / Draw / GainLife effects with an empty
+    valid_filter, the controller (you) is the default actor — this is the
+    Lich's Tomb / Oath of Lim-Dûl pattern.
+    """
+    vf = (cand_port.get("valid_filter") or "").strip()
+    if not vf:
+        ev = (cand_port.get("event_class") or "").strip()
+        if ev in _IMPLICIT_YOU_EFFECT_DEFAULTS:
+            return "you"
+        return "any"
+    return _parse_scope_string(vf)
+
+
+def _scope_compatible(cmdr_scope: str, cand_scope: str) -> bool:
+    """True iff a commander trigger can fire on the candidate's effect.
+
+    ``any`` on either side matches. Otherwise the scopes must agree.
+    """
+    if cmdr_scope == "any" or cand_scope == "any":
+        return True
+    return cmdr_scope == cand_scope
+
+
+# ---------------------------------------------------------------------------
 # §2  Build the event-pair maps for each rule
 # ---------------------------------------------------------------------------
 
