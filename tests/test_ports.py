@@ -348,19 +348,21 @@ def test_akroma_vision_of_ixidor_does_not_explode():
     card = parse_card_file(card_path)
     ports = extract_all_ports(card)
     pump_all_ports = [p for p in ports if p["port_type"] == "effect" and p["event_class"] == "PumpAll"]
-    assert len(pump_all_ports) == 14
-    assert len(ports) < 50
+    assert len(pump_all_ports) == 14, f"Akroma should emit exactly 14 PumpAll ports, got {len(pump_all_ports)}"
+    assert len(ports) < 50, f"Akroma total port count should be small; got {len(ports)}"
 
 
 def test_nature_demands_an_offering_does_not_explode():
     card_path = FORGE_CARDSFOLDER / "n" / "nature_demands_an_offering.txt"
     card = parse_card_file(card_path)
     ports = extract_all_ports(card)
-    assert len(ports) < 30
+    assert len(ports) > 0, "expected at least some ports"
+    assert len(ports) < 30, f"Nature Demands an Offering port count exploded: {len(ports)}"
 
 
 def test_largepox_does_not_explode():
     card_path = FORGE_CARDSFOLDER / "l" / "largepox.txt"
     card = parse_card_file(card_path)
     ports = extract_all_ports(card)
-    assert len(ports) < 30
+    assert len(ports) > 0, "expected at least some ports"
+    assert len(ports) < 30, f"Largepox port count exploded: {len(ports)}"
