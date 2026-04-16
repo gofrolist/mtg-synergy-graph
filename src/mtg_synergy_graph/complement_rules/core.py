@@ -121,6 +121,48 @@ def _scope_compatible(cmdr_scope: str, cand_scope: str) -> bool:
     return cmdr_scope == cand_scope
 
 
+#: Player-centric trigger events where the commander's valid_filter names
+#: a specific player (you / opp) and the candidate's effect filter names
+#: who performs the corresponding action. For these events the scopes must
+#: be compatible. Other events (ChangesZone, CounterAdded, DamageDone,
+#: SpellCast, Attacks, etc.) have their own compatibility logic (zones,
+#: counters, catch-all) and are left untouched.
+_SCOPED_TRIGGER_EVENTS: frozenset[str] = frozenset({"Sacrificed", "Discarded", "Drawn", "LifeLost", "LifeGained"})
+
+
+def _scoped_event_match_map() -> dict[str, dict[str, EventCheck]]:
+    """Clone EVENT_MATCH_MAP and wrap player-centric entries with a
+    commander-trigger × candidate-effect scope check.
+
+    Only the events in ``_SCOPED_TRIGGER_EVENTS`` are wrapped — everything
+    else uses the original check (zone compatibility, counter compatibility,
+    or _always for catch-alls). EVENT_MATCH_MAP itself is not mutated
+    because it is consumed by ``match_event`` in graph_engine.py where the
+    simpler semantics are still desired.
+    """
+    out: dict[str, dict[str, EventCheck]] = {}
+    for trig_ev, effects in EVENT_MATCH_MAP.items():
+        if trig_ev not in _SCOPED_TRIGGER_EVENTS:
+            out[trig_ev] = dict(effects)
+            continue
+        wrapped: dict[str, EventCheck] = {}
+        for eff_ev, base_check in effects.items():
+            wrapped[eff_ev] = _make_scoped_check(base_check)
+        out[trig_ev] = wrapped
+    return out
+
+
+def _make_scoped_check(base: EventCheck) -> EventCheck:
+    """Compose ``base`` with a trigger/effect scope compatibility check."""
+
+    def _check(trigger: PortRow, effect: PortRow) -> bool:
+        if not base(trigger, effect):
+            return False
+        return _scope_compatible(_parse_trigger_scope(trigger), _parse_cand_scope(effect))
+
+    return _check
+
+
 # ---------------------------------------------------------------------------
 # §2  Build the event-pair maps for each rule
 # ---------------------------------------------------------------------------
@@ -376,7 +418,7 @@ COMPLEMENT_RULES: tuple[ComplementRule, ...] = (
         rule_id="trigger_effect",
         cmdr_port_type="trigger",
         cand_port_type="effect",
-        event_pairs=EVENT_MATCH_MAP,
+        event_pairs=_scoped_event_match_map(),
     ),
     # 2. Commander trigger -> candidate cost feeds it
     ComplementRule(

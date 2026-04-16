@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from mtg_synergy_graph.complement_rules.core import (
+    COMPLEMENT_RULES,
     _parse_cand_scope,
     _parse_trigger_scope,
     _scope_compatible,
@@ -122,3 +123,113 @@ class TestScopeCompatible:
     )
     def test_matrix(self, cmdr, cand, expected):
         assert _scope_compatible(cmdr, cand) is expected
+
+
+# ---------------------------------------------------------------------------
+# Integration: trigger_effect rule should reject scope-incompatible pairs
+# ---------------------------------------------------------------------------
+
+
+def _trigger_effect_rule():
+    for rule in COMPLEMENT_RULES:
+        if rule.rule_id == "trigger_effect":
+            return rule
+    raise AssertionError("trigger_effect rule not found in COMPLEMENT_RULES")
+
+
+class TestTriggerEffectScope:
+    """The trigger_effect rule must respect player scope on player-centric events."""
+
+    def test_tergrid_rejects_you_sacrifice(self):
+        """Tergrid (opp-scoped Sacrificed) × Lich's Tomb (you-scoped Sacrifice)
+        must NOT match. Before this fix the pair matched via trigger_effect
+        and Lich's Tomb ranked as Tergrid's #1 pick — a false synergy."""
+        rule = _trigger_effect_rule()
+        check = rule.event_pairs["Sacrificed"]["Sacrifice"]
+        tergrid_trigger = {
+            "event_class": "Sacrificed",
+            "valid_filter": "Permanent.!token+OppCtrl",
+        }
+        lichs_tomb_effect = {"event_class": "Sacrifice", "valid_filter": ""}
+        assert check(tergrid_trigger, lichs_tomb_effect) is False
+
+    def test_tergrid_accepts_each_player_sacrifice(self):
+        """Tergrid × Smallpox ("Each player sacrifices") must match:
+        forcing all players to sac includes opponents."""
+        rule = _trigger_effect_rule()
+        check = rule.event_pairs["Sacrificed"]["Sacrifice"]
+        tergrid_trigger = {
+            "event_class": "Sacrificed",
+            "valid_filter": "Permanent.!token+OppCtrl",
+        }
+        smallpox_effect = {"event_class": "Sacrifice", "valid_filter": "Player"}
+        assert check(tergrid_trigger, smallpox_effect) is True
+
+    def test_tergrid_accepts_opponent_discard(self):
+        """Tergrid × Burglar Rat (opponent discards): opp ↔ opp matches."""
+        rule = _trigger_effect_rule()
+        check = rule.event_pairs["Discarded"]["Discard"]
+        tergrid_trigger = {
+            "event_class": "Discarded",
+            "valid_filter": "Permanent.!token+OppCtrl",
+        }
+        opp_discard = {"event_class": "Discard", "valid_filter": "Opponent"}
+        assert check(tergrid_trigger, opp_discard) is True
+
+    def test_meren_accepts_each_player_sacrifice(self):
+        """Meren (you-scoped creature-dies) × Smallpox must match — each-player
+        sac includes your own."""
+        rule = _trigger_effect_rule()
+        # Meren's trigger is ChangesZone death, not Sacrificed — exercise
+        # the Sacrificed axis with a hypothetical you-scoped commander that
+        # triggers on your permanents being sacrificed.
+        check = rule.event_pairs["Sacrificed"]["Sacrifice"]
+        you_scoped = {
+            "event_class": "Sacrificed",
+            "valid_filter": "Permanent.YouCtrl",
+        }
+        smallpox_effect = {"event_class": "Sacrifice", "valid_filter": "Player"}
+        assert check(you_scoped, smallpox_effect) is True
+
+    def test_you_scoped_rejects_opp_only_sacrifice(self):
+        """You-scoped sac trigger × opp-only Sacrifice effect → no match."""
+        rule = _trigger_effect_rule()
+        check = rule.event_pairs["Sacrificed"]["Sacrifice"]
+        you_scoped = {
+            "event_class": "Sacrificed",
+            "valid_filter": "Permanent.YouCtrl",
+        }
+        opp_only = {"event_class": "Sacrifice", "valid_filter": "Opponent"}
+        assert check(you_scoped, opp_only) is False
+
+    def test_any_scoped_trigger_matches_anything(self):
+        """A trigger with no player filter (any) accepts all candidate scopes."""
+        rule = _trigger_effect_rule()
+        check = rule.event_pairs["Sacrificed"]["Sacrifice"]
+        any_trigger = {"event_class": "Sacrificed", "valid_filter": ""}
+        for vf in ("", "Player", "Opponent", "You"):
+            eff = {"event_class": "Sacrifice", "valid_filter": vf}
+            assert check(any_trigger, eff) is True, f"any trigger should match cand_vf={vf!r}"
+
+    def test_non_player_events_unchanged(self):
+        """ChangesZone and counter events should NOT gain a scope filter —
+        their compatibility is handled by zone/counter logic."""
+        rule = _trigger_effect_rule()
+        # ChangesZone → ChangeZone still uses zone compatibility (no scope).
+        # We verify that passing YouCtrl/OppCtrl filters doesn't flip the
+        # result for zone pairs — the zone check is what matters.
+        check = rule.event_pairs["ChangesZone"]["ChangeZone"]
+        etb_trigger = {
+            "event_class": "ChangesZone",
+            "valid_filter": "Creature.OppCtrl",
+            "zone_origin": "Any",
+            "zone_destination": "Battlefield",
+        }
+        etb_effect = {
+            "event_class": "ChangeZone",
+            "valid_filter": "",
+            "zone_origin": "Any",
+            "zone_destination": "Battlefield",
+        }
+        # Zone-compatible; scope difference must not filter this out.
+        assert check(etb_trigger, etb_effect) is True
