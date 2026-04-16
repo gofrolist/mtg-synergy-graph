@@ -67,6 +67,7 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "edict_feeder": "sacrifice_synergy",
     "counter_doubler": "counter_synergy",
     "counter_keyword": "counter_synergy",
+    "counter_producer": "counter_synergy",
     "damage_synergy": "port_match",
     "mana_doubler": "port_match",
     "pan_density": "port_match",

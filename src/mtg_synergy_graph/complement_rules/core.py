@@ -846,6 +846,7 @@ from .density import (  # noqa: E402
     _find_cost_reduction_targets,
     _find_counter_doubler_synergy,
     _find_counter_keyword_synergy,
+    _find_counter_producer,
     _find_etb_self_complements,
     _find_lord_complements,
     _find_pinger_synergy,
@@ -1045,6 +1046,7 @@ def find_all_complements(
         out.extend(_find_cheat_cmc_bonus(conn, cmdr_ports, cmdr_set))
         out.extend(_find_counter_doubler_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_counter_keyword_synergy(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_counter_producer(conn, cmdr_ports, cmdr_set))
         out.extend(_find_power_matters_density(conn, cmdr_ports, cmdr_set))
         out.extend(_find_proliferate_synergy(conn, cmdr_ports, cmdr_set, candidate_cache))
         out.extend(_find_damage_effect_synergy(conn, cmdr_ports, cmdr_set))

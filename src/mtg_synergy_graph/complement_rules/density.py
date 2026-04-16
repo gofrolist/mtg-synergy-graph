@@ -1005,6 +1005,94 @@ def _find_counter_doubler_synergy(
     return results
 
 
+def _find_counter_producer(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Find cards that actively put +1/+1 counters on creatures, for
+    commanders whose trigger looks *for* creatures with counters.
+
+    Marchesa triggers when ``Card.YouCtrl+counters_GE1_P1P1`` dies —
+    she needs creatures to HAVE counters. Unspeakable Symbol, Thran
+    Vigil, Drana, Liberator of Malakir add counters. Ghave, Pir/Toothy
+    have similar counter-filter patterns and benefit too.
+
+    Crucially, this rule does NOT fire for commanders who put counters
+    themselves (Lathiel, Ezuri, Animar, Hamza) — they are already the
+    counter producer and want payoffs, not more producers. Gate on
+    trigger valid_filter containing ``counters_`` / ``P1P1`` pattern
+    rather than the broader ``_has_counter_interest`` check.
+
+    N ≈ 150-200 (narrow match). IDF-weighted.
+    """
+    # Narrow gate: commander must have a trigger whose valid_filter looks
+    # for creatures that ALREADY have counters. This distinguishes Marchesa
+    # (wants counter creatures) from Lathiel (makes counter creatures).
+    has_counter_filter_trigger = False
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "trigger":
+            continue
+        vf = (p.get("valid_filter") or "").strip()
+        # Marchesa's "counters_GE1_P1P1", Ghave's tokens-with-counters,
+        # generic "+counters_" filters. Require P1P1 so we don't fire for
+        # loyalty / charge / experience counter filters.
+        if "counters_" in vf and "P1P1" in vf:
+            has_counter_filter_trigger = True
+            break
+    if not has_counter_filter_trigger:
+        return []
+
+    # PutCounter / PutCounterAll with P1P1 counter_type targeting creatures.
+    cur = conn.execute(
+        "SELECT DISTINCT card_name, event_class FROM card_ports "
+        "WHERE port_type = 'effect' "
+        "AND event_class IN ('PutCounter', 'PutCounterAll') "
+        "AND counter_type = 'P1P1' "
+        "AND (valid_filter LIKE '%Creature%' "
+        "     OR valid_filter = '' OR valid_filter IS NULL)"
+    )
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name in cmdr_set or name in seen:
+            continue
+        seen.add(name)
+        results.append(
+            PortComplement(
+                rule_id="counter_producer",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="counters_filter_trigger",
+                cand_event=r["event_class"],
+            )
+        )
+    # Also match creatures that enter with +1/+1 counters (etbCounter:P1P1:N)
+    # — Iron Apprentice, Walking Ballista, Forgotten Ancient — because they
+    # satisfy Marchesa's counters_GE1_P1P1 filter on death / trigger.
+    # Separate cand_event so the 301 etbCounter cards get their own IDF
+    # group and don't dilute the PutCounter matches.
+    cur = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports WHERE port_type = 'keyword' AND event_class LIKE 'etbCounter:P1P1:%'"
+    )
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name in cmdr_set or name in seen:
+            continue
+        seen.add(name)
+        results.append(
+            PortComplement(
+                rule_id="counter_producer",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="counters_filter_trigger",
+                cand_event="etbCounter_P1P1",
+            )
+        )
+    return results
+
+
 def _find_counter_keyword_synergy(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
