@@ -479,6 +479,31 @@ def extract_effect_ports(
 # ---------------------------------------------------------------------------
 
 
+#: Keys on a parsed Forge node that signal a runtime condition gating
+#: whether the effect actually resolves. If any node in a trigger's execute
+#: chain has one of these keys, the trigger is ``effect_conditional``.
+_CONDITION_KEYS: frozenset[str] = frozenset(
+    {
+        "ConditionCheckSVar",
+        "ConditionSVarCompare",
+        "ConditionPresent",
+        "ConditionDefined",
+        "CheckSVar",
+    }
+)
+
+
+def _chain_has_condition(chain: list[Any]) -> bool:
+    """True iff any ChainNode in ``chain`` carries a runtime condition key."""
+    for node in chain:
+        parsed = getattr(node, "parsed", None)
+        if not isinstance(parsed, dict):
+            continue
+        if any(k in parsed for k in _CONDITION_KEYS):
+            return True
+    return False
+
+
 def extract_trigger_ports(
     card_name: str,
     parsed: dict[str, Any],
@@ -493,12 +518,32 @@ def extract_trigger_ports(
     A2 was deferred — bisect showed it removed port_attribute cardinality
     that downstream matchers depend on. It will land together with the D3
     combat-modifier matcher whose new joins offset the cardinality drop.
+
+    Effect-conditional triggers: if any node in the execute SVar chain
+    carries a ``ConditionCheckSVar`` / ``ConditionPresent`` / ``CheckSVar``
+    runtime gate (Selvala's power compare, Meren's XP-vs-CMC compare),
+    the trigger is flagged ``effect_conditional=True``. Downstream
+    scoring can then dampen trigger_effect matches for such triggers,
+    since the trigger fires broadly but the payoff is gated.
     """
     valid_filter = parsed.get("ValidCard") or parsed.get("ValidSource", "")
 
     trigger_source: str | None = None
     if parsed.get("FirstTime", "") == "True":
         trigger_source = "first_time"
+
+    # Walk execute chain once; reuse for both effect extraction and
+    # effect-conditional detection.
+    chain: list[Any] = []
+    execute_ref = parsed.get("Execute")
+    if execute_ref:
+        chain = walk_svar_chain(
+            execute_ref,
+            svars,
+            branch_kind="execute",
+            branch_parent=None,
+            chain_depth=1,
+        )
 
     trigger_port: PortRow = {
         "card_name": card_name,
@@ -512,22 +557,14 @@ def extract_trigger_ports(
         "is_combat": parsed.get("CombatDamage", "") == "True",
         "execute_ref": parsed.get("Execute", ""),
         "trigger_source": trigger_source,
+        "effect_conditional": _chain_has_condition(chain),
         "raw_line": repr(parsed),
         **_branch_defaults(),
     }
     ports: list[PortRow] = [trigger_port]
 
-    execute_ref = parsed.get("Execute")
-    if execute_ref:
-        chain = walk_svar_chain(
-            execute_ref,
-            svars,
-            branch_kind="execute",
-            branch_parent=None,
-            chain_depth=1,
-        )
-        for node in chain:
-            ports.extend(extract_effect_ports(card_name, node, svars))
+    for node in chain:
+        ports.extend(extract_effect_ports(card_name, node, svars))
 
     return ports
 

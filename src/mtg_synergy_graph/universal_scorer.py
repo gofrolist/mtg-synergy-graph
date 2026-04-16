@@ -344,9 +344,17 @@ def _compute_idf_weights(
     result: dict[tuple[str, str, str, str], float] = {}
     for key, candidates in freq.items():
         rule_id = key[0]
+        filter_group = key[3] or ""
+        # Effect-conditional dampening: when a commander trigger's
+        # execute has a runtime gate (Selvala power compare, Meren's
+        # XP-vs-CMC), matches on that trigger are tagged with ":cond" in
+        # filter_group. Halve IDF for these — the trigger fires broadly
+        # but the payoff is gated, so most matches don't pan out.
+        cond_mult = 0.5 if filter_group.endswith(":cond") else 1.0
         if rule_id in _FLAT_COUNT_RULES:
             override = _FLAT_WEIGHT_OVERRIDES.get(rule_id)
-            result[key] = override if override is not None else 1.0
+            base_w = override if override is not None else 1.0
+            result[key] = base_w * cond_mult
         else:
             n = len(candidates)
             # For forward panharmonicon matches, apply minimum N=10 floor.
@@ -362,7 +370,7 @@ def _compute_idf_weights(
             # Apply quality multiplier: cost-based rules are boosted,
             # broad effect rules are dampened.
             mult = _RULE_QUALITY_MULTIPLIER.get(rule_id, 1.0)
-            result[key] = w * mult
+            result[key] = w * mult * cond_mult
     return result
 
 

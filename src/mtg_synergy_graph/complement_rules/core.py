@@ -1145,6 +1145,14 @@ def find_all_complements(
             # sub-IDF groups within the broad sacrifice pool.
             enrich_cost = rule.rule_id == "cost_feeds_trigger"
 
+            # Effect-conditional suffix: when the commander trigger's
+            # execute has a runtime condition (Selvala's power compare,
+            # Meren's XP-vs-CMC), matches into trigger_effect are tagged
+            # with ":cond" so the IDF computer can halve their weight —
+            # the trigger fires broadly but the payoff is gated, so most
+            # matches don't pan out in practice.
+            cond_suffix = ":cond" if rule.rule_id == "trigger_effect" and cp.get("effect_conditional") else ""
+
             if "*" in targets:
                 # Wildcard: check every candidate port of this type
                 check = targets["*"]
@@ -1163,6 +1171,8 @@ def find_all_complements(
                             seen.add(key)
                             cfp = _cost_filter_group(cand_p) if enrich_cost else ""
                             enriched_fg = f"{fg}_{cfp}" if fg and cfp else (fg or cfp)
+                            if cond_suffix:
+                                enriched_fg = f"{enriched_fg}{cond_suffix}" if enriched_fg else cond_suffix
                             results.append(
                                 PortComplement(
                                     rule_id=rule.rule_id,
@@ -1189,6 +1199,8 @@ def find_all_complements(
                             seen.add(key)
                             cfp = _cost_filter_group(cand_p) if enrich_cost else ""
                             enriched_fg = f"{fg}_{cfp}" if fg and cfp else (fg or cfp)
+                            if cond_suffix:
+                                enriched_fg = f"{enriched_fg}{cond_suffix}" if enriched_fg else cond_suffix
                             results.append(
                                 PortComplement(
                                     rule_id=rule.rule_id,

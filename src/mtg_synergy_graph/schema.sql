@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS card_ports (
     is_optional        BOOLEAN DEFAULT FALSE,
     is_combat          BOOLEAN DEFAULT FALSE,
     is_curse           BOOLEAN DEFAULT FALSE,
+    effect_conditional BOOLEAN DEFAULT FALSE,  -- trigger's execute has runtime Condition* gate
+                                                 -- (Selvala's power check, Meren's XP compare)
     replacement_event  TEXT,
     replacement_result TEXT,
     replacement_player TEXT,

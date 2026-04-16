@@ -357,6 +357,7 @@ _PORT_COLUMNS = (
     "is_optional",
     "is_combat",
     "is_curse",
+    "effect_conditional",
     "replacement_event",
     "replacement_result",
     "replacement_player",
