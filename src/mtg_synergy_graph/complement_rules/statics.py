@@ -149,6 +149,87 @@ def _find_graveyard_play_synergy(
     return results
 
 
+def _find_affinity_archetype(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Affinity-keyword commanders want many permanents of the affinity
+    type. Emry, Lurker of the Loch has Affinity:Artifact -> she benefits
+    from cheap artifacts, artifact lands, and artifact-cost reducers.
+
+    Narrow gate: commander has a ``Affinity:<Type>`` keyword port.
+
+    Three cand_event buckets with distinct IDF:
+    - ``typed_land``: Land cards of the affinity type (Seat of the Synod,
+      Darksteel Citadel for Artifact). ~22 cards, very high IDF.
+    - ``cost_reducer``: ReduceCost statics targeting the type (Etherium
+      Sculptor, Foundry Inspector).
+    - ``cheap_typed``: CMC 0-1 non-land permanents of the type (Mishra's
+      Bauble, Lotus Petal, Chromatic Star). ~300 cards, medium IDF.
+
+    The affinity-type subtype isn't used as a filter directly — the
+    common case is Affinity:Artifact, so we read the keyword suffix
+    and match `card_types LIKE '%<Type>%'`. For non-Artifact Affinity
+    (e.g. Equipment) the rule works the same way.
+    """
+    affinity_type = ""
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "keyword":
+            continue
+        ev = (p.get("event_class") or "").strip()
+        if ev.startswith("Affinity:"):
+            affinity_type = ev.split(":", 1)[1].strip()
+            break
+    if not affinity_type:
+        return []
+
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+    type_pattern = f"%{affinity_type}%"
+
+    def _add(name: str, cand_event: str) -> None:
+        if name in cmdr_set or name in seen:
+            return
+        seen.add(name)
+        results.append(
+            PortComplement(
+                rule_id="affinity_archetype",
+                direction="synergy",
+                candidate=name,
+                cmdr_event=f"Affinity_{affinity_type}",
+                cand_event=cand_event,
+            )
+        )
+
+    # typed_land: Land cards of the affinity type
+    cur = conn.execute(
+        "SELECT name FROM cards WHERE card_types LIKE '%Land%' AND card_types LIKE ?",
+        (type_pattern,),
+    )
+    for r in cur.fetchall():
+        _add(r["name"], "typed_land")
+
+    # cost_reducer: ReduceCost statics whose ValidCard hits the type
+    cur = conn.execute(
+        "SELECT DISTINCT card_name, raw_line FROM card_ports WHERE port_type = 'static' AND event_class = 'ReduceCost'"
+    )
+    for r in cur.fetchall():
+        raw = r["raw_line"] or ""
+        if f"'ValidCard': '{affinity_type}" in raw or f"'Type': '{affinity_type}" in raw:
+            _add(r["card_name"], "cost_reducer")
+
+    # cheap_typed: non-land permanents of the type at CMC <= 1
+    cur = conn.execute(
+        "SELECT name FROM cards WHERE card_types LIKE ? AND card_types NOT LIKE '%Land%' AND cmc <= 1",
+        (type_pattern,),
+    )
+    for r in cur.fetchall():
+        _add(r["name"], "cheap_typed")
+
+    return results
+
+
 def _find_yard_caster(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],

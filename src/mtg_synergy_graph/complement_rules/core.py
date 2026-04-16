@@ -874,6 +874,7 @@ from .panharmonicon import (  # noqa: E402
     _find_reverse_panharmonicon,
 )
 from .statics import (  # noqa: E402
+    _find_affinity_archetype,
     _find_cost_reduction_synergy,
     _find_edict_feeders,
     _find_graveyard_play_synergy,
@@ -1043,6 +1044,7 @@ def find_all_complements(
         out.extend(_find_cost_reduction_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_graveyard_play_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_yard_caster(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_affinity_archetype(conn, cmdr_ports, cmdr_set))
         out.extend(_find_edict_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_value_engine_density(conn, cmdr_ports, cmdr_set))
         out.extend(_find_cheat_cmc_bonus(conn, cmdr_ports, cmdr_set))

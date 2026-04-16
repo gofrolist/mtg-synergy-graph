@@ -1039,19 +1039,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.018257,
-      "on_page_hits": 2,
+      "ndcg30": 0.047086,
+      "on_page_hits": 6,
       "top10": [
         "Leyline Dowser",
-        "Mental Note",
-        "Perpetual Timepiece",
         "Wand of Vertebrae",
         "Excavated Wall",
+        "Shard of Broken Glass",
+        "Retrofitter Foundry",
+        "Mental Note",
+        "Perpetual Timepiece",
         "Palant\u00edr of Orthanc",
         "Stillness in Motion",
-        "Shard of Broken Glass",
-        "The Everflowing Well",
-        "Cephalid Illusionist"
+        "Soul-Guide Lantern"
       ]
     },
     {
