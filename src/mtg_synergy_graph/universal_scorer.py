@@ -59,6 +59,7 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "artifact_recursion": "graveyard_synergy",
     "copy_synergy": "port_match",
     "token_sac_chain": "sacrifice_synergy",
+    "token_etb_damage": "token_etb_payoff",
     "evasion": "port_match",
     "spellcast_resonance": "spellcast_density",
     "untap_synergy": "port_match",
@@ -320,6 +321,12 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # than mechanical synergy — "be the right type" is a density signal.
     "value_engine": 0.5,
     "cost_reduction_target": 0.5,
+    # token_etb_damage has ~40 matches giving IDF ≈ 0.19. For commanders
+    # with creature-heavy decks this lifts correct picks (Prossh +0.197,
+    # Kykar +0.100), but for spell-based token commanders (Talrand) it
+    # can displace spell staples from top-30. The 0.5 multiplier
+    # preserves the gain magnitudes while shrinking off-target damage.
+    "token_etb_damage": 0.5,
 }
 
 

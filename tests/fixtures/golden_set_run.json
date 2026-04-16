@@ -200,21 +200,21 @@
         "Chatterfang, Squirrel General",
         "Mirkwood Bats"
       ],
-      "hi_syn_hits": 2,
+      "hi_syn_hits": 3,
       "hi_syn_total": 10,
-      "ndcg30": 0.141308,
-      "on_page_hits": 6,
+      "ndcg30": 0.338357,
+      "on_page_hits": 11,
       "top10": [
-        "Academy Manufactor",
-        "Peregrin Took",
-        "Xorn",
-        "Chatterfang, Squirrel General",
-        "Stridehangar Automaton",
-        "Quina, Qu Gourmet",
-        "Parallel Lives",
-        "Jolene, the Plunder Queen",
-        "Mirrormind Crown",
-        "Doubling Season"
+        "Impact Tremors",
+        "Agate Instigator",
+        "Shocking Sharpshooter",
+        "Glaring Fleshraker",
+        "Witty Roastmaster",
+        "Molten Gatekeeper",
+        "Weftstalker Ardent",
+        "General Kreat, the Boltbringer",
+        "Purphoros, God of the Forge",
+        "Raphael, Tough Turtle"
       ]
     },
     {
@@ -2558,8 +2558,8 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.115925,
-      "on_page_hits": 6,
+      "ndcg30": 0.112178,
+      "on_page_hits": 5,
       "top10": [
         "Stridehangar Automaton",
         "Ornithopter",
@@ -2618,10 +2618,10 @@
         "Jeskai Ascendancy",
         "Kykar, Zephyr Awakener"
       ],
-      "hi_syn_hits": 1,
+      "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.102563,
-      "on_page_hits": 4,
+      "ndcg30": 0.164932,
+      "on_page_hits": 7,
       "top10": [
         "Spellweaver Volute",
         "Harmonic Prodigy",
@@ -2632,7 +2632,7 @@
         "Jace's Sanctum",
         "Reality Twist",
         "Naked Singularity",
-        "Hallowed Haunting"
+        "Impact Tremors"
       ]
     },
     {

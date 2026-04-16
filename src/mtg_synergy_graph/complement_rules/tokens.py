@@ -334,6 +334,70 @@ def _find_static_strategy(
     return results
 
 
+def _find_token_etb_damage(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Find creature-ETB-damage payoffs for token-producing commanders.
+
+    The Locust God creates 1/1 Insect tokens on every card draw; Krenko
+    taps for Goblin tokens; Edgar Markov puts +1/+1 counters while making
+    Vampires. Every token ETB can trigger a payoff like Impact Tremors
+    ("Whenever a creature enters under your control, [DealDamage] each
+    opponent"), Purphoros, or Witty Roastmaster.
+
+    Gate: commander has any ``effect: Token`` port (in any branch).
+    Match: candidates that have BOTH a ``trigger: ChangesZone`` with
+    a Creature valid_filter AND a ``DealDamage`` effect targeting a
+    Player or Opponent — the self-contained ETB-damage card shape.
+    """
+    # Narrow gate: commander must have a Token effect in an EXECUTE
+    # branch — produced passively by a trigger (Locust God's Drawn
+    # trigger, Kykar's SpellCast trigger, Prossh's ETB). Excludes
+    # commanders whose Token output is from an activated ability
+    # (Ghave spends counters, Rhys pays mana) — their strategy axis is
+    # different (counter/token multiplication, not ETB-damage ping).
+    has_passive_token = any(
+        (p.get("port_type") or "").strip() == "effect"
+        and (p.get("event_class") or "").strip() == "Token"
+        and (p.get("branch_kind") or "").strip() == "execute"
+        for p in cmdr_ports
+    )
+    if not has_passive_token:
+        return []
+
+    cur = conn.execute(
+        "SELECT DISTINCT t.card_name "
+        "FROM card_ports t "
+        "JOIN card_ports e ON e.card_name = t.card_name "
+        "WHERE t.port_type = 'trigger' "
+        "AND t.event_class = 'ChangesZone' "
+        "AND (t.zone_destination IS NULL OR t.zone_destination IN ('Battlefield', '')) "
+        "AND t.valid_filter LIKE '%Creature%' "
+        "AND e.port_type = 'effect' "
+        "AND e.event_class = 'DealDamage' "
+        "AND (e.valid_filter LIKE '%Player%' OR e.valid_filter LIKE '%Opponent%')"
+    )
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name in cmdr_set or name in seen:
+            continue
+        seen.add(name)
+        results.append(
+            PortComplement(
+                rule_id="token_etb_damage",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="token_producer",
+                cand_event="etb_damage",
+            )
+        )
+    return results
+
+
 def _find_token_sac_chain(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],

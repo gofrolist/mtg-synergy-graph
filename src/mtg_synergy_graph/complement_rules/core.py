@@ -883,6 +883,7 @@ from .statics import (  # noqa: E402
 from .tokens import (  # noqa: E402
     _find_effect_feeds_etb,
     _find_static_strategy,
+    _find_token_etb_damage,
     _find_token_producers_for_trigger,
     _find_token_sac_chain,
 )
@@ -1037,6 +1038,7 @@ def find_all_complements(
         out.extend(_find_artifact_recursion(conn, cmdr_ports, cmdr_set))
         out.extend(_find_copy_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_token_sac_chain(conn, cmdr_ports, cmdr_set, candidate_cache))
+        out.extend(_find_token_etb_damage(conn, cmdr_ports, cmdr_set))
         out.extend(_find_reverse_panharmonicon(conn, cmdr_ports, cmdr_set, candidate_cache))
         out.extend(_find_panharmonicon_stacking(conn, cmdr_ports, cmdr_set, candidate_cache))
         out.extend(_find_evasion_complements(conn, cmdr_ports, cmdr_set))
