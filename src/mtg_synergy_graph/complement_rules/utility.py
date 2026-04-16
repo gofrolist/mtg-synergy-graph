@@ -535,6 +535,56 @@ def _find_landfall_enablers(
     return results
 
 
+def _find_multicolor_untap(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Narrow rule: untap-effect commanders want multicolor mana dorks.
+
+    Derevi, Empyrial Tactician's combat-damage trigger has a
+    ``TapOrUntap Permanent`` effect — every combat damage lets her
+    untap a creature. Repeatedly untapping Bloom Tender or Faeburrow
+    Elder (produce mana in every color among permanents you control)
+    is a premium payoff.
+
+    Gate: commander has ``effect: TapOrUntap`` or ``effect: Untap``
+    (not just a tap cost — must actively untap).
+
+    Only 4 cards produce ``EachColorAmong`` mana (Bloom Tender,
+    Faeburrow Elder, Sunbird Standard, Tarnation Vista). Narrow match
+    → high IDF, giving these a dedicated synergy signal.
+    """
+    has_untap_effect = any(
+        (p.get("port_type") or "").strip() == "effect"
+        and (p.get("event_class") or "").strip() in ("TapOrUntap", "Untap", "UntapAll")
+        for p in cmdr_ports
+    )
+    if not has_untap_effect:
+        return []
+
+    cur = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE port_type = 'effect' AND event_class = 'Mana' "
+        "AND raw_line LIKE '%EachColorAmong%'"
+    )
+    results: list[PortComplement] = []
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name in cmdr_set:
+            continue
+        results.append(
+            PortComplement(
+                rule_id="multicolor_untap",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="untap_effect",
+                cand_event="eachcolor_dork",
+            )
+        )
+    return results
+
+
 def _find_untap_synergy(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],

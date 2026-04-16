@@ -62,6 +62,7 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "evasion": "port_match",
     "spellcast_resonance": "spellcast_density",
     "untap_synergy": "port_match",
+    "multicolor_untap": "port_match",
     "cost_reducer": "spellcast_density",
     "graveyard_play": "port_match",
     "yard_caster": "graveyard_synergy",

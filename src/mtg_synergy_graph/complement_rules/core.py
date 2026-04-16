@@ -895,6 +895,7 @@ from .utility import (  # noqa: E402
     _find_flicker_synergy,
     _find_landfall_enablers,
     _find_mana_doubler_synergy,
+    _find_multicolor_untap,
     _find_opponent_forcing,
     _find_untap_synergy,
     _find_wheel_synergy,
@@ -1041,6 +1042,7 @@ def find_all_complements(
         out.extend(_find_evasion_complements(conn, cmdr_ports, cmdr_set))
         out.extend(_find_spellcast_resonance(conn, cmdr_ports, cmdr_set))
         out.extend(_find_untap_synergy(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_multicolor_untap(conn, cmdr_ports, cmdr_set))
         out.extend(_find_cost_reduction_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_graveyard_play_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_yard_caster(conn, cmdr_ports, cmdr_set))
