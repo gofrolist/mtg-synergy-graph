@@ -7,7 +7,30 @@ Guidance for Claude Code working in this repo.
 MTG Synergy Graph — deterministic, rule-based EDH/Commander synergy scorer
 using Forge DSL ports. No training, no EDHREC at inference.
 Current aggregate NDCG@30 ~ 0.194, Hi-Syn 160/1000 on the 100-commander golden set.
-Port extraction: 184,106 ports from 32,327 cards (GenericChoice + StaticAbilities$ expansion).
+Port extraction: 108,644 ports from 32,327 cards (GenericChoice + StaticAbilities$
+expansion, deduped after A1's 2^N re-walk fix).
+
+### Extra port_attributes (2026-04-16)
+
+Beyond the standard `valid_filter` explosion, the importer also emits:
+- `attr_kind='change_type'` for ChangeZone effect ChangeType$ clauses
+  (Kaalia's Angel/Demon/Dragon cheat-into-play list).
+- `attr_kind='token_color'` + `attr_kind='token_subtype'` for every TokenScript
+  produced by a Token effect (including multi-color prefixes like `gw`, `all`
+  and artifact-creature format like `c_0_1_a_thopter`).
+
+### card_hints table (2026-04-16)
+
+Normalised projection of Forge's AI annotations:
+- `DeckNeeds`, `DeckHints`, `DeckHas` → kind `needs`/`hints`/`has`.
+- `BuffedBy` SVar → kind `buffed_by`.
+
+Populated by the importer alongside `cards`. Not yet used by any complement
+rule — exploratory rules (`deck_hint_match`, `deck_needs_fulfilled`,
+`buffed_by_match`) were prototyped and reverted: each regressed NDCG@30
+against EDHREC because the curated matches are broad (e.g. every Aura, every
+Token-producer) and dilute the mechanical-port signal. Retained as data
+infrastructure for future work.
 
 ## Common Commands
 
@@ -16,7 +39,7 @@ uv run python scripts/import_cardsfolder.py                              # Impor
 uv run python scripts/recommend.py --commander "Korvold, Fae-Cursed King" --top 30 --explain
 uv run python scripts/compare_edhrec.py --commanders tests/fixtures/golden_set.json
 uv run python scripts/golden_set_track.py --baseline tests/fixtures/golden_set_run.json
-uv run pytest tests/                                                     # 212 tests, ~1s
+uv run pytest tests/                                                     # 649 tests, ~1s
 ```
 
 ## Scoring Architecture — Universal Port Matcher
