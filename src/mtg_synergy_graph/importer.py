@@ -416,6 +416,7 @@ def import_card(
     )
     conn.execute("DELETE FROM card_ports WHERE card_name = ?", (name,))
     conn.execute("DELETE FROM card_svars WHERE card_name = ?", (name,))
+    conn.execute("DELETE FROM card_hints WHERE card_name = ?", (name,))
 
     if oracle_id_resolver is not None and not card.get("oracle_id"):
         hit = _resolve_scryfall_meta(
@@ -433,6 +434,19 @@ def import_card(
                 card["edhrec_rank"] = hit[1]
 
     conn.execute(_CARD_INSERT_SQL, _card_row(card))
+
+    # Project deck_needs / deck_hints / deck_has dicts into the normalised
+    # card_hints table so synergy rules can join by (kind, category, value).
+    for kind, key in (("needs", "deck_needs"), ("hints", "deck_hints"), ("has", "deck_has")):
+        source = card.get(key)
+        if not source:
+            continue
+        for category, values in source.items():
+            for value in values:
+                conn.execute(
+                    "INSERT OR IGNORE INTO card_hints (card_name, kind, category, value) VALUES (?, ?, ?, ?)",
+                    (name, kind, category, value),
+                )
 
     for svar_name, svar_value in card.get("svars", {}).items():
         conn.execute(

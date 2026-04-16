@@ -165,3 +165,20 @@ CREATE TABLE IF NOT EXISTS causal_neighbours (
 
 CREATE INDEX IF NOT EXISTS idx_causal_neighbours_by_card
     ON causal_neighbours(card_name);
+
+-- ---------------------------------------------------------------------------
+-- card_hints: normalised projection of DeckNeeds / DeckHints / DeckHas
+-- (from cards.deck_*) and BuffedBy (from card_svars). Populated by the
+-- importer; enables rule queries like "commander DeckHas Token Ability
+-- intersect candidate DeckNeeds Token".
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS card_hints (
+    card_name  TEXT NOT NULL REFERENCES cards(name),
+    kind       TEXT NOT NULL,     -- 'needs' | 'hints' | 'has' | 'buffed_by'
+    category   TEXT NOT NULL,     -- 'Type' | 'Ability' | 'Color' | 'Keyword' | 'Name'
+    value      TEXT NOT NULL,
+    PRIMARY KEY (card_name, kind, category, value)
+);
+
+CREATE INDEX IF NOT EXISTS idx_card_hints_lookup
+    ON card_hints(kind, category, value);

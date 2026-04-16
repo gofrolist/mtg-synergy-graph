@@ -245,3 +245,67 @@ def test_parse_token_script_named_script_without_color_prefix_is_skipped():
     from mtg_synergy_graph.ports import _parse_token_script
 
     assert _parse_token_script("kobolds_of_kher_keep") == []
+
+
+def test_card_hints_populated_from_deck_needs_and_has(tmp_path):
+    """A card with DeckNeeds:Type$Dragon and DeckHas:Ability$Token must
+    produce (kind, category, value) rows in card_hints.
+    """
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+
+    card = {
+        "name": "Test Dragonlord",
+        "types": "Legendary Creature",
+        "deck_needs": {"Type": ["Dragon"]},
+        "deck_has": {"Ability": ["Token"]},
+        "abilities": [],
+        "svars": {},
+        "keywords": [],
+    }
+    import_card(conn, card, oracle_id_resolver=None)
+
+    rows = [
+        tuple(r)
+        for r in conn.execute(
+            "SELECT kind, category, value FROM card_hints WHERE card_name=? ORDER BY kind, value",
+            ("Test Dragonlord",),
+        ).fetchall()
+    ]
+    assert ("has", "Ability", "Token") in rows
+    assert ("needs", "Type", "Dragon") in rows
+    conn.close()
+
+
+def test_card_hints_reimport_replaces_existing(tmp_path):
+    """A second import_card for the same card must clear stale hints."""
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+
+    card_v1 = {
+        "name": "Test Shifter",
+        "deck_needs": {"Type": ["Shapeshifter"]},
+        "abilities": [],
+        "svars": {},
+        "keywords": [],
+    }
+    import_card(conn, card_v1, oracle_id_resolver=None)
+
+    card_v2 = {
+        "name": "Test Shifter",
+        "deck_needs": {"Type": ["Changeling"]},
+        "abilities": [],
+        "svars": {},
+        "keywords": [],
+    }
+    import_card(conn, card_v2, oracle_id_resolver=None)
+
+    rows = [
+        tuple(r)
+        for r in conn.execute(
+            "SELECT kind, category, value FROM card_hints WHERE card_name=?",
+            ("Test Shifter",),
+        ).fetchall()
+    ]
+    assert rows == [("needs", "Type", "Changeling")]
+    conn.close()
