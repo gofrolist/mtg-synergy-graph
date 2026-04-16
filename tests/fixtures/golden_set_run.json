@@ -543,19 +543,19 @@
       ],
       "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.253588,
+      "ndcg30": 0.274276,
       "on_page_hits": 13,
       "top10": [
         "Twinflame Travelers",
         "Icetill Explorer",
         "Field of the Dead",
-        "Mirrorpool",
-        "Littjara Mirrorlake",
-        "Waste Land",
         "Ramunap Excavator",
         "Crucible of Worlds",
         "Walk-In Closet",
-        "Conduit of Worlds"
+        "Conduit of Worlds",
+        "Serra Paragon",
+        "Perennial Behemoth",
+        "Zask, Skittering Swarmlord"
       ]
     },
     {
@@ -977,19 +977,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.012423,
+      "ndcg30": 0.012873,
       "on_page_hits": 1,
       "top10": [
         "Baloth Prime",
-        "Grist, Voracious Larva",
         "Wolfwillow Haven",
+        "Grist, Voracious Larva",
         "Titania, Protector of Argoth",
         "Glaring Fleshraker",
         "Feasting Troll King",
         "Plane-Merge Elf",
-        "Springheart Nantuko",
         "Hunted Troll",
-        "Hydra Broodmaster"
+        "Hydra Broodmaster",
+        "Terastodon"
       ]
     },
     {
