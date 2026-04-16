@@ -434,6 +434,7 @@ def import_card(
     ports = extract_all_ports(card)
     inserted = 0
     for port in ports:
+        change_type = port.pop("_change_type", "") if "_change_type" in port else ""
         cur = conn.execute(_PORT_INSERT_SQL, _normalise_port(port))
         port_id = cur.lastrowid
         inserted += 1
@@ -443,6 +444,19 @@ def import_card(
                 "(port_id, attr_kind, attr_value, is_negated) VALUES (?, ?, ?, ?)",
                 (port_id, attr["attr_kind"], attr["attr_value"], attr["is_negated"]),
             )
+        # ChangeType is a comma-separated list of filter clauses; explode
+        # each clause with the shared filter parser and re-tag as change_type.
+        if change_type:
+            for clause in change_type.split(","):
+                for attr in explode_filter(clause):
+                    # Only keep semantically-interesting kinds (types and
+                    # subtypes). Controller/color/cmc_cmp are orthogonal.
+                    if attr["attr_kind"] in ("type", "subtype"):
+                        conn.execute(
+                            "INSERT OR IGNORE INTO port_attributes "
+                            "(port_id, attr_kind, attr_value, is_negated) VALUES (?, ?, ?, ?)",
+                            (port_id, "change_type", attr["attr_value"], attr["is_negated"]),
+                        )
 
     return inserted
 

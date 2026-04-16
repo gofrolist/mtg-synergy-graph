@@ -275,6 +275,11 @@ def extract_effect_ports(
     # so D2's mana-restriction matcher can join on it.
     mana_restriction = parsed.get("RestrictValid", "") if verb == "Mana" else ""
 
+    # ChangeZone effects carry their type-scope in ChangeType$, separate
+    # from ValidTgts/Defined. Store it on the port so the importer can
+    # explode it into port_attributes under attr_kind='change_type'.
+    change_type = parsed.get("ChangeType", "") if verb == "ChangeZone" else ""
+
     port: PortRow = {
         "card_name": card_name,
         "port_type": "effect",
@@ -289,6 +294,7 @@ def extract_effect_ports(
         "is_curse": parsed.get("IsCurse", "") == "True",
         "mana_restriction": mana_restriction,
         "raw_line": repr(parsed),
+        "_change_type": change_type,  # consumed by importer, stripped before insert
         **branch,
     }
 

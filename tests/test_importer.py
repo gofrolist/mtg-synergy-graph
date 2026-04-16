@@ -6,8 +6,14 @@ from pathlib import Path
 
 import pytest
 
+from mtg_synergy_graph import parse_card_file
 from mtg_synergy_graph.db import open_db
-from mtg_synergy_graph.importer import _derive_cmc, _derive_colors, import_cards_folder
+from mtg_synergy_graph.importer import (
+    _derive_cmc,
+    _derive_colors,
+    import_card,
+    import_cards_folder,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -112,3 +118,24 @@ def test_derive_colors_still_handles_pip_letters_in_mana_cost():
 def test_derive_cmc_treats_no_cost_as_unknown():
     assert _derive_cmc("no cost") is None
     assert _derive_cmc("3 W W") == 5.0
+
+
+def test_change_type_attributes_populated_for_kaalia(tmp_path):
+    """Kaalia of the Vast cheats Angel/Demon/Dragon into play via ChangeType.
+    Those subtypes must land in port_attributes with attr_kind='change_type'.
+    """
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    card_path = Path(__file__).parent.parent / "data/forge/forge-gui/res/cardsfolder/k/kaalia_of_the_vast.txt"
+    card = parse_card_file(card_path)
+    import_card(conn, card, oracle_id_resolver=None)
+
+    rows = conn.execute(
+        "SELECT attr_kind, attr_value FROM port_attributes "
+        "WHERE attr_kind='change_type' "
+        "AND port_id IN (SELECT id FROM card_ports WHERE card_name=?)",
+        ("Kaalia of the Vast",),
+    ).fetchall()
+    values = {r[1] for r in rows}
+    assert {"Angel", "Demon", "Dragon"} <= values, f"Expected Angel/Demon/Dragon in change_type attrs, got {values}"
+    conn.close()
