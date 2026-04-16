@@ -139,3 +139,42 @@ def test_change_type_attributes_populated_for_kaalia(tmp_path):
     values = {r[1] for r in rows}
     assert {"Angel", "Demon", "Dragon"} <= values, f"Expected Angel/Demon/Dragon in change_type attrs, got {values}"
     conn.close()
+
+
+def test_token_script_attributes_populated_for_tireless_provisioner(tmp_path):
+    """Tireless Provisioner's Token effect has TokenScript values for
+    Food and Treasure tokens via GenericChoice expansion."""
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    card_path = Path(__file__).parent.parent / "data/forge/forge-gui/res/cardsfolder/t/tireless_provisioner.txt"
+    card = parse_card_file(card_path)
+    import_card(conn, card, oracle_id_resolver=None)
+
+    rows = conn.execute(
+        "SELECT attr_kind, attr_value FROM port_attributes "
+        "WHERE attr_kind IN ('token_color', 'token_subtype') "
+        "AND port_id IN (SELECT id FROM card_ports WHERE card_name=?)",
+        ("Tireless Provisioner",),
+    ).fetchall()
+    subtypes = {r[1] for r in rows if r[0] == "token_subtype"}
+    assert "Food" in subtypes or "Treasure" in subtypes, (
+        f"Expected Food or Treasure in token_subtype attrs, got {subtypes}"
+    )
+    conn.close()
+
+
+def test_parse_token_script_handles_single_and_multi_choice():
+    from mtg_synergy_graph.ports import _parse_token_script
+
+    assert _parse_token_script("w_1_1_soldier") == [
+        ("token_color", "W"),
+        ("token_subtype", "Soldier"),
+    ]
+    assert _parse_token_script("w_1_1_human,u_1_1_merfolk") == [
+        ("token_color", "W"),
+        ("token_subtype", "Human"),
+        ("token_color", "U"),
+        ("token_subtype", "Merfolk"),
+    ]
+    assert _parse_token_script("") == []
+    assert _parse_token_script("malformed") == []

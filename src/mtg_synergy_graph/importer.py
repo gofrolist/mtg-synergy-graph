@@ -16,7 +16,7 @@ from typing import Any
 
 from .attributes import explode_filter
 from .parser import parse_card_file
-from .ports import extract_all_ports
+from .ports import _parse_token_script, extract_all_ports
 
 log = logging.getLogger(__name__)
 
@@ -376,7 +376,7 @@ _PORT_INSERT_SQL = (
 #: Keys the importer consumes from the port dict but does NOT persist
 #: on card_ports. Producers attach these; import_card must pop them
 #: before calling _normalise_port.
-_TRANSIENT_PORT_KEYS: frozenset[str] = frozenset({"_change_type"})
+_TRANSIENT_PORT_KEYS: frozenset[str] = frozenset({"_change_type", "_token_script"})
 
 
 def _normalise_port(port: dict[str, Any]) -> dict[str, Any]:
@@ -444,6 +444,7 @@ def import_card(
     inserted = 0
     for port in ports:
         change_type = port.pop("_change_type", "")
+        token_script = port.pop("_token_script", "")
         cur = conn.execute(_PORT_INSERT_SQL, _normalise_port(port))
         port_id = cur.lastrowid
         inserted += 1
@@ -466,6 +467,13 @@ def import_card(
                             "(port_id, attr_kind, attr_value, is_negated) VALUES (?, ?, ?, ?)",
                             (port_id, "change_type", attr["attr_value"], attr["is_negated"]),
                         )
+        if token_script:
+            for attr_kind, attr_value in _parse_token_script(token_script):
+                conn.execute(
+                    "INSERT OR IGNORE INTO port_attributes "
+                    "(port_id, attr_kind, attr_value, is_negated) VALUES (?, ?, ?, ?)",
+                    (port_id, attr_kind, attr_value, False),
+                )
 
     return inserted
 

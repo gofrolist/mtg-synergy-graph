@@ -60,6 +60,58 @@ COST_PATTERNS: tuple[tuple[str, str], ...] = (
     ("Draw<", "draw_cost"),  # A4: 45 cards
 )
 
+#: Forge token-script colour letters → canonical uppercase.
+_TOKEN_COLOR_MAP: dict[str, str] = {
+    "w": "W",
+    "u": "U",
+    "b": "B",
+    "r": "R",
+    "g": "G",
+    "c": "C",
+}
+
+
+def _parse_token_script(script: str) -> list[tuple[str, str]]:
+    """Parse a TokenScript like ``w_1_1_soldier`` (or multi-choice
+    ``w_1_1_human,u_1_1_merfolk``) into a list of ``(attr_kind, attr_value)``
+    pairs.
+
+    Creature tokens use ``<color>_<power>_<toughness>_<subtype>[_<kw>]*``.
+    Artifact tokens without power/toughness use ``<color>_a_<subtype>[_<flag>]*``
+    (e.g. ``c_a_food_sac``, ``c_a_powerstone``). The subtype is the first
+    part after the numeric/``a`` prefix block.
+
+    >>> _parse_token_script("w_1_1_soldier")
+    [('token_color', 'W'), ('token_subtype', 'Soldier')]
+    >>> _parse_token_script("w_1_1_human,u_1_1_merfolk")
+    [('token_color', 'W'), ('token_subtype', 'Human'), ('token_color', 'U'), ('token_subtype', 'Merfolk')]
+    """
+    attrs: list[tuple[str, str]] = []
+    if not script:
+        return attrs
+    for piece in script.split(","):
+        parts = piece.strip().split("_")
+        if len(parts) < 4:
+            continue
+        color_letter = parts[0].lower()
+        color = _TOKEN_COLOR_MAP.get(color_letter)
+        if color:
+            attrs.append(("token_color", color))
+        # Determine subtype position: creature tokens have digit power/
+        # toughness at [1][2], so subtype is at [3]. Artifact tokens like
+        # ``c_a_food_sac`` use ``a`` at [1] with no power/toughness, so
+        # subtype is at [2].
+        if parts[1].isdigit():
+            subtype_raw = parts[3]
+        elif parts[1].lower() == "a":
+            subtype_raw = parts[2]
+        else:
+            subtype_raw = parts[3]
+        if subtype_raw:
+            attrs.append(("token_subtype", subtype_raw.capitalize()))
+    return attrs
+
+
 #: Cost types that take a ``<count/typespec[/desc]>`` payload describing
 #: which permanents the controller picks. These are the only costs where
 #: the self / other distinction is meaningful — `PayLife`, `tap_type` etc.
@@ -279,6 +331,7 @@ def extract_effect_ports(
     # from ValidTgts/Defined. Store it on the port so the importer can
     # explode it into port_attributes under attr_kind='change_type'.
     change_type = parsed.get("ChangeType", "") if verb == "ChangeZone" else ""
+    token_script = parsed.get("TokenScript", "") if verb == "Token" else ""
 
     port: PortRow = {
         "card_name": card_name,
@@ -295,6 +348,7 @@ def extract_effect_ports(
         "mana_restriction": mana_restriction,
         "raw_line": repr(parsed),
         "_change_type": change_type,  # consumed by importer, stripped before insert
+        "_token_script": token_script,  # same
         **branch,
     }
 
