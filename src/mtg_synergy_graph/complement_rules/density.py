@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from typing import TYPE_CHECKING
 
 from ..graph_engine import (
     _SELF_EVENT_TRIGGERS,
@@ -15,6 +16,9 @@ from ..graph_engine import (
 )
 from .core import PortComplement, PortRow, _commander_subtypes_from_ports
 
+if TYPE_CHECKING:
+    from ..penalties import CandidateCache
+
 
 def _escape_like(value: str) -> str:
     """Escape SQL LIKE wildcard characters (%, _) in a value."""
@@ -25,6 +29,7 @@ def _find_lord_complements(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
     cmdr_set: set[str],
+    candidate_cache: CandidateCache | None = None,
 ) -> list[PortComplement]:
     """Lord matching: candidate static Continuous ports whose affected_scope
     overlaps with commander's mechanically-relevant subtypes.
@@ -37,19 +42,23 @@ def _find_lord_complements(
     if not cmdr_subtypes:
         return []
 
-    cur = conn.execute(
-        "SELECT card_name, affected_scope, branch_kind "
-        "FROM card_ports "
-        "WHERE port_type = 'static' AND event_class = 'Continuous' "
-        "AND affected_scope IS NOT NULL AND affected_scope != ''"
-    )
+    if candidate_cache is not None:
+        rows = candidate_cache.lord_continuous_rows
+    else:
+        rows = tuple(
+            (row["card_name"], row["affected_scope"] or "", row["branch_kind"] or "")
+            for row in conn.execute(
+                "SELECT card_name, affected_scope, branch_kind "
+                "FROM card_ports "
+                "WHERE port_type = 'static' AND event_class = 'Continuous' "
+                "AND affected_scope IS NOT NULL AND affected_scope != ''"
+            )
+        )
     results: list[PortComplement] = []
     seen: set[str] = set()
-    for r in cur.fetchall():
-        card = r["card_name"]
+    for card, scope, branch in rows:
         if card in cmdr_set or card in seen:
             continue
-        scope = r["affected_scope"] or ""
         attrs = explode_filter(scope)
         scope_subtypes = {a["attr_value"] for a in attrs if a["attr_kind"] == "subtype"}
         if scope_subtypes & cmdr_subtypes:
@@ -61,7 +70,7 @@ def _find_lord_complements(
                     candidate=card,
                     cmdr_event="tribal",
                     cand_event="Continuous",
-                    branch_kind=r["branch_kind"] or "root",
+                    branch_kind=branch or "root",
                 )
             )
     return results
@@ -71,9 +80,17 @@ def _find_etb_self_complements(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
     cmdr_set: set[str],
+    candidate_cache: CandidateCache | None = None,
 ) -> list[PortComplement]:
     """ETB-self: candidate card's identity (type/subtype) satisfies
     a commander trigger's valid_filter.
+
+    In batch mode a shared ``candidate_cache`` short-circuits two hot
+    spots:
+    1. The per-commander SQL that loaded card-attr rows.
+    2. The per-card ``_card_attrs_for_filter`` invocation inside
+       ``_filter_card_match`` — we look up the precomputed attribute
+       set by name instead.
     """
     # Collect commander self-event triggers with valid_filters
     triggers: list[PortRow] = []
@@ -137,7 +154,17 @@ def _find_etb_self_complements(
         if needs_full_scan:
             break
 
-    if needs_full_scan or not all_type_hints:
+    if candidate_cache is not None:
+        # Batch mode: iterate the shared in-memory attr rows. We still
+        # apply the type-hint narrowing in Python to preserve the
+        # original behaviour of skipping cards whose card_types don't
+        # intersect any requested primary type.
+        attr_rows = candidate_cache.candidate_attr_rows
+        if needs_full_scan or not all_type_hints:
+            cards = list(attr_rows.values())
+        else:
+            cards = [row for row in attr_rows.values() if any(h in (row["card_types"] or "") for h in all_type_hints)]
+    elif needs_full_scan or not all_type_hints:
         cards = _rows_to_dicts(
             conn.execute(
                 "SELECT name, card_types, supertypes, subtypes, keywords, color_identity FROM cards"
@@ -153,6 +180,10 @@ def _find_etb_self_complements(
             ).fetchall()
         )
 
+    # Lookup map for precomputed per-card attr sets. ``None`` falls back
+    # to per-call recomputation inside ``_filter_card_match``.
+    card_attrs_map = candidate_cache.card_attrs if candidate_cache is not None else None
+
     results: list[PortComplement] = []
     seen: set[tuple[str, str]] = set()
     for trig, alts in parsed:
@@ -164,7 +195,8 @@ def _find_etb_self_complements(
             key = (name, ev)
             if key in seen:
                 continue
-            if any(_filter_card_match(alt, card) for alt in alts):
+            cached_attrs = card_attrs_map.get(name) if card_attrs_map is not None else None
+            if any(_filter_card_match(alt, card, cached_attrs) for alt in alts):
                 seen.add(key)
                 results.append(
                     PortComplement(
@@ -626,6 +658,7 @@ def _find_proliferate_synergy(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
     cmdr_set: set[str],
+    candidate_cache: CandidateCache | None = None,
 ) -> list[PortComplement]:
     """Find proliferate effects for counter-caring commanders.
 
@@ -661,14 +694,19 @@ def _find_proliferate_synergy(
         return []
 
     # Find all cards that actively proliferate (effect or trigger, not cost)
-    cur = conn.execute(
-        "SELECT DISTINCT card_name FROM card_ports "
-        "WHERE event_class = 'Proliferate' "
-        "AND port_type IN ('effect', 'trigger')"
-    )
+    if candidate_cache is not None:
+        names_iter = candidate_cache.proliferate_cards
+    else:
+        names_iter = (
+            row["card_name"]
+            for row in conn.execute(
+                "SELECT DISTINCT card_name FROM card_ports "
+                "WHERE event_class = 'Proliferate' "
+                "AND port_type IN ('effect', 'trigger')"
+            )
+        )
     results: list[PortComplement] = []
-    for r in cur.fetchall():
-        name = r["card_name"]
+    for name in names_iter:
         if name not in cmdr_set:
             results.append(
                 PortComplement(
@@ -687,6 +725,7 @@ def _find_scales_with_density(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
     cmdr_set: set[str],
+    candidate_cache: CandidateCache | None = None,
 ) -> list[PortComplement]:
     """Find cards that contribute to a commander's scaling condition.
 
@@ -709,15 +748,20 @@ def _find_scales_with_density(
         # scales_with Valid filter=Creature.YouCtrl+counters_GE1_P1P1)
         vf = (p.get("valid_filter") or "").strip()
         if "P1P1" in ev or "P1P1" in vf:
-            cur = conn.execute(
-                "SELECT DISTINCT card_name FROM card_ports "
-                "WHERE port_type = 'effect' AND event_class IN "
-                "('PutCounter', 'PutCounterAll', 'Proliferate') "
-                "AND (counter_type IS NULL OR counter_type = '' "
-                "OR counter_type = 'P1P1')"
-            )
-            for r in cur.fetchall():
-                name = r["card_name"]
+            if candidate_cache is not None:
+                names = candidate_cache.p1p1_counter_producers
+            else:
+                names = frozenset(
+                    row["card_name"]
+                    for row in conn.execute(
+                        "SELECT DISTINCT card_name FROM card_ports "
+                        "WHERE port_type = 'effect' AND event_class IN "
+                        "('PutCounter', 'PutCounterAll', 'Proliferate') "
+                        "AND (counter_type IS NULL OR counter_type = '' "
+                        "OR counter_type = 'P1P1')"
+                    )
+                )
+            for name in names:
                 if name not in cmdr_set and name not in seen:
                     seen.add(name)
                     results.append(

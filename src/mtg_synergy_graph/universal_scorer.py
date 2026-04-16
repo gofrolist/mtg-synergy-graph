@@ -14,6 +14,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
+from typing import TYPE_CHECKING
 
 from .complement_rules import (
     PortComplement,
@@ -21,6 +22,9 @@ from .complement_rules import (
 )
 from .heuristics import STAPLES
 from .scoring import BUCKETS
+
+if TYPE_CHECKING:
+    from .penalties import CandidateCache
 
 # ---------------------------------------------------------------------------
 # §1  UniversalScore — per-candidate result
@@ -222,30 +226,42 @@ class UniversalScore:
         return frozenset(c.rule_id for c in self.complements if c.direction == "synergy")
 
     def to_legacy_buckets(self) -> dict[str, float]:
-        """Map IDF-weighted scores to legacy bucket dict."""
+        """Map IDF-weighted scores to legacy bucket dict.
+
+        The running ``total`` is accumulated in the single complement
+        loop instead of re-summing the dict afterwards — this function
+        is called once per candidate per commander (≈80 k times across a
+        100-commander batch), so dropping the 28-key ``sum`` comprehension
+        is worth a couple hundred milliseconds.
+        """
         buckets: dict[str, float] = dict.fromkeys(BUCKETS, 0.0)
-        buckets["total"] = 0.0
+        total = 0.0
         seen: set[tuple[str, str, str, str, str]] = set()
+        seen_add = seen.add
+        idf_weights = self.idf_weights
         for c in self.complements:
             key = (c.rule_id, c.cmdr_event, c.cand_event, c.filter_group, c.direction)
             if key in seen:
                 continue
-            seen.add(key)
+            seen_add(key)
             bucket = _RULE_TO_BUCKET.get(c.rule_id, "catchall")
             idf_key = (c.rule_id, c.cmdr_event, c.cand_event, c.filter_group)
-            weight = self.idf_weights.get(idf_key, 1.0)
+            weight = idf_weights.get(idf_key, 1.0)
             if c.direction == "anti_synergy":
                 buckets[bucket] -= weight
+                total -= weight
             else:
                 buckets[bucket] += weight
+                total += weight
         if self.staple_bonus:
             buckets["staple"] = self.staple_bonus
-        buckets["total"] = sum(buckets[b] for b in BUCKETS)
+            total += self.staple_bonus
         n_rules = len(self.distinct_rules)
         if n_rules >= 2:
-            buckets["total"] += 0.02 * min(n_rules - 1, 4)
-        buckets["total"] += _compute_pair_bonus(self.distinct_rules)
-        buckets["total"] += self.circuit_bonus + self.cmc_bonus + self.rank_bonus
+            total += 0.02 * min(n_rules - 1, 4)
+        total += _compute_pair_bonus(self.distinct_rules)
+        total += self.circuit_bonus + self.cmc_bonus + self.rank_bonus
+        buckets["total"] = total
         return buckets
 
 
@@ -353,6 +369,7 @@ def _compute_idf_weights(
 def score_all_universal(
     conn: sqlite3.Connection,
     commander_set: Sequence[str],
+    candidate_cache: CandidateCache | None = None,
 ) -> dict[str, UniversalScore]:
     """Score every candidate via IDF-weighted port matching.
 
@@ -362,8 +379,13 @@ def score_all_universal(
 
     Returns one ``UniversalScore`` per candidate reached by at least one
     complement rule.
+
+    When ``candidate_cache`` is provided, the commander-independent
+    cmc/edhrec_rank load is skipped in favour of the cache, and the
+    cache is forwarded to ``find_all_complements`` so the complement
+    rule layer can also skip its redundant SQL.
     """
-    complements = find_all_complements(conn, commander_set)
+    complements = find_all_complements(conn, commander_set, candidate_cache=candidate_cache)
     idf = _compute_idf_weights(complements)
 
     # Group complements by candidate
@@ -390,12 +412,19 @@ def score_all_universal(
         if (rules_hit & _FEEDS_COMMANDER_RULES) and (rules_hit & _FED_BY_COMMANDER_RULES):
             circuit_candidates.add(name)
 
-    # Bulk-load CMC and edhrec_rank for micro-scores
+    # Bulk-load CMC and edhrec_rank for micro-scores. In batch mode the
+    # engine shares a CandidateCache, so we read the pre-loaded map
+    # instead of re-issuing the same full-table scan per commander.
     cmc_data: dict[str, float] = {}
     rank_data: dict[str, int] = {}
-    for row in conn.execute("SELECT name, cmc, edhrec_rank FROM cards"):
-        cmc_data[row["name"]] = row["cmc"] if row["cmc"] is not None else 99.0
-        rank_data[row["name"]] = row["edhrec_rank"] if row["edhrec_rank"] is not None else 99999
+    if candidate_cache is not None:
+        for name, (cmc, rank) in candidate_cache.cmc_rank_map.items():
+            cmc_data[name] = cmc
+            rank_data[name] = rank
+    else:
+        for row in conn.execute("SELECT name, cmc, edhrec_rank FROM cards"):
+            cmc_data[row["name"]] = row["cmc"] if row["cmc"] is not None else 99.0
+            rank_data[row["name"]] = row["edhrec_rank"] if row["edhrec_rank"] is not None else 99999
 
     # Build results with IDF and quality dampener injected
     results: dict[str, UniversalScore] = {}

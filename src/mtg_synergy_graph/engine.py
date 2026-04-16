@@ -194,7 +194,13 @@ class SynergyEngine:
         cache_key = tuple(cmdr_set)
         universal = self._score_cache.get(cache_key)
         if universal is None:
-            universal = score_all_universal(self._conn, cmdr_set)
+            if self._candidate_cache is None:
+                self._candidate_cache = build_candidate_cache(self._conn)
+            universal = score_all_universal(
+                self._conn,
+                cmdr_set,
+                candidate_cache=self._candidate_cache,
+            )
             self._score_cache[cache_key] = universal
         us = universal.get(card)
         if us is None:
@@ -351,7 +357,12 @@ class SynergyEngine:
         cache_key = tuple(cmdr_set)
         universal = self._score_cache.get(cache_key)
         if universal is None:
-            universal = score_all_universal(self._conn, cmdr_set)
+            # _candidate_cache is guaranteed populated above (line ~319).
+            universal = score_all_universal(
+                self._conn,
+                cmdr_set,
+                candidate_cache=self._candidate_cache,
+            )
             self._score_cache[cache_key] = universal
         ranked: list[tuple[str, dict[str, float]]] = []
         for cand in legal:

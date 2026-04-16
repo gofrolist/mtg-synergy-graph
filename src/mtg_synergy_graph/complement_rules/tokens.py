@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from typing import TYPE_CHECKING
 
 from ..graph_engine import _trigger_only_matches_self
 from ..penalties import _token_subtype
 from .core import PortComplement, PortRow
+
+if TYPE_CHECKING:
+    from ..penalties import CandidateCache
 
 
 def _find_effect_feeds_etb(
@@ -334,6 +338,7 @@ def _find_token_sac_chain(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
     cmdr_set: set[str],
+    candidate_cache: CandidateCache | None = None,
 ) -> list[PortComplement]:
     """Find token producers for sacrifice-trigger commanders (2-hop chain).
 
@@ -362,16 +367,22 @@ def _find_token_sac_chain(
     # These tokens have built-in sacrifice abilities
     _SAC_TOKEN_PATTERNS = ("treasure", "food", "clue", "blood")
 
-    cur = conn.execute(
-        "SELECT card_name, raw_line FROM card_ports WHERE port_type = 'effect' AND event_class = 'Token'"
-    )
+    if candidate_cache is not None:
+        token_rows = candidate_cache.token_effect_rows
+    else:
+        token_rows = tuple(
+            (row["card_name"], row["raw_line"] or "")
+            for row in conn.execute(
+                "SELECT card_name, raw_line FROM card_ports WHERE port_type = 'effect' AND event_class = 'Token'"
+            )
+        )
     results: list[PortComplement] = []
     seen: set[str] = set()
-    for r in cur.fetchall():
-        name = r["card_name"]
+    for card_name, raw_line in token_rows:
+        name = card_name
         if name in cmdr_set or name in seen:
             continue
-        raw = str(r["raw_line"])
+        raw = str(raw_line)
         m = re.search(r"'TokenScript':\s*'([^']+)'", raw)
         if not m:
             continue

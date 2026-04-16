@@ -4,9 +4,34 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from typing import TYPE_CHECKING
 
 from ..graph_engine import _trigger_only_matches_self
 from .core import PortComplement, PortRow
+
+if TYPE_CHECKING:
+    from ..penalties import CandidateCache
+
+
+def _iter_panharmonicon_statics(
+    conn: sqlite3.Connection,
+    candidate_cache: CandidateCache | None,
+):
+    """Yield ``(card_name, raw_line)`` for every Panharmonicon static port.
+
+    Reads from ``candidate_cache.panharmonicon_statics`` when provided to
+    avoid the ``SELECT card_name, raw_line FROM card_ports WHERE
+    port_type='static' AND event_class='Panharmonicon'`` roundtrip — this
+    query is issued twice per commander (reverse + stacking) and
+    dominated batch-eval profile traces.
+    """
+    if candidate_cache is not None:
+        yield from candidate_cache.panharmonicon_statics
+        return
+    for row in conn.execute(
+        "SELECT card_name, raw_line FROM card_ports WHERE port_type = 'static' AND event_class = 'Panharmonicon'"
+    ):
+        yield (row["card_name"], row["raw_line"] or "")
 
 
 def _find_panharmonicon_complements(
@@ -145,6 +170,7 @@ def _find_reverse_panharmonicon(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
     cmdr_set: set[str],
+    candidate_cache: CandidateCache | None = None,
 ) -> list[PortComplement]:
     """Find candidates with Panharmonicon static that double the commander's triggers.
 
@@ -177,16 +203,13 @@ def _find_reverse_panharmonicon(
         return []
 
     # Find Panharmonicon statics where the commander matches ValidCard
-    cur = conn.execute(
-        "SELECT card_name, raw_line FROM card_ports WHERE port_type = 'static' AND event_class = 'Panharmonicon'"
-    )
     results: list[PortComplement] = []
     seen: set[str] = set()
-    for r in cur.fetchall():
-        card = r["card_name"]
+    for card_name, raw_line in _iter_panharmonicon_statics(conn, candidate_cache):
+        card = card_name
         if card in cmdr_set or card in seen:
             continue
-        raw = str(r["raw_line"])
+        raw = str(raw_line)
 
         # Extract ValidCard filter
         m_vc = re.search(r"'ValidCard':\s*'([^']+)'", raw)
@@ -297,6 +320,7 @@ def _find_panharmonicon_stacking(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
     cmdr_set: set[str],
+    candidate_cache: CandidateCache | None = None,
 ) -> list[PortComplement]:
     """Find Panharmonicon-like cards when the commander IS a Panharmonicon.
 
@@ -321,15 +345,12 @@ def _find_panharmonicon_stacking(
         return []
 
     # Find candidates also having Panharmonicon with overlapping ValidMode
-    cur = conn.execute(
-        "SELECT card_name, raw_line FROM card_ports WHERE port_type = 'static' AND event_class = 'Panharmonicon'"
-    )
     results: list[PortComplement] = []
-    for r in cur.fetchall():
-        card = r["card_name"]
+    for card_name, raw_line in _iter_panharmonicon_statics(conn, candidate_cache):
+        card = card_name
         if card in cmdr_set:
             continue
-        raw = str(r["raw_line"])
+        raw = str(raw_line)
         m = re.search(r"'ValidMode':\s*'([^']+)'", raw)
         if not m:
             continue

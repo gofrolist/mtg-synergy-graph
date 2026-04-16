@@ -26,6 +26,7 @@ import re
 import sqlite3
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
+from functools import lru_cache
 from typing import Any
 
 from .attributes import explode_filter
@@ -1031,27 +1032,59 @@ _BROAD_QUALIFIERS: frozenset[str] = frozenset(
 )
 
 
-def _filter_card_match(valid_filter: str, card_row: PortRow) -> bool:
-    """Return True iff a card row's static attributes satisfy the filter,
-    treating runtime subtype values (``Other``, ``attacking``, ...) as
-    always satisfied.
+@lru_cache(maxsize=8192)
+def _compile_filter(
+    valid_filter: str,
+) -> tuple[tuple[tuple[str, str], ...], tuple[tuple[str, str], ...]]:
+    """Parse ``valid_filter`` once into ``(required, forbidden)`` tuples.
+
+    Caches the result — each commander visits the same ~hundreds of
+    filter strings across tens of thousands of ``_filter_card_match``
+    calls, and ``explode_filter`` itself costs ~3 µs per invocation.
+    Returned tuples are immutable, so sharing them across callers is
+    safe. Unknown runtime kinds (``attacking``, ``Other``, ...) are
+    stripped here so the hot matching loop only handles static attrs.
     """
     if not valid_filter:
-        return False
-    attrs = _card_attrs_for_filter(card_row)
-    cand_set = set(attrs)
+        return ((), ())
     required: list[tuple[str, str]] = []
     forbidden: list[tuple[str, str]] = []
     for attr in explode_filter(valid_filter):
-        if attr["attr_kind"] in _RUNTIME_ATTR_KINDS:
+        kind = attr["attr_kind"]
+        if kind in _RUNTIME_ATTR_KINDS:
             continue
-        if attr["attr_kind"] == "subtype" and attr["attr_value"] in _RUNTIME_SUBTYPE_VALUES:
+        value = attr["attr_value"]
+        if kind == "subtype" and value in _RUNTIME_SUBTYPE_VALUES:
             continue
-        pair = (attr["attr_kind"], attr["attr_value"])
+        pair = (kind, value)
         (forbidden if attr["is_negated"] else required).append(pair)
-    if any(p in cand_set for p in forbidden):
+    return (tuple(required), tuple(forbidden))
+
+
+def _filter_card_match(
+    valid_filter: str,
+    card_row: PortRow,
+    cand_attrs: frozenset[tuple[str, str]] | None = None,
+) -> bool:
+    """Return True iff a card row's static attributes satisfy the filter,
+    treating runtime subtype values (``Other``, ``attacking``, ...) as
+    always satisfied.
+
+    ``cand_attrs`` is an optional pre-built attribute set (from
+    ``CandidateCache.card_attrs``). When provided, the per-call
+    string-parsing of card_types / supertypes / subtypes / keywords /
+    color_identity is skipped. Batch evaluation takes tens of thousands
+    of filter-matching calls per commander, so reusing a single
+    precomputed set is the bulk of the win.
+    """
+    if not valid_filter:
         return False
-    return all(p in cand_set for p in required)
+    required, forbidden = _compile_filter(valid_filter)
+    if cand_attrs is None:
+        cand_attrs = frozenset(_card_attrs_for_filter(card_row))
+    if any(p in cand_attrs for p in forbidden):
+        return False
+    return all(p in cand_attrs for p in required)
 
 
 # ---------------------------------------------------------------------------

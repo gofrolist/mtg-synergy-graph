@@ -57,11 +57,6 @@ def _candidates(results: list[PortComplement]) -> set[str]:
     return {r.candidate for r in results}
 
 
-def _rule_ids(results: list[PortComplement]) -> set[str]:
-    """Extract rule_ids from a list of PortComplement."""
-    return {r.rule_id for r in results}
-
-
 # ---------------------------------------------------------------------------
 # 1. _build_stax_exclusion
 # ---------------------------------------------------------------------------

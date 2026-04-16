@@ -130,10 +130,6 @@ def _candidates(results) -> set[str]:
     return {r.candidate for r in results}
 
 
-def _rule_ids(results) -> set[str]:
-    return {r.rule_id for r in results}
-
-
 # ===========================================================================
 # _find_opponent_forcing
 # ===========================================================================

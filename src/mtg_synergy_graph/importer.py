@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -446,24 +445,6 @@ def import_card(
             )
 
     return inserted
-
-
-def import_cards(
-    conn: sqlite3.Connection,
-    cards: Iterable[dict[str, Any]],
-    *,
-    oracle_id_resolver: dict[str, ScryfallMeta] | None = None,
-) -> int:
-    """Import a sequence of already-parsed cards inside a single transaction."""
-    total_ports = 0
-    with conn:
-        for card in cards:
-            total_ports += import_card(
-                conn,
-                card,
-                oracle_id_resolver=oracle_id_resolver,
-            )
-    return total_ports
 
 
 def import_cards_folder(

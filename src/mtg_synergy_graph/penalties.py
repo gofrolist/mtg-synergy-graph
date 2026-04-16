@@ -187,6 +187,13 @@ class CandidateCache:
     Building this once and passing it to :func:`build_penalty_context`
     avoids repeating ~90 ms of SQL on every call — a 9-second saving
     when running 100 commanders in the golden-set tracker.
+
+    The extra ``cmc_rank_map``, ``panharmonicon_statics``,
+    ``token_effect_rows``, and ``stax_cards_by_event`` fields extend the
+    cache to the complement-rule layer so helpers in
+    ``complement_rules/`` and ``universal_scorer`` can read from the
+    cache instead of re-issuing the same SQL for every commander in a
+    batch run.
     """
 
     candidate_rows: dict[str, dict[str, Any]]
@@ -196,10 +203,37 @@ class CandidateCache:
     candidate_counter_types: dict[str, set[str]]
     candidate_counters_on_land: dict[str, bool]
     candidate_opp_mill: dict[str, bool]
+    cmc_rank_map: dict[str, tuple[float, int]]
+    panharmonicon_statics: tuple[tuple[str, str], ...]
+    token_effect_rows: tuple[tuple[str, str], ...]
+    stax_cards_by_event: dict[str, frozenset[str]]
+    #: Per-card ``(attr_kind, attr_value)`` set, exactly the output of
+    #: :func:`graph_engine._card_attrs_for_filter`. Precomputed once so
+    #: ``_filter_card_match`` can skip re-parsing card_types / supertypes
+    #: / subtypes / keywords / color_identity on every call.
+    card_attrs: dict[str, frozenset[tuple[str, str]]]
+    #: Per-card attribute rows keyed by name. Mirrors the column subset
+    #: that ``_find_etb_self_complements`` used to load per-commander:
+    #: ``name, card_types, supertypes, subtypes, keywords, color_identity``.
+    #: Stored here so density helpers can iterate in-memory instead of
+    #: re-issuing SQL for every commander.
+    candidate_attr_rows: dict[str, dict[str, Any]]
+    #: ``(card_name, affected_scope, branch_kind)`` rows for every
+    #: static Continuous port with a non-empty affected_scope. Consumed
+    #: by ``_find_lord_complements`` — commander-independent, reissued
+    #: per commander before caching.
+    lord_continuous_rows: tuple[tuple[str, str, str], ...]
+    #: Names of cards that have a ``Proliferate`` effect or trigger port.
+    #: Consumed by ``_find_proliferate_synergy``.
+    proliferate_cards: frozenset[str]
+    #: Names of cards that produce generic or P1P1 counters. Consumed by
+    #: the ``scales_with`` P1P1 branch of ``_find_scales_with_density``.
+    p1p1_counter_producers: frozenset[str]
 
 
 def build_candidate_cache(conn: sqlite3.Connection) -> CandidateCache:
     """Load all commander-independent candidate data in one pass."""
+    candidate_attr_rows = _bulk_load_candidate_attr_rows(conn)
     return CandidateCache(
         candidate_rows=_bulk_load_candidates(conn),
         creature_static_scopes=_bulk_load_static_scopes(conn),
@@ -208,6 +242,15 @@ def build_candidate_cache(conn: sqlite3.Connection) -> CandidateCache:
         candidate_counter_types=_bulk_load_counter_types(conn),
         candidate_counters_on_land=_bulk_load_counters_on_lands(conn),
         candidate_opp_mill=_bulk_load_opp_mill(conn),
+        cmc_rank_map=_bulk_load_cmc_rank(conn),
+        panharmonicon_statics=_bulk_load_panharmonicon_statics(conn),
+        token_effect_rows=_bulk_load_token_effect_rows(conn),
+        stax_cards_by_event=_bulk_load_stax_cards_by_event(conn),
+        card_attrs=_build_card_attrs(candidate_attr_rows),
+        candidate_attr_rows=candidate_attr_rows,
+        lord_continuous_rows=_bulk_load_lord_continuous_rows(conn),
+        proliferate_cards=_bulk_load_proliferate_cards(conn),
+        p1p1_counter_producers=_bulk_load_p1p1_counter_producers(conn),
     )
 
 
@@ -378,6 +421,181 @@ def _bulk_load_token_types(conn: sqlite3.Connection) -> dict[str, set[str]]:
             if sub:
                 out.setdefault(row["card_name"], set()).add(sub)
     return out
+
+
+def _bulk_load_cmc_rank(conn: sqlite3.Connection) -> dict[str, tuple[float, int]]:
+    """Per-card ``(cmc, edhrec_rank)`` map used by ``score_all_universal``.
+
+    Uses the same sentinel defaults (99.0 / 99999) as the previous
+    inline loop in ``universal_scorer.score_all_universal``.
+    """
+    out: dict[str, tuple[float, int]] = {}
+    for row in conn.execute("SELECT name, cmc, edhrec_rank FROM cards"):
+        cmc = row["cmc"] if row["cmc"] is not None else 99.0
+        rank = row["edhrec_rank"] if row["edhrec_rank"] is not None else 99999
+        out[row["name"]] = (cmc, rank)
+    return out
+
+
+def _bulk_load_panharmonicon_statics(
+    conn: sqlite3.Connection,
+) -> tuple[tuple[str, str], ...]:
+    """Raw ``(card_name, raw_line)`` rows for every Panharmonicon static.
+
+    Consumed by ``complement_rules/panharmonicon.py``. Returned as a
+    tuple of tuples (immutable, hashable) so callers can iterate safely.
+    """
+    return tuple(
+        (row["card_name"], row["raw_line"] or "")
+        for row in conn.execute(
+            "SELECT card_name, raw_line FROM card_ports WHERE port_type = 'static' AND event_class = 'Panharmonicon'"
+        )
+    )
+
+
+def _bulk_load_token_effect_rows(
+    conn: sqlite3.Connection,
+) -> tuple[tuple[str, str], ...]:
+    """Raw ``(card_name, raw_line)`` rows for every Token effect port.
+
+    Consumed by ``complement_rules/tokens.py::_find_token_sac_chain``,
+    which re-parses ``raw_line`` for its own token-type extraction (distinct
+    from the pre-parsed ``candidate_token_types`` mapping).
+    """
+    return tuple(
+        (row["card_name"], row["raw_line"] or "")
+        for row in conn.execute(
+            "SELECT card_name, raw_line FROM card_ports WHERE port_type = 'effect' AND event_class = 'Token'"
+        )
+    )
+
+
+#: Union of every stax ``event_class`` that ``_build_stax_exclusion``
+#: (complement_rules/core.py) may query. Keep in sync with ``_STAX_MAP``
+#: in core.py — adding a new stax axis there requires adding it here too.
+_STAX_EVENT_CLASSES: tuple[str, ...] = (
+    "DisableTriggers",
+    "CantSacrifice",
+    "RaiseCost",
+    "CantBeCast",
+    "CantGainLife",
+    "CantDraw",
+    "CantPutCounter",
+)
+
+
+def _bulk_load_candidate_attr_rows(
+    conn: sqlite3.Connection,
+) -> dict[str, dict[str, Any]]:
+    """Load the exact column subset that ``_card_attrs_for_filter`` reads.
+
+    ``candidate_rows`` intentionally omits ``supertypes`` and ``keywords``
+    (the penalty layer doesn't need them), so the density helpers and
+    ``_filter_card_match`` cache keep their own row map with just the
+    attr-relevant columns.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for row in conn.execute("SELECT name, card_types, supertypes, subtypes, keywords, color_identity FROM cards"):
+        out[row["name"]] = {
+            "name": row["name"],
+            "card_types": row["card_types"],
+            "supertypes": row["supertypes"],
+            "subtypes": row["subtypes"],
+            "keywords": row["keywords"],
+            "color_identity": row["color_identity"],
+        }
+    return out
+
+
+def _build_card_attrs(
+    attr_rows: dict[str, dict[str, Any]],
+) -> dict[str, frozenset[tuple[str, str]]]:
+    """Precompute the full ``(attr_kind, attr_value)`` set per card.
+
+    Replays :func:`graph_engine._card_attrs_for_filter` in bulk so
+    ``_filter_card_match`` can hit a hashed set instead of rebuilding
+    it from string columns on every (filter, card) pair.
+    """
+    # Imported here to avoid an import cycle at module load time.
+    from .graph_engine import _card_attrs_for_filter
+
+    return {name: frozenset(_card_attrs_for_filter(row)) for name, row in attr_rows.items()}
+
+
+def _bulk_load_lord_continuous_rows(
+    conn: sqlite3.Connection,
+) -> tuple[tuple[str, str, str], ...]:
+    """Static ``Continuous`` ports with a non-empty affected_scope.
+
+    Consumed by ``_find_lord_complements``. Returned as a tuple of
+    ``(card_name, affected_scope, branch_kind)`` triples.
+    """
+    return tuple(
+        (
+            row["card_name"],
+            row["affected_scope"] or "",
+            row["branch_kind"] or "",
+        )
+        for row in conn.execute(
+            "SELECT card_name, affected_scope, branch_kind FROM card_ports "
+            "WHERE port_type = 'static' AND event_class = 'Continuous' "
+            "AND affected_scope IS NOT NULL AND affected_scope != ''"
+        )
+    )
+
+
+def _bulk_load_proliferate_cards(conn: sqlite3.Connection) -> frozenset[str]:
+    """Card names that actively proliferate (effect or trigger port).
+
+    Consumed by ``_find_proliferate_synergy``.
+    """
+    return frozenset(
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports "
+            "WHERE event_class = 'Proliferate' "
+            "AND port_type IN ('effect', 'trigger')"
+        )
+    )
+
+
+def _bulk_load_p1p1_counter_producers(conn: sqlite3.Connection) -> frozenset[str]:
+    """Card names that put +1/+1 (or generic) counters.
+
+    Consumed by the P1P1 branch of ``_find_scales_with_density``.
+    """
+    return frozenset(
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports "
+            "WHERE port_type = 'effect' AND event_class IN "
+            "('PutCounter', 'PutCounterAll', 'Proliferate') "
+            "AND (counter_type IS NULL OR counter_type = '' "
+            "OR counter_type = 'P1P1')"
+        )
+    )
+
+
+def _bulk_load_stax_cards_by_event(
+    conn: sqlite3.Connection,
+) -> dict[str, frozenset[str]]:
+    """Per-event set of card names with a ``static`` port matching that event.
+
+    Pre-loads the result of every ``SELECT DISTINCT card_name FROM card_ports
+    WHERE port_type='static' AND event_class IN (...)`` query that
+    ``_build_stax_exclusion`` would issue at runtime, keyed by the
+    individual event class so core.py can union the axes that apply to
+    the current commander.
+    """
+    placeholders = ",".join("?" * len(_STAX_EVENT_CLASSES))
+    acc: dict[str, set[str]] = {ev: set() for ev in _STAX_EVENT_CLASSES}
+    for row in conn.execute(
+        f"SELECT DISTINCT card_name, event_class FROM card_ports "
+        f"WHERE port_type = 'static' AND event_class IN ({placeholders})",
+        _STAX_EVENT_CLASSES,
+    ):
+        acc[row["event_class"]].add(row["card_name"])
+    return {ev: frozenset(names) for ev, names in acc.items()}
 
 
 def build_penalty_context(

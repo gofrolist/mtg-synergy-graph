@@ -135,10 +135,6 @@ def _candidates(results: list) -> set[str]:
     return {r.candidate for r in results}
 
 
-def _rule_ids(results: list) -> set[str]:
-    return {r.rule_id for r in results}
-
-
 # ===========================================================================
 # _find_graveyard_fillers
 # ===========================================================================
