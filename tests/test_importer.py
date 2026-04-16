@@ -309,3 +309,50 @@ def test_card_hints_reimport_replaces_existing(tmp_path):
     ]
     assert rows == [("needs", "Type", "Changeling")]
     conn.close()
+
+
+def test_buffed_by_svar_populates_card_hints_with_subtype(tmp_path):
+    """SVar:BuffedBy:Elf,Permanent.Snow populates (kind='buffed_by', category='Type', value='Elf')."""
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+
+    card = {
+        "name": "Test Elvish Lord",
+        "types": "Creature",
+        "abilities": [],
+        "svars": {"BuffedBy": "Elf,Permanent.Snow"},
+        "keywords": [],
+    }
+    import_card(conn, card, oracle_id_resolver=None)
+
+    rows = conn.execute(
+        "SELECT kind, category, value FROM card_hints WHERE card_name=? AND kind='buffed_by' ORDER BY value",
+        ("Test Elvish Lord",),
+    ).fetchall()
+    values = {tuple(r)[2] for r in rows}
+    assert "Elf" in values, f"Expected Elf in buffed_by hints, got {values}"
+
+
+def test_buffed_by_svar_skips_non_type_tokens(tmp_path):
+    """Controller qualifiers (YouCtrl) and cmc comparators (cmcLE3) must not
+    produce buffed_by rows.
+    """
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+
+    card = {
+        "name": "Test Skip Controller",
+        "abilities": [],
+        "svars": {"BuffedBy": "Creature.YouCtrl,cmcLE3"},
+        "keywords": [],
+    }
+    import_card(conn, card, oracle_id_resolver=None)
+
+    rows = conn.execute(
+        "SELECT category, value FROM card_hints WHERE card_name=? AND kind='buffed_by'",
+        ("Test Skip Controller",),
+    ).fetchall()
+    values = {tuple(r)[1] for r in rows}
+    assert "Creature" in values
+    assert "YouCtrl" not in values
+    assert "cmcLE3" not in values

@@ -378,6 +378,17 @@ _PORT_INSERT_SQL = (
 #: before calling _normalise_port.
 _TRANSIENT_PORT_KEYS: frozenset[str] = frozenset({"_change_type", "_token_script"})
 
+#: BuffedBy SVar tokens classified by explode_filter → card_hints.category.
+#: attr_kinds not in this map (controller, cmc_cmp, etc.) are skipped —
+#: they carry no tribal/synergy signal.
+_BUFFED_BY_CATEGORY: dict[str, str] = {
+    "type": "Type",
+    "subtype": "Type",
+    "supertype": "Type",
+    "keyword": "Keyword",
+    "color": "Color",
+}
+
 
 def _normalise_port(port: dict[str, Any]) -> dict[str, Any]:
     leaked = _TRANSIENT_PORT_KEYS & port.keys()
@@ -453,6 +464,21 @@ def import_card(
             "INSERT OR REPLACE INTO card_svars (card_name, svar_name, svar_value) VALUES (?, ?, ?)",
             (name, svar_name, svar_value),
         )
+
+    # BuffedBy is Forge's AI hint declaring which permanents buff this card.
+    # Flatten into card_hints so complement rules can match it to candidate
+    # types/subtypes/keywords/colors.
+    buffed_by = card.get("svars", {}).get("BuffedBy", "")
+    if buffed_by:
+        for piece in buffed_by.split(","):
+            for attr in explode_filter(piece.strip()):
+                category = _BUFFED_BY_CATEGORY.get(attr["attr_kind"])
+                if category is None:
+                    continue
+                conn.execute(
+                    "INSERT OR IGNORE INTO card_hints (card_name, kind, category, value) VALUES (?, ?, ?, ?)",
+                    (name, "buffed_by", category, attr["attr_value"]),
+                )
 
     ports = extract_all_ports(card)
     inserted = 0
