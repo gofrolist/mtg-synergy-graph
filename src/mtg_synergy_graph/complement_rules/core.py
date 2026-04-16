@@ -169,17 +169,34 @@ def _make_scoped_check(base: EventCheck) -> EventCheck:
 
 
 def _invert_cost_feeds() -> dict[str, dict[str, EventCheck]]:
-    """Invert COST_FEEDS_TRIGGER: trigger_event -> {cost_event -> _always}.
+    """Invert COST_FEEDS_TRIGGER: trigger_event -> {cost_event -> check}.
 
     COST_FEEDS_TRIGGER is cost->trigger; we need trigger->cost for the
     complement rule where the commander has a trigger and we look for
     candidate costs that feed it.
+
+    For player-centric events (Sacrificed, Discarded, LifeLost) the check
+    also rejects opp-scoped commander triggers — a Forge cost is always
+    paid by the activator (you), so an opponent-only trigger cannot fire
+    from any candidate cost.
     """
     out: dict[str, dict[str, EventCheck]] = {}
     for cost_ev, trigger_evs in COST_FEEDS_TRIGGER.items():
         for trig_ev in trigger_evs:
-            out.setdefault(trig_ev, {})[cost_ev] = _always
+            if trig_ev in _SCOPED_TRIGGER_EVENTS:
+                out.setdefault(trig_ev, {})[cost_ev] = _reject_opp_trigger
+            else:
+                out.setdefault(trig_ev, {})[cost_ev] = _always
     return out
+
+
+def _reject_opp_trigger(trigger: PortRow, _cost_port: PortRow) -> bool:
+    """Reject commander triggers scoped to OppCtrl / OppOwn for cost feeders.
+
+    Costs are paid by the activator (you), so no candidate cost can cause
+    an opponent-scoped trigger to fire.
+    """
+    return _parse_trigger_scope(trigger) != "opp"
 
 
 def _cand_trigger_not_self(_cmdr_port: PortRow, cand_port: PortRow) -> bool:

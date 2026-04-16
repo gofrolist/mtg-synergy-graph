@@ -233,3 +233,94 @@ class TestTriggerEffectScope:
         }
         # Zone-compatible; scope difference must not filter this out.
         assert check(etb_trigger, etb_effect) is True
+
+
+# ---------------------------------------------------------------------------
+# Integration: cost_feeds_trigger rule — costs are always paid by 'you'
+# ---------------------------------------------------------------------------
+
+
+def _cost_feeds_trigger_rule():
+    for rule in COMPLEMENT_RULES:
+        if rule.rule_id == "cost_feeds_trigger":
+            return rule
+    raise AssertionError("cost_feeds_trigger rule not found in COMPLEMENT_RULES")
+
+
+class TestCostFeedsTriggerScope:
+    """Costs are paid by the activator (controller = you). So a commander
+    trigger scoped to ``opp`` cannot be fed by any candidate cost."""
+
+    def test_opp_trigger_rejects_self_sac_cost(self):
+        """Tergrid (opp-sac trigger) × Gonti's Machinations (self-sac cost)
+        must NOT match. Before this fix the pair matched via
+        cost_feeds_trigger and Gonti's Machinations ranked #1 for Tergrid."""
+        rule = _cost_feeds_trigger_rule()
+        check = rule.event_pairs["Sacrificed"]["sacrifice"]
+        tergrid_trigger = {
+            "event_class": "Sacrificed",
+            "valid_filter": "Permanent.!token+OppCtrl",
+        }
+        self_sac_cost = {
+            "event_class": "sacrifice",
+            "cost_subtype": "1/CARDNAME/self",
+        }
+        assert check(tergrid_trigger, self_sac_cost) is False
+
+    def test_opp_trigger_rejects_creature_sac_cost(self):
+        """Tergrid × Ashnod's Altar (sac creature cost) must NOT match —
+        the activator sacs their own creature, not the opponent's."""
+        rule = _cost_feeds_trigger_rule()
+        check = rule.event_pairs["Sacrificed"]["sacrifice"]
+        tergrid_trigger = {
+            "event_class": "Sacrificed",
+            "valid_filter": "Permanent.!token+OppCtrl",
+        }
+        sac_cost = {"event_class": "sacrifice", "cost_subtype": "1/Creature"}
+        assert check(tergrid_trigger, sac_cost) is False
+
+    def test_you_trigger_accepts_sac_cost(self):
+        """Korvold (you-sac trigger) × Ashnod's Altar must match."""
+        rule = _cost_feeds_trigger_rule()
+        check = rule.event_pairs["Sacrificed"]["sacrifice"]
+        korvold_trigger = {
+            "event_class": "Sacrificed",
+            "valid_filter": "Permanent.YouCtrl",
+        }
+        sac_cost = {"event_class": "sacrifice", "cost_subtype": "1/Creature"}
+        assert check(korvold_trigger, sac_cost) is True
+
+    def test_any_trigger_accepts_sac_cost(self):
+        """Unscoped Sacrificed trigger accepts any cost feeder."""
+        rule = _cost_feeds_trigger_rule()
+        check = rule.event_pairs["Sacrificed"]["sacrifice"]
+        any_trigger = {"event_class": "Sacrificed", "valid_filter": ""}
+        sac_cost = {"event_class": "sacrifice", "cost_subtype": "1/Creature"}
+        assert check(any_trigger, sac_cost) is True
+
+    def test_opp_discard_trigger_rejects_discard_cost(self):
+        """Opp-Discarded trigger × candidate discard cost must not match."""
+        rule = _cost_feeds_trigger_rule()
+        check = rule.event_pairs["Discarded"]["discard"]
+        opp_trigger = {"event_class": "Discarded", "valid_filter": "Card.OppOwn"}
+        discard_cost = {"event_class": "discard", "cost_subtype": "1/Card"}
+        assert check(opp_trigger, discard_cost) is False
+
+    def test_opp_life_lost_trigger_rejects_pay_life_cost(self):
+        """Opp-LifeLost trigger × pay-life cost must not match (you pay, not opp)."""
+        rule = _cost_feeds_trigger_rule()
+        check = rule.event_pairs["LifeLost"]["pay_life"]
+        opp_trigger = {"event_class": "LifeLost", "valid_filter": "Player.Opponent"}
+        pay_life_cost = {"event_class": "pay_life", "cost_subtype": "2"}
+        assert check(opp_trigger, pay_life_cost) is False
+
+    def test_non_scoped_events_unchanged(self):
+        """Taps/Exiled/Milled cost feeders are NOT scope-checked —
+        leaving their semantics alone."""
+        rule = _cost_feeds_trigger_rule()
+        # Taps isn't in _SCOPED_TRIGGER_EVENTS, so opp-tap trigger + tap cost
+        # should still match via the original _always check.
+        check = rule.event_pairs["Taps"]["tap"]
+        opp_trigger = {"event_class": "Taps", "valid_filter": "Creature.OppCtrl"}
+        tap_cost = {"event_class": "tap"}
+        assert check(opp_trigger, tap_cost) is True
