@@ -163,6 +163,24 @@ def _make_scoped_check(base: EventCheck) -> EventCheck:
     return _check
 
 
+def _make_scoped_trigger_trigger_check(base: EventCheck) -> EventCheck:
+    """Compose ``base`` with a scope check for trigger ↔ trigger rules.
+
+    Both sides are triggers on a player-centric event. Both filters refer
+    to the player whose action the trigger watches. Scopes must agree.
+    """
+
+    def _check(cmdr_trigger: PortRow, cand_trigger: PortRow) -> bool:
+        if not base(cmdr_trigger, cand_trigger):
+            return False
+        return _scope_compatible(
+            _parse_trigger_scope(cmdr_trigger),
+            _parse_trigger_scope(cand_trigger),
+        )
+
+    return _check
+
+
 # ---------------------------------------------------------------------------
 # §2  Build the event-pair maps for each rule
 # ---------------------------------------------------------------------------
@@ -376,11 +394,15 @@ def _build_resonance_pairs() -> dict[str, dict[str, EventCheck]]:
 
 
 def _build_trigger_resonance_pairs() -> dict[str, dict[str, EventCheck]]:
-    """trigger_event -> {trigger_event -> _always} for resonant triggers.
+    """trigger_event -> {trigger_event -> check} for resonant triggers.
 
     Triggers on the same event resonate (both fire on the same game event).
     Exclude catch-all triggers (SpellCast, Attacks) and ChangesZone
     (handled by ETB-self with filter matching).
+
+    For player-centric events (_SCOPED_TRIGGER_EVENTS), also enforce scope
+    compatibility on both sides: opp-scoped commander × you-scoped
+    candidate don't watch the same game event.
     """
     _RESONANT_TRIGGERS = frozenset(
         {
@@ -399,7 +421,13 @@ def _build_trigger_resonance_pairs() -> dict[str, dict[str, EventCheck]]:
             "Surveil",
         }
     )
-    return {ev: {ev: _always} for ev in _RESONANT_TRIGGERS}
+    out: dict[str, dict[str, EventCheck]] = {}
+    for ev in _RESONANT_TRIGGERS:
+        if ev in _SCOPED_TRIGGER_EVENTS:
+            out[ev] = {ev: _make_scoped_trigger_trigger_check(_always)}
+        else:
+            out[ev] = {ev: _always}
+    return out
 
 
 def _build_sacrifice_cluster_pairs() -> dict[str, dict[str, EventCheck]]:
@@ -408,18 +436,22 @@ def _build_sacrifice_cluster_pairs() -> dict[str, dict[str, EventCheck]]:
 
     Also matches commander sacrifice triggers -> candidate death-related
     effects (Zulaport Cutthroat's LoseLife on opponent when creature dies).
+
+    Enforces scope compatibility: Sacrificed and LifeLost are both in
+    _SCOPED_TRIGGER_EVENTS, so an opp-scoped commander trigger is paired
+    only with candidates whose scope also covers opponents.
     """
     _DEATH_TRIGGERS = frozenset({"Sacrificed", "LifeLost"})
     _DEATH_EFFECTS = frozenset({"Sacrifice", "SacrificeAll"})
     out: dict[str, dict[str, EventCheck]] = {}
     for trig in _DEATH_TRIGGERS:
         targets: dict[str, EventCheck] = {}
-        # Other death triggers (payoff cluster)
+        # Other death triggers (payoff cluster) — trigger↔trigger scope
         for t2 in _DEATH_TRIGGERS:
-            targets[t2] = _always
-        # Death effects on candidates
+            targets[t2] = _make_scoped_trigger_trigger_check(_always)
+        # Death effects on candidates — trigger↔effect scope
         for eff in _DEATH_EFFECTS:
-            targets[eff] = _always
+            targets[eff] = _make_scoped_check(_always)
         out[trig] = targets
     return out
 

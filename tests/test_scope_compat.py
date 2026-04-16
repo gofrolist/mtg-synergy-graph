@@ -324,3 +324,125 @@ class TestCostFeedsTriggerScope:
         opp_trigger = {"event_class": "Taps", "valid_filter": "Creature.OppCtrl"}
         tap_cost = {"event_class": "tap"}
         assert check(opp_trigger, tap_cost) is True
+
+
+# ---------------------------------------------------------------------------
+# Integration: trigger_resonance rule — trigger ↔ trigger scope check
+# ---------------------------------------------------------------------------
+
+
+def _trigger_resonance_rule():
+    for rule in COMPLEMENT_RULES:
+        if rule.rule_id == "trigger_resonance":
+            return rule
+    raise AssertionError("trigger_resonance rule not found in COMPLEMENT_RULES")
+
+
+class TestTriggerResonanceScope:
+    """Both sides of trigger_resonance are triggers — both filters specify
+    the player scope of the event being watched. Scopes must agree."""
+
+    def test_opp_rejects_you_resonance(self):
+        """Tergrid (opp-Sacrificed) × Blood Aspirant (you-Sacrificed) → no match.
+        Tergrid's trigger fires when opps sacrifice; Blood Aspirant fires
+        when YOU sacrifice — they watch different events."""
+        rule = _trigger_resonance_rule()
+        check = rule.event_pairs["Sacrificed"]["Sacrificed"]
+        tergrid = {"event_class": "Sacrificed", "valid_filter": "Permanent.!token+OppCtrl"}
+        blood_aspirant = {"event_class": "Sacrificed", "valid_filter": "Permanent.YouCtrl"}
+        assert check(tergrid, blood_aspirant) is False
+
+    def test_opp_accepts_opp_resonance(self):
+        """Tergrid × Waste Not (opp-Discarded): opp↔opp matches."""
+        rule = _trigger_resonance_rule()
+        check = rule.event_pairs["Discarded"]["Discarded"]
+        tergrid = {"event_class": "Discarded", "valid_filter": "Permanent.!token+OppCtrl"}
+        waste_not = {"event_class": "Discarded", "valid_filter": "Card.nonLand+nonCreature+OppOwn"}
+        assert check(tergrid, waste_not) is True
+
+    def test_opp_accepts_any_resonance(self):
+        """An opp-scoped commander matches a scopeless candidate trigger
+        (the candidate fires on any player's event, including opp's)."""
+        rule = _trigger_resonance_rule()
+        check = rule.event_pairs["Sacrificed"]["Sacrificed"]
+        tergrid = {"event_class": "Sacrificed", "valid_filter": "Permanent.!token+OppCtrl"}
+        unscoped = {"event_class": "Sacrificed", "valid_filter": ""}
+        assert check(tergrid, unscoped) is True
+
+    def test_you_accepts_you_resonance(self):
+        """You-scoped commander × you-scoped candidate: match."""
+        rule = _trigger_resonance_rule()
+        check = rule.event_pairs["Sacrificed"]["Sacrificed"]
+        you_cmdr = {"event_class": "Sacrificed", "valid_filter": "Permanent.YouCtrl"}
+        you_cand = {"event_class": "Sacrificed", "valid_filter": "Permanent.YouCtrl"}
+        assert check(you_cmdr, you_cand) is True
+
+    def test_you_rejects_opp_resonance(self):
+        """You-scoped commander × opp-only candidate: no match."""
+        rule = _trigger_resonance_rule()
+        check = rule.event_pairs["Sacrificed"]["Sacrificed"]
+        you_cmdr = {"event_class": "Sacrificed", "valid_filter": "Permanent.YouCtrl"}
+        opp_cand = {"event_class": "Sacrificed", "valid_filter": "Permanent.OppCtrl"}
+        assert check(you_cmdr, opp_cand) is False
+
+    def test_non_scoped_event_unchanged(self):
+        """Proliferate / DamageDone / Taps / Untaps / Investigated / Surveil
+        are NOT in _SCOPED_TRIGGER_EVENTS and keep _always semantics."""
+        rule = _trigger_resonance_rule()
+        check = rule.event_pairs["DamageDone"]["DamageDone"]
+        opp_trigger = {"event_class": "DamageDone", "valid_filter": "Creature.OppCtrl"}
+        you_trigger = {"event_class": "DamageDone", "valid_filter": "Creature.YouCtrl"}
+        # DamageDone filters refer to the source creature, not a player event —
+        # scope logic doesn't apply. _always should still match.
+        assert check(opp_trigger, you_trigger) is True
+
+
+# ---------------------------------------------------------------------------
+# Integration: sacrifice_cluster rule — trigger↔trigger + trigger↔effect
+# ---------------------------------------------------------------------------
+
+
+def _sacrifice_cluster_rule():
+    for rule in COMPLEMENT_RULES:
+        if rule.rule_id == "sacrifice_cluster":
+            return rule
+    raise AssertionError("sacrifice_cluster rule not found in COMPLEMENT_RULES")
+
+
+class TestSacrificeClusterScope:
+    """sacrifice_cluster pairs death triggers with death triggers or death
+    effects. Scope must agree on both cmdr side and cand side."""
+
+    def test_opp_trigger_rejects_you_trigger_cluster(self):
+        """Tergrid × Blood Aspirant (you-sacrificed trigger): no match."""
+        rule = _sacrifice_cluster_rule()
+        check = rule.event_pairs["Sacrificed"]["Sacrificed"]
+        tergrid = {"event_class": "Sacrificed", "valid_filter": "Permanent.!token+OppCtrl"}
+        blood_aspirant = {"event_class": "Sacrificed", "valid_filter": "Permanent.YouCtrl"}
+        assert check(tergrid, blood_aspirant) is False
+
+    def test_opp_trigger_rejects_you_sacrifice_effect(self):
+        """Tergrid × self-Sacrifice effect: no match (candidate effect is
+        you-scoped via empty-filter default)."""
+        rule = _sacrifice_cluster_rule()
+        check = rule.event_pairs["Sacrificed"]["Sacrifice"]
+        tergrid = {"event_class": "Sacrificed", "valid_filter": "Permanent.!token+OppCtrl"}
+        self_sac = {"event_class": "Sacrifice", "valid_filter": ""}
+        assert check(tergrid, self_sac) is False
+
+    def test_opp_trigger_accepts_each_player_sacrifice(self):
+        """Tergrid × Smallpox (each-player Sacrifice): match."""
+        rule = _sacrifice_cluster_rule()
+        check = rule.event_pairs["Sacrificed"]["Sacrifice"]
+        tergrid = {"event_class": "Sacrificed", "valid_filter": "Permanent.!token+OppCtrl"}
+        smallpox = {"event_class": "Sacrifice", "valid_filter": "Player"}
+        assert check(tergrid, smallpox) is True
+
+    def test_you_trigger_accepts_you_trigger_cluster(self):
+        """Korvold × Blood Artist: you↔any matches (Blood Artist is
+        scopeless creature-dies)."""
+        rule = _sacrifice_cluster_rule()
+        check = rule.event_pairs["Sacrificed"]["Sacrificed"]
+        korvold = {"event_class": "Sacrificed", "valid_filter": "Permanent.YouCtrl"}
+        any_scope = {"event_class": "Sacrificed", "valid_filter": ""}
+        assert check(korvold, any_scope) is True
