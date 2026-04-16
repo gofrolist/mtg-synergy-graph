@@ -946,19 +946,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.002938,
-      "on_page_hits": 1,
+      "ndcg30": 0.00656,
+      "on_page_hits": 2,
       "top10": [
         "Goblin Engineer",
         "Cauldron Familiar",
-        "Skoa, Embermage",
         "Grafted Butcher",
         "Ruthless Technomancer",
         "Eddie Brock",
         "A-Cauldron Familiar",
         "Cavalier of Night",
         "Daretti, Rocketeer Engineer",
-        "Woe Strider"
+        "Hoarder's Overflow",
+        "Chthonian Nightmare"
       ]
     },
     {
