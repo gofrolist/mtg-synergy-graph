@@ -2682,19 +2682,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.018308,
-      "on_page_hits": 3,
+      "ndcg30": 0.02256,
+      "on_page_hits": 4,
       "top10": [
-        "Lich's Tomb",
-        "Oath of Lim-D\u00fbl",
         "Gonti's Machinations",
-        "Fain, the Broker",
         "Witch-king of Angmar",
-        "Soul Servitude",
         "Rankle, Pitiless Trickster",
+        "Soul Servitude",
+        "Momentum Breaker",
+        "Fain, the Broker",
         "Blighted Fen",
-        "Ordeal of Erebos",
-        "Momentum Breaker"
+        "The Underworld Cookbook",
+        "Priest of Forgotten Gods",
+        "Nuka-Cola Vending Machine"
       ]
     },
     {
