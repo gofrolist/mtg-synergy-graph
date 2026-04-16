@@ -157,9 +157,8 @@ def test_token_script_attributes_populated_for_tireless_provisioner(tmp_path):
         ("Tireless Provisioner",),
     ).fetchall()
     subtypes = {r[1] for r in rows if r[0] == "token_subtype"}
-    assert "Food" in subtypes or "Treasure" in subtypes, (
-        f"Expected Food or Treasure in token_subtype attrs, got {subtypes}"
-    )
+    # GenericChoice expansion must produce both Food and Treasure entries.
+    assert {"Food", "Treasure"} <= subtypes, f"Expected both Food and Treasure in token_subtype attrs, got {subtypes}"
     conn.close()
 
 
@@ -219,10 +218,30 @@ def test_parse_token_script_preserves_pure_artifact_format():
     assert subtypes == ["Food"], f"Expected [Food], got {subtypes}"
 
 
-def test_parse_token_script_preserves_creature_format():
-    """Regression: w_1_1_soldier must still yield Soldier."""
+def test_parse_token_script_multi_color_prefix_expands_to_per_letter():
+    """Multi-color prefixes (gw, rg, all) emit one token_color per letter
+    and still extract the subtype correctly. Covers 250+ tokens in the
+    Forge corpus that would otherwise drop color information silently.
+    """
     from mtg_synergy_graph.ports import _parse_token_script
 
-    result = _parse_token_script("w_1_1_soldier")
+    assert _parse_token_script("gw_1_1_citizen") == [
+        ("token_color", "G"),
+        ("token_color", "W"),
+        ("token_subtype", "Citizen"),
+    ]
+    result = _parse_token_script("all_1_1_human_wizard")
+    colors = [v for k, v in result if k == "token_color"]
     subtypes = [v for k, v in result if k == "token_subtype"]
-    assert subtypes == ["Soldier"], f"Expected [Soldier], got {subtypes}"
+    assert colors == ["W", "U", "B", "R", "G"]
+    assert subtypes == ["Human"]
+
+
+def test_parse_token_script_named_script_without_color_prefix_is_skipped():
+    """Named token scripts (kobolds_of_kher_keep) whose leading word is
+    not a recognised color must be dropped entirely rather than emit a
+    guessed subtype like 'Keep'.
+    """
+    from mtg_synergy_graph.ports import _parse_token_script
+
+    assert _parse_token_script("kobolds_of_kher_keep") == []
