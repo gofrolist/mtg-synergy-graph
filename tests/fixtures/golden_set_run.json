@@ -2680,21 +2680,21 @@
         "Liliana's Triumph",
         "Syphon Mind"
       ],
-      "hi_syn_hits": 0,
+      "hi_syn_hits": 3,
       "hi_syn_total": 10,
-      "ndcg30": 0.02256,
-      "on_page_hits": 4,
+      "ndcg30": 0.160922,
+      "on_page_hits": 9,
       "top10": [
-        "Gonti's Machinations",
-        "Witch-king of Angmar",
         "Rankle, Pitiless Trickster",
-        "Soul Servitude",
-        "Momentum Breaker",
-        "Fain, the Broker",
-        "Blighted Fen",
-        "The Underworld Cookbook",
-        "Priest of Forgotten Gods",
-        "Nuka-Cola Vending Machine"
+        "Nuka-Cola Vending Machine",
+        "Aclazotz, Deepest Betrayal",
+        "Voracious Fell Beast",
+        "Taste of Death",
+        "Extract a Confession",
+        "Mindcrank",
+        "Liliana, Dreadhorde General",
+        "Gonti's Machinations",
+        "Moonstone Harbinger"
       ]
     },
     {
