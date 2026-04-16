@@ -1535,19 +1535,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.000542,
-      "on_page_hits": 1,
+      "ndcg30": 0.004698,
+      "on_page_hits": 2,
       "top10": [
-        "Invasion of Vryn",
-        "Soul-Guide Lantern",
-        "Fountainport Bell",
-        "Candy Trail",
-        "Blood Fountain",
-        "Witching Well",
-        "Lembas",
-        "Cryogen Relic",
-        "Instant Ramen",
-        "Carrot Cake"
+        "Threefold Thunderhulk",
+        "Eriette's Tempting Apple",
+        "Dimension X Pizzasaur",
+        "Selfcraft Mechan",
+        "Eye of Doom",
+        "Anchovy & Banana Pizza",
+        "Chipper Chopper",
+        "Metalhead",
+        "Transplant Theorist",
+        "Rook Turret"
       ]
     },
     {

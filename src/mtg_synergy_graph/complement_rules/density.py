@@ -1162,6 +1162,13 @@ def _find_cheat_cmc_bonus(
     """
     wanted: list[tuple[str, str]] = []  # (kind, target_name)
 
+    # Detect whether the commander has any effect_conditional trigger.
+    # Meren's end-step reanimate is conditional (XP ≥ CMC) — cheating
+    # high-CMC targets only works once she has enough XP, so skip.
+    has_cond_trigger = any(
+        (p.get("port_type") or "").strip() == "trigger" and p.get("effect_conditional") for p in cmdr_ports
+    )
+
     for p in cmdr_ports:
         pt = (p.get("port_type") or "").strip()
         ev = (p.get("event_class") or "").strip()
@@ -1193,6 +1200,27 @@ def _find_cheat_cmc_bonus(
                 ):
                     wanted.append(("subtype", subtype))
                 elif base in _CHEAT_TYPES:
+                    wanted.append(("type", base))
+
+        # ChangeZone effect in execute branch with typed ValidTgts
+        # (Sharuum-style: ETB trigger → reanimate target Artifact from GY).
+        # Only for non-conditional triggers — Meren's XP-gated reanimate
+        # shouldn't broadcast high-CMC synergy to every expensive card.
+        elif (
+            pt == "effect"
+            and ev == "ChangeZone"
+            and (p.get("branch_kind") or "").strip() == "execute"
+            and (p.get("zone_origin") or "").strip() == "Graveyard"
+            and (p.get("zone_destination") or "").strip() == "Battlefield"
+            and not has_cond_trigger
+        ):
+            vf = (p.get("valid_filter") or "").strip()
+            if not vf:
+                continue
+            # Extract the base type from "Artifact.YouCtrl" / "Creature.YouOwn"
+            for part in vf.split(","):
+                base = part.strip().split(".")[0].split("+")[0].strip()
+                if base in _CHEAT_TYPES:
                     wanted.append(("type", base))
 
     if not wanted:
