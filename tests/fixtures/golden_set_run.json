@@ -698,19 +698,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.018089,
-      "on_page_hits": 2,
+      "ndcg30": 0.021375,
+      "on_page_hits": 3,
       "top10": [
         "Harmonic Prodigy",
         "Goblin Engineer",
+        "Woe Strider",
         "Momentum Breaker",
+        "Redcap Gutter-Dweller",
+        "Selfcraft Mechan",
         "Skoa, Embermage",
         "Hoarder's Overflow",
-        "Bitter Reunion",
-        "Melded Moxite",
-        "Invasion of Vryn",
-        "Yawgmoth, Thran Physician",
-        "Cauldron Familiar"
+        "Arcade Cabinet",
+        "Wick, the Whorled Mind"
       ]
     },
     {
