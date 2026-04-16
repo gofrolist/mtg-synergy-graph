@@ -572,21 +572,21 @@
         "Mystic Remora",
         "Chord of Calling"
       ],
-      "hi_syn_hits": 0,
+      "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.017057,
-      "on_page_hits": 2,
+      "ndcg30": 0.232341,
+      "on_page_hits": 3,
       "top10": [
+        "Bloom Tender",
+        "Faeburrow Elder",
+        "Sunbird Standard",
+        "Tarnation Vista",
         "Genji Glove",
         "Finest Hour",
         "Bruce Banner",
         "Mesmeric Orb",
         "Fishing Pole",
-        "Wake Thrasher",
-        "The Roaring Toeclaws",
-        "Paradox Haze",
-        "Imoen, Wise Trickster",
-        "Illusionist's Gambit"
+        "Wake Thrasher"
       ]
     },
     {
@@ -2682,7 +2682,7 @@
       ],
       "hi_syn_hits": 3,
       "hi_syn_total": 10,
-      "ndcg30": 0.168192,
+      "ndcg30": 0.166737,
       "on_page_hits": 9,
       "top10": [
         "Rankle, Pitiless Trickster",
