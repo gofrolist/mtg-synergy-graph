@@ -64,6 +64,7 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "untap_synergy": "port_match",
     "cost_reducer": "spellcast_density",
     "graveyard_play": "port_match",
+    "yard_caster": "graveyard_synergy",
     "edict_feeder": "sacrifice_synergy",
     "counter_doubler": "counter_synergy",
     "counter_keyword": "counter_synergy",
