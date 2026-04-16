@@ -2682,11 +2682,10 @@
       ],
       "hi_syn_hits": 3,
       "hi_syn_total": 10,
-      "ndcg30": 0.160922,
+      "ndcg30": 0.168192,
       "on_page_hits": 9,
       "top10": [
         "Rankle, Pitiless Trickster",
-        "Nuka-Cola Vending Machine",
         "Aclazotz, Deepest Betrayal",
         "Voracious Fell Beast",
         "Taste of Death",
@@ -2694,7 +2693,8 @@
         "Mindcrank",
         "Liliana, Dreadhorde General",
         "Gonti's Machinations",
-        "Moonstone Harbinger"
+        "Moonstone Harbinger",
+        "Exquisite Blood"
       ]
     },
     {
@@ -2804,21 +2804,21 @@
         "Spiteful Visions",
         "Scrawling Crawler"
       ],
-      "hi_syn_hits": 3,
+      "hi_syn_hits": 4,
       "hi_syn_total": 10,
-      "ndcg30": 0.284477,
+      "ndcg30": 0.31579,
       "on_page_hits": 12,
       "top10": [
         "Harmonic Prodigy",
+        "Faerie Mastermind",
+        "Scrawling Crawler",
+        "Zurzoth, Chaos Rider",
         "Burning Inquiry",
         "Concealing Curtains",
         "Memory Worm",
         "Windfall",
         "Wheel of Fortune",
-        "Magus of the Wheel",
-        "Lore Broker",
-        "Jace's Archivist",
-        "Compulsive Research"
+        "Magus of the Wheel"
       ]
     },
     {
