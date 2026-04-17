@@ -229,6 +229,14 @@ class CandidateCache:
     #: Names of cards that produce generic or P1P1 counters. Consumed by
     #: the ``scales_with`` P1P1 branch of ``_find_scales_with_density``.
     p1p1_counter_producers: frozenset[str]
+    #: Names of cards matching the ETB-damage payoff shape — a creature-ETB
+    #: ``ChangesZone`` trigger AND a ``DealDamage`` effect targeting a
+    #: Player/Opponent (Impact Tremors, Purphoros, Witty Roastmaster, …).
+    #: The underlying self-join with three ``LIKE`` patterns costs ~800 ms
+    #: against the full port table; caching here turns a 100-commander
+    #: batch run from ~80 s into a single query. Consumed by
+    #: ``_find_token_etb_damage``.
+    token_etb_damage_cards: frozenset[str]
 
 
 def build_candidate_cache(conn: sqlite3.Connection) -> CandidateCache:
@@ -251,6 +259,7 @@ def build_candidate_cache(conn: sqlite3.Connection) -> CandidateCache:
         lord_continuous_rows=_bulk_load_lord_continuous_rows(conn),
         proliferate_cards=_bulk_load_proliferate_cards(conn),
         p1p1_counter_producers=_bulk_load_p1p1_counter_producers(conn),
+        token_etb_damage_cards=_bulk_load_token_etb_damage_cards(conn),
     )
 
 
@@ -474,6 +483,28 @@ def _bulk_load_token_effect_rows(
             "SELECT card_name, raw_line FROM card_ports WHERE port_type = 'effect' AND event_class = 'Token'"
         )
     )
+
+
+def _bulk_load_token_etb_damage_cards(conn: sqlite3.Connection) -> frozenset[str]:
+    """Cards whose ports form a self-contained ETB-damage payoff shape.
+
+    Self-join with three ``LIKE`` scans costs ~800 ms against the full
+    port table. Commander-independent, so we evaluate it once and hand
+    the result to ``_find_token_etb_damage`` via :class:`CandidateCache`.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT t.card_name "
+        "FROM card_ports t "
+        "JOIN card_ports e ON e.card_name = t.card_name "
+        "WHERE t.port_type = 'trigger' "
+        "AND t.event_class = 'ChangesZone' "
+        "AND (t.zone_destination IS NULL OR t.zone_destination IN ('Battlefield', '')) "
+        "AND t.valid_filter LIKE '%Creature%' "
+        "AND e.port_type = 'effect' "
+        "AND e.event_class = 'DealDamage' "
+        "AND (e.valid_filter LIKE '%Player%' OR e.valid_filter LIKE '%Opponent%')"
+    ).fetchall()
+    return frozenset(row["card_name"] for row in rows)
 
 
 #: Union of every stax ``event_class`` that ``_build_stax_exclusion``

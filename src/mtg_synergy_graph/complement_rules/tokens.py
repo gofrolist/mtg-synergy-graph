@@ -338,6 +338,7 @@ def _find_token_etb_damage(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
     cmdr_set: set[str],
+    candidate_cache: CandidateCache | None = None,
 ) -> list[PortComplement]:
     """Find creature-ETB-damage payoffs for token-producing commanders.
 
@@ -367,35 +368,27 @@ def _find_token_etb_damage(
     if not has_passive_token:
         return []
 
-    cur = conn.execute(
-        "SELECT DISTINCT t.card_name "
-        "FROM card_ports t "
-        "JOIN card_ports e ON e.card_name = t.card_name "
-        "WHERE t.port_type = 'trigger' "
-        "AND t.event_class = 'ChangesZone' "
-        "AND (t.zone_destination IS NULL OR t.zone_destination IN ('Battlefield', '')) "
-        "AND t.valid_filter LIKE '%Creature%' "
-        "AND e.port_type = 'effect' "
-        "AND e.event_class = 'DealDamage' "
-        "AND (e.valid_filter LIKE '%Player%' OR e.valid_filter LIKE '%Opponent%')"
-    )
-    results: list[PortComplement] = []
-    seen: set[str] = set()
-    for r in cur.fetchall():
-        name = r["card_name"]
-        if name in cmdr_set or name in seen:
-            continue
-        seen.add(name)
-        results.append(
-            PortComplement(
-                rule_id="token_etb_damage",
-                direction="synergy",
-                candidate=name,
-                cmdr_event="token_producer",
-                cand_event="etb_damage",
-            )
+    # Commander-independent self-join cost (~800 ms) is memoised on the
+    # CandidateCache; fall back to a direct query when no cache is passed
+    # (test harnesses that call this helper in isolation).
+    if candidate_cache is not None:
+        payoff_cards: frozenset[str] = candidate_cache.token_etb_damage_cards
+    else:
+        from ..penalties import _bulk_load_token_etb_damage_cards
+
+        payoff_cards = _bulk_load_token_etb_damage_cards(conn)
+
+    return [
+        PortComplement(
+            rule_id="token_etb_damage",
+            direction="synergy",
+            candidate=name,
+            cmdr_event="token_producer",
+            cand_event="etb_damage",
         )
-    return results
+        for name in payoff_cards
+        if name not in cmdr_set
+    ]
 
 
 def _find_token_sac_chain(
