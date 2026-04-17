@@ -55,6 +55,8 @@ class TestYardCasterRule:
         assert "Squee, Goblin Nabob" in names
         # Loot outlet (draw + discard)
         assert "Faithless Looting" in names
+        # rule_id stamp (folded from a separate test_rule_id).
+        assert all(r.rule_id == "yard_caster" for r in results)
 
     def test_categories_use_distinct_cand_events(self, conn):
         """Different reanimator patterns get different cand_event tags so
@@ -84,11 +86,3 @@ class TestYardCasterRule:
             ports = load_ports_for_set(conn, [cmdr])
             results = _find_yard_caster(conn, ports, {cmdr})
             assert results == [], f"{cmdr} should not trigger yard_caster"
-
-    def test_rule_id(self, conn):
-        from mtg_synergy_graph.complement_rules.statics import _find_yard_caster
-        from mtg_synergy_graph.graph_engine import load_ports_for_set
-
-        ports = load_ports_for_set(conn, ["Chainer, Nightmare Adept"])
-        results = _find_yard_caster(conn, ports, {"Chainer, Nightmare Adept"})
-        assert all(r.rule_id == "yard_caster" for r in results)

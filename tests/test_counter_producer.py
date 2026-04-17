@@ -56,13 +56,7 @@ class TestCounterProducerRule:
         assert "Unspeakable Symbol" in names
         assert "Thran Vigil" in names
         assert "Drana, Liberator of Malakir" in names
-
-    def test_rule_id(self, conn):
-        from mtg_synergy_graph.complement_rules.density import _find_counter_producer
-        from mtg_synergy_graph.graph_engine import load_ports_for_set
-
-        ports = load_ports_for_set(conn, ["Marchesa, the Black Rose"])
-        results = _find_counter_producer(conn, ports, {"Marchesa, the Black Rose"})
+        # rule_id stamp (folded from a separate test_rule_id).
         assert all(r.rule_id == "counter_producer" for r in results)
 
     def test_no_counter_interest_no_match(self, conn):

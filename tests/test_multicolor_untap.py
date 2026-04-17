@@ -48,6 +48,8 @@ class TestMulticolorUntapRule:
         names = {r.candidate for r in results}
         assert "Bloom Tender" in names
         assert "Faeburrow Elder" in names
+        # rule_id stamp (folded from a separate test_rule_id).
+        assert all(r.rule_id == "multicolor_untap" for r in results)
 
     def test_no_untap_effect_no_match(self, conn):
         """Commanders with no TapOrUntap/Untap effect don't trigger."""
@@ -64,13 +66,3 @@ class TestMulticolorUntapRule:
             ports = load_ports_for_set(conn, [cmdr])
             results = _find_multicolor_untap(conn, ports, {cmdr})
             assert results == []
-
-    def test_rule_id(self, conn):
-        from mtg_synergy_graph.complement_rules.utility import (
-            _find_multicolor_untap,
-        )
-        from mtg_synergy_graph.graph_engine import load_ports_for_set
-
-        ports = load_ports_for_set(conn, ["Derevi, Empyrial Tactician"])
-        results = _find_multicolor_untap(conn, ports, {"Derevi, Empyrial Tactician"})
-        assert all(r.rule_id == "multicolor_untap" for r in results)

@@ -51,6 +51,9 @@ class TestTokenEtbDamage:
         assert "Impact Tremors" in names
         assert "Purphoros, God of the Forge" in names
         assert "Witty Roastmaster" in names
+        # rule_id stamp (folded from a separate test_rule_id to avoid
+        # re-running the same ~800 ms rule query).
+        assert all(r.rule_id == "token_etb_damage" for r in results)
 
     def test_activated_token_commander_no_match(self, conn):
         """Ghave/Krenko/Rhys create tokens via activated abilities, not
@@ -99,13 +102,3 @@ class TestTokenEtbDamage:
                 continue
             results = _find_token_etb_damage(conn, ports, {cmdr})
             assert results == [], f"{cmdr} has no Token effect"
-
-    def test_rule_id(self, conn):
-        from mtg_synergy_graph.complement_rules.tokens import (
-            _find_token_etb_damage,
-        )
-        from mtg_synergy_graph.graph_engine import load_ports_for_set
-
-        ports = load_ports_for_set(conn, ["The Locust God"])
-        results = _find_token_etb_damage(conn, ports, {"The Locust God"})
-        assert all(r.rule_id == "token_etb_damage" for r in results)

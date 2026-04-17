@@ -62,6 +62,9 @@ class TestAffinityArchetypeRule:
         assert "Mishra's Bauble" in names
         assert "Lotus Petal" in names
         assert "Chromatic Star" in names
+        # rule_id stamp (folded from a separate test_rule_id to avoid
+        # re-running the same expensive rule query).
+        assert all(r.rule_id == "affinity_archetype" for r in results)
 
     def test_distinct_cand_events_per_category(self, conn):
         from mtg_synergy_graph.complement_rules.statics import (
@@ -94,13 +97,3 @@ class TestAffinityArchetypeRule:
             ports = load_ports_for_set(conn, [cmdr])
             results = _find_affinity_archetype(conn, ports, {cmdr})
             assert results == [], f"{cmdr} should not match affinity_archetype"
-
-    def test_rule_id(self, conn):
-        from mtg_synergy_graph.complement_rules.statics import (
-            _find_affinity_archetype,
-        )
-        from mtg_synergy_graph.graph_engine import load_ports_for_set
-
-        ports = load_ports_for_set(conn, ["Emry, Lurker of the Loch"])
-        results = _find_affinity_archetype(conn, ports, {"Emry, Lurker of the Loch"})
-        assert all(r.rule_id == "affinity_archetype" for r in results)
