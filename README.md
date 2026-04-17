@@ -55,9 +55,26 @@ uv run python scripts/compare_edhrec.py --commanders tests/fixtures/golden_set.j
 # Golden-set regression tracking
 uv run python scripts/golden_set_track.py --baseline tests/fixtures/golden_set_run.json
 
-# Tests
-uv run pytest tests/ -q
+# Tests — unit only (this is what CI runs)
+uv run pytest tests/ -q      # or: make test
+
+# Tests — integration (needs data/synergy.db + data/forge cardsfolder)
+uv run pytest -m integration # or: make test-integration
+
+# Tests — everything
+make test-all
 ```
+
+Integration tests are tagged `@pytest.mark.integration` and excluded by default.
+They require artefacts that aren't in the repo:
+
+- `data/synergy.db` — produced by `scripts/import_cardsfolder.py`.
+- `data/forge/forge-gui/res/cardsfolder/` — sparse-checkout of
+  [Card-Forge/forge](https://github.com/Card-Forge/forge).
+
+CI therefore runs only the unit tier. For the integration tier see
+`.github/workflows/integration.yml` (manual-dispatch workflow — maintainer
+chooses how to ship the data to the runner) or run locally.
 
 ## Project Structure
 

@@ -344,15 +344,18 @@ def test_cost_pattern_exile_any_grave_does_not_collide_with_exile_from_grave():
 
 FORGE_CARDSFOLDER = Path(__file__).parent.parent / "data" / "forge" / "forge-gui" / "res" / "cardsfolder"
 
-#: These regression tests assert on actual Forge DSL files; CI doesn't
-#: check in the ~80 MB cardsfolder, so the tests skip cleanly when it's
-#: absent. Local dev (with the cardsfolder cloned) still runs them.
+#: These regression tests assert on actual Forge DSL files. Tagged
+#: `integration` so CI (which runs `-m "not integration"`) skips them
+#: at collection time; skipif is a fallback for local `-m integration`
+#: runs without the ~80 MB cardsfolder cloned.
+_integration = pytest.mark.integration
 _requires_cardsfolder = pytest.mark.skipif(
     not FORGE_CARDSFOLDER.exists(),
     reason="requires data/forge cardsfolder (see scripts/import_cardsfolder.py)",
 )
 
 
+@_integration
 @_requires_cardsfolder
 def test_akroma_vision_of_ixidor_does_not_explode():
     card_path = FORGE_CARDSFOLDER / "a" / "akroma_vision_of_ixidor.txt"
@@ -363,6 +366,7 @@ def test_akroma_vision_of_ixidor_does_not_explode():
     assert len(ports) < 50, f"Akroma total port count should be small; got {len(ports)}"
 
 
+@_integration
 @_requires_cardsfolder
 def test_nature_demands_an_offering_does_not_explode():
     card_path = FORGE_CARDSFOLDER / "n" / "nature_demands_an_offering.txt"
@@ -372,6 +376,7 @@ def test_nature_demands_an_offering_does_not_explode():
     assert len(ports) < 30, f"Nature Demands an Offering port count exploded: {len(ports)}"
 
 
+@_integration
 @_requires_cardsfolder
 def test_largepox_does_not_explode():
     card_path = FORGE_CARDSFOLDER / "l" / "largepox.txt"

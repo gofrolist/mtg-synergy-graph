@@ -121,12 +121,14 @@ def test_derive_cmc_treats_no_cost_as_unknown():
 
 
 _FORGE_CARDSFOLDER = Path(__file__).parent.parent / "data" / "forge" / "forge-gui" / "res" / "cardsfolder"
+_integration = pytest.mark.integration
 _requires_cardsfolder = pytest.mark.skipif(
     not _FORGE_CARDSFOLDER.exists(),
     reason="requires data/forge cardsfolder (see scripts/import_cardsfolder.py)",
 )
 
 
+@_integration
 @_requires_cardsfolder
 def test_change_type_attributes_populated_for_kaalia(tmp_path):
     """Kaalia of the Vast cheats Angel/Demon/Dragon into play via ChangeType.
@@ -149,6 +151,7 @@ def test_change_type_attributes_populated_for_kaalia(tmp_path):
     conn.close()
 
 
+@_integration
 @_requires_cardsfolder
 def test_token_script_attributes_populated_for_tireless_provisioner(tmp_path):
     """Tireless Provisioner's Token effect has TokenScript values for

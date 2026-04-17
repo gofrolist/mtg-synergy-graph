@@ -18,12 +18,16 @@ from pathlib import Path
 
 import pytest
 
-# Integration: requires the full 32k-card synergy.db produced by
-# scripts/import_cardsfolder.py.
-pytestmark = pytest.mark.skipif(
-    not Path("data/synergy.db").exists(),
-    reason="requires data/synergy.db (run scripts/import_cardsfolder.py)",
-)
+# Integration: requires the full 32k-card synergy.db. Tagged with the
+# `integration` marker so CI deselects via `-m "not integration"`;
+# skipif is a fallback for `pytest -m integration` without the data.
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not Path("data/synergy.db").exists(),
+        reason="requires data/synergy.db (run scripts/import_cardsfolder.py)",
+    ),
+]
 
 
 @pytest.fixture(scope="module")

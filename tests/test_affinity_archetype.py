@@ -21,12 +21,17 @@ from pathlib import Path
 import pytest
 
 # Integration: requires the full 32k-card synergy.db produced by
-# scripts/import_cardsfolder.py. CI doesn't ship the Forge cardsfolder,
-# so these tests skip cleanly when the DB is absent.
-pytestmark = pytest.mark.skipif(
-    not Path("data/synergy.db").exists(),
-    reason="requires data/synergy.db (run scripts/import_cardsfolder.py)",
-)
+# scripts/import_cardsfolder.py. Tagged with the `integration` marker so
+# CI (which runs `-m "not integration"` by default) deselects them at
+# collection time. The skipif is a belt-and-suspenders guard for
+# contributors who run `pytest -m integration` without the data.
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not Path("data/synergy.db").exists(),
+        reason="requires data/synergy.db (run scripts/import_cardsfolder.py)",
+    ),
+]
 
 
 @pytest.fixture(scope="module")

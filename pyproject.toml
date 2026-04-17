@@ -20,7 +20,14 @@ reportMissingImports = "warning"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=src/mtg_synergy_graph --cov-fail-under=80"
+# Integration tests (marker `integration`) require the full synergy.db /
+# Forge cardsfolder. They are excluded from the default run so CI — and
+# any contributor without the data — gets a fast, green suite. Run
+# explicitly with `uv run pytest -m integration` on a dev machine.
+addopts = "--cov=src/mtg_synergy_graph --cov-fail-under=80 -m 'not integration'"
+markers = [
+    "integration: requires data/synergy.db or data/forge cardsfolder; excluded by default",
+]
 
 [tool.coverage.report]
 exclude_lines = [
