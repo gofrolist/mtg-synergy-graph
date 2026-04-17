@@ -69,12 +69,11 @@ Integration tests are tagged `@pytest.mark.integration` and excluded by default.
 They require artefacts that aren't in the repo:
 
 - `data/synergy.db` — produced by `scripts/import_cardsfolder.py`.
-- `data/forge/forge-gui/res/cardsfolder/` — sparse-checkout of
-  [Card-Forge/forge](https://github.com/Card-Forge/forge).
+- `data/forge/forge-gui/res/cardsfolder/` — clone of
+  [Card-Forge/forge](https://github.com/Card-Forge/forge) into `data/forge`.
 
-CI therefore runs only the unit tier. For the integration tier see
-`.github/workflows/integration.yml` (manual-dispatch workflow — maintainer
-chooses how to ship the data to the runner) or run locally.
+CI therefore runs only the unit tier; the integration tier is **local-dev only**.
+Run it with `make test-integration` after `make import`.
 
 ## Project Structure
 
