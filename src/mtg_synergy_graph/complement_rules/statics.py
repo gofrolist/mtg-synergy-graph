@@ -173,14 +173,26 @@ def _find_affinity_archetype(
     and match `card_types LIKE '%<Type>%'`. For non-Artifact Affinity
     (e.g. Equipment) the rule works the same way.
     """
+    # Recognized top-level card types that map cleanly to the `card_types`
+    # column. Compound Affinity forms like "Creature.Artifact:artifact"
+    # (Urza, Chief Artificer) or "Land.Snow:snow" would not match card_types
+    # as a substring; take the first type token only, skip the rest.
+    _RECOGNIZED_TYPES: frozenset[str] = frozenset(
+        {"Artifact", "Creature", "Enchantment", "Land", "Planeswalker", "Instant", "Sorcery"}
+    )
     affinity_type = ""
     for p in cmdr_ports:
         if (p.get("port_type") or "").strip() != "keyword":
             continue
         ev = (p.get("event_class") or "").strip()
         if ev.startswith("Affinity:"):
-            affinity_type = ev.split(":", 1)[1].strip()
-            break
+            raw_type = ev.split(":", 1)[1].strip()
+            # Split on "." to drop compound subtype qualifiers and keep the
+            # base type ("Creature.Artifact:artifact" → "Creature").
+            base = raw_type.split(".", 1)[0].strip()
+            if base in _RECOGNIZED_TYPES:
+                affinity_type = base
+                break
     if not affinity_type:
         return []
 
