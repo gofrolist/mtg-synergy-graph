@@ -155,9 +155,15 @@ class TestEffectConditionalScoring:
 
         from mtg_synergy_graph.complement_rules import find_all_complements
 
-        with sqlite3.connect("data/synergy.db") as conn:
+        # NB: `with sqlite3.connect(...)` only commits/rollbacks on exit,
+        # it does NOT close the connection (Python gotcha). Use contextlib.closing
+        # or an explicit close() to avoid a ResourceWarning leak.
+        conn = sqlite3.connect("data/synergy.db")
+        try:
             conn.row_factory = sqlite3.Row
             comps = find_all_complements(conn, ["Selvala, Heart of the Wilds"])
+        finally:
+            conn.close()
         trigger_effect_cond = [c for c in comps if c.rule_id == "trigger_effect" and ":cond" in (c.filter_group or "")]
         assert len(trigger_effect_cond) > 0, "expected Selvala's ETB-trigger x creature matches to carry ':cond' suffix"
 
@@ -169,9 +175,12 @@ class TestEffectConditionalScoring:
 
         from mtg_synergy_graph.complement_rules import find_all_complements
 
-        with sqlite3.connect("data/synergy.db") as conn:
+        conn = sqlite3.connect("data/synergy.db")
+        try:
             conn.row_factory = sqlite3.Row
             comps = find_all_complements(conn, ["Korvold, Fae-Cursed King"])
+        finally:
+            conn.close()
         cond_matches = [c for c in comps if c.rule_id == "trigger_effect" and ":cond" in (c.filter_group or "")]
         assert cond_matches == []
 

@@ -340,6 +340,7 @@ def test_buffed_by_svar_populates_card_hints_with_subtype(tmp_path):
     ).fetchall()
     values = {tuple(r)[2] for r in rows}
     assert "Elf" in values, f"Expected Elf in buffed_by hints, got {values}"
+    conn.close()
 
 
 def test_buffed_by_svar_skips_non_type_tokens(tmp_path):
@@ -365,3 +366,4 @@ def test_buffed_by_svar_skips_non_type_tokens(tmp_path):
     assert "Creature" in values
     assert "YouCtrl" not in values
     assert "cmcLE3" not in values
+    conn.close()
