@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 from ..graph_engine import _trigger_only_matches_self
@@ -13,10 +14,35 @@ if TYPE_CHECKING:
     from ..penalties import CandidateCache
 
 
+#: Effect events worth doubling for Panharmonicon-style commanders.
+#: Vanilla triggers (PumpAll, RegenerateAll) are skipped to avoid
+#: flooding results with non-impactful matches.
+_VALUABLE_EFFECTS: frozenset[str] = frozenset(
+    {
+        "Draw",
+        "Destroy",
+        "DestroyAll",
+        "Token",
+        "GainControl",
+        "DealDamage",
+        "DamageAll",
+        "PutCounter",
+        "Mill",
+        "Dig",
+        "ChangeZone",
+        "Sacrifice",
+        "SacrificeAll",
+        "Mana",
+        "LoseLife",
+        "GainLife",
+    }
+)
+
+
 def _iter_panharmonicon_statics(
     conn: sqlite3.Connection,
     candidate_cache: CandidateCache | None,
-):
+) -> Iterator[tuple[str, str]]:
     """Yield ``(card_name, raw_line)`` for every Panharmonicon static port.
 
     Reads from ``candidate_cache.panharmonicon_statics`` when provided to
@@ -81,26 +107,6 @@ def _find_panharmonicon_complements(
     # Collect matching candidates -- both self-ETB and non-self triggers.
     # Self-ETB creatures (Mulldrifter, Coiling Oracle) ARE what Panharmonicon
     # commanders want to double. We gate on valuable effects to avoid flooding.
-    _VALUABLE_EFFECTS = frozenset(
-        {
-            "Draw",
-            "Destroy",
-            "DestroyAll",
-            "Token",
-            "GainControl",
-            "DealDamage",
-            "DamageAll",
-            "PutCounter",
-            "Mill",
-            "Dig",
-            "ChangeZone",
-            "Sacrifice",
-            "SacrificeAll",
-            "Mana",
-            "LoseLife",
-            "GainLife",
-        }
-    )
     matched: list[tuple[str, str, str, bool]] = []  # (card, ev, branch_kind, is_self)
     seen: set[str] = set()
     for r in cur.fetchall():
@@ -144,13 +150,12 @@ def _find_panharmonicon_complements(
         if not best_eff:
             continue
 
-        if is_self:  # noqa: SIM108
-            # Self-ETB: use a single IDF group ("ChangesZone_etb") to avoid
-            # tiny per-effect-type groups with artificial high IDF.
-            cand_ev = f"{ev}_etb"
-        else:
-            # Non-self: enrich with effect type for narrower IDF groups.
-            cand_ev = f"{ev}_{best_eff}"
+        # Self-ETB splits by effect type ("ChangesZone_etb_Draw",
+        # "ChangesZone_etb_Dig") so premium Yarok picks (Mulldrifter,
+        # Coiling Oracle, Wood Elves) aren't drowned in a unified
+        # 3.9k-card group (IDF 0.08). Pool sizes per effect type are
+        # 150-1250 — IDF 0.10-0.14, in line with non-self groups.
+        cand_ev = f"{ev}_etb_{best_eff}" if is_self else f"{ev}_{best_eff}"
 
         results.append(
             PortComplement(

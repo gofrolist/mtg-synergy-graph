@@ -85,6 +85,10 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "toughness_synergy": "scaling",
     "cascade_value": "port_match",
     "flicker_payoff": "port_match",
+    "monarch_synergy": "port_match",
+    "counter_target_payoff": "counter_synergy",
+    "creature_untap_engine": "untap_synergy",
+    "populate_stack": "port_match",
     "dies_drain": "sacrifice_synergy",
     "gy_loader": "graveyard_synergy",
     "untap_combo": "port_match",
@@ -326,7 +330,12 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # IDF already dampens based on N, but the signal is inherently weaker
     # than mechanical synergy — "be the right type" is a density signal.
     "value_engine": 0.5,
-    "cost_reduction_target": 0.5,
+    # Value engines (Kozilek, Artisan, Rune-Scarred Demon) only match this
+    # single rule for pure cost-reducer commanders (Rakdos, Animar, Hamza).
+    # The pool is narrowed to non-damage-dealing creatures, so the remaining
+    # hits are the high-quality ETB payoffs we actually want to surface.
+    # 1.0× (no dampening) so they can crack top-30 when no other rule fires.
+    "cost_reduction_target": 1.0,
     # token_etb_damage has ~40 matches giving IDF ≈ 0.19. For commanders
     # with creature-heavy decks this lifts correct picks (Prossh +0.197,
     # Kykar +0.100), but for spell-based token commanders (Talrand) it
@@ -372,6 +381,51 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # (voltron flat 0.3) floor that every random Aura/Equipment rides.
     # 2.5× puts them above the floor so the enablers crack top-30.
     "aura_equipment_support": 2.5,
+    # wheel_synergy: ~62-card wheel pool, IDF ≈ 0.17 per match. Wheels
+    # are the archetype's DEFINING cards (Windfall, Wheel of Fortune,
+    # Magus of the Wheel) for Locust God / Nekusar / Narset's Reversal-
+    # style commanders. Without a boost they sit at ~0.25 port_match,
+    # below loot artifacts (Bag of Holding, Soul-Guide Lantern) that
+    # accumulate ``etb_value`` on top of their single port match. 2.0×
+    # lifts true wheels above loot.
+    "wheel_synergy": 2.0,
+    # monarch_synergy: ~75-card pool (BecomeMonarch effects + pillowfort
+    # statics), IDF ≈ 0.17. For Queen Marchesa the Courts and pillowfort
+    # cards match only this single rule and sit below the 0.5 tribal-
+    # Assassin floor (she creates Assassin tokens, so every Assassin
+    # gets catchall 0.5). 2.5× lifts the archetype's canonical cards
+    # (Court of Grace, Ghostly Prison, Thorn of the Black Rose) into
+    # the top tier.
+    "monarch_synergy": 2.5,
+    # counter_target_payoff: ~280-card pool of P1P1 receivers (IDF ≈ 0.14).
+    # Fires only for XP-scaling commanders (Ezuri). Without a boost,
+    # Fathom Mage / Gyre Sage sit at rank ~40; Ezuri's top-10 is
+    # dominated by token-creator cards that match multiple existing
+    # rules. 2.0× lifts EDHREC-canonical counter payoffs into top-20.
+    "counter_target_payoff": 2.0,
+    # creature_untap_engine: ~150-card creature-untap pool (IDF ≈ 0.14).
+    # Fires only for tap-for-mana creature commanders (Selvala). Without
+    # a boost, Quirion Ranger / Scryb Ranger only hit ~0.15 port_match
+    # and sit at rank 795; Selvala's top-10 is dominated by artifact-
+    # untap cards from ``untap_combo`` (flat 3.0× pool multiplier for
+    # Urza). 3.0× to bring creature-untappers level with artifact-
+    # untappers for her archetype.
+    "creature_untap_engine": 3.0,
+    # populate_stack: Ghired's 26-card populate pool (Sundering Growth,
+    # Rootborn Defenses, Growing Ranks, Second Harvest, Song of the
+    # Worldsoul). IDF ≈ 0.21. Without a boost, populate spells sit at
+    # rank 70+ behind Rhino-tribal catchall 0.5. 2.5× lifts them into
+    # the top tier.
+    "populate_stack": 2.5,
+    # landfall_enabler: ~20-card AdjustLandPlays + MayPlay-Land-from-GY
+    # pool (Azusa, Crucible of Worlds, Ramunap Excavator, Ancient
+    # Greenwarden, Dryad of the Ilysian Grove, Exploration). Fires for
+    # landfall-trigger commanders (Tatyova, Titania) and land-reanimate
+    # commanders (Lord Windgrace). Base IDF ≈ 0.22. Without a boost,
+    # canonical lands-matter support sits at rank 200+ below broad
+    # graveyard+etb_value stacks. 2.0× lifts the archetype's defining
+    # enablers into top-30 without flattening texture.
+    "landfall_enabler": 2.0,
 }
 
 
@@ -420,8 +474,15 @@ def _compute_idf_weights(
             # Exclude reverse_panharmonicon and panharmonicon_stack which
             # have genuinely unique high-value matches (Harmonic Prodigy).
             cmdr_event = key[1]
-            if rule_id == "panharmonicon" and n < 10 and "reverse" not in cmdr_event and "stack" not in cmdr_event:
-                n = 10
+            if rule_id == "panharmonicon" and "reverse" not in cmdr_event and "stack" not in cmdr_event:
+                # Floor raised from 10 to 30 so rare board-wide triggers
+                # (ChangesZoneAll + Token, N=35, IDF 0.195) don't swamp
+                # the numerous self-ETB payoff groups (ChangesZone_etb_*,
+                # IDF 0.10-0.14). Yarok's EDHREC Hi-Syn is dominated by
+                # self-ETB value creatures (Mulldrifter, Coiling Oracle)
+                # that were buried at rank 1000+ when board-wide-trigger
+                # cards captured the 0.289 cap.
+                n = max(n, 30)
             w = 1.0 / math.log2(1.0 + n)
             # Apply quality multiplier: cost-based rules are boosted,
             # broad effect rules are dampened.

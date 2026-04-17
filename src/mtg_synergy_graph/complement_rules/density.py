@@ -801,16 +801,21 @@ def _find_scales_with_density(
                         )
                     )
 
-        # LifeOppsLostThisTurn -> drain/damage effects.
+        # LifeOppsLostThisTurn -> repeatable drain/damage sources.
         # DamageAll is included so global pingers (Spear Spewer,
-        # Pyrohemia, Repercussion) match: for Rakdos-style commanders
-        # the LIFE LOSS is what feeds the trigger, regardless of whether
-        # the damage is single-target or global.
+        # Pyrohemia, Repercussion) match. Instants/Sorceries are
+        # excluded: one-shot burn (Lightning Bolt, Shock, Blazing
+        # Volley) fires once per cast rather than each turn, and the
+        # flat 0.3 density weight drowns true repeatable enablers
+        # like Creeping Bloodsucker / Stormfist Crusader.
         elif "LifeOppsLost" in ev:
             cur = conn.execute(
-                "SELECT DISTINCT card_name FROM card_ports "
-                "WHERE port_type = 'effect' AND event_class IN "
-                "('LoseLife', 'DealDamage', 'DamageAll')"
+                "SELECT DISTINCT cp.card_name FROM card_ports cp "
+                "JOIN cards c ON c.name = cp.card_name "
+                "WHERE cp.port_type = 'effect' AND cp.event_class IN "
+                "('LoseLife', 'DealDamage', 'DamageAll') "
+                "AND c.card_types NOT LIKE '%Instant%' "
+                "AND c.card_types NOT LIKE '%Sorcery%'"
             )
             for r in cur.fetchall():
                 name = r["card_name"]
@@ -1285,12 +1290,25 @@ def _find_cost_reduction_targets(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
     cmdr_set: set[str],
+    candidate_cache: CandidateCache | None = None,
 ) -> list[PortComplement]:
     """High-CMC creatures for cost-reduction commanders.
 
     Rakdos reduces creature spell costs by life lost → expensive
-    creatures (Eldrazi, Blightsteel Colossus) benefit most. N ≈ 2249,
-    quality-multiplied 0.5x.
+    creatures (Eldrazi, Blightsteel Colossus) benefit most. N ≈ 1624
+    after quality gate, weight 1.0× (no IDF dampening).
+
+    Quality gate: creature must carry at least one trigger or effect
+    port — pure keyword-vanilla fatties (Colossal Dreadmaw, Baneslayer
+    Angel) are generic and shouldn't outrank true value engines
+    (Kozilek, Artisan, Vilis). Creatures whose utility is a damage or
+    life-loss effect (Marionette Master, Kokusho, Dreadhound) are
+    excluded because those are already captured by the ``pinger`` and
+    ``scaling`` rules for damage-scaling commanders.
+
+    Candidate pool is commander-independent — provided via
+    ``candidate_cache.cost_reduction_target_pool`` to avoid a 650 ms
+    correlated EXISTS/NOT EXISTS subquery per commander.
     """
     has_reduce_cost = False
     for p in cmdr_ports:
@@ -1305,10 +1323,23 @@ def _find_cost_reduction_targets(
     if not has_reduce_cost:
         return []
 
-    cur = conn.execute("SELECT name FROM cards WHERE card_types LIKE '%Creature%' AND cmc >= 6")
+    if candidate_cache is not None:
+        pool: frozenset[str] | set[str] = candidate_cache.cost_reduction_target_pool
+    else:
+        pool = {
+            r["name"]
+            for r in conn.execute(
+                "SELECT name FROM cards c WHERE c.card_types LIKE '%Creature%' AND c.cmc >= 6 "
+                "AND EXISTS (SELECT 1 FROM card_ports cp WHERE cp.card_name = c.name "
+                "            AND cp.port_type IN ('trigger', 'effect')) "
+                "AND NOT EXISTS (SELECT 1 FROM card_ports cp2 WHERE cp2.card_name = c.name "
+                "                AND cp2.port_type = 'effect' "
+                "                AND cp2.event_class IN ('DealDamage', 'DamageAll', 'LoseLife'))"
+            ).fetchall()
+        }
+
     results: list[PortComplement] = []
-    for r in cur.fetchall():
-        name = r["name"]
+    for name in pool:
         if name not in cmdr_set:
             results.append(
                 PortComplement(
@@ -1344,12 +1375,21 @@ def _find_pinger_synergy(
     if not has_damage_scaling:
         return []
 
+    # Repeatable damage sources only. Instant/Sorcery are excluded —
+    # one-shot burn (Lightning Bolt, Blazing Volley) doesn't sustain
+    # the per-turn life-loss trigger that Rakdos/Breya need. Widen
+    # valid_filter to include 'Player' so symmetric pingers
+    # (Stormfist Crusader: "each player loses 1 life") are captured.
     cur = conn.execute(
-        "SELECT DISTINCT card_name FROM card_ports "
-        "WHERE port_type = 'effect' "
-        "AND event_class IN ('DealDamage', 'DamageAll', 'LoseLife') "
-        "AND (valid_filter LIKE '%Opp%' OR valid_filter LIKE '%Each%' "
-        "     OR valid_filter = '' OR valid_filter IS NULL)"
+        "SELECT DISTINCT cp.card_name FROM card_ports cp "
+        "JOIN cards c ON c.name = cp.card_name "
+        "WHERE cp.port_type = 'effect' "
+        "AND cp.event_class IN ('DealDamage', 'DamageAll', 'LoseLife') "
+        "AND c.card_types NOT LIKE '%Instant%' "
+        "AND c.card_types NOT LIKE '%Sorcery%' "
+        "AND (cp.valid_filter LIKE '%Opp%' OR cp.valid_filter LIKE '%Each%' "
+        "     OR cp.valid_filter LIKE '%Player%' "
+        "     OR cp.valid_filter = '' OR cp.valid_filter IS NULL)"
     )
     results: list[PortComplement] = []
     for r in cur.fetchall():

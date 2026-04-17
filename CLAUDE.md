@@ -6,7 +6,7 @@ Guidance for Claude Code working in this repo.
 
 MTG Synergy Graph — deterministic, rule-based EDH/Commander synergy scorer
 using Forge DSL ports. No training, no EDHREC at inference.
-Current aggregate NDCG@30 ~ 0.206, Hi-Syn 171/1000 on the 100-commander golden set.
+Current aggregate NDCG@30 ~ 0.244, Hi-Syn 218/1000 on the 100-commander golden set.
 Port extraction: 108,644 ports from 32,327 cards (GenericChoice + StaticAbilities$
 expansion, deduped after A1's 2^N re-walk fix).
 
@@ -93,7 +93,11 @@ pair creates a synergy. Each wraps an existing mechanical map.
 | voltron | Hexproof/Exalted keyword | Auras and Equipment | Sigarda/Rafiq |
 | etb_sac_target | GY reanimate effect | self-ETB + sacrifice cost creatures | Meren/Karador |
 | combat_enhancer | DamageDone trigger | AddPhase + Double Strike | Saskia |
-| wheel_synergy | Drawn trigger (opp-facing) | Draw+Discard effect cards | Nekusar |
+| wheel_synergy | Drawn trigger (opp-facing OR self+Token/Counter payoff) | Mode:Hand Discard + Draw | Nekusar, Locust God |
+| monarch_synergy | BecomeMonarch effect | BecomeMonarch + CantAttackUnless pillowfort | Queen Marchesa |
+| counter_target_payoff | scales_with XP + PutCounter P1P1 on Creature.Other | trigger CounterAdded / scales_with CardCounters.P1P1 | Ezuri |
+| creature_untap_engine | cost=tap (plain) + effect=Mana | Untap Creature / unfiltered Untap | Selvala |
+| populate_stack | CopyPermanent with Populate:True in raw | Other Populate CopyPermanent cards | Ghired |
 | artifact_recursion | GY→BF Artifact effect | self-sac artifacts, ETB artifacts | Osgir/Daretti |
 | copy_synergy | CopyPermanent effect | populate targets, ETB creatures | Ghired/Riku |
 | token_sac_chain | Sacrificed trigger | Treasure/Food/Clue/Blood producers | Korvold |

@@ -270,6 +270,13 @@ class CandidateCache:
     #: handles creature-only Quirion-Ranger-style untaps; consumed by
     #: ``_find_untap_combo``.
     untap_combo_cards: frozenset[str]
+    #: Names of CMC ≥ 6 value creatures (Kozilek, Artisan, Rune-Scarred
+    #: Demon) — the quality-gated cost-reduction-target pool. Excludes
+    #: damage-dealing creatures (already covered by pinger/scaling) and
+    #: keyword-vanilla fatties. Consumed by
+    #: ``_find_cost_reduction_targets``. Caching cuts ~650 ms per
+    #: commander to one upfront query.
+    cost_reduction_target_pool: frozenset[str]
 
 
 def build_candidate_cache(conn: sqlite3.Connection) -> CandidateCache:
@@ -297,6 +304,7 @@ def build_candidate_cache(conn: sqlite3.Connection) -> CandidateCache:
         gy_loader_cards=_bulk_load_gy_loader_cards(conn),
         attack_payoff_cards=_bulk_load_attack_payoff_cards(conn),
         untap_combo_cards=_bulk_load_untap_combo_cards(conn),
+        cost_reduction_target_pool=_bulk_load_cost_reduction_target_pool(conn),
     )
 
 
@@ -520,6 +528,37 @@ def _bulk_load_token_effect_rows(
             "SELECT card_name, raw_line FROM card_ports WHERE port_type = 'effect' AND event_class = 'Token'"
         )
     )
+
+
+def _bulk_load_cost_reduction_target_pool(conn: sqlite3.Connection) -> frozenset[str]:
+    """Cards that are quality cost-reduction targets — CMC ≥ 6 creatures
+    with at least one trigger/effect port AND no damage/life-loss effect.
+
+    The natural SQL would be ``SELECT … WHERE EXISTS (...) AND NOT
+    EXISTS (...)`` but those correlated subqueries cost ~5.8 s on the
+    32k-card port table. Three simple single-scan queries plus Python
+    set arithmetic runs in <100 ms — same result, ~60× faster.
+
+    Commander-independent → cached on :class:`CandidateCache` and
+    consumed by :func:`_find_cost_reduction_targets` (Rakdos, Animar,
+    Hamza, Urza — every cost-reducer commander).
+    """
+    creatures = {
+        row["name"] for row in conn.execute("SELECT name FROM cards WHERE card_types LIKE '%Creature%' AND cmc >= 6")
+    }
+    has_payoff_port = {
+        row["card_name"]
+        for row in conn.execute("SELECT DISTINCT card_name FROM card_ports WHERE port_type IN ('trigger', 'effect')")
+    }
+    has_damage_effect = {
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports "
+            "WHERE port_type = 'effect' "
+            "AND event_class IN ('DealDamage', 'DamageAll', 'LoseLife')"
+        )
+    }
+    return frozenset((creatures & has_payoff_port) - has_damage_effect)
 
 
 def _bulk_load_token_etb_damage_cards(conn: sqlite3.Connection) -> frozenset[str]:

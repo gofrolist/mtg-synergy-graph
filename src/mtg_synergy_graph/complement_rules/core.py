@@ -940,12 +940,15 @@ from .tokens import (  # noqa: E402
 from .utility import (  # noqa: E402
     _find_cascade_value,
     _find_cost_payoff_complements,
+    _find_counter_target_payoff,
+    _find_creature_untap_engine,
     _find_damage_effect_synergy,
     _find_extra_land_plays,
     _find_flicker_payoffs,
     _find_flicker_synergy,
     _find_landfall_enablers,
     _find_mana_doubler_synergy,
+    _find_monarch_synergy,
     _find_multicolor_untap,
     _find_opponent_forcing,
     _find_untap_combo,
@@ -1116,11 +1119,14 @@ def find_all_complements(
         out.extend(_find_mana_doubler_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_panharmonicon_density(conn, cmdr_ports, cmdr_set))
         out.extend(_find_graveyard_sac_value(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_cost_reduction_targets(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_cost_reduction_targets(conn, cmdr_ports, cmdr_set, candidate_cache))
         out.extend(_find_pinger_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_toughness_matters(conn, cmdr_ports, cmdr_set))
         out.extend(_find_cascade_value(conn, cmdr_ports, cmdr_set))
         out.extend(_find_flicker_payoffs(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_monarch_synergy(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_counter_target_payoff(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_creature_untap_engine(conn, cmdr_ports, cmdr_set))
         return out
 
     if not needed_cand:

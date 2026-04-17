@@ -47,19 +47,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.071051,
+      "ndcg30": 0.071078,
       "on_page_hits": 4,
       "top10": [
         "Twinflame Travelers",
         "The Earth Crystal",
         "Ozolith, the Shattered Spire",
         "Benevolent Hydra",
+        "Kiora's Dambreaker",
         "Lonis, Genetics Expert",
         "Renegade Krasis",
-        "Kiora's Dambreaker",
-        "Vorinclex, Monstrous Raider",
         "Thrummingbird",
-        "Ripples of Potential"
+        "Ripples of Potential",
+        "Experimental Augury"
       ]
     },
     {
@@ -138,10 +138,10 @@
         "Sakura-Tribe Scout",
         "Avenger of Zendikar"
       ],
-      "hi_syn_hits": 1,
+      "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.27723,
-      "on_page_hits": 13,
+      "ndcg30": 0.428845,
+      "on_page_hits": 18,
       "top10": [
         "Icetill Explorer",
         "Ramunap Excavator",
@@ -151,8 +151,8 @@
         "Perennial Behemoth",
         "Zask, Skittering Swarmlord",
         "Ancient Greenwarden",
-        "Phial of Galadriel",
-        "Alhammarret's Archive"
+        "Aesi, Tyrant of Gyre Strait",
+        "Phial of Galadriel"
       ]
     },
     {
@@ -541,21 +541,21 @@
         "Aesi, Tyrant of Gyre Strait",
         "Felidar Retreat"
       ],
-      "hi_syn_hits": 2,
+      "hi_syn_hits": 3,
       "hi_syn_total": 10,
-      "ndcg30": 0.275163,
-      "on_page_hits": 13,
+      "ndcg30": 0.304242,
+      "on_page_hits": 14,
       "top10": [
         "Twinflame Travelers",
         "Icetill Explorer",
-        "Field of the Dead",
         "Ramunap Excavator",
         "Crucible of Worlds",
         "Walk-In Closet",
         "Conduit of Worlds",
         "Serra Paragon",
         "Perennial Behemoth",
-        "Zask, Skittering Swarmlord"
+        "Zask, Skittering Swarmlord",
+        "Ancient Greenwarden"
       ]
     },
     {
@@ -634,21 +634,21 @@
         "Myr Battlesphere",
         "Trash for Treasure"
       ],
-      "hi_syn_hits": 1,
+      "hi_syn_hits": 3,
       "hi_syn_total": 10,
-      "ndcg30": 0.136288,
-      "on_page_hits": 4,
+      "ndcg30": 0.214448,
+      "on_page_hits": 8,
       "top10": [
         "Goblin Engineer",
         "Bag of Holding",
         "Dragonspark Reactor",
         "Melded Moxite",
-        "Hoarder's Overflow",
-        "Bitter Reunion",
-        "Sin Prodder",
-        "Gathering Stone",
-        "Candles of Leng",
-        "Thran Tome"
+        "Soul-Guide Lantern",
+        "Fountainport Bell",
+        "Candy Trail",
+        "Experimental Synthesizer",
+        "Currency Converter",
+        "Lion's Eye Diamond"
       ]
     },
     {
@@ -667,19 +667,19 @@
       ],
       "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.259835,
-      "on_page_hits": 14,
+      "ndcg30": 0.273822,
+      "on_page_hits": 13,
       "top10": [
         "Tezzeret, Cruel Captain",
-        "Academy Manufactor",
-        "Xorn",
-        "Stridehangar Automaton",
-        "Anointed Procession",
-        "Mondrak, Glory Dominus",
-        "Case of the Pilfered Proof",
-        "Mirrormind Crown",
-        "Elspeth, Storm Slayer",
-        "Divine Visitation"
+        "Retrofitter Foundry",
+        "The Ozolith",
+        "Doc Ock's Tentacles",
+        "Sai of the Shinobi",
+        "Foundry Inspector",
+        "Starnheim Courser",
+        "Voyager Quickwelder",
+        "Darksteel Citadel",
+        "Seat of the Synod"
       ]
     },
     {
@@ -760,19 +760,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.097831,
-      "on_page_hits": 8,
+      "ndcg30": 0.170305,
+      "on_page_hits": 10,
       "top10": [
+        "Ancient Greenwarden",
         "Thicket Crasher",
         "Earthquake Dragon",
         "Fungus Elemental",
+        "Icetill Explorer",
         "Bristlebud Farmer",
         "Territory Culler",
         "Aftermath Analyst",
         "Mossborn Hydra",
-        "Blanchwood Prowler",
-        "Splinterfright",
-        "Undergrowth Champion"
+        "Blanchwood Prowler"
       ]
     },
     {
@@ -853,19 +853,19 @@
       ],
       "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.038534,
+      "ndcg30": 0.056621,
       "on_page_hits": 2,
       "top10": [
+        "Ruin Crab",
+        "Altar of the Brood",
+        "Hedron Crab",
+        "Thieves' Guild Enforcer",
+        "Lotus Cobra",
         "Elvish Warmaster",
+        "Grinding Station",
+        "Blood Seeker",
         "Satoru, the Infiltrator",
-        "Cloakwood Swarmkeeper",
-        "Elvish Archivist",
-        "Woodland Champion",
-        "Underhanded Designs",
-        "Kotis, Sibsig Champion",
-        "The Sibsig Ceremony",
-        "Grave Peril",
-        "Tainted Aether"
+        "Scrabbling Skullcrab"
       ]
     },
     {
@@ -975,21 +975,21 @@
         "Phyrexian Soulgorger",
         "Hyrax Tower Scout"
       ],
-      "hi_syn_hits": 0,
+      "hi_syn_hits": 3,
       "hi_syn_total": 10,
-      "ndcg30": 0.017262,
-      "on_page_hits": 3,
+      "ndcg30": 0.11077,
+      "on_page_hits": 4,
       "top10": [
         "Voltaic Construct",
         "Baloth Prime",
         "Nature's Chosen",
         "Tezzeret, Cruel Captain",
         "Mobile Garrison",
-        "Wolfwillow Haven",
-        "Endbringer",
-        "Grist, Voracious Larva",
-        "Titania, Protector of Argoth",
-        "Glaring Fleshraker"
+        "Retrofitter Foundry",
+        "Shriekwood Devourer",
+        "Depth Charge Colossus",
+        "Mage-Ring Responder",
+        "Phyrexian Colossus"
       ]
     },
     {
@@ -1378,21 +1378,21 @@
         "Windborn Muse",
         "Kambal, Consul of Allocation"
       ],
-      "hi_syn_hits": 0,
+      "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.064265,
-      "on_page_hits": 4,
+      "ndcg30": 0.35091,
+      "on_page_hits": 19,
       "top10": [
-        "Ezio Auditore da Firenze",
-        "Mari, the Killing Quill",
-        "Arno Dorian",
         "Thorn of the Black Rose",
         "Starscream, Power Hungry",
         "Custodi Lich",
         "Knights of the Black Rose",
-        "Iridescent Vinelasher",
-        "Assassin Initiate",
-        "Razorkin Needlehead"
+        "Ezio Auditore da Firenze",
+        "Mari, the Killing Quill",
+        "Arno Dorian",
+        "Crown of Gondor",
+        "Coin of Fate",
+        "Court of Grace"
       ]
     },
     {
@@ -1440,21 +1440,21 @@
         "Herald of Secret Streams",
         "Chasm Skulker"
       ],
-      "hi_syn_hits": 1,
+      "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.070116,
+      "ndcg30": 0.138229,
       "on_page_hits": 6,
       "top10": [
         "Flourishing Defenses",
+        "Mycoloth",
+        "Phantasmal Sphere",
         "Michelangelo, Weirdness to 11",
         "Grist, Voracious Larva",
         "Scurry Oak",
+        "Gyre Sage",
+        "Fathom Mage",
         "Recon Craft Theta",
-        "Glaring Fleshraker",
-        "Monkey Cage",
-        "Springheart Nantuko",
-        "Arboreal Alliance",
-        "Esika's Chariot"
+        "Glaring Fleshraker"
       ]
     },
     {
@@ -1535,19 +1535,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.028349,
-      "on_page_hits": 8,
+      "ndcg30": 0.03349,
+      "on_page_hits": 7,
       "top10": [
         "Gathering Stone",
         "Thran Tome",
+        "Soul-Guide Lantern",
+        "Fountainport Bell",
+        "Candy Trail",
+        "Blood Fountain",
         "Threefold Thunderhulk",
-        "Eriette's Tempting Apple",
-        "Dimension X Pizzasaur",
-        "Selfcraft Mechan",
-        "Eye of Doom",
-        "Anchovy & Banana Pizza",
-        "Metalhead",
-        "Transplant Theorist"
+        "Witching Well",
+        "Sewer-veillance Cam",
+        "Eriette's Tempting Apple"
       ]
     },
     {
@@ -1566,7 +1566,7 @@
       ],
       "hi_syn_hits": 5,
       "hi_syn_total": 10,
-      "ndcg30": 0.405136,
+      "ndcg30": 0.40694,
       "on_page_hits": 18,
       "top10": [
         "Spellweaver Volute",
@@ -1575,10 +1575,10 @@
         "Storm-Kiln Artist",
         "Archmage Emeritus",
         "Ashling, Flame Dancer",
+        "Primal Amulet",
         "Ral, Storm Conduit",
         "Prismari Apprentice",
-        "Zaffai, Thunder Conductor",
-        "Deekah, Fractal Theorist"
+        "Zaffai, Thunder Conductor"
       ]
     },
     {
@@ -1688,21 +1688,21 @@
         "Keen Duelist",
         "Spawn of Mayhem"
       ],
-      "hi_syn_hits": 0,
+      "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.0,
-      "on_page_hits": 0,
+      "ndcg30": 0.055456,
+      "on_page_hits": 2,
       "top10": [
-        "Marionette Master",
-        "Kokusho, the Evening Star",
-        "Vein Ripper",
-        "Keeper of Secrets",
-        "Dreadhound",
-        "Red Dragon",
-        "Fear of Burning Alive",
-        "Blitzwing, Cruel Tormentor",
-        "Myr Battlesphere",
-        "Burning Sun's Avatar"
+        "Bolas's Citadel",
+        "Cryptbreaker",
+        "Kederekt Parasite",
+        "Disciple of the Vault",
+        "Cauldron Familiar",
+        "Iridescent Vinelasher",
+        "The Millennium Calendar",
+        "Spear Spewer",
+        "Voldaren Epicure",
+        "Hopeless Nightmare"
       ]
     },
     {
@@ -1781,21 +1781,21 @@
         "Captain Lannery Storm",
         "Anim Pakal, Thousandth Moon"
       ],
-      "hi_syn_hits": 1,
+      "hi_syn_hits": 3,
       "hi_syn_total": 10,
-      "ndcg30": 0.053138,
-      "on_page_hits": 5,
+      "ndcg30": 0.238941,
+      "on_page_hits": 10,
       "top10": [
+        "Curse of Opulence",
         "Legion's Landing",
-        "Obsessive Pursuit",
-        "Swashbuckler Extraordinaire",
-        "Path of Mettle",
-        "Within Range",
-        "Lucille",
-        "Ultima, Origin of Oblivion",
-        "Kami of Celebration",
-        "Alluring Suitor",
-        "Avatar Roku, Firebender"
+        "Sword of the Animist",
+        "Spinneret and Spiderling",
+        "Tome of Legends",
+        "Ainok Strike Leader",
+        "Fear of Missing Out",
+        "Staff of Titania",
+        "Inquisitorial Rosette",
+        "Obsessive Pursuit"
       ]
     },
     {
@@ -2122,21 +2122,21 @@
         "Second Harvest",
         "Hour of Reckoning"
       ],
-      "hi_syn_hits": 0,
+      "hi_syn_hits": 4,
       "hi_syn_total": 10,
-      "ndcg30": 0.05608,
-      "on_page_hits": 1,
+      "ndcg30": 0.407841,
+      "on_page_hits": 16,
       "top10": [
         "Harmonic Prodigy",
+        "Life Finds a Way",
+        "Trostani, Selesnya's Voice",
         "Rocksteady, Mutant Marauder",
         "Railway Brawler",
         "Master of Ceremonies",
         "Zoo Escapees",
         "Workshop Warchief",
-        "Razorfield Ripper",
-        "Dauntless Escort",
-        "Rhox Faithmender",
-        "Proud Pack-Rhino"
+        "Full Flowering",
+        "Sundering Growth"
       ]
     },
     {
@@ -2525,21 +2525,21 @@
         "Windfall",
         "Purphoros, God of the Forge"
       ],
-      "hi_syn_hits": 1,
+      "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.026226,
-      "on_page_hits": 1,
+      "ndcg30": 0.149353,
+      "on_page_hits": 6,
       "top10": [
+        "Hoarder's Overflow",
+        "Vindictive Flamestoker",
+        "Magus of the Wheel",
+        "Ogre-Head Helm",
+        "Memory Jar",
+        "Magus of the Jar",
         "Bag of Holding",
+        "Tolarian Winds",
         "Soul-Guide Lantern",
-        "Fountainport Bell",
-        "Candy Trail",
-        "Witching Well",
-        "Bitter Reunion",
-        "Lembas",
-        "Cryogen Relic",
-        "Omen of the Sea",
-        "Instant Ramen"
+        "Windfall"
       ]
     },
     {
@@ -2556,10 +2556,10 @@
         "Emry, Lurker of the Loch",
         "Ashnod's Altar"
       ],
-      "hi_syn_hits": 0,
+      "hi_syn_hits": 3,
       "hi_syn_total": 10,
-      "ndcg30": 0.050232,
-      "on_page_hits": 5,
+      "ndcg30": 0.18449,
+      "on_page_hits": 11,
       "top10": [
         "Impact Tremors",
         "Agate Instigator",
@@ -2651,19 +2651,19 @@
       ],
       "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.200021,
-      "on_page_hits": 10,
+      "ndcg30": 0.31163,
+      "on_page_hits": 14,
       "top10": [
-        "Ashling, the Limitless",
         "Ancient Greenwarden",
+        "Ashling, the Limitless",
         "Creeping Trailblazer",
         "Incandescent Soulstoke",
         "Thicket Crasher",
         "Titania, Voice of Gaea",
         "Lumra, Bellow of the Woods",
         "Tempestra, Dame of Games",
-        "Xorn",
-        "Akoum Hellhound"
+        "Icetill Explorer",
+        "Xorn"
       ]
     },
     {
@@ -2742,21 +2742,21 @@
         "Dragonspeaker Shaman",
         "Old Gnawbone"
       ],
-      "hi_syn_hits": 3,
+      "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.322907,
-      "on_page_hits": 16,
+      "ndcg30": 0.334612,
+      "on_page_hits": 17,
       "top10": [
-        "Stormscale Scion",
         "Karrthus, Tyrant of Jund",
         "Korlessa, Scale Singer",
         "Rith, Liberated Primeval",
+        "Stormscale Scion",
         "Ancient Copper Dragon",
-        "Niv-Mizzet, Parun",
         "Hellkite Tyrant",
         "Steel Hellkite",
         "Lathliss, Dragon Queen",
-        "Scourge of the Throne"
+        "Scourge of the Throne",
+        "Miirym, Sentinel Wyrm"
       ]
     },
     {
@@ -2806,19 +2806,19 @@
       ],
       "hi_syn_hits": 4,
       "hi_syn_total": 10,
-      "ndcg30": 0.31579,
-      "on_page_hits": 12,
+      "ndcg30": 0.402237,
+      "on_page_hits": 15,
       "top10": [
         "Harmonic Prodigy",
-        "Faerie Mastermind",
-        "Scrawling Crawler",
-        "Zurzoth, Chaos Rider",
-        "Burning Inquiry",
-        "Concealing Curtains",
-        "Memory Worm",
         "Windfall",
         "Wheel of Fortune",
-        "Magus of the Wheel"
+        "Magus of the Wheel",
+        "Jace's Archivist",
+        "Whispering Madness",
+        "Wheel and Deal",
+        "Sensation Gorger",
+        "Reforge the Soul",
+        "Memory Jar"
       ]
     },
     {
@@ -2835,21 +2835,21 @@
         "Crucible of Worlds",
         "Dryad of the Ilysian Grove"
       ],
-      "hi_syn_hits": 0,
+      "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.030784,
-      "on_page_hits": 4,
+      "ndcg30": 0.214267,
+      "on_page_hits": 10,
       "top10": [
         "Goblin Engineer",
+        "Icetill Explorer",
         "Territory Culler",
-        "Bag of Holding",
-        "Aftermath Analyst",
-        "Seedship Broodtender",
-        "Bristlebud Farmer",
-        "Hoarder's Overflow",
-        "Entomb",
-        "Bitter Reunion",
-        "Melded Moxite"
+        "Ramunap Excavator",
+        "Crucible of Worlds",
+        "Walk-In Closet",
+        "Conduit of Worlds",
+        "Kagha, Shadow Archdruid",
+        "Coram, the Undertaker",
+        "Perennial Behemoth"
       ]
     },
     {
@@ -3021,12 +3021,11 @@
         "Combustible Gearhulk",
         "Triplicate Titan"
       ],
-      "hi_syn_hits": 4,
+      "hi_syn_hits": 3,
       "hi_syn_total": 10,
-      "ndcg30": 0.288225,
-      "on_page_hits": 11,
+      "ndcg30": 0.345838,
+      "on_page_hits": 9,
       "top10": [
-        "Retrofitter Foundry",
         "Darksteel Citadel",
         "Seat of the Synod",
         "Great Furnace",
@@ -3035,7 +3034,8 @@
         "Razortide Bridge",
         "Silverbluff Bridge",
         "Rustvale Bridge",
-        "Tree of Tales"
+        "Tree of Tales",
+        "Mistvault Bridge"
       ]
     },
     {
@@ -3054,15 +3054,15 @@
       ],
       "hi_syn_hits": 5,
       "hi_syn_total": 10,
-      "ndcg30": 0.330664,
+      "ndcg30": 0.331201,
       "on_page_hits": 17,
       "top10": [
         "Crowded Crypt",
         "Black Market",
-        "Overseer of the Damned",
         "Life Insurance",
         "Ob Nixilis, Unshackled",
         "Dreadhound",
+        "Overseer of the Damned",
         "Midnight Reaper",
         "Shaile, Dean of Radiance",
         "Syr Konrad, the Grim",

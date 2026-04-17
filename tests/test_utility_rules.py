@@ -12,10 +12,13 @@ import pytest
 
 from mtg_synergy_graph.complement_rules.utility import (
     _find_cost_payoff_complements,
+    _find_counter_target_payoff,
+    _find_creature_untap_engine,
     _find_damage_effect_synergy,
     _find_extra_land_plays,
     _find_flicker_synergy,
     _find_mana_doubler_synergy,
+    _find_monarch_synergy,
     _find_opponent_forcing,
     _find_wheel_synergy,
 )
@@ -238,16 +241,68 @@ class TestFindWheelSynergy:
         cmdr_ports = [_port_row(port_type="effect", event_class="Draw")]
         assert _find_wheel_synergy(conn, cmdr_ports, set()) == []
 
-    def test_self_drawn_trigger_returns_empty(self, conn):
-        """Niv-Mizzet (Card.YouOwn) should NOT trigger wheel synergy."""
-        cmdr_ports = [_port_row(port_type="trigger", event_class="Drawn", valid_filter="Card.YouOwn")]
+    def test_self_drawn_with_token_finds_wheels(self, conn):
+        """The Locust God (Card.YouCtrl Drawn + Token effect) wants wheels — each
+        draw makes a token, so forced mass-draw = mass tokens."""
+        _add_port(conn, "Windfall", port_type="effect", event_class="Draw")
+        _add_port(
+            conn,
+            "Windfall",
+            port_type="effect",
+            event_class="Discard",
+            raw_line="{'Defined': 'Player', 'Mode': 'Hand'}",
+        )
+        cmdr_ports = [
+            _port_row(port_type="trigger", event_class="Drawn", valid_filter="Card.YouCtrl"),
+            _port_row(port_type="effect", event_class="Token"),
+        ]
+        results = _find_wheel_synergy(conn, cmdr_ports, set())
+        assert "Windfall" in _candidates(results)
+
+    def test_self_drawn_damage_payoff_skips_wheels(self, conn):
+        """Niv-Mizzet Parun (self Drawn + DealDamage payoff) prefers cantrips,
+        not wheels — EDHREC deck runs high-count repeatable draws."""
+        _add_port(conn, "Windfall", port_type="effect", event_class="Draw")
+        _add_port(
+            conn,
+            "Windfall",
+            port_type="effect",
+            event_class="Discard",
+            raw_line="{'Defined': 'Player', 'Mode': 'Hand'}",
+        )
+        cmdr_ports = [
+            _port_row(port_type="trigger", event_class="Drawn", valid_filter="Card.YouCtrl"),
+            _port_row(port_type="effect", event_class="DealDamage"),
+        ]
         assert _find_wheel_synergy(conn, cmdr_ports, set()) == []
+
+    def test_loot_card_excluded(self, conn):
+        """Loot cards (Bag of Holding: Discard NumCards=1) are not wheels. Only
+        ``Mode: Hand`` discards count — those empty the hand, which is what
+        triggers mass-draw payoffs."""
+        _add_port(conn, "Bag of Holding", port_type="effect", event_class="Draw")
+        _add_port(
+            conn,
+            "Bag of Holding",
+            port_type="effect",
+            event_class="Discard",
+            raw_line="{'Defined': 'You', 'NumCards': '1', 'Mode': 'TgtChoose'}",
+        )
+        cmdr_ports = [_port_row(port_type="trigger", event_class="Drawn", valid_filter="Card.YouCtrl")]
+        results = _find_wheel_synergy(conn, cmdr_ports, set())
+        assert "Bag of Holding" not in _candidates(results)
 
     def test_opponent_drawn_finds_wheels(self, conn):
         """Nekusar with Opp-facing Drawn trigger should find wheel effects."""
-        # Windfall has both Draw and Discard effects
+        # Windfall has both Draw and Mode: Hand Discard effects
         _add_port(conn, "Windfall", port_type="effect", event_class="Draw")
-        _add_port(conn, "Windfall", port_type="effect", event_class="Discard")
+        _add_port(
+            conn,
+            "Windfall",
+            port_type="effect",
+            event_class="Discard",
+            raw_line="{'Defined': 'Player', 'Mode': 'Hand'}",
+        )
         # Brainstorm has only Draw (no Discard) -- not a wheel
         _add_port(conn, "Brainstorm", port_type="effect", event_class="Draw")
 
@@ -260,7 +315,13 @@ class TestFindWheelSynergy:
     def test_player_filter_drawn_trigger(self, conn):
         """Drawn trigger with 'Player' filter should also trigger wheel matching."""
         _add_port(conn, "Wheel of Fortune", port_type="effect", event_class="Draw")
-        _add_port(conn, "Wheel of Fortune", port_type="effect", event_class="Discard")
+        _add_port(
+            conn,
+            "Wheel of Fortune",
+            port_type="effect",
+            event_class="Discard",
+            raw_line="{'Defined': 'Player', 'Mode': 'Hand'}",
+        )
 
         cmdr_ports = [_port_row(port_type="trigger", event_class="Drawn", valid_filter="Player")]
         results = _find_wheel_synergy(conn, cmdr_ports, set())
@@ -269,7 +330,13 @@ class TestFindWheelSynergy:
     def test_each_filter_drawn_trigger(self, conn):
         """Drawn trigger with 'Each' filter should also trigger wheel matching."""
         _add_port(conn, "Whispering Madness", port_type="effect", event_class="Draw")
-        _add_port(conn, "Whispering Madness", port_type="effect", event_class="Discard")
+        _add_port(
+            conn,
+            "Whispering Madness",
+            port_type="effect",
+            event_class="Discard",
+            raw_line="{'Defined': 'Player', 'Mode': 'Hand'}",
+        )
 
         cmdr_ports = [_port_row(port_type="trigger", event_class="Drawn", valid_filter="EachPlayer")]
         results = _find_wheel_synergy(conn, cmdr_ports, set())
@@ -277,7 +344,13 @@ class TestFindWheelSynergy:
 
     def test_excludes_commander_set(self, conn):
         _add_port(conn, "Windfall", port_type="effect", event_class="Draw")
-        _add_port(conn, "Windfall", port_type="effect", event_class="Discard")
+        _add_port(
+            conn,
+            "Windfall",
+            port_type="effect",
+            event_class="Discard",
+            raw_line="{'Defined': 'Player', 'Mode': 'Hand'}",
+        )
 
         cmdr_ports = [_port_row(port_type="trigger", event_class="Drawn", valid_filter="Card.OppOwn")]
         results = _find_wheel_synergy(conn, cmdr_ports, {"Windfall"})
@@ -285,7 +358,13 @@ class TestFindWheelSynergy:
 
     def test_rule_id_and_events(self, conn):
         _add_port(conn, "Windfall", port_type="effect", event_class="Draw")
-        _add_port(conn, "Windfall", port_type="effect", event_class="Discard")
+        _add_port(
+            conn,
+            "Windfall",
+            port_type="effect",
+            event_class="Discard",
+            raw_line="{'Defined': 'Player', 'Mode': 'Hand'}",
+        )
 
         cmdr_ports = [_port_row(port_type="trigger", event_class="Drawn", valid_filter="Card.OppOwn")]
         results = _find_wheel_synergy(conn, cmdr_ports, set())
@@ -906,3 +985,249 @@ class TestManaDoublerSynergy:
         cmdr_ports = [_port_row(port_type="trigger", event_class="TapsForMana")]
         results = _find_mana_doubler_synergy(conn, cmdr_ports, {"Cmdr"})
         assert results == []
+
+
+# ===========================================================================
+# _find_monarch_synergy
+# ===========================================================================
+
+
+class TestFindMonarchSynergy:
+    """Queen Marchesa: her ETB makes her monarch. Cards with the same
+    BecomeMonarch effect and pillowfort statics (CantAttackUnless) are
+    the archetype's core."""
+
+    def _monarch_cmdr_ports(self):
+        return [_port_row(port_type="effect", event_class="BecomeMonarch")]
+
+    def test_no_monarch_effect_returns_empty(self, conn):
+        cmdr_ports = [_port_row(port_type="effect", event_class="Token")]
+        assert _find_monarch_synergy(conn, cmdr_ports, set()) == []
+
+    def test_finds_other_monarch_givers(self, conn):
+        """Courts (Court of Grace, Ambition) also give monarch — core picks."""
+        _add_port(conn, "Court of Grace", port_type="effect", event_class="BecomeMonarch")
+        _add_port(conn, "Thorn of the Black Rose", port_type="effect", event_class="BecomeMonarch")
+
+        results = _find_monarch_synergy(conn, self._monarch_cmdr_ports(), set())
+        names = _candidates(results)
+        assert "Court of Grace" in names
+        assert "Thorn of the Black Rose" in names
+
+    def test_finds_pillowfort(self, conn):
+        """Ghostly Prison / Windborn Muse (CantAttackUnless) protect the monarch."""
+        _add_port(conn, "Ghostly Prison", port_type="static", event_class="CantAttackUnless")
+        _add_port(conn, "Windborn Muse", port_type="static", event_class="CantAttackUnless")
+        _add_port(conn, "Unrelated Static", port_type="static", event_class="Continuous")
+
+        results = _find_monarch_synergy(conn, self._monarch_cmdr_ports(), set())
+        names = _candidates(results)
+        assert "Ghostly Prison" in names
+        assert "Windborn Muse" in names
+        assert "Unrelated Static" not in names
+
+    def test_excludes_commander(self, conn):
+        _add_port(conn, "Queen Marchesa", port_type="effect", event_class="BecomeMonarch")
+        results = _find_monarch_synergy(conn, self._monarch_cmdr_ports(), {"Queen Marchesa"})
+        assert "Queen Marchesa" not in _candidates(results)
+
+    def test_rule_id(self, conn):
+        _add_port(conn, "Court of Grace", port_type="effect", event_class="BecomeMonarch")
+        results = _find_monarch_synergy(conn, self._monarch_cmdr_ports(), set())
+        assert all(r.rule_id == "monarch_synergy" for r in results)
+
+
+# ===========================================================================
+# _find_counter_target_payoff
+# ===========================================================================
+
+
+class TestFindCounterTargetPayoff:
+    """Ezuri distributes +1/+1 counters to other creatures. Cards that benefit
+    from being counter-targeted (CounterAdded trigger, scales_with P1P1) are
+    the archetype's defining payoffs."""
+
+    def _ezuri_ports(self):
+        return [
+            _port_row(port_type="scales_with", event_class="YourCountersExperience"),
+            _port_row(
+                port_type="effect",
+                event_class="PutCounter",
+                valid_filter="Creature.Other+YouCtrl",
+                counter_type="P1P1",
+            ),
+        ]
+
+    def test_no_put_counter_on_other_returns_empty(self, conn):
+        """Commander without a P1P1 distribution effect yields nothing."""
+        cmdr_ports = [
+            _port_row(port_type="scales_with", event_class="YourCountersExperience"),
+            _port_row(port_type="effect", event_class="PutCounter", valid_filter="You", counter_type="Experience"),
+        ]
+        assert _find_counter_target_payoff(conn, cmdr_ports, set()) == []
+
+    def test_no_xp_scaling_skips_non_ezuri_commanders(self, conn):
+        """Ghave / Heliod / Lathiel distribute P1P1 counters but EDHREC favours
+        aristocrats / lifegain staples over pure counter receivers for them.
+        Without ``scales_with=YourCountersExperience`` the rule does not fire."""
+        _add_port(
+            conn,
+            "Fathom Mage",
+            port_type="trigger",
+            event_class="CounterAdded",
+            valid_filter="Card.Self",
+            counter_type="P1P1",
+        )
+        cmdr_ports = [
+            _port_row(port_type="effect", event_class="PutCounter", valid_filter="Creature", counter_type="P1P1"),
+        ]
+        assert _find_counter_target_payoff(conn, cmdr_ports, set()) == []
+
+    def test_finds_counter_added_trigger(self, conn):
+        """Fathom Mage: 'Whenever a +1/+1 counter is put on me, draw a card.'"""
+        _add_port(
+            conn,
+            "Fathom Mage",
+            port_type="trigger",
+            event_class="CounterAdded",
+            valid_filter="Card.Self",
+            counter_type="P1P1",
+        )
+        results = _find_counter_target_payoff(conn, self._ezuri_ports(), set())
+        assert "Fathom Mage" in _candidates(results)
+
+    def test_finds_scales_with_p1p1(self, conn):
+        """Gyre Sage / Chasm Skulker grow with +1/+1 counters."""
+        _add_port(conn, "Gyre Sage", port_type="scales_with", event_class="CardCounters.P1P1")
+        _add_port(conn, "Chasm Skulker", port_type="scales_with", event_class="CardCounters.P1P1")
+        results = _find_counter_target_payoff(conn, self._ezuri_ports(), set())
+        names = _candidates(results)
+        assert "Gyre Sage" in names
+        assert "Chasm Skulker" in names
+
+    def test_excludes_other_counter_types(self, conn):
+        """Loyalty / charge / energy counter triggers don't match P1P1 distribution."""
+        _add_port(
+            conn,
+            "Loyalty Triggered",
+            port_type="trigger",
+            event_class="CounterAdded",
+            valid_filter="Card.Self",
+            counter_type="LOYALTY",
+        )
+        _add_port(conn, "Charge Scales", port_type="scales_with", event_class="CardCounters.CHARGE")
+        results = _find_counter_target_payoff(conn, self._ezuri_ports(), set())
+        names = _candidates(results)
+        assert "Loyalty Triggered" not in names
+        assert "Charge Scales" not in names
+
+    def test_self_only_put_counter_does_not_fire(self, conn):
+        """Commander that only puts counters on self (not targeting others) doesn't qualify —
+        this rule is about the distribution-target archetype."""
+        _add_port(
+            conn,
+            "Fathom Mage",
+            port_type="trigger",
+            event_class="CounterAdded",
+            valid_filter="Card.Self",
+            counter_type="P1P1",
+        )
+        cmdr_ports = [
+            _port_row(port_type="scales_with", event_class="YourCountersExperience"),
+            _port_row(port_type="effect", event_class="PutCounter", valid_filter="Self", counter_type="P1P1"),
+        ]
+        assert _find_counter_target_payoff(conn, cmdr_ports, set()) == []
+
+    def test_excludes_commander(self, conn):
+        _add_port(
+            conn,
+            "Ezuri",
+            port_type="trigger",
+            event_class="CounterAdded",
+            valid_filter="Card.Self",
+            counter_type="P1P1",
+        )
+        results = _find_counter_target_payoff(conn, self._ezuri_ports(), {"Ezuri"})
+        assert "Ezuri" not in _candidates(results)
+
+    def test_rule_id(self, conn):
+        _add_port(
+            conn,
+            "Fathom Mage",
+            port_type="trigger",
+            event_class="CounterAdded",
+            valid_filter="Card.Self",
+            counter_type="P1P1",
+        )
+        results = _find_counter_target_payoff(conn, self._ezuri_ports(), set())
+        assert all(r.rule_id == "counter_target_payoff" for r in results)
+
+
+# ===========================================================================
+# _find_creature_untap_engine
+# ===========================================================================
+
+
+class TestFindCreatureUntapEngine:
+    """Selvala taps herself for mana. Cards that untap a creature (Quirion
+    Ranger, Scryb Ranger, Staff of Domination) are the archetype's core.
+
+    Distinct from untap_combo (narrow artifact-untap pool for Urza/Emry)
+    and untap_synergy (broad, covers all tap-cost commanders including
+    Krenko's non-mana tap). This rule targets tap-for-mana engines
+    specifically so creature-untappers rank above the tribal/utility
+    tap cards that existing rules already surface.
+    """
+
+    def _selvala_ports(self):
+        return [
+            _port_row(port_type="cost", event_class="tap"),
+            _port_row(port_type="effect", event_class="Mana"),
+        ]
+
+    def test_no_mana_effect_skips(self, conn):
+        """Krenko (tap for Tokens) doesn't qualify — not a mana engine."""
+        _add_port(conn, "Quirion Ranger", port_type="effect", event_class="Untap", valid_filter="Creature")
+        cmdr_ports = [
+            _port_row(port_type="cost", event_class="tap"),
+            _port_row(port_type="effect", event_class="Token"),
+        ]
+        assert _find_creature_untap_engine(conn, cmdr_ports, set()) == []
+
+    def test_no_tap_cost_skips(self, conn):
+        """Commander without tap cost yields nothing."""
+        _add_port(conn, "Quirion Ranger", port_type="effect", event_class="Untap", valid_filter="Creature")
+        cmdr_ports = [_port_row(port_type="effect", event_class="Mana")]
+        assert _find_creature_untap_engine(conn, cmdr_ports, set()) == []
+
+    def test_finds_creature_untappers(self, conn):
+        """Quirion Ranger / Scryb Ranger / Staff of Domination all untap a
+        creature — premium Selvala enablers."""
+        _add_port(conn, "Quirion Ranger", port_type="effect", event_class="Untap", valid_filter="Creature")
+        _add_port(conn, "Scryb Ranger", port_type="effect", event_class="Untap", valid_filter="Creature")
+        _add_port(conn, "Staff of Domination", port_type="effect", event_class="Untap", valid_filter="")
+
+        results = _find_creature_untap_engine(conn, self._selvala_ports(), set())
+        names = _candidates(results)
+        assert "Quirion Ranger" in names
+        assert "Scryb Ranger" in names
+        assert "Staff of Domination" in names
+
+    def test_excludes_non_creature_untap(self, conn):
+        """Land-only untap (Wilderness Reclamation) is Kinnan territory,
+        not Selvala — this rule should skip it."""
+        _add_port(
+            conn, "Wilderness Reclamation", port_type="effect", event_class="UntapAll", valid_filter="Land.YouCtrl"
+        )
+        results = _find_creature_untap_engine(conn, self._selvala_ports(), set())
+        assert "Wilderness Reclamation" not in _candidates(results)
+
+    def test_excludes_commander(self, conn):
+        _add_port(conn, "Selvala", port_type="effect", event_class="Untap", valid_filter="Creature")
+        results = _find_creature_untap_engine(conn, self._selvala_ports(), {"Selvala"})
+        assert "Selvala" not in _candidates(results)
+
+    def test_rule_id(self, conn):
+        _add_port(conn, "Quirion Ranger", port_type="effect", event_class="Untap", valid_filter="Creature")
+        results = _find_creature_untap_engine(conn, self._selvala_ports(), set())
+        assert all(r.rule_id == "creature_untap_engine" for r in results)

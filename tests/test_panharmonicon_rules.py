@@ -254,8 +254,9 @@ class TestFindPanharmoniconComplements:
         # Empty zone_destination passes the check (cand_zd is falsy)
         assert "NoZone Card" in candidates
 
-    def test_self_etb_uses_etb_suffix_in_cand_event(self, conn):
-        """Self-ETB triggers should produce cand_event with _etb suffix."""
+    def test_self_etb_splits_by_effect_type_in_cand_event(self, conn):
+        """Self-ETB triggers split by effect type (``_etb_Draw``, ``_etb_Dig``)
+        so premium Yarok picks don't share a single flooded IDF group."""
         cmdr_ports = [
             _port_row(
                 port_type="trigger",
@@ -277,7 +278,7 @@ class TestFindPanharmoniconComplements:
 
         results = _find_panharmonicon_complements(conn, cmdr_ports, {"Yarok"})
         assert len(results) == 1
-        assert results[0].cand_event == "ChangesZone_etb"
+        assert results[0].cand_event == "ChangesZone_etb_Draw"
 
     def test_non_self_trigger_uses_effect_suffix(self, conn):
         """Non-self triggers should produce cand_event with effect type suffix."""

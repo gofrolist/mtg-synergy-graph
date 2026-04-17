@@ -18,6 +18,15 @@ _EDICT_FILTERS: tuple[str, ...] = (
     "Player.Other",
 )
 
+#: Top-level card types that map cleanly to the ``card_types`` column.
+#: Compound Affinity forms like ``Creature.Artifact:artifact``
+#: (Urza, Chief Artificer) or ``Land.Snow:snow`` would not match
+#: card_types as a substring; callers take the first type token only,
+#: skip the rest.
+_AFFINITY_RECOGNIZED_TYPES: frozenset[str] = frozenset(
+    {"Artifact", "Creature", "Enchantment", "Land", "Planeswalker", "Instant", "Sorcery"}
+)
+
 
 def _find_cost_reduction_synergy(
     conn: sqlite3.Connection,
@@ -173,13 +182,6 @@ def _find_affinity_archetype(
     and match `card_types LIKE '%<Type>%'`. For non-Artifact Affinity
     (e.g. Equipment) the rule works the same way.
     """
-    # Recognized top-level card types that map cleanly to the `card_types`
-    # column. Compound Affinity forms like "Creature.Artifact:artifact"
-    # (Urza, Chief Artificer) or "Land.Snow:snow" would not match card_types
-    # as a substring; take the first type token only, skip the rest.
-    _RECOGNIZED_TYPES: frozenset[str] = frozenset(
-        {"Artifact", "Creature", "Enchantment", "Land", "Planeswalker", "Instant", "Sorcery"}
-    )
     affinity_type = ""
     for p in cmdr_ports:
         if (p.get("port_type") or "").strip() != "keyword":
@@ -190,9 +192,36 @@ def _find_affinity_archetype(
             # Split on "." to drop compound subtype qualifiers and keep the
             # base type ("Creature.Artifact:artifact" → "Creature").
             base = raw_type.split(".", 1)[0].strip()
-            if base in _RECOGNIZED_TYPES:
+            if base in _AFFINITY_RECOGNIZED_TYPES:
                 affinity_type = base
                 break
+
+    # Extended gate for Artifact: commanders without Affinity:Artifact but
+    # whose core mechanic involves artifacts (Sharuum reanimates artifacts,
+    # Breya sacrifices artifacts, Osgir sacs artifacts for +X/+0, Urza taps
+    # artifacts for mana) share the same canonical support pool — cheap
+    # artifacts, artifact lands, cost reducers.
+    #
+    # Require the cost/effect to be PURELY artifact — Mondrak's
+    # ``Sac<2/Artifact.Other;Creature.Other>`` mixes artifacts with
+    # creatures and isn't an artifact-matters commander. The ``;``
+    # separator in Forge notation indicates alternative types.
+    if not affinity_type:
+        for p in cmdr_ports:
+            pt = (p.get("port_type") or "").strip()
+            ev = (p.get("event_class") or "").strip()
+            vf = p.get("valid_filter") or ""
+            raw = p.get("raw_line") or ""
+            # Reanimate/cast-from-GY artifact (Sharuum, Emry)
+            if pt == "effect" and ev in ("ChangeZone", "Effect") and "Artifact" in vf and ";" not in vf:
+                affinity_type = "Artifact"
+                break
+            # Sacrifice/tap-type with only-Artifact cost (Breya, Osgir, Urza)
+            if pt == "cost" and ev in ("sacrifice", "tap_type"):
+                m = re.search(r"<\d+/([^/>]+)(?:/[^>]*)?>", raw)
+                if m and "Artifact" in m.group(1) and ";" not in m.group(1):
+                    affinity_type = "Artifact"
+                    break
     if not affinity_type:
         return []
 

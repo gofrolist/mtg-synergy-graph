@@ -13,10 +13,12 @@ import sqlite3
 import pytest
 
 from mtg_synergy_graph.complement_rules.density import (
+    _find_cost_reduction_targets,
     _find_counter_doubler_synergy,
     _find_counter_keyword_synergy,
     _find_etb_self_complements,
     _find_lord_complements,
+    _find_pinger_synergy,
     _find_scales_with_density,
     _find_scaling_complements,
     _find_spellcast_density_complements,
@@ -124,11 +126,12 @@ def _insert_card(
     color_identity: str = "",
     power: str = "",
     toughness: str = "",
+    cmc: float | None = None,
 ) -> None:
     conn.execute(
-        "INSERT INTO cards (name, card_types, subtypes, types, supertypes, keywords, color_identity, power, toughness) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (name, card_types, subtypes, types, supertypes, keywords, color_identity, power, toughness),
+        "INSERT INTO cards (name, card_types, subtypes, types, supertypes, keywords, color_identity, power, toughness, cmc) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (name, card_types, subtypes, types, supertypes, keywords, color_identity, power, toughness, cmc),
     )
 
 
@@ -926,28 +929,31 @@ class TestFindScalesWithDensity:
         assert "Shield Sphere" in _candidates(results)
 
     def test_life_lost_scaling(self, conn):
-        """Commander with LifeOppsLost scales_with should find drain/damage effects,
-        including DamageAll pingers like Spear Spewer."""
+        """Commander with LifeOppsLost scales_with should find repeatable drain/damage
+        sources (permanents) and exclude one-shot burn (Instant/Sorcery)."""
         _insert_card(conn, "Rakdos", card_types="Creature", types="Creature")
         _insert_card(conn, "Lightning Bolt", card_types="Instant")
         _insert_card(conn, "Drain Life", card_types="Sorcery")
         _insert_card(conn, "Spear Spewer", card_types="Creature")
+        _insert_card(conn, "Kokusho, the Evening Star", card_types="Creature")
         _insert_port(conn, "Rakdos", "scales_with", "LifeOppsLostThisTurn")
         _insert_port(conn, "Lightning Bolt", "effect", "DealDamage")
         _insert_port(conn, "Drain Life", "effect", "LoseLife")
         _insert_port(conn, "Spear Spewer", "effect", "DamageAll")
+        _insert_port(conn, "Kokusho, the Evening Star", "effect", "LoseLife", valid_filter="Opponent")
 
         cmdr_ports = [
             dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Rakdos",)).fetchall()
         ]
         results = _find_scales_with_density(conn, cmdr_ports, {"Rakdos"})
         cands = _candidates(results)
-        assert "Lightning Bolt" in cands
-        assert "Drain Life" in cands
-        # Regression: global-damage pingers (DamageAll) must match too —
-        # Spear Spewer / Pyrohemia / Repercussion all enable Rakdos's
-        # cost reduction. Previously the query hard-coded DealDamage/LoseLife.
+        # One-shot burn is excluded — it fires once per cast, not per turn,
+        # and flat 0.3 weight drowns true repeatable enablers.
+        assert "Lightning Bolt" not in cands
+        assert "Drain Life" not in cands
+        # Repeatable permanent-based damage is kept.
         assert "Spear Spewer" in cands
+        assert "Kokusho, the Evening Star" in cands
         assert any(r.cmdr_event == "scales_opp_life_lost" for r in results)
 
     def test_no_scales_with_returns_empty(self, conn):
@@ -1286,4 +1292,129 @@ class TestValueEngineDensity:
             dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Cmdr",)).fetchall()
         ]
         results = _find_value_engine_density(conn, cmdr_ports, {"Cmdr"})
+        assert results == []
+
+
+# ---------------------------------------------------------------------------
+# _find_pinger_synergy
+# ---------------------------------------------------------------------------
+
+
+class TestFindPingerSynergy:
+    def _rakdos_ports(self, conn):
+        _insert_card(conn, "Rakdos", card_types="Creature", types="Creature")
+        _insert_port(conn, "Rakdos", "scales_with", "LifeOppsLostThisTurn")
+        return [dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Rakdos",)).fetchall()]
+
+    def test_pinger_matches_opponent_targeted(self, conn):
+        """Classic tap-pinger (DealDamage to Player.Opponent) matches."""
+        cmdr_ports = self._rakdos_ports(conn)
+        _insert_card(conn, "Thermo-Alchemist", card_types="Creature")
+        _insert_port(conn, "Thermo-Alchemist", "effect", "DealDamage", valid_filter="Player.Opponent")
+
+        results = _find_pinger_synergy(conn, cmdr_ports, {"Rakdos"})
+        assert "Thermo-Alchemist" in _candidates(results)
+
+    def test_pinger_matches_symmetric_player_lose_life(self, conn):
+        """Stormfist Crusader pings every player (Defined=Player) — should still
+        count for a Rakdos-style cost-by-life-loss commander."""
+        cmdr_ports = self._rakdos_ports(conn)
+        _insert_card(conn, "Stormfist Crusader", card_types="Creature")
+        _insert_port(conn, "Stormfist Crusader", "effect", "LoseLife", valid_filter="Player")
+
+        results = _find_pinger_synergy(conn, cmdr_ports, {"Rakdos"})
+        assert "Stormfist Crusader" in _candidates(results)
+
+    def test_pinger_excludes_instant_burn(self, conn):
+        """One-shot burn (Instant/Sorcery) is not a pinger."""
+        cmdr_ports = self._rakdos_ports(conn)
+        _insert_card(conn, "Lightning Bolt", card_types="Instant")
+        _insert_port(conn, "Lightning Bolt", "effect", "DealDamage", valid_filter="Any")
+        _insert_card(conn, "Blazing Volley", card_types="Sorcery")
+        _insert_port(conn, "Blazing Volley", "effect", "DealDamage", valid_filter="Opponent")
+
+        results = _find_pinger_synergy(conn, cmdr_ports, {"Rakdos"})
+        cands = _candidates(results)
+        assert "Lightning Bolt" not in cands
+        assert "Blazing Volley" not in cands
+
+    def test_pinger_requires_damage_scaling_cmdr(self, conn):
+        """Commander with no LifeOppsLost/LifeLost scaling yields no pingers."""
+        _insert_card(conn, "NotRakdos", card_types="Creature")
+        _insert_port(conn, "NotRakdos", "scales_with", "CardCounters.P1P1")
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("NotRakdos",)).fetchall()
+        ]
+        _insert_card(conn, "Thermo-Alchemist", card_types="Creature")
+        _insert_port(conn, "Thermo-Alchemist", "effect", "DealDamage", valid_filter="Player.Opponent")
+
+        results = _find_pinger_synergy(conn, cmdr_ports, {"NotRakdos"})
+        assert results == []
+
+
+# ---------------------------------------------------------------------------
+# _find_cost_reduction_targets
+# ---------------------------------------------------------------------------
+
+
+class TestFindCostReductionTargets:
+    def _rakdos_ports(self, conn):
+        _insert_card(conn, "Rakdos, LoR", card_types="Creature", types="Creature")
+        _insert_port(
+            conn,
+            "Rakdos, LoR",
+            "static",
+            "ReduceCost",
+            raw_line="{'Mode': 'ReduceCost', 'ValidCard': 'Creature', 'Type': 'Spell'}",
+        )
+        return [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Rakdos, LoR",)).fetchall()
+        ]
+
+    def test_includes_high_cmc_creature_with_etb_trigger(self, conn):
+        """Big value creatures (ETB triggers) are correct picks for cost-reduction."""
+        cmdr_ports = self._rakdos_ports(conn)
+        _insert_card(conn, "Artisan of Kozilek", card_types="Creature", cmc=9.0)
+        _insert_port(conn, "Artisan of Kozilek", "trigger", "SpellCast", valid_filter="Card.Self")
+        _insert_port(
+            conn,
+            "Artisan of Kozilek",
+            "effect",
+            "ChangeZone",
+            valid_filter="Creature.YouOwn",
+        )
+
+        results = _find_cost_reduction_targets(conn, cmdr_ports, {"Rakdos, LoR"})
+        assert "Artisan of Kozilek" in _candidates(results)
+
+    def test_excludes_vanilla_big_creature(self, conn):
+        """Keyword-only vanilla creature (no triggers/effects) is NOT a cost-reduction
+        target — it's generic fat that matches every big-mana commander."""
+        cmdr_ports = self._rakdos_ports(conn)
+        _insert_card(conn, "Colossal Dreadmaw", card_types="Creature", cmc=6.0)
+        _insert_port(conn, "Colossal Dreadmaw", "keyword", "Trample")
+
+        results = _find_cost_reduction_targets(conn, cmdr_ports, {"Rakdos, LoR"})
+        assert "Colossal Dreadmaw" not in _candidates(results)
+
+    def test_excludes_low_cmc(self, conn):
+        """CMC<6 creatures aren't the target of cost reduction."""
+        cmdr_ports = self._rakdos_ports(conn)
+        _insert_card(conn, "Grizzly Bears", card_types="Creature", cmc=2.0)
+        _insert_port(conn, "Grizzly Bears", "trigger", "ChangesZone", valid_filter="Card.Self")
+        _insert_port(conn, "Grizzly Bears", "effect", "Pump")
+
+        results = _find_cost_reduction_targets(conn, cmdr_ports, {"Rakdos, LoR"})
+        assert "Grizzly Bears" not in _candidates(results)
+
+    def test_requires_cost_reduction_port(self, conn):
+        """Commander without ReduceCost yields no results."""
+        _insert_card(conn, "NoReducer", card_types="Creature")
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("NoReducer",)).fetchall()
+        ]
+        _insert_card(conn, "Big Guy", card_types="Creature", cmc=8.0)
+        _insert_port(conn, "Big Guy", "trigger", "ChangesZone")
+
+        results = _find_cost_reduction_targets(conn, cmdr_ports, {"NoReducer"})
         assert results == []

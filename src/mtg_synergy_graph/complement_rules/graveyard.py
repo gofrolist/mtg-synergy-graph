@@ -406,6 +406,34 @@ def _find_copy_synergy(
                     )
                 )
 
+        # Other populate spells stack with the commander's own populate
+        # (Sundering Growth, Rootborn Defenses, Growing Ranks, Second
+        # Harvest, Song of the Worldsoul). Narrow pool (~26 cards) so
+        # these canonical EDHREC picks rise above the 280+ broad Token-
+        # producer pool. Emitted with a distinct rule_id so the
+        # ``populate_stack`` quality multiplier doesn't lift Riku's
+        # (creature-copy) matches. Tolerate both dict-repr variants
+        # (spaced and compact) for resilience to importer formatting.
+        cur2 = conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports "
+            "WHERE port_type = 'effect' AND event_class = 'CopyPermanent' "
+            "AND (raw_line LIKE '%''Populate'': ''True''%' "
+            "     OR raw_line LIKE '%''Populate'':''True''%')"
+        )
+        for r in cur2.fetchall():
+            name = r["card_name"]
+            if name not in cmdr_set and name not in seen:
+                seen.add(name)
+                results.append(
+                    PortComplement(
+                        rule_id="populate_stack",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="CopyPermanent_populate",
+                        cand_event="populate_stack",
+                    )
+                )
+
     # Creature copy: find creatures with self-ETB + valuable effects
     if has_creature_copy:
         _VALUABLE_LIST = (

@@ -615,6 +615,36 @@ class TestFindCopySynergy:
         assert "Avenger of Zendikar" in _candidates(results)
         assert all(r.rule_id == "copy_synergy" for r in results)
 
+    def test_populate_finds_other_populate_spells(self, conn) -> None:
+        """Other populate cards (Sundering Growth, Rootborn Defenses, Growing Ranks,
+        Second Harvest) stack with Ghired's own populate and are canonical picks."""
+        _insert_card(conn, "Ghired, Conclave Exile")
+        for name in ("Sundering Growth", "Rootborn Defenses", "Growing Ranks", "Second Harvest"):
+            _insert_card(conn, name)
+            _insert_port(
+                conn,
+                name,
+                "effect",
+                "CopyPermanent",
+                raw_line="{'Populate': 'True'}",
+            )
+        conn.commit()
+
+        cmdr_ports = [
+            _port(
+                "Ghired, Conclave Exile",
+                "effect",
+                "CopyPermanent",
+                raw_line="{'Populate': True}",
+            ),
+        ]
+        results = _find_copy_synergy(conn, cmdr_ports, {"Ghired, Conclave Exile"})
+        names = _candidates(results)
+        assert "Sundering Growth" in names
+        assert "Rootborn Defenses" in names
+        assert "Growing Ranks" in names
+        assert "Second Harvest" in names
+
     def test_creature_copy_finds_etb_creatures(self, conn) -> None:
         """Commander with creature copy finds creatures with self-ETB + valuable effect."""
         _insert_card(conn, "Riku of Two Reflections")

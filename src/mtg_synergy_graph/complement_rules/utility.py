@@ -19,6 +19,17 @@ _OPPONENT_TRIGGER_TO_EFFECT: dict[str, tuple[str, ...]] = {
 }
 
 #: valid_filter values that indicate opponent-targeting (not self-targeting).
+#: Effect events that make a self-ETB trigger worth flickering.
+#: Vanilla effects (Pump, Untap) don't justify the cost of repeating
+#: the ETB; high-value effects (Dig, modal, GainControl) do.
+_FLICKER_HIGH_VALUE_EFFECTS: frozenset[str] = frozenset(
+    {
+        "Dig",
+        "GenericChoice",
+        "GainControl",
+    }
+)
+
 _OPPONENT_FILTERS: frozenset[str] = frozenset(
     {
         "Opponent",
@@ -114,15 +125,23 @@ def _find_wheel_synergy(
 ) -> list[PortComplement]:
     """Find wheel effects (discard + draw) for Drawn-trigger commanders.
 
-    Locust God triggers on Draw -> Windfall (discard hand, draw equal)
-    is premium because it draws 7+ cards at once. Cards with BOTH
-    Discard AND Draw effects are wheel effects.
+    Fires when the commander's Drawn payoff is cumulative — more draws
+    always = more value:
 
-    ~100-200 cards, IDF ~ 0.14 -- higher than plain Draw (2000+, IDF ~ 0.09).
+    - Opp/Player/Each-facing trigger (Nekusar): wheels punish opponents
+      for drawing.
+    - Self-facing trigger with a Token or PutCounter effect (Locust
+      God creates 1/1 flyer per draw; Chasm Skulker adds counter per
+      draw): mass-draw = mass payoff.
+
+    Self-facing triggers with damage/spellcast payoffs (Niv-Mizzet
+    Parun) prefer cheap cantrips over wheels — EDHREC runs high-count
+    repeatable draws, not burst. Excluded here.
+
+    Cards with BOTH Discard (``Mode: Hand``) AND Draw effects are
+    true wheels. Loot (Bag of Holding: NumCards=1) is excluded.
+    ~100-200 cards, IDF ~ 0.14.
     """
-    # Only fire for commanders whose Drawn trigger cares about opponent
-    # draws (Nekusar: Card.OppOwn) or any player. Niv-Mizzet (Card.YouOwn)
-    # wants self-draw cantrips, not wheels that also draw opponents.
     has_drawn_trigger = False
     for p in cmdr_ports:
         if (p.get("port_type") or "").strip() != "trigger":
@@ -133,16 +152,34 @@ def _find_wheel_synergy(
         if "Opp" in vf or "Player" in vf or "Each" in vf:
             has_drawn_trigger = True
             break
+        if "YouCtrl" in vf or "YouOwn" in vf or vf == "":
+            has_cumulative_payoff = any(
+                (q.get("port_type") or "").strip() == "effect"
+                and (q.get("event_class") or "").strip() in ("Token", "PutCounter")
+                for q in cmdr_ports
+            )
+            if has_cumulative_payoff:
+                has_drawn_trigger = True
+                break
 
     if not has_drawn_trigger:
         return []
 
+    # True wheels: the Discard effect uses ``Mode: Hand`` (discard the
+    # entire hand). Loot cards (Bag of Holding, Faithless Looting)
+    # discard NumCards=1 and aren't wheels — they dilute the wheel
+    # signal for token/damage-per-draw payoffs (Locust God, Nekusar).
+    # Tolerate both Python dict-repr variants (spaced and compact) so
+    # an importer formatting change doesn't silently zero out the
+    # pool.
     cur = conn.execute(
         "SELECT DISTINCT card_name FROM card_ports "
         "WHERE port_type = 'effect' AND event_class = 'Draw' "
         "AND card_name IN ("
         "  SELECT card_name FROM card_ports "
-        "  WHERE port_type = 'effect' AND event_class = 'Discard'"
+        "  WHERE port_type = 'effect' AND event_class = 'Discard' "
+        "  AND (raw_line LIKE '%''Mode'': ''Hand''%' "
+        "       OR raw_line LIKE '%''Mode'':''Hand''%')"
         ")"
     )
     results: list[PortComplement] = []
@@ -159,6 +196,189 @@ def _find_wheel_synergy(
                 )
             )
 
+    return results
+
+
+def _find_monarch_synergy(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Find monarch-related cards for monarch-granting commanders.
+
+    Queen Marchesa's ETB makes her monarch. The archetype pairs with:
+    - Other cards that also make you monarch (Courts, Thorn of the
+      Black Rose, Archon of Coronation) — stack monarch triggers.
+    - Pillowfort statics (``CantAttackUnless``: Ghostly Prison,
+      Windborn Muse, Propaganda) — protect the monarch so the upkeep
+      card draw keeps firing.
+
+    Pool ~60 cards, IDF ≈ 0.17. The archetype is narrow (Q. Marchesa
+    is the canonical commander in the golden set) so collisions with
+    other commanders are rare.
+    """
+    has_monarch = any(
+        (p.get("port_type") or "").strip() == "effect" and (p.get("event_class") or "").strip() == "BecomeMonarch"
+        for p in cmdr_ports
+    )
+    if not has_monarch:
+        return []
+
+    cur = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE (port_type = 'effect' AND event_class = 'BecomeMonarch') "
+        "   OR (port_type = 'static' AND event_class = 'CantAttackUnless')"
+    )
+    results: list[PortComplement] = []
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name not in cmdr_set:
+            results.append(
+                PortComplement(
+                    rule_id="monarch_synergy",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="BecomeMonarch",
+                    cand_event="monarch_or_pillowfort",
+                )
+            )
+    return results
+
+
+def _find_counter_target_payoff(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Find +1/+1 counter payoff creatures for counter-distribution commanders.
+
+    Ezuri, Claw of Progress distributes Experience-scaled +1/+1 counters
+    to other creatures each combat. The archetype rewards creatures
+    that BENEFIT from receiving counters:
+
+    - ``trigger=CounterAdded`` with P1P1 type (Fathom Mage draws, Bloodcrazed
+      Hoplite pumps on every counter).
+    - ``scales_with=CardCounters.P1P1`` (Gyre Sage taps for mana equal to
+      counters, Chasm Skulker grows, Cold-Eyed Selkie — any "counts its
+      own +1/+1 counters" card).
+
+    The effect-feeds-trigger rule's ``_cand_trigger_not_self`` gate
+    rejects Card.Self triggers globally; that's correct for Token
+    effects (a token isn't the trigger card) but wrong for targeted
+    PutCounter where the target IS the trigger card. This rule fills
+    that gap.
+
+    Fires only for XP-scaling commanders (Ezuri, Claw of Progress):
+    ``scales_with=YourCountersExperience`` + ``effect=PutCounter``
+    ``counter_type=P1P1`` targeting another creature. EDHREC data
+    shows Ghave/Heliod/Lathiel (P1P1 distributors without XP
+    scaling) prefer tribal or lifegain staples over pure counter
+    receivers, so restricting to XP scaling avoids false positives.
+    Pool ~280 cards.
+    """
+    has_xp_scaling = any(
+        (p.get("port_type") or "").strip() == "scales_with" and "YourCountersExperience" in (p.get("event_class") or "")
+        for p in cmdr_ports
+    )
+    if not has_xp_scaling:
+        return []
+
+    has_counter_target = False
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "effect":
+            continue
+        if (p.get("event_class") or "").strip() != "PutCounter":
+            continue
+        if (p.get("counter_type") or "").strip() != "P1P1":
+            continue
+        vf = p.get("valid_filter") or ""
+        if "Creature" in vf and "Self" not in vf:
+            has_counter_target = True
+            break
+    if not has_counter_target:
+        return []
+
+    cur = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports WHERE "
+        "(port_type = 'trigger' AND event_class = 'CounterAdded' "
+        " AND (counter_type = '' OR counter_type IS NULL OR counter_type = 'P1P1')) "
+        "OR (port_type = 'scales_with' AND event_class LIKE '%CardCounters.P1P1%')"
+    )
+    results: list[PortComplement] = []
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name not in cmdr_set:
+            results.append(
+                PortComplement(
+                    rule_id="counter_target_payoff",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="PutCounter_P1P1",
+                    cand_event="counter_receiver",
+                )
+            )
+    return results
+
+
+def _find_creature_untap_engine(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Find creature-untappers for tap-for-mana commanders.
+
+    Selvala, Heart of the Wilds taps herself for X green mana (where
+    X = greatest power you control). Untapping her repeatedly is the
+    combo:
+
+    - Quirion Ranger / Scryb Ranger: ``effect=Untap valid_filter=Creature``
+      with ``cost=return Forest`` — free untap per Forest.
+    - Hyrax Tower Scout: triggered creature-untap on ETB.
+    - Staff of Domination: ``effect=Untap`` (any target) plus its own
+      payoff modes (draw, GainLife).
+
+    ``untap_combo`` already covers the Urza/Emry artifact-untap pool
+    but explicitly excludes ``Untap valid_filter=Creature`` because
+    it hurt artifact-combo commanders. ``untap_synergy`` fires for
+    every tap-cost commander (Krenko, Kumena) so Selvala's canonical
+    untap engines get the same low IDF signal as tribal-tap cards.
+
+    Gate: commander has ``cost=tap`` plain (not ``tap_type``) + an
+    ``effect=Mana``. That's tap-for-mana creature commanders
+    (Selvala, Bloom Tender-style) and excludes artifact-tap engines
+    (Urza) and non-mana tap archetypes (Krenko). Pool ~150 cards.
+    """
+    has_plain_tap = False
+    has_mana_effect = False
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        if pt == "cost" and ev == "tap":
+            has_plain_tap = True
+        elif pt == "effect" and ev == "Mana":
+            has_mana_effect = True
+    if not (has_plain_tap and has_mana_effect):
+        return []
+
+    cur = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE port_type = 'effect' AND event_class = 'Untap' "
+        "AND (valid_filter LIKE '%Creature%' "
+        "     OR valid_filter = '' OR valid_filter IS NULL)"
+    )
+    results: list[PortComplement] = []
+    for r in cur.fetchall():
+        name = r["card_name"]
+        if name not in cmdr_set:
+            results.append(
+                PortComplement(
+                    rule_id="creature_untap_engine",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="tap_for_mana",
+                    cand_event="creature_untap",
+                )
+            )
     return results
 
 
@@ -283,13 +503,6 @@ def _find_flicker_synergy(
     # not their main strategy.
     has_self_etb = False
     etb_effect_count = 0
-    _HIGH_VALUE_EFFECTS = frozenset(
-        {
-            "Dig",
-            "GenericChoice",
-            "GainControl",
-        }
-    )
     for p in cmdr_ports:
         pt = (p.get("port_type") or "").strip()
         ev = (p.get("event_class") or "").strip()
@@ -298,7 +511,7 @@ def _find_flicker_synergy(
             zd = (p.get("zone_destination") or "").strip()
             if _trigger_only_matches_self(vf) and zd == "Battlefield":
                 has_self_etb = True
-        if pt == "effect" and ev in _HIGH_VALUE_EFFECTS:
+        if pt == "effect" and ev in _FLICKER_HIGH_VALUE_EFFECTS:
             etb_effect_count += 1
 
     if not has_self_etb or etb_effect_count == 0:
@@ -362,7 +575,6 @@ def _find_flicker_payoffs(
     paired Exile/All→Battlefield effect (true flicker, not bounce).
     N≈1902 ETB creatures with valuable effects.
     """
-    has_flicker_effect = False
     cmdr_has_exile = False
     cmdr_has_return = False
     for p in cmdr_ports:
@@ -376,9 +588,8 @@ def _find_flicker_payoffs(
             cmdr_has_exile = True
         if zo in ("Exile", "All") and zd == "Battlefield":
             cmdr_has_return = True
-    has_flicker_effect = cmdr_has_exile and cmdr_has_return
 
-    if not has_flicker_effect:
+    if not (cmdr_has_exile and cmdr_has_return):
         return []
 
     cur = conn.execute(
@@ -457,6 +668,29 @@ def _find_extra_land_plays(
     return results
 
 
+def _port_cares_about_lands(p: PortRow) -> bool:
+    """True when a commander port cares about lands entering battlefield.
+
+    Covers landfall triggers (``trigger=ChangesZone Land zd=Battlefield``)
+    and land reanimation effects (``effect=ChangeZone[All] Land
+    zo=Graveyard zd=Battlefield``).
+    """
+    pt = (p.get("port_type") or "").strip()
+    ev = (p.get("event_class") or "").strip()
+    vf = p.get("valid_filter") or ""
+    zo = (p.get("zone_origin") or "").strip()
+    zd = (p.get("zone_destination") or "").strip()
+    if pt == "trigger" and ev == "ChangesZone" and "Land" in vf and zd == "Battlefield":
+        return True
+    return (
+        pt == "effect"
+        and ev in ("ChangeZone", "ChangeZoneAll")
+        and "Land" in vf
+        and zo == "Graveyard"
+        and zd == "Battlefield"
+    )
+
+
 def _find_landfall_enablers(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
@@ -472,18 +706,12 @@ def _find_landfall_enablers(
     extra-land commanders; this finds extra-land candidates for landfall
     commanders.
     """
-    # Detect: commander has a ChangesZone Land trigger to battlefield
-    has_landfall = False
-    for p in cmdr_ports:
-        pt = (p.get("port_type") or "").strip()
-        ev = (p.get("event_class") or "").strip()
-        vf = p.get("valid_filter") or ""
-        zd = (p.get("zone_destination") or "").strip()
-        if pt == "trigger" and ev == "ChangesZone" and "Land" in vf and zd == "Battlefield":
-            has_landfall = True
-            break
-
-    if not has_landfall:
+    # Detect commander ports that care about lands entering battlefield:
+    # - ChangesZone Land trigger (Tatyova, Titania, Omnath — landfall)
+    # - ChangeZone Land effect from Graveyard to Battlefield (Windgrace —
+    #   land reanimation). Both archetypes share the canonical support
+    #   pool (Azusa, Crucible, Ramunap) plus landfall payoffs.
+    if not any(_port_cares_about_lands(p) for p in cmdr_ports):
         return []
 
     results: list[PortComplement] = []
