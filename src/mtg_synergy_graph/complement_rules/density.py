@@ -801,12 +801,16 @@ def _find_scales_with_density(
                         )
                     )
 
-        # LifeOppsLostThisTurn -> drain/damage effects
+        # LifeOppsLostThisTurn -> drain/damage effects.
+        # DamageAll is included so global pingers (Spear Spewer,
+        # Pyrohemia, Repercussion) match: for Rakdos-style commanders
+        # the LIFE LOSS is what feeds the trigger, regardless of whether
+        # the damage is single-target or global.
         elif "LifeOppsLost" in ev:
             cur = conn.execute(
                 "SELECT DISTINCT card_name FROM card_ports "
                 "WHERE port_type = 'effect' AND event_class IN "
-                "('LoseLife', 'DealDamage')"
+                "('LoseLife', 'DealDamage', 'DamageAll')"
             )
             for r in cur.fetchall():
                 name = r["card_name"]

@@ -840,13 +840,16 @@ class TestFindScalesWithDensity:
         assert "Shield Sphere" in _candidates(results)
 
     def test_life_lost_scaling(self, conn):
-        """Commander with LifeOppsLost scales_with should find drain/damage effects."""
+        """Commander with LifeOppsLost scales_with should find drain/damage effects,
+        including DamageAll pingers like Spear Spewer."""
         _insert_card(conn, "Rakdos", card_types="Creature", types="Creature")
         _insert_card(conn, "Lightning Bolt", card_types="Instant")
         _insert_card(conn, "Drain Life", card_types="Sorcery")
+        _insert_card(conn, "Spear Spewer", card_types="Creature")
         _insert_port(conn, "Rakdos", "scales_with", "LifeOppsLostThisTurn")
         _insert_port(conn, "Lightning Bolt", "effect", "DealDamage")
         _insert_port(conn, "Drain Life", "effect", "LoseLife")
+        _insert_port(conn, "Spear Spewer", "effect", "DamageAll")
 
         cmdr_ports = [
             dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Rakdos",)).fetchall()
@@ -855,6 +858,10 @@ class TestFindScalesWithDensity:
         cands = _candidates(results)
         assert "Lightning Bolt" in cands
         assert "Drain Life" in cands
+        # Regression: global-damage pingers (DamageAll) must match too —
+        # Spear Spewer / Pyrohemia / Repercussion all enable Rakdos's
+        # cost reduction. Previously the query hard-coded DealDamage/LoseLife.
+        assert "Spear Spewer" in cands
         assert any(r.cmdr_event == "scales_opp_life_lost" for r in results)
 
     def test_no_scales_with_returns_empty(self, conn):
