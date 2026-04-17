@@ -85,6 +85,12 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "toughness_synergy": "scaling",
     "cascade_value": "port_match",
     "flicker_payoff": "port_match",
+    "dies_drain": "sacrifice_synergy",
+    "gy_loader": "graveyard_synergy",
+    "untap_combo": "port_match",
+    "attack_payoffs": "port_match",
+    "exalted_density": "scaling",
+    "aura_equipment_support": "scaling",
 }
 
 # ---------------------------------------------------------------------------
@@ -327,6 +333,45 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # can displace spell staples from top-30. The 0.5 multiplier
     # preserves the gain magnitudes while shrinking off-target damage.
     "token_etb_damage": 0.5,
+    # dies_drain: payoff cards (Blood Artist, Grim Haruspex, Pitiless
+    # Plunderer) are pure consequence cards — they don't feed the
+    # engine the way sac-cost creatures do, so they accumulate fewer
+    # rule matches (typically 3 vs 6) and were drowned out without a
+    # boost. 1.5× lifts payoff cards into view without displacing
+    # tribal lords on Zombie/Sliver dies-commanders (Wilhelt's Death
+    # Baron, Cemetery Reaper). Pool size is defined by
+    # ``_bulk_load_dies_drain_cards``.
+    "dies_drain": 1.5,
+    # gy_loader: 49-card tutor pool → IDF ≈ 0.177. A single matching
+    # rule leaves tutor sorceries (Buried Alive, Entomb) at rank ~180
+    # for Karador/Muldrotha because they have no other port matches
+    # (no ETB, no tribal hook, no triggers). 1.5× lifts them into the
+    # range where reanimator commanders actually see them; the
+    # original ``trigger_effect+graveyard_filler+entomb`` emission
+    # stays put so the card accumulates two distinct rule matches
+    # plus the breadth bonus.
+    "gy_loader": 1.5,
+    # untap_combo: combo cards are mostly instants/enchantments/
+    # statics (Dramatic Reversal, Unwinding Clock, Paradox Engine)
+    # that match NO other rules — Urza's top-30 is a tribal_density
+    # tie at 0.50. 3× lifts specialist combo cards enough that,
+    # combined with breadth bonuses on cards that also match
+    # tribal_density (Voltaic Servant, Clock of Omens), they actually
+    # crack top-30. Pool is defined by ``_bulk_load_untap_combo_cards``.
+    "untap_combo": 3.0,
+    # attack_payoffs: ~400-card pool → IDF ≈ 0.115. The existing
+    # panharmonicon rule already matches these cards for Isshin but
+    # does so against a 1000+ pool, burying Hi-Syn attack creatures
+    # (Adeline, Krenko Tin Street) in a flat tier. 1.5× on a narrower
+    # value-effect-filtered pool puts real attack payoffs above the
+    # tier of staple equipment noise.
+    "attack_payoffs": 1.5,
+    # aura_equipment_support: ~30-card pool → IDF ≈ 0.20. These support
+    # cards (Sigarda's Aid, Sram, Puresteel Paladin) have exactly one
+    # rule match on voltron commanders and sit below the ``scaling``
+    # (voltron flat 0.3) floor that every random Aura/Equipment rides.
+    # 2.5× puts them above the floor so the enablers crack top-30.
+    "aura_equipment_support": 2.5,
 }
 
 

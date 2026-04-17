@@ -1,11 +1,13 @@
 """Tests for graveyard-related complement matchers.
 
 Uses an in-memory SQLite database with minimal schema to exercise every
-branch of the four functions in complement_rules.graveyard:
+branch of the functions in complement_rules.graveyard:
   - _find_graveyard_fillers
   - _find_artifact_recursion
   - _find_copy_synergy
   - _find_etb_sac_targets
+  - _find_dies_drain
+  - _find_gy_loader
 """
 
 from __future__ import annotations
@@ -17,8 +19,10 @@ import pytest
 from mtg_synergy_graph.complement_rules.graveyard import (
     _find_artifact_recursion,
     _find_copy_synergy,
+    _find_dies_drain,
     _find_etb_sac_targets,
     _find_graveyard_fillers,
+    _find_gy_loader,
 )
 
 # ---------------------------------------------------------------------------
@@ -1015,3 +1019,425 @@ class TestFindEtbSacTargets:
             assert r.cmdr_event == "graveyard_reanimate"
             assert r.cand_event == "etb_sac_creature"
             assert r.direction == "synergy"
+
+
+# ===========================================================================
+# _find_dies_drain
+# ===========================================================================
+
+
+def _dies_trigger(conn: sqlite3.Connection, card_name: str, valid_filter: str = "Creature.Other+YouCtrl") -> None:
+    _insert_port(
+        conn,
+        card_name,
+        "trigger",
+        "ChangesZone",
+        valid_filter=valid_filter,
+        zone_origin="Battlefield",
+        zone_destination="Graveyard",
+    )
+
+
+def _drain_effect(conn: sqlite3.Connection, card_name: str) -> None:
+    _insert_port(conn, card_name, "effect", "LoseLife", valid_filter="Player.Opponent")
+
+
+class TestFindDiesDrain:
+    """Tests for _find_dies_drain."""
+
+    def test_no_dies_trigger_commander_returns_empty(self, conn) -> None:
+        """Commander without a BF→GY creature-dies trigger is gated out."""
+        _insert_card(conn, "Blood Artist")
+        _dies_trigger(conn, "Blood Artist")
+        _drain_effect(conn, "Blood Artist")
+        conn.commit()
+
+        # Commander with only an ETB trigger — not a dies-commander.
+        ports = [
+            _port(
+                "Generic Cmdr",
+                "trigger",
+                "ChangesZone",
+                valid_filter="Card.Self",
+                zone_destination="Battlefield",
+            )
+        ]
+        assert _find_dies_drain(conn, ports, {"Generic Cmdr"}) == []
+
+    def test_card_self_only_filter_rejected(self, conn) -> None:
+        """A ``Card.Self``-only BF→GY trigger (just "when I die") is NOT
+        a qualifying dies-commander gate."""
+        _insert_card(conn, "Blood Artist")
+        _dies_trigger(conn, "Blood Artist")
+        _drain_effect(conn, "Blood Artist")
+        conn.commit()
+
+        ports = [
+            _port(
+                "Self-Only Cmdr",
+                "trigger",
+                "ChangesZone",
+                valid_filter="Card.Self",
+                zone_origin="Battlefield",
+                zone_destination="Graveyard",
+            )
+        ]
+        assert _find_dies_drain(conn, ports, {"Self-Only Cmdr"}) == []
+
+    def test_creature_type_filter_activates(self, conn) -> None:
+        """``Creature.Other`` dies-trigger commander matches payoffs."""
+        _insert_card(conn, "Meren of Clan Nel Toth")
+        _insert_card(conn, "Blood Artist")
+        _dies_trigger(conn, "Blood Artist")
+        _drain_effect(conn, "Blood Artist")
+        conn.commit()
+
+        ports = [
+            _port(
+                "Meren of Clan Nel Toth",
+                "trigger",
+                "ChangesZone",
+                valid_filter="Creature.Other+YouCtrl",
+                zone_origin="Battlefield",
+                zone_destination="Graveyard",
+            )
+        ]
+        results = _find_dies_drain(conn, ports, {"Meren of Clan Nel Toth"})
+        assert "Blood Artist" in _candidates(results)
+        assert all(r.rule_id == "dies_drain" for r in results)
+
+    def test_creature_subtype_filter_activates(self, conn) -> None:
+        """Subtype-scoped dies-triggers (Wilhelt's ``Zombie.Other``,
+        Slimefoot's ``Saproling.YouCtrl``, Omnath's ``Elemental.Other``)
+        also count as creature-dies commanders."""
+        _insert_card(conn, "Wilhelt, the Rotcleaver")
+        _insert_card(conn, "Pitiless Plunderer")
+        _dies_trigger(conn, "Pitiless Plunderer", "Creature.Other+YouCtrl")
+        _insert_port(conn, "Pitiless Plunderer", "effect", "Token")
+        conn.commit()
+
+        ports = [
+            _port(
+                "Wilhelt, the Rotcleaver",
+                "trigger",
+                "ChangesZone",
+                valid_filter="Zombie.Other+YouCtrl+withoutDecayed",
+                zone_origin="Battlefield",
+                zone_destination="Graveyard",
+            )
+        ]
+        results = _find_dies_drain(conn, ports, {"Wilhelt, the Rotcleaver"})
+        assert "Pitiless Plunderer" in _candidates(results)
+
+    def test_teysa_panharmonicon_static_activates(self, conn) -> None:
+        """Teysa Karlov has no creature-dies trigger of her own — her
+        ``static: Panharmonicon`` doubles other death triggers. The
+        gate should still fire for her via the Panharmonicon branch
+        (``Origin: Battlefield`` + ``Destination: Graveyard`` +
+        ``ValidCause: Creature``)."""
+        _insert_card(conn, "Teysa Karlov")
+        _insert_card(conn, "Blood Artist")
+        _dies_trigger(conn, "Blood Artist")
+        _drain_effect(conn, "Blood Artist")
+        conn.commit()
+
+        ports = [
+            _port(
+                "Teysa Karlov",
+                "static",
+                "Panharmonicon",
+                raw_line=(
+                    "{'Mode': 'Panharmonicon',"
+                    " 'ValidMode': 'ChangesZone,ChangesZoneAll',"
+                    " 'ValidCard': 'Permanent.YouCtrl',"
+                    " 'ValidCause': 'Creature',"
+                    " 'Origin': 'Battlefield',"
+                    " 'Destination': 'Graveyard'}"
+                ),
+            )
+        ]
+        results = _find_dies_drain(conn, ports, {"Teysa Karlov"})
+        assert "Blood Artist" in _candidates(results)
+
+    def test_panharmonicon_without_creature_valid_cause_rejected(self, conn) -> None:
+        """A Panharmonicon static that doubles *non-creature* death
+        triggers (hypothetical Land-dies or Artifact-dies doubler)
+        should NOT qualify for the dies-drain payoff pool."""
+        _insert_card(conn, "Blood Artist")
+        _dies_trigger(conn, "Blood Artist")
+        _drain_effect(conn, "Blood Artist")
+        conn.commit()
+
+        ports = [
+            _port(
+                "LandDoubler",
+                "static",
+                "Panharmonicon",
+                raw_line=(
+                    "{'Mode': 'Panharmonicon',"
+                    " 'ValidMode': 'ChangesZone',"
+                    " 'ValidCause': 'Land',"
+                    " 'Origin': 'Battlefield',"
+                    " 'Destination': 'Graveyard'}"
+                ),
+            )
+        ]
+        assert _find_dies_drain(conn, ports, {"LandDoubler"}) == []
+
+    def test_commander_excluded_from_results(self, conn) -> None:
+        """The commander never appears in its own recommendations — even
+        if its port shape matches the candidate pool."""
+        _insert_card(conn, "Judith, the Scourge Diva")
+        # Judith herself has a BF→GY Creature dies-trigger with a DealDamage
+        # effect, so she'd match her own candidate shape without the
+        # cmdr_set guard.
+        _dies_trigger(conn, "Judith, the Scourge Diva", "Creature.YouCtrl+!token")
+        _insert_port(
+            conn,
+            "Judith, the Scourge Diva",
+            "effect",
+            "DealDamage",
+            valid_filter="Player.Opponent",
+        )
+        conn.commit()
+
+        ports = [
+            _port(
+                "Judith, the Scourge Diva",
+                "trigger",
+                "ChangesZone",
+                valid_filter="Creature.YouCtrl+!token",
+                zone_origin="Battlefield",
+                zone_destination="Graveyard",
+            )
+        ]
+        results = _find_dies_drain(conn, ports, {"Judith, the Scourge Diva"})
+        assert "Judith, the Scourge Diva" not in _candidates(results)
+
+    def test_self_growth_only_effect_rejected(self, conn) -> None:
+        """Cards whose only "payoff" is PutCounter on self (self-growth,
+        e.g. Dauthi Ghoul) are NOT in the candidate pool — these are
+        weak payoffs that displace lords on tribal dies-commanders."""
+        _insert_card(conn, "Self-Growth Only")
+        _dies_trigger(conn, "Self-Growth Only")
+        _insert_port(
+            conn,
+            "Self-Growth Only",
+            "effect",
+            "PutCounter",
+            valid_filter="Self",
+        )
+        conn.commit()
+
+        ports = [
+            _port(
+                "Cmdr",
+                "trigger",
+                "ChangesZone",
+                valid_filter="Creature.Other+YouCtrl",
+                zone_origin="Battlefield",
+                zone_destination="Graveyard",
+            )
+        ]
+        results = _find_dies_drain(conn, ports, {"Cmdr"})
+        assert "Self-Growth Only" not in _candidates(results)
+
+    def test_complement_has_correct_metadata(self, conn) -> None:
+        """Complements carry the ``dies_drain`` rule_id and event metadata."""
+        _insert_card(conn, "Cmdr")
+        _insert_card(conn, "Grim Haruspex")
+        _dies_trigger(conn, "Grim Haruspex", "Creature.!token+Other+YouCtrl")
+        _insert_port(conn, "Grim Haruspex", "effect", "Draw", valid_filter="You")
+        conn.commit()
+
+        ports = [
+            _port(
+                "Cmdr",
+                "trigger",
+                "ChangesZone",
+                valid_filter="Creature.Other+YouCtrl",
+                zone_origin="Battlefield",
+                zone_destination="Graveyard",
+            )
+        ]
+        results = _find_dies_drain(conn, ports, {"Cmdr"})
+        haruspex = next(r for r in results if r.candidate == "Grim Haruspex")
+        assert haruspex.rule_id == "dies_drain"
+        assert haruspex.direction == "synergy"
+        assert haruspex.cmdr_event == "creature_dies"
+        assert haruspex.cand_event == "dies_payoff"
+
+
+# ===========================================================================
+# _find_gy_loader
+# ===========================================================================
+
+
+def _entomb_tutor(conn: sqlite3.Connection, card_name: str) -> None:
+    """Insert a Library→Graveyard tutor port (Buried Alive, Entomb, …)."""
+    _insert_port(
+        conn,
+        card_name,
+        "effect",
+        "ChangeZone",
+        zone_origin="Library",
+        zone_destination="Graveyard",
+    )
+
+
+class TestFindGyLoader:
+    """Tests for _find_gy_loader."""
+
+    def test_no_reanimator_returns_empty(self, conn) -> None:
+        """Commander with no GY-reanimation / MayPlay-creature signal
+        is gated out even if it has a graveyard interaction."""
+        _insert_card(conn, "Buried Alive")
+        _entomb_tutor(conn, "Buried Alive")
+        conn.commit()
+
+        ports = [_port("Generic Cmdr", "trigger", "SpellCast")]
+        assert _find_gy_loader(conn, ports, {"Generic Cmdr"}) == []
+
+    def test_changezone_graveyard_to_battlefield_activates(self, conn) -> None:
+        """Meren-style ``effect: ChangeZone orig=Graveyard dest=Battlefield``
+        reanimators fire the rule."""
+        _insert_card(conn, "Meren of Clan Nel Toth")
+        _insert_card(conn, "Buried Alive")
+        _entomb_tutor(conn, "Buried Alive")
+        conn.commit()
+
+        ports = [
+            _port(
+                "Meren of Clan Nel Toth",
+                "effect",
+                "ChangeZone",
+                valid_filter="Creature.YouOwn",
+                zone_origin="Graveyard",
+                zone_destination="Battlefield",
+            )
+        ]
+        results = _find_gy_loader(conn, ports, {"Meren of Clan Nel Toth"})
+        assert "Buried Alive" in _candidates(results)
+        assert all(r.rule_id == "gy_loader" for r in results)
+
+    def test_mayplay_creature_activates(self, conn) -> None:
+        """Karador-style MayPlay-from-Graveyard on creatures fires."""
+        _insert_card(conn, "Karador, Ghost Chieftain")
+        _insert_card(conn, "Entomb")
+        _entomb_tutor(conn, "Entomb")
+        conn.commit()
+
+        ports = [
+            _port(
+                "Karador, Ghost Chieftain",
+                "static",
+                "Continuous",
+                raw_line=(
+                    "{'Mode': 'Continuous', 'Affected': 'Creature.nonLand+YouCtrl',"
+                    " 'MayPlay': 'True', 'AffectedZone': 'Graveyard'}"
+                ),
+            )
+        ]
+        results = _find_gy_loader(conn, ports, {"Karador, Ghost Chieftain"})
+        assert "Entomb" in _candidates(results)
+
+    def test_mayplay_instant_sorcery_only_rejected(self, conn) -> None:
+        """Kess — MayPlay limited to Instant/Sorcery — does NOT want
+        Library→GY tutors (those put creatures in GY, Kess plays
+        non-creatures from GY)."""
+        _insert_card(conn, "Kess, Dissident Mage")
+        _insert_card(conn, "Buried Alive")
+        _entomb_tutor(conn, "Buried Alive")
+        conn.commit()
+
+        ports = [
+            _port(
+                "Kess, Dissident Mage",
+                "static",
+                "Continuous",
+                raw_line=(
+                    "{'Mode': 'Continuous', 'Affected': 'Instant.YouCtrl,Sorcery.YouCtrl',"
+                    " 'MayPlay': 'True', 'AffectedZone': 'Graveyard'}"
+                ),
+            )
+        ]
+        assert _find_gy_loader(conn, ports, {"Kess, Dissident Mage"}) == []
+
+    def test_discard_cost_alone_rejected(self, conn) -> None:
+        """Borborygmos-style discard cost without any reanimation /
+        creature-recast signal does NOT qualify — the discard is for
+        land themes (retrace / Dredge), not GY-fill for reanimator."""
+        _insert_card(conn, "Borborygmos Enraged")
+        _insert_card(conn, "Buried Alive")
+        _entomb_tutor(conn, "Buried Alive")
+        conn.commit()
+
+        ports = [
+            _port("Borborygmos Enraged", "effect", "Dig", valid_filter="You"),
+            _port("Borborygmos Enraged", "cost", "discard"),
+        ]
+        assert _find_gy_loader(conn, ports, {"Borborygmos Enraged"}) == []
+
+    def test_triggered_card_reanimation_rejected(self, conn) -> None:
+        """Tergrid-style reanimation of an opponent's discarded/
+        sacrificed card (``valid_filter='TriggeredCard'``) is NOT a
+        reason to tutor YOUR creatures into YOUR graveyard."""
+        _insert_card(conn, "Tergrid, God of Fright")
+        _insert_card(conn, "Buried Alive")
+        _entomb_tutor(conn, "Buried Alive")
+        conn.commit()
+
+        ports = [
+            _port(
+                "Tergrid, God of Fright",
+                "effect",
+                "ChangeZone",
+                valid_filter="TriggeredCard",
+                zone_origin="Graveyard",
+                zone_destination="Battlefield",
+            )
+        ]
+        assert _find_gy_loader(conn, ports, {"Tergrid, God of Fright"}) == []
+
+    def test_commander_excluded_from_results(self, conn) -> None:
+        """Commander itself never appears in its own recommendations."""
+        _insert_card(conn, "Cmdr Tutor")
+        _entomb_tutor(conn, "Cmdr Tutor")
+        conn.commit()
+
+        ports = [
+            _port(
+                "Cmdr Tutor",
+                "effect",
+                "ChangeZone",
+                valid_filter="Creature.YouCtrl",
+                zone_origin="Graveyard",
+                zone_destination="Battlefield",
+            )
+        ]
+        results = _find_gy_loader(conn, ports, {"Cmdr Tutor"})
+        assert "Cmdr Tutor" not in _candidates(results)
+
+    def test_complement_has_correct_metadata(self, conn) -> None:
+        """Complements carry the ``gy_loader`` rule_id and event metadata."""
+        _insert_card(conn, "Cmdr")
+        _insert_card(conn, "Jarad's Orders")
+        _entomb_tutor(conn, "Jarad's Orders")
+        conn.commit()
+
+        ports = [
+            _port(
+                "Cmdr",
+                "effect",
+                "ChangeZone",
+                valid_filter="Creature.YouCtrl",
+                zone_origin="Graveyard",
+                zone_destination="Battlefield",
+            )
+        ]
+        results = _find_gy_loader(conn, ports, {"Cmdr"})
+        jarad = next(r for r in results if r.candidate == "Jarad's Orders")
+        assert jarad.rule_id == "gy_loader"
+        assert jarad.direction == "synergy"
+        assert jarad.cmdr_event == "reanimator"
+        assert jarad.cand_event == "library_to_gy_tutor"

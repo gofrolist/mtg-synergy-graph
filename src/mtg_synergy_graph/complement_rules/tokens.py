@@ -331,6 +331,75 @@ def _find_static_strategy(
                     )
                 )
 
+    # Exalted density: the Rafiq-style narrow pool. Every other Exalted
+    # creature stacks the +1/+1 on the lone attacker, so Exalted is a
+    # self-reinforcing keyword-tribal. The generic ``voltron`` rule
+    # above matches ~2000 Auras/Equipment and buries the 34 real
+    # Exalted cards (Finest Hour, Sublime Archangel, Giltspire Avenger,
+    # Battlegrace Angel) — this sub-rule gives them their own narrow
+    # IDF bucket (~0.20/card, 3× higher than voltron's).
+    has_exalted = any(
+        (p.get("port_type") or "").strip() == "keyword" and (p.get("event_class") or "").strip() == "Exalted"
+        for p in cmdr_ports
+    )
+    if has_exalted:
+        cur = conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports WHERE port_type = 'keyword' AND event_class = 'Exalted'"
+        )
+        for r in cur.fetchall():
+            name = r["card_name"]
+            if name not in cmdr_set:
+                results.append(
+                    PortComplement(
+                        rule_id="exalted_density",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="exalted",
+                        cand_event="exalted_keyword",
+                    )
+                )
+
+    # Aura / Equipment support pool: a narrow set of cards that *enable*
+    # voltron by drawing off attachments, discounting them, or letting
+    # you deploy them for free (Sigarda's Aid, Sram, Puresteel Paladin,
+    # Danitha Capashen, Kor Spiritdancer). Gate on commanders that
+    # scale with BOTH Aura *and* Equipment (Wyleth), since the support
+    # pool is heavy on Equipment-only enablers (Puresteel, Stoneforge-
+    # style). Pure-Aura commanders like Uril (``Aura.Attached`` only)
+    # regress with this pool because their EDHREC Hi-Syn is pure
+    # power-pumping Auras (Ethereal Armor, Rancor, Armadillo Cloak)
+    # that this rule doesn't cover.
+    wants_attachment_support = any(
+        (p.get("port_type") or "").strip() == "scales_with" and "Equipment" in (p.get("valid_filter") or "")
+        for p in cmdr_ports
+    )
+    if wants_attachment_support:
+        cur = conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports WHERE ("
+            "  (port_type='trigger' AND event_class='SpellCast'"
+            "   AND (valid_filter LIKE '%Aura%' OR valid_filter LIKE '%Equipment%'))"
+            " OR (port_type='static' AND event_class='ReduceCost'"
+            "   AND (raw_line LIKE '%Aura%' OR raw_line LIKE '%Equipment%'))"
+            " OR (port_type='static' AND event_class='CastWithFlash'"
+            "   AND (raw_line LIKE '%Aura%' OR raw_line LIKE '%Equipment%'))"
+            " OR (port_type='trigger' AND event_class='ChangesZone'"
+            "   AND (valid_filter LIKE '%Equipment%' OR valid_filter LIKE '%Aura%')"
+            "   AND zone_destination='Battlefield')"
+            ")"
+        )
+        for r in cur.fetchall():
+            name = r["card_name"]
+            if name not in cmdr_set:
+                results.append(
+                    PortComplement(
+                        rule_id="aura_equipment_support",
+                        direction="synergy",
+                        candidate=name,
+                        cmdr_event="attachment_scaling",
+                        cand_event="aura_equipment_enabler",
+                    )
+                )
+
     return results
 
 

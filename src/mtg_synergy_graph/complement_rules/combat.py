@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 from ..graph_engine import _trigger_only_matches_self
+from ..penalties import CandidateCache
 from .core import (
     PortComplement,
     PortRow,
@@ -285,3 +286,80 @@ def _find_changeszone_resonance(
             break
 
     return results
+
+
+def _has_creature_attack_trigger(cmdr_ports: list[PortRow]) -> bool:
+    """Return True iff the commander AMPLIFIES other creature-attack
+    triggers via an Isshin-style ``Panharmonicon`` static.
+
+    Narrow by design. Commanders that *have* an Attacks trigger
+    themselves (Edgar Markov, Adeline, Rafiq, The Ur-Dragon) are
+    already served by existing ``trigger_resonance`` /
+    ``combat_enhancer`` rules plus their tribal / voltron axes —
+    stacking ``attack_payoffs`` on top promoted generic attack
+    creatures over the tribal / Aura picks that their EDHREC Hi-Syn
+    actually values (Rafiq NDCG dropped from 0.16 to 0.02 when the
+    broader gate was in place). Only the Panharmonicon shape
+    consistently benefits: Isshin has no trigger of his own, so a
+    dedicated attack-payoff pool is additive rather than displacing.
+    """
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        if pt == "static" and ev == "Panharmonicon":
+            # Normalise whitespace in the raw dict repr so tests
+            # don't have to replicate Forge's exact pretty-printing.
+            raw = "".join((p.get("raw_line") or "").split())
+            if "Attacks" in raw and "'ValidCause':'Creature'" in raw:
+                return True
+    return False
+
+
+def _find_attack_payoffs(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+    candidate_cache: CandidateCache | None = None,
+) -> list[PortComplement]:
+    """Match attack-trigger payoff cards for combat-trigger commanders.
+
+    Parallel to ``_find_dies_drain``. Isshin doubles every creature-
+    attack trigger; Adeline, Rafiq, Edgar Markov care about attack
+    events directly. The Hi-Syn EDHREC cards for these commanders
+    (Krenko Tin Street, Captain Lannery Storm, Adeline, Mardu
+    Ascendancy, Sword of the Animist) all share a single distinctive
+    port pair: ``Attacks``/``AttackersDeclared`` trigger + a
+    value-producing effect (Token / +1/+1 / Draw / Mana / land cheat).
+
+    The existing ``panharmonicon`` rule already matches these cards
+    for Isshin, but with a 1000+ card pool the IDF is tiny and they
+    tie with pure staples on CMC. This dedicated rule gives them a
+    narrower pool (~400) plus a 1.5× quality multiplier so the real
+    attack-trigger payoffs crack top-30.
+
+    Gate: ``_has_creature_attack_trigger`` — Panharmonicon static over
+    Attacks+Creature only. Commanders that themselves have an Attacks
+    trigger (Edgar Markov, Rafiq) are intentionally *not* gated in;
+    see ``_has_creature_attack_trigger`` for the rationale.
+    """
+    if not _has_creature_attack_trigger(cmdr_ports):
+        return []
+
+    if candidate_cache is not None:
+        pool: frozenset[str] = candidate_cache.attack_payoff_cards
+    else:
+        from ..penalties import _bulk_load_attack_payoff_cards
+
+        pool = _bulk_load_attack_payoff_cards(conn)
+
+    return [
+        PortComplement(
+            rule_id="attack_payoffs",
+            direction="synergy",
+            candidate=name,
+            cmdr_event="creature_attacks",
+            cand_event="attack_payoff",
+        )
+        for name in pool
+        if name not in cmdr_set
+    ]

@@ -237,6 +237,39 @@ class CandidateCache:
     #: batch run from ~80 s into a single query. Consumed by
     #: ``_find_token_etb_damage``.
     token_etb_damage_cards: frozenset[str]
+    #: Names of cards matching the "dies-drain" aristocrats-payoff shape —
+    #: a ``ChangesZone Battlefield→Graveyard`` trigger whose ``valid_filter``
+    #: references ``Creature`` (Blood Artist, Zulaport Cutthroat, Pitiless
+    #: Plunderer, Grim Haruspex, Midnight Reaper, Elenda, …). Commander-
+    #: independent, so cached here and consumed by ``_find_dies_drain``.
+    dies_drain_cards: frozenset[str]
+    #: Names of Library→Graveyard tutor cards (Buried Alive, Entomb,
+    #: Jarad's Orders, Final Parting, Vile Entomber, Corpse Connoisseur,
+    #: …). The single shape ``effect: ChangeZone / ChangeZoneAll`` with
+    #: ``zone_origin='Library'`` + ``zone_destination='Graveyard'``.
+    #: Already emitted by ``_find_graveyard_fillers`` under
+    #: ``rule_id='trigger_effect'``; the second emission under
+    #: ``rule_id='gy_loader'`` (via ``_find_gy_loader``) gives tutors a
+    #: distinct bucket and a 1.5× boost so they can compete for top-30
+    #: in reanimator decks.
+    gy_loader_cards: frozenset[str]
+    #: Names of attack-trigger payoff cards — creatures and permanents
+    #: whose ``Attacks``/``AttackersDeclared`` trigger produces a Token,
+    #: a +1/+1 counter on self, mana, a draw, or ChangeZone-from-library
+    #: (Adeline, Krenko Tin Street, Captain Lannery Storm, Anim Pakal,
+    #: Mardu Ascendancy, Skyknight Vanguard, Sword of the Animist,
+    #: Legion's Landing). Consumed by ``_find_attack_payoffs`` for
+    #: combat-trigger commanders (Isshin's Panharmonicon doubler plus
+    #: any commander with a creature-scoped Attacks trigger).
+    attack_payoff_cards: frozenset[str]
+    #: Names of broad-scope untap cards — mass untap (Dramatic Reversal,
+    #: Paradox Engine, Turnabout, Seedborn Muse), artifact-targeted
+    #: untap (Voltaic Key, Clock of Omens), permanent/targeted untap
+    #: (Fatestitcher), and static untap-at-other-players'-untap-steps
+    #: (Unwinding Clock). Distinct from ``_find_untap_synergy`` which
+    #: handles creature-only Quirion-Ranger-style untaps; consumed by
+    #: ``_find_untap_combo``.
+    untap_combo_cards: frozenset[str]
 
 
 def build_candidate_cache(conn: sqlite3.Connection) -> CandidateCache:
@@ -260,6 +293,10 @@ def build_candidate_cache(conn: sqlite3.Connection) -> CandidateCache:
         proliferate_cards=_bulk_load_proliferate_cards(conn),
         p1p1_counter_producers=_bulk_load_p1p1_counter_producers(conn),
         token_etb_damage_cards=_bulk_load_token_etb_damage_cards(conn),
+        dies_drain_cards=_bulk_load_dies_drain_cards(conn),
+        gy_loader_cards=_bulk_load_gy_loader_cards(conn),
+        attack_payoff_cards=_bulk_load_attack_payoff_cards(conn),
+        untap_combo_cards=_bulk_load_untap_combo_cards(conn),
     )
 
 
@@ -503,6 +540,145 @@ def _bulk_load_token_etb_damage_cards(conn: sqlite3.Connection) -> frozenset[str
         "AND e.port_type = 'effect' "
         "AND e.event_class = 'DealDamage' "
         "AND (e.valid_filter LIKE '%Player%' OR e.valid_filter LIKE '%Opponent%')"
+    ).fetchall()
+    return frozenset(row["card_name"] for row in rows)
+
+
+def _bulk_load_dies_drain_cards(conn: sqlite3.Connection) -> frozenset[str]:
+    """Cards matching the aristocrats dies-payoff shape.
+
+    Trigger half: ``ChangesZone Battlefield→Graveyard`` with a
+    ``valid_filter`` that mentions ``Creature`` — so we skip the ~680
+    ``Card.Self``-only "when I die" triggers that don't pay off
+    arbitrary creature deaths.
+
+    Effect half: restricted to *externally-visible* payoffs — drain
+    (LoseLife/DealDamage targeting a Player/Opponent), Draw, Token, or
+    Mana. Self-growth effects (``PutCounter Self``) and pure own-side
+    lifegain are intentionally excluded: they're weaker payoffs and
+    their inclusion pushed tribal lords out of Wilhelt's top-30
+    (Abattoir Ghoul, Dread Slaver displacing Death Baron / Cemetery
+    Reaper). The 118-card result keeps Blood Artist, Zulaport Cutthroat,
+    Cruel Celebrant, Grim Haruspex, Midnight Reaper, Pitiless Plunderer,
+    Elenda and Bastion of Remembrance.
+
+    Commander-independent, so cached here and consumed by
+    ``_find_dies_drain``.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT t.card_name FROM card_ports t "
+        "JOIN card_ports e ON e.card_name = t.card_name "
+        "WHERE t.port_type = 'trigger' "
+        "AND t.event_class = 'ChangesZone' "
+        "AND t.zone_origin = 'Battlefield' "
+        "AND t.zone_destination = 'Graveyard' "
+        "AND t.valid_filter LIKE '%Creature%' "
+        "AND e.port_type = 'effect' "
+        "AND ("
+        "     (e.event_class = 'LoseLife' AND e.valid_filter LIKE '%Player%')"
+        "  OR (e.event_class = 'DealDamage' AND e.valid_filter LIKE '%Player%')"
+        "  OR (e.event_class = 'Token')"
+        "  OR (e.event_class = 'Draw' AND e.valid_filter LIKE '%You%')"
+        "  OR (e.event_class = 'Mana')"
+        ")"
+    ).fetchall()
+    return frozenset(row["card_name"] for row in rows)
+
+
+def _bulk_load_gy_loader_cards(conn: sqlite3.Connection) -> frozenset[str]:
+    """Library→Graveyard tutor cards (Buried Alive, Entomb, Jarad's
+    Orders, Final Parting, Vile Entomber, …).
+
+    Pool size ~49. Commander-independent and also queried by
+    ``_find_graveyard_fillers`` — duplicating the query here lets the
+    new ``_find_gy_loader`` rule emit its own complements under a
+    distinct ``rule_id`` so tutors accumulate two rule matches
+    (trigger_effect + gy_loader) instead of one.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE port_type = 'effect' "
+        "AND event_class IN ('ChangeZone', 'ChangeZoneAll') "
+        "AND zone_origin = 'Library' "
+        "AND zone_destination = 'Graveyard'"
+    ).fetchall()
+    return frozenset(row["card_name"] for row in rows)
+
+
+def _bulk_load_attack_payoff_cards(conn: sqlite3.Connection) -> frozenset[str]:
+    """Cards whose ``Attacks`` or ``AttackersDeclared`` trigger produces
+    a distinct piece of value on every attack — the shape that makes
+    Isshin-style attack-trigger-doubler commanders tick.
+
+    Effect half restricted to value-generating events: Token (Adeline,
+    Mardu Ascendancy, Captain Lannery Storm), ``PutCounter Self`` or
+    ``PutCounter Creature.YouCtrl`` (Anim Pakal, Krenko Tin Street),
+    ``Draw`` (Bident of Thassa, Reconnaissance Mission), ``Mana``
+    (Legion's Landing flipping), ``ChangeZone Library→*`` (Sword of
+    the Animist, Etali-style land cheats).
+
+    Pool ≈ 400 cards. Commander-independent, cached here and consumed
+    by ``_find_attack_payoffs``.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT t.card_name FROM card_ports t "
+        "JOIN card_ports e ON e.card_name = t.card_name "
+        "WHERE t.port_type = 'trigger' "
+        "AND t.event_class IN ('Attacks', 'AttackersDeclared') "
+        "AND e.port_type = 'effect' "
+        "AND ("
+        "     (e.event_class = 'Token')"
+        "  OR (e.event_class = 'PutCounter'"
+        "      AND (e.valid_filter = 'Self' OR e.valid_filter = 'Creature.YouCtrl'))"
+        "  OR (e.event_class = 'Draw' AND e.valid_filter LIKE '%You%')"
+        "  OR (e.event_class = 'Mana')"
+        "  OR (e.event_class = 'ChangeZone' AND e.zone_origin = 'Library')"
+        ")"
+    ).fetchall()
+    return frozenset(row["card_name"] for row in rows)
+
+
+def _bulk_load_untap_combo_cards(conn: sqlite3.Connection) -> frozenset[str]:
+    """Classic-combo-shape untap cards.
+
+    Tightened to the core shapes that *actually* enable Urza / Emry /
+    Isochron-Scepter-style combos. Includes:
+
+    1. ``effect: UntapAll`` scoped to permanents/artifacts/own
+       creatures (Dramatic Reversal, Paradox Engine, Seedborn Muse,
+       Turnabout, Inspiring Statuary-ish).
+    2. ``effect: Untap`` where the filter references Artifact — the
+       targeted artifact-untap cost-doubler shape (Voltaic Key, Clock
+       of Omens, Aphetto Alchemist).
+    3. ``static: UntapOtherPlayer`` — Unwinding Clock and its handful
+       of cousins.
+    4. ``effect: TapOrUntapAll`` — Turnabout-style mass flip.
+
+    Intentionally EXCLUDES:
+    - Land-only untap (Wilderness Reclamation, Awakening) — Kinnan
+      territory, but too niche for Urza/Emry.
+    - ``Untap vf='Permanent' / 'Targeted' / 'Creature'`` — broad pools
+      full of niche effects (Cerulean Wisps, Inverted Iceberg) that
+      over-promoted random cards into top-30 on every tap-cost
+      commander.
+    - ``TapOrUntap`` (targeted) — Fatestitcher, Kiora's Follower —
+      similar noise problem.
+
+    Pool ≈ 97 cards. Commander-independent.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE ("
+        "     (port_type = 'effect' AND event_class = 'UntapAll'"
+        "      AND (valid_filter LIKE '%Permanent%'"
+        "        OR valid_filter LIKE '%Artifact%'"
+        "        OR valid_filter LIKE '%Creature.YouCtrl%'"
+        "        OR valid_filter = 'You'))"
+        "  OR (port_type = 'effect' AND event_class = 'Untap'"
+        "      AND valid_filter LIKE '%Artifact%')"
+        "  OR (port_type = 'static' AND event_class = 'UntapOtherPlayer')"
+        "  OR (port_type = 'effect' AND event_class = 'TapOrUntapAll')"
+        ")"
     ).fetchall()
     return frozenset(row["card_name"] for row in rows)
 

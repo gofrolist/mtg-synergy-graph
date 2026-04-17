@@ -667,6 +667,21 @@ _BASE_TYPES: frozenset[str] = frozenset(
 )
 
 
+#: Base types whose presence signals a *competing* non-creature
+#: archetype. Used by Gate 5 in ``_commander_subtypes_from_ports`` to
+#: suppress incidental token subtypes on artifact/enchantment-focused
+#: commanders (Urza's Constructs, Breya's Thopters, Jan Jansen's
+#: Treasures — all token flavor, not tribal strategy).
+_NON_CREATURE_ARCHETYPE_TYPES: frozenset[str] = frozenset({"Artifact", "Enchantment"})
+
+#: Minimum number of commander ports that must reference a
+#: ``_NON_CREATURE_ARCHETYPE_TYPES`` token before Gate 5 considers the
+#: commander to have a competing archetype. Two is empirical: one
+#: artifact reference is common on incidental cards, two indicates an
+#: intentional artifact engine.
+_COMPETING_ARCHETYPE_THRESHOLD: int = 2
+
+
 def _commander_subtypes_from_ports(
     conn: sqlite3.Connection,
     commander_set: Sequence[str],
@@ -747,6 +762,28 @@ def _commander_subtypes_from_ports(
             if len(parts) >= 2 and parts[-1][0:1].isupper():
                 sac_fuel_subtypes.add(parts[-1])
 
+    # Precompute whether the commander has a competing non-creature
+    # archetype. For Urza/Breya/Jan Jansen the actual strategy is
+    # Artifact / Treasure / combo; their ETB-created Construct/Thopter
+    # tokens are flavor, not tribal. Detected as at least
+    # ``_COMPETING_ARCHETYPE_THRESHOLD`` ports referencing a base type
+    # other than Creature (Artifact, Enchantment, …).
+    archetype_type_refs = 0
+    for p in cmdr_ports:
+        vf = p.get("valid_filter") or ""
+        cs = p.get("cost_subtype") or ""
+        raw = str(p.get("raw_line") or "")
+        haystack = f"{vf} {cs} {raw}"
+        for t in _NON_CREATURE_ARCHETYPE_TYPES:
+            # Word-boundary match: ``"Artifact" in haystack`` alone
+            # would also match ``nonArtifact`` / ``CounterArtifact``
+            # identifiers in Forge scripts. Guard against false
+            # positives even though the current DB happens to be safe.
+            if re.search(rf"\b{t}\b", haystack):
+                archetype_type_refs += 1
+                break  # count each port at most once
+    has_competing_archetype = archetype_type_refs >= _COMPETING_ARCHETYPE_THRESHOLD
+
     for p in cmdr_ports:
         ev = (p.get("event_class") or "").strip()
         if ev == "Token":
@@ -792,6 +829,16 @@ def _commander_subtypes_from_ports(
                 # has no other connection to the token subtype.
                 if _has_any_noncreature_trigger(cmdr_ports):
                     continue
+                # Gate 5: skip when the commander has a competing non-
+                # creature archetype (≥2 Artifact/Enchantment port refs)
+                # AND the token subtype didn't pass Gate 1 or Gate 2.
+                # Urza's Constructs, Breya's Thopters, Jan Jansen's
+                # Treasures/Constructs are flavor byproducts of an
+                # artifact strategy — they match 200+ creatures in the
+                # DB and bury actual artifact-synergy picks (tutors,
+                # untap-combo pieces) under a tribal_density floor.
+                if has_competing_archetype:
+                    continue
                 # Passed all gates -- token IS the strategy
                 relevant.add(sub)
 
@@ -836,6 +883,7 @@ def _cost_filter_group(cost_port: PortRow) -> str:
 # ---------------------------------------------------------------------------
 
 from .combat import (  # noqa: E402
+    _find_attack_payoffs,
     _find_changeszone_resonance,
     _find_combat_enhancers,
     _find_evasion_complements,
@@ -863,9 +911,11 @@ from .density import (  # noqa: E402
 from .graveyard import (  # noqa: E402
     _find_artifact_recursion,
     _find_copy_synergy,
+    _find_dies_drain,
     _find_etb_sac_targets,
     _find_graveyard_fillers,
     _find_graveyard_sac_value,
+    _find_gy_loader,
 )
 from .panharmonicon import (  # noqa: E402
     _find_panharmonicon_complements,
@@ -898,6 +948,7 @@ from .utility import (  # noqa: E402
     _find_mana_doubler_synergy,
     _find_multicolor_untap,
     _find_opponent_forcing,
+    _find_untap_combo,
     _find_untap_synergy,
     _find_wheel_synergy,
 )
@@ -1034,16 +1085,20 @@ def find_all_complements(
         out.extend(_find_static_strategy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_etb_sac_targets(conn, cmdr_ports, cmdr_set))
         out.extend(_find_combat_enhancers(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_attack_payoffs(conn, cmdr_ports, cmdr_set, candidate_cache))
         out.extend(_find_wheel_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_artifact_recursion(conn, cmdr_ports, cmdr_set))
         out.extend(_find_copy_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_token_sac_chain(conn, cmdr_ports, cmdr_set, candidate_cache))
         out.extend(_find_token_etb_damage(conn, cmdr_ports, cmdr_set, candidate_cache))
+        out.extend(_find_dies_drain(conn, cmdr_ports, cmdr_set, candidate_cache))
+        out.extend(_find_gy_loader(conn, cmdr_ports, cmdr_set, candidate_cache))
         out.extend(_find_reverse_panharmonicon(conn, cmdr_ports, cmdr_set, candidate_cache))
         out.extend(_find_panharmonicon_stacking(conn, cmdr_ports, cmdr_set, candidate_cache))
         out.extend(_find_evasion_complements(conn, cmdr_ports, cmdr_set))
         out.extend(_find_spellcast_resonance(conn, cmdr_ports, cmdr_set))
         out.extend(_find_untap_synergy(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_untap_combo(conn, cmdr_ports, cmdr_set, candidate_cache))
         out.extend(_find_multicolor_untap(conn, cmdr_ports, cmdr_set))
         out.extend(_find_cost_reduction_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_graveyard_play_synergy(conn, cmdr_ports, cmdr_set))

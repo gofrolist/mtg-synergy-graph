@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 from ..graph_engine import _trigger_only_matches_self
+from ..penalties import CandidateCache
 from .core import PortComplement, PortRow
 
 # ---------------------------------------------------------------------------
@@ -692,6 +693,76 @@ def _find_untap_synergy(
                 )
 
     return results
+
+
+def _find_untap_combo(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+    candidate_cache: CandidateCache | None = None,
+) -> list[PortComplement]:
+    """Match mass/broad-scope untap cards to tap-activated commanders.
+
+    Complements ``_find_untap_synergy`` which handles the narrower
+    creature-targeted Quirion-Ranger slice. This rule targets the
+    combo half of the same mechanic — Urza / Emry / Isochron-Scepter-
+    style engines where untapping *artifacts* or *all permanents*
+    doubles or infinitely loops the tap ability.
+
+    Urza's current state illustrates the gap: his tap cost is
+    ``tap_type<1/Artifact>`` (not the plain ``tap`` the existing rule
+    gates on), so Dramatic Reversal, Unwinding Clock, Voltaic Key,
+    Paradox Engine all match zero rules for him today.
+
+    Gate (narrow): commander has a ``cost: tap`` / ``cost: tap_type``
+    port **paired with an** ``effect: Mana`` on the same card (Urza,
+    Selvala), OR a ``trigger: TapsForMana`` (Kinnan-style untap-
+    scaling engine). Tribal tap-for-tokens/draw commanders (Krenko,
+    Lathril, Kumena) don't qualify — earlier looser gates regressed
+    their tribal-specific picks.
+
+    Candidate pool: see ``_bulk_load_untap_combo_cards`` — classic
+    combo shapes (UntapAll, Untap-on-Artifact, UntapOtherPlayer
+    statics, TapOrUntapAll).
+    """
+    has_tap_cost = False
+    has_mana_effect = False
+    has_tapsformana = False
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        if pt == "cost" and ev in ("tap", "tap_type"):
+            has_tap_cost = True
+        if pt == "effect" and ev == "Mana":
+            has_mana_effect = True
+        if pt == "trigger" and ev == "TapsForMana":
+            has_tapsformana = True
+    # Narrow: tap cost *paired with a mana ability* (Urza, Selvala), or
+    # TapsForMana trigger (Kinnan). Tribal/non-mana tap costs (Krenko,
+    # Lathril, Kumena) don't qualify — their archetype isn't combo
+    # mana, and the rule was pushing Dramatic Reversal / Clock of Omens
+    # into their top-30 over tribal-specific EDHREC picks.
+    if not ((has_tap_cost and has_mana_effect) or has_tapsformana):
+        return []
+
+    if candidate_cache is not None:
+        pool: frozenset[str] = candidate_cache.untap_combo_cards
+    else:
+        from ..penalties import _bulk_load_untap_combo_cards
+
+        pool = _bulk_load_untap_combo_cards(conn)
+
+    return [
+        PortComplement(
+            rule_id="untap_combo",
+            direction="synergy",
+            candidate=name,
+            cmdr_event="tap_engine",
+            cand_event="broad_untap",
+        )
+        for name in pool
+        if name not in cmdr_set
+    ]
 
 
 def _find_damage_effect_synergy(

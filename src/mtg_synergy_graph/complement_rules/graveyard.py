@@ -5,11 +5,20 @@ from __future__ import annotations
 import re
 import sqlite3
 
+from ..attributes import CARD_TYPES, CONTROLLER_QUALIFIERS, SUPERTYPES
+from ..penalties import CandidateCache
 from .core import PortComplement, PortRow
 
 #: Card types that are spells (not permanents). Used by _find_graveyard_sac_value
 #: to skip commanders that only replay instants/sorceries (e.g. Kess).
 _SPELL_ONLY_TYPES: frozenset[str] = frozenset({"Instant", "Sorcery"})
+
+#: Recast-from-GY types that are NOT creature-adjacent. If a
+#: commander's MayPlay-from-GY ``Affected`` set is a subset of these,
+#: they don't want creature-focused GY-fill / reanimator support.
+_NON_CREATURE_RECAST_TYPES: frozenset[str] = frozenset(
+    {"Instant", "Sorcery", "Artifact", "Enchantment", "Land", "Planeswalker", "Battle"}
+)
 
 #: Effect events that indicate a sacrifice cost has a valuable payoff.
 _VALUABLE_SAC_EFFECTS: tuple[str, ...] = (
@@ -70,9 +79,19 @@ def _extract_recast_types(cmdr_ports: list[PortRow]) -> set[str]:
 def _wants_gy_fill(cmdr_ports: list[PortRow]) -> bool:
     """Return True if the commander needs entomb/discard GY-fill.
 
-    Only for commanders that actively REANIMATE permanents (ChangeZone
-    GY→BF) or have a discard cost (Chainer). Kess/Locust God care about
-    GY but don't need GY-fill.
+    Fires for commanders that actively REANIMATE permanents
+    (``effect: ChangeZone`` Graveyard→Battlefield) or RECAST creatures
+    from the graveyard (MayPlay-from-GY static whose ``Affected``
+    names ``Creature`` / ``Permanent`` or a creature subtype — Karador,
+    Muldrotha, Gisa and Geralf, Chainer).
+
+    Tergrid-style ``valid_filter='TriggeredCard'`` reanimation of an
+    opponent's discarded card is rejected (irrelevant to own-side
+    GY-fill). A bare ``cost: discard`` alone does NOT qualify —
+    Borborygmos Enraged discards for retrace/Dredge without
+    reanimation. Kess and Emry also stay False because their MayPlay
+    scopes (Instant/Sorcery and Artifact respectively) are covered
+    by ``_NON_CREATURE_RECAST_TYPES``.
     """
     for p in cmdr_ports:
         pt = (p.get("port_type") or "").strip()
@@ -83,10 +102,24 @@ def _wants_gy_fill(cmdr_ports: list[PortRow]) -> bool:
             and (p.get("zone_origin") or "").strip() == "Graveyard"
             and (p.get("zone_destination") or "").strip() == "Battlefield"
         ):
+            vf = (p.get("valid_filter") or "").strip()
+            # Skip Tergrid-style "reanimate the card THEY just discarded"
+            # — TriggeredCard with an opponent-scoped trigger means the
+            # reanimation targets opponents' cards, not your own, so
+            # own-side GY-fill (Buried Alive) is irrelevant.
+            if vf == "TriggeredCard":
+                continue
             return True
-        if pt == "cost" and ev == "discard":
-            return True
-    return False
+    # Recast-from-GY for creature-like types: Karador's
+    # ``Creature.nonLand+YouCtrl``, Muldrotha's multi-type MayPlay,
+    # Gisa and Geralf's ``Zombie.YouCtrl``. ``_extract_recast_types``
+    # already strips ``Card``, so any creature subtype surfaces via
+    # the ``recast - _NON_CREATURE_RECAST_TYPES`` difference.
+    #
+    # Note: a bare ``cost: discard`` doesn't qualify — Borborygmos
+    # Enraged uses discard for retrace/Dredge, not reanimation.
+    recast = _extract_recast_types(cmdr_ports)
+    return "Creature" in recast or "Permanent" in recast or bool(recast - _NON_CREATURE_RECAST_TYPES)
 
 
 def _emit_filler(
@@ -568,3 +601,164 @@ def _find_etb_sac_targets(
             )
 
     return results
+
+
+def _has_creature_dies_trigger(cmdr_ports: list[PortRow]) -> bool:
+    """Return True iff the commander itself triggers on another creature
+    dying, OR amplifies such triggers via a Panharmonicon-style static.
+
+    Strict gate for ``_find_dies_drain``. Accepts:
+
+    1. A raw ``ChangesZone Battlefield→Graveyard`` trigger whose
+       ``valid_filter`` names ``Creature`` / ``Permanent`` **or** a
+       creature subtype (Zombie, Saproling, Elemental, …) — so Meren,
+       Wilhelt (``Zombie.Other``) and Slimefoot (``Saproling.YouCtrl``)
+       qualify alongside plain ``Creature.Other`` commanders. A
+       solitary ``Card.Self`` filter is rejected (~680 "when I die"
+       cards that don't actually pay off other creature deaths).
+
+    2. A ``static: Panharmonicon`` port whose ``raw_line`` describes
+       a creature-dies doubler — ``Origin: Battlefield``,
+       ``Destination: Graveyard``, and ``ValidCause: Creature`` — so
+       Teysa Karlov qualifies even though she has no trigger of her
+       own. Doubling a creature-dies trigger is mechanically
+       equivalent to having one for the purpose of aristocrat-payoff
+       synergies.
+    """
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        if pt == "static" and (p.get("event_class") or "").strip() == "Panharmonicon":
+            # Normalise whitespace in the raw dict repr so the check is
+            # tolerant of Forge's pretty-printing.
+            raw = "".join((p.get("raw_line") or "").split())
+            if (
+                "'Origin':'Battlefield'" in raw
+                and "'Destination':'Graveyard'" in raw
+                and "'ValidCause':'Creature'" in raw
+            ):
+                return True
+            continue
+        if pt != "trigger":
+            continue
+        if (p.get("event_class") or "").strip() != "ChangesZone":
+            continue
+        if (p.get("zone_origin") or "").strip() != "Battlefield":
+            continue
+        if (p.get("zone_destination") or "").strip() != "Graveyard":
+            continue
+        vf = (p.get("valid_filter") or "").strip()
+        if not vf:
+            continue
+        # `Card.Self,Creature.Other+YouCtrl` → split on `,` for OR-alts,
+        # then `+`/`.` within each alt. The first token of an alt is the
+        # main type (`Card`, `Creature`, `Zombie`, …); qualifiers follow.
+        for alt in vf.split(","):
+            tokens = alt.replace("+", ".").split(".")
+            if not tokens:
+                continue
+            main = tokens[0].lstrip("!").strip()
+            if not main or main == "Card":
+                continue
+            if main in ("Creature", "Permanent"):
+                return True
+            # Any other main-type token that isn't a built-in Forge
+            # classifier (type/supertype/controller) is a creature subtype.
+            if main not in CARD_TYPES and main not in SUPERTYPES and main not in CONTROLLER_QUALIFIERS:
+                return True
+    return False
+
+
+def _find_dies_drain(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+    candidate_cache: CandidateCache | None = None,
+) -> list[PortComplement]:
+    """Match aristocrats-payoff cards for creature-dies commanders.
+
+    Cards like Blood Artist, Zulaport Cutthroat, Cruel Celebrant, Pitiless
+    Plunderer, Grim Haruspex, Midnight Reaper and Elenda all share a
+    single distinctive port: a ``ChangesZone Battlefield→Graveyard``
+    trigger with a ``Creature``-referencing ``valid_filter``. They are
+    universal payoffs for any commander whose own strategy kills their
+    creatures repeatedly (Meren, Judith, Wilhelt, Slimefoot, Omnath).
+
+    The existing ``sacrifice_cluster`` rule operates on event names
+    ``Sacrificed`` / ``LifeLost``, so it misses these cards whose trigger
+    is raw ``ChangesZone`` — hence a dedicated rule.
+
+    Gate: strict. Commander must itself have a creature-dies trigger
+    (``_has_creature_dies_trigger``). Commanders that merely *double*
+    death triggers (Teysa Karlov's ``Panharmonicon`` static) or sac
+    permanents broadly (Korvold's ``Sacrificed`` trigger) do not qualify
+    — those axes are covered by other rules.
+    """
+    if not _has_creature_dies_trigger(cmdr_ports):
+        return []
+
+    if candidate_cache is not None:
+        payoff_cards: frozenset[str] = candidate_cache.dies_drain_cards
+    else:
+        from ..penalties import _bulk_load_dies_drain_cards
+
+        payoff_cards = _bulk_load_dies_drain_cards(conn)
+
+    return [
+        PortComplement(
+            rule_id="dies_drain",
+            direction="synergy",
+            candidate=name,
+            cmdr_event="creature_dies",
+            cand_event="dies_payoff",
+        )
+        for name in payoff_cards
+        if name not in cmdr_set
+    ]
+
+
+def _find_gy_loader(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+    candidate_cache: CandidateCache | None = None,
+) -> list[PortComplement]:
+    """Match Library→Graveyard tutors for reanimator commanders.
+
+    Buried Alive, Entomb, Jarad's Orders, Final Parting, Vile Entomber
+    and friends are EDHREC-top-synergy for every reanimator commander
+    (Meren Hi-Syn #7 @ 0.52, Karador, Muldrotha, …) because they *set
+    up* the engine: tutor a creature into the graveyard, then reanimate
+    it. This shape is already queried by ``_find_graveyard_fillers``
+    (which emits under ``rule_id='trigger_effect'``), but a tutor
+    sorcery typically matches only that single rule, so it scored
+    ~0.18 and sat below rank ~150 — well out of top-30.
+
+    Emitting the same cards again under a distinct ``gy_loader``
+    rule_id gives them two rule matches, a breadth bonus, and the 1.5×
+    quality multiplier (see universal_scorer), lifting them into the
+    range where they can compete.
+
+    Gate: ``_wants_gy_fill`` — reanimators / recast-from-GY commanders
+    only. Kess (Instant/Sorcery MayPlay) still returns False.
+    """
+    if not _wants_gy_fill(cmdr_ports):
+        return []
+
+    if candidate_cache is not None:
+        tutor_cards: frozenset[str] = candidate_cache.gy_loader_cards
+    else:
+        from ..penalties import _bulk_load_gy_loader_cards
+
+        tutor_cards = _bulk_load_gy_loader_cards(conn)
+
+    return [
+        PortComplement(
+            rule_id="gy_loader",
+            direction="synergy",
+            candidate=name,
+            cmdr_event="reanimator",
+            cand_event="library_to_gy_tutor",
+        )
+        for name in tutor_cards
+        if name not in cmdr_set
+    ]

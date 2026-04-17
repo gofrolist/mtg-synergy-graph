@@ -1,11 +1,12 @@
 """Tests for combat-related complement matchers.
 
 Uses an in-memory SQLite database with minimal schema to exercise every
-branch of the four functions in complement_rules.combat:
+branch of the five functions in complement_rules.combat:
   - _find_combat_enhancers
   - _find_evasion_complements
   - _find_sacrifice_outlets
   - _find_changeszone_resonance
+  - _find_attack_payoffs
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import sqlite3
 import pytest
 
 from mtg_synergy_graph.complement_rules.combat import (
+    _find_attack_payoffs,
     _find_changeszone_resonance,
     _find_combat_enhancers,
     _find_evasion_complements,
@@ -518,3 +520,119 @@ class TestFindChangeszoneResonance:
         _insert_port(conn, "Cand", "trigger", "ChangesZone", valid_filter="Creature.YouCtrl")
         results = _find_changeszone_resonance(conn, ports, {"Tatyova"})
         assert results == []
+
+
+# ===========================================================================
+# _find_attack_payoffs
+# ===========================================================================
+
+
+def _attack_token_card(conn: sqlite3.Connection, card_name: str) -> None:
+    """Insert an ``Attacks``-triggered ``Token``-producing card
+    (Mardu Ascendancy shape)."""
+    _insert_port(conn, card_name, "trigger", "Attacks", valid_filter="Creature.YouCtrl")
+    _insert_port(conn, card_name, "effect", "Token")
+
+
+class TestFindAttackPayoffs:
+    def test_no_attacks_panharmonicon_returns_empty(self, conn: sqlite3.Connection) -> None:
+        """Commander without an Isshin-style Panharmonicon static for
+        Attacks+Creature is gated out — even if it has an Attacks
+        trigger of its own. That case is served by other rules."""
+        _insert_card(conn, "Adeline")
+        _attack_token_card(conn, "Adeline")
+        # Commander has Attacks trigger but NOT a Panharmonicon static.
+        ports = [
+            _port("Edgar Markov", "trigger", "Attacks", valid_filter="Creature.YouCtrl"),
+        ]
+        assert _find_attack_payoffs(conn, ports, {"Edgar Markov"}) == []
+
+    def test_isshin_panharmonicon_activates(self, conn: sqlite3.Connection) -> None:
+        """Isshin's ``static: Panharmonicon`` with ``ValidMode: Attacks``
+        and ``ValidCause: Creature`` fires the rule."""
+        _insert_card(conn, "Mardu Ascendancy")
+        _attack_token_card(conn, "Mardu Ascendancy")
+        conn.commit()
+
+        ports = [
+            _port(
+                "Isshin, Two Heavens as One",
+                "static",
+                "Panharmonicon",
+                raw_line=(
+                    "{'Mode':'Panharmonicon',"
+                    " 'ValidMode':'Attacks,AttackersDeclared,AttackersDeclaredOneTarget',"
+                    " 'ValidCard':'Permanent.YouCtrl',"
+                    " 'ValidCause':'Creature'}"
+                ),
+            )
+        ]
+        results = _find_attack_payoffs(conn, ports, {"Isshin, Two Heavens as One"})
+        names = {r.candidate for r in results}
+        assert "Mardu Ascendancy" in names
+        assert all(r.rule_id == "attack_payoffs" for r in results)
+
+    def test_non_creature_cause_rejected(self, conn: sqlite3.Connection) -> None:
+        """A Panharmonicon static with a non-Creature ``ValidCause``
+        (e.g. land-dies doubler) doesn't qualify as an attack-trigger
+        doubler."""
+        _insert_card(conn, "Mardu Ascendancy")
+        _attack_token_card(conn, "Mardu Ascendancy")
+        conn.commit()
+
+        ports = [
+            _port(
+                "LandDoubler",
+                "static",
+                "Panharmonicon",
+                raw_line=("{'Mode':'Panharmonicon', 'ValidMode':'ChangesZone', 'ValidCause':'Land'}"),
+            )
+        ]
+        assert _find_attack_payoffs(conn, ports, {"LandDoubler"}) == []
+
+    def test_commander_excluded_from_results(self, conn: sqlite3.Connection) -> None:
+        """Commander doesn't appear in its own recommendations even when
+        it matches the candidate shape."""
+        _insert_card(conn, "IsshinClone")
+        # Same card is both commander and candidate shape.
+        _attack_token_card(conn, "IsshinClone")
+        _insert_port(
+            conn,
+            "IsshinClone",
+            "static",
+            "Panharmonicon",
+            raw_line=("{'Mode':'Panharmonicon','ValidMode':'Attacks', 'ValidCause':'Creature'}"),
+        )
+        conn.commit()
+
+        ports = [
+            _port(
+                "IsshinClone",
+                "static",
+                "Panharmonicon",
+                raw_line=("{'Mode':'Panharmonicon','ValidMode':'Attacks', 'ValidCause':'Creature'}"),
+            )
+        ]
+        results = _find_attack_payoffs(conn, ports, {"IsshinClone"})
+        assert "IsshinClone" not in {r.candidate for r in results}
+
+    def test_complement_metadata(self, conn: sqlite3.Connection) -> None:
+        """Complements carry the expected rule_id / event pair."""
+        _insert_card(conn, "Adeline")
+        _attack_token_card(conn, "Adeline")
+        conn.commit()
+
+        ports = [
+            _port(
+                "Isshin",
+                "static",
+                "Panharmonicon",
+                raw_line=("{'Mode':'Panharmonicon','ValidMode':'Attacks', 'ValidCause':'Creature'}"),
+            )
+        ]
+        results = _find_attack_payoffs(conn, ports, {"Isshin"})
+        adeline = next(r for r in results if r.candidate == "Adeline")
+        assert adeline.rule_id == "attack_payoffs"
+        assert adeline.direction == "synergy"
+        assert adeline.cmdr_event == "creature_attacks"
+        assert adeline.cand_event == "attack_payoff"

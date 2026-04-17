@@ -763,6 +763,92 @@ class TestFindTribalDensityComplements:
         assert "Goblin Soldier" in _candidates(results)
         assert "Goblin Grenade" not in _candidates(results)
 
+    def test_gate5_artifact_archetype_suppresses_incidental_token(self, conn):
+        """Commander whose ETB token subtype isn't in its literal
+        subtypes or port filters, AND which has ≥2 Artifact port refs
+        (Urza-style), should NOT get the token subtype as a tribal axis.
+        Without Gate 5 the 232 Constructs in the DB all matched
+        tribal_density for Urza and buried Dramatic Reversal / Unwinding
+        Clock under a rank-30 floor of 0.50."""
+        _insert_card(
+            conn,
+            "UrzaLike",
+            card_types="Creature",
+            subtypes="Human Artificer",
+            types="Creature",
+        )
+        _insert_card(conn, "Walking Ballista", card_types="Creature", subtypes="Construct")
+        # ETB-self Token effect that creates a Construct token.
+        _insert_port(
+            conn,
+            "UrzaLike",
+            "trigger",
+            "ChangesZone",
+            valid_filter="Card.Self",
+            raw_line="{'Mode':'ChangesZone','Origin':'Any','Destination':'Battlefield','ValidCard':'Card.Self'}",
+        )
+        _insert_port(
+            conn,
+            "UrzaLike",
+            "effect",
+            "Token",
+            raw_line="{'TokenScript': 'c_0_0_a_construct_total_artifacts'}",
+        )
+        # TWO artifact-referencing ports — the "competing archetype"
+        # signal Gate 5 looks for.
+        _insert_port(
+            conn,
+            "UrzaLike",
+            "cost",
+            "tap_type",
+            raw_line="tapXType<1/Artifact>",
+        )
+        _insert_port(
+            conn,
+            "UrzaLike",
+            "static",
+            "Continuous",
+            raw_line="{'Mode':'Continuous','Affected':'Artifact.YouCtrl','AddAbility':'T: Add 1'}",
+        )
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("UrzaLike",)).fetchall()
+        ]
+        results = _find_tribal_density_complements(conn, cmdr_ports, {"UrzaLike"})
+        assert "Walking Ballista" not in _candidates(results), (
+            "Gate 5 should suppress incidental Construct tribal for artifact-archetype commanders"
+        )
+
+    def test_gate5_does_not_affect_real_tribal_commanders(self, conn):
+        """Ghave/Krenko-style commanders have 0 Artifact port refs, so
+        Gate 5 is a no-op: their token subtype still counts as tribal
+        via the existing fall-through path."""
+        _insert_card(
+            conn,
+            "GhaveLike",
+            card_types="Creature",
+            subtypes="Fungus Shaman",
+            types="Creature",
+        )
+        _insert_card(conn, "Sporemound", card_types="Creature", subtypes="Saproling")
+        # No triggers (Ghave's tokens come from an activated ability);
+        # the Token effect's TokenScript names Saproling.
+        _insert_port(
+            conn,
+            "GhaveLike",
+            "effect",
+            "Token",
+            raw_line="{'TokenScript': 'g_1_1_saproling'}",
+        )
+        _insert_port(conn, "GhaveLike", "cost", "sacrifice")
+        _insert_port(conn, "GhaveLike", "effect", "PutCounter", valid_filter="Creature")
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("GhaveLike",)).fetchall()
+        ]
+        results = _find_tribal_density_complements(conn, cmdr_ports, {"GhaveLike"})
+        assert "Sporemound" in _candidates(results)
+
 
 # ---------------------------------------------------------------------------
 # _find_scales_with_density

@@ -873,3 +873,136 @@ class TestFindTokenSacChain:
 
         results = _find_token_sac_chain(conn, ports, {"Korvold"})
         assert len(results) == 1
+
+
+# ---------------------------------------------------------------------------
+# _find_static_strategy — exalted_density sub-rule
+# ---------------------------------------------------------------------------
+
+
+class TestExaltedDensity:
+    """The exalted_density sub-rule inside ``_find_static_strategy``."""
+
+    def test_exalted_commander_finds_other_exalted(self, conn: sqlite3.Connection) -> None:
+        """Rafiq-style Exalted commander surfaces every Exalted creature."""
+        ports = [_port("Rafiq", "keyword", "Exalted")]
+        _insert_card(conn, "Rafiq")
+        _insert_card(conn, "Qasali Pridemage")
+        _insert_card(conn, "Sublime Archangel")
+        _insert_card(conn, "Finest Hour")
+        _insert_port(conn, "Qasali Pridemage", "keyword", "Exalted")
+        _insert_port(conn, "Sublime Archangel", "keyword", "Exalted")
+        _insert_port(conn, "Finest Hour", "keyword", "Exalted")
+
+        results = _find_static_strategy(conn, ports, {"Rafiq"})
+        ex = [r for r in results if r.rule_id == "exalted_density"]
+        names = {r.candidate for r in ex}
+        assert "Qasali Pridemage" in names
+        assert "Sublime Archangel" in names
+        assert "Finest Hour" in names
+        assert "Rafiq" not in names
+        for r in ex:
+            assert r.cmdr_event == "exalted"
+            assert r.cand_event == "exalted_keyword"
+
+    def test_non_exalted_commander_no_density(self, conn: sqlite3.Connection) -> None:
+        """Hexproof voltron commander triggers the generic voltron pool
+        but NOT exalted_density."""
+        ports = [_port("Sigarda", "keyword", "Hexproof")]
+        _insert_card(conn, "Qasali Pridemage")
+        _insert_port(conn, "Qasali Pridemage", "keyword", "Exalted")
+
+        results = _find_static_strategy(conn, ports, {"Sigarda"})
+        assert [r for r in results if r.rule_id == "exalted_density"] == []
+
+
+# ---------------------------------------------------------------------------
+# _find_static_strategy — aura_equipment_support sub-rule
+# ---------------------------------------------------------------------------
+
+
+class TestAuraEquipmentSupport:
+    """The aura_equipment_support sub-rule."""
+
+    def test_equipment_scaling_commander_matches(self, conn: sqlite3.Connection) -> None:
+        """Wyleth-style commander (scales_with Equipment.Attached)
+        surfaces Sigarda's-Aid / Sram / Puresteel-Paladin-style enabler
+        cards via the SpellCast and ReduceCost port shapes."""
+        ports = [
+            _port(
+                "Wyleth",
+                "scales_with",
+                "Valid",
+                valid_filter="Equipment.Attached,Aura.Attached",
+            )
+        ]
+        _insert_card(conn, "Sram")
+        _insert_port(
+            conn,
+            "Sram",
+            "trigger",
+            "SpellCast",
+            valid_filter="Aura,Equipment,Vehicle",
+        )
+        _insert_card(conn, "Danitha")
+        _insert_port(
+            conn,
+            "Danitha",
+            "static",
+            "ReduceCost",
+            raw_line="{'Mode':'ReduceCost','ValidCard':'Aura,Equipment'}",
+        )
+
+        results = _find_static_strategy(conn, ports, {"Wyleth"})
+        support = [r for r in results if r.rule_id == "aura_equipment_support"]
+        names = {r.candidate for r in support}
+        assert "Sram" in names
+        assert "Danitha" in names
+
+    def test_aura_only_scaling_rejected(self, conn: sqlite3.Connection) -> None:
+        """Uril-style pure-Aura ``scales_with Aura.Attached`` does NOT
+        activate the rule. The gate requires Equipment mention because
+        the support pool is Equipment-heavy; pure-Aura commanders are
+        better served by the generic voltron pool."""
+        ports = [
+            _port(
+                "Uril",
+                "scales_with",
+                "Valid",
+                valid_filter="Aura.Attached/Times.2",
+            )
+        ]
+        _insert_card(conn, "Sram")
+        _insert_port(
+            conn,
+            "Sram",
+            "trigger",
+            "SpellCast",
+            valid_filter="Aura,Equipment,Vehicle",
+        )
+
+        results = _find_static_strategy(conn, ports, {"Uril"})
+        assert [r for r in results if r.rule_id == "aura_equipment_support"] == []
+
+    def test_commander_excluded(self, conn: sqlite3.Connection) -> None:
+        """Commander never appears in its own aura_equipment_support
+        results even if it matches the candidate shape."""
+        ports = [
+            _port(
+                "Self",
+                "scales_with",
+                "Valid",
+                valid_filter="Equipment.Attached,Aura.Attached",
+            )
+        ]
+        _insert_card(conn, "Self")
+        _insert_port(
+            conn,
+            "Self",
+            "trigger",
+            "SpellCast",
+            valid_filter="Aura,Equipment",
+        )
+
+        results = _find_static_strategy(conn, ports, {"Self"})
+        assert "Self" not in {r.candidate for r in results}
