@@ -6,7 +6,7 @@ Guidance for Claude Code working in this repo.
 
 MTG Synergy Graph — deterministic, rule-based EDH/Commander synergy scorer
 using Forge DSL ports. No training, no EDHREC at inference.
-Current aggregate NDCG@30 ~ 0.194, Hi-Syn 160/1000 on the 100-commander golden set.
+Current aggregate NDCG@30 ~ 0.206, Hi-Syn 171/1000 on the 100-commander golden set.
 Port extraction: 108,644 ports from 32,327 cards (GenericChoice + StaticAbilities$
 expansion, deduped after A1's 2^N re-walk fix).
 
@@ -31,6 +31,16 @@ rule — exploratory rules (`deck_hint_match`, `deck_needs_fulfilled`,
 against EDHREC because the curated matches are broad (e.g. every Aura, every
 Token-producer) and dilute the mechanical-port signal. Retained as data
 infrastructure for future work.
+
+### Legality filter (2026-04-16)
+
+`cards.legal_commander` is populated from Scryfall's `legalities.commander`
+(1 = legal, 0 = not_legal / banned). Cards with `legal_commander=0` (~1,679
+rows, mostly silver-border/acorn/Unfinity leakage through the Forge cardsfolder)
+are hard-dropped by `SynergyEngine.page()` and `legal_cards()` before scoring —
+they can never surface even if they match every mechanical rule. Columns in the
+synergy.db `cards` table default to 1 when the upstream Scryfall DB lacks the
+column (legacy test fixtures).
 
 ## Common Commands
 

@@ -1,5 +1,12 @@
 # Scoring Model Improvement Implementation Plan
 
+> **STATUS: COMPLETE (as of 2026-04-16)**. All phases landed via 37 commits on
+> `main`. Checkboxes below were never marked because work shipped commit-by-
+> commit; the git log is the authoritative record. Phase B hint rules
+> (`deck_hint_match`, `deck_needs_fulfilled`, `buffed_by_match`) were
+> prototyped and reverted — see CLAUDE.md `card_hints` note. Final aggregate:
+> NDCG@30 0.194 → 0.206 (+6.2%), Hi-Syn 160 → 171.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Eliminate the 2^N port extraction bug, extract unused Forge DSL fields, drop hand-tuned scoring weights, and add curated-hint rules — in three staged phases each with its own NDCG acceptance gate.

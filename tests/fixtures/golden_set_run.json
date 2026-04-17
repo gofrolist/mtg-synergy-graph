@@ -16,19 +16,19 @@
       ],
       "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.059397,
-      "on_page_hits": 4,
+      "ndcg30": 0.074588,
+      "on_page_hits": 6,
       "top10": [
         "Savra, Queen of the Golgari",
         "Sanguine Statuette",
         "Gluttonous Guest",
         "Moonstone Eulogist",
         "Jaws, Relentless Predator",
-        "Sanguine Brushstroke",
         "Ashling, the Limitless",
         "Trail of Crumbs",
         "Nuka-Cola Vending Machine",
-        "Unlucky Cabbage Merchant"
+        "Unlucky Cabbage Merchant",
+        "Rapacious Guest"
       ]
     },
     {
@@ -233,10 +233,9 @@
       ],
       "hi_syn_hits": 3,
       "hi_syn_total": 10,
-      "ndcg30": 0.312699,
-      "on_page_hits": 15,
+      "ndcg30": 0.364538,
+      "on_page_hits": 16,
       "top10": [
-        "Earl of Squirrel",
         "Squirrel Sovereign",
         "Bakersbane Duo",
         "Bloodroot Apothecary",
@@ -245,7 +244,8 @@
         "Bushy Bodyguard",
         "Honored Dreyleader",
         "Scurry of Squirrels",
-        "Squirrel Mob"
+        "Squirrel Mob",
+        "Scurrid Colony"
       ]
     },
     {
@@ -388,7 +388,7 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.089047,
+      "ndcg30": 0.090109,
       "on_page_hits": 15,
       "top10": [
         "Sol Ring",
@@ -399,8 +399,8 @@
         "Nature's Lore",
         "Heroic Intervention",
         "Sylvan Library",
-        "Dockside Extortionist",
-        "Beast Within"
+        "Beast Within",
+        "Chaos Warp"
       ]
     },
     {
@@ -419,8 +419,8 @@
       ],
       "hi_syn_hits": 5,
       "hi_syn_total": 10,
-      "ndcg30": 0.559902,
-      "on_page_hits": 21,
+      "ndcg30": 0.567076,
+      "on_page_hits": 22,
       "top10": [
         "Conspicuous Snoop",
         "Rundvelt Hordemaster",
@@ -481,8 +481,8 @@
       ],
       "hi_syn_hits": 4,
       "hi_syn_total": 10,
-      "ndcg30": 0.435386,
-      "on_page_hits": 20,
+      "ndcg30": 0.445306,
+      "on_page_hits": 21,
       "top10": [
         "Joraga Treespeaker",
         "Joraga Warcaller",
@@ -543,7 +543,7 @@
       ],
       "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.274276,
+      "ndcg30": 0.275163,
       "on_page_hits": 13,
       "top10": [
         "Twinflame Travelers",
@@ -574,8 +574,8 @@
       ],
       "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.232341,
-      "on_page_hits": 3,
+      "ndcg30": 0.237155,
+      "on_page_hits": 4,
       "top10": [
         "Bloom Tender",
         "Faeburrow Elder",
@@ -729,8 +729,8 @@
       ],
       "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.233318,
-      "on_page_hits": 9,
+      "ndcg30": 0.242805,
+      "on_page_hits": 10,
       "top10": [
         "Joraga Treespeaker",
         "Joraga Warcaller",
@@ -760,19 +760,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.095872,
+      "ndcg30": 0.101545,
       "on_page_hits": 8,
       "top10": [
         "Thicket Crasher",
         "Earthquake Dragon",
         "Fungus Elemental",
-        "A-Earthquake Dragon",
         "Bristlebud Farmer",
         "Aftermath Analyst",
-        "Vinesoul Spider",
         "Mossborn Hydra",
         "Blanchwood Prowler",
-        "Splinterfright"
+        "Splinterfright",
+        "Undergrowth Champion",
+        "Greensleeves, Maro-Sorcerer"
       ]
     },
     {
@@ -822,19 +822,19 @@
       ],
       "hi_syn_hits": 4,
       "hi_syn_total": 10,
-      "ndcg30": 0.424232,
-      "on_page_hits": 20,
+      "ndcg30": 0.471491,
+      "on_page_hits": 22,
       "top10": [
         "Ezuri, Stalker of Spheres",
-        "Contagion Dispenser",
         "Scheming Aspirant",
         "Voidwing Hybrid",
         "Venser, Corpse Puppet",
-        "Ichor Aberration",
         "Mikey & Leo, Chaos & Order",
-        "Hardened Bonds",
         "Flourishing Defenses",
-        "Whisper of the Dross"
+        "Whisper of the Dross",
+        "Thrummingbird",
+        "Ripples of Potential",
+        "Experimental Augury"
       ]
     },
     {
@@ -853,7 +853,7 @@
       ],
       "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.038215,
+      "ndcg30": 0.038534,
       "on_page_hits": 2,
       "top10": [
         "Elvish Warmaster",
@@ -946,7 +946,7 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.00656,
+      "ndcg30": 0.006795,
       "on_page_hits": 2,
       "top10": [
         "Goblin Engineer",
@@ -954,11 +954,11 @@
         "Grafted Butcher",
         "Ruthless Technomancer",
         "Eddie Brock",
-        "A-Cauldron Familiar",
         "Cavalier of Night",
         "Daretti, Rocketeer Engineer",
         "Hoarder's Overflow",
-        "Chthonian Nightmare"
+        "Chthonian Nightmare",
+        "Grimoire of the Dead"
       ]
     },
     {
@@ -977,7 +977,7 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.012873,
+      "ndcg30": 0.013406,
       "on_page_hits": 1,
       "top10": [
         "Baloth Prime",
@@ -986,10 +986,10 @@
         "Titania, Protector of Argoth",
         "Glaring Fleshraker",
         "Feasting Troll King",
-        "Plane-Merge Elf",
         "Hunted Troll",
         "Hydra Broodmaster",
-        "Terastodon"
+        "Terastodon",
+        "Worldspine Wurm"
       ]
     },
     {
@@ -1070,10 +1070,9 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.10135,
+      "ndcg30": 0.110954,
       "on_page_hits": 10,
       "top10": [
-        "Dockside Extortionist",
         "Beast Within",
         "Generous Gift",
         "Smothering Tithe",
@@ -1082,7 +1081,8 @@
         "Ragavan, Nimble Pilferer",
         "Curse of Opulence",
         "Gilded Goose",
-        "Ocelot Pride"
+        "Ocelot Pride",
+        "Strike It Rich"
       ]
     },
     {
@@ -1194,19 +1194,19 @@
       ],
       "hi_syn_hits": 5,
       "hi_syn_total": 10,
-      "ndcg30": 0.48142,
+      "ndcg30": 0.491177,
       "on_page_hits": 18,
       "top10": [
         "Scion of Oona",
         "Tegwyll, Duke of Splendor",
-        "Oura, the Imitator",
         "Faerie Seer",
         "Faerie Dreamthief",
         "Faerie Mastermind",
         "Eye Collector",
         "Cloud of Faeries",
         "Likeness Looter",
-        "Emrakul's Messenger"
+        "Emrakul's Messenger",
+        "Obyra, Dreaming Duelist"
       ]
     },
     {
@@ -1223,10 +1223,10 @@
         "Sanctum Seeker",
         "Vito, Thorn of the Dusk Rose"
       ],
-      "hi_syn_hits": 6,
+      "hi_syn_hits": 7,
       "hi_syn_total": 10,
-      "ndcg30": 0.549511,
-      "on_page_hits": 23,
+      "ndcg30": 0.583418,
+      "on_page_hits": 24,
       "top10": [
         "Falkenrath Gorger",
         "Legion Lieutenant",
@@ -1287,8 +1287,8 @@
       ],
       "hi_syn_hits": 3,
       "hi_syn_total": 10,
-      "ndcg30": 0.30667,
-      "on_page_hits": 14,
+      "ndcg30": 0.328061,
+      "on_page_hits": 15,
       "top10": [
         "Gonti's Machinations",
         "Exquisite Blood",
@@ -1296,10 +1296,10 @@
         "Moonstone Harbinger",
         "Vampire Scrivener",
         "Lich's Mastery",
-        "A-Vampire Scrivener",
         "Mindcrank",
         "Lich's Tomb",
-        "Oath of Lim-D\u00fbl"
+        "Oath of Lim-D\u00fbl",
+        "Vilis, Broker of Blood"
       ]
     },
     {
@@ -1442,8 +1442,8 @@
       ],
       "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.063905,
-      "on_page_hits": 5,
+      "ndcg30": 0.070116,
+      "on_page_hits": 6,
       "top10": [
         "Flourishing Defenses",
         "Michelangelo, Weirdness to 11",
@@ -1452,9 +1452,9 @@
         "Recon Craft Theta",
         "Glaring Fleshraker",
         "Monkey Cage",
-        "Plane-Merge Elf",
         "Springheart Nantuko",
-        "Arboreal Alliance"
+        "Arboreal Alliance",
+        "Esika's Chariot"
       ]
     },
     {
@@ -1473,7 +1473,7 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.125971,
+      "ndcg30": 0.126489,
       "on_page_hits": 8,
       "top10": [
         "Harmonic Prodigy",
@@ -1535,7 +1535,7 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.004698,
+      "ndcg30": 0.004822,
       "on_page_hits": 2,
       "top10": [
         "Threefold Thunderhulk",
@@ -1544,10 +1544,10 @@
         "Selfcraft Mechan",
         "Eye of Doom",
         "Anchovy & Banana Pizza",
-        "Chipper Chopper",
         "Metalhead",
         "Transplant Theorist",
-        "Rook Turret"
+        "Rook Turret",
+        "Bloodsoaked Altar"
       ]
     },
     {
@@ -1566,8 +1566,8 @@
       ],
       "hi_syn_hits": 5,
       "hi_syn_total": 10,
-      "ndcg30": 0.397297,
-      "on_page_hits": 17,
+      "ndcg30": 0.405136,
+      "on_page_hits": 18,
       "top10": [
         "Spellweaver Volute",
         "Harmonic Prodigy",
@@ -1578,7 +1578,7 @@
         "Ral, Storm Conduit",
         "Prismari Apprentice",
         "Zaffai, Thunder Conductor",
-        "A-Spell Satchel"
+        "Deekah, Fractal Theorist"
       ]
     },
     {
@@ -1628,7 +1628,7 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.026234,
+      "ndcg30": 0.026283,
       "on_page_hits": 3,
       "top10": [
         "Bristlebud Farmer",
@@ -1783,7 +1783,7 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.072624,
+      "ndcg30": 0.072814,
       "on_page_hits": 7,
       "top10": [
         "Explorer's Scope",
@@ -1876,8 +1876,8 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.155606,
-      "on_page_hits": 10,
+      "ndcg30": 0.174643,
+      "on_page_hits": 11,
       "top10": [
         "Lunarch Veteran",
         "The Ozolith",
@@ -1938,7 +1938,7 @@
       ],
       "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.155496,
+      "ndcg30": 0.156118,
       "on_page_hits": 7,
       "top10": [
         "Lost Monarch of Ifnir",
@@ -1969,10 +1969,9 @@
       ],
       "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.197505,
+      "ndcg30": 0.211419,
       "on_page_hits": 14,
       "top10": [
-        "Hardened Bonds",
         "Flourishing Defenses",
         "Staff of Compleation",
         "Thrummingbird",
@@ -1981,7 +1980,8 @@
         "Unnatural Restoration",
         "Contagion Clasp",
         "Contentious Plan",
-        "Throne of Geth"
+        "Throne of Geth",
+        "Smell Fear"
       ]
     },
     {
@@ -2155,7 +2155,7 @@
       ],
       "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.231222,
+      "ndcg30": 0.235459,
       "on_page_hits": 17,
       "top10": [
         "Moonstone Harbinger",
@@ -2163,11 +2163,11 @@
         "Vampire Scrivener",
         "Lich's Mastery",
         "Marina Vendrell's Grimoire",
-        "A-Vampire Scrivener",
         "Cleric of Life's Bond",
         "Wedding Ring",
         "Qala, Ajani's Pridemate",
-        "South Wind Avatar"
+        "South Wind Avatar",
+        "Gonti's Machinations"
       ]
     },
     {
@@ -2217,19 +2217,19 @@
       ],
       "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.304547,
-      "on_page_hits": 15,
+      "ndcg30": 0.337794,
+      "on_page_hits": 17,
       "top10": [
         "Sporecrown Thallid",
         "Shroofus Sproutsire",
         "Thelonite Hermit",
         "Tendershoot Dryad",
         "Mikey & Leo, Chaos & Order",
-        "Hardened Bonds",
         "Flourishing Defenses",
         "Doubling Season",
         "Primal Vigor",
-        "Halving Season"
+        "Hardened Scales",
+        "Ozolith, the Shattered Spire"
       ]
     },
     {
@@ -2248,8 +2248,8 @@
       ],
       "hi_syn_hits": 5,
       "hi_syn_total": 10,
-      "ndcg30": 0.637171,
-      "on_page_hits": 23,
+      "ndcg30": 0.639956,
+      "on_page_hits": 22,
       "top10": [
         "Master of the Pearl Trident",
         "Vodalian Hexcatcher",
@@ -2341,7 +2341,7 @@
       ],
       "hi_syn_hits": 4,
       "hi_syn_total": 10,
-      "ndcg30": 0.483143,
+      "ndcg30": 0.484044,
       "on_page_hits": 18,
       "top10": [
         "Tomb Tyrant",
@@ -2370,21 +2370,21 @@
         "Silver-Fur Master",
         "Moon-Circuit Hacker"
       ],
-      "hi_syn_hits": 5,
+      "hi_syn_hits": 7,
       "hi_syn_total": 10,
-      "ndcg30": 0.489626,
-      "on_page_hits": 20,
+      "ndcg30": 0.598953,
+      "on_page_hits": 25,
       "top10": [
         "Silver-Fur Master",
         "Splinter, Hamato Yoshi",
         "Throatseeker",
-        "A-Silver-Fur Master",
         "Moon-Circuit Hacker",
         "Skullsnatcher",
         "Dokuchi Silencer",
         "Nashi, Searcher in the Dark",
         "Nashi, Moon Sage's Scion",
-        "Mistblade Shinobi"
+        "Mistblade Shinobi",
+        "Mist-Syndicate Naga"
       ]
     },
     {
@@ -2434,7 +2434,7 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.143357,
+      "ndcg30": 0.143954,
       "on_page_hits": 23,
       "top10": [
         "Harmonic Prodigy",
@@ -2465,19 +2465,19 @@
       ],
       "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.27411,
-      "on_page_hits": 9,
+      "ndcg30": 0.279947,
+      "on_page_hits": 10,
       "top10": [
         "Scion of Oona",
         "Tegwyll, Duke of Splendor",
-        "Oura, the Imitator",
         "Faerie Mechanist",
         "Inquisitive Glimmer",
         "Mana Matrix",
         "Hallowed Haunting",
         "Sigil of the Empty Throne",
         "Secret Arcade",
-        "Presence of the Master"
+        "Presence of the Master",
+        "Academy Manufactor"
       ]
     },
     {
@@ -2558,7 +2558,7 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.112178,
+      "ndcg30": 0.112509,
       "on_page_hits": 5,
       "top10": [
         "Stridehangar Automaton",
@@ -2570,7 +2570,7 @@
         "Pilgrim's Eye",
         "Roterothopter",
         "Skyscanner",
-        "Phyrexian Ornithopter"
+        "Aetherjacket"
       ]
     },
     {
@@ -2682,10 +2682,9 @@
       ],
       "hi_syn_hits": 3,
       "hi_syn_total": 10,
-      "ndcg30": 0.166737,
+      "ndcg30": 0.193847,
       "on_page_hits": 9,
       "top10": [
-        "Rankle, Pitiless Trickster",
         "Aclazotz, Deepest Betrayal",
         "Voracious Fell Beast",
         "Taste of Death",
@@ -2694,7 +2693,8 @@
         "Liliana, Dreadhorde General",
         "Gonti's Machinations",
         "Moonstone Harbinger",
-        "Exquisite Blood"
+        "Exquisite Blood",
+        "Bloodthirsty Conqueror"
       ]
     },
     {
@@ -2868,8 +2868,8 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.083939,
-      "on_page_hits": 13,
+      "ndcg30": 0.108311,
+      "on_page_hits": 14,
       "top10": [
         "Phial of Galadriel",
         "Uba Mask",
@@ -2992,7 +2992,7 @@
       ],
       "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.18933,
+      "ndcg30": 0.18939,
       "on_page_hits": 10,
       "top10": [
         "Hardened Scales",
@@ -3023,8 +3023,8 @@
       ],
       "hi_syn_hits": 4,
       "hi_syn_total": 10,
-      "ndcg30": 0.285572,
-      "on_page_hits": 10,
+      "ndcg30": 0.288225,
+      "on_page_hits": 11,
       "top10": [
         "Retrofitter Foundry",
         "Darksteel Citadel",
@@ -3054,7 +3054,7 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.077742,
+      "ndcg30": 0.077965,
       "on_page_hits": 7,
       "top10": [
         "Scavenger's Talent",
