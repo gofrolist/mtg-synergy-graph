@@ -131,11 +131,22 @@ class TestEffectConditionalInDB:
         assert "effect_conditional" in names
 
 
+#: Skip the end-to-end scoring tests below when data/synergy.db is not
+#: available — CI doesn't ship the Forge cardsfolder needed to build it.
+#: The structural tests higher up this file don't depend on the DB and
+#: continue to run in CI.
+_requires_full_db = pytest.mark.skipif(
+    not Path("data/synergy.db").exists(),
+    reason="requires data/synergy.db (run scripts/import_cardsfolder.py)",
+)
+
+
 class TestEffectConditionalScoring:
     """Integration: trigger_effect matches from effect-conditional triggers
     get a ``:cond`` suffix on filter_group, which the IDF computer uses to
     halve the weight."""
 
+    @_requires_full_db
     def test_trigger_effect_gets_cond_suffix(self):
         """Selvala's ETB trigger is effect_conditional; the matches
         produced via the trigger_effect rule should carry ':cond' in
@@ -150,6 +161,7 @@ class TestEffectConditionalScoring:
         trigger_effect_cond = [c for c in comps if c.rule_id == "trigger_effect" and ":cond" in (c.filter_group or "")]
         assert len(trigger_effect_cond) > 0, "expected Selvala's ETB-trigger x creature matches to carry ':cond' suffix"
 
+    @_requires_full_db
     def test_korvold_no_cond_suffix(self):
         """Korvold's Sacrificed trigger is not effect_conditional; matches
         must NOT carry ':cond' suffix."""

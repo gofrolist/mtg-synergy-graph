@@ -120,13 +120,21 @@ def test_derive_cmc_treats_no_cost_as_unknown():
     assert _derive_cmc("3 W W") == 5.0
 
 
+_FORGE_CARDSFOLDER = Path(__file__).parent.parent / "data" / "forge" / "forge-gui" / "res" / "cardsfolder"
+_requires_cardsfolder = pytest.mark.skipif(
+    not _FORGE_CARDSFOLDER.exists(),
+    reason="requires data/forge cardsfolder (see scripts/import_cardsfolder.py)",
+)
+
+
+@_requires_cardsfolder
 def test_change_type_attributes_populated_for_kaalia(tmp_path):
     """Kaalia of the Vast cheats Angel/Demon/Dragon into play via ChangeType.
     Those subtypes must land in port_attributes with attr_kind='change_type'.
     """
     db_path = tmp_path / "test.db"
     conn = open_db(db_path)
-    card_path = Path(__file__).parent.parent / "data/forge/forge-gui/res/cardsfolder/k/kaalia_of_the_vast.txt"
+    card_path = _FORGE_CARDSFOLDER / "k" / "kaalia_of_the_vast.txt"
     card = parse_card_file(card_path)
     import_card(conn, card, oracle_id_resolver=None)
 
@@ -141,12 +149,13 @@ def test_change_type_attributes_populated_for_kaalia(tmp_path):
     conn.close()
 
 
+@_requires_cardsfolder
 def test_token_script_attributes_populated_for_tireless_provisioner(tmp_path):
     """Tireless Provisioner's Token effect has TokenScript values for
     Food and Treasure tokens via GenericChoice expansion."""
     db_path = tmp_path / "test.db"
     conn = open_db(db_path)
-    card_path = Path(__file__).parent.parent / "data/forge/forge-gui/res/cardsfolder/t/tireless_provisioner.txt"
+    card_path = _FORGE_CARDSFOLDER / "t" / "tireless_provisioner.txt"
     card = parse_card_file(card_path)
     import_card(conn, card, oracle_id_resolver=None)
 

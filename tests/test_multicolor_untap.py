@@ -12,8 +12,16 @@ Narrow: only 4 cards in the DB produce ``EachColorAmong`` mana.
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 import pytest
+
+# Integration: requires the full 32k-card synergy.db produced by
+# scripts/import_cardsfolder.py.
+pytestmark = pytest.mark.skipif(
+    not Path("data/synergy.db").exists(),
+    reason="requires data/synergy.db (run scripts/import_cardsfolder.py)",
+)
 
 
 @pytest.fixture(scope="module")
