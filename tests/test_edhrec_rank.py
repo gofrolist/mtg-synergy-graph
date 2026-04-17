@@ -95,10 +95,16 @@ def test_resolver_returns_oracle_id_and_rank_pairs(ranked_scryfall_db):
 
     hit = _resolve_scryfall_meta("Sol Ring", None, resolver)
     assert hit is not None
-    assert hit == ("0a" * 16, 1)
+    # Index access still works (NamedTuple is tuple-compatible), so
+    # keep the field-by-field check instead of full-tuple equality —
+    # that way adding new meta fields doesn't churn this assertion.
+    assert hit[0] == "0a" * 16
+    assert hit[1] == 1
 
     hit = _resolve_scryfall_meta("Dockside Extortionist", None, resolver)
-    assert hit == ("07" * 16, 12)
+    assert hit is not None
+    assert hit[0] == "07" * 16
+    assert hit[1] == 12
 
 
 def test_resolver_preserves_null_edhrec_rank(ranked_scryfall_db):

@@ -12,7 +12,7 @@ import json
 import logging
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from .attributes import explode_filter
 from .parser import parse_card_file
@@ -44,10 +44,20 @@ _RESOLVER_TIERS = (
     "dfc_back_face",  # Forge has alternate_name "B", Scryfall stores "A // B"
 )
 
-#: Value type produced by the resolver: ``(oracle_id, edhrec_rank)``.
-#: ``edhrec_rank`` is ``None`` when the Scryfall source row has no rank,
-#: or when the scryfall DB schema pre-dates the column (tiny test fixtures).
-ScryfallMeta = tuple[str, int | None]
+
+#: Value type produced by the resolver. Named tuple so fields are
+#: self-documenting at call sites (``hit.legal_commander`` reads better
+#: than ``hit[2]``) while still being indexable as a plain tuple for
+#: back-compat with older callers that do ``hit[0]`` / ``hit[1]``.
+#:
+#: - ``edhrec_rank`` is ``None`` when the Scryfall source row has no
+#:   rank, or the DB schema pre-dates the column.
+#: - ``legal_commander`` defaults to ``True`` when the schema pre-dates
+#:   the ``legal_commander`` column — "no known reason to exclude".
+class ScryfallMeta(NamedTuple):
+    oracle_id: str
+    edhrec_rank: int | None
+    legal_commander: bool = True
 
 
 def _build_oracle_id_resolver(
@@ -74,6 +84,7 @@ def _build_oracle_id_resolver(
     cols = {r[1] for r in scryfall_conn.execute("PRAGMA table_info(cards)").fetchall()}
     has_type_line = "type_line" in cols
     has_edhrec_rank = "edhrec_rank" in cols
+    has_legal_commander = "legal_commander" in cols
 
     # Bucket each Scryfall row by priority so later tiers never clobber
     # earlier ones.
@@ -87,6 +98,8 @@ def _build_oracle_id_resolver(
         select_cols.append("type_line")
     if has_edhrec_rank:
         select_cols.append("edhrec_rank")
+    if has_legal_commander:
+        select_cols.append("legal_commander")
     sql = "SELECT " + ", ".join(select_cols) + " FROM cards"
 
     for row in scryfall_conn.execute(sql):
@@ -98,11 +111,17 @@ def _build_oracle_id_resolver(
             idx += 1
         raw_rank = row[idx] if has_edhrec_rank else None
         edhrec_rank = int(raw_rank) if raw_rank is not None else None
+        if has_edhrec_rank:
+            idx += 1
+        # Scryfall stores commander legality as 1/0/None. Anything not
+        # explicitly 0 is treated as legal — "no known reason to exclude".
+        raw_legal = row[idx] if has_legal_commander else None
+        legal_commander = raw_legal != 0
 
         if not oracle_id or not canonical:
             continue
 
-        meta: ScryfallMeta = (oracle_id, edhrec_rank)
+        meta = ScryfallMeta(oracle_id, edhrec_rank, legal_commander)
         is_token = bool(type_line) and "Token" in type_line
         if is_token:
             by_name_any.setdefault(canonical, meta)
@@ -309,6 +328,11 @@ def _card_row(card: dict[str, Any]) -> dict[str, Any]:
         "edhrec_rank": card.get("edhrec_rank"),
         "rarity": None,
         "set_code": None,
+        # Default to legal (1) when unknown — the Scryfall resolver
+        # overrides this via `card["legal_commander"]` when the DB
+        # carries the column. Never None: the schema enforces DEFAULT 1
+        # but binding an explicit value avoids relying on that default.
+        "legal_commander": 1 if card.get("legal_commander", True) else 0,
     }
 
 
@@ -317,12 +341,12 @@ INSERT OR REPLACE INTO cards (
     name, oracle_id, mana_cost, cmc, types, supertypes, subtypes, card_types,
     colors, color_identity, power, toughness, loyalty, keywords,
     oracle_text, is_commander, deck_hints, deck_needs, deck_has,
-    edhrec_rank, rarity, set_code
+    edhrec_rank, rarity, set_code, legal_commander
 ) VALUES (
     :name, :oracle_id, :mana_cost, :cmc, :types, :supertypes, :subtypes, :card_types,
     :colors, :color_identity, :power, :toughness, :loyalty, :keywords,
     :oracle_text, :is_commander, :deck_hints, :deck_needs, :deck_has,
-    :edhrec_rank, :rarity, :set_code
+    :edhrec_rank, :rarity, :set_code, :legal_commander
 )
 """
 
@@ -437,13 +461,17 @@ def import_card(
             oracle_id_resolver,
         )
         if hit is not None:
-            card["oracle_id"] = hit[0]
+            card["oracle_id"] = hit.oracle_id
             # Only overwrite edhrec_rank when not already set on the
             # parsed card (future-proofing: if parsers ever learn to
             # read rank directly from Forge data, that would take
             # priority).
             if card.get("edhrec_rank") is None:
-                card["edhrec_rank"] = hit[1]
+                card["edhrec_rank"] = hit.edhrec_rank
+            # Scryfall legality always wins — Forge has no legality
+            # signal, so there is nothing to protect against being
+            # overwritten here.
+            card["legal_commander"] = hit.legal_commander
 
     conn.execute(_CARD_INSERT_SQL, _card_row(card))
 

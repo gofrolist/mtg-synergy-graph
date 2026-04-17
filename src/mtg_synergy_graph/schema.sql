@@ -27,7 +27,12 @@ CREATE TABLE IF NOT EXISTS cards (
     deck_has        TEXT,            -- JSON
     edhrec_rank     INTEGER,
     rarity          TEXT,
-    set_code        TEXT
+    set_code        TEXT,
+    -- Scryfall legalities.commander: 1 legal, 0 not_legal/banned. Default 1
+    -- preserves behaviour when the Scryfall source DB lacks the column
+    -- (tiny test fixtures) — missing data is treated as "no known reason
+    -- to exclude".
+    legal_commander INTEGER DEFAULT 1
 );
 
 -- Partial unique index: one Forge card per Scryfall oracle_id, but NULLs are

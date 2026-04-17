@@ -161,12 +161,19 @@ class SynergyEngine:
     def legal_cards(self, commander: str | Sequence[str]) -> list[str]:
         """Return every card legal for ``commander``: colour identity ⊆
         commander union (§6.9.1) AND a non-empty top-level type that is
-        not in :data:`NON_EDH_CARD_TYPES` (planes, schemes, etc.)."""
+        not in :data:`NON_EDH_CARD_TYPES` (planes, schemes, etc.) AND
+        not flagged ``legal_commander = 0`` by Scryfall (acorn/un-set
+        leakage from the Forge cardsfolder)."""
         cmdr_set = _normalise_commander(commander)
         cmdr_rows = self._fetch_cards(cmdr_set)
         identity = set(_color_identity_union(cmdr_rows))
+        # Same back-compat gate as in penalties._bulk_load_candidates:
+        # synergy.db files created before the legal_commander migration
+        # don't have the column, so fall back to a literal 1.
+        has_legal = any(r[1] == "legal_commander" for r in self._conn.execute("PRAGMA table_info(cards)").fetchall())
+        legal_expr = "legal_commander" if has_legal else "1 AS legal_commander"
         cur = self._conn.execute(
-            "SELECT name, color_identity, card_types FROM cards WHERE name NOT IN ({})".format(
+            f"SELECT name, color_identity, card_types, {legal_expr} FROM cards WHERE name NOT IN ({{}})".format(
                 ",".join("?" * len(cmdr_set))
             ),
             tuple(cmdr_set),
@@ -177,6 +184,8 @@ class SynergyEngine:
             if not cand_types:
                 continue
             if any(t in NON_EDH_CARD_TYPES for t in cand_types):
+                continue
+            if r["legal_commander"] == 0:
                 continue
             cand_pips = {t.strip() for t in (r["color_identity"] or "").split(",") if t.strip()}
             if not (cand_pips - identity):
@@ -340,6 +349,10 @@ class SynergyEngine:
             if not cand_types:
                 continue
             if any(t in NON_EDH_CARD_TYPES for t in cand_types):
+                continue
+            # Scryfall `legal_commander = 0` (acorn / silver-border /
+            # banned) — hard drop before scoring.
+            if row.get("legal_commander") == 0:
                 continue
             cand_pips = {t.strip() for t in (row["color_identity"] or "").split(",") if t.strip()}
             if not (cand_pips - identity_set):

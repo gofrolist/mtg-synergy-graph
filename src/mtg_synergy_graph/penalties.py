@@ -316,9 +316,14 @@ class PenaltyContext:
 
 def _bulk_load_candidates(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
+    # ``legal_commander`` may be absent on older synergy.db files that
+    # predate the schema migration; treat missing as legal so this loader
+    # stays backward compatible with cached test DBs.
+    has_legal = any(r[1] == "legal_commander" for r in conn.execute("PRAGMA table_info(cards)").fetchall())
+    legal_expr = "legal_commander" if has_legal else "1 AS legal_commander"
     for row in conn.execute(
         "SELECT name, color_identity, subtypes, oracle_text, card_types, "
-        "       cmc, deck_needs, deck_hints, deck_has, edhrec_rank FROM cards"
+        f"       cmc, deck_needs, deck_hints, deck_has, edhrec_rank, {legal_expr} FROM cards"
     ).fetchall():
         out[row["name"]] = {
             "name": row["name"],
@@ -331,6 +336,7 @@ def _bulk_load_candidates(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]
             "deck_hints": row["deck_hints"],
             "deck_has": row["deck_has"],
             "edhrec_rank": row["edhrec_rank"],
+            "legal_commander": row["legal_commander"],
         }
     return out
 
