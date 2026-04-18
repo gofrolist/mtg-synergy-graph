@@ -936,6 +936,39 @@ def _find_scales_with_density(
                         )
                     )
 
+        # Domain -> cards that add basic land types (Prismatic Omen,
+        # Dryad of the Ilysian Grove) or grant all-colors basic type
+        # coverage. Radha, Coalition Warlord / Grand Arbiter / Tromokratis
+        # style commanders scale by basic-land-type count — giving a
+        # single land all five types converts "Domain = 1" into
+        # "Domain = 5". Narrow pool (~30 cards) with a static
+        # ``AddType`` clause naming basic land types.
+        elif ev == "Domain":
+            cur = conn.execute(
+                "SELECT DISTINCT card_name FROM card_ports "
+                "WHERE port_type = 'static' AND event_class = 'Continuous' "
+                "AND raw_line LIKE '%AddType%' "
+                "AND ("
+                "    raw_line LIKE '%Forest%' OR raw_line LIKE '%Plains%'"
+                " OR raw_line LIKE '%Island%' OR raw_line LIKE '%Swamp%'"
+                " OR raw_line LIKE '%Mountain%' OR raw_line LIKE '%basic land%'"
+                ") "
+                "AND raw_line LIKE '%Land%'"
+            )
+            for r in cur.fetchall():
+                name = r["card_name"]
+                if name not in cmdr_set and name not in seen:
+                    seen.add(name)
+                    results.append(
+                        PortComplement(
+                            rule_id="scaling",
+                            direction="synergy",
+                            candidate=name,
+                            cmdr_event="scales_domain",
+                            cand_event="land_type_adder",
+                        )
+                    )
+
         # LifeOppsLostThisTurn -> repeatable drain/damage sources.
         # DamageAll is included so global pingers (Spear Spewer,
         # Pyrohemia, Repercussion) match. Instants/Sorceries are

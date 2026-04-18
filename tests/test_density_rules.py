@@ -1153,6 +1153,47 @@ class TestFindScalesWithDensity:
         results = _find_scales_with_density(conn, cmdr_ports, {"Ghalta"})
         assert "Queen Allenal" not in _candidates(results)
 
+    def test_domain_scaling_matches_land_type_adders(self, conn):
+        """Commander scaling with Domain (basic-land-type count) matches
+        cards that add basic land types to a permanent — Prismatic
+        Omen (all lands all basic types) and Dryad of the Ilysian
+        Grove are the canonical Radha / Domain enablers."""
+        _insert_card(conn, "Radha", card_types="Creature", types="Creature")
+        _insert_card(conn, "Prismatic Omen", card_types="Enchantment")
+        _insert_card(conn, "Dryad of the Ilysian Grove", card_types="Creature")
+        _insert_card(conn, "Random Creature", card_types="Creature")
+        _insert_port(conn, "Radha", "scales_with", "Domain")
+        _insert_port(
+            conn,
+            "Prismatic Omen",
+            "static",
+            "Continuous",
+            raw_line=(
+                "{'Mode': 'Continuous', 'Affected': 'Land.YouCtrl',"
+                " 'AddType': 'Plains & Island & Swamp & Mountain & Forest'}"
+            ),
+        )
+        _insert_port(
+            conn,
+            "Dryad of the Ilysian Grove",
+            "static",
+            "Continuous",
+            raw_line=(
+                "{'Mode': 'Continuous', 'Affected': 'Land.YouCtrl',"
+                " 'AddType': 'Forest & Plains & Island & Swamp & Mountain'}"
+            ),
+        )
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Radha",)).fetchall()
+        ]
+        results = _find_scales_with_density(conn, cmdr_ports, {"Radha"})
+        names = _candidates(results)
+        assert "Prismatic Omen" in names
+        assert "Dryad of the Ilysian Grove" in names
+        assert "Random Creature" not in names
+        assert any(r.cmdr_event == "scales_domain" for r in results)
+
     def test_no_scales_with_returns_empty(self, conn):
         """Commander without scales_with ports returns empty."""
         _insert_card(conn, "Plain", card_types="Creature", types="Creature")

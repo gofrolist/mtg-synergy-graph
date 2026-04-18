@@ -768,6 +768,36 @@ class TestFindFlickerSynergy:
         results = _find_flicker_synergy(conn, cmdr_ports, set())
         assert results == []
 
+    def test_lavinia_detain_qualifies(self, conn):
+        """Lavinia of the Tenth's ETB Detain on opponent permanents is
+        a temporary disable — flickering her re-detains different
+        targets, giving repeated removal. Detain is always on
+        opponent permanents, so the event class alone qualifies."""
+        _add_port(
+            conn,
+            "Closet",
+            port_type="effect",
+            event_class="ChangeZone",
+            zone_origin="Battlefield",
+            zone_destination="Exile",
+        )
+        _add_port(
+            conn,
+            "Closet",
+            port_type="effect",
+            event_class="ChangeZone",
+            zone_origin="Exile",
+            zone_destination="Battlefield",
+        )
+        lavinia_detain = _port_row(
+            port_type="effect",
+            event_class="Detain",
+            valid_filter="Valid Permanent.OppCtrl+nonLand+cmcLE4",
+        )
+        cmdr_ports = [self._self_etb_port(), lavinia_detain]
+        results = _find_flicker_synergy(conn, cmdr_ports, set())
+        assert "Closet" in _candidates(results)
+
     def test_gain_control_is_high_value(self, conn):
         """GainControl effect should count as high-value."""
         _add_port(

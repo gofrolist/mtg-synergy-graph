@@ -1541,3 +1541,76 @@ class TestFindGyLoader:
         assert jarad.direction == "synergy"
         assert jarad.cmdr_event == "reanimator"
         assert jarad.cand_event == "library_to_gy_tutor"
+
+    def test_graveyard_replay_keyword_grant_activates(self, conn) -> None:
+        """Sedris-style Continuous static that grants Unearth (or
+        Embalm / Eternalize / Encore / Escape / Flashback / Jump-start)
+        to creature cards in graveyard qualifies as a reanimator
+        archetype — fill the GY, then replay creatures from it."""
+        _insert_card(conn, "Sedris, the Traitor King")
+        _insert_card(conn, "Buried Alive")
+        _entomb_tutor(conn, "Buried Alive")
+        conn.commit()
+
+        ports = [
+            _port(
+                "Sedris, the Traitor King",
+                "static",
+                "Continuous",
+                raw_line=(
+                    "{'Mode': 'Continuous', 'EffectZone': 'Battlefield',"
+                    " 'AffectedZone': 'Graveyard', 'Affected': 'Creature.YouCtrl',"
+                    " 'AddKeyword': 'Unearth:2 B'}"
+                ),
+            )
+        ]
+        results = _find_gy_loader(conn, ports, {"Sedris, the Traitor King"})
+        assert "Buried Alive" in _candidates(results)
+
+    def test_graveyard_replay_non_creature_affected_rejected(self, conn) -> None:
+        """Static that grants recursion to non-creature GY cards
+        (e.g. Flashback on Instants/Sorceries) must NOT trigger the
+        creature-reanimator gate — those commanders have different
+        Hi-Syn (spell density, not creature tutors)."""
+        _insert_card(conn, "Spell Replayer")
+        _insert_card(conn, "Buried Alive")
+        _entomb_tutor(conn, "Buried Alive")
+        conn.commit()
+
+        ports = [
+            _port(
+                "Spell Replayer",
+                "static",
+                "Continuous",
+                raw_line=(
+                    "{'Mode': 'Continuous', 'AffectedZone': 'Graveyard',"
+                    " 'Affected': 'Instant.YouCtrl,Sorcery.YouCtrl',"
+                    " 'AddKeyword': 'Flashback'}"
+                ),
+            )
+        ]
+        assert _find_gy_loader(conn, ports, {"Spell Replayer"}) == []
+
+    def test_graveyard_replay_without_replay_keyword_rejected(self, conn) -> None:
+        """Static affecting creature cards in graveyard *without* a
+        recognized replay keyword (e.g. Morph, Lifelink) doesn't
+        qualify — only replay-from-GY mechanics define a reanimator
+        archetype."""
+        _insert_card(conn, "Hearts Aflame")
+        _insert_card(conn, "Buried Alive")
+        _entomb_tutor(conn, "Buried Alive")
+        conn.commit()
+
+        ports = [
+            _port(
+                "Hearts Aflame",
+                "static",
+                "Continuous",
+                raw_line=(
+                    "{'Mode': 'Continuous', 'AffectedZone': 'Graveyard',"
+                    " 'Affected': 'Creature.YouCtrl',"
+                    " 'AddKeyword': 'Lifelink'}"
+                ),
+            )
+        ]
+        assert _find_gy_loader(conn, ports, {"Hearts Aflame"}) == []

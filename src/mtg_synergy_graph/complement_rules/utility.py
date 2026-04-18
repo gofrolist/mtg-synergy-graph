@@ -49,6 +49,14 @@ _FLICKER_HIGH_VALUE_EFFECTS: frozenset[str] = frozenset(
         # to Battlefield-origin ChangeZone effects (exile/reanimate
         # shapes) rather than plain tutor-to-hand.
         "ChangeZone",
+        # Lavinia of the Tenth's ETB detains opponent permanents — a
+        # temporary disable that snaps back when Lavinia leaves, the
+        # same mechanical shape as Lagrella's exile-until-I-leave.
+        # Flickering Lavinia re-detains different targets = repeated
+        # removal. Detain is always on opponent permanents, so no
+        # additional zone / filter qualifier is needed beyond the
+        # event class.
+        "Detain",
     }
 )
 

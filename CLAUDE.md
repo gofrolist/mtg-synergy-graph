@@ -65,6 +65,25 @@ Flicker gate + creature-count scaling (2026-04-18):
   ValidCard`) stay out.
 - Non-golden set: 2 commanders crack 0 → non-zero (Lagrella 0 → 0.174,
   Shanna 0 → 0.169). Zero golden-set regressions, 5 new tests.
+GY-replay keyword grant + Detain + Domain (2026-04-18):
+- `_wants_gy_fill` now also fires when the commander has a Continuous
+  static that grants a GY-replay keyword (Unearth / Embalm /
+  Eternalize / Encore / Escape / Flashback / Jump-start) to creature
+  cards in the graveyard. Sedris, the Traitor King (Unearth) and
+  Sliver Gravemother (Encore) — both previously had zero complements
+  because their mechanic is "fill the GY, play creatures from it" but
+  neither has an explicit ChangeZone GY→BF effect port.
+- `flicker_synergy` now accepts `Detain` as a high-value ETB effect.
+  Lavinia of the Tenth's "detain opponents' permanents on ETB" is
+  mechanically the same shape as Lagrella's temporary exile —
+  flickering re-detains new targets.
+- `scales_with Domain` now matches basic-land-type adders
+  (Prismatic Omen, Dryad of the Ilysian Grove, Nylea's Presence).
+  Radha, Coalition Warlord / Nael, Avizoa Aeronaut both scale with
+  Domain count.
+- Non-golden set: +5 commanders improved (Radha +0.37, Lavinia +0.32,
+  Nael +0.29, Sedris +0.20, Zar Ojanen +0.19), zero regressions,
+  zero golden-set impact. 835 tests (5 new).
 Port extraction: 108,644 ports from 32,327 cards (GenericChoice + StaticAbilities$
 expansion, deduped after A1's 2^N re-walk fix).
 

@@ -76,6 +76,53 @@ def _extract_recast_types(cmdr_ports: list[PortRow]) -> set[str]:
     return recast_types
 
 
+#: Keywords that, when granted to creature cards in the graveyard,
+#: turn the commander into a reanimator engine — playing creatures
+#: straight out of the graveyard. Sedris (Unearth) and Sliver
+#: Gravemother (Encore) are the current examples. Embalm / Eternalize
+#: grant token copies; Escape pays mana + exiles other GY cards. Each
+#: of these mechanics defines the same engine: fill the graveyard,
+#: then replay creatures from it.
+_GRAVEYARD_REPLAY_KEYWORDS: tuple[str, ...] = (
+    "Unearth",
+    "Embalm",
+    "Eternalize",
+    "Encore",
+    "Escape",
+    "Flashback",
+    "Jump-start",
+)
+
+
+def _has_graveyard_replay_static(cmdr_ports: list[PortRow]) -> bool:
+    """True when the commander has a Continuous static that grants a
+    graveyard-replay keyword (Unearth / Embalm / Eternalize / Encore /
+    Escape / Flashback / Jump-start) to creature cards in the
+    graveyard.
+
+    Sedris, the Traitor King's "each creature card in your graveyard
+    has unearth {2}{B}" is the canonical shape. Sliver Gravemother
+    grants Encore to Slivers in your graveyard. The mechanical
+    invariant is ``AffectedZone: Graveyard`` + ``Affected`` naming
+    ``Creature`` + an ``AddKeyword`` / raw-line mention of one of the
+    replay keywords.
+    """
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "static":
+            continue
+        if (p.get("event_class") or "").strip() != "Continuous":
+            continue
+        raw = str(p.get("raw_line") or "")
+        if "Graveyard" not in raw or "Creature" not in raw:
+            continue
+        if "'AffectedZone': 'Graveyard'" not in raw:
+            continue
+        for kw in _GRAVEYARD_REPLAY_KEYWORDS:
+            if kw in raw:
+                return True
+    return False
+
+
 def _wants_gy_fill(cmdr_ports: list[PortRow]) -> bool:
     """Return True if the commander needs entomb/discard GY-fill.
 
@@ -83,7 +130,9 @@ def _wants_gy_fill(cmdr_ports: list[PortRow]) -> bool:
     (``effect: ChangeZone`` Graveyard→Battlefield) or RECAST creatures
     from the graveyard (MayPlay-from-GY static whose ``Affected``
     names ``Creature`` / ``Permanent`` or a creature subtype — Karador,
-    Muldrotha, Gisa and Geralf, Chainer).
+    Muldrotha, Gisa and Geralf, Chainer), or GRANT a graveyard-replay
+    keyword to creature cards in the graveyard (Sedris's Unearth,
+    Sliver Gravemother's Encore).
 
     Tergrid-style ``valid_filter='TriggeredCard'`` reanimation of an
     opponent's discarded card is rejected (irrelevant to own-side
@@ -119,7 +168,10 @@ def _wants_gy_fill(cmdr_ports: list[PortRow]) -> bool:
     # Note: a bare ``cost: discard`` doesn't qualify — Borborygmos
     # Enraged uses discard for retrace/Dredge, not reanimation.
     recast = _extract_recast_types(cmdr_ports)
-    return "Creature" in recast or "Permanent" in recast or bool(recast - _NON_CREATURE_RECAST_TYPES)
+    if "Creature" in recast or "Permanent" in recast or bool(recast - _NON_CREATURE_RECAST_TYPES):
+        return True
+    # Graveyard-replay keyword grants (Sedris / Sliver Gravemother).
+    return _has_graveyard_replay_static(cmdr_ports)
 
 
 def _emit_filler(
