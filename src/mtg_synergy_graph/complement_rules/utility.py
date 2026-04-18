@@ -1572,6 +1572,262 @@ def _find_damage_effect_synergy(
     return results
 
 
+#: ``replacement_result`` values that AMPLIFY damage (DmgTwice → x2,
+#: DmgPlus2 → +2, etc). Excludes Prevent / DmgMinus* / DmgHalf* /
+#: redirector results that don't increase damage. Used as the gate
+#: for the damage-doubler axis on both commander and candidate sides.
+_DAMAGE_AMP_RESULTS: frozenset[str] = frozenset(
+    {
+        "DmgTwice",
+        "DmgTriple",
+        "DmgPlus",
+        "DmgPlus1",
+        "DmgPlus2",
+        "Dmg2",
+        "Dmg3",
+        "HarshDmg",
+    }
+)
+
+#: ``trigger.event_class`` values that fire repeatedly during a normal
+#: turn cycle (every cast spell, every upkeep, every land drop).
+#: A candidate carrying one of these triggers AND a DealDamage effect
+#: targeting an opponent is a "ping engine" worth doubling.
+#: Excludes ``Attacks`` / ``DamageDone`` / ``Blocks`` (combat-only —
+#: those route through ``combat_enhancer`` instead).
+_PING_TRIGGER_EVENTS: frozenset[str] = frozenset(
+    {
+        "SpellCast",
+        "Phase",
+        "LandPlayed",
+        "TapsForMana",
+        "Drawn",
+        "Discarded",
+        "Sacrificed",
+        "ChangesZone",
+    }
+)
+
+
+def _find_damage_doubler_synergy(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Find synergies for damage-amplifier replacement-effect commanders.
+
+    Torbran's ``+2`` static, Gisela / Solphim's ``double`` statics, and
+    Tor Wauki / Raphael / Wolverine's similar replacements all share a
+    mechanical shape: ``replacement.DamageDone`` with a damage-amp
+    ``replacement_result`` (DmgTwice / DmgTriple / DmgPlus*) targeting
+    opponent / opponent-permanent. The static is the commander's
+    finisher — every damage source becomes more lethal.
+
+    Two tiers:
+
+    - ``damage_amp_stack``: candidates carrying their own opponent-
+      facing damage-amp replacement (Furnace of Rath, Fiery
+      Emancipation, Dictate of the Twin Gods, Curse of Bloodletting,
+      Angrath's Marauders, City on Fire). Multiplicative stacking
+      makes each pair of doublers worth disproportionately more than
+      either alone — the highest-priority match for these commanders.
+    - ``damage_pinger``: candidates with a non-combat repeating
+      trigger (SpellCast / Phase / LandPlayed / TapsForMana / Drawn /
+      Discarded / Sacrificed / ChangesZone) AND an effect=DealDamage
+      port targeting Player / Opponent. Guttersnipe, Firebrand
+      Archer, Thermo-Alchemist, Manabarbs, Sulfuric Vortex,
+      Kessig Flamebreather, Storm-Kiln Artist. The amplifier turns
+      each ping into a serious damage clock.
+
+    Rejected commander shapes:
+
+    - Pure prevention statics (Iroas, Tajic, Emmara, Frodo) — their
+      replacement_result is ``Prevent`` or has ``PreventionEffect:
+      True`` / ``Prevent: True``. Different mechanical axis.
+    - Self-target replacements (Dralnu's "damage to me → sacrifice
+      permanents", Polukranos's "damage to me → counters") — the
+      ``ValidTarget`` is ``Card.Self`` / ``You`` / ``Permanent.YouCtrl``
+      with no opponent-facing target. These are damage-routing
+      commanders, not amplifiers.
+    - Damage-decreasing replacements (DmgMinus1, DmgHalfDown) — same
+      rejection as preventers.
+    """
+    has_amp = False
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "replacement":
+            continue
+        if (p.get("event_class") or "").strip() != "DamageDone":
+            continue
+        result = (p.get("replacement_result") or "").strip()
+        if result not in _DAMAGE_AMP_RESULTS:
+            continue
+        raw = str(p.get("raw_line") or "")
+        # Reject any prevention flag — amp + prevent never coexist on
+        # the same port, but defensive check keeps the gate clean.
+        if "'Prevent': 'True'" in raw or "'PreventionEffect': 'True'" in raw:
+            continue
+        # Require an opponent-facing ValidTarget — self-only targets
+        # describe damage routing (Dralnu / Polukranos), not amps.
+        if not _replacement_targets_opponent(raw):
+            continue
+        has_amp = True
+        break
+    if not has_amp:
+        return []
+
+    amp_placeholders = ",".join("?" * len(_DAMAGE_AMP_RESULTS))
+    amp_list = sorted(_DAMAGE_AMP_RESULTS)
+    amp_set: set[str] = {
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports "
+            "WHERE port_type = 'replacement' "
+            "AND event_class = 'DamageDone' "
+            f"AND replacement_result IN ({amp_placeholders}) "
+            "AND raw_line NOT LIKE ? "
+            "AND raw_line NOT LIKE ?",
+            (*amp_list, "%'Prevent': 'True'%", "%'PreventionEffect': 'True'%"),
+        )
+    }
+
+    ping_placeholders = ",".join("?" * len(_PING_TRIGGER_EVENTS))
+    ping_list = sorted(_PING_TRIGGER_EVENTS)
+    ping_set: set[str] = {
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT cp_eff.card_name "
+            "FROM card_ports cp_eff "
+            "JOIN card_ports cp_trig ON cp_trig.card_name = cp_eff.card_name "
+            "WHERE cp_eff.port_type = 'effect' AND cp_eff.event_class = 'DealDamage' "
+            "AND (cp_eff.valid_filter LIKE '%Opponent%' "
+            "     OR cp_eff.valid_filter LIKE '%Player%' "
+            "     OR cp_eff.valid_filter LIKE '%Each%') "
+            "AND cp_trig.port_type = 'trigger' "
+            f"AND cp_trig.event_class IN ({ping_placeholders})",
+            ping_list,
+        )
+    }
+
+    tier_priority = (
+        ("damage_amp_stack", amp_set),
+        ("damage_pinger", ping_set),
+    )
+    seen: set[str] = set()
+    results: list[PortComplement] = []
+    for cand_event, candidates in tier_priority:
+        for name in candidates:
+            if name in cmdr_set or name in seen:
+                continue
+            seen.add(name)
+            results.append(
+                PortComplement(
+                    rule_id="damage_doubler_synergy",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="damage_amp",
+                    cand_event=cand_event,
+                )
+            )
+    return results
+
+
+#: ``ValidTarget`` clause values whose opponent-facing intent is
+#: unambiguous. Anything containing one of these substrings counts as
+#: opponent-targeting; all else is treated as self-only / ambiguous.
+_OPPONENT_TARGET_SUBSTRINGS: tuple[str, ...] = (
+    "Opponent",
+    "OppCtrl",
+    "Player.Opp",
+)
+
+
+def _replacement_targets_opponent(raw_line: str) -> bool:
+    """True iff the replacement port's ``ValidTarget`` clause names
+    an opponent or opponent-controlled permanent.
+    """
+    m = re.search(r"'ValidTarget':\s*'([^']+)'", raw_line)
+    if not m:
+        # No ValidTarget clause = unrestricted (Furnace of Rath shape:
+        # all damage anywhere). Treat as opponent-targeting too — the
+        # candidate-side query below will still narrow by replacement
+        # result.
+        return True
+    val = m.group(1)
+    return any(sub in val for sub in _OPPONENT_TARGET_SUBSTRINGS)
+
+
+#: Keywords whose blocking restriction text is "can't be blocked
+#: except by creatures with <keyword>". Members of these pools form
+#: a peer-blocking ecosystem — every card with the keyword is both an
+#: attacker that bypasses normal blockers AND the only legal blocker
+#: for opposing copies. The pools are tiny by design (Horsemanship 29,
+#: Shadow 36), so any commander on the axis wants the rest of the
+#: pool as both attackers and blockers.
+_PEER_BLOCKING_KEYWORDS: frozenset[str] = frozenset({"Horsemanship", "Shadow"})
+
+
+def _find_peer_evasion_tribal(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Surface peer-blocking-keyword partners for evasion-tribal commanders.
+
+    A "peer-blocking" keyword is one whose Magic rules text reads
+    "can't be blocked except by creatures with <keyword>" — Horsemanship
+    and Shadow are the only members today. Pools are tiny (~30 cards
+    each) and the rest of the pool serves a dual mechanical role for
+    a commander on the axis:
+
+    - Other attackers with the keyword stack the unblockable clock.
+    - The only legal blockers against opposing copies of the keyword.
+
+    The Portal Three Kingdoms commanders (Cao Ren, Liu Bei, Lu Bu,
+    Lu Meng, Lu Xun, Ma Chao, Sun Ce, Xiahou Dun, Yuan Shao, Zhang
+    Fei, Zhang He, Zhao Zilong, Lady Zhurong, Guan Yu) all carry
+    Horsemanship and almost no other mechanical port — without this
+    rule they fall through every gate and surface generic staples.
+
+    Single tier ``peer_evasion_partner`` — narrow gate, narrow pool,
+    no need to tier further.
+    """
+    cmdr_keywords: set[str] = set()
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "keyword":
+            continue
+        ev = (p.get("event_class") or "").strip()
+        if ev in _PEER_BLOCKING_KEYWORDS:
+            cmdr_keywords.add(ev)
+    if not cmdr_keywords:
+        return []
+
+    placeholders = ",".join("?" * len(cmdr_keywords))
+    keyword_list = sorted(cmdr_keywords)
+    candidates: set[str] = {
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports "
+            f"WHERE port_type = 'keyword' AND event_class IN ({placeholders})",
+            keyword_list,
+        )
+    }
+
+    results: list[PortComplement] = []
+    for name in candidates:
+        if name in cmdr_set:
+            continue
+        results.append(
+            PortComplement(
+                rule_id="peer_evasion_tribal",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="peer_evasion_keyword",
+                cand_event="peer_evasion_partner",
+            )
+        )
+    return results
+
+
 def _find_mana_doubler_synergy(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],

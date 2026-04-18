@@ -99,6 +99,8 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "counter_axis_feeder": "counter_synergy",
     "modified_axis_feeder": "counter_synergy",
     "creatures_as_lands_landfall": "port_match",
+    "damage_doubler_synergy": "port_match",
+    "peer_evasion_tribal": "port_match",
 }
 
 # ---------------------------------------------------------------------------
@@ -476,6 +478,27 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # only card matching today but any future card with the same
     # mechanical shape qualifies automatically.
     "creatures_as_lands_landfall": 2.5,
+    # damage_doubler_synergy: replacement.DamageDone with damage-amp
+    # replacement_result (Torbran +2, Gisela / Solphim double, Tor
+    # Wauki / Raphael / Wolverine variants). Two tiers — amp_stack
+    # (~50 cards: Furnace of Rath, Fiery Emancipation, Curse of
+    # Bloodletting, Angrath's Marauders) + damage_pinger (~170
+    # cards: Guttersnipe, Firebrand Archer, Manabarbs, Sulfuric
+    # Vortex, Storm-Kiln Artist). Multiplier 2.5× lifts the narrow
+    # amp_stack tier into the 0.5+ range — the multiplicative
+    # synergy of paired doublers is the genuine Hi-Syn signal for
+    # this archetype, not the broad pinger pool.
+    "damage_doubler_synergy": 2.5,
+    # peer_evasion_tribal: commanders carrying a peer-blocking
+    # keyword (Horsemanship 29 cards / Shadow 36 cards) want the
+    # rest of the pool as both attackers and the only legal blockers
+    # against opposing copies. Tiny pools mean naturally high IDF;
+    # the 2.0× multiplier ensures the partners surface above the
+    # generic-staple noise (P3K vanilla horsemanship commanders had
+    # nothing else for the engine to latch onto). All 14 P3K
+    # legendary horsemanship commanders qualify automatically; any
+    # future card / commander with these keywords does too.
+    "peer_evasion_tribal": 2.0,
 }
 
 

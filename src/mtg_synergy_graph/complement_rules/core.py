@@ -970,6 +970,7 @@ from .utility import (  # noqa: E402
     _find_counter_target_payoff,
     _find_creature_untap_engine,
     _find_creatures_as_lands_landfall,
+    _find_damage_doubler_synergy,
     _find_damage_effect_synergy,
     _find_extra_land_plays,
     _find_flicker_payoffs,
@@ -980,6 +981,7 @@ from .utility import (  # noqa: E402
     _find_monarch_synergy,
     _find_multicolor_untap,
     _find_opponent_forcing,
+    _find_peer_evasion_tribal,
     _find_untap_combo,
     _find_untap_synergy,
     _find_wheel_synergy,
@@ -1160,6 +1162,8 @@ def find_all_complements(
         out.extend(_find_creature_untap_engine(conn, cmdr_ports, cmdr_set))
         out.extend(_find_counter_axis_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_modified_axis_feeders(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_damage_doubler_synergy(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_peer_evasion_tribal(conn, cmdr_ports, cmdr_set))
         return out
 
     if not needed_cand:

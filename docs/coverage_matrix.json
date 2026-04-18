@@ -18,10 +18,10 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "combat_enhancer": 1,
+      "effect_feeds_trigger": 1,
       "effect_resonance": 1,
       "lord": 1,
-      "replacement_resonance": 1,
-      "token_etb_damage": 1,
       "tribal_density": 1
     }
   },
@@ -133,8 +133,8 @@
     "formally_covered_by": [],
     "top_rules": {
       "artifact_recursion": 2,
+      "cost_reducer": 2,
       "effect_feeds_trigger": 4,
-      "etb_sac_target": 2,
       "replacement_resonance": 4,
       "spellcast_resonance": 2
     }
@@ -237,8 +237,8 @@
     "formally_covered_by": [],
     "top_rules": {
       "counter_keyword": 1,
+      "effect_feeds_trigger": 1,
       "proliferate_synergy": 1,
-      "replacement_resonance": 1,
       "trigger_effect": 1,
       "trigger_resonance": 1
     }
@@ -276,10 +276,10 @@
     "empirical_activations": 4,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 2,
       "lord": 2,
       "panharmonicon": 4,
       "replacement_resonance": 3,
-      "token_etb_damage": 2,
       "tribal_density": 2
     }
   },
@@ -290,9 +290,9 @@
     "formally_covered_by": [],
     "top_rules": {
       "combat_enhancer": 1,
+      "effect_feeds_trigger": 1,
       "lord": 1,
       "replacement_resonance": 2,
-      "token_etb_damage": 1,
       "tribal_density": 1
     }
   },
@@ -302,11 +302,11 @@
     "empirical_activations": 8,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 1,
       "effect_resonance": 2,
       "flicker_synergy": 1,
       "panharmonicon": 2,
-      "trigger_effect": 2,
-      "untap_synergy": 1
+      "trigger_effect": 2
     }
   },
   "effect|Animate": {
@@ -361,7 +361,7 @@
       "effect_resonance": 8,
       "lord": 3,
       "monarch_synergy": 8,
-      "trigger_effect": 3
+      "tribal_density": 3
     }
   },
   "effect|Blight": {
@@ -370,8 +370,8 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 1,
       "effect_resonance": 1,
-      "etb_self": 1,
       "lord": 1,
       "tribal_density": 1,
       "trigger_effect": 1
@@ -385,8 +385,8 @@
     "top_rules": {
       "effect_feeds_trigger": 10,
       "etb_self": 6,
+      "lord": 4,
       "replacement_resonance": 13,
-      "tribal_density": 4,
       "trigger_effect": 7
     }
   },
@@ -534,8 +534,8 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "combat_enhancer": 1,
       "lord": 1,
-      "replacement_blocks": 1,
       "tribal_density": 1,
       "trigger_effect": 1,
       "trigger_resonance": 1
@@ -563,8 +563,8 @@
       "cost_reduction_target": 1,
       "effect_feeds_trigger": 1,
       "etb_self": 1,
-      "tribal_density": 1,
-      "trigger_effect": 1
+      "lord": 1,
+      "tribal_density": 1
     }
   },
   "effect|ControlPlayer": {
@@ -609,8 +609,8 @@
     "empirical_activations": 7,
     "formally_covered_by": [],
     "top_rules": {
-      "cost_payoff": 1,
       "cost_reducer": 1,
+      "replacement_resonance": 1,
       "spell_density": 1,
       "spellcast_resonance": 1,
       "untap_synergy": 4
@@ -645,8 +645,8 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "combat_enhancer": 1,
       "lord": 1,
-      "replacement_blocks": 1,
       "tribal_density": 1,
       "trigger_effect": 1,
       "trigger_resonance": 1
@@ -733,9 +733,9 @@
     "formally_covered_by": [],
     "top_rules": {
       "creature_untap_engine": 1,
+      "effect_feeds_trigger": 1,
       "replacement_resonance": 1,
       "trigger_effect": 1,
-      "untap_combo": 1,
       "untap_synergy": 1
     }
   },
@@ -823,9 +823,9 @@
     }
   },
   "effect|Effect": {
-    "activation_rate": 0.8173076923076923,
+    "activation_rate": 0.8221153846153846,
     "commanders": 208,
-    "empirical_activations": 170,
+    "empirical_activations": 171,
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 77,
@@ -850,10 +850,10 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "dies_drain": 1,
       "edict_feeder": 1,
-      "etb_self": 1,
       "lord": 1,
-      "trigger_effect": 1,
+      "tribal_density": 1,
       "zone_resonance": 1
     }
   },
@@ -886,8 +886,8 @@
     "empirical_activations": 4,
     "formally_covered_by": [],
     "top_rules": {
+      "combat_enhancer": 2,
       "lord": 3,
-      "replacement_resonance": 2,
       "tribal_density": 3,
       "trigger_effect": 2,
       "trigger_resonance": 2
@@ -1015,11 +1015,11 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 1,
       "effect_resonance": 1,
       "lord": 1,
       "spellcast_resonance": 1,
-      "tribal_density": 1,
-      "trigger_effect": 1
+      "tribal_density": 1
     }
   },
   "effect|Investigate": {
@@ -1117,8 +1117,8 @@
       "etb_self": 1,
       "graveyard_play": 1,
       "landfall_enabler": 1,
-      "panharmonicon": 1,
-      "trigger_effect": 1
+      "trigger_effect": 1,
+      "zone_resonance": 1
     }
   },
   "effect|Meld": {
@@ -1158,8 +1158,8 @@
       "effect_feeds_trigger": 2,
       "proliferate_synergy": 2,
       "replacement_resonance": 3,
-      "trigger_effect": 1,
-      "untap_synergy": 3
+      "untap_synergy": 3,
+      "zone_resonance": 1
     }
   },
   "effect|MultiplyCounter": {
@@ -1170,10 +1170,10 @@
       "effect_feeds_trigger"
     ],
     "top_rules": {
+      "combat_enhancer": 2,
       "effect_feeds_trigger": 12,
       "proliferate_synergy": 12,
       "replacement_resonance": 7,
-      "trigger_effect": 2,
       "untap_synergy": 3
     }
   },
@@ -1208,10 +1208,10 @@
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 3,
-      "etb_sac_target": 2,
       "graveyard_play": 2,
       "replacement_resonance": 3,
-      "trigger_effect": 3
+      "trigger_effect": 3,
+      "untap_synergy": 2
     }
   },
   "effect|PeekAndReveal": {
@@ -1271,8 +1271,8 @@
     "empirical_activations": 2,
     "formally_covered_by": [],
     "top_rules": {
+      "combat_enhancer": 1,
       "effect_resonance": 1,
-      "evasion": 1,
       "replacement_blocks": 1,
       "trigger_effect": 1,
       "trigger_resonance": 1
@@ -1329,9 +1329,9 @@
     }
   },
   "effect|Pump": {
-    "activation_rate": 0.8106312292358804,
+    "activation_rate": 0.813953488372093,
     "commanders": 301,
-    "empirical_activations": 244,
+    "empirical_activations": 245,
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 111,
@@ -1342,9 +1342,9 @@
     }
   },
   "effect|PumpAll": {
-    "activation_rate": 0.7857142857142857,
+    "activation_rate": 0.7946428571428571,
     "commanders": 112,
-    "empirical_activations": 88,
+    "empirical_activations": 89,
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 39,
@@ -1392,8 +1392,8 @@
     "empirical_activations": 4,
     "formally_covered_by": [],
     "top_rules": {
+      "dies_drain": 1,
       "effect_feeds_trigger": 4,
-      "etb_self": 1,
       "lord": 2,
       "replacement_resonance": 3,
       "tribal_density": 2
@@ -1414,7 +1414,7 @@
     "empirical_activations": 11,
     "formally_covered_by": [],
     "top_rules": {
-      "edict_feeder": 2,
+      "dies_drain": 2,
       "effect_feeds_trigger": 5,
       "lord": 4,
       "replacement_resonance": 4,
@@ -1474,8 +1474,8 @@
     "top_rules": {
       "combat_enhancer": 6,
       "effect_feeds_trigger": 13,
-      "panharmonicon": 4,
       "replacement_resonance": 12,
+      "tribal_density": 4,
       "trigger_effect": 5
     }
   },
@@ -1498,8 +1498,8 @@
     "empirical_activations": 3,
     "formally_covered_by": [],
     "top_rules": {
-      "affinity_archetype": 1,
       "effect_feeds_trigger": 2,
+      "flicker_synergy": 1,
       "replacement_resonance": 2,
       "untap_synergy": 1,
       "value_engine": 1
@@ -1524,9 +1524,9 @@
     "empirical_activations": 3,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 1,
       "lord": 1,
       "panharmonicon": 2,
-      "replacement_resonance": 1,
       "tribal_density": 1,
       "untap_synergy": 1
     }
@@ -1604,11 +1604,11 @@
     "empirical_activations": 3,
     "formally_covered_by": [],
     "top_rules": {
+      "affinity_archetype": 1,
       "effect_feeds_trigger": 2,
       "effect_resonance": 1,
       "flicker_synergy": 1,
-      "token_etb_damage": 1,
-      "untap_combo": 1
+      "replacement_resonance": 1
     }
   },
   "effect|SkipPhase": {
@@ -1811,8 +1811,8 @@
     "empirical_activations": 5,
     "formally_covered_by": [],
     "top_rules": {
-      "etb_sac_target": 2,
       "graveyard_play": 2,
+      "gy_loader": 2,
       "panharmonicon": 2,
       "replacement_resonance": 2,
       "trigger_effect": 2
@@ -1824,10 +1824,10 @@
     "empirical_activations": 5,
     "formally_covered_by": [],
     "top_rules": {
+      "dies_drain": 2,
       "edict_feeder": 2,
       "replacement_resonance": 2,
       "tribal_density": 2,
-      "trigger_effect": 2,
       "zone_resonance": 2
     }
   },
@@ -1840,8 +1840,8 @@
       "combat_enhancer": 1,
       "effect_feeds_trigger": 1,
       "flicker_synergy": 1,
-      "replacement_resonance": 2,
-      "tribal_density": 1
+      "lord": 1,
+      "replacement_resonance": 2
     }
   },
   "effect|WinsGame": {
@@ -1888,7 +1888,7 @@
     "top_rules": {
       "affinity_archetype": 4,
       "combat_enhancer": 1,
-      "etb_sac_target": 1,
+      "effect_resonance": 1,
       "replacement_resonance": 2,
       "scaling": 2
     }
@@ -1958,11 +1958,11 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "dies_drain": 1,
       "edict_feeder": 1,
-      "etb_self": 1,
       "lord": 1,
-      "replacement_blocks": 1,
-      "trigger_effect": 1
+      "tribal_density": 1,
+      "trigger_resonance": 1
     }
   },
   "keyword|Afflict:3": {
@@ -2105,7 +2105,7 @@
     "empirical_activations": 4,
     "formally_covered_by": [],
     "top_rules": {
-      "edict_feeder": 1,
+      "dies_drain": 1,
       "effect_feeds_trigger": 3,
       "lord": 1,
       "replacement_resonance": 2,
@@ -2217,8 +2217,8 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 1,
       "flicker_payoff": 1,
-      "panharmonicon": 1,
       "replacement_resonance": 1,
       "trigger_effect": 1,
       "untap_synergy": 1
@@ -2232,9 +2232,9 @@
     "top_rules": {
       "flicker_payoff": 1,
       "lord": 1,
-      "token_etb_damage": 1,
       "tribal_density": 1,
-      "trigger_effect": 1
+      "trigger_effect": 1,
+      "untap_synergy": 1
     }
   },
   "keyword|Chapter:3:Incubate,PumpAll,DestroyAll": {
@@ -2243,7 +2243,7 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
-      "damage_synergy": 1,
+      "effect_feeds_trigger": 1,
       "flicker_payoff": 1,
       "replacement_blocks": 1,
       "trigger_effect": 1,
@@ -2401,10 +2401,10 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "combat_enhancer": 1,
+      "effect_feeds_trigger": 1,
       "effect_resonance": 1,
-      "replacement_resonance": 1,
       "tribal_density": 1,
-      "trigger_effect": 1,
       "zone_resonance": 1
     }
   },
@@ -2504,8 +2504,8 @@
     "empirical_activations": 2,
     "formally_covered_by": [],
     "top_rules": {
+      "combat_enhancer": 1,
       "lord": 2,
-      "replacement_blocks": 1,
       "tribal_density": 2,
       "trigger_effect": 1,
       "trigger_resonance": 1
@@ -2556,10 +2556,10 @@
     "formally_covered_by": [],
     "top_rules": {
       "counter_keyword": 1,
-      "etb_sac_target": 1,
+      "counter_producer": 1,
+      "dies_drain": 1,
       "graveyard_play": 1,
-      "panharmonicon": 1,
-      "trigger_effect": 1
+      "gy_loader": 1
     }
   },
   "keyword|Devoid": {
@@ -2591,11 +2591,11 @@
     "empirical_activations": 2,
     "formally_covered_by": [],
     "top_rules": {
-      "evasion": 1,
+      "combat_enhancer": 1,
+      "effect_feeds_trigger": 1,
       "lord": 1,
-      "replacement_blocks": 1,
       "tribal_density": 1,
-      "trigger_effect": 1
+      "trigger_resonance": 1
     }
   },
   "keyword|Disturb:1": {
@@ -2694,10 +2694,10 @@
     "formally_covered_by": [],
     "top_rules": {
       "creature_untap_engine": 1,
+      "effect_feeds_trigger": 1,
       "lord": 1,
-      "replacement_resonance": 1,
       "tribal_density": 1,
-      "untap_combo": 1
+      "untap_synergy": 1
     }
   },
   "keyword|ETBReplacement:Other:AddExtraCounter:Mandatory:Battlefield:Creature.Beast+YouCtrl+Other": {
@@ -2733,10 +2733,10 @@
     "formally_covered_by": [],
     "top_rules": {
       "effect_resonance": 1,
-      "etb_sac_target": 1,
+      "graveyard_play": 1,
+      "gy_loader": 1,
       "scaling": 1,
-      "toughness_synergy": 1,
-      "trigger_effect": 1
+      "toughness_synergy": 1
     }
   },
   "keyword|ETBReplacement:Other:AddExtraCounter:Mandatory:Battlefield:Creature.YouCtrl+Other": {
@@ -2988,9 +2988,9 @@
     "empirical_activations": 2,
     "formally_covered_by": [],
     "top_rules": {
-      "effect_resonance": 1,
+      "counter_keyword": 1,
+      "effect_feeds_trigger": 1,
       "replacement_resonance": 2,
-      "sacrifice_cluster": 1,
       "trigger_effect": 2,
       "trigger_resonance": 2
     }
@@ -3045,9 +3045,9 @@
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 1,
-      "etb_sac_target": 1,
+      "graveyard_play": 1,
       "lord": 1,
-      "panharmonicon": 1,
+      "tribal_density": 1,
       "trigger_effect": 1
     }
   },
@@ -3108,9 +3108,9 @@
     }
   },
   "keyword|First": {
-    "activation_rate": 0.7391304347826086,
+    "activation_rate": 0.75,
     "commanders": 92,
-    "empirical_activations": 68,
+    "empirical_activations": 69,
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 33,
@@ -3143,9 +3143,9 @@
     }
   },
   "keyword|Flying": {
-    "activation_rate": 0.8055555555555556,
+    "activation_rate": 0.8098290598290598,
     "commanders": 468,
-    "empirical_activations": 377,
+    "empirical_activations": 379,
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 197,
@@ -3166,9 +3166,9 @@
     }
   },
   "keyword|Haste": {
-    "activation_rate": 0.8598726114649682,
+    "activation_rate": 0.8726114649681529,
     "commanders": 157,
-    "empirical_activations": 135,
+    "empirical_activations": 137,
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 69,
@@ -3185,8 +3185,8 @@
     "formally_covered_by": [],
     "top_rules": {
       "combat_enhancer": 2,
+      "effect_feeds_trigger": 1,
       "lord": 2,
-      "replacement_resonance": 1,
       "tribal_density": 3,
       "voltron": 9
     }
@@ -3199,7 +3199,7 @@
     "top_rules": {
       "lord": 1,
       "panharmonicon": 1,
-      "token_etb_damage": 1,
+      "replacement_resonance": 1,
       "tribal_density": 1,
       "trigger_effect": 1
     }
@@ -3212,7 +3212,7 @@
     "top_rules": {
       "lord": 1,
       "panharmonicon": 1,
-      "token_etb_damage": 1,
+      "replacement_resonance": 1,
       "tribal_density": 1,
       "trigger_effect": 1
     }
@@ -3225,7 +3225,7 @@
     "top_rules": {
       "lord": 1,
       "panharmonicon": 1,
-      "token_etb_damage": 1,
+      "replacement_resonance": 1,
       "tribal_density": 1,
       "trigger_effect": 1
     }
@@ -3259,15 +3259,15 @@
     }
   },
   "keyword|Horsemanship": {
-    "activation_rate": 0.35714285714285715,
+    "activation_rate": 1.0,
     "commanders": 14,
-    "empirical_activations": 5,
+    "empirical_activations": 14,
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 2,
       "etb_sac_target": 2,
       "graveyard_play": 2,
-      "replacement_resonance": 1,
+      "peer_evasion_tribal": 14,
       "trigger_effect": 2
     }
   },
@@ -3299,8 +3299,8 @@
     "top_rules": {
       "artifact_recursion": 1,
       "effect_feeds_trigger": 2,
-      "effect_resonance": 1,
-      "etb_sac_target": 1,
+      "graveyard_play": 1,
+      "gy_loader": 1,
       "trigger_effect": 3
     }
   },
@@ -3369,11 +3369,11 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
-      "etb_sac_target": 1,
-      "etb_self": 1,
+      "effect_feeds_trigger": 1,
       "graveyard_play": 1,
+      "gy_loader": 1,
       "lord": 1,
-      "trigger_effect": 1
+      "tribal_density": 1
     }
   },
   "keyword|Landwalk:Forest": {
@@ -3382,10 +3382,10 @@
     "empirical_activations": 4,
     "formally_covered_by": [],
     "top_rules": {
+      "combat_enhancer": 1,
       "lord": 2,
       "replacement_producer": 1,
       "replacement_resonance": 1,
-      "token_etb_damage": 1,
       "tribal_density": 4
     }
   },
@@ -3417,8 +3417,8 @@
     "top_rules": {
       "cheat_cmc": 1,
       "effect_feeds_trigger": 2,
-      "etb_sac_target": 1,
       "graveyard_play": 1,
+      "gy_loader": 1,
       "trigger_effect": 1
     }
   },
@@ -3476,7 +3476,7 @@
     "formally_covered_by": [],
     "top_rules": {
       "cheat_cmc": 1,
-      "etb_sac_target": 1,
+      "effect_feeds_trigger": 1,
       "graveyard_play": 1,
       "gy_loader": 1,
       "trigger_effect": 1
@@ -3523,11 +3523,11 @@
     "empirical_activations": 2,
     "formally_covered_by": [],
     "top_rules": {
-      "cost_feeds_trigger": 1,
+      "dies_drain": 1,
       "edict_feeder": 1,
+      "effect_feeds_trigger": 1,
       "panharmonicon": 2,
-      "tribal_density": 1,
-      "zone_resonance": 1
+      "tribal_density": 1
     }
   },
   "keyword|Mobilize:1": {
@@ -3648,7 +3648,7 @@
     "formally_covered_by": [],
     "top_rules": {
       "cheat_cmc": 1,
-      "etb_sac_target": 1,
+      "effect_feeds_trigger": 1,
       "graveyard_play": 1,
       "gy_loader": 1,
       "trigger_effect": 1
@@ -3667,8 +3667,8 @@
     "empirical_activations": 2,
     "formally_covered_by": [],
     "top_rules": {
+      "combat_enhancer": 1,
       "lord": 2,
-      "replacement_blocks": 1,
       "tribal_density": 2,
       "trigger_effect": 1,
       "trigger_resonance": 1
@@ -3700,7 +3700,7 @@
     "formally_covered_by": [],
     "top_rules": {
       "cheat_cmc": 1,
-      "etb_sac_target": 1,
+      "effect_feeds_trigger": 1,
       "graveyard_play": 1,
       "gy_loader": 1,
       "trigger_effect": 1
@@ -3712,10 +3712,10 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "combat_enhancer": 1,
+      "effect_feeds_trigger": 1,
       "lord": 1,
-      "replacement_blocks": 1,
       "tribal_density": 1,
-      "trigger_effect": 1,
       "trigger_resonance": 1
     }
   },
@@ -3800,8 +3800,8 @@
     "empirical_activations": 2,
     "formally_covered_by": [],
     "top_rules": {
+      "counter_target_payoff": 1,
       "effect_feeds_trigger": 2,
-      "etb_self": 1,
       "proliferate_synergy": 2,
       "replacement_resonance": 2,
       "untap_synergy": 1
@@ -3826,8 +3826,8 @@
     "empirical_activations": 4,
     "formally_covered_by": [],
     "top_rules": {
-      "edict_feeder": 1,
-      "etb_self": 1,
+      "dies_drain": 1,
+      "effect_feeds_trigger": 1,
       "replacement_resonance": 3,
       "token_etb_damage": 2,
       "tribal_density": 4
@@ -3883,8 +3883,8 @@
     "empirical_activations": 2,
     "formally_covered_by": [],
     "top_rules": {
-      "evasion": 1,
-      "replacement_blocks": 1,
+      "combat_enhancer": 1,
+      "effect_feeds_trigger": 1,
       "tribal_density": 1,
       "trigger_effect": 1,
       "trigger_resonance": 1
@@ -3914,10 +3914,10 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 1,
       "effect_resonance": 1,
       "lord": 1,
       "proliferate_synergy": 1,
-      "replacement_resonance": 1,
       "tribal_density": 1
     }
   },
@@ -3946,11 +3946,11 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
-      "etb_self": 1,
+      "effect_feeds_trigger": 1,
       "graveyard_play": 1,
-      "panharmonicon": 1,
+      "landfall_enabler": 1,
       "scaling": 1,
-      "trigger_effect": 1
+      "tribal_density": 1
     }
   },
   "keyword|Protection:Spell.ThisTurnCast:spells": {
@@ -3992,11 +3992,11 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
-      "etb_self": 1,
+      "effect_feeds_trigger": 1,
       "graveyard_play": 1,
-      "panharmonicon": 1,
+      "landfall_enabler": 1,
       "scaling": 1,
-      "trigger_effect": 1
+      "tribal_density": 1
     }
   },
   "keyword|Prowess": {
@@ -4089,11 +4089,11 @@
     "empirical_activations": 2,
     "formally_covered_by": [],
     "top_rules": {
-      "evasion": 1,
+      "combat_enhancer": 1,
+      "effect_feeds_trigger": 1,
       "power_matters": 1,
-      "replacement_blocks": 1,
       "replacement_resonance": 1,
-      "trigger_effect": 1
+      "trigger_resonance": 1
     }
   },
   "keyword|Sneak:1": {
@@ -4127,7 +4127,7 @@
     "formally_covered_by": [],
     "top_rules": {
       "cheat_cmc": 1,
-      "etb_sac_target": 1,
+      "effect_feeds_trigger": 1,
       "graveyard_play": 1,
       "gy_loader": 1,
       "trigger_effect": 1
@@ -4217,8 +4217,8 @@
     "top_rules": {
       "flicker_synergy": 1,
       "lord": 2,
-      "panharmonicon": 1,
       "tribal_density": 2,
+      "trigger_resonance": 1,
       "untap_synergy": 1
     }
   },
@@ -4236,10 +4236,10 @@
     "formally_covered_by": [],
     "top_rules": {
       "counter_keyword": 1,
-      "etb_self": 1,
+      "edict_feeder": 1,
+      "effect_feeds_trigger": 1,
       "replacement_resonance": 3,
-      "sacrifice_cluster": 1,
-      "trigger_effect": 1
+      "trigger_resonance": 1
     }
   },
   "keyword|Trample": {
@@ -4314,10 +4314,10 @@
     "formally_covered_by": [],
     "top_rules": {
       "creature_untap_engine": 1,
+      "effect_feeds_trigger": 1,
       "lord": 2,
-      "replacement_resonance": 1,
       "tribal_density": 2,
-      "untap_combo": 1
+      "untap_synergy": 1
     }
   },
   "keyword|Unleash": {
@@ -4326,9 +4326,9 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "combat_enhancer": 1,
       "effect_feeds_trigger": 1,
       "lord": 1,
-      "panharmonicon": 1,
       "replacement_resonance": 1,
       "tribal_density": 1
     }
@@ -4341,9 +4341,9 @@
     "top_rules": {}
   },
   "keyword|Vigilance": {
-    "activation_rate": 0.8252427184466019,
+    "activation_rate": 0.8300970873786407,
     "commanders": 206,
-    "empirical_activations": 170,
+    "empirical_activations": 171,
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 87,
@@ -4435,10 +4435,10 @@
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 2,
-      "etb_self": 1,
       "lord": 1,
       "modified_axis_feeder": 1,
-      "proliferate_synergy": 1
+      "proliferate_synergy": 1,
+      "tribal_density": 1
     }
   },
   "keyword|Ward:Discard<1/Enchantment;Instant;Sorcery/enchantment,": {
@@ -4469,7 +4469,7 @@
     "empirical_activations": 4,
     "formally_covered_by": [],
     "top_rules": {
-      "sacrifice_cluster": 1,
+      "effect_feeds_trigger": 1,
       "spell_density": 1,
       "tribal_density": 2,
       "trigger_effect": 2,
@@ -4509,7 +4509,7 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
-      "evasion": 1,
+      "combat_enhancer": 1,
       "replacement_blocks": 1,
       "replacement_resonance": 1,
       "trigger_effect": 1,
@@ -4523,10 +4523,10 @@
     "formally_covered_by": [],
     "top_rules": {
       "edict_feeder": 1,
-      "etb_self": 1,
+      "effect_feeds_trigger": 1,
       "lord": 1,
-      "sacrifice_cluster": 1,
-      "trigger_effect": 1
+      "tribal_density": 1,
+      "trigger_resonance": 1
     }
   },
   "keyword|Ward:Sac<1/Food>": {
@@ -4536,10 +4536,10 @@
     "formally_covered_by": [],
     "top_rules": {
       "cost_feeds_trigger": 1,
+      "dies_drain": 1,
       "edict_feeder": 1,
-      "etb_self": 1,
-      "panharmonicon": 1,
-      "replacement_resonance": 1
+      "effect_feeds_trigger": 1,
+      "etb_self": 1
     }
   },
   "keyword|Ward:Sac<2/Permanent>": {
@@ -4591,8 +4591,8 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 1,
       "etb_self": 1,
-      "replacement_resonance": 1,
       "token_producer": 1,
       "trigger_effect": 1,
       "zone_resonance": 1
@@ -4604,10 +4604,10 @@
     "empirical_activations": 2,
     "formally_covered_by": [],
     "top_rules": {
+      "cost_reducer": 1,
       "lord": 1,
       "replacement_resonance": 2,
       "spellcast_resonance": 1,
-      "token_etb_damage": 1,
       "tribal_density": 1
     }
   },
@@ -4718,7 +4718,7 @@
     "formally_covered_by": [],
     "top_rules": {
       "cost_reduction_target": 1,
-      "panharmonicon": 1,
+      "flicker_payoff": 1,
       "scaling": 1,
       "spell_density": 1,
       "spellcast_resonance": 1
@@ -4761,9 +4761,9 @@
     "formally_covered_by": [],
     "top_rules": {
       "counter_keyword": 1,
+      "effect_feeds_trigger": 1,
       "power_matters": 1,
       "proliferate_synergy": 1,
-      "replacement_resonance": 1,
       "scaling": 1
     }
   },
@@ -4776,8 +4776,8 @@
       "counter_axis_feeder": 2,
       "counter_keyword": 2,
       "counter_producer": 2,
-      "proliferate_synergy": 2,
-      "replacement_resonance": 2
+      "effect_feeds_trigger": 2,
+      "proliferate_synergy": 2
     }
   },
   "keyword|etbCounter:P1P1:4": {
@@ -4787,8 +4787,8 @@
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 2,
+      "power_matters": 1,
       "replacement_resonance": 2,
-      "token_producer": 1,
       "trigger_effect": 1,
       "zone_resonance": 1
     }
@@ -4799,7 +4799,7 @@
     "empirical_activations": 2,
     "formally_covered_by": [],
     "top_rules": {
-      "counter_keyword": 1,
+      "counter_producer": 1,
       "effect_feeds_trigger": 2,
       "lord": 1,
       "replacement_resonance": 2,
@@ -4819,8 +4819,8 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
-      "etb_sac_target": 1,
       "graveyard_play": 1,
+      "gy_loader": 1,
       "lord": 1,
       "tribal_density": 1,
       "trigger_effect": 1
@@ -4859,9 +4859,9 @@
     "formally_covered_by": [],
     "top_rules": {
       "etb_sac_target": 1,
+      "graveyard_play": 1,
       "lord": 2,
       "power_matters": 2,
-      "scaling": 1,
       "tribal_density": 2
     }
   },
@@ -4872,7 +4872,7 @@
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 2,
-      "etb_sac_target": 1,
+      "graveyard_play": 1,
       "lord": 1,
       "replacement_resonance": 1,
       "tribal_density": 1
@@ -4897,7 +4897,7 @@
     "top_rules": {
       "effect_feeds_trigger": 1,
       "replacement_producer": 9,
-      "token_etb_damage": 1,
+      "replacement_resonance": 1,
       "tribal_density": 1,
       "trigger_effect": 1
     }
@@ -4949,14 +4949,14 @@
     }
   },
   "replacement|DamageDone": {
-    "activation_rate": 0.4838709677419355,
+    "activation_rate": 0.5806451612903226,
     "commanders": 31,
-    "empirical_activations": 15,
+    "empirical_activations": 18,
     "formally_covered_by": [],
     "top_rules": {
+      "damage_doubler_synergy": 5,
       "effect_feeds_trigger": 6,
-      "etb_sac_target": 2,
-      "graveyard_play": 2,
+      "gy_loader": 2,
       "replacement_resonance": 8,
       "trigger_effect": 4
     }
@@ -5070,8 +5070,8 @@
     "formally_covered_by": [],
     "top_rules": {
       "combat_enhancer": 2,
+      "effect_feeds_trigger": 1,
       "effect_resonance": 1,
-      "etb_self": 1,
       "panharmonicon": 1,
       "trigger_effect": 2
     }
@@ -5207,9 +5207,9 @@
     "formally_covered_by": [],
     "top_rules": {
       "counter_keyword": 1,
+      "effect_feeds_trigger": 1,
       "power_matters": 1,
       "proliferate_synergy": 1,
-      "replacement_resonance": 1,
       "scaling": 1
     }
   },
@@ -5232,11 +5232,11 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
-      "cost_feeds_trigger": 1,
       "counter_axis_feeder": 1,
+      "dies_drain": 1,
       "edict_feeder": 1,
-      "tribal_density": 1,
-      "zone_resonance": 1
+      "effect_feeds_trigger": 1,
+      "tribal_density": 1
     }
   },
   "scales_with|CardCounters.SPORE": {
@@ -5294,10 +5294,10 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 1,
       "etb_self": 1,
       "graveyard_play": 1,
       "landfall_enabler": 1,
-      "trigger_effect": 1,
       "zone_resonance": 1
     }
   },
@@ -5359,9 +5359,9 @@
     "top_rules": {
       "effect_feeds_trigger": 2,
       "lord": 1,
-      "panharmonicon": 1,
       "replacement_resonance": 2,
-      "scaling": 1
+      "scaling": 1,
+      "tribal_density": 1
     }
   },
   "scales_with|CastTotalManaSpent": {
@@ -5384,9 +5384,9 @@
     "formally_covered_by": [],
     "top_rules": {
       "cost_reduction_target": 2,
-      "damage_synergy": 1,
       "effect_feeds_trigger": 2,
       "replacement_resonance": 4,
+      "trigger_resonance": 1,
       "untap_synergy": 4
     }
   },
@@ -5475,7 +5475,7 @@
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 2,
-      "etb_self": 1,
+      "flicker_payoff": 1,
       "tribal_density": 1,
       "trigger_effect": 2,
       "zone_resonance": 1
@@ -5500,11 +5500,11 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
-      "cost_feeds_trigger": 1,
+      "dies_drain": 1,
       "edict_feeder": 1,
-      "etb_self": 1,
+      "effect_feeds_trigger": 1,
       "lord": 1,
-      "zone_resonance": 1
+      "tribal_density": 1
     }
   },
   "scales_with|CountersAddedThisTurn Any Player Card.Self": {
@@ -5536,10 +5536,10 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "combat_enhancer": 1,
+      "effect_feeds_trigger": 1,
       "flicker_synergy": 1,
       "lord": 1,
-      "replacement_resonance": 1,
-      "token_etb_damage": 1,
       "tribal_density": 1
     }
   },
@@ -5566,8 +5566,8 @@
     "empirical_activations": 3,
     "formally_covered_by": [],
     "top_rules": {
+      "dies_drain": 1,
       "edict_feeder": 1,
-      "etb_self": 1,
       "replacement_resonance": 3,
       "trigger_effect": 2,
       "zone_resonance": 1
@@ -5612,9 +5612,9 @@
     "empirical_activations": 3,
     "formally_covered_by": [],
     "top_rules": {
+      "dies_drain": 1,
       "edict_feeder": 1,
       "effect_feeds_trigger": 3,
-      "etb_self": 1,
       "replacement_resonance": 3,
       "trigger_effect": 2
     }
@@ -5625,7 +5625,7 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
-      "etb_sac_target": 1,
+      "effect_feeds_trigger": 1,
       "graveyard_play": 1,
       "replacement_resonance": 1,
       "tribal_density": 1,
@@ -5704,10 +5704,10 @@
     "empirical_activations": 2,
     "formally_covered_by": [],
     "top_rules": {
+      "cost_feeds_trigger": 1,
+      "dies_drain": 1,
       "edict_feeder": 1,
-      "etb_sac_target": 1,
       "graveyard_play": 1,
-      "trigger_effect": 1,
       "zone_resonance": 2
     }
   },
@@ -5737,8 +5737,8 @@
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 2,
-      "etb_sac_target": 1,
-      "panharmonicon": 1,
+      "graveyard_play": 1,
+      "gy_loader": 1,
       "replacement_resonance": 2,
       "scaling": 4
     }
@@ -5766,11 +5766,11 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 1,
       "graveyard_play": 1,
       "panharmonicon": 1,
       "replacement_resonance": 1,
-      "scaling": 1,
-      "token_etb_damage": 1
+      "scaling": 1
     }
   },
   "scales_with|Kicked.1.0": {
@@ -5806,8 +5806,8 @@
     "formally_covered_by": [],
     "top_rules": {
       "cost_feeds_trigger": 1,
+      "dies_drain": 1,
       "edict_feeder": 1,
-      "etb_self": 1,
       "tribal_density": 1,
       "trigger_effect": 1
     }
@@ -5844,8 +5844,8 @@
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 12,
-      "etb_sac_target": 4,
       "graveyard_play": 4,
+      "gy_loader": 4,
       "replacement_resonance": 11,
       "trigger_effect": 7
     }
@@ -5921,9 +5921,9 @@
     "formally_covered_by": [],
     "top_rules": {
       "creature_untap_engine": 1,
+      "effect_feeds_trigger": 1,
       "replacement_resonance": 1,
       "trigger_effect": 1,
-      "untap_combo": 1,
       "untap_synergy": 1
     }
   },
@@ -5975,11 +5975,11 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "cost_feeds_trigger": 1,
+      "dies_drain": 1,
       "edict_feeder": 1,
-      "etb_sac_target": 1,
-      "etb_self": 1,
       "graveyard_play": 1,
-      "trigger_effect": 1
+      "zone_resonance": 1
     }
   },
   "scales_with|Party": {
@@ -6003,9 +6003,9 @@
     "top_rules": {
       "combat_enhancer": 2,
       "effect_feeds_trigger": 6,
-      "etb_self": 1,
       "replacement_resonance": 8,
-      "trigger_effect": 3
+      "trigger_effect": 3,
+      "zone_resonance": 1
     }
   },
   "scales_with|RememberedNumber/Times.2": {
@@ -6028,10 +6028,10 @@
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 3,
-      "etb_sac_target": 2,
+      "graveyard_play": 2,
       "lord": 2,
       "replacement_resonance": 3,
-      "trigger_effect": 2
+      "tribal_density": 2
     }
   },
   "scales_with|RememberedSize/Twice": {
@@ -6064,11 +6064,11 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
-      "panharmonicon": 1,
+      "effect_feeds_trigger": 1,
       "replacement_blocks": 1,
-      "replacement_resonance": 1,
       "trigger_effect": 1,
-      "trigger_resonance": 1
+      "trigger_resonance": 1,
+      "wheel_synergy": 1
     }
   },
   "scales_with|ThisTurnActivated_Activated.Equip+YouCtrl": {
@@ -6098,11 +6098,11 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "cost_feeds_trigger": 1,
       "edict_feeder": 1,
-      "etb_self": 1,
-      "sacrifice_cluster": 1,
+      "effect_feeds_trigger": 1,
       "scaling": 1,
-      "trigger_effect": 1
+      "trigger_resonance": 1
     }
   },
   "scales_with|ThisTurnCast_Card": {
@@ -6252,7 +6252,7 @@
     "top_rules": {
       "cost_reduction_target": 1,
       "etb_self": 1,
-      "panharmonicon": 1,
+      "tribal_density": 1,
       "trigger_effect": 1,
       "zone_resonance": 1
     }
@@ -6264,9 +6264,9 @@
     "formally_covered_by": [],
     "top_rules": {
       "flicker_payoff": 2,
-      "panharmonicon": 1,
       "replacement_resonance": 2,
       "scaling": 3,
+      "spell_density": 1,
       "spellcast_resonance": 1
     }
   },
@@ -6288,8 +6288,8 @@
     "empirical_activations": 3,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 1,
       "lord": 1,
-      "panharmonicon": 1,
       "replacement_resonance": 1,
       "scaling": 3,
       "tribal_density": 1
@@ -6323,9 +6323,9 @@
     "empirical_activations": 3,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 1,
       "lord": 1,
       "replacement_producer": 1,
-      "token_etb_damage": 1,
       "tribal_density": 1,
       "untap_synergy": 1
     }
@@ -6379,11 +6379,11 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 1,
       "graveyard_play": 1,
       "panharmonicon": 1,
       "replacement_resonance": 1,
-      "scaling": 1,
-      "token_etb_damage": 1
+      "scaling": 1
     }
   },
   "scales_with|ThisTurnEntered_Battlefield_Permanent.nonLand+YouCtrl": {
@@ -6403,9 +6403,9 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 1,
       "etb_self": 1,
       "lord": 1,
-      "replacement_resonance": 1,
       "tribal_density": 1,
       "trigger_effect": 1
     }
@@ -6463,9 +6463,9 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 1,
       "lord": 1,
       "replacement_resonance": 1,
-      "token_etb_damage": 1,
       "tribal_density": 1,
       "trigger_effect": 1
     }
@@ -6476,9 +6476,9 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 1,
       "lord": 1,
       "replacement_resonance": 1,
-      "token_etb_damage": 1,
       "tribal_density": 1,
       "trigger_effect": 1
     }
@@ -6524,11 +6524,11 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 1,
       "effect_resonance": 1,
       "lord": 1,
       "spellcast_resonance": 1,
-      "tribal_density": 1,
-      "trigger_effect": 1
+      "tribal_density": 1
     }
   },
   "scales_with|ThisTurnEntered_Hand_from_Battlefield_Permanent.YouOwn": {
@@ -6586,10 +6586,10 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 1,
       "effect_resonance": 1,
       "flicker_payoff": 1,
       "multicolor_untap": 1,
-      "panharmonicon": 1,
       "untap_synergy": 1
     }
   },
@@ -6616,9 +6616,9 @@
     }
   },
   "scales_with|Valid": {
-    "activation_rate": 0.8893805309734514,
+    "activation_rate": 0.8938053097345132,
     "commanders": 226,
-    "empirical_activations": 201,
+    "empirical_activations": 202,
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 102,
@@ -6784,7 +6784,7 @@
     "top_rules": {
       "combat_enhancer": 1,
       "effect_feeds_trigger": 2,
-      "etb_sac_target": 1,
+      "gy_loader": 1,
       "scaling": 2,
       "trigger_effect": 2
     }
@@ -6795,11 +6795,11 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "dies_drain": 1,
       "edict_feeder": 1,
-      "etb_self": 1,
+      "effect_feeds_trigger": 1,
       "lord": 1,
-      "scaling": 1,
-      "trigger_effect": 1
+      "tribal_density": 1
     }
   },
   "scales_with|ValidGraveyard Assassin.YouCtrl": {
@@ -6892,10 +6892,10 @@
     "formally_covered_by": [],
     "top_rules": {
       "creature_untap_engine": 1,
+      "effect_feeds_trigger": 1,
       "graveyard_play": 1,
-      "panharmonicon": 1,
-      "spellcast_resonance": 1,
-      "trigger_effect": 1
+      "spell_density": 1,
+      "spellcast_resonance": 1
     }
   },
   "scales_with|ValidGraveyard Card.YouOwn/LimitMax.6": {
@@ -6905,10 +6905,10 @@
     "formally_covered_by": [],
     "top_rules": {
       "cheat_cmc": 1,
-      "etb_sac_target": 1,
+      "combat_enhancer": 1,
+      "effect_feeds_trigger": 1,
       "graveyard_play": 1,
-      "gy_loader": 1,
-      "trigger_effect": 1
+      "gy_loader": 1
     }
   },
   "scales_with|ValidGraveyard Card.nonCreature+nonLand+YouOwn": {
@@ -6936,8 +6936,8 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "combat_enhancer": 1,
       "effect_resonance": 1,
-      "etb_sac_target": 1,
       "graveyard_play": 1,
       "power_matters": 1,
       "trigger_effect": 1
@@ -6976,10 +6976,10 @@
     "formally_covered_by": [],
     "top_rules": {
       "cheat_cmc": 1,
-      "etb_sac_target": 1,
+      "combat_enhancer": 1,
+      "effect_feeds_trigger": 1,
       "graveyard_play": 1,
-      "gy_loader": 1,
-      "trigger_effect": 1
+      "gy_loader": 1
     }
   },
   "scales_with|ValidGraveyard Creature.YouOwn/Times.2": {
@@ -7024,7 +7024,7 @@
     "empirical_activations": 2,
     "formally_covered_by": [],
     "top_rules": {
-      "effect_resonance": 1,
+      "effect_feeds_trigger": 1,
       "panharmonicon": 2,
       "scaling": 2,
       "spellcast_resonance": 1,
@@ -7038,10 +7038,10 @@
     "formally_covered_by": [],
     "top_rules": {
       "cost_reduction_target": 1,
+      "effect_feeds_trigger": 1,
       "lord": 1,
-      "panharmonicon": 1,
       "scaling": 1,
-      "trigger_effect": 1
+      "tribal_density": 1
     }
   },
   "scales_with|ValidGraveyard Instant.YouOwn,Sorcery.YouOwn/Times.2": {
@@ -7061,9 +7061,9 @@
     "empirical_activations": 3,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 2,
       "effect_resonance": 2,
       "graveyard_play": 3,
-      "replacement_resonance": 2,
       "scaling": 3,
       "trigger_effect": 3
     }
@@ -7124,8 +7124,8 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 1,
       "replacement_blocks": 1,
-      "replacement_resonance": 1,
       "tribal_density": 1,
       "trigger_effect": 1,
       "trigger_resonance": 1
@@ -7178,9 +7178,9 @@
     "formally_covered_by": [],
     "top_rules": {
       "creature_untap_engine": 1,
+      "effect_feeds_trigger": 1,
       "power_matters": 1,
       "replacement_resonance": 1,
-      "untap_combo": 1,
       "untap_synergy": 1
     }
   },
@@ -7201,10 +7201,10 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
-      "etb_sac_target": 1,
-      "flicker_synergy": 1,
+      "effect_feeds_trigger": 1,
+      "flicker_payoff": 1,
       "graveyard_play": 1,
-      "replacement_resonance": 1,
+      "gy_loader": 1,
       "trigger_effect": 1
     }
   },
@@ -7223,11 +7223,11 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 1,
       "effect_resonance": 1,
-      "etb_sac_target": 1,
+      "flicker_payoff": 1,
       "graveyard_play": 1,
-      "panharmonicon": 1,
-      "trigger_effect": 1
+      "trigger_resonance": 1
     }
   },
   "scales_with|ValidLibrary Creature.YouOwn": {
@@ -7258,10 +7258,10 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
-      "cost_feeds_trigger": 1,
+      "dies_drain": 1,
       "edict_feeder": 1,
-      "etb_self": 1,
-      "trigger_effect": 1,
+      "effect_feeds_trigger": 1,
+      "power_matters": 1,
       "zone_resonance": 1
     }
   },
@@ -7292,10 +7292,10 @@
     "empirical_activations": 4,
     "formally_covered_by": [],
     "top_rules": {
+      "combat_enhancer": 1,
       "effect_feeds_trigger": 2,
       "lord": 3,
       "replacement_resonance": 3,
-      "token_etb_damage": 1,
       "tribal_density": 3
     }
   },
@@ -7328,7 +7328,7 @@
     "empirical_activations": 7,
     "formally_covered_by": [],
     "top_rules": {
-      "cheat_cmc": 2,
+      "dies_drain": 2,
       "effect_feeds_trigger": 5,
       "lord": 3,
       "replacement_resonance": 5,
@@ -7342,9 +7342,9 @@
     "formally_covered_by": [],
     "top_rules": {
       "cost_feeds_trigger": 2,
+      "dies_drain": 2,
       "edict_feeder": 2,
       "etb_self": 2,
-      "trigger_effect": 2,
       "zone_resonance": 2
     }
   },
@@ -7355,9 +7355,9 @@
     "formally_covered_by": [],
     "top_rules": {
       "cost_feeds_trigger": 2,
+      "dies_drain": 2,
       "edict_feeder": 2,
       "etb_self": 2,
-      "trigger_effect": 2,
       "zone_resonance": 2
     }
   },
@@ -7368,9 +7368,9 @@
     "formally_covered_by": [],
     "top_rules": {
       "cheat_cmc": 1,
+      "cost_feeds_trigger": 1,
+      "dies_drain": 1,
       "edict_feeder": 1,
-      "etb_self": 1,
-      "trigger_effect": 1,
       "zone_resonance": 1
     }
   },
@@ -7403,7 +7403,7 @@
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 2,
-      "graveyard_play": 1,
+      "etb_sac_target": 1,
       "lord": 1,
       "replacement_resonance": 3,
       "tribal_density": 1
@@ -7472,11 +7472,11 @@
     "empirical_activations": 2,
     "formally_covered_by": [],
     "top_rules": {
-      "etb_sac_target": 1,
+      "combat_enhancer": 1,
+      "effect_feeds_trigger": 1,
       "graveyard_play": 1,
       "lord": 1,
-      "tribal_density": 1,
-      "trigger_effect": 1
+      "tribal_density": 1
     }
   },
   "static|AttackRestrict": {
@@ -7573,10 +7573,10 @@
     "empirical_activations": 2,
     "formally_covered_by": [],
     "top_rules": {
+      "combat_enhancer": 1,
       "effect_feeds_trigger": 1,
       "lord": 1,
       "replacement_resonance": 1,
-      "token_etb_damage": 1,
       "tribal_density": 1
     }
   },
@@ -7610,7 +7610,7 @@
     "empirical_activations": 5,
     "formally_covered_by": [],
     "top_rules": {
-      "etb_sac_target": 1,
+      "gy_loader": 1,
       "lord": 2,
       "replacement_resonance": 2,
       "token_etb_damage": 2,
@@ -7618,9 +7618,9 @@
     }
   },
   "static|CantBlockBy": {
-    "activation_rate": 0.8064516129032258,
+    "activation_rate": 0.8225806451612904,
     "commanders": 62,
-    "empirical_activations": 50,
+    "empirical_activations": 51,
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 24,
@@ -7752,9 +7752,9 @@
     }
   },
   "static|Continuous": {
-    "activation_rate": 0.7774524158125915,
+    "activation_rate": 0.7789165446559297,
     "commanders": 683,
-    "empirical_activations": 531,
+    "empirical_activations": 532,
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 236,
@@ -7869,13 +7869,14 @@
     }
   },
   "static|MinMaxBlocker": {
-    "activation_rate": 0.25,
+    "activation_rate": 0.375,
     "commanders": 8,
-    "empirical_activations": 2,
+    "empirical_activations": 3,
     "formally_covered_by": [],
     "top_rules": {
       "combat_enhancer": 1,
       "effect_feeds_trigger": 2,
+      "peer_evasion_tribal": 1,
       "replacement_resonance": 2,
       "token_etb_damage": 1
     }
@@ -7886,11 +7887,11 @@
     "empirical_activations": 11,
     "formally_covered_by": [],
     "top_rules": {
+      "dies_drain": 2,
       "edict_feeder": 2,
       "effect_feeds_trigger": 6,
       "replacement_resonance": 7,
-      "tribal_density": 2,
-      "zone_resonance": 2
+      "tribal_density": 2
     }
   },
   "static|MustBlock": {
@@ -7940,10 +7941,10 @@
     "empirical_activations": 14,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 2,
       "lord": 3,
       "pan_density": 12,
       "panharmonicon": 12,
-      "replacement_resonance": 2,
       "tribal_density": 3
     }
   },
@@ -7963,7 +7964,7 @@
       "cost_feeds_trigger": 1,
       "cost_reduction_target": 3,
       "edict_feeder": 1,
-      "etb_self": 1,
+      "subject_zone_feeder": 1,
       "zone_resonance": 1
     }
   },
@@ -7999,9 +8000,9 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
-      "damage_synergy": 1,
       "lord": 1,
       "replacement_blocks": 1,
+      "tribal_density": 1,
       "trigger_effect": 1,
       "trigger_resonance": 1
     }
@@ -8013,7 +8014,7 @@
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 2,
-      "power_matters": 1,
+      "effect_resonance": 1,
       "replacement_resonance": 2,
       "scaling": 1,
       "token_etb_damage": 1
@@ -8027,9 +8028,9 @@
     "top_rules": {
       "cost_feeds_trigger": 1,
       "edict_feeder": 1,
-      "etb_self": 1,
-      "sacrifice_cluster": 1,
-      "trigger_effect": 1
+      "effect_feeds_trigger": 1,
+      "token_sac_chain": 1,
+      "trigger_resonance": 1
     }
   },
   "trigger|Always": {
@@ -8038,11 +8039,11 @@
     "empirical_activations": 2,
     "formally_covered_by": [],
     "top_rules": {
+      "cost_reducer": 1,
       "effect_feeds_trigger": 2,
       "panharmonicon": 1,
       "replacement_resonance": 2,
-      "spellcast_resonance": 1,
-      "token_etb_damage": 1
+      "spellcast_resonance": 1
     }
   },
   "trigger|Attached": {
@@ -8121,9 +8122,9 @@
     }
   },
   "trigger|Attacks": {
-    "activation_rate": 0.8976982097186701,
+    "activation_rate": 0.9028132992327366,
     "commanders": 391,
-    "empirical_activations": 351,
+    "empirical_activations": 353,
     "formally_covered_by": [
       "trigger_effect"
     ],
@@ -8170,10 +8171,10 @@
     ],
     "top_rules": {
       "effect_feeds_trigger": 4,
-      "etb_sac_target": 2,
+      "graveyard_play": 2,
+      "gy_loader": 2,
       "replacement_resonance": 8,
-      "spell_density": 4,
-      "trigger_effect": 2
+      "spell_density": 4
     }
   },
   "trigger|BecomesTargetOnce": {
@@ -8187,9 +8188,9 @@
     }
   },
   "trigger|Blocks": {
-    "activation_rate": 0.7142857142857143,
+    "activation_rate": 0.7857142857142857,
     "commanders": 14,
-    "empirical_activations": 10,
+    "empirical_activations": 11,
     "formally_covered_by": [],
     "top_rules": {
       "combat_enhancer": 3,
@@ -8205,10 +8206,10 @@
     "empirical_activations": 2,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 1,
       "flicker_synergy": 1,
       "lord": 1,
       "replacement_resonance": 2,
-      "token_etb_damage": 1,
       "tribal_density": 1
     }
   },
@@ -8270,7 +8271,7 @@
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 5,
-      "graveyard_play": 2,
+      "etb_sac_target": 2,
       "replacement_resonance": 4,
       "token_etb_damage": 2,
       "tribal_density": 2
@@ -8417,9 +8418,9 @@
     "top_rules": {
       "cost_feeds_trigger": 1,
       "edict_feeder": 1,
-      "sacrifice_cluster": 1,
+      "effect_feeds_trigger": 1,
       "token_sac_chain": 1,
-      "trigger_effect": 1
+      "trigger_resonance": 1
     }
   },
   "trigger|Discarded": {
@@ -8478,8 +8479,8 @@
     "top_rules": {
       "cheat_cmc": 1,
       "effect_feeds_trigger": 2,
-      "etb_sac_target": 1,
-      "panharmonicon": 1,
+      "graveyard_play": 1,
+      "gy_loader": 1,
       "trigger_effect": 1
     }
   },
@@ -8545,8 +8546,8 @@
     "empirical_activations": 2,
     "formally_covered_by": [],
     "top_rules": {
-      "evasion": 1,
-      "replacement_blocks": 1,
+      "combat_enhancer": 1,
+      "effect_feeds_trigger": 1,
       "replacement_resonance": 2,
       "trigger_effect": 1,
       "trigger_resonance": 1
@@ -8558,11 +8559,11 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
-      "cheat_cmc": 1,
+      "effect_feeds_trigger": 1,
       "effect_resonance": 1,
-      "etb_sac_target": 1,
       "graveyard_play": 1,
-      "trigger_effect": 1
+      "gy_loader": 1,
+      "zone_resonance": 1
     }
   },
   "trigger|LandPlayed": {
@@ -8634,8 +8635,8 @@
     "empirical_activations": 3,
     "formally_covered_by": [],
     "top_rules": {
-      "edict_feeder": 1,
-      "etb_self": 1,
+      "dies_drain": 1,
+      "effect_feeds_trigger": 1,
       "lord": 1,
       "tribal_density": 1,
       "trigger_effect": 2
@@ -8668,10 +8669,10 @@
     "empirical_activations": 2,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 1,
       "effect_resonance": 2,
       "replacement_resonance": 2,
       "tribal_density": 2,
-      "trigger_effect": 1,
       "trigger_resonance": 1
     }
   },
@@ -8683,9 +8684,9 @@
     "top_rules": {
       "effect_feeds_trigger": 2,
       "effect_resonance": 1,
-      "etb_sac_target": 1,
-      "panharmonicon": 2,
-      "trigger_effect": 1
+      "graveyard_play": 1,
+      "gy_loader": 1,
+      "panharmonicon": 2
     }
   },
   "trigger|Phase": {
@@ -8735,9 +8736,9 @@
       "trigger_resonance"
     ],
     "top_rules": {
+      "effect_feeds_trigger": 1,
       "effect_resonance": 1,
       "proliferate_synergy": 2,
-      "replacement_resonance": 1,
       "trigger_effect": 2,
       "trigger_resonance": 2
     }
@@ -8762,7 +8763,7 @@
     "formally_covered_by": [],
     "top_rules": {
       "effect_feeds_trigger": 3,
-      "etb_sac_target": 1,
+      "graveyard_play": 1,
       "multicolor_untap": 1,
       "replacement_resonance": 3,
       "untap_synergy": 2
@@ -8806,9 +8807,9 @@
     "formally_covered_by": [],
     "top_rules": {
       "counter_keyword": 1,
+      "effect_feeds_trigger": 1,
       "lord": 1,
       "proliferate_synergy": 1,
-      "token_etb_damage": 1,
       "tribal_density": 1
     }
   },
@@ -8831,9 +8832,9 @@
     "empirical_activations": 3,
     "formally_covered_by": [],
     "top_rules": {
+      "dies_drain": 1,
       "edict_feeder": 1,
       "effect_feeds_trigger": 3,
-      "etb_self": 1,
       "replacement_resonance": 3,
       "trigger_effect": 2
     }
@@ -8902,7 +8903,7 @@
     ],
     "top_rules": {
       "effect_feeds_trigger": 2,
-      "etb_sac_target": 1,
+      "gy_loader": 1,
       "replacement_resonance": 3,
       "trigger_effect": 3,
       "trigger_resonance": 3
@@ -8948,9 +8949,9 @@
     "formally_covered_by": [],
     "top_rules": {
       "counter_keyword": 1,
+      "effect_feeds_trigger": 1,
       "lord": 1,
       "proliferate_synergy": 1,
-      "token_etb_damage": 1,
       "tribal_density": 1
     }
   },
@@ -9020,10 +9021,10 @@
     "empirical_activations": 1,
     "formally_covered_by": [],
     "top_rules": {
+      "effect_feeds_trigger": 1,
       "effect_resonance": 1,
       "lord": 1,
       "replacement_resonance": 1,
-      "token_etb_damage": 1,
       "tribal_density": 1
     }
   }

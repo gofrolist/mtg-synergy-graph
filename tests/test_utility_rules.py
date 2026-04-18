@@ -16,6 +16,7 @@ from mtg_synergy_graph.complement_rules.utility import (
     _find_counter_target_payoff,
     _find_creature_untap_engine,
     _find_creatures_as_lands_landfall,
+    _find_damage_doubler_synergy,
     _find_damage_effect_synergy,
     _find_extra_land_plays,
     _find_flicker_synergy,
@@ -23,6 +24,7 @@ from mtg_synergy_graph.complement_rules.utility import (
     _find_modified_axis_feeders,
     _find_monarch_synergy,
     _find_opponent_forcing,
+    _find_peer_evasion_tribal,
     _find_wheel_synergy,
 )
 
@@ -1913,3 +1915,333 @@ class TestFindModifiedAxisFeeders:
         _add_port(conn, "Iron Apprentice", port_type="keyword", event_class="etbCounter:P1P1:1")
         results = _find_modified_axis_feeders(conn, self._kodama_ports(), set())
         assert all(r.rule_id == "modified_axis_feeder" for r in results)
+
+
+class TestFindDamageDoublerSynergy:
+    """General rule for replacement.DamageDone commanders that AMPLIFY
+    damage (Torbran +2, Gisela / Solphim double, Tor Wauki / Raphael
+    / Wolverine variants). Rejects prevention / self-routing /
+    damage-decreasing replacements. Two tiers: amp_stack (other
+    doublers stack multiplicatively) > damage_pinger (repeatable
+    triggered DealDamage on opponents)."""
+
+    def _torbran_ports(self):
+        return [
+            _port_row(
+                port_type="replacement",
+                event_class="DamageDone",
+                replacement_event="DamageDone",
+                replacement_result="DmgPlus2",
+                raw_line=(
+                    "{'Event': 'DamageDone', 'ValidSource': 'Card.RedSource+YouCtrl', "
+                    "'ValidTarget': 'Player.Opponent,Permanent.OppCtrl', "
+                    "'ReplaceWith': 'DmgPlus2'}"
+                ),
+            )
+        ]
+
+    def _gisela_ports(self):
+        # Gisela has TWO replacement.DamageDone — the doubler AND the
+        # half-prevention. Only the doubler should activate the rule.
+        return [
+            _port_row(
+                port_type="replacement",
+                event_class="DamageDone",
+                replacement_event="DamageDone",
+                replacement_result="DmgTwice",
+                raw_line=(
+                    "{'Event': 'DamageDone', 'ValidSource': 'Card,Emblem', "
+                    "'ValidTarget': 'Opponent,Permanent.OppCtrl', "
+                    "'ReplaceWith': 'DmgTwice'}"
+                ),
+            ),
+            _port_row(
+                port_type="replacement",
+                event_class="DamageDone",
+                replacement_event="DamageDone",
+                replacement_result="DBReplace",
+                raw_line=(
+                    "{'Event': 'DamageDone', 'ValidTarget': 'You,Permanent.YouCtrl', "
+                    "'ReplaceWith': 'DBReplace', 'PreventionEffect': 'True'}"
+                ),
+            ),
+        ]
+
+    def test_no_replacement_skips(self, conn):
+        ports = [_port_row(port_type="trigger", event_class="DamageDone")]
+        assert _find_damage_doubler_synergy(conn, ports, set()) == []
+
+    def test_prevention_skips(self, conn):
+        """Iroas / Tajic / Emmara / Frodo: replacement.DamageDone with
+        Prevent: True or PreventionEffect: True. Different mechanical
+        axis — must not activate the doubler rule."""
+        ports = [
+            _port_row(
+                port_type="replacement",
+                event_class="DamageDone",
+                replacement_event="DamageDone",
+                replacement_result="Prevent",
+                raw_line=("{'Event': 'DamageDone', 'Prevent': 'True', 'ValidTarget': 'Creature.attacking+YouCtrl'}"),
+            )
+        ]
+        assert _find_damage_doubler_synergy(conn, ports, set()) == []
+
+    def test_self_target_replacement_skips(self, conn):
+        """Dralnu / Polukranos / Sekki: damage to me → custom effect.
+        Self-only targets aren't damage-amplifier commanders."""
+        ports = [
+            _port_row(
+                port_type="replacement",
+                event_class="DamageDone",
+                replacement_event="DamageDone",
+                replacement_result="Sac",
+                raw_line=("{'Event': 'DamageDone', 'ValidTarget': 'Card.Self', 'ReplaceWith': 'Sac'}"),
+            )
+        ]
+        assert _find_damage_doubler_synergy(conn, ports, set()) == []
+
+    def test_damage_decrease_skips(self, conn):
+        """DmgMinus1 / DmgHalfDown decrease damage — same rejection as
+        Prevent. Their result tokens are not in the amp set."""
+        ports = [
+            _port_row(
+                port_type="replacement",
+                event_class="DamageDone",
+                replacement_event="DamageDone",
+                replacement_result="DmgMinus1",
+                raw_line=("{'Event': 'DamageDone', 'ValidTarget': 'Permanent.OppCtrl', 'ReplaceWith': 'DmgMinus1'}"),
+            )
+        ]
+        assert _find_damage_doubler_synergy(conn, ports, set()) == []
+
+    def test_torbran_activates(self, conn):
+        _add_port(
+            conn,
+            "Furnace of Rath",
+            port_type="replacement",
+            event_class="DamageDone",
+            replacement_event="DamageDone",
+            replacement_result="DmgTwice",
+            raw_line="{'Event': 'DamageDone', 'ReplaceWith': 'DmgTwice'}",
+        )
+        results = _find_damage_doubler_synergy(conn, self._torbran_ports(), set())
+        names = _candidates(results)
+        assert "Furnace of Rath" in names
+
+    def test_gisela_activates_via_doubler_port(self, conn):
+        """Gisela's preventer port should NOT block — her doubler port
+        still activates the rule."""
+        _add_port(
+            conn,
+            "Dictate of the Twin Gods",
+            port_type="replacement",
+            event_class="DamageDone",
+            replacement_event="DamageDone",
+            replacement_result="DmgTwice",
+            raw_line="{'Event': 'DamageDone', 'ReplaceWith': 'DmgTwice'}",
+        )
+        results = _find_damage_doubler_synergy(conn, self._gisela_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Dictate of the Twin Gods") == "damage_amp_stack"
+
+    def test_amp_stack_tier(self, conn):
+        for amp in ("Furnace of Rath", "Fiery Emancipation", "Curse of Bloodletting"):
+            _add_port(
+                conn,
+                amp,
+                port_type="replacement",
+                event_class="DamageDone",
+                replacement_event="DamageDone",
+                replacement_result="DmgTwice",
+                raw_line="{'Event': 'DamageDone', 'ReplaceWith': 'DmgTwice'}",
+            )
+        results = _find_damage_doubler_synergy(conn, self._torbran_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events["Furnace of Rath"] == "damage_amp_stack"
+        assert events["Fiery Emancipation"] == "damage_amp_stack"
+        assert events["Curse of Bloodletting"] == "damage_amp_stack"
+
+    def test_amp_stack_excludes_prevention_replacement(self, conn):
+        """A prevention-only replacement on the candidate side (Divine
+        Presence, Lich's Mirror) is not a damage amplifier even if its
+        replacement_result happens to be in the amp set due to schema
+        quirk — gate by raw_line Prevent flag."""
+        _add_port(
+            conn,
+            "Mock Preventer",
+            port_type="replacement",
+            event_class="DamageDone",
+            replacement_event="DamageDone",
+            replacement_result="DmgTwice",
+            raw_line="{'Event': 'DamageDone', 'ReplaceWith': 'DmgTwice', 'Prevent': 'True'}",
+        )
+        results = _find_damage_doubler_synergy(conn, self._torbran_ports(), set())
+        assert "Mock Preventer" not in _candidates(results)
+
+    def test_pinger_tier(self, conn):
+        """Guttersnipe-shape: trigger.SpellCast + effect.DealDamage on
+        Player. The amp turns each cast into a heavier ping."""
+        _add_port(
+            conn,
+            "Guttersnipe",
+            port_type="trigger",
+            event_class="SpellCast",
+            valid_filter="Instant.YouCtrl,Sorcery.YouCtrl",
+        )
+        _add_port(
+            conn,
+            "Guttersnipe",
+            port_type="effect",
+            event_class="DealDamage",
+            valid_filter="Player.Opponent",
+        )
+        results = _find_damage_doubler_synergy(conn, self._torbran_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Guttersnipe") == "damage_pinger"
+
+    def test_pinger_excludes_combat_only_trigger(self, conn):
+        """A creature whose only trigger is Attacks (combat-only) +
+        DealDamage isn't a non-combat ping engine — it's a voltron
+        combat creature, handled by combat_enhancer."""
+        _add_port(
+            conn,
+            "Combat-Only Creature",
+            port_type="trigger",
+            event_class="Attacks",
+            valid_filter="Card.Self",
+        )
+        _add_port(
+            conn,
+            "Combat-Only Creature",
+            port_type="effect",
+            event_class="DealDamage",
+            valid_filter="Player.Opponent",
+        )
+        results = _find_damage_doubler_synergy(conn, self._torbran_ports(), set())
+        assert "Combat-Only Creature" not in _candidates(results)
+
+    def test_pinger_requires_opponent_target(self, conn):
+        """A DealDamage effect on an unrelated valid_filter (e.g.
+        Creature.YouCtrl — self-burn) doesn't count as a ping engine."""
+        _add_port(
+            conn,
+            "Self-Burn",
+            port_type="trigger",
+            event_class="SpellCast",
+            valid_filter="Card.YouCtrl",
+        )
+        _add_port(
+            conn,
+            "Self-Burn",
+            port_type="effect",
+            event_class="DealDamage",
+            valid_filter="Creature.YouCtrl",
+        )
+        results = _find_damage_doubler_synergy(conn, self._torbran_ports(), set())
+        assert "Self-Burn" not in _candidates(results)
+
+    def test_dedup_amp_wins_over_pinger(self, conn):
+        """A card that fits both tiers (e.g. an enchantment that both
+        doubles damage AND has a SpellCast→DealDamage trigger) gets
+        ONE complement in the higher-priority amp_stack tier."""
+        _add_port(
+            conn,
+            "Dual",
+            port_type="replacement",
+            event_class="DamageDone",
+            replacement_event="DamageDone",
+            replacement_result="DmgTwice",
+            raw_line="{'Event': 'DamageDone', 'ReplaceWith': 'DmgTwice'}",
+        )
+        _add_port(conn, "Dual", port_type="trigger", event_class="SpellCast")
+        _add_port(
+            conn,
+            "Dual",
+            port_type="effect",
+            event_class="DealDamage",
+            valid_filter="Player.Opponent",
+        )
+        results = _find_damage_doubler_synergy(conn, self._torbran_ports(), set())
+        dual = [r for r in results if r.candidate == "Dual"]
+        assert len(dual) == 1
+        assert dual[0].cand_event == "damage_amp_stack"
+
+    def test_excludes_commander(self, conn):
+        _add_port(
+            conn,
+            "Torbran, Thane of Red Fell",
+            port_type="replacement",
+            event_class="DamageDone",
+            replacement_event="DamageDone",
+            replacement_result="DmgTwice",
+            raw_line="{'Event': 'DamageDone', 'ReplaceWith': 'DmgTwice'}",
+        )
+        results = _find_damage_doubler_synergy(conn, self._torbran_ports(), {"Torbran, Thane of Red Fell"})
+        assert "Torbran, Thane of Red Fell" not in _candidates(results)
+
+    def test_rule_id(self, conn):
+        _add_port(
+            conn,
+            "Furnace of Rath",
+            port_type="replacement",
+            event_class="DamageDone",
+            replacement_event="DamageDone",
+            replacement_result="DmgTwice",
+            raw_line="{'Event': 'DamageDone', 'ReplaceWith': 'DmgTwice'}",
+        )
+        results = _find_damage_doubler_synergy(conn, self._torbran_ports(), set())
+        assert all(r.rule_id == "damage_doubler_synergy" for r in results)
+
+
+class TestFindPeerEvasionTribal:
+    """Commanders carrying a peer-blocking keyword (Horsemanship,
+    Shadow) want the rest of the tiny pool as both attackers and the
+    only legal blockers against opposing copies. Any other keyword —
+    even Flying / Trample / Haste — must not activate the rule
+    because the pools are too large to spam-recommend."""
+
+    def _horsemanship_ports(self):
+        return [_port_row(port_type="keyword", event_class="Horsemanship")]
+
+    def _shadow_ports(self):
+        return [_port_row(port_type="keyword", event_class="Shadow")]
+
+    def test_no_peer_keyword_skips(self, conn):
+        ports = [_port_row(port_type="keyword", event_class="Flying")]
+        _add_port(conn, "Random Card", port_type="keyword", event_class="Flying")
+        assert _find_peer_evasion_tribal(conn, ports, set()) == []
+
+    def test_horsemanship_matches_horsemanship_pool(self, conn):
+        for n in ("Wei Scout", "Shu Cavalry", "Lu Bu, Master-at-Arms"):
+            _add_port(conn, n, port_type="keyword", event_class="Horsemanship")
+        results = _find_peer_evasion_tribal(conn, self._horsemanship_ports(), set())
+        names = _candidates(results)
+        assert "Wei Scout" in names
+        assert "Shu Cavalry" in names
+
+    def test_shadow_matches_shadow_pool(self, conn):
+        _add_port(conn, "Soltari Monk", port_type="keyword", event_class="Shadow")
+        _add_port(conn, "Rebel Informer", port_type="keyword", event_class="Shadow")
+        results = _find_peer_evasion_tribal(conn, self._shadow_ports(), set())
+        names = _candidates(results)
+        assert "Soltari Monk" in names
+        assert "Rebel Informer" in names
+
+    def test_horsemanship_does_not_match_shadow(self, conn):
+        """Pools are siloed — horsemanship commander shouldn't surface
+        Shadow cards (different mechanical axis, even though both are
+        peer-blocking)."""
+        _add_port(conn, "Soltari Monk", port_type="keyword", event_class="Shadow")
+        results = _find_peer_evasion_tribal(conn, self._horsemanship_ports(), set())
+        assert "Soltari Monk" not in _candidates(results)
+
+    def test_excludes_commander(self, conn):
+        _add_port(conn, "Lu Bu, Master-at-Arms", port_type="keyword", event_class="Horsemanship")
+        results = _find_peer_evasion_tribal(conn, self._horsemanship_ports(), {"Lu Bu, Master-at-Arms"})
+        assert "Lu Bu, Master-at-Arms" not in _candidates(results)
+
+    def test_rule_id(self, conn):
+        _add_port(conn, "Wei Scout", port_type="keyword", event_class="Horsemanship")
+        results = _find_peer_evasion_tribal(conn, self._horsemanship_ports(), set())
+        assert all(r.rule_id == "peer_evasion_tribal" for r in results)
+        assert all(r.cand_event == "peer_evasion_partner" for r in results)

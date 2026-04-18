@@ -132,6 +132,34 @@ modified_axis_feeder rule (2026-04-18):
   Scales / Doubling Season / etbCounter:P1P1 cards). Multiplier
   3.0× to match counter_axis_feeder. Golden set NDCG unchanged.
   14 new tests; 852 total tests passing, 86% coverage.
+Schema-driven gap closures (2026-04-18):
+- `damage_doubler_synergy`: replacement.DamageDone with damage-amp
+  replacement_result (DmgTwice, DmgTriple, DmgPlus*, Dmg2/3,
+  HarshDmg) targeting opponent. Two tiers — damage_amp_stack
+  (other replacement-doublers, ~50 cards) > damage_pinger (cards
+  with non-combat repeating trigger + DealDamage opponent, ~170).
+  Rejects prevention statics (Iroas/Tajic/Emmara/Frodo —
+  Prevent: True / PreventionEffect: True), self-target replacements
+  (Dralnu/Polukranos/Sekki — ValidTarget: Card.Self / You /
+  Permanent.YouCtrl), and damage-decreasing results
+  (DmgMinus*, DmgHalf*). Lifts Gisela 0→2 hi_syn, Solphim 0→1,
+  Wolverine 0→1, Raphael 0→2, Tor Wauki 0→1; Torbran top-30
+  becomes pure doublers (Furnace of Rath, Curse of Bloodletting,
+  Mechanized Warfare, Fiery Emancipation, City on Fire).
+  Multiplier 2.5×. Closes the cell from 48% → 58% activation.
+- `peer_evasion_tribal`: commander has a peer-blocking keyword
+  (Horsemanship 29 cards / Shadow 36 cards) → match other cards
+  with the SAME keyword. Pools are siloed (horsemanship cmdr
+  doesn't pull Shadow, vice versa). General gate: any future
+  peer-blocking keyword goes in the `_PEER_BLOCKING_KEYWORDS`
+  frozenset. Closes the keyword.Horsemanship cell from 36% →
+  100% activation — all 14 P3K legendary horsemanship commanders
+  (Cao Ren / Liu Bei / Lu Bu / Lu Meng / Lu Xun / Ma Chao /
+  Sun Ce / Xiahou Dun / Yuan Shao / Zhang Fei / Zhang He /
+  Zhao Zilong / Lady Zhurong / Guan Yu) now surface their pool.
+  Multiplier 2.0×.
+- 20 new tests (14 doubler + 6 horsemanship); 872 total tests
+  passing, 86% coverage. Golden set NDCG unchanged at 0.246137.
 Port extraction: 108,644 ports from 32,327 cards (GenericChoice + StaticAbilities$
 expansion, deduped after A1's 2^N re-walk fix).
 
@@ -237,6 +265,8 @@ pair creates a synergy. Each wraps an existing mechanical map.
 | subject_zone_feeder | ChangesZone BF→GY trigger w/ non-Creature subject (Land, Artifact, Enchantment) | effect=Sacrifice SacValid=<subject> + effect=ChangeZoneAll mass return from Graveyard. Scope-filtered (reject Defined=Opponent). | Titania (Land); any future subject-specific death-trigger commander |
 | counter_axis_feeder | any cmdr port valid_filter contains `counters_GE_<TYPE>` on non-Self scope | counter_axis_payoff > counter_producer (self-sac-only cards dropped) > etb_counter_keyword > self_recur_keyword (P1P1 only) | Marchesa (trigger), Hamza (scales_with); any future counters_GE commander |
 | modified_axis_feeder | any cmdr port carries the `modified` qualifier on a non-Self axis (rejecting `TargetsValid` / description clauses) | modified_p1p1_doubler > modified_p1p1_producer > modified_self_grower (creatures only) > modified_proliferate > modified_etb_keyword (etbCounter:P1P1 + Modular) | Kodama of the West Tree, Red XIII, SP//dr, Sephiroth, Chishiro, Goro-Goro, Silver Sable |
+| damage_doubler_synergy | replacement.DamageDone with amp `replacement_result` (DmgTwice/DmgTriple/DmgPlus*) targeting opponent; rejects Prevent / self-target / DmgMinus | damage_amp_stack (other replacement doublers) > damage_pinger (non-combat repeating trigger + DealDamage opponent) | Torbran, Gisela, Solphim, Tor Wauki, Raphael, Wolverine, Neriv, Ojer Axonil, Absorbing Man and Titania |
+| peer_evasion_tribal | commander has a keyword in `_PEER_BLOCKING_KEYWORDS` (Horsemanship, Shadow) | other cards with the SAME keyword | every Portal Three Kingdoms horsemanship legendary (Cao Ren, Liu Bei, Lu Bu, Lu Meng, Lu Xun, Ma Chao, Sun Ce, Xiahou Dun, Yuan Shao, Zhang Fei, Zhang He, Zhao Zilong, Lady Zhurong, Guan Yu) |
 | creatures_as_lands_landfall | static with Affected=Creature and AddType=Land | LandPlayed triggers + ChangesZone Land ETB triggers (landfall payoffs) | Ashaya, Soul of the Wild |
 
 ### IDF Weighting (`universal_scorer.py`)
