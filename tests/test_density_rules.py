@@ -1036,6 +1036,123 @@ class TestFindScalesWithDensity:
         assert "Kokusho, the Evening Star" in cands
         assert any(r.cmdr_event == "scales_opp_life_lost" for r in results)
 
+    def test_creature_count_scaling_emits_token_producers(self, conn):
+        """Shanna-style vanilla scaler (scales_with Valid Creature.YouCtrl +
+        self-pump Continuous static only) matches token producers, since
+        every token gives her another +1/+1."""
+        _insert_card(conn, "Shanna", card_types="Creature", types="Creature")
+        _insert_card(conn, "Queen Allenal", card_types="Creature")
+        _insert_card(conn, "Sundering Growth", card_types="Instant")
+        _insert_port(
+            conn,
+            "Shanna",
+            "scales_with",
+            "Valid",
+            valid_filter="Creature.YouCtrl",
+        )
+        _insert_port(
+            conn,
+            "Shanna",
+            "static",
+            "Continuous",
+            raw_line="{'Mode': 'Continuous', 'Affected': 'Card.Self', 'AddPower': 'X'}",
+        )
+        _insert_port(
+            conn,
+            "Queen Allenal",
+            "effect",
+            "Token",
+            raw_line="{'TokenScript': 'g_1_1_creature'}",
+        )
+        _insert_port(
+            conn,
+            "Sundering Growth",
+            "effect",
+            "CopyPermanent",
+            raw_line="{'Populate': 'True'}",
+        )
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Shanna",)).fetchall()
+        ]
+        results = _find_scales_with_density(conn, cmdr_ports, {"Shanna"})
+        names = _candidates(results)
+        assert "Queen Allenal" in names
+        assert "Sundering Growth" in names
+        assert any(r.cmdr_event == "scales_creature_count" for r in results)
+
+    def test_creature_count_scaling_skips_when_trigger_present(self, conn):
+        """Adeline-style (scales_with Creature + Attacks trigger that
+        makes tokens) must NOT grab the broad token pool — her Hi-Syn
+        is attack payoffs, not raw token producers. Gate rejects any
+        trigger / effect / cost / replacement port."""
+        _insert_card(conn, "Adeline", card_types="Creature", types="Creature")
+        _insert_card(conn, "Queen Allenal", card_types="Creature")
+        _insert_port(
+            conn,
+            "Adeline",
+            "scales_with",
+            "Valid",
+            valid_filter="Creature.YouCtrl",
+        )
+        _insert_port(
+            conn,
+            "Adeline",
+            "trigger",
+            "Attacks",
+            valid_filter="Card.Self",
+        )
+        _insert_port(
+            conn,
+            "Queen Allenal",
+            "effect",
+            "Token",
+            raw_line="{'TokenScript': 'w_1_1_creature'}",
+        )
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Adeline",)).fetchall()
+        ]
+        results = _find_scales_with_density(conn, cmdr_ports, {"Adeline"})
+        assert "Queen Allenal" not in _candidates(results)
+
+    def test_creature_count_scaling_skips_reducecost_cmdr(self, conn):
+        """Ghalta-style (scales_with Creature.YouCtrl$CardPower + static
+        ReduceCost) is a cost-reducer for big creatures, not a token
+        producer commander. The self-static gate rejects any static
+        whose raw_line doesn't name 'Affected' or 'ValidTarget' Card.Self —
+        ReduceCost uses 'ValidCard' Card.Self which is a different slot
+        (the cast target, not an affected permanent)."""
+        _insert_card(conn, "Ghalta", card_types="Creature", types="Creature")
+        _insert_card(conn, "Queen Allenal", card_types="Creature")
+        _insert_port(
+            conn,
+            "Ghalta",
+            "scales_with",
+            "Valid",
+            valid_filter="Creature.YouCtrl$CardPower",
+        )
+        _insert_port(
+            conn,
+            "Ghalta",
+            "static",
+            "ReduceCost",
+            raw_line="{'Mode': 'ReduceCost', 'ValidCard': 'Card.Self', 'Amount': 'X'}",
+        )
+        _insert_port(
+            conn,
+            "Queen Allenal",
+            "effect",
+            "Token",
+            raw_line="{'TokenScript': 'g_1_1_creature'}",
+        )
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Ghalta",)).fetchall()
+        ]
+        results = _find_scales_with_density(conn, cmdr_ports, {"Ghalta"})
+        assert "Queen Allenal" not in _candidates(results)
+
     def test_no_scales_with_returns_empty(self, conn):
         """Commander without scales_with ports returns empty."""
         _insert_card(conn, "Plain", card_types="Creature", types="Creature")

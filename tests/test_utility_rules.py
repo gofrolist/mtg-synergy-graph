@@ -665,6 +665,109 @@ class TestFindFlickerSynergy:
         assert r.cmdr_event == "self_etb"
         assert r.cand_event == "flicker"
 
+    def test_lagrella_temporary_exile_qualifies(self, conn):
+        """Lagrella-style ETB: exiles other creatures until she leaves
+        (ChangeZone BF→Exile with ReturnAbility in raw_line). This is
+        a flicker engine — re-entering her re-exiles targets =
+        extra ETB triggers. The gate accepts this ChangeZone shape."""
+        _add_port(
+            conn,
+            "Closet",
+            port_type="effect",
+            event_class="ChangeZone",
+            zone_origin="Battlefield",
+            zone_destination="Exile",
+        )
+        _add_port(
+            conn,
+            "Closet",
+            port_type="effect",
+            event_class="ChangeZone",
+            zone_origin="Exile",
+            zone_destination="Battlefield",
+        )
+        lagrella_etb_exile = _port_row(
+            port_type="effect",
+            event_class="ChangeZone",
+            zone_origin="Battlefield",
+            zone_destination="Exile",
+            valid_filter="Creature.Other",
+            raw_line=(
+                "{'DB': 'ChangeZone', 'Origin': 'Battlefield', "
+                "'Destination': 'Exile', 'Duration': 'UntilHostLeavesPlay', "
+                "'ReturnAbility': 'DBReturn'}"
+            ),
+        )
+        cmdr_ports = [self._self_etb_port(), lagrella_etb_exile]
+        results = _find_flicker_synergy(conn, cmdr_ports, set())
+        assert "Closet" in _candidates(results)
+
+    def test_brinelin_bounce_not_flicker(self, conn):
+        """Plain bounce (ChangeZone BF→Hand, Brinelin pattern) is NOT
+        a flicker engine — the commander doesn't retrigger anything.
+        This gate must reject it so generic bounce commanders don't
+        pick up the flicker-support pool."""
+        _add_port(
+            conn,
+            "Closet",
+            port_type="effect",
+            event_class="ChangeZone",
+            zone_origin="Battlefield",
+            zone_destination="Exile",
+        )
+        _add_port(
+            conn,
+            "Closet",
+            port_type="effect",
+            event_class="ChangeZone",
+            zone_origin="Exile",
+            zone_destination="Battlefield",
+        )
+        brinelin_bounce = _port_row(
+            port_type="effect",
+            event_class="ChangeZone",
+            zone_origin="Battlefield",
+            zone_destination="Hand",
+            valid_filter="Permanent.nonLand",
+            raw_line="{'DB': 'ChangeZone', 'Origin': 'Battlefield', 'Destination': 'Hand'}",
+        )
+        cmdr_ports = [self._self_etb_port(), brinelin_bounce]
+        results = _find_flicker_synergy(conn, cmdr_ports, set())
+        assert results == []
+
+    def test_sharuum_reanimation_not_flicker(self, conn):
+        """GY→BF reanimation (Sharuum, Bladewing) has dedicated
+        artifact_recursion / gy_loader axes. The flicker gate must
+        reject zone_origin=Graveyard so reanimator commanders don't
+        absorb flicker-support cards."""
+        _add_port(
+            conn,
+            "Closet",
+            port_type="effect",
+            event_class="ChangeZone",
+            zone_origin="Battlefield",
+            zone_destination="Exile",
+        )
+        _add_port(
+            conn,
+            "Closet",
+            port_type="effect",
+            event_class="ChangeZone",
+            zone_origin="Exile",
+            zone_destination="Battlefield",
+        )
+        reanimation = _port_row(
+            port_type="effect",
+            event_class="ChangeZone",
+            zone_origin="Graveyard",
+            zone_destination="Battlefield",
+            valid_filter="Artifact.YouCtrl",
+            raw_line="{'Origin': 'Graveyard', 'Destination': 'Battlefield'}",
+        )
+        cmdr_ports = [self._self_etb_port(), reanimation]
+        results = _find_flicker_synergy(conn, cmdr_ports, set())
+        assert results == []
+
     def test_gain_control_is_high_value(self, conn):
         """GainControl effect should count as high-value."""
         _add_port(

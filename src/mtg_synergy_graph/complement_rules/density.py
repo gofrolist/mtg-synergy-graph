@@ -856,6 +856,86 @@ def _find_scales_with_density(
                         )
                     )
 
+        # Valid Creature.YouCtrl (with no counter qualifier) -> token
+        # producers + populate spells. Shanna, Sisay's Legacy scales
+        # P/T with creature count; Queen Allenal / Rootborn Defenses /
+        # Sundering Growth / Wayfaring Temple / Raise the Alarm all
+        # feed her scaling. The counter-axis branch above handles
+        # Hamza / Marchesa; this branch handles pure creature-count
+        # scalers with *no other mechanical ports* — commanders whose
+        # whole identity is "get bigger with more creatures".
+        #
+        # Narrow gate: commander must have no trigger / effect / cost /
+        # replacement ports. This keeps attack-trigger token-makers
+        # (Adeline) and tap-for-mana engines (Selvala) out — their
+        # Hi-Syn is attack payoffs / mana-doublers, not raw token
+        # producers, and the broad token pool flattens their top-30.
+        elif ev == "Valid" and vf.startswith("Creature.YouCtrl") and "counters" not in vf:
+            # Skip subtype-qualified filters (Creature.YouCtrl+Zombie)
+            # where tribal_density is the better axis.
+            subtype_suffix = vf[len("Creature.YouCtrl") :]
+            if subtype_suffix and subtype_suffix.startswith("+"):
+                continue
+            cmdr_pts = {(cp.get("port_type") or "").strip() for cp in cmdr_ports}
+            if cmdr_pts & {"trigger", "effect", "cost", "replacement"}:
+                continue
+            # Commander's statics must all be self-focused: either
+            # ``Affected: Card.Self`` (self-pump Continuous) or
+            # ``ValidTarget: Card.Self`` (self-protection CantTarget).
+            # This excludes Ghalta-style ``ReduceCost ValidCard
+            # Card.Self`` — the ``ValidCard`` slot names a *cast*
+            # target, not an affected permanent, and the archetype is
+            # "cheat big creatures into play" not "make more
+            # creatures". Anthems / MayPlay statics that affect
+            # other permanents also fail this gate.
+            static_ok = True
+            for cp in cmdr_ports:
+                if (cp.get("port_type") or "").strip() != "static":
+                    continue
+                raw = str(cp.get("raw_line") or "")
+                if "'Affected': 'Card.Self'" not in raw and "'ValidTarget': 'Card.Self'" not in raw:
+                    static_ok = False
+                    break
+            if not static_ok:
+                continue
+            cur = conn.execute(
+                "SELECT DISTINCT card_name FROM card_ports "
+                "WHERE port_type = 'effect' AND event_class = 'Token' "
+                "AND (raw_line LIKE '%creature%' OR raw_line LIKE '%Creature%')"
+            )
+            for r in cur.fetchall():
+                name = r["card_name"]
+                if name not in cmdr_set and name not in seen:
+                    seen.add(name)
+                    results.append(
+                        PortComplement(
+                            rule_id="scaling",
+                            direction="synergy",
+                            candidate=name,
+                            cmdr_event="scales_creature_count",
+                            cand_event="token_producer",
+                        )
+                    )
+            # Populate spells (CopyPermanent with Populate:True in raw)
+            cur2 = conn.execute(
+                "SELECT DISTINCT card_name FROM card_ports "
+                "WHERE port_type = 'effect' AND event_class = 'CopyPermanent' "
+                "AND raw_line LIKE '%Populate%'"
+            )
+            for r in cur2.fetchall():
+                name = r["card_name"]
+                if name not in cmdr_set and name not in seen:
+                    seen.add(name)
+                    results.append(
+                        PortComplement(
+                            rule_id="scaling",
+                            direction="synergy",
+                            candidate=name,
+                            cmdr_event="scales_creature_count",
+                            cand_event="populate",
+                        )
+                    )
+
         # LifeOppsLostThisTurn -> repeatable drain/damage sources.
         # DamageAll is included so global pingers (Spear Spewer,
         # Pyrohemia, Repercussion) match. Instants/Sorceries are

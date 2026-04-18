@@ -49,6 +49,22 @@ Vanilla tribal-anchor fallback (2026-04-18):
   6 regressed (Gorm -0.23, Zetalpa -0.01 — voltron commanders whose
   Hi-Syn isn't tribal). Net +0.001 aggregate across the broad set;
   golden-set NDCG unchanged.
+Flicker gate + creature-count scaling (2026-04-18):
+- `flicker_synergy` now fires when the commander's ETB has a
+  temporary-exile ChangeZone effect (`Battlefield → Exile` with a
+  `ReturnAbility` clause in raw_line). Lagrella, the Magpie's
+  "exile-until-she-leaves" engine qualifies. Plain bounce
+  (`→ Hand`), saga-timed exile (Vorinclex, Joshua), and reanimation
+  (`Graveyard →`, Sharuum) are rejected.
+- `scales_with Valid Creature.YouCtrl` (pure creature-count scaling,
+  no counter qualifier) now emits token-producer and populate
+  complements. Narrow gate: commander must have no trigger / effect
+  / cost / replacement port AND all statics must be self-scoped
+  (`Affected: Card.Self` or `ValidTarget: Card.Self`). Shanna, Sisay's
+  Legacy qualifies; Adeline (attack trigger) and Ghalta (`ReduceCost
+  ValidCard`) stay out.
+- Non-golden set: 2 commanders crack 0 → non-zero (Lagrella 0 → 0.174,
+  Shanna 0 → 0.169). Zero golden-set regressions, 5 new tests.
 Port extraction: 108,644 ports from 32,327 cards (GenericChoice + StaticAbilities$
 expansion, deduped after A1's 2^N re-walk fix).
 

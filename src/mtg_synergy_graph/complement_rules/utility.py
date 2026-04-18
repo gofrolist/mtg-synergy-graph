@@ -42,6 +42,13 @@ _FLICKER_HIGH_VALUE_EFFECTS: frozenset[str] = frozenset(
         "Dig",
         "GenericChoice",
         "GainControl",
+        # Lagrella, the Magpie exile-a-creature-until-I-leave is
+        # functionally a blink on other creatures — flickering Lagrella
+        # herself re-triggers the exile and replays the ETBs. The zone
+        # check inside _find_flicker_synergy's sibling gate narrows this
+        # to Battlefield-origin ChangeZone effects (exile/reanimate
+        # shapes) rather than plain tutor-to-hand.
+        "ChangeZone",
     }
 )
 
@@ -707,6 +714,20 @@ def _find_flicker_synergy(
             if _trigger_only_matches_self(vf) and zd == "Battlefield":
                 has_self_etb = True
         if pt == "effect" and ev in _FLICKER_HIGH_VALUE_EFFECTS:
+            # ChangeZone is only flicker-worthy when the ETB creates
+            # a *temporary exile* that returns later — Lagrella's
+            # ``ReturnAbility`` pattern (exile until I leave → replay
+            # her ETB to re-exile = double ETB triggers on targets).
+            # Plain bounce (Battlefield→Hand, Brinelin) or saga-like
+            # exile-then-return-at-end (Vorinclex, Joshua) don't
+            # benefit from flickering the commander herself.
+            if ev == "ChangeZone":
+                raw = str(p.get("raw_line") or "")
+                zo = (p.get("zone_origin") or "").strip()
+                zd = (p.get("zone_destination") or "").strip()
+                is_temporary_exile = zo == "Battlefield" and zd == "Exile" and "ReturnAbility" in raw
+                if not is_temporary_exile:
+                    continue
             etb_effect_count += 1
 
     if not has_self_etb or etb_effect_count == 0:
