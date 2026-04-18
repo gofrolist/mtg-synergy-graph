@@ -106,6 +106,25 @@ _ATTACKS_ENGINE_EFFECTS: frozenset[str] = frozenset(
 )
 
 
+#: Effect event classes that are "value" but not individually engine-like.
+#: A commander needs two or more of these on the same attack chain to
+#: qualify for combat enhancement — Etali's Dig + Play pair, Scourge's
+#: UntapAll + AddPhase. Single instances are voltron (Wyleth: Draw)
+#: or enchantress (Zur: ChangeZone tutor) signals, handled by other
+#: rules.
+_ATTACKS_VALUE_EFFECTS_THRESHOLD: frozenset[str] = frozenset(
+    {
+        "Draw",
+        "ChangeZone",
+        "ChangeZoneAll",
+        "PutCounter",
+        "LoseLife",
+        "GainLife",
+        "Destroy",
+    }
+)
+
+
 def _attacks_trigger_has_value_effect(cmdr_ports: list[PortRow]) -> bool:
     """True when an Attacks-Self trigger commander has an effect chain
     that converts extra combat steps into repeated material payoff.
@@ -136,7 +155,7 @@ def _attacks_trigger_has_value_effect(cmdr_ports: list[PortRow]) -> bool:
         ev = (p.get("event_class") or "").strip()
         if ev in _ATTACKS_ENGINE_EFFECTS:
             return True
-        if ev in ("Draw", "ChangeZone", "ChangeZoneAll", "PutCounter", "LoseLife", "GainLife", "Destroy"):
+        if ev in _ATTACKS_VALUE_EFFECTS_THRESHOLD:
             effect_count += 1
     return effect_count >= 2
 

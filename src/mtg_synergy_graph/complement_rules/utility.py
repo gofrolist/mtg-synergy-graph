@@ -7,7 +7,7 @@ import sqlite3
 
 from ..graph_engine import _trigger_only_matches_self
 from ..penalties import CandidateCache
-from .core import PortComplement, PortRow
+from .core import PortComplement, PortRow, _is_static_continuous
 
 #: Extracts ``<TYPE>`` from a ``counters_GE<N>_<TYPE>`` qualifier token
 #: (e.g. ``counters_GE1_P1P1`` → ``P1P1``). The counter type determines
@@ -929,9 +929,7 @@ def _has_creatures_are_lands_static(cmdr_ports: list[PortRow]) -> bool:
     card with the same pattern automatically qualifies.
     """
     for p in cmdr_ports:
-        if (p.get("port_type") or "").strip() != "static":
-            continue
-        if (p.get("event_class") or "").strip() != "Continuous":
+        if not _is_static_continuous(p):
             continue
         raw = str(p.get("raw_line") or "")
         aff_m = re.search(r"'Affected':\s*'([^']+)'", raw)
@@ -980,7 +978,13 @@ def _find_creatures_as_lands_landfall(
         "    event_class = 'LandPlayed'"
         " OR (event_class = 'ChangesZone' AND valid_filter LIKE '%Land%'"
         "     AND zone_destination = 'Battlefield')"
-        ")"
+        ") "
+        # Reject opponent-scoped triggers (Tectonic Instability-style
+        # ``Land.OppCtrl`` landfall-punish cards) — opponents' lands
+        # don't fire the commander's "creature = land" static.
+        # Matches the defensive pattern used by gy_retrieval /
+        # subject_zone_feeder.
+        "AND (valid_filter IS NULL OR valid_filter NOT LIKE '%Opp%')"
     ).fetchall()
 
     return [

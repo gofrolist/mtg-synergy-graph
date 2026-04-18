@@ -72,6 +72,18 @@ class ComplementRule:
 _IMPLICIT_YOU_EFFECT_DEFAULTS: frozenset[str] = frozenset({"Sacrifice", "Discard", "Draw", "GainLife"})
 
 
+def _is_static_continuous(p: PortRow) -> bool:
+    """True iff ``p`` is a ``static`` port with ``event_class`` ``Continuous``.
+
+    Shared across gate helpers that scan commander statics looking for
+    specific raw-line shapes (type-bending, MayPlay, GY-replay grants,
+    vanilla-anchor detection). Centralising the pair check here keeps
+    the port/event convention in one place if Forge ever renames either
+    side.
+    """
+    return (p.get("port_type") or "").strip() == "static" and (p.get("event_class") or "").strip() == "Continuous"
+
+
 def _parse_scope_string(vf: str) -> str:
     """Classify a Forge valid_filter string as opp / you / any."""
     s = vf.strip()

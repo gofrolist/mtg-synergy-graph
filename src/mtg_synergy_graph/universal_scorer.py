@@ -459,8 +459,10 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # Zendikar, Scute Swarm). IDF ≈ 0.126. 2.5× lifts landfall payoffs
     # above the flat 0.30 ``scaling`` floor that every land sits at for
     # these commanders — without the multiplier the generic basic
-    # lands tie with Rampaging Baloths. Narrow gate (single static
-    # pattern) keeps cross-commander impact to zero.
+    # lands tie with Rampaging Baloths. The gate matches static ports
+    # with ``Affected: Creature`` + ``AddType: Land``; Ashaya is the
+    # only card matching today but any future card with the same
+    # mechanical shape qualifies automatically.
     "creatures_as_lands_landfall": 2.5,
 }
 

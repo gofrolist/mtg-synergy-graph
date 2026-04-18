@@ -7,7 +7,7 @@ import sqlite3
 
 from ..attributes import CARD_TYPES, CONTROLLER_QUALIFIERS, SUPERTYPES
 from ..penalties import CandidateCache
-from .core import PortComplement, PortRow
+from .core import PortComplement, PortRow, _is_static_continuous
 
 #: Card types that are spells (not permanents). Used by _find_graveyard_sac_value
 #: to skip commanders that only replay instants/sorceries (e.g. Kess).
@@ -108,9 +108,7 @@ def _has_graveyard_replay_static(cmdr_ports: list[PortRow]) -> bool:
     replay keywords.
     """
     for p in cmdr_ports:
-        if (p.get("port_type") or "").strip() != "static":
-            continue
-        if (p.get("event_class") or "").strip() != "Continuous":
+        if not _is_static_continuous(p):
             continue
         raw = str(p.get("raw_line") or "")
         if "Graveyard" not in raw or "Creature" not in raw:

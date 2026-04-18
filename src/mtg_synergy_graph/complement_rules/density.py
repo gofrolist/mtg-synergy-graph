@@ -557,9 +557,11 @@ def _vanilla_tribal_subtypes(conn: sqlite3.Connection, commander_set: set[str]) 
       EDHREC axis).
     - Commander has no creature subtype at all (eldrazi shape etc).
     """
+    placeholders = ",".join("?" * len(commander_set))
+    params = tuple(commander_set)
     rows = conn.execute(
-        "SELECT DISTINCT port_type FROM card_ports WHERE card_name IN ({})".format(",".join("?" * len(commander_set))),
-        tuple(commander_set),
+        f"SELECT DISTINCT port_type FROM card_ports WHERE card_name IN ({placeholders})",
+        params,
     ).fetchall()
     port_types = {r["port_type"] for r in rows if r["port_type"]}
     # Allow "keyword" only. Any other port type means the commander has
@@ -568,8 +570,8 @@ def _vanilla_tribal_subtypes(conn: sqlite3.Connection, commander_set: set[str]) 
         return set()
 
     subtype_rows = conn.execute(
-        "SELECT subtypes FROM cards WHERE name IN ({})".format(",".join("?" * len(commander_set))),
-        tuple(commander_set),
+        f"SELECT subtypes FROM cards WHERE name IN ({placeholders})",
+        params,
     ).fetchall()
     literal: set[str] = set()
     for r in subtype_rows:
@@ -936,24 +938,34 @@ def _find_scales_with_density(
                         )
                     )
 
-        # Domain -> cards that add basic land types (Prismatic Omen,
-        # Dryad of the Ilysian Grove) or grant all-colors basic type
-        # coverage. Radha, Coalition Warlord / Grand Arbiter / Tromokratis
-        # style commanders scale by basic-land-type count — giving a
-        # single land all five types converts "Domain = 1" into
-        # "Domain = 5". Narrow pool (~30 cards) with a static
-        # ``AddType`` clause naming basic land types.
+        # Domain -> cards that add multiple basic land types (Prismatic
+        # Omen, Dryad of the Ilysian Grove, Nylea's Presence). Radha,
+        # Coalition Warlord / Nael, Avizoa Aeronaut style commanders
+        # scale by basic-land-type count — a card that makes a single
+        # land all five types converts ``Domain = 1`` into
+        # ``Domain = 5``. Narrow pool (~10 cards) matched by the
+        # Forge-specific ``AllBasicLandType`` marker or a multi-type
+        # ``AddType`` clause joined with ``&``. Blood Moon / Magus of
+        # the Moon (single-type ``Mountain`` with ``RemoveLandTypes``)
+        # are rejected — they *remove* Domain diversity rather than
+        # adding it.
         elif ev == "Domain":
             cur = conn.execute(
                 "SELECT DISTINCT card_name FROM card_ports "
                 "WHERE port_type = 'static' AND event_class = 'Continuous' "
-                "AND raw_line LIKE '%AddType%' "
+                "AND raw_line LIKE '%Land%' "
                 "AND ("
-                "    raw_line LIKE '%Forest%' OR raw_line LIKE '%Plains%'"
-                " OR raw_line LIKE '%Island%' OR raw_line LIKE '%Swamp%'"
-                " OR raw_line LIKE '%Mountain%' OR raw_line LIKE '%basic land%'"
-                ") "
-                "AND raw_line LIKE '%Land%'"
+                "    raw_line LIKE '%AllBasicLandType%'"
+                " OR ("
+                "       raw_line LIKE '%AddType%' AND raw_line LIKE '%&%'"
+                "   AND raw_line NOT LIKE '%RemoveLandTypes%'"
+                "   AND ("
+                "         raw_line LIKE '%Forest%' OR raw_line LIKE '%Plains%'"
+                "      OR raw_line LIKE '%Island%' OR raw_line LIKE '%Swamp%'"
+                "      OR raw_line LIKE '%Mountain%'"
+                "   )"
+                " )"
+                ")"
             )
             for r in cur.fetchall():
                 name = r["card_name"]
