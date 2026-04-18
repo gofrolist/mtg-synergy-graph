@@ -976,6 +976,7 @@ from .utility import (  # noqa: E402
     _find_flicker_synergy,
     _find_landfall_enablers,
     _find_mana_doubler_synergy,
+    _find_modified_axis_feeders,
     _find_monarch_synergy,
     _find_multicolor_untap,
     _find_opponent_forcing,
@@ -1158,6 +1159,7 @@ def find_all_complements(
         out.extend(_find_counter_target_payoff(conn, cmdr_ports, cmdr_set))
         out.extend(_find_creature_untap_engine(conn, cmdr_ports, cmdr_set))
         out.extend(_find_counter_axis_feeders(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_modified_axis_feeders(conn, cmdr_ports, cmdr_set))
         return out
 
     if not needed_cand:

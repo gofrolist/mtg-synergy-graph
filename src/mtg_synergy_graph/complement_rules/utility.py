@@ -572,6 +572,212 @@ def _find_counter_axis_feeders(
     return results
 
 
+#: Word-boundary regex matching the standalone ``modified`` qualifier,
+#: not substrings (e.g. ``unmodified``). Forge writes the qualifier as
+#: a delimited token in valid_filter (``Creature.modified+YouCtrl``) or
+#: in raw_line clauses (``Affected: 'Creature.modified+YouCtrl'``).
+_MODIFIED_QUALIFIER_RE = re.compile(r"(?<![A-Za-z])modified(?![A-Za-z])")
+
+#: Extracts (clause_key, clause_value) pairs from raw_line where the
+#: value contains the ``modified`` qualifier, e.g.
+#: ``'IsPresent': 'Card.Self+modified'`` → ``('IsPresent',
+#: 'Card.Self+modified')``. Used both to reject Self-anchored clauses
+#: and to skip ``TargetsValid`` (the qualifier is on the trigger's
+#: targeted-permanent parameter, not on the trigger axis itself —
+#: Pearl-Ear's "draw when an Aura targets a modified permanent" is
+#: still fundamentally an Aura tribal commander).
+_MODIFIED_CLAUSE_RE = re.compile(r"'([^']+)':\s*'([^']*\bmodified\b[^']*)'")
+
+#: raw_line clause keys that carry the modified qualifier as a side
+#: condition or as flavor text rather than as a payoff axis. Skip these
+#: when deciding whether the commander has modified-axis intent.
+#: ``TargetsValid`` qualifies the trigger's *targeted* permanent
+#: (Pearl-Ear: "Aura that targets a modified permanent" — fundamentally
+#: an Aura tribal commander). ``TriggerDescription`` / ``Description`` /
+#: ``SpellDescription`` / ``StackDescription`` are flavor text where the
+#: word "modified" appears prose-only and shouldn't drive matching.
+_MODIFIED_NON_AXIS_KEYS: frozenset[str] = frozenset(
+    {
+        "TargetsValid",
+        "TriggerDescription",
+        "Description",
+        "SpellDescription",
+        "StackDescription",
+        "PrecostDesc",
+    }
+)
+
+
+def _is_self_qualified(filter_or_clause: str) -> bool:
+    """Return True if the first OR-alt of ``filter_or_clause`` carries a
+    ``Self`` token (with optional ``!`` negation prefix).
+
+    Mirrors the self-only rejection used by ``_find_counter_axis_feeders``
+    so commander-level "this commander is X" conditions don't get
+    promoted to per-card payoff axes.
+    """
+    first_alt = filter_or_clause.split(",")[0]
+    alt_tokens = first_alt.replace("+", ".").split(".")
+    return any(tok.lstrip("!").strip() == "Self" for tok in alt_tokens)
+
+
+def _find_modified_axis_feeders(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """General rule for commanders whose filter axis includes the
+    ``modified`` qualifier.
+
+    A creature is "modified" iff it has a +1/+1 counter, an Aura
+    attached, OR an Equipment attached. Kodama of the West Tree's
+    ``Continuous: Affected=Creature.modified+YouCtrl AddKeyword=Trample``
+    is the canonical anthem-payoff shape. Red XIII, SP//dr, Sephiroth,
+    Chishiro, and Goro-Goro all share the same filter axis through
+    different port types (static, trigger, effect.IsPresent).
+
+    Mirrors ``counter_axis_feeder`` for the implicit P1P1 axis (the
+    counter mechanic dominates "modified" interpretations on EDHREC),
+    plus an Aura/Equipment-keyword tier for cards that grant the other
+    two flavors of modification.
+
+    Tier priority:
+    - ``modified_p1p1_producer``: ``effect=PutCounter[All]
+      counter_type=P1P1`` on Creature scope (excluding self-sac-only).
+    - ``modified_proliferate``: any ``effect=Proliferate`` (extends
+      existing P1P1 counters).
+    - ``modified_aura_equipment_grant``: cards with an etbCounter:P1P1
+      keyword OR static that animates / attaches Aura+Equipment to a
+      creature on ETB. Cast a wider net than just the subtype check
+      (Aura subtype alone matches ~700 cards, mostly irrelevant
+      pump-once auras), so we lean on the etb-counter keyword as the
+      narrow proxy for modified-on-ETB cards (Iron Apprentice, Walking
+      Ballista, all the Modular artifacts).
+
+    Detection scope is wider than counter_axis_feeder — checks effect /
+    cost / replacement ports too — because the ``modified`` qualifier
+    appears in IsPresent clauses on Token effects and SacValid clauses
+    on activated abilities, not just trigger filters.
+    """
+    has_modified = False
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        if pt not in ("trigger", "scales_with", "static", "effect", "cost", "replacement"):
+            continue
+        vf = (p.get("valid_filter") or "").strip()
+        if vf and _MODIFIED_QUALIFIER_RE.search(vf):
+            if _is_self_qualified(vf):
+                continue
+            has_modified = True
+            break
+        raw = str(p.get("raw_line") or "")
+        if not raw or not _MODIFIED_QUALIFIER_RE.search(raw):
+            continue
+        # raw_line may carry the modified qualifier inside an
+        # ``Affected``/``ValidCard``/``ValidSource``/``ValidTarget``/
+        # ``IsPresent``/``ValidCards`` clause — extract every clause
+        # value containing ``modified`` and reject when ALL are
+        # Self-anchored. This catches Ian the Reckless's
+        # ``IsPresent: Card.Self+modified`` (a self-condition, not a
+        # commander-level payoff axis) without losing Goro-Goro's
+        # ``IsPresent: Creature.YouCtrl+attacking+modified``.
+        clause_pairs = _MODIFIED_CLAUSE_RE.findall(raw)
+        axis_clauses = [v for k, v in clause_pairs if k not in _MODIFIED_NON_AXIS_KEYS and not _is_self_qualified(v)]
+        if clause_pairs and not axis_clauses:
+            continue
+        has_modified = True
+        break
+    if not has_modified:
+        return []
+
+    producer_set: set[str] = {
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports "
+            "WHERE port_type = 'effect' "
+            "AND event_class IN ('PutCounter', 'PutCounterAll') "
+            "AND counter_type = 'P1P1' "
+            "AND (valid_filter LIKE '%Creature%' "
+            "     OR valid_filter = '' OR valid_filter IS NULL)"
+        )
+    }
+    producer_set -= _only_self_sac_cost(conn)
+
+    # Self-counter creatures (Forgotten Ancient, Champion of Lambholt,
+    # Managorger Hydra) put P1P1 counters on themselves through their
+    # own triggers — they enter as / become "modified" without help.
+    # Restrict to creature cards so we don't pull in non-creature
+    # self-counter artifacts that aren't on the modified payoff axis.
+    self_grower_set: set[str] = {
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT cp.card_name "
+            "FROM card_ports cp JOIN cards c ON c.name = cp.card_name "
+            "WHERE cp.port_type = 'effect' "
+            "AND cp.event_class IN ('PutCounter', 'PutCounterAll') "
+            "AND cp.counter_type = 'P1P1' "
+            "AND cp.valid_filter LIKE '%Self%' "
+            "AND c.types LIKE '%Creature%'"
+        )
+    }
+
+    # Counter doublers: Hardened Scales, Kami of Whispered Hopes,
+    # Doubling Season, Branching Evolution. They ``ReplaceWith:
+    # AddOneMoreCounters`` on the AddCounter event for P1P1, making
+    # every modified creature grow faster.
+    doubler_set: set[str] = {
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports "
+            "WHERE port_type = 'replacement' AND event_class = 'AddCounter' "
+            "AND raw_line LIKE '%ValidCounterType%' "
+            "AND raw_line LIKE '%P1P1%' "
+            "AND raw_line LIKE '%AddOneMoreCounters%'"
+        )
+    }
+
+    proliferate_set: set[str] = {
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports WHERE port_type = 'effect' AND event_class = 'Proliferate'"
+        )
+    }
+
+    keyword_set: set[str] = {
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports "
+            "WHERE port_type = 'keyword' "
+            "AND (event_class LIKE 'etbCounter:P1P1%' OR event_class = 'Modular')"
+        )
+    }
+
+    tier_priority = (
+        ("modified_p1p1_doubler", doubler_set),
+        ("modified_p1p1_producer", producer_set),
+        ("modified_self_grower", self_grower_set),
+        ("modified_proliferate", proliferate_set),
+        ("modified_etb_keyword", keyword_set),
+    )
+    seen: set[str] = set()
+    results: list[PortComplement] = []
+    for cand_event, candidates in tier_priority:
+        for name in candidates:
+            if name in cmdr_set or name in seen:
+                continue
+            seen.add(name)
+            results.append(
+                PortComplement(
+                    rule_id="modified_axis_feeder",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="modified_axis",
+                    cand_event=cand_event,
+                )
+            )
+    return results
+
+
 def _only_self_sac_cost(conn: sqlite3.Connection) -> frozenset[str]:
     """Return card names whose ONLY sacrifice cost targets themselves.
 

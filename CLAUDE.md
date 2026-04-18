@@ -100,6 +100,38 @@ combat_enhancer tightened to is_combat-only (2026-04-18):
 - Non-golden set: 3 commanders improved (Ghyrson Starn +0.017,
   Taii Wakeen +0.015, Auntie Blyte +0.027), zero regressions. 3
   new tests.
+modified_axis_feeder rule (2026-04-18):
+- New general rule mirroring counter_axis_feeder for the `modified`
+  qualifier (a creature with a +1/+1 counter, an Aura attached, or
+  Equipment attached). Detects `modified` in any commander port's
+  valid_filter or raw_line clauses. Self-anchored conditions
+  (Ian the Reckless's `IsPresent: Card.Self+modified`) and clause
+  keys carrying the qualifier as a side condition or flavor text
+  (`TargetsValid` for Pearl-Ear, `TriggerDescription`,
+  `Description`, `SpellDescription`, `StackDescription`,
+  `PrecostDesc`) are skipped — they don't make the commander a
+  modified-axis archetype.
+- Five tiers (deduped, highest-priority wins per card):
+  - `modified_p1p1_doubler` — replacement AddCounter with
+    ValidCounterType P1P1 and ReplaceWith AddOneMoreCounters
+    (Hardened Scales, Doubling Season, Kami of Whispered Hopes).
+  - `modified_p1p1_producer` — effect=PutCounter[All] P1P1 on
+    Creature scope, excluding self-sac-only producers.
+  - `modified_self_grower` — Creature card with PutCounter Self
+    P1P1 (Champion of Lambholt, Forgotten Ancient, Managorger
+    Hydra). Restricted to creature cards via cards.types JOIN.
+  - `modified_proliferate` — any Proliferate effect.
+  - `modified_etb_keyword` — etbCounter:P1P1:N keyword + Modular.
+- 11 legendary creature commanders use the modified filter; 9 have
+  EDHREC data. Kodama of the West Tree 0/10 → 4/10 hi_syn (Hardened
+  Scales / Ozolith / Kami of Whispered Hopes / Evolution Sage),
+  on_page 0 → 8/30. Chishiro on_page 3 → 8, Red XIII 0 → 6, SP//dr
+  hi_syn 0 → 1. Pearl-Ear (Aura tribal) preserved at 5/10 baseline
+  via TargetsValid skip; Silver Sable shows minor on_page churn
+  (13 → 7) but new top 30 is mechanically more correct (Hardened
+  Scales / Doubling Season / etbCounter:P1P1 cards). Multiplier
+  3.0× to match counter_axis_feeder. Golden set NDCG unchanged.
+  14 new tests; 852 total tests passing, 86% coverage.
 Port extraction: 108,644 ports from 32,327 cards (GenericChoice + StaticAbilities$
 expansion, deduped after A1's 2^N re-walk fix).
 
@@ -204,6 +236,7 @@ pair creates a synergy. Each wraps an existing mechanical map.
 | cascade_value | Cascade keyword | high-CMC spells with valuable effects | Maelstrom Wanderer |
 | subject_zone_feeder | ChangesZone BF→GY trigger w/ non-Creature subject (Land, Artifact, Enchantment) | effect=Sacrifice SacValid=<subject> + effect=ChangeZoneAll mass return from Graveyard. Scope-filtered (reject Defined=Opponent). | Titania (Land); any future subject-specific death-trigger commander |
 | counter_axis_feeder | any cmdr port valid_filter contains `counters_GE_<TYPE>` on non-Self scope | counter_axis_payoff > counter_producer (self-sac-only cards dropped) > etb_counter_keyword > self_recur_keyword (P1P1 only) | Marchesa (trigger), Hamza (scales_with); any future counters_GE commander |
+| modified_axis_feeder | any cmdr port carries the `modified` qualifier on a non-Self axis (rejecting `TargetsValid` / description clauses) | modified_p1p1_doubler > modified_p1p1_producer > modified_self_grower (creatures only) > modified_proliferate > modified_etb_keyword (etbCounter:P1P1 + Modular) | Kodama of the West Tree, Red XIII, SP//dr, Sephiroth, Chishiro, Goro-Goro, Silver Sable |
 | creatures_as_lands_landfall | static with Affected=Creature and AddType=Land | LandPlayed triggers + ChangesZone Land ETB triggers (landfall payoffs) | Ashaya, Soul of the Wild |
 
 ### IDF Weighting (`universal_scorer.py`)

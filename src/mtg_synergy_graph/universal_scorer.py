@@ -97,6 +97,7 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "aura_equipment_support": "scaling",
     "subject_zone_feeder": "graveyard_synergy",
     "counter_axis_feeder": "counter_synergy",
+    "modified_axis_feeder": "counter_synergy",
     "creatures_as_lands_landfall": "port_match",
 }
 
@@ -453,6 +454,17 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # Hamza) without the high multiplier that would be needed to beat
     # scaling-rule bonuses on incidental proliferate cards.
     "counter_axis_feeder": 3.0,
+    # modified_axis_feeder: parallel to counter_axis_feeder for the
+    # ``modified`` qualifier (a creature with a +1/+1 counter, Aura, or
+    # Equipment attached). Three tiers — modified_p1p1_producer (~150,
+    # same set as counter_producer P1P1) > modified_proliferate (~70) >
+    # modified_etb_keyword (~330, etbCounter:P1P1 + Modular). 3.0× to
+    # match counter_axis_feeder so Kodama / Red XIII / SP//dr / Sephiroth
+    # / Chishiro all get their P1P1 distributors into top-30. Pure
+    # counter-payoff commanders qualify, so the multiplier matches
+    # counter_axis_feeder rather than the lower 2.5× of subject_zone /
+    # creatures_as_lands gates that target less-curated archetypes.
+    "modified_axis_feeder": 3.0,
     # creatures_as_lands_landfall: commanders whose type-bending static
     # makes creatures also lands (Ashaya, Soul of the Wild). Pool ~237
     # landfall-trigger cards (Rampaging Baloths, Lotus Cobra, Avenger of

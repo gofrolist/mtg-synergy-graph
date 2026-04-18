@@ -20,6 +20,7 @@ from mtg_synergy_graph.complement_rules.utility import (
     _find_extra_land_plays,
     _find_flicker_synergy,
     _find_mana_doubler_synergy,
+    _find_modified_axis_feeders,
     _find_monarch_synergy,
     _find_opponent_forcing,
     _find_wheel_synergy,
@@ -1712,3 +1713,203 @@ class TestFindCounterAxisFeeders:
         _add_port(conn, "Iron Apprentice", port_type="keyword", event_class="etbCounter:P1P1:1")
         results = _find_counter_axis_feeders(conn, self._marchesa_ports(), set())
         assert all(r.rule_id == "counter_axis_feeder" for r in results)
+
+
+class TestFindModifiedAxisFeeders:
+    """General rule: for any commander port whose valid_filter or
+    raw_line contains the standalone ``modified`` qualifier on a
+    non-Self axis, surface candidates that contribute the three
+    flavors of modification — +1/+1 counters (producer / self-grower /
+    doubler), Proliferate, and etb-counter / Modular keywords.
+
+    Self-anchored conditions (``Card.Self+modified``) and
+    description / TargetsValid clauses are rejected so commanders
+    whose modified appears only as a self-condition or a flavor-text
+    mention aren't promoted to modified-axis archetypes."""
+
+    def _kodama_ports(self):
+        return [
+            _port_row(
+                port_type="static",
+                event_class="Continuous",
+                raw_line=("{'Mode': 'Continuous', 'Affected': 'Creature.modified+YouCtrl', 'AddKeyword': 'Trample'}"),
+            )
+        ]
+
+    def test_no_modified_qualifier_skips(self, conn):
+        ports = [_port_row(port_type="trigger", event_class="DamageDone", valid_filter="Creature.YouCtrl")]
+        assert _find_modified_axis_feeders(conn, ports, set()) == []
+
+    def test_unmodified_substring_does_not_trigger(self, conn):
+        """``unmodified`` is a different qualifier — word boundary
+        check rejects it."""
+        ports = [
+            _port_row(
+                port_type="trigger",
+                event_class="Attacks",
+                valid_filter="Creature.unmodified+YouCtrl",
+            )
+        ]
+        assert _find_modified_axis_feeders(conn, ports, set()) == []
+
+    def test_self_modified_skips(self, conn):
+        """Ian the Reckless's ``IsPresent: Card.Self+modified`` is a
+        self-condition (only Ian must be modified), not a payoff axis."""
+        ports = [
+            _port_row(
+                port_type="trigger",
+                event_class="Attacks",
+                valid_filter="Card.Self",
+                raw_line=(
+                    "{'Mode': 'Attacks', 'ValidCard': 'Card.Self', "
+                    "'IsPresent': 'Card.Self+modified', 'Execute': 'TrigDamage'}"
+                ),
+            )
+        ]
+        assert _find_modified_axis_feeders(conn, ports, set()) == []
+
+    def test_targets_valid_skips(self, conn):
+        """Pearl-Ear's ``TargetsValid: Permanent.modified+YouCtrl`` is
+        a target qualifier on an Aura-tribal trigger. The commander is
+        fundamentally Aura tribal — modified is incidental."""
+        ports = [
+            _port_row(
+                port_type="trigger",
+                event_class="SpellCast",
+                valid_filter="Aura",
+                raw_line=(
+                    "{'Mode': 'SpellCast', 'ValidCard': 'Aura', "
+                    "'TargetsValid': 'Permanent.modified+YouCtrl', "
+                    "'Execute': 'TrigDraw'}"
+                ),
+            )
+        ]
+        assert _find_modified_axis_feeders(conn, ports, set()) == []
+
+    def test_description_mention_skips(self, conn):
+        """``modified`` appearing only in TriggerDescription / Description
+        flavor text shouldn't activate the rule."""
+        ports = [
+            _port_row(
+                port_type="trigger",
+                event_class="Attacks",
+                valid_filter="Card.Self",
+                raw_line=(
+                    "{'Mode': 'Attacks', 'ValidCard': 'Card.Self', "
+                    "'TriggerDescription': "
+                    "'Whenever this attacks, target modified creature gets +1/+1.'}"
+                ),
+            )
+        ]
+        assert _find_modified_axis_feeders(conn, ports, set()) == []
+
+    def test_kodama_static_activates(self, conn):
+        _add_port(
+            conn,
+            "Rishkar, Peema Renegade",
+            port_type="effect",
+            event_class="PutCounter",
+            counter_type="P1P1",
+            valid_filter="Creature",
+        )
+        results = _find_modified_axis_feeders(conn, self._kodama_ports(), set())
+        names = _candidates(results)
+        assert "Rishkar, Peema Renegade" in names
+
+    def test_p1p1_doubler_tier(self, conn):
+        """Hardened Scales / Doubling Season — replacement AddCounter
+        with ValidCounterType P1P1 → AddOneMoreCounters."""
+        _add_port(
+            conn,
+            "Hardened Scales",
+            port_type="replacement",
+            event_class="AddCounter",
+            valid_filter="Creature.YouCtrl+inZoneBattlefield",
+            raw_line=(
+                "{'Event': 'AddCounter', 'ValidCard': 'Creature.YouCtrl+inZoneBattlefield', "
+                "'ValidCounterType': 'P1P1', 'ReplaceWith': 'AddOneMoreCounters'}"
+            ),
+        )
+        results = _find_modified_axis_feeders(conn, self._kodama_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Hardened Scales") == "modified_p1p1_doubler"
+
+    def test_self_grower_tier(self, conn):
+        """Self-counter creatures (Forgotten Ancient, Champion of
+        Lambholt, Managorger Hydra) are modified on board because they
+        carry their own +1/+1 counters."""
+        conn.execute("INSERT INTO cards (name, types) VALUES (?, ?)", ("Champion of Lambholt", "Creature"))
+        conn.execute(
+            "INSERT INTO card_ports (card_name, port_type, event_class, counter_type, valid_filter) "
+            "VALUES (?, 'effect', 'PutCounter', 'P1P1', 'Self')",
+            ("Champion of Lambholt",),
+        )
+        results = _find_modified_axis_feeders(conn, self._kodama_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Champion of Lambholt") == "modified_self_grower"
+
+    def test_self_grower_skips_non_creature(self, conn):
+        """Self-counter on a non-creature artifact isn't on the
+        modified axis (modified targets creatures specifically)."""
+        conn.execute("INSERT INTO cards (name, types) VALUES (?, ?)", ("Artifact Self-Counter", "Artifact"))
+        conn.execute(
+            "INSERT INTO card_ports (card_name, port_type, event_class, counter_type, valid_filter) "
+            "VALUES (?, 'effect', 'PutCounter', 'P1P1', 'Self')",
+            ("Artifact Self-Counter",),
+        )
+        results = _find_modified_axis_feeders(conn, self._kodama_ports(), set())
+        assert "Artifact Self-Counter" not in _candidates(results)
+
+    def test_proliferate_tier(self, conn):
+        _add_port(conn, "Evolution Sage", port_type="effect", event_class="Proliferate")
+        results = _find_modified_axis_feeders(conn, self._kodama_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Evolution Sage") == "modified_proliferate"
+
+    def test_etb_keyword_tier(self, conn):
+        _add_port(conn, "Iron Apprentice", port_type="keyword", event_class="etbCounter:P1P1:1")
+        _add_port(conn, "Arcbound Ravager", port_type="keyword", event_class="Modular")
+        results = _find_modified_axis_feeders(conn, self._kodama_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Iron Apprentice") == "modified_etb_keyword"
+        assert events.get("Arcbound Ravager") == "modified_etb_keyword"
+
+    def test_excludes_commander(self, conn):
+        _add_port(
+            conn,
+            "Kodama of the West Tree",
+            port_type="effect",
+            event_class="PutCounter",
+            counter_type="P1P1",
+            valid_filter="Creature",
+        )
+        results = _find_modified_axis_feeders(conn, self._kodama_ports(), {"Kodama of the West Tree"})
+        assert "Kodama of the West Tree" not in _candidates(results)
+
+    def test_one_complement_per_card_doubler_wins(self, conn):
+        """A card matching both doubler and producer tiers gets the
+        higher-priority doubler tier (only doubling matters for
+        modified-axis ranking)."""
+        conn.execute("INSERT INTO cards (name, types) VALUES (?, ?)", ("Hybrid Card", "Creature"))
+        conn.execute(
+            "INSERT INTO card_ports (card_name, port_type, event_class, valid_filter, raw_line) "
+            "VALUES (?, 'replacement', 'AddCounter', 'Creature.YouCtrl+inZoneBattlefield', ?)",
+            (
+                "Hybrid Card",
+                "{'Event': 'AddCounter', 'ValidCounterType': 'P1P1', 'ReplaceWith': 'AddOneMoreCounters'}",
+            ),
+        )
+        conn.execute(
+            "INSERT INTO card_ports (card_name, port_type, event_class, counter_type, valid_filter) "
+            "VALUES (?, 'effect', 'PutCounter', 'P1P1', 'Creature')",
+            ("Hybrid Card",),
+        )
+        results = _find_modified_axis_feeders(conn, self._kodama_ports(), set())
+        hybrid = [r for r in results if r.candidate == "Hybrid Card"]
+        assert len(hybrid) == 1
+        assert hybrid[0].cand_event == "modified_p1p1_doubler"
+
+    def test_rule_id(self, conn):
+        _add_port(conn, "Iron Apprentice", port_type="keyword", event_class="etbCounter:P1P1:1")
+        results = _find_modified_axis_feeders(conn, self._kodama_ports(), set())
+        assert all(r.rule_id == "modified_axis_feeder" for r in results)
