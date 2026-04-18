@@ -944,6 +944,7 @@ from .utility import (  # noqa: E402
     _find_counter_axis_feeders,
     _find_counter_target_payoff,
     _find_creature_untap_engine,
+    _find_creatures_as_lands_landfall,
     _find_damage_effect_synergy,
     _find_extra_land_plays,
     _find_flicker_payoffs,
@@ -1083,6 +1084,7 @@ def find_all_complements(
         out.extend(_find_graveyard_fillers(conn, cmdr_ports, cmdr_set))
         out.extend(_find_extra_land_plays(conn, cmdr_ports, cmdr_set))
         out.extend(_find_landfall_enablers(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_creatures_as_lands_landfall(conn, cmdr_ports, cmdr_set))
         out.extend(_find_scales_with_density(conn, cmdr_ports, cmdr_set, candidate_cache))
         out.extend(_find_flicker_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_cost_payoff_complements(conn, cmdr_ports, cmdr_set))

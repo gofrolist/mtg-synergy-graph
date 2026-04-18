@@ -89,20 +89,83 @@ def _sac_target_subject(cost_raw_line: str) -> str:
     return m.group(1) if m else ""
 
 
+#: Effect event classes that unambiguously signal an "attack = engine"
+#: pattern where extra combats translate to a repeated material
+#: payoff. A single one of these on the commander is sufficient.
+_ATTACKS_ENGINE_EFFECTS: frozenset[str] = frozenset(
+    {
+        "AddPhase",  # Scourge of the Throne, Moraug
+        "Dig",  # Etali (exile top + cast)
+        "Play",  # Etali's chain paired with Dig
+        "Mana",  # Neheb-style mana engines on attack
+        "Token",  # Tovolar, Krenko-on-attack creators
+        "DealDamage",  # Ping-on-attack commanders
+        "Discard",  # Attack-into-discard (Rakdos, Raiyuu)
+        "Mill",  # Attack-mill payoffs
+    }
+)
+
+
+def _attacks_trigger_has_value_effect(cmdr_ports: list[PortRow]) -> bool:
+    """True when an Attacks-Self trigger commander has an effect chain
+    that converts extra combat steps into repeated material payoff.
+
+    Two acceptance paths:
+
+    1. **At least one engine effect** (``_ATTACKS_ENGINE_EFFECTS``) —
+       AddPhase, Dig, Play, Mana, Token, DealDamage, Discard, Mill.
+       Each implies the commander is trading attacks for resources,
+       and extra combats multiply that.
+
+    2. **Multiple value effects** (>=2) on the same card — Etali's
+       Dig+Play chain, Scourge's UntapAll+AddPhase. A multi-effect
+       on-attack engine rewards combat multipliers even if no single
+       effect is on the engine list.
+
+    Single-effect voltron triggers (Wyleth: Draw only; Zur:
+    ChangeZone tutor only) fail both paths and stay out. Stacking
+    attack-combat enhancers on them displaces their voltron /
+    enchantress axes (Zur NDCG 0.27 → 0.15 when this gate was
+    looser).
+    """
+    effect_count = 0
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        if pt != "effect":
+            continue
+        ev = (p.get("event_class") or "").strip()
+        if ev in _ATTACKS_ENGINE_EFFECTS:
+            return True
+        if ev in ("Draw", "ChangeZone", "ChangeZoneAll", "PutCounter", "LoseLife", "GainLife", "Destroy"):
+            effect_count += 1
+    return effect_count >= 2
+
+
 def _find_combat_enhancers(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
     cmdr_set: set[str],
 ) -> list[PortComplement]:
-    """Find extra-combat and double-strike cards for DamageDone commanders.
+    """Find extra-combat and double-strike cards for combat-trigger commanders.
 
-    Saskia triggers on combat damage -> wants Aurelia (extra combat),
-    Gisela (damage doubling), creatures with double strike.
+    Two families of commanders benefit from combat enhancers:
 
-    Dedicated IDF group (~212 cards) lifts these above the 1875-card
-    trigger_effect pool where they'd be buried.
+    1. **DamageDone triggers** that watch arbitrary creatures (Saskia
+       the Unyielding). Doubling damage or adding combat steps
+       multiplies her payoff directly.
+
+    2. **Attacks Card.Self triggers** with a valuable on-attack effect
+       — Etali, Primal Storm's "exile top of each library and play
+       it free" chain, Neheb the Eternal's mana-on-damage, Scourge of
+       the Throne's ascend. Extra combat steps multiply the free
+       casts / mana / damage-based effects; Double Strike pushes an
+       otherwise single swing into two. Gating on "Attacks trigger +
+       non-trivial effect chain" keeps vanilla attack-matters
+       creatures out — they already get signal from the tribal /
+       voltron axes.
     """
     has_damage_trigger = False
+    has_self_attack_with_value = False
     for p in cmdr_ports:
         if (p.get("port_type") or "").strip() != "trigger":
             continue
@@ -112,8 +175,12 @@ def _find_combat_enhancers(
             if not _trigger_only_matches_self(vf):
                 has_damage_trigger = True
                 break
+        if ev == "Attacks":
+            vf = p.get("valid_filter") or ""
+            if _trigger_only_matches_self(vf):
+                has_self_attack_with_value = _attacks_trigger_has_value_effect(cmdr_ports)
 
-    if not has_damage_trigger:
+    if not has_damage_trigger and not has_self_attack_with_value:
         return []
 
     results: list[PortComplement] = []

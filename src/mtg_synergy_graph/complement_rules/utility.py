@@ -886,6 +886,87 @@ def _port_cares_about_lands(p: PortRow) -> bool:
     )
 
 
+def _has_creatures_are_lands_static(cmdr_ports: list[PortRow]) -> bool:
+    """True when commander has a type-bending static that adds ``Land`` to
+    creatures you control (Ashaya, Soul of the Wild).
+
+    Semantically, every creature ETB is also a land ETB under this static —
+    so the commander mechanically "wants" everything a landfall trigger
+    commander wants (Rampaging Baloths, Lotus Cobra, Avenger of Zendikar,
+    Scute Swarm).
+
+    Extracts the ``Affected`` + ``AddType`` clauses from the raw static
+    dict rather than looking for a specific commander by name. Any future
+    card with the same pattern automatically qualifies.
+    """
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "static":
+            continue
+        if (p.get("event_class") or "").strip() != "Continuous":
+            continue
+        raw = str(p.get("raw_line") or "")
+        aff_m = re.search(r"'Affected':\s*'([^']+)'", raw)
+        add_m = re.search(r"'AddType':\s*'([^']+)'", raw)
+        if not aff_m or not add_m:
+            continue
+        if "Creature" in aff_m.group(1) and "Land" in add_m.group(1):
+            return True
+    return False
+
+
+def _find_creatures_as_lands_landfall(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Match Ashaya-style commanders with landfall-trigger payoffs.
+
+    Ashaya, Soul of the Wild's type-bending static (``AddType: Forest &
+    Land`` on ``Creature.!token+YouCtrl``) makes every creature ETB
+    function as a land ETB. That turns the whole landfall family
+    (Rampaging Baloths, Lotus Cobra, Avenger of Zendikar, Scute Swarm,
+    Emeria Angel, Roil Elemental, Tireless Tracker) into legitimate
+    payoffs — but without an explicit ``ChangesZone Land`` trigger on
+    the commander herself, ``zone_resonance`` skips her entirely and
+    she ends up scoring every land at a flat 0.30 (the ``scaling``
+    floor from ``Land.YouCtrl`` SVar) with zero differentiation.
+
+    Gate: ``_has_creatures_are_lands_static`` — detects the Affected
+    = Creature / AddType = Land pattern generically from the raw static
+    dict. Only Ashaya matches today; any future card with the same
+    shape qualifies automatically.
+
+    Candidate pool: ~237 cards with a ``LandPlayed`` trigger or
+    ``ChangesZone Land zd=Battlefield`` trigger. IDF ≈ 0.126 baseline;
+    the ``creatures_as_lands_landfall`` multiplier lifts landfall
+    payoffs above the flat 0.30 land floor so they actually surface.
+    """
+    if not _has_creatures_are_lands_static(cmdr_ports):
+        return []
+
+    rows = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE port_type = 'trigger' "
+        "AND ("
+        "    event_class = 'LandPlayed'"
+        " OR (event_class = 'ChangesZone' AND valid_filter LIKE '%Land%'"
+        "     AND zone_destination = 'Battlefield')"
+        ")"
+    ).fetchall()
+
+    return [
+        PortComplement(
+            rule_id="creatures_as_lands_landfall",
+            direction="synergy",
+            candidate=r["card_name"],
+            cmdr_event="creatures_are_lands",
+            cand_event="landfall_payoff",
+        )
+        for r in rows
+        if r["card_name"] not in cmdr_set
+    ]
+
+
 def _find_landfall_enablers(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],

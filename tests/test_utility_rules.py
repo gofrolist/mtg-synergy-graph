@@ -15,6 +15,7 @@ from mtg_synergy_graph.complement_rules.utility import (
     _find_counter_axis_feeders,
     _find_counter_target_payoff,
     _find_creature_untap_engine,
+    _find_creatures_as_lands_landfall,
     _find_damage_effect_synergy,
     _find_extra_land_plays,
     _find_flicker_synergy,
@@ -893,6 +894,131 @@ class TestFindExtraLandPlays:
         results = _find_extra_land_plays(conn, cmdr_ports, set())
         assert len(results) == 1
         assert results[0].branch_kind == "root"
+
+
+# ---------------------------------------------------------------------------
+# _find_creatures_as_lands_landfall
+# ---------------------------------------------------------------------------
+
+
+class TestFindCreaturesAsLandsLandfall:
+    """Ashaya-style static (AddType Land on Creature Affected) should
+    synthesize a landfall-payoff axis, since her creatures are also
+    lands and thus trigger landfall effects on ETB."""
+
+    _ASHAYA_STATIC = (
+        "{'Mode': 'Continuous', 'Affected': 'Creature.!token+YouCtrl', "
+        "'AddType': 'Forest & Land', 'Description': \"Nontoken creatures "
+        'you control are Forest lands in addition to their other types."}'
+    )
+
+    def test_no_type_bending_static_skips(self, conn):
+        """Commander without the Affected=Creature / AddType=Land static
+        doesn't activate."""
+        cmdr_ports = [_port_row(port_type="trigger", event_class="Attacks")]
+        assert _find_creatures_as_lands_landfall(conn, cmdr_ports, set()) == []
+
+    def test_land_to_creature_static_skips(self, conn):
+        """Opposite direction (Nissa: Forests are creatures) must NOT
+        fire — that's a separate archetype."""
+        cmdr_ports = [
+            _port_row(
+                port_type="static",
+                event_class="Continuous",
+                raw_line="{'Mode': 'Continuous', 'Affected': 'Forest.YouCtrl', 'AddType': 'Creature & Elf'}",
+            )
+        ]
+        assert _find_creatures_as_lands_landfall(conn, cmdr_ports, set()) == []
+
+    def test_ashaya_matches_landfall_trigger(self, conn):
+        """Ashaya static matches candidates with ChangesZone Land ETB
+        triggers (Rampaging Baloths, Lotus Cobra)."""
+        _add_port(
+            conn,
+            "Rampaging Baloths",
+            port_type="trigger",
+            event_class="ChangesZone",
+            valid_filter="Land.YouCtrl",
+            zone_destination="Battlefield",
+        )
+        _add_port(
+            conn,
+            "Lotus Cobra",
+            port_type="trigger",
+            event_class="ChangesZone",
+            valid_filter="Land.YouCtrl",
+            zone_destination="Battlefield",
+        )
+        # Non-landfall trigger — should NOT match
+        _add_port(
+            conn,
+            "Grim Haruspex",
+            port_type="trigger",
+            event_class="ChangesZone",
+            valid_filter="Creature.YouCtrl",
+            zone_destination="Graveyard",
+        )
+
+        cmdr_ports = [_port_row(port_type="static", event_class="Continuous", raw_line=self._ASHAYA_STATIC)]
+        names = _candidates(_find_creatures_as_lands_landfall(conn, cmdr_ports, set()))
+        assert "Rampaging Baloths" in names
+        assert "Lotus Cobra" in names
+        assert "Grim Haruspex" not in names
+
+    def test_ashaya_matches_landplayed_trigger(self, conn):
+        """LandPlayed triggers (Emeria Angel, Scute Swarm) also match
+        — they fire when a land is played, which Ashaya's creatures
+        functionally become."""
+        _add_port(
+            conn,
+            "Emeria Angel",
+            port_type="trigger",
+            event_class="LandPlayed",
+            valid_filter="",
+        )
+
+        cmdr_ports = [_port_row(port_type="static", event_class="Continuous", raw_line=self._ASHAYA_STATIC)]
+        names = _candidates(_find_creatures_as_lands_landfall(conn, cmdr_ports, set()))
+        assert "Emeria Angel" in names
+
+    def test_commander_excluded_from_pool(self, conn):
+        _add_port(
+            conn,
+            "Ashaya, Soul of the Wild",
+            port_type="trigger",
+            event_class="LandPlayed",
+            valid_filter="",
+        )
+        _add_port(
+            conn,
+            "Rampaging Baloths",
+            port_type="trigger",
+            event_class="ChangesZone",
+            valid_filter="Land.YouCtrl",
+            zone_destination="Battlefield",
+        )
+
+        cmdr_ports = [_port_row(port_type="static", event_class="Continuous", raw_line=self._ASHAYA_STATIC)]
+        names = _candidates(_find_creatures_as_lands_landfall(conn, cmdr_ports, {"Ashaya, Soul of the Wild"}))
+        assert "Ashaya, Soul of the Wild" not in names
+        assert "Rampaging Baloths" in names
+
+    def test_rule_id_and_events(self, conn):
+        _add_port(
+            conn,
+            "Lotus Cobra",
+            port_type="trigger",
+            event_class="ChangesZone",
+            valid_filter="Land.YouCtrl",
+            zone_destination="Battlefield",
+        )
+        cmdr_ports = [_port_row(port_type="static", event_class="Continuous", raw_line=self._ASHAYA_STATIC)]
+        results = _find_creatures_as_lands_landfall(conn, cmdr_ports, set())
+        assert len(results) == 1
+        r = results[0]
+        assert r.rule_id == "creatures_as_lands_landfall"
+        assert r.cmdr_event == "creatures_are_lands"
+        assert r.cand_event == "landfall_payoff"
 
 
 # ---------------------------------------------------------------------------

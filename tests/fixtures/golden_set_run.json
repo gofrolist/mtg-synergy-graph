@@ -2277,21 +2277,21 @@
         "Relentless Assault",
         "Time Warp"
       ],
-      "hi_syn_hits": 0,
+      "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.06931,
-      "on_page_hits": 4,
+      "ndcg30": 0.115328,
+      "on_page_hits": 8,
       "top10": [
-        "Swiftfoot Boots",
-        "Lightning Greaves",
-        "Paradise Mantle",
-        "Accorder's Shield",
-        "Bone Saw",
-        "Cathar's Shield",
-        "Skullclamp",
-        "Spidersilk Net",
-        "Basilisk Collar",
-        "Shadowspear"
+        "Paradox Haze",
+        "Breath of Fury",
+        "Genji Glove",
+        "Hexplate Wallbreaker",
+        "Grim Reaper's Sprint",
+        "Shadow of the Second Sun",
+        "Fear of Missing Out",
+        "Response",
+        "Aggravated Assault",
+        "Najeela, the Blade-Blossom"
       ]
     },
     {

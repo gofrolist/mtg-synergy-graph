@@ -204,6 +204,70 @@ class TestFindCombatEnhancers:
         names = {r.candidate for r in results}
         assert names == {"Aurelia", "Boros Charm"}
 
+    def test_etali_attacks_self_with_engine_effect(self, conn: sqlite3.Connection) -> None:
+        """Etali-pattern: Attacks Card.Self trigger + Dig + Play engine chain
+        qualifies for combat enhancers. Extra combats multiply her free
+        casts from opponents' libraries."""
+        ports = [
+            _port("Etali", "trigger", "Attacks", valid_filter="Card.Self"),
+            _port("Etali", "effect", "Dig"),
+            _port("Etali", "effect", "Play"),
+        ]
+        _insert_port(conn, "Aggravated Assault", "effect", "AddPhase")
+        results = _find_combat_enhancers(conn, ports, {"Etali"})
+        names = {r.candidate for r in results}
+        assert names == {"Aggravated Assault"}
+
+    def test_scourge_attacks_self_with_addphase(self, conn: sqlite3.Connection) -> None:
+        """Scourge of the Throne's Attacks self + AddPhase engine effect
+        qualifies — the single AddPhase effect is on the engine list."""
+        ports = [
+            _port("Scourge", "trigger", "Attacks", valid_filter="Card.Self"),
+            _port("Scourge", "effect", "AddPhase"),
+        ]
+        _insert_port(conn, "Relentless Assault", "effect", "AddPhase")
+        results = _find_combat_enhancers(conn, ports, {"Scourge"})
+        names = {r.candidate for r in results}
+        assert names == {"Relentless Assault"}
+
+    def test_wyleth_attacks_self_with_only_draw_skips(self, conn: sqlite3.Connection) -> None:
+        """Wyleth (Attacks Card.Self + Draw only) is voltron, not extra-
+        combat — single Draw isn't an engine effect and doesn't meet
+        the 2+ value-effect threshold. Stacking combat enhancers on
+        him displaces his equipment axis."""
+        ports = [
+            _port("Wyleth", "trigger", "Attacks", valid_filter="Card.Self"),
+            _port("Wyleth", "effect", "Draw"),
+        ]
+        _insert_port(conn, "Aggravated Assault", "effect", "AddPhase")
+        results = _find_combat_enhancers(conn, ports, {"Wyleth"})
+        assert results == []
+
+    def test_zur_attacks_self_with_only_changezone_skips(self, conn: sqlite3.Connection) -> None:
+        """Zur (Attacks Card.Self + single ChangeZone tutor) is an
+        enchantress tutor commander, not an extra-combat engine."""
+        ports = [
+            _port("Zur", "trigger", "Attacks", valid_filter="Card.Self"),
+            _port("Zur", "effect", "ChangeZone"),
+        ]
+        _insert_port(conn, "Aggravated Assault", "effect", "AddPhase")
+        results = _find_combat_enhancers(conn, ports, {"Zur"})
+        assert results == []
+
+    def test_attacks_with_multiple_value_effects(self, conn: sqlite3.Connection) -> None:
+        """Two value effects (Draw + ChangeZone) meet the >=2 threshold
+        even without an engine effect — multi-step on-attack engines
+        like Kalamax / Raiyuu qualify."""
+        ports = [
+            _port("MultiEngine", "trigger", "Attacks", valid_filter="Card.Self"),
+            _port("MultiEngine", "effect", "Draw"),
+            _port("MultiEngine", "effect", "ChangeZone"),
+        ]
+        _insert_port(conn, "Aggravated Assault", "effect", "AddPhase")
+        results = _find_combat_enhancers(conn, ports, {"MultiEngine"})
+        names = {r.candidate for r in results}
+        assert names == {"Aggravated Assault"}
+
 
 # ===========================================================================
 # _find_evasion_complements

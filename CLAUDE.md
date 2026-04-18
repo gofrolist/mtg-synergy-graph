@@ -6,7 +6,7 @@ Guidance for Claude Code working in this repo.
 
 MTG Synergy Graph — deterministic, rule-based EDH/Commander synergy scorer
 using Forge DSL ports. No training, no EDHREC at inference.
-Current aggregate NDCG@30 ~ 0.246, Hi-Syn 222/1000 on the 100-commander golden set.
+Current aggregate NDCG@30 ~ 0.246, Hi-Syn 224/1000 on the 100-commander golden set.
 Filter-axis generalization (2026-04-18):
 - Extract the subject type (Land, Creature, Artifact, creature subtype) from a
   commander's ChangesZone BF→GY trigger filter, then narrow cost_feeds_trigger
@@ -22,6 +22,19 @@ Filter-axis generalization (2026-04-18):
 - Result: Titania 0.1703 → 0.3210, Marchesa 0.0211 → 0.0476, Hamza 0.0750 →
   0.1094, all via filter-axis extraction with zero commander-specific code.
   Aggregate golden-set NDCG 0.243525 → 0.245677, no regressions.
+Non-golden commander coverage (2026-04-18):
+- `creatures_as_lands_landfall`: detects Ashaya's type-bending static
+  (Affected=Creature, AddType=Land) and emits landfall-payoff matches
+  (ChangesZone Land ETB + LandPlayed triggers). Field of the Dead /
+  Lotus Cobra / Rampaging Baloths / Scute Swarm now surface for Ashaya.
+- `combat_enhancer` broadened: now also fires for Attacks-Self triggers
+  when the commander's effect chain contains an engine effect
+  (AddPhase / Dig / Play / Mana / Token / DealDamage / Discard / Mill)
+  or ≥2 value effects. Etali / Scourge of the Throne / Narset now surface
+  extra-combat spells (Relentless Assault, Aggravated Assault, Seize
+  the Day). Zur / Wyleth excluded — single Draw or single ChangeZone
+  tutor is voltron, not an extra-combat engine.
+- Aggregate golden-set NDCG 0.245677 → 0.246137, Hi-Syn 222 → 224.
 Port extraction: 108,644 ports from 32,327 cards (GenericChoice + StaticAbilities$
 expansion, deduped after A1's 2^N re-walk fix).
 
@@ -107,7 +120,7 @@ pair creates a synergy. Each wraps an existing mechanical map.
 | go_wide | Continuous creature pump | Token effects | Jetmir |
 | voltron | Hexproof/Exalted keyword | Auras and Equipment | Sigarda/Rafiq |
 | etb_sac_target | GY reanimate effect | self-ETB + sacrifice cost creatures | Meren/Karador |
-| combat_enhancer | DamageDone trigger | AddPhase + Double Strike | Saskia |
+| combat_enhancer | DamageDone trigger OR Attacks-Self trigger w/ engine effect (AddPhase/Dig/Play/Mana/Token/DealDamage/Discard/Mill, or 2+ value effects) | AddPhase + Double Strike | Saskia / Etali / Scourge of the Throne |
 | wheel_synergy | Drawn trigger (opp-facing OR self+Token/Counter payoff) | Mode:Hand Discard + Draw | Nekusar, Locust God |
 | monarch_synergy | BecomeMonarch effect | BecomeMonarch + CantAttackUnless pillowfort | Queen Marchesa |
 | counter_target_payoff | scales_with XP + PutCounter P1P1 on Creature.Other | trigger CounterAdded / scales_with CardCounters.P1P1 | Ezuri |
@@ -126,6 +139,7 @@ pair creates a synergy. Each wraps an existing mechanical map.
 | cascade_value | Cascade keyword | high-CMC spells with valuable effects | Maelstrom Wanderer |
 | subject_zone_feeder | ChangesZone BF→GY trigger w/ non-Creature subject (Land, Artifact, Enchantment) | effect=Sacrifice SacValid=<subject> + effect=ChangeZoneAll mass return from Graveyard. Scope-filtered (reject Defined=Opponent). | Titania (Land); any future subject-specific death-trigger commander |
 | counter_axis_feeder | any cmdr port valid_filter contains `counters_GE_<TYPE>` on non-Self scope | counter_axis_payoff > counter_producer (self-sac-only cards dropped) > etb_counter_keyword > self_recur_keyword (P1P1 only) | Marchesa (trigger), Hamza (scales_with); any future counters_GE commander |
+| creatures_as_lands_landfall | static with Affected=Creature and AddType=Land | LandPlayed triggers + ChangesZone Land ETB triggers (landfall payoffs) | Ashaya, Soul of the Wild |
 
 ### IDF Weighting (`universal_scorer.py`)
 

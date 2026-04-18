@@ -97,6 +97,7 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "aura_equipment_support": "scaling",
     "subject_zone_feeder": "graveyard_synergy",
     "counter_axis_feeder": "counter_synergy",
+    "creatures_as_lands_landfall": "port_match",
 }
 
 # ---------------------------------------------------------------------------
@@ -452,6 +453,15 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # Hamza) without the high multiplier that would be needed to beat
     # scaling-rule bonuses on incidental proliferate cards.
     "counter_axis_feeder": 3.0,
+    # creatures_as_lands_landfall: commanders whose type-bending static
+    # makes creatures also lands (Ashaya, Soul of the Wild). Pool ~237
+    # landfall-trigger cards (Rampaging Baloths, Lotus Cobra, Avenger of
+    # Zendikar, Scute Swarm). IDF ≈ 0.126. 2.5× lifts landfall payoffs
+    # above the flat 0.30 ``scaling`` floor that every land sits at for
+    # these commanders — without the multiplier the generic basic
+    # lands tie with Rampaging Baloths. Narrow gate (single static
+    # pattern) keeps cross-commander impact to zero.
+    "creatures_as_lands_landfall": 2.5,
 }
 
 
