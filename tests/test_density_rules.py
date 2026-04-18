@@ -852,6 +852,86 @@ class TestFindTribalDensityComplements:
         results = _find_tribal_density_complements(conn, cmdr_ports, {"GhaveLike"})
         assert "Sporemound" in _candidates(results)
 
+    def test_vanilla_tribal_anchor_fires_on_literal_subtype(self, conn):
+        """Keywords-only vanilla anchor (Akroma-style) falls back to literal
+        card subtypes for tribal density, since its EDHREC Hi-Syn is
+        dominated by the tribe and no other rule would match."""
+        _insert_card(
+            conn,
+            "Akroma",
+            card_types="Creature",
+            subtypes="Angel",
+            types="Legendary Creature",
+        )
+        _insert_card(conn, "Giada", card_types="Creature", subtypes="Angel")
+        _insert_card(conn, "Llanowar Elves", card_types="Creature", subtypes="Elf")
+        # Only keyword ports — vanilla anchor
+        _insert_port(conn, "Akroma", "keyword", "Flying")
+        _insert_port(conn, "Akroma", "keyword", "First Strike")
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Akroma",)).fetchall()
+        ]
+        results = _find_tribal_density_complements(conn, cmdr_ports, {"Akroma"})
+        names = _candidates(results)
+        assert "Giada" in names
+        assert "Llanowar Elves" not in names
+
+    def test_vanilla_tribal_anchor_skipped_when_mechanical_ports_present(self, conn):
+        """If the commander has any non-keyword port (trigger / effect /
+        static / replacement / scales_with / cost), the vanilla fallback
+        is skipped — the mechanical structure drives the synergy, and
+        layering tribal on top would flatten top-30.
+
+        Horobi-style commander: mechanical port exists (BecomesTarget
+        trigger + Destroy effect) but neither references his literal
+        Spirit subtype, so the standard extraction yields no subtypes.
+        The vanilla fallback must stay silent since Horobi has mechanical
+        structure (his BecomesTarget engine)."""
+        _insert_card(
+            conn,
+            "Horobi",
+            card_types="Creature",
+            subtypes="Spirit",
+            types="Legendary Creature",
+        )
+        _insert_card(conn, "Spirit of the Hearth", card_types="Creature", subtypes="Spirit")
+        _insert_port(conn, "Horobi", "keyword", "Flying")
+        # Mechanical port — ablates the vanilla fallback (doesn't reference "Spirit")
+        _insert_port(conn, "Horobi", "trigger", "BecomesTarget")
+        _insert_port(conn, "Horobi", "effect", "Destroy", valid_filter="TriggeredTargetLKICopy")
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Horobi",)).fetchall()
+        ]
+        results = _find_tribal_density_complements(conn, cmdr_ports, {"Horobi"})
+        assert results == []
+
+    def test_vanilla_tribal_anchor_skips_overbroad_subtypes(self, conn):
+        """Human / Warrior / Soldier are too over-represented to drive
+        tribal density for a vanilla anchor — 4300 Humans would flatten
+        every Human-subtyped anchor's top-30. The skiplist filters these
+        out; only the rarer subtype (if any) qualifies."""
+        _insert_card(
+            conn,
+            "Generic Human Warrior",
+            card_types="Creature",
+            subtypes="Human Warrior",
+            types="Legendary Creature",
+        )
+        _insert_card(conn, "Random Human", card_types="Creature", subtypes="Human Soldier")
+        _insert_port(conn, "Generic Human Warrior", "keyword", "Vigilance")
+
+        cmdr_ports = [
+            dict(r)
+            for r in conn.execute(
+                "SELECT * FROM card_ports WHERE card_name = ?",
+                ("Generic Human Warrior",),
+            ).fetchall()
+        ]
+        results = _find_tribal_density_complements(conn, cmdr_ports, {"Generic Human Warrior"})
+        assert results == []
+
 
 # ---------------------------------------------------------------------------
 # _find_scales_with_density

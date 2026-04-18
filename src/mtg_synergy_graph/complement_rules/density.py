@@ -529,6 +529,55 @@ def _find_spellcast_density_complements(
     return results
 
 
+#: Creature subtypes whose tribal pool is too large/weak to emit at the
+#: vanilla-anchor fallback. Human alone has ~1500 creatures and would
+#: flatten top-30 for any Human-subtyped vanilla anchor. Warrior / Soldier
+#: are similarly over-represented across 1000+ commanders' own subtypes
+#: and aren't the EDHREC-recognized tribal axis.
+_VANILLA_TRIBAL_SKIPLIST: frozenset[str] = frozenset({"Human", "Warrior", "Soldier"})
+
+
+def _vanilla_tribal_subtypes(conn: sqlite3.Connection, commander_set: set[str]) -> set[str]:
+    """Return creature subtypes for a vanilla-anchor commander.
+
+    A *vanilla anchor* is a legendary creature whose card has no
+    mechanical port structure — only keywords (Flying / Trample /
+    Protection) or nothing at all. Akroma, Angel of Wrath / Ghalta,
+    Primal Hunger / Rorix Bladewing / Grumgully, the Generous are the
+    canonical shape. Their EDHREC Hi-Syn is dominated by their tribe
+    (Angels / Dinosaurs / Dragons / Goblins) because the deck *is* the
+    tribe — the commander has nothing else to build around.
+
+    Returns an empty set when:
+    - Commander has any non-keyword ports (trigger / effect / static /
+      replacement / scales_with / cost). Their mechanical structure
+      will drive the synergy; layering tribal on top dilutes.
+    - Commander's only subtypes are in ``_VANILLA_TRIBAL_SKIPLIST``
+      (Human / Warrior / Soldier — pools too large or not the recognized
+      EDHREC axis).
+    - Commander has no creature subtype at all (eldrazi shape etc).
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT port_type FROM card_ports WHERE card_name IN ({})".format(",".join("?" * len(commander_set))),
+        tuple(commander_set),
+    ).fetchall()
+    port_types = {r["port_type"] for r in rows if r["port_type"]}
+    # Allow "keyword" only. Any other port type means the commander has
+    # mechanical structure worth matching directly.
+    if port_types and not port_types.issubset({"keyword"}):
+        return set()
+
+    subtype_rows = conn.execute(
+        "SELECT subtypes FROM cards WHERE name IN ({})".format(",".join("?" * len(commander_set))),
+        tuple(commander_set),
+    ).fetchall()
+    literal: set[str] = set()
+    for r in subtype_rows:
+        if r["subtypes"]:
+            literal.update(r["subtypes"].split())
+    return literal - _VANILLA_TRIBAL_SKIPLIST
+
+
 def _find_tribal_density_complements(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
@@ -541,7 +590,11 @@ def _find_tribal_density_complements(
     Sliver Overlord -> every Sliver. Marrow-Gnawer -> every Rat.
 
     Uses the same subtype extraction as the lord rule (includes token
-    subtypes like Saproling for Slimefoot).
+    subtypes like Saproling for Slimefoot). Falls back to the
+    commander's literal subtypes when the card is a *vanilla anchor*
+    (keywords-only, no mechanical ports — Akroma, Ghalta, Rorix) since
+    their EDHREC Hi-Syn is dominated by their tribe and no other rule
+    emits a match for them.
     """
     # Suppress tribal density for spell-copy commanders (Wort). Their
     # token subtypes pass the tribal gate (Goblin IS a literal subtype)
@@ -560,6 +613,8 @@ def _find_tribal_density_complements(
             return []
 
     subtypes = _commander_subtypes_from_ports(conn, list(cmdr_set), cmdr_ports)
+    if not subtypes:
+        subtypes = _vanilla_tribal_subtypes(conn, cmdr_set)
     if not subtypes:
         return []
 

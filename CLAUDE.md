@@ -35,6 +35,20 @@ Non-golden commander coverage (2026-04-18):
   the Day). Zur / Wyleth excluded — single Draw or single ChangeZone
   tutor is voltron, not an extra-combat engine.
 - Aggregate golden-set NDCG 0.245677 → 0.246137, Hi-Syn 222 → 224.
+Vanilla tribal-anchor fallback (2026-04-18):
+- `tribal_density` rule now falls back to the commander's literal
+  creature subtypes when the commander is a *vanilla anchor* (only
+  keyword ports, no triggers / effects / statics). Akroma (Angel),
+  Ghalta (Dinosaur), Rorix (Dragon), Grumgully (Goblin Shaman), Konda
+  (Samurai) — their EDHREC Hi-Syn is dominated by the tribe but no
+  other rule emits a match because they have no mechanical structure.
+- Skiplist `{Human, Warrior, Soldier}` — pools too large (Human ~4300)
+  or not the recognized EDHREC tribal axis.
+- Across 2,559 non-golden commanders: 16 commanders improved (Konda
+  +0.67, Moritte +0.49, Leonardo +0.27, Akroma +0.18, Rorix +0.14),
+  6 regressed (Gorm -0.23, Zetalpa -0.01 — voltron commanders whose
+  Hi-Syn isn't tribal). Net +0.001 aggregate across the broad set;
+  golden-set NDCG unchanged.
 Port extraction: 108,644 ports from 32,327 cards (GenericChoice + StaticAbilities$
 expansion, deduped after A1's 2^N re-walk fix).
 
