@@ -207,6 +207,7 @@ def _find_combat_enhancers(
             vf = p.get("valid_filter") or ""
             if _trigger_only_matches_self(vf):
                 has_self_attack_with_value = _attacks_trigger_has_value_effect(cmdr_ports)
+                break
 
     if not has_damage_trigger and not has_self_attack_with_value:
         return []

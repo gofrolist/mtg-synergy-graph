@@ -557,6 +557,12 @@ def _vanilla_tribal_subtypes(conn: sqlite3.Connection, commander_set: set[str]) 
       EDHREC axis).
     - Commander has no creature subtype at all (eldrazi shape etc).
     """
+    # Two-step SQL (port_types, then subtypes) is intentional: the
+    # port_types probe is cheap and short-circuits the subtype lookup
+    # for every commander with mechanical structure — the majority
+    # case. A single JOIN would always pay the cost of hitting the
+    # cards table. Fused into one query only if batch profiling shows
+    # the two round trips matter.
     placeholders = ",".join("?" * len(commander_set))
     params = tuple(commander_set)
     rows = conn.execute(
@@ -875,8 +881,8 @@ def _find_scales_with_density(
         elif ev == "Valid" and vf.startswith("Creature.YouCtrl") and "counters" not in vf:
             # Skip subtype-qualified filters (Creature.YouCtrl+Zombie)
             # where tribal_density is the better axis.
-            subtype_suffix = vf[len("Creature.YouCtrl") :]
-            if subtype_suffix and subtype_suffix.startswith("+"):
+            subtype_qualifier = vf[len("Creature.YouCtrl") :]
+            if subtype_qualifier.startswith("+"):
                 continue
             cmdr_pts = {(cp.get("port_type") or "").strip() for cp in cmdr_ports}
             if cmdr_pts & {"trigger", "effect", "cost", "replacement"}:

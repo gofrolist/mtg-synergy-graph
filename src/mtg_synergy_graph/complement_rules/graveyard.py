@@ -83,14 +83,16 @@ def _extract_recast_types(cmdr_ports: list[PortRow]) -> set[str]:
 #: grant token copies; Escape pays mana + exiles other GY cards. Each
 #: of these mechanics defines the same engine: fill the graveyard,
 #: then replay creatures from it.
-_GRAVEYARD_REPLAY_KEYWORDS: tuple[str, ...] = (
-    "Unearth",
-    "Embalm",
-    "Eternalize",
-    "Encore",
-    "Escape",
-    "Flashback",
-    "Jump-start",
+_GRAVEYARD_REPLAY_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "Unearth",
+        "Embalm",
+        "Eternalize",
+        "Encore",
+        "Escape",
+        "Flashback",
+        "Jump-start",
+    }
 )
 
 

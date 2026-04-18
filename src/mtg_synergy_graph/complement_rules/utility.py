@@ -23,6 +23,17 @@ _COUNTER_GATE_RE = re.compile(r"counters_GE\d*_([A-Z0-9]+)")
 #: _VALID_*_EXPRS frozensets + ValueError").
 _VALID_COUNTER_TYPE_RE = re.compile(r"^[A-Z0-9]+$")
 
+#: Extracts the ``Affected`` clause value from a Forge static raw_line.
+#: Used by ``_has_creatures_are_lands_static`` to pull the type-bending
+#: scope (e.g. ``Creature.!token+YouCtrl``). Hoisted to module level to
+#: avoid recompiling inside the per-port loop.
+_AFFECTED_CLAUSE_RE = re.compile(r"'Affected':\s*'([^']+)'")
+
+#: Extracts the ``AddType`` clause value from a Forge static raw_line
+#: (e.g. ``Forest & Land``). Paired with ``_AFFECTED_CLAUSE_RE`` in the
+#: creatures-are-lands detector.
+_ADD_TYPE_CLAUSE_RE = re.compile(r"'AddType':\s*'([^']+)'")
+
 # ---------------------------------------------------------------------------
 # Opponent-forcing constants (used only by _find_opponent_forcing)
 # ---------------------------------------------------------------------------
@@ -932,8 +943,8 @@ def _has_creatures_are_lands_static(cmdr_ports: list[PortRow]) -> bool:
         if not _is_static_continuous(p):
             continue
         raw = str(p.get("raw_line") or "")
-        aff_m = re.search(r"'Affected':\s*'([^']+)'", raw)
-        add_m = re.search(r"'AddType':\s*'([^']+)'", raw)
+        aff_m = _AFFECTED_CLAUSE_RE.search(raw)
+        add_m = _ADD_TYPE_CLAUSE_RE.search(raw)
         if not aff_m or not add_m:
             continue
         if "Creature" in aff_m.group(1) and "Land" in add_m.group(1):
