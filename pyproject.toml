@@ -78,7 +78,7 @@ dev = [
     "pyright>=1.1",
     "pytest>=9.0.3",
     "pytest-cov>=6.1",
-    "ruff>=0.15",
+    "ruff>=0.15.11",
     "vulture>=2.16",
     "mtg-synergy-graph[graph]",
 ]
