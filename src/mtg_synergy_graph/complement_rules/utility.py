@@ -7,7 +7,13 @@ import sqlite3
 
 from ..graph_engine import _trigger_only_matches_self
 from ..penalties import CandidateCache
-from .core import PortComplement, PortRow, _is_static_continuous
+from .core import (
+    _ADD_TYPE_CLAUSE_RE,
+    _AFFECTED_CLAUSE_RE,
+    PortComplement,
+    PortRow,
+    _is_static_continuous,
+)
 
 #: Extracts ``<TYPE>`` from a ``counters_GE<N>_<TYPE>`` qualifier token
 #: (e.g. ``counters_GE1_P1P1`` → ``P1P1``). The counter type determines
@@ -23,16 +29,6 @@ _COUNTER_GATE_RE = re.compile(r"counters_GE\d*_([A-Z0-9]+)")
 #: _VALID_*_EXPRS frozensets + ValueError").
 _VALID_COUNTER_TYPE_RE = re.compile(r"^[A-Z0-9]+$")
 
-#: Extracts the ``Affected`` clause value from a Forge static raw_line.
-#: Used by ``_has_creatures_are_lands_static`` to pull the type-bending
-#: scope (e.g. ``Creature.!token+YouCtrl``). Hoisted to module level to
-#: avoid recompiling inside the per-port loop.
-_AFFECTED_CLAUSE_RE = re.compile(r"'Affected':\s*'([^']+)'")
-
-#: Extracts the ``AddType`` clause value from a Forge static raw_line
-#: (e.g. ``Forest & Land``). Paired with ``_AFFECTED_CLAUSE_RE`` in the
-#: creatures-are-lands detector.
-_ADD_TYPE_CLAUSE_RE = re.compile(r"'AddType':\s*'([^']+)'")
 
 # ---------------------------------------------------------------------------
 # Opponent-forcing constants (used only by _find_opponent_forcing)

@@ -14,7 +14,13 @@ from ..graph_engine import (
     _trigger_only_matches_self,
     explode_filter,
 )
-from .core import PortComplement, PortRow, _commander_subtypes_from_ports
+from .core import (
+    _AFFECTED_CLAUSE_RE,
+    _VALID_TARGET_CLAUSE_RE,
+    PortComplement,
+    PortRow,
+    _commander_subtypes_from_ports,
+)
 
 if TYPE_CHECKING:
     from ..penalties import CandidateCache
@@ -784,6 +790,30 @@ def _find_proliferate_synergy(
     return results
 
 
+def _statics_all_self_focused(cmdr_ports: list[PortRow]) -> bool:
+    """True when every one of the commander's static ports names
+    ``Card.Self`` in its ``Affected`` (self-pump) or ``ValidTarget``
+    (self-protection) clause.
+
+    Used by the scales-with-creature-count branch to keep Shanna,
+    Sisay's Legacy (self-pump Continuous + CantTarget Card.Self) in
+    scope while excluding Ghalta-style ``ReduceCost ValidCard
+    Card.Self`` — the ``ValidCard`` slot names a *cast* target, not an
+    affected permanent, so the clause regex deliberately doesn't match
+    it.
+    """
+    for cp in cmdr_ports:
+        if (cp.get("port_type") or "").strip() != "static":
+            continue
+        raw = str(cp.get("raw_line") or "")
+        aff_m = _AFFECTED_CLAUSE_RE.search(raw)
+        tgt_m = _VALID_TARGET_CLAUSE_RE.search(raw)
+        self_focused = (aff_m and aff_m.group(1) == "Card.Self") or (tgt_m and tgt_m.group(1) == "Card.Self")
+        if not self_focused:
+            return False
+    return True
+
+
 def _find_scales_with_density(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
@@ -800,6 +830,12 @@ def _find_scales_with_density(
     """
     results: list[PortComplement] = []
     seen: set[str] = set()
+
+    # Commander-level invariants hoisted out of the per-port loop: the
+    # scales-with-creature-count branch gates on these but they don't
+    # change across scales_with ports.
+    _cmdr_pts: set[str] | None = None
+    _cmdr_static_self_focused: bool | None = None
 
     for p in cmdr_ports:
         if (p.get("port_type") or "").strip() != "scales_with":
@@ -884,8 +920,12 @@ def _find_scales_with_density(
             subtype_qualifier = vf[len("Creature.YouCtrl") :]
             if subtype_qualifier.startswith("+"):
                 continue
-            cmdr_pts = {(cp.get("port_type") or "").strip() for cp in cmdr_ports}
-            if cmdr_pts & {"trigger", "effect", "cost", "replacement"}:
+            # Compute commander-level invariants once per commander, not
+            # once per scales_with port. Lazy init — only pay the cost
+            # when this branch is reached.
+            if _cmdr_pts is None:
+                _cmdr_pts = {(cp.get("port_type") or "").strip() for cp in cmdr_ports}
+            if _cmdr_pts & {"trigger", "effect", "cost", "replacement"}:
                 continue
             # Commander's statics must all be self-focused: either
             # ``Affected: Card.Self`` (self-pump Continuous) or
@@ -896,15 +936,9 @@ def _find_scales_with_density(
             # "cheat big creatures into play" not "make more
             # creatures". Anthems / MayPlay statics that affect
             # other permanents also fail this gate.
-            static_ok = True
-            for cp in cmdr_ports:
-                if (cp.get("port_type") or "").strip() != "static":
-                    continue
-                raw = str(cp.get("raw_line") or "")
-                if "'Affected': 'Card.Self'" not in raw and "'ValidTarget': 'Card.Self'" not in raw:
-                    static_ok = False
-                    break
-            if not static_ok:
+            if _cmdr_static_self_focused is None:
+                _cmdr_static_self_focused = _statics_all_self_focused(cmdr_ports)
+            if not _cmdr_static_self_focused:
                 continue
             cur = conn.execute(
                 "SELECT DISTINCT card_name FROM card_ports "

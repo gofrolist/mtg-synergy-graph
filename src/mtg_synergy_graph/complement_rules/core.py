@@ -84,6 +84,19 @@ def _is_static_continuous(p: PortRow) -> bool:
     return (p.get("port_type") or "").strip() == "static" and (p.get("event_class") or "").strip() == "Continuous"
 
 
+#: Extracts the ``Affected`` clause value from a Forge static raw_line
+#: (e.g. ``Creature.!token+YouCtrl``). Raw lines use ``repr``-ed dict
+#: syntax with single-quoted keys, so a simple regex is sufficient.
+_AFFECTED_CLAUSE_RE = re.compile(r"'Affected':\s*'([^']+)'")
+
+#: Extracts the ``AddType`` clause value (e.g. ``Forest & Land``).
+_ADD_TYPE_CLAUSE_RE = re.compile(r"'AddType':\s*'([^']+)'")
+
+#: Extracts the ``ValidTarget`` clause value (self-protection statics,
+#: e.g. ``Card.Self``).
+_VALID_TARGET_CLAUSE_RE = re.compile(r"'ValidTarget':\s*'([^']+)'")
+
+
 def _parse_scope_string(vf: str) -> str:
     """Classify a Forge valid_filter string as opp / you / any."""
     s = vf.strip()
