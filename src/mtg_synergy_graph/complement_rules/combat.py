@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 
 from ..graph_engine import _trigger_only_matches_self
@@ -15,6 +16,77 @@ from .core import (
 
 #: Card types used for zone-resonance matching.
 _PRIMARY_TYPES: frozenset[str] = frozenset({"Creature", "Artifact", "Enchantment", "Land", "Planeswalker"})
+
+#: Generic subjects that don't constrain candidates — a trigger
+#: filtering on ``Card`` or ``Permanent`` accepts any permanent type,
+#: so no subject-based narrowing applies.
+_GENERIC_SUBJECTS: frozenset[str] = frozenset({"Card", "Permanent"})
+
+#: Matches the ``Sac<N/<subject>[/descr]>`` token inside a cost's raw_line.
+#: Captures the subject main type (up to `.` or `/` or `>`).
+_SAC_TARGET_RE = re.compile(r"Sac<[^>]*?/([A-Za-z]+)(?:[./>])")
+
+#: Matches ``'SacValid': '<Type>`` in a Sacrifice effect's raw_line
+#: (Scapeshift, Barter in Blood, Lotus Field). Captures the main type.
+_SAC_VALID_RE = re.compile(r"'SacValid':\s*'([A-Za-z]+)")
+
+#: Matches ``'ChangeType': '<Type>`` in a ChangeZoneAll effect's raw_line
+#: (Splendid Reclamation, Living Death). Captures the main type.
+_CHANGE_TYPE_RE = re.compile(r"'ChangeType':\s*'([A-Za-z]+)")
+
+#: Matches ``'Defined': '<Scope>`` in any effect's raw_line. Used to
+#: reject opponent-forcing effects (``Defined: Opponent``) that don't
+#: feed a YouCtrl-scoped trigger.
+_DEFINED_RE = re.compile(r"'Defined':\s*'([A-Za-z.]+)")
+
+
+def _cmdr_trigger_subject_types(cmdr_ports: list[PortRow]) -> frozenset[str]:
+    """Return the set of main subject types across the commander's
+    ChangesZone death triggers.
+
+    Extracts the first token of each OR-alternative in the valid_filter
+    (e.g. ``Land.YouCtrl`` → ``Land``, ``Creature.Other+YouCtrl`` →
+    ``Creature``). Generic subjects (``Card`` / ``Permanent``) and
+    self-only (``Self``) are excluded — they don't narrow candidates.
+    Returns empty when no qualifying trigger exists or all filters are
+    generic, signalling the caller to fall back to broad matching.
+    """
+    subjects: set[str] = set()
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "trigger":
+            continue
+        if (p.get("event_class") or "").strip() != "ChangesZone":
+            continue
+        if (p.get("zone_destination") or "").strip() != "Graveyard":
+            continue
+        vf = (p.get("valid_filter") or "").strip()
+        if not vf or _trigger_only_matches_self(vf):
+            continue
+        for alt in vf.split(","):
+            tokens = alt.replace("+", ".").split(".")
+            if not tokens:
+                continue
+            main = tokens[0].lstrip("!").strip()
+            if not main or main == "Self":
+                continue
+            if main in _GENERIC_SUBJECTS:
+                continue
+            subjects.add(main)
+    return frozenset(subjects)
+
+
+def _sac_target_subject(cost_raw_line: str) -> str:
+    """Extract the sacrifice target subject from a cost port's raw_line.
+
+    ``Sac<1/Land>`` → ``Land``
+    ``Sac<1/CARDNAME/this creature>`` → ``CARDNAME`` (self-sac)
+    ``2 G Sac<1/Land>`` → ``Land``
+    ``Sac<1/Creature.YouCtrl>`` → ``Creature``
+    """
+    if not cost_raw_line:
+        return ""
+    m = _SAC_TARGET_RE.search(cost_raw_line)
+    return m.group(1) if m else ""
 
 
 def _find_combat_enhancers(
@@ -155,16 +227,28 @@ def _find_sacrifice_outlets(
 ) -> list[PortComplement]:
     """Find sacrifice outlet candidates for commanders with death triggers.
 
-    Commanders with ``ChangesZone`` triggers on ``Battlefield -> Graveyard``
-    (dying creatures) want candidates with sacrifice costs -- these enable
-    the commander to profit from creature deaths on demand.
+    A commander's ``ChangesZone`` trigger on ``Battlefield → Graveyard``
+    with a ``valid_filter`` like ``Land.YouCtrl`` or ``Creature.Other``
+    only fires when a permanent of the filtered subject type dies. This
+    rule extracts the subject type(s) (Land, Creature, Artifact, Zombie,
+    …) and hard-filters candidate sacrifice costs so only Sac<subject>
+    targets that align with the commander's filter pass through. When
+    the commander's subject is generic (``Card`` / ``Permanent``) every
+    sac target qualifies. The hard filter is the real signal improver
+    — tagging candidate subjects into ``filter_group`` was considered
+    and rejected because it shattered the IDF pool into ~30 tiny
+    buckets with inflated per-card weight; the emitted complement
+    keeps the legacy ``free_outlet`` / ``paid_outlet`` / ``self_sac``
+    cost-payment structure in ``filter_group``.
 
-    Marchesa triggers when creatures with +1/+1 counters die. Meren
-    triggers when creatures die. Both want Viscera Seer, Ashnod's Altar,
-    etc.
+    A second narrowing applies to triggers gated on ``counters_GE_P1P1``
+    (Marchesa): self-sac costs only qualify when the card also has a
+    counter mechanic (Persist / Undying / Modular / etbCounter /
+    PutCounter P1P1) — a self-sac without a counter can't satisfy the
+    trigger.
     """
-    # Check if commander has a ChangesZone death trigger
     has_death_trigger = False
+    counters_gated = False
     for p in cmdr_ports:
         if p.get("port_type") != "trigger":
             continue
@@ -175,20 +259,46 @@ def _find_sacrifice_outlets(
         if _trigger_only_matches_self(vf):
             continue
         zd = (p.get("zone_destination") or "").strip()
-        # Death = going to graveyard (from battlefield)
         if zd == "Graveyard":
             has_death_trigger = True
+            if "counters_" in vf and "P1P1" in vf:
+                counters_gated = True
+            if not counters_gated:
+                continue
             break
 
     if not has_death_trigger:
         return []
 
-    # Find all cards with sacrifice costs, loading cost metadata for
-    # sub-IDF grouping (free_outlet / paid_outlet / self_sac).
+    # Extract commander trigger's subject-type constraint. When empty /
+    # generic, every sac target qualifies. Otherwise, candidate sac
+    # subjects must align. ``Creature`` also matches sacs of creature
+    # subtypes (Zombie, Goblin, …) which Forge writes as e.g. Sac<Zombie>.
+    subject_constraint = _cmdr_trigger_subject_types(cmdr_ports)
+
     cur = conn.execute(
         "SELECT card_name, event_class, cost_target, raw_line FROM card_ports "
         "WHERE port_type = 'cost' AND event_class = 'sacrifice'"
     )
+
+    counter_mechanic_cards: set[str] = set()
+    if counters_gated:
+        counter_mechanic_cards = {
+            row["card_name"]
+            for row in conn.execute(
+                "SELECT DISTINCT card_name FROM card_ports "
+                "WHERE (port_type = 'keyword' AND ("
+                "      event_class = 'Persist' "
+                "   OR event_class = 'Undying' "
+                "   OR event_class = 'Modular' "
+                "   OR event_class LIKE 'etbCounter:P1P1%'"
+                "  )) "
+                "OR (port_type = 'effect' "
+                "   AND event_class IN ('PutCounter', 'PutCounterAll') "
+                "   AND counter_type = 'P1P1')"
+            )
+        }
+
     results: list[PortComplement] = []
     seen: set[str] = set()
     for r in cur.fetchall():
@@ -197,6 +307,39 @@ def _find_sacrifice_outlets(
             continue
         seen.add(card)
         fg = _cost_filter_group(dict(r))
+        if counters_gated and fg == "self_sac" and card not in counter_mechanic_cards:
+            continue
+
+        # Subject-type narrowing. Extract the candidate's sac target
+        # from raw_line; if the commander has a specific subject
+        # constraint and the candidate's target is a DIFFERENT concrete
+        # subject, skip. Empty / missing raw_line keeps the card
+        # (benefit of the doubt — can't verify mismatch). ``CARDNAME``
+        # is a self-sac placeholder; we keep it too since the dying
+        # card's type can't be read from raw_line alone. Non-Creature
+        # specific subjects (Land, Artifact) further drop CARDNAME
+        # self-sacs — those are predominantly creatures, not lands.
+        sac_subject = _sac_target_subject(r["raw_line"] or "")
+        if subject_constraint and sac_subject:
+            if sac_subject == "CARDNAME":
+                # Self-sac placeholder: drop unless the commander's
+                # constraint is creature-family (most self-sacs are
+                # creatures). Counter-gated flows already filter these
+                # via counter_mechanic_cards above.
+                creature_constraint = "Creature" in subject_constraint or any(
+                    s not in _PRIMARY_TYPES and s not in _GENERIC_SUBJECTS for s in subject_constraint
+                )
+                if not creature_constraint:
+                    continue
+            elif sac_subject not in subject_constraint and not _subject_alignment(subject_constraint, sac_subject):
+                continue
+
+        # filter_group kept as the legacy cost-payment structure
+        # (free_outlet / paid_outlet / self_sac). Tagging the candidate
+        # sac subject too would shatter the IDF pool into ~30 tiny
+        # buckets with inflated per-card weight; the hard subject filter
+        # above is the real win because it removes non-matching sacs
+        # from the pool entirely.
         results.append(
             PortComplement(
                 rule_id="cost_feeds_trigger",
@@ -209,6 +352,142 @@ def _find_sacrifice_outlets(
         )
 
     return results
+
+
+def _find_subject_zone_feeders(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """General subject-axis feeders for commanders with a death trigger
+    on a specific subject type.
+
+    A commander with a ``ChangesZone Battlefield→Graveyard`` trigger on
+    ``Land.YouCtrl`` (Titania), ``Creature.Other+YouCtrl`` (Meren),
+    ``Zombie.Other+YouCtrl`` (Wilhelt) cares about the subject type —
+    her trigger only fires when cards of that subject die. Two
+    candidate-side effect classes feed that axis:
+
+    - ``sac_type_effect`` (cand_event): ``effect=Sacrifice`` with
+      ``SacValid=<subject>`` — Scapeshift (sac all Lands), Lotus Field's
+      ETB-sac of 2 Lands, Barter in Blood (sac 2 Creatures). Triggers
+      the commander once per sacrificed permanent.
+    - ``mass_return_to_battlefield`` (cand_event): ``effect=ChangeZoneAll``
+      with ``ChangeType=<subject>``, ``Origin=Graveyard``,
+      ``Destination=Battlefield`` — Splendid Reclamation for Lands,
+      Living Death for Creatures. The subsequent sacrifice-for-value
+      cycle is the archetype's kill loop.
+
+    The same subject constraint as ``_find_sacrifice_outlets`` applies:
+    ``Card`` / ``Permanent`` are too generic and never activate this
+    rule; creature-subtypes (Zombie, Goblin) align with ``Creature``.
+    """
+    subject_constraint = _cmdr_trigger_subject_types(cmdr_ports)
+    if not subject_constraint:
+        return []
+
+    # Restrict to non-Creature primary types. Creature-subject commanders
+    # (Meren, Wilhelt, Slimefoot, Judith) already surface individual
+    # creature-recursion via ``cost_feeds_trigger`` (Sac<Creature>),
+    # ``etb_sac_target`` (Plaguecrafter-style), ``gy_loader`` (Entomb-
+    # style), and ``dies_drain`` (Blood Artist-style). Adding mass-sac
+    # and mass-return effects on top displaces their tribal-lord and
+    # aristocrat-payoff Hi-Syn picks (Death Baron, Cemetery Reaper,
+    # Hateful Eidolon) with generic mass effects (Accursed Centaur,
+    # Custodi Lich). Land / Artifact / Enchantment commanders have no
+    # comparable toolkit so the mass axis is the archetype's core.
+    non_creature_subjects = {s for s in subject_constraint if s in _PRIMARY_TYPES and s != "Creature"}
+    if not non_creature_subjects:
+        return []
+    subject_constraint = frozenset(non_creature_subjects)
+
+    sac_effect_rows = conn.execute(
+        "SELECT DISTINCT card_name, raw_line FROM card_ports "
+        "WHERE port_type = 'effect' AND event_class = 'Sacrifice' "
+        "AND raw_line LIKE '%SacValid%'"
+    ).fetchall()
+
+    mass_return_rows = conn.execute(
+        "SELECT DISTINCT card_name, raw_line FROM card_ports "
+        "WHERE port_type = 'effect' AND event_class = 'ChangeZoneAll' "
+        "AND raw_line LIKE '%''ChangeType''%' "
+        "AND raw_line LIKE '%''Origin'': ''Graveyard%' "
+        "AND raw_line LIKE '%''Destination'': ''Battlefield%'"
+    ).fetchall()
+
+    def _targets_your_side(raw_line: str) -> bool:
+        """Return True if the sacrifice/return effect acts on YOUR
+        permanents (``Defined`` is You, Player — each player — or
+        unspecified, which defaults to activator). Opponent-only
+        effects (Goremand, Butcher of Malakir, Eradicator Valkyrie)
+        sacrifice the opponent's creatures and don't feed a
+        YouCtrl-scoped death trigger."""
+        m = _DEFINED_RE.search(raw_line or "")
+        if not m:
+            return True  # unspecified → activator default
+        defined = m.group(1)
+        # Reject Opponent / Player.Opponent / Opponents
+        return not defined.startswith("Opponent") and not defined.startswith("Player.Opp")
+
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+
+    def _emit(name: str, cand_event: str) -> None:
+        if name in cmdr_set or name in seen:
+            return
+        seen.add(name)
+        results.append(
+            PortComplement(
+                rule_id="subject_zone_feeder",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="ChangesZone_death",
+                cand_event=cand_event,
+            )
+        )
+
+    for r in sac_effect_rows:
+        raw = r["raw_line"] or ""
+        m = _SAC_VALID_RE.search(raw)
+        if not m:
+            continue
+        subj = m.group(1)
+        if not (subj in subject_constraint or _subject_alignment(subject_constraint, subj)):
+            continue
+        if not _targets_your_side(raw):
+            continue
+        _emit(r["card_name"], "sac_type_effect")
+
+    for r in mass_return_rows:
+        m = _CHANGE_TYPE_RE.search(r["raw_line"] or "")
+        if not m:
+            continue
+        subj = m.group(1)
+        if subj in subject_constraint:
+            _emit(r["card_name"], "mass_return_to_battlefield")
+
+    return results
+
+
+def _subject_alignment(constraint: frozenset[str], sac_subject: str) -> bool:
+    """Return True when a candidate's sac target subject aligns with any
+    subject the commander trigger filters on.
+
+    Handles the common ``Creature`` ↔ creature-subtype case: a Korvold
+    commander filtering on ``Dragon`` should accept Sac<Creature>, and
+    a Meren on ``Creature`` accepts Sac<Zombie> / Sac<Goblin>. Land,
+    Artifact, and Enchantment align only to themselves.
+    """
+    if sac_subject in constraint:
+        return True
+    # Creature-family alignment: if commander filters on Creature or a
+    # creature subtype, accept sacrifices of any creature-family subject.
+    creature_constraint = "Creature" in constraint or any(
+        s not in _PRIMARY_TYPES and s not in _GENERIC_SUBJECTS for s in constraint
+    )
+    return creature_constraint and (
+        sac_subject == "Creature" or (sac_subject not in _PRIMARY_TYPES and sac_subject not in _GENERIC_SUBJECTS)
+    )
 
 
 def _find_changeszone_resonance(

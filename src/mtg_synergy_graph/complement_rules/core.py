@@ -888,6 +888,7 @@ from .combat import (  # noqa: E402
     _find_combat_enhancers,
     _find_evasion_complements,
     _find_sacrifice_outlets,
+    _find_subject_zone_feeders,
 )
 from .density import (  # noqa: E402
     _find_cheat_cmc_bonus,
@@ -940,6 +941,7 @@ from .tokens import (  # noqa: E402
 from .utility import (  # noqa: E402
     _find_cascade_value,
     _find_cost_payoff_complements,
+    _find_counter_axis_feeders,
     _find_counter_target_payoff,
     _find_creature_untap_engine,
     _find_damage_effect_synergy,
@@ -1076,6 +1078,7 @@ def find_all_complements(
         out.extend(_find_changeszone_resonance(conn, cmdr_ports, cmdr_set))
         out.extend(_find_effect_feeds_etb(conn, cmdr_ports, cmdr_set))
         out.extend(_find_sacrifice_outlets(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_subject_zone_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_panharmonicon_complements(conn, cmdr_ports, cmdr_set))
         out.extend(_find_graveyard_fillers(conn, cmdr_ports, cmdr_set))
         out.extend(_find_extra_land_plays(conn, cmdr_ports, cmdr_set))
@@ -1127,6 +1130,7 @@ def find_all_complements(
         out.extend(_find_monarch_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_counter_target_payoff(conn, cmdr_ports, cmdr_set))
         out.extend(_find_creature_untap_engine(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_counter_axis_feeders(conn, cmdr_ports, cmdr_set))
         return out
 
     if not needed_cand:

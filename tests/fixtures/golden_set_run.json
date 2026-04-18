@@ -698,19 +698,19 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.021093,
+      "ndcg30": 0.047638,
       "on_page_hits": 3,
       "top10": [
-        "Goblin Engineer",
-        "Harmonic Prodigy",
         "Woe Strider",
-        "Momentum Breaker",
+        "Goblin Engineer",
         "Redcap Gutter-Dweller",
         "Selfcraft Mechan",
-        "Skoa, Embermage",
-        "Hoarder's Overflow",
         "Arcade Cabinet",
-        "Wick, the Whorled Mind"
+        "Wick, the Whorled Mind",
+        "Threefold Thunderhulk",
+        "Metalhead",
+        "Grenzo, Dungeon Warden",
+        "Harmonic Prodigy"
       ]
     },
     {
@@ -758,21 +758,21 @@
         "Crucible of Worlds",
         "Lotus Cobra"
       ],
-      "hi_syn_hits": 0,
+      "hi_syn_hits": 3,
       "hi_syn_total": 10,
-      "ndcg30": 0.170305,
-      "on_page_hits": 10,
+      "ndcg30": 0.320956,
+      "on_page_hits": 15,
       "top10": [
+        "Lumra, Bellow of the Woods",
+        "Titania, Voice of Gaea",
+        "Aftermath Analyst",
         "Ancient Greenwarden",
+        "World Shaper",
         "Thicket Crasher",
         "Earthquake Dragon",
-        "Fungus Elemental",
+        "Splendid Reclamation",
         "Icetill Explorer",
-        "Bristlebud Farmer",
-        "Territory Culler",
-        "Aftermath Analyst",
-        "Mossborn Hydra",
-        "Blanchwood Prowler"
+        "Territory Culler"
       ]
     },
     {
@@ -884,7 +884,7 @@
       ],
       "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.233524,
+      "ndcg30": 0.233561,
       "on_page_hits": 7,
       "top10": [
         "Shroofus Sproutsire",
@@ -896,7 +896,7 @@
         "Ob Nixilis, Unshackled",
         "Kheru Bloodsucker",
         "Skyclave Shadowcat",
-        "Toxrill, the Corrosive"
+        "Peregrin Took"
       ]
     },
     {
@@ -1628,15 +1628,15 @@
       ],
       "hi_syn_hits": 0,
       "hi_syn_total": 10,
-      "ndcg30": 0.022901,
+      "ndcg30": 0.023043,
       "on_page_hits": 3,
       "top10": [
         "Bristlebud Farmer",
         "Ayara, First of Locthwain",
         "Sephiroth, Fabled SOLDIER",
+        "Buzzard-Wasp Colony",
         "Aftermath Analyst",
         "Seedship Broodtender",
-        "Buzzard-Wasp Colony",
         "Campsite Cuisine",
         "Momentum Breaker",
         "Kheru Bloodsucker",
@@ -2651,7 +2651,7 @@
       ],
       "hi_syn_hits": 2,
       "hi_syn_total": 10,
-      "ndcg30": 0.31163,
+      "ndcg30": 0.31509,
       "on_page_hits": 14,
       "top10": [
         "Ancient Greenwarden",
@@ -2661,9 +2661,9 @@
         "Thicket Crasher",
         "Titania, Voice of Gaea",
         "Lumra, Bellow of the Woods",
-        "Tempestra, Dame of Games",
         "Icetill Explorer",
-        "Xorn"
+        "Xorn",
+        "Ramunap Excavator"
       ]
     },
     {
@@ -2959,21 +2959,21 @@
         "Conclave Mentor",
         "Renata, Called to the Hunt"
       ],
-      "hi_syn_hits": 0,
+      "hi_syn_hits": 1,
       "hi_syn_total": 10,
-      "ndcg30": 0.07504,
-      "on_page_hits": 6,
+      "ndcg30": 0.109398,
+      "on_page_hits": 7,
       "top10": [
+        "Woodfall Primus",
+        "Twilight Shepherd",
+        "Patrolling Peacemaker",
         "Renegade Krasis",
         "Ozolith, the Shattered Spire",
         "Benevolent Hydra",
         "The Earth Crystal",
-        "Unnatural Restoration",
-        "Contagion Clasp",
-        "Metastatic Evangel",
-        "Grateful Apparition",
-        "Throne of Geth",
-        "Smell Fear"
+        "Incubation Druid",
+        "Agatha's Soul Cauldron",
+        "Duskshell Crawler"
       ]
     },
     {

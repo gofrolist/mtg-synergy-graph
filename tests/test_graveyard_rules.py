@@ -1297,6 +1297,76 @@ class TestFindDiesDrain:
         assert haruspex.cmdr_event == "creature_dies"
         assert haruspex.cand_event == "dies_payoff"
 
+    def test_marchesa_card_youctrl_with_p1p1_counters_filter_activates(self, conn) -> None:
+        """Marchesa's BF→GY trigger uses ``Card.YouCtrl+counters_GE1_P1P1``
+        because she returns ANY card-with-P1P1-counter that dies. The
+        ``Card`` main token would normally fail the gate, but the
+        ``counters_GE_P1P1`` qualifier means the trigger is mechanically a
+        creature-dies trigger (P1P1 counters live on creatures in practice)
+        and should activate the dies-drain payoff pool."""
+        _insert_card(conn, "Marchesa, the Black Rose")
+        _insert_card(conn, "Blood Artist")
+        _dies_trigger(conn, "Blood Artist")
+        _drain_effect(conn, "Blood Artist")
+        conn.commit()
+
+        ports = [
+            _port(
+                "Marchesa, the Black Rose",
+                "trigger",
+                "ChangesZone",
+                valid_filter="Card.YouCtrl+counters_GE1_P1P1",
+                zone_origin="Battlefield",
+                zone_destination="Graveyard",
+            )
+        ]
+        results = _find_dies_drain(conn, ports, {"Marchesa, the Black Rose"})
+        assert "Blood Artist" in _candidates(results)
+
+    def test_card_self_with_counters_filter_rejected(self, conn) -> None:
+        """Ochre Jelly / Promising Duskmage have ``Card.Self+counters_GE_P1P1``
+        triggers — these only fire when THE SAME card dies (a "when I die"
+        self-trigger), not "any creature you control dies". The gate must
+        still reject ``Card.Self+counters_*`` filters."""
+        _insert_card(conn, "Blood Artist")
+        _dies_trigger(conn, "Blood Artist")
+        _drain_effect(conn, "Blood Artist")
+        conn.commit()
+
+        ports = [
+            _port(
+                "Self-Counters Cmdr",
+                "trigger",
+                "ChangesZone",
+                valid_filter="Card.Self+counters_GE2_P1P1",
+                zone_origin="Battlefield",
+                zone_destination="Graveyard",
+            )
+        ]
+        assert _find_dies_drain(conn, ports, {"Self-Counters Cmdr"}) == []
+
+    def test_card_youctrl_without_p1p1_counters_filter_rejected(self, conn) -> None:
+        """A bare ``Card.YouCtrl`` filter (no counter-qualifier) is too
+        broad to qualify — it would match every Land, Artifact and
+        Enchantment dying. Only the counter-gated variant means
+        "creature-dies in practice" and should pass."""
+        _insert_card(conn, "Blood Artist")
+        _dies_trigger(conn, "Blood Artist")
+        _drain_effect(conn, "Blood Artist")
+        conn.commit()
+
+        ports = [
+            _port(
+                "Bare Card Cmdr",
+                "trigger",
+                "ChangesZone",
+                valid_filter="Card.YouCtrl",
+                zone_origin="Battlefield",
+                zone_destination="Graveyard",
+            )
+        ]
+        assert _find_dies_drain(conn, ports, {"Bare Card Cmdr"}) == []
+
 
 # ===========================================================================
 # _find_gy_loader

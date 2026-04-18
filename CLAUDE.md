@@ -6,7 +6,22 @@ Guidance for Claude Code working in this repo.
 
 MTG Synergy Graph — deterministic, rule-based EDH/Commander synergy scorer
 using Forge DSL ports. No training, no EDHREC at inference.
-Current aggregate NDCG@30 ~ 0.244, Hi-Syn 218/1000 on the 100-commander golden set.
+Current aggregate NDCG@30 ~ 0.246, Hi-Syn 222/1000 on the 100-commander golden set.
+Filter-axis generalization (2026-04-18):
+- Extract the subject type (Land, Creature, Artifact, creature subtype) from a
+  commander's ChangesZone BF→GY trigger filter, then narrow cost_feeds_trigger
+  candidates to sacrifice costs whose Sac<N/X> target aligns. Replaces
+  commander-specific hand-coded rules — the same logic now lifts any future
+  card/commander following the pattern.
+- Generic subject_zone_feeder rule (non-Creature subjects only): matches
+  effect=Sacrifice SacValid=<subject> and mass ChangeZoneAll returns from
+  Graveyard. Scope filter rejects opponent-forcing effects on YouCtrl triggers.
+- Generic counter_axis_feeder rule: extracts `counters_GE_<TYPE>` qualifier
+  from any commander port (trigger / scales_with / static) on non-Self scope.
+  Matches candidates on 4 tiers (payoff / producer / etb_counter / self_recur).
+- Result: Titania 0.1703 → 0.3210, Marchesa 0.0211 → 0.0476, Hamza 0.0750 →
+  0.1094, all via filter-axis extraction with zero commander-specific code.
+  Aggregate golden-set NDCG 0.243525 → 0.245677, no regressions.
 Port extraction: 108,644 ports from 32,327 cards (GenericChoice + StaticAbilities$
 expansion, deduped after A1's 2^N re-walk fix).
 
@@ -109,6 +124,8 @@ pair creates a synergy. Each wraps an existing mechanical map.
 | pinger | scales_with LifeOppsLost | DealDamage/LoseLife targeting opponents | Rakdos |
 | toughness_synergy | scales_with CardToughness | Defender creatures | Phenax |
 | cascade_value | Cascade keyword | high-CMC spells with valuable effects | Maelstrom Wanderer |
+| subject_zone_feeder | ChangesZone BF→GY trigger w/ non-Creature subject (Land, Artifact, Enchantment) | effect=Sacrifice SacValid=<subject> + effect=ChangeZoneAll mass return from Graveyard. Scope-filtered (reject Defined=Opponent). | Titania (Land); any future subject-specific death-trigger commander |
+| counter_axis_feeder | any cmdr port valid_filter contains `counters_GE_<TYPE>` on non-Self scope | counter_axis_payoff > counter_producer (self-sac-only cards dropped) > etb_counter_keyword > self_recur_keyword (P1P1 only) | Marchesa (trigger), Hamza (scales_with); any future counters_GE commander |
 
 ### IDF Weighting (`universal_scorer.py`)
 

@@ -95,6 +95,8 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "attack_payoffs": "port_match",
     "exalted_density": "scaling",
     "aura_equipment_support": "scaling",
+    "subject_zone_feeder": "graveyard_synergy",
+    "counter_axis_feeder": "counter_synergy",
 }
 
 # ---------------------------------------------------------------------------
@@ -398,10 +400,10 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # the top tier.
     "monarch_synergy": 2.5,
     # counter_target_payoff: ~280-card pool of P1P1 receivers (IDF ≈ 0.14).
-    # Fires only for XP-scaling commanders (Ezuri). Without a boost,
-    # Fathom Mage / Gyre Sage sit at rank ~40; Ezuri's top-10 is
-    # dominated by token-creator cards that match multiple existing
-    # rules. 2.0× lifts EDHREC-canonical counter payoffs into top-20.
+    # Gated on the XP-counter mechanism (``scales_with
+    # YourCountersExperience`` Forge SVar) combined with active P1P1
+    # distribution — a mechanism-specific pair, not a commander name.
+    # 2.0× lifts Fathom Mage / Gyre Sage into Ezuri's top-20.
     "counter_target_payoff": 2.0,
     # creature_untap_engine: ~150-card creature-untap pool (IDF ≈ 0.14).
     # Fires only for tap-for-mana creature commanders (Selvala). Without
@@ -426,6 +428,30 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # graveyard+etb_value stacks. 2.0× lifts the archetype's defining
     # enablers into top-30 without flattening texture.
     "landfall_enabler": 2.0,
+    # subject_zone_feeder: general rule for commanders with a death
+    # trigger filtered to a specific subject type (Land, Creature,
+    # Artifact, creature-subtype). Matches candidates whose effect
+    # sacrifices that subject (Scapeshift, Barter in Blood) or returns
+    # it en-masse from graveyard (Splendid Reclamation, Living Death).
+    # Pool scales with subject specificity: Land ~15 cards, Creature
+    # ~50 cards. IDF ~0.2-0.25 per tier. 2.5× lifts these narrow
+    # archetype-defining cards (Splendid Reclamation for Titania, which
+    # matches NO other rule) into top-30 territory. Narrow gate (only
+    # specific-subject death-trigger commanders qualify) keeps
+    # cross-commander impact minimal.
+    "subject_zone_feeder": 2.5,
+    # counter_axis_feeder: general rule for commanders with a port
+    # (trigger / scales_with / static) whose valid_filter contains a
+    # ``counters_GE_<TYPE>`` qualifier on a broad scope (non-Self).
+    # Four deduped tiers match candidates on the same axis —
+    # counter_axis_payoff (~10 cards) > counter_producer (~150 after
+    # dropping self-sac-only cards) > etb_counter_keyword (~300) >
+    # self_recur_keyword (~75, P1P1 axis only). 3.0× lifts the narrow
+    # top tier into the 0.5-0.6 range — enough to crack the 4-rule
+    # aristocrat-noise floor for counter-axis commanders (Marchesa,
+    # Hamza) without the high multiplier that would be needed to beat
+    # scaling-rule bonuses on incidental proliferate cards.
+    "counter_axis_feeder": 3.0,
 }
 
 

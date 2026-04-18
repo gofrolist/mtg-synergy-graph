@@ -685,7 +685,20 @@ def _has_creature_dies_trigger(cmdr_ports: list[PortRow]) -> bool:
             if not tokens:
                 continue
             main = tokens[0].lstrip("!").strip()
-            if not main or main == "Card":
+            if not main:
+                continue
+            if main == "Card":
+                # Marchesa: `Card.YouCtrl+counters_GE1_P1P1`. The `Card` main
+                # token is too broad on its own, but the +1/+1-counter qualifier
+                # restricts the trigger to creatures in practice (P1P1 counters
+                # only live on creatures). `Card.Self+counters_*` (Ochre Jelly)
+                # is rejected — it's a self-only trigger, not a "any creature
+                # you control dies" payoff axis.
+                qualifiers = [t.lstrip("!").strip() for t in tokens[1:]]
+                if "Self" in qualifiers:
+                    continue
+                if any("counters_" in q and "P1P1" in q for q in qualifiers):
+                    return True
                 continue
             if main in ("Creature", "Permanent"):
                 return True

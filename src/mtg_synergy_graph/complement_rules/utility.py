@@ -2,11 +2,26 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 
 from ..graph_engine import _trigger_only_matches_self
 from ..penalties import CandidateCache
 from .core import PortComplement, PortRow
+
+#: Extracts ``<TYPE>`` from a ``counters_GE<N>_<TYPE>`` qualifier token
+#: (e.g. ``counters_GE1_P1P1`` → ``P1P1``). The counter type determines
+#: which candidate-side matches count as valid producers/payoffs.
+_COUNTER_GATE_RE = re.compile(r"counters_GE\d*_([A-Z0-9]+)")
+
+#: Validator for extracted counter-type tokens before they flow into
+#: SQL placeholders. Re-applies the ``[A-Z0-9]+`` shape from
+#: ``_COUNTER_GATE_RE``'s capture group so downstream SQL-fragment
+#: construction stays safe even if the regex is loosened in future.
+#: Mirrors the ``_VALID_*_EXPRS`` guard convention used elsewhere in
+#: the codebase (see CLAUDE.md: "SQL fragment interpolation guarded by
+#: _VALID_*_EXPRS frozensets + ValueError").
+_VALID_COUNTER_TYPE_RE = re.compile(r"^[A-Z0-9]+$")
 
 # ---------------------------------------------------------------------------
 # Opponent-forcing constants (used only by _find_opponent_forcing)
@@ -250,30 +265,32 @@ def _find_counter_target_payoff(
     cmdr_ports: list[PortRow],
     cmdr_set: set[str],
 ) -> list[PortComplement]:
-    """Find +1/+1 counter payoff creatures for counter-distribution commanders.
+    """Find +1/+1 counter payoff creatures for XP-scaling P1P1
+    distributor commanders.
 
-    Ezuri, Claw of Progress distributes Experience-scaled +1/+1 counters
-    to other creatures each combat. The archetype rewards creatures
-    that BENEFIT from receiving counters:
+    The archetype combines TWO mechanics (both Forge-port-level, not
+    commander-name): the commander scales with Experience counters
+    (``scales_with YourCountersExperience`` — an SVar emitted by any
+    card using the XP-counter mechanism, currently Ezuri but open to
+    any future printing) AND actively distributes P1P1 counters via
+    ``effect=PutCounter[All] counter_type=P1P1`` on Creature.Other.
 
-    - ``trigger=CounterAdded`` with P1P1 type (Fathom Mage draws, Bloodcrazed
-      Hoplite pumps on every counter).
-    - ``scales_with=CardCounters.P1P1`` (Gyre Sage taps for mana equal to
-      counters, Chasm Skulker grows, Cold-Eyed Selkie — any "counts its
-      own +1/+1 counters" card).
+    Both gates are needed — generalizing to "any P1P1 distributor"
+    causes regressions on Ghave (sac-driven), Heliod/Lathiel
+    (lifegain-driven), and Hamza (passive scaler) because EDHREC
+    data ranks their Hi-Syn around tribal lords / lifegain staples /
+    sacrifice payoffs rather than pure counter receivers. The XP axis
+    specifically (Ezuri's slow, one-counter-per-ETB trigger) matches
+    the counter-receiver payoff pattern exactly. Other counter-caring
+    archetypes route through ``counter_axis_feeder``, ``counter_producer``,
+    and ``proliferate_synergy``.
 
-    The effect-feeds-trigger rule's ``_cand_trigger_not_self`` gate
-    rejects Card.Self triggers globally; that's correct for Token
-    effects (a token isn't the trigger card) but wrong for targeted
-    PutCounter where the target IS the trigger card. This rule fills
-    that gap.
+    Matches:
+    - ``trigger=CounterAdded`` with P1P1 type (Fathom Mage draws,
+      Bloodcrazed Hoplite pumps on every counter).
+    - ``scales_with=CardCounters.P1P1`` (Gyre Sage, Chasm Skulker,
+      Cold-Eyed Selkie — any "counts its own +1/+1 counters" card).
 
-    Fires only for XP-scaling commanders (Ezuri, Claw of Progress):
-    ``scales_with=YourCountersExperience`` + ``effect=PutCounter``
-    ``counter_type=P1P1`` targeting another creature. EDHREC data
-    shows Ghave/Heliod/Lathiel (P1P1 distributors without XP
-    scaling) prefer tribal or lifegain staples over pure counter
-    receivers, so restricting to XP scaling avoids false positives.
     Pool ~280 cards.
     """
     has_xp_scaling = any(
@@ -287,7 +304,8 @@ def _find_counter_target_payoff(
     for p in cmdr_ports:
         if (p.get("port_type") or "").strip() != "effect":
             continue
-        if (p.get("event_class") or "").strip() != "PutCounter":
+        ev = (p.get("event_class") or "").strip()
+        if ev not in ("PutCounter", "PutCounterAll"):
             continue
         if (p.get("counter_type") or "").strip() != "P1P1":
             continue
@@ -380,6 +398,183 @@ def _find_creature_untap_engine(
                 )
             )
     return results
+
+
+def _find_counter_axis_feeders(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """General rule for commanders whose filter axis includes a
+    ``counters_GE_<TYPE>`` qualifier on a broad scope.
+
+    Extracts the (main_subject, counter_type) pair from any commander
+    port (trigger, scales_with, or static Continuous) whose valid_filter
+    carries ``counters_GE_<TYPE>`` AND whose main token is NOT ``Self``
+    (self-counter scalers like Incubation Druid / Ochre Jelly describe
+    a single card growing with its own counters, not a commander-level
+    axis). Marchesa's ``Card.YouCtrl+counters_GE1_P1P1`` trigger and
+    Hamza's ``Creature.YouCtrl+counters_GE1_P1P1`` scaler both qualify.
+
+    Emits one complement per card across four priority tiers:
+
+    - ``counter_axis_payoff``: candidate port (scales_with or static
+      Continuous) shares the same counter_GE filter — Inspiring Call,
+      Armorcraft Judge, Abzan Falconer.
+    - ``counter_producer``: candidate has ``effect=PutCounter[All]``
+      with matching counter_type and a Creature-targeting valid_filter.
+      Activated-with-self-sac cards (Pizzasaur, Selfcraft Mechan) are
+      excluded because their PutCounter is an incidental side effect.
+    - ``etb_counter_keyword``: ``etbCounter:<TYPE>:N`` keyword — Iron
+      Apprentice, Walking Ballista.
+    - ``self_recur_keyword`` (P1P1 axis only): Persist / Undying /
+      Modular keyword — Glen Elendra, Strangleroot Geist, Arcbound
+      Ravager. These cycle P1P1/M1M1 counters natively.
+
+    The gate is narrow (golden-set commanders: Marchesa, Hamza) but
+    the logic is fully general — any future commander / card with a
+    ``counters_GE`` filter axis activates it automatically.
+    """
+    counter_types: set[str] = set()
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        if pt not in ("trigger", "scales_with", "static"):
+            continue
+        vf = (p.get("valid_filter") or "").strip()
+        if not vf or "counters_GE" not in vf:
+            continue
+        # Reject self-only scalers: neither the main token nor any
+        # subsequent qualifier in the first OR-alt may be ``Self`` —
+        # that describes a single card growing with its own counters
+        # (Incubation Druid, Ochre Jelly, Card.Self+counters_*), not
+        # a commander-level axis.
+        first_alt = vf.split(",")[0]
+        alt_tokens = first_alt.replace("+", ".").split(".")
+        if any(tok.lstrip("!").strip() == "Self" for tok in alt_tokens):
+            continue
+        for m in _COUNTER_GATE_RE.finditer(vf):
+            counter_types.add(m.group(1))
+
+    if not counter_types:
+        return []
+
+    # Build a `counter_type IN (...)` parameter list. In practice this
+    # will be a single counter type (P1P1) but the general logic handles
+    # multi-axis commanders too. Every extracted token is re-validated
+    # against the ``[A-Z0-9]+`` shape before the placeholder string is
+    # built — the actual values still bind via SQL parameters, but the
+    # explicit guard makes the safety of the f-string interpolation
+    # audit-clear and matches the project's _VALID_*_EXPRS convention.
+    types_list = sorted(counter_types)
+    for ct in types_list:
+        if not _VALID_COUNTER_TYPE_RE.fullmatch(ct):
+            raise ValueError(f"invalid counter type token: {ct!r}")
+    types_placeholder = ",".join("?" * len(types_list))
+
+    # Tier 1: same-axis payoff — scales_with / static Continuous filter
+    # mentions ``counters_GE`` + <TYPE>.
+    payoff_set: set[str] = set()
+    for ct in types_list:
+        for row in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports "
+            "WHERE ((port_type = 'scales_with' AND valid_filter LIKE '%counters_GE%' AND valid_filter LIKE ?)"
+            "       OR (port_type = 'static' AND event_class = 'Continuous' "
+            "           AND raw_line LIKE '%Affected%counters_GE%' AND raw_line LIKE ?))",
+            (f"%{ct}%", f"%{ct}%"),
+        ):
+            payoff_set.add(row["card_name"])
+
+    # Tier 2: counter producers. Cards whose PutCounter is gated behind
+    # a self-sac cost (their only sac cost targets themselves) are
+    # excluded — the PutCounter is an incidental side effect of the
+    # activated ability, not a sustainable distributor on the axis.
+    producer_set: set[str] = {
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports "
+            "WHERE port_type = 'effect' "
+            "AND event_class IN ('PutCounter', 'PutCounterAll') "
+            f"AND counter_type IN ({types_placeholder}) "
+            "AND (valid_filter LIKE '%Creature%' "
+            "     OR valid_filter = '' OR valid_filter IS NULL)",
+            types_list,
+        )
+    }
+    producer_set = producer_set - _only_self_sac_cost(conn)
+
+    # Tier 3: etbCounter:<TYPE>:N keyword (Iron Apprentice → P1P1:1,
+    # Walking Ballista → P1P1:X).
+    etb_counter_set: set[str] = set()
+    for ct in types_list:
+        for row in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports WHERE port_type = 'keyword' AND event_class LIKE ?",
+            (f"etbCounter:{ct}%",),
+        ):
+            etb_counter_set.add(row["card_name"])
+
+    # Tier 4: Persist / Undying / Modular — only when the axis is
+    # P1P1 (the keywords natively cycle +1/+1 and -1/-1 counters).
+    self_recur_set: set[str] = set()
+    if "P1P1" in counter_types:
+        self_recur_set = {
+            row["card_name"]
+            for row in conn.execute(
+                "SELECT DISTINCT card_name FROM card_ports "
+                "WHERE port_type = 'keyword' "
+                "AND event_class IN ('Persist', 'Undying', 'Modular')"
+            )
+        }
+
+    tier_priority = (
+        ("counter_axis_payoff", payoff_set),
+        ("counter_producer", producer_set),
+        ("etb_counter_keyword", etb_counter_set),
+        ("self_recur_keyword", self_recur_set),
+    )
+    seen: set[str] = set()
+    results: list[PortComplement] = []
+    for cand_event, candidates in tier_priority:
+        for name in candidates:
+            if name in cmdr_set or name in seen:
+                continue
+            seen.add(name)
+            results.append(
+                PortComplement(
+                    rule_id="counter_axis_feeder",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="counter_axis",
+                    cand_event=cand_event,
+                )
+            )
+    return results
+
+
+def _only_self_sac_cost(conn: sqlite3.Connection) -> frozenset[str]:
+    """Return card names whose ONLY sacrifice cost targets themselves.
+
+    A card with a root-level ``cost: sacrifice cost_target=self`` AND no
+    other sacrifice cost whose target is ``any`` or ``other`` uses its
+    PutCounter effect (if any) as the payoff of an activated ability
+    paid by sacrificing itself — not a sustainable distributor.
+    """
+    with_self = {
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports "
+            "WHERE port_type = 'cost' AND event_class = 'sacrifice' "
+            "AND cost_target = 'self'"
+        )
+    }
+    with_other = {
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports "
+            "WHERE port_type = 'cost' AND event_class = 'sacrifice' "
+            "AND cost_target IN ('any', 'other')"
+        )
+    }
+    return frozenset(with_self - with_other)
 
 
 def _find_cost_payoff_complements(

@@ -12,6 +12,7 @@ import pytest
 
 from mtg_synergy_graph.complement_rules.utility import (
     _find_cost_payoff_complements,
+    _find_counter_axis_feeders,
     _find_counter_target_payoff,
     _find_creature_untap_engine,
     _find_damage_effect_synergy,
@@ -1043,9 +1044,14 @@ class TestFindMonarchSynergy:
 
 
 class TestFindCounterTargetPayoff:
-    """Ezuri distributes +1/+1 counters to other creatures. Cards that benefit
-    from being counter-targeted (CounterAdded trigger, scales_with P1P1) are
-    the archetype's defining payoffs."""
+    """XP-counter distributor archetype: commander scales with
+    Experience counters (``scales_with YourCountersExperience`` — a
+    Forge SVar emitted by any card using the XP-counter mechanism)
+    AND actively distributes P1P1 counters to OTHER creatures. Both
+    gates are mechanism-specific, not commander-name-specific —
+    future printings using XP counters automatically qualify. Cards
+    that benefit from being counter-targeted (CounterAdded self
+    trigger, scales_with own P1P1) are the canonical payoffs."""
 
     def _ezuri_ports(self):
         return [
@@ -1066,10 +1072,12 @@ class TestFindCounterTargetPayoff:
         ]
         assert _find_counter_target_payoff(conn, cmdr_ports, set()) == []
 
-    def test_no_xp_scaling_skips_non_ezuri_commanders(self, conn):
-        """Ghave / Heliod / Lathiel distribute P1P1 counters but EDHREC favours
-        aristocrats / lifegain staples over pure counter receivers for them.
-        Without ``scales_with=YourCountersExperience`` the rule does not fire."""
+    def test_no_xp_scaling_skips_non_xp_commanders(self, conn):
+        """Commanders without the XP-counter scaler (Ghave / Heliod /
+        Lathiel distribute P1P1 but through sac / lifegain mechanisms)
+        don't activate this rule — other counter-caring axes are
+        covered by counter_producer / counter_axis_feeder /
+        proliferate_synergy."""
         _add_port(
             conn,
             "Fathom Mage",
@@ -1231,3 +1239,217 @@ class TestFindCreatureUntapEngine:
         _add_port(conn, "Quirion Ranger", port_type="effect", event_class="Untap", valid_filter="Creature")
         results = _find_creature_untap_engine(conn, self._selvala_ports(), set())
         assert all(r.rule_id == "creature_untap_engine" for r in results)
+
+
+class TestFindCounterAxisFeeders:
+    """General rule: for any commander port (trigger, scales_with,
+    static) whose valid_filter contains a ``counters_GE_<TYPE>``
+    qualifier on a broad scope (YouCtrl / Other, not Self), extract the
+    (main_subject, counter_type) axis and match candidates that:
+
+    - scale/payoff on the same axis (same ``counters_GE_<TYPE>`` filter
+      on scales_with or static-Continuous ports),
+    - produce the matching counter type on creatures
+      (PutCounter[All] counter_type=<TYPE> valid_filter ~ Creature),
+    - have the matching etbCounter:<TYPE>:N keyword, or
+    - for P1P1 specifically, have Persist / Undying / Modular (the
+      native P1P1/M1M1 cycling keywords).
+
+    Self-only filters (Card.Self+counters_*) are rejected — they
+    describe a card scaling with its OWN counters (Incubation Druid,
+    Ochre Jelly) rather than a commander-level axis. Dedup to one
+    complement per card, highest-priority tier winning."""
+
+    def _marchesa_ports(self):
+        return [
+            _port_row(
+                port_type="trigger",
+                event_class="ChangesZone",
+                zone_origin="Battlefield",
+                zone_destination="Graveyard",
+                valid_filter="Card.YouCtrl+counters_GE1_P1P1",
+            )
+        ]
+
+    def _hamza_ports(self):
+        return [
+            _port_row(
+                port_type="scales_with",
+                event_class="Valid",
+                valid_filter="Creature.YouCtrl+counters_GE1_P1P1",
+            )
+        ]
+
+    def test_no_counter_axis_skips(self, conn):
+        """Commander without any counters_GE filter doesn't activate."""
+        ezuri_ports = [_port_row(port_type="scales_with", event_class="YourCountersExperience")]
+        _add_port(
+            conn,
+            "Drana, Liberator of Malakir",
+            port_type="effect",
+            event_class="PutCounterAll",
+            counter_type="P1P1",
+            valid_filter="Creature.YouCtrl+attacking",
+        )
+        assert _find_counter_axis_feeders(conn, ezuri_ports, set()) == []
+
+    def test_self_only_counters_filter_skips(self, conn):
+        """Card.Self+counters_* (Incubation Druid, Ochre Jelly) is a
+        self-scaler, not a commander-level axis."""
+        ports = [_port_row(port_type="scales_with", event_class="Valid", valid_filter="Card.Self+counters_GE1_P1P1")]
+        assert _find_counter_axis_feeders(conn, ports, set()) == []
+
+    def test_marchesa_activates_via_trigger_filter(self, conn):
+        """Marchesa's ChangesZone death trigger with counters_GE_P1P1
+        qualifier activates the rule and matches P1P1 producers."""
+        _add_port(
+            conn,
+            "Drana, Liberator of Malakir",
+            port_type="effect",
+            event_class="PutCounterAll",
+            counter_type="P1P1",
+            valid_filter="Creature.YouCtrl+attacking",
+        )
+        _add_port(
+            conn, "Drana, Liberator of Malakir", port_type="trigger", event_class="DamageDone", valid_filter="Card.Self"
+        )
+        results = _find_counter_axis_feeders(conn, self._marchesa_ports(), set())
+        names = _candidates(results)
+        assert "Drana, Liberator of Malakir" in names
+
+    def test_hamza_activates_via_scales_with(self, conn):
+        """Hamza's scales_with with counters_GE_P1P1 qualifier
+        activates the rule the same way Marchesa's trigger does."""
+        _add_port(
+            conn,
+            "Drana, Liberator of Malakir",
+            port_type="effect",
+            event_class="PutCounterAll",
+            counter_type="P1P1",
+            valid_filter="Creature.YouCtrl+attacking",
+        )
+        _add_port(
+            conn, "Drana, Liberator of Malakir", port_type="trigger", event_class="DamageDone", valid_filter="Card.Self"
+        )
+        results = _find_counter_axis_feeders(conn, self._hamza_ports(), set())
+        names = _candidates(results)
+        assert "Drana, Liberator of Malakir" in names
+
+    def test_counter_axis_payoff_tier(self, conn):
+        """Cards whose scales_with / static Continuous filters on
+        ``counters_GE_<TYPE>`` mirror the commander's axis — highest
+        priority tier."""
+        _add_port(
+            conn,
+            "Inspiring Call",
+            port_type="scales_with",
+            event_class="Valid",
+            valid_filter="Creature.YouCtrl+counters_GE1_P1P1",
+        )
+        _add_port(
+            conn,
+            "Abzan Falconer",
+            port_type="static",
+            event_class="Continuous",
+            raw_line=(
+                "{'Mode': 'Continuous', 'Affected': 'Creature.YouCtrl+counters_GE1_P1P1', 'AddKeyword': 'Flying'}"
+            ),
+        )
+        results = _find_counter_axis_feeders(conn, self._hamza_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Inspiring Call") == "counter_axis_payoff"
+        assert events.get("Abzan Falconer") == "counter_axis_payoff"
+
+    def test_counter_producer_tier(self, conn):
+        """PutCounter[All] effects producing the matching counter type
+        on creatures — Drana, Thran Vigil, Unspeakable Symbol."""
+        _add_port(
+            conn,
+            "Thran Vigil",
+            port_type="effect",
+            event_class="PutCounter",
+            counter_type="P1P1",
+            valid_filter="Creature.YouCtrl",
+        )
+        _add_port(
+            conn, "Thran Vigil", port_type="trigger", event_class="ChangesZoneAll", valid_filter="Creature.YouOwn"
+        )
+        results = _find_counter_axis_feeders(conn, self._marchesa_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Thran Vigil") == "counter_producer"
+
+    def test_etb_counter_keyword_tier(self, conn):
+        """etbCounter:P1P1 keyword cards (Iron Apprentice, Walking
+        Ballista) enter with a counter that matches the axis."""
+        _add_port(conn, "Iron Apprentice", port_type="keyword", event_class="etbCounter:P1P1:1")
+        results = _find_counter_axis_feeders(conn, self._marchesa_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Iron Apprentice") == "etb_counter_keyword"
+
+    def test_persist_undying_modular_only_for_p1p1_axis(self, conn):
+        """Persist (returns with -1/-1), Undying (returns with +1/+1),
+        and Modular (dies → move P1P1 counters) all involve the P1P1
+        axis. They qualify only when the commander's counter type is
+        P1P1 (not for a hypothetical M1M1-only axis)."""
+        _add_port(conn, "Glen Elendra Archmage", port_type="keyword", event_class="Persist")
+        _add_port(conn, "Strangleroot Geist", port_type="keyword", event_class="Undying")
+        results = _find_counter_axis_feeders(conn, self._marchesa_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Glen Elendra Archmage") == "self_recur_keyword"
+        assert events.get("Strangleroot Geist") == "self_recur_keyword"
+
+    def test_counter_producer_rejects_self_sac_gated(self, conn):
+        """Pizzasaur's PutCounter is downstream of a self-sac activated
+        ability (cost_target=self). Its P1P1 output isn't a sustainable
+        distributor for the axis — reject. Only cards whose PutCounter
+        is triggered or cheaply activated (no self-sac cost) qualify."""
+        _add_port(
+            conn,
+            "Pizzasaur",
+            port_type="effect",
+            event_class="PutCounter",
+            counter_type="P1P1",
+            valid_filter="Creature",
+        )
+        _add_port(
+            conn,
+            "Pizzasaur",
+            port_type="trigger",
+            event_class="ChangesZone",
+            valid_filter="Card.Self",
+            zone_destination="Battlefield",
+        )
+        _add_port(conn, "Pizzasaur", port_type="cost", event_class="sacrifice", cost_target="self")
+        results = _find_counter_axis_feeders(conn, self._marchesa_ports(), set())
+        assert "Pizzasaur" not in _candidates(results)
+
+    def test_one_complement_per_card_highest_priority_wins(self, conn):
+        """Mikaeus has BOTH etbCounter:P1P1 AND PutCounterAll — he gets
+        ONE match in the higher-priority tier (counter_producer, since
+        PutCounterAll > etbCounter in priority). Avoids double-counting
+        that would displace single-tier specialists."""
+        _add_port(conn, "Mikaeus, the Lunarch", port_type="keyword", event_class="etbCounter:P1P1:X")
+        _add_port(
+            conn,
+            "Mikaeus, the Lunarch",
+            port_type="effect",
+            event_class="PutCounterAll",
+            counter_type="P1P1",
+            valid_filter="Creature.StrictlyOther+YouCtrl",
+        )
+        _add_port(conn, "Mikaeus, the Lunarch", port_type="trigger", event_class="SpellCast", valid_filter="Card")
+        results = _find_counter_axis_feeders(conn, self._marchesa_ports(), set())
+        mik = [r for r in results if r.candidate == "Mikaeus, the Lunarch"]
+        assert len(mik) == 1
+        assert mik[0].cand_event == "counter_producer"
+
+    def test_excludes_commander(self, conn):
+        """Commander never surfaces in its own recommendations."""
+        _add_port(conn, "Marchesa, the Black Rose", port_type="keyword", event_class="Persist")
+        results = _find_counter_axis_feeders(conn, self._marchesa_ports(), {"Marchesa, the Black Rose"})
+        assert "Marchesa, the Black Rose" not in _candidates(results)
+
+    def test_rule_id(self, conn):
+        _add_port(conn, "Iron Apprentice", port_type="keyword", event_class="etbCounter:P1P1:1")
+        results = _find_counter_axis_feeders(conn, self._marchesa_ports(), set())
+        assert all(r.rule_id == "counter_axis_feeder" for r in results)
