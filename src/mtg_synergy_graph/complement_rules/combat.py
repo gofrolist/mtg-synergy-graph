@@ -172,9 +172,18 @@ def _find_combat_enhancers(
         ev = (p.get("event_class") or "").strip()
         if ev == "DamageDone":
             vf = p.get("valid_filter") or ""
-            if not _trigger_only_matches_self(vf):
-                has_damage_trigger = True
-                break
+            if _trigger_only_matches_self(vf):
+                continue
+            # The `is_combat` flag in card_ports is set iff the trigger's
+            # raw ``CombatDamage`` clause is True — the only unambiguous
+            # signal that the commander watches *combat* damage (Saskia,
+            # Edward Kenway) rather than spell / ping damage (Imodane,
+            # Ghyrson Starn). Extra combat steps and Double Strike only
+            # multiply the payoff when the trigger is combat-gated.
+            if not p.get("is_combat"):
+                continue
+            has_damage_trigger = True
+            break
         if ev == "Attacks":
             vf = p.get("valid_filter") or ""
             if _trigger_only_matches_self(vf):

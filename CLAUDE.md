@@ -84,6 +84,22 @@ GY-replay keyword grant + Detain + Domain (2026-04-18):
 - Non-golden set: +5 commanders improved (Radha +0.37, Lavinia +0.32,
   Nael +0.29, Sedris +0.20, Zar Ojanen +0.19), zero regressions,
   zero golden-set impact. 835 tests (5 new).
+combat_enhancer tightened to is_combat-only (2026-04-18):
+- `_find_combat_enhancers` DamageDone branch now requires the
+  trigger port's `is_combat` flag (Forge sets this iff the raw trigger
+  has `CombatDamage: True`). Spell-damage commanders (Imodane, the
+  Pyrohammer / Ghyrson Starn, Kelermorph — their DamageDone triggers
+  on Instant.YouCtrl, Sorcery.YouCtrl or Card.Other+YouCtrl with
+  `DamageAmount EQ1` rather than CombatDamage: True) were previously
+  picked up by combat_enhancer and flooded with extra-combat spells
+  that their burn-doubler archetype doesn't want.
+- Edward Kenway (Vehicle.YouCtrl + CombatDamage: True) and Saskia
+  (Creature.YouCtrl + CombatDamage: True) still qualify — the
+  is_combat flag directly captures the distinction rather than
+  needing a filter-type allowlist.
+- Non-golden set: 3 commanders improved (Ghyrson Starn +0.017,
+  Taii Wakeen +0.015, Auntie Blyte +0.027), zero regressions. 3
+  new tests.
 Port extraction: 108,644 ports from 32,327 cards (GenericChoice + StaticAbilities$
 expansion, deduped after A1's 2^N re-walk fix).
 

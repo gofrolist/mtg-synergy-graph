@@ -84,6 +84,7 @@ def _port(
     raw_line: str = "",
     affected_scope: str = "",
     branch_kind: str = "root",
+    is_combat: int = 0,
 ) -> dict:
     """Build a PortRow dict for use as a commander port."""
     return {
@@ -97,6 +98,7 @@ def _port(
         "affected_scope": affected_scope,
         "branch_kind": branch_kind,
         "is_conditional": False,
+        "is_combat": is_combat,
         "replacement_event": "",
         "replacement_result": "",
         "amount": "",
@@ -161,7 +163,7 @@ class TestFindCombatEnhancers:
 
     def test_finds_addphase_candidates(self, conn: sqlite3.Connection) -> None:
         """DamageDone trigger -> picks up AddPhase effect candidates (lines 38-57)."""
-        ports = [_port("Saskia", "trigger", "DamageDone", valid_filter="Creature.YouCtrl")]
+        ports = [_port("Saskia", "trigger", "DamageDone", valid_filter="Creature.YouCtrl", is_combat=1)]
         _insert_port(conn, "Aurelia", "effect", "AddPhase")
         results = _find_combat_enhancers(conn, ports, {"Saskia"})
         assert len(results) == 1
@@ -171,7 +173,7 @@ class TestFindCombatEnhancers:
 
     def test_finds_double_strike_candidates(self, conn: sqlite3.Connection) -> None:
         """DamageDone trigger -> picks up Double Strike keyword candidates (lines 59-75)."""
-        ports = [_port("Saskia", "trigger", "DamageDone", valid_filter="Creature.YouCtrl")]
+        ports = [_port("Saskia", "trigger", "DamageDone", valid_filter="Creature.YouCtrl", is_combat=1)]
         _insert_port(conn, "Boros Charm", "keyword", "Double Strike")
         results = _find_combat_enhancers(conn, ports, {"Saskia"})
         assert len(results) == 1
@@ -180,7 +182,7 @@ class TestFindCombatEnhancers:
 
     def test_excludes_commander_from_results(self, conn: sqlite3.Connection) -> None:
         """Commander's own cards excluded from candidates (line 47, 65)."""
-        ports = [_port("Saskia", "trigger", "DamageDone", valid_filter="Creature.YouCtrl")]
+        ports = [_port("Saskia", "trigger", "DamageDone", valid_filter="Creature.YouCtrl", is_combat=1)]
         _insert_port(conn, "Saskia", "effect", "AddPhase")
         _insert_port(conn, "Aurelia", "effect", "AddPhase")
         results = _find_combat_enhancers(conn, ports, {"Saskia"})
@@ -189,7 +191,7 @@ class TestFindCombatEnhancers:
 
     def test_dedup_across_addphase_and_double_strike(self, conn: sqlite3.Connection) -> None:
         """A card appearing in both AddPhase and DoubleStrike only listed once (seen set)."""
-        ports = [_port("Saskia", "trigger", "DamageDone", valid_filter="Creature.YouCtrl")]
+        ports = [_port("Saskia", "trigger", "DamageDone", valid_filter="Creature.YouCtrl", is_combat=1)]
         _insert_port(conn, "Weird Card", "effect", "AddPhase")
         _insert_port(conn, "Weird Card", "keyword", "Double Strike")
         results = _find_combat_enhancers(conn, ports, {"Saskia"})
@@ -197,7 +199,7 @@ class TestFindCombatEnhancers:
 
     def test_both_addphase_and_double_strike(self, conn: sqlite3.Connection) -> None:
         """Multiple distinct candidates from both queries (lines 42-77)."""
-        ports = [_port("Saskia", "trigger", "DamageDone", valid_filter="Creature.YouCtrl")]
+        ports = [_port("Saskia", "trigger", "DamageDone", valid_filter="Creature.YouCtrl", is_combat=1)]
         _insert_port(conn, "Aurelia", "effect", "AddPhase")
         _insert_port(conn, "Boros Charm", "keyword", "Double Strike")
         results = _find_combat_enhancers(conn, ports, {"Saskia"})
@@ -267,6 +269,52 @@ class TestFindCombatEnhancers:
         results = _find_combat_enhancers(conn, ports, {"MultiEngine"})
         names = {r.candidate for r in results}
         assert names == {"Aggravated Assault"}
+
+    def test_damage_trigger_requires_is_combat_flag(self, conn: sqlite3.Connection) -> None:
+        """Spell-damage triggers (Imodane-style: DamageDone on
+        Instant.YouCtrl / Sorcery.YouCtrl) don't benefit from extra
+        combat steps — their payoff is paired with spell casts, not
+        attacks. Gate requires the port's ``is_combat`` flag (Forge
+        sets this iff the raw trigger has ``CombatDamage: True``)."""
+        imodane = _port(
+            "Imodane",
+            "trigger",
+            "DamageDone",
+            valid_filter="Instant.YouCtrl,Sorcery.YouCtrl",
+            is_combat=0,
+        )
+        _insert_port(conn, "Aggravated Assault", "effect", "AddPhase")
+        assert _find_combat_enhancers(conn, [imodane], {"Imodane"}) == []
+
+    def test_damage_trigger_with_combat_flag_qualifies(self, conn: sqlite3.Connection) -> None:
+        """Saskia-style combat-damage trigger (is_combat=1 because the
+        raw line has ``CombatDamage: True``) qualifies for the
+        combat_enhancer pool regardless of filter specifics."""
+        saskia = _port(
+            "Saskia",
+            "trigger",
+            "DamageDone",
+            valid_filter="Creature.YouCtrl",
+            is_combat=1,
+        )
+        _insert_port(conn, "Aggravated Assault", "effect", "AddPhase")
+        results = _find_combat_enhancers(conn, [saskia], {"Saskia"})
+        assert "Aggravated Assault" in {r.candidate for r in results}
+
+    def test_vehicle_combat_damage_qualifies(self, conn: sqlite3.Connection) -> None:
+        """Edward Kenway's Vehicle.YouCtrl + CombatDamage trigger still
+        qualifies — Vehicles deal combat damage like creatures, so
+        extra combats multiply the payoff."""
+        edward = _port(
+            "Edward Kenway",
+            "trigger",
+            "DamageDone",
+            valid_filter="Vehicle.YouCtrl",
+            is_combat=1,
+        )
+        _insert_port(conn, "Aggravated Assault", "effect", "AddPhase")
+        results = _find_combat_enhancers(conn, [edward], {"Edward Kenway"})
+        assert "Aggravated Assault" in {r.candidate for r in results}
 
 
 # ===========================================================================
