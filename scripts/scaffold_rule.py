@@ -41,8 +41,11 @@ sys.path.insert(0, str(Path(__file__).parent))
 from _attempt_log import (
     AttemptRecord,
     is_known_bad,
+    is_template_blocked,
     now_iso,
     record_attempt,
+    template_pass_rate,
+    template_stats,
 )
 from gap_report import (
     GapStat,
@@ -1130,6 +1133,13 @@ def _pick_top_proposal(conn: sqlite3.Connection) -> RuleProposal | None:
         prop = _propose(gap, conn)
         if prop is None or prop.template not in _GENERATORS:
             continue
+        # Template-level block: if past attempts on this template show
+        # a pass rate at or below the threshold (with enough samples),
+        # skip every proposal that uses it. Avoids burning cycles on
+        # generators with systemic flaws.
+        t_blocked, _ = is_template_blocked(prop.template)
+        if t_blocked:
+            continue
         try:
             art = _GENERATORS[prop.template](prop)
         except Exception:  # noqa: S112  (skip generator errors and try the next eligible proposal)
@@ -1211,6 +1221,24 @@ def _attempt_one(
                 signature=signature,
                 outcome="skipped",
                 reason=f"prior revert: {prior_reason[:150]}",
+            )
+        )
+        return "skipped"
+
+    t_blocked, t_reason = is_template_blocked(template_name)
+    if t_blocked and not force:
+        print(
+            f"\n[SKIPPED] template `{template_name}` is blocked: {t_reason}",
+            file=sys.stderr,
+        )
+        record_attempt(
+            AttemptRecord(
+                timestamp=now_iso(),
+                rule_id=art.rule_id,
+                template=template_name,
+                signature=signature,
+                outcome="skipped",
+                reason=f"template blocked: {t_reason}",
             )
         )
         return "skipped"
@@ -1315,7 +1343,43 @@ def main() -> int:
         "re-scans the universe each iteration so freshly-shipped "
         "rules update the queue.",
     )
+    parser.add_argument(
+        "--show-template-stats",
+        action="store_true",
+        help="Print per-template attempt statistics from the attempt log "
+        "(passed/trivial/reverted/skipped + smoothed pass rate + block "
+        "status) and exit. Useful for understanding which generators "
+        "are paying off and which are systematically broken.",
+    )
     args = parser.parse_args()
+
+    if args.show_template_stats:
+        stats = template_stats()
+        if not stats:
+            print("attempt log is empty — no template statistics yet.")
+            return 0
+        rows = []
+        for t in sorted(stats):
+            counts = stats[t]
+            rate, fresh = template_pass_rate(t)
+            blocked, _ = is_template_blocked(t)
+            rows.append(
+                (
+                    t,
+                    counts.get("passed", 0),
+                    counts.get("trivial", 0),
+                    counts.get("reverted", 0),
+                    counts.get("skipped", 0),
+                    fresh,
+                    rate,
+                    "BLOCKED" if blocked else "ok",
+                )
+            )
+        print(f"{'template':<35} {'pass':>5} {'triv':>5} {'rev':>5} {'skip':>5} {'fresh':>6} {'rate':>6}  status")
+        print("-" * 80)
+        for row in rows:
+            print(f"{row[0]:<35} {row[1]:>5} {row[2]:>5} {row[3]:>5} {row[4]:>5} {row[5]:>6} {row[6]:>6.2f}  {row[7]}")
+        return 0
 
     if args.walk > 1 and not args.apply:
         print("error: --walk requires --apply", file=sys.stderr)

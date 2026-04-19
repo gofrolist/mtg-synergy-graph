@@ -100,6 +100,69 @@ def prior_attempts_for_template(template: str) -> list[AttemptRecord]:
 
 _BLOCKING_OUTCOMES: frozenset[str] = frozenset({"reverted", "trivial"})
 
+#: Templates whose pass rate falls at or below this threshold AND have
+#: at least :data:`_TEMPLATE_BLOCK_MIN_FRESH` fresh attempts get blocked
+#: at the template level — every (template, rule_id) it generates will
+#: skip without ``--force``. Catches templates whose generator has a
+#: systemic flaw (not just one bad rule_id).
+_TEMPLATE_BLOCK_RATE: float = 0.34
+_TEMPLATE_BLOCK_MIN_FRESH: int = 2
+
+
+def template_stats() -> dict[str, dict[str, int]]:
+    """Per-template outcome counts. Outer key = template name, inner
+    keys = ``passed`` / ``trivial`` / ``reverted`` / ``skipped`` (only
+    keys with non-zero counts are present).
+    """
+    out: dict[str, dict[str, int]] = {}
+    for a in load_attempts():
+        bucket = out.setdefault(a.template, {})
+        bucket[a.outcome] = bucket.get(a.outcome, 0) + 1
+    return out
+
+
+def template_pass_rate(template: str) -> tuple[float, int]:
+    """Laplace-smoothed pass rate + ``fresh`` attempt count for one
+    template. Returns ``((passed + 1) / (fresh + 2), fresh)`` where
+    ``fresh = passed + trivial + reverted``.
+
+    Smoothing rationale:
+    - templates with no history get a neutral 0.5 (give them a chance);
+    - one trivial doesn't immediately blacklist a template;
+    - at scale, converges to the true rate.
+
+    ``skipped`` outcomes don't count — they're refusals, not new tries.
+    """
+    stats = template_stats().get(template, {})
+    passed = stats.get("passed", 0)
+    trivial = stats.get("trivial", 0)
+    reverted = stats.get("reverted", 0)
+    fresh = passed + trivial + reverted
+    return ((passed + 1) / (fresh + 2), fresh)
+
+
+def is_template_blocked(template: str) -> tuple[bool, str | None]:
+    """True iff the template has a low enough pass rate to skip outright.
+
+    Threshold: ``rate <= _TEMPLATE_BLOCK_RATE`` AND
+    ``fresh >= _TEMPLATE_BLOCK_MIN_FRESH``. Returns
+    ``(blocked, reason)`` so the caller can surface the block in logs.
+    """
+    rate, fresh = template_pass_rate(template)
+    if fresh < _TEMPLATE_BLOCK_MIN_FRESH:
+        return (False, None)
+    if rate > _TEMPLATE_BLOCK_RATE:
+        return (False, None)
+    stats = template_stats().get(template, {})
+    return (
+        True,
+        (
+            f"template pass rate {rate:.2f} (passed={stats.get('passed', 0)}, "
+            f"trivial={stats.get('trivial', 0)}, reverted={stats.get('reverted', 0)}) "
+            f"<= {_TEMPLATE_BLOCK_RATE} threshold"
+        ),
+    )
+
 
 def is_known_bad(template: str, rule_id: str) -> tuple[bool, str | None]:
     """True iff a prior attempt with the same (template, rule_id) had
