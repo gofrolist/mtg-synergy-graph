@@ -942,6 +942,8 @@ from .generated.etbreplacement_copy_dbcopy_optional_tribal import (  # noqa: E40
 )
 from .generated.etbreplacement_other_choosect_tribal import _find_etbreplacement_other_choosect_tribal  # noqa: E402
 from .generated.firebending_2_tribal import _find_firebending_2_tribal  # noqa: E402
+from .generated.landwalk_island_tribal import _find_landwalk_island_tribal  # noqa: E402
+from .generated.melee_tribal import _find_melee_tribal  # noqa: E402
 from .generated.mentor_tribal import _find_mentor_tribal  # noqa: E402
 from .generated.more_tribal import _find_more_tribal  # noqa: E402
 from .generated.prowess_tribal import _find_prowess_tribal  # noqa: E402
@@ -1176,6 +1178,8 @@ def find_all_complements(
         out.extend(_find_counter_axis_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_modified_axis_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_damage_doubler_synergy(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_melee_tribal(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_landwalk_island_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_changeling_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_repl_moved_exile_stack(conn, cmdr_ports, cmdr_set))
         out.extend(_find_mentor_tribal(conn, cmdr_ports, cmdr_set))

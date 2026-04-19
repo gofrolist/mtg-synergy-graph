@@ -58,8 +58,8 @@ check: 100 commanders
 - **Estimated pool sizes**: producer=1732, doubler=16, proliferate=82
 
 ### #4: `keyword.Ward:2[*]`
-- ⚠️ **Prior failure**: 6 revert(s) on this template — most recent 2026-04-19T05:03:09+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', '  Venser, Corpse Puppet                               0.700 -> 0.600  (-0.100)']_
-- ✅ **Prior success**: 13 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
+- ⚠️ **Prior failure**: 7 revert(s) on this template — most recent 2026-04-19T16:18:47+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', "  Sol'kanar the Swamp King                            0.300 -> 0.000  (-0.300)"]_
+- ✅ **Prior success**: 16 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
 - **Reach**: 28 commanders carrying this signature; 0 get any rule activation (0%).
 - **Impact**: 28.0
 - **Template**: `peer_tribal_keyword`
@@ -156,21 +156,16 @@ check: 100 commanders
 - **Gate sketch**: `port_type='cost' AND event_class='add_counter'`
 
 ### #14: `replacement.Moved[ETBTapped]`
-- ⚠️ **Prior failure**: 2 revert(s) on this template — most recent 2026-04-19T05:03:01+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', '  The Watcher in the Water                            0.200 -> 0.000  (-0.200)']_
-- ✅ **Prior success**: 1 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
 - **Reach**: 14 commanders carrying this signature; 0 get any rule activation (0%).
 - **Impact**: 14.0
-- **Template**: `replacement_stack`
-- **Rationale**: Other cards with the same replacement event 'Moved' and result 'ETBTapped' stack with the commander's effect.
+- **Template**: `needs_template`
+- **Rationale**: No template in the catalog matches `replacement.Moved[ETBTapped]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
 - **Exemplar commanders** (no rule activation): Alirios, Enraptured, Archelos, Lagoon Mystic, Ebondeath, Dracolich, Grimgrin, Corpse-Born, Reidane, God of the Worthy, Spider-Woman, Stunning Savior, Taeko, the Patient Avalanche, Thalia and The Gitrog Monster
-- **Gate sketch**: `p.port_type='replacement' AND p.event_class='Moved' AND p.replacement_result='ETBTapped'`
-- **Tier sketches**:
-  - same-shape replacements: port_type='replacement' AND event_class='Moved' AND replacement_result='ETBTapped'
-- **Estimated pool sizes**: same_shape=589
+- **Gate sketch**: `port_type='replacement' AND event_class='Moved' AND sub_discriminator='ETBTapped'`
 
 ### #15: `keyword.Living[*]`
-- ⚠️ **Prior failure**: 6 revert(s) on this template — most recent 2026-04-19T05:03:09+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', '  Venser, Corpse Puppet                               0.700 -> 0.600  (-0.100)']_
-- ✅ **Prior success**: 13 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
+- ⚠️ **Prior failure**: 7 revert(s) on this template — most recent 2026-04-19T16:18:47+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', "  Sol'kanar the Swamp King                            0.300 -> 0.000  (-0.300)"]_
+- ✅ **Prior success**: 16 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
 - **Reach**: 13 commanders carrying this signature; 0 get any rule activation (0%).
 - **Impact**: 13.0
 - **Template**: `peer_tribal_keyword`
@@ -273,8 +268,8 @@ check: 100 commanders
 - **Gate sketch**: `port_type='effect' AND event_class='ChangeZoneAll' AND sub_discriminator='Library->Library'`
 
 ### #26: `keyword.Ward:1[*]`
-- ⚠️ **Prior failure**: 6 revert(s) on this template — most recent 2026-04-19T05:03:09+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', '  Venser, Corpse Puppet                               0.700 -> 0.600  (-0.100)']_
-- ✅ **Prior success**: 13 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
+- ⚠️ **Prior failure**: 7 revert(s) on this template — most recent 2026-04-19T16:18:47+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', "  Sol'kanar the Swamp King                            0.300 -> 0.000  (-0.300)"]_
+- ✅ **Prior success**: 16 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
 - **Reach**: 8 commanders carrying this signature; 0 get any rule activation (0%).
 - **Impact**: 8.0
 - **Template**: `peer_tribal_keyword`
@@ -310,8 +305,8 @@ check: 100 commanders
 - **Gate sketch**: `port_type='trigger' AND event_class='ChangesZoneAll' AND sub_discriminator='->Battlefield'`
 
 ### #30: `keyword.Partner:Friends[*]`
-- ⚠️ **Prior failure**: 6 revert(s) on this template — most recent 2026-04-19T05:03:09+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', '  Venser, Corpse Puppet                               0.700 -> 0.600  (-0.100)']_
-- ✅ **Prior success**: 13 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
+- ⚠️ **Prior failure**: 7 revert(s) on this template — most recent 2026-04-19T16:18:47+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', "  Sol'kanar the Swamp King                            0.300 -> 0.000  (-0.300)"]_
+- ✅ **Prior success**: 16 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
 - **Reach**: 7 commanders carrying this signature; 0 get any rule activation (0%).
 - **Impact**: 7.0
 - **Template**: `peer_tribal_keyword`
@@ -323,8 +318,8 @@ check: 100 commanders
 - **Estimated pool sizes**: same_keyword=7
 
 ### #31: `keyword.etbCounter:P1P1:X[*]`
-- ⚠️ **Prior failure**: 6 revert(s) on this template — most recent 2026-04-19T05:03:09+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', '  Venser, Corpse Puppet                               0.700 -> 0.600  (-0.100)']_
-- ✅ **Prior success**: 13 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
+- ⚠️ **Prior failure**: 7 revert(s) on this template — most recent 2026-04-19T16:18:47+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', "  Sol'kanar the Swamp King                            0.300 -> 0.000  (-0.300)"]_
+- ✅ **Prior success**: 16 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
 - **Reach**: 7 commanders carrying this signature; 0 get any rule activation (0%).
 - **Impact**: 7.0
 - **Template**: `peer_tribal_keyword`
@@ -336,8 +331,8 @@ check: 100 commanders
 - **Estimated pool sizes**: same_keyword=49
 
 ### #32: `keyword.etbCounter:P1P1:X:no[*]`
-- ⚠️ **Prior failure**: 6 revert(s) on this template — most recent 2026-04-19T05:03:09+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', '  Venser, Corpse Puppet                               0.700 -> 0.600  (-0.100)']_
-- ✅ **Prior success**: 13 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
+- ⚠️ **Prior failure**: 7 revert(s) on this template — most recent 2026-04-19T16:18:47+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', "  Sol'kanar the Swamp King                            0.300 -> 0.000  (-0.300)"]_
+- ✅ **Prior success**: 16 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
 - **Reach**: 7 commanders carrying this signature; 0 get any rule activation (0%).
 - **Impact**: 7.0
 - **Template**: `peer_tribal_keyword`
@@ -374,8 +369,8 @@ check: 100 commanders
 - **Gate sketch**: `(see complement_rules/utility.py:_find_damage_doubler_synergy)`
 
 ### #36: `keyword.Bushido:1[*]`
-- ⚠️ **Prior failure**: 6 revert(s) on this template — most recent 2026-04-19T05:03:09+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', '  Venser, Corpse Puppet                               0.700 -> 0.600  (-0.100)']_
-- ✅ **Prior success**: 13 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
+- ⚠️ **Prior failure**: 7 revert(s) on this template — most recent 2026-04-19T16:18:47+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', "  Sol'kanar the Swamp King                            0.300 -> 0.000  (-0.300)"]_
+- ✅ **Prior success**: 16 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
 - **Reach**: 6 commanders carrying this signature; 0 get any rule activation (0%).
 - **Impact**: 6.0
 - **Template**: `peer_tribal_keyword`
@@ -387,8 +382,8 @@ check: 100 commanders
 - **Estimated pool sizes**: same_keyword=25
 
 ### #37: `keyword.Partner:Character[*]`
-- ⚠️ **Prior failure**: 6 revert(s) on this template — most recent 2026-04-19T05:03:09+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', '  Venser, Corpse Puppet                               0.700 -> 0.600  (-0.100)']_
-- ✅ **Prior success**: 13 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
+- ⚠️ **Prior failure**: 7 revert(s) on this template — most recent 2026-04-19T16:18:47+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', "  Sol'kanar the Swamp King                            0.300 -> 0.000  (-0.300)"]_
+- ✅ **Prior success**: 16 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
 - **Reach**: 6 commanders carrying this signature; 0 get any rule activation (0%).
 - **Impact**: 6.0
 - **Template**: `peer_tribal_keyword`
@@ -400,8 +395,8 @@ check: 100 commanders
 - **Estimated pool sizes**: same_keyword=6
 
 ### #38: `keyword.Ward:3[*]`
-- ⚠️ **Prior failure**: 6 revert(s) on this template — most recent 2026-04-19T05:03:09+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', '  Venser, Corpse Puppet                               0.700 -> 0.600  (-0.100)']_
-- ✅ **Prior success**: 13 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
+- ⚠️ **Prior failure**: 7 revert(s) on this template — most recent 2026-04-19T16:18:47+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', "  Sol'kanar the Swamp King                            0.300 -> 0.000  (-0.300)"]_
+- ✅ **Prior success**: 16 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
 - **Reach**: 6 commanders carrying this signature; 0 get any rule activation (0%).
 - **Impact**: 6.0
 - **Template**: `peer_tribal_keyword`
@@ -413,8 +408,8 @@ check: 100 commanders
 - **Estimated pool sizes**: same_keyword=20
 
 ### #39: `keyword.etbCounter:P1P1:Y:no[*]`
-- ⚠️ **Prior failure**: 6 revert(s) on this template — most recent 2026-04-19T05:03:09+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', '  Venser, Corpse Puppet                               0.700 -> 0.600  (-0.100)']_
-- ✅ **Prior success**: 13 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
+- ⚠️ **Prior failure**: 7 revert(s) on this template — most recent 2026-04-19T16:18:47+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', "  Sol'kanar the Swamp King                            0.300 -> 0.000  (-0.300)"]_
+- ✅ **Prior success**: 16 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
 - **Reach**: 6 commanders carrying this signature; 0 get any rule activation (0%).
 - **Impact**: 6.0
 - **Template**: `peer_tribal_keyword`
@@ -501,8 +496,8 @@ check: 100 commanders
   - axis_producer: effect that produces the Other state
 
 ### #49: `keyword.CARDNAME[*]`
-- ⚠️ **Prior failure**: 6 revert(s) on this template — most recent 2026-04-19T05:03:09+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', '  Venser, Corpse Puppet                               0.700 -> 0.600  (-0.100)']_
-- ✅ **Prior success**: 13 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
+- ⚠️ **Prior failure**: 7 revert(s) on this template — most recent 2026-04-19T16:18:47+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', "  Sol'kanar the Swamp King                            0.300 -> 0.000  (-0.300)"]_
+- ✅ **Prior success**: 16 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
 - **Reach**: 5 commanders carrying this signature; 0 get any rule activation (0%).
 - **Impact**: 5.0
 - **Template**: `peer_tribal_keyword`
@@ -514,8 +509,8 @@ check: 100 commanders
 - **Estimated pool sizes**: same_keyword=43
 
 ### #50: `keyword.etbCounter:DIVINITY:1:CheckSVar$[*]`
-- ⚠️ **Prior failure**: 6 revert(s) on this template — most recent 2026-04-19T05:03:09+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', '  Venser, Corpse Puppet                               0.700 -> 0.600  (-0.100)']_
-- ✅ **Prior success**: 13 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
+- ⚠️ **Prior failure**: 7 revert(s) on this template — most recent 2026-04-19T16:18:47+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', "  Sol'kanar the Swamp King                            0.300 -> 0.000  (-0.300)"]_
+- ✅ **Prior success**: 16 passing apply(s) — rule should already be in the registry; check why it's not catching this signature.
 - **Reach**: 5 commanders carrying this signature; 0 get any rule activation (0%).
 - **Impact**: 5.0
 - **Template**: `peer_tribal_keyword`
