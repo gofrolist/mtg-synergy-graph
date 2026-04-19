@@ -34,6 +34,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from .core import COMPLEMENT_RULES, PortRow
+from .generated.choose_tribal import _choose_tribal_gate
 
 
 @dataclass(frozen=True)
@@ -647,6 +648,7 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("zone_resonance", _zone_resonance_gate),
     RuleGate("exalted_density", _exalted_density_gate),
     RuleGate("aura_equipment_support", _aura_equipment_support_gate),
+    RuleGate("choose_tribal", _choose_tribal_gate),
 )
 
 

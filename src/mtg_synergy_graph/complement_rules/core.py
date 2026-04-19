@@ -934,6 +934,7 @@ from .density import (  # noqa: E402
     _find_tribal_density_complements,
     _find_value_engine_density,
 )
+from .generated.choose_tribal import _find_choose_tribal  # noqa: E402
 from .graveyard import (  # noqa: E402
     _find_artifact_recursion,
     _find_copy_synergy,
@@ -1163,6 +1164,7 @@ def find_all_complements(
         out.extend(_find_counter_axis_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_modified_axis_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_damage_doubler_synergy(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_choose_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_peer_evasion_tribal(conn, cmdr_ports, cmdr_set))
         return out
 

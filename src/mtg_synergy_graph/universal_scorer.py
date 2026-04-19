@@ -101,6 +101,7 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "creatures_as_lands_landfall": "port_match",
     "damage_doubler_synergy": "port_match",
     "peer_evasion_tribal": "port_match",
+    "choose_tribal": "port_match",
 }
 
 # ---------------------------------------------------------------------------
@@ -499,6 +500,8 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # legendary horsemanship commanders qualify automatically; any
     # future card / commander with these keywords does too.
     "peer_evasion_tribal": 2.0,
+    # AUTO-GENERATED keyword-tribal — IDF handles weighting
+    "choose_tribal": 2.0,
 }
 
 
