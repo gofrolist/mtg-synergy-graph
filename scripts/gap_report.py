@@ -493,9 +493,11 @@ def _propose(gap: GapStat, conn: sqlite3.Connection) -> RuleProposal | None:
         )
 
     # Template: replacement_stack (generic)
-    # Any replacement.<E> with non-trivial commander reach but no
-    # existing rule covering it.
-    if pt == "replacement":
+    # Any replacement.<E>[<R>] with non-trivial commander reach but no
+    # existing rule covering it. Requires both event_class and
+    # replacement_result -- the generator can't produce a peer-stack
+    # rule without both discriminators.
+    if pt == "replacement" and sub:
         pool = conn.execute(
             "SELECT COUNT(DISTINCT card_name) FROM card_ports "
             "WHERE port_type = 'replacement' AND event_class = ? "
