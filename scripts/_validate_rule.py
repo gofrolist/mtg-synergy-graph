@@ -402,7 +402,11 @@ def main() -> int:
 
     if verdict == "marginal":
         top_movers = ", ".join(f"{n} ({d:+})" for n, _, _, d in impact["movers"][:3])
-        ratio = sum_d / (n_touched or 1)
+        # Use the same denominator (`scored`) as the verdict logic in
+        # _impact_check so the displayed ratio always matches the
+        # threshold check that actually fired.
+        scored = impact["scored"] or 1
+        ratio = sum_d / scored
         _emit(
             {
                 "passed": True,
@@ -413,7 +417,8 @@ def main() -> int:
                 "marginal": True,
                 "marginal_reason": (
                     f"Net hi_syn delta {sum_d:+} across {n_touched} touched "
-                    f"cmdrs; ratio {ratio:.3f} < 0.1 threshold (barely above noise)"
+                    f"cmdrs ({impact['scored']} scored); ratio {ratio:.3f} "
+                    f"< {_MARGINAL_RATIO} threshold (barely above noise)"
                 ),
                 "summary": (f"MARGINAL: {base_summary}" + (f" Top movers: {top_movers}." if top_movers else "")),
             }
