@@ -98,16 +98,28 @@ def prior_attempts_for_template(template: str) -> list[AttemptRecord]:
     return [a for a in load_attempts() if a.template == template]
 
 
+_BLOCKING_OUTCOMES: frozenset[str] = frozenset({"reverted", "trivial"})
+
+
 def is_known_bad(template: str, rule_id: str) -> tuple[bool, str | None]:
-    """True iff a prior attempt with the same (template, rule_id) was
-    reverted. Returns ``(blocked, prior_reason)``.
+    """True iff a prior attempt with the same (template, rule_id) had
+    a blocking outcome. Returns ``(blocked, prior_reason)``.
+
+    Blocking outcomes:
+    - ``reverted``: the apply step failed validation (regression, test
+      failure, etc.). Same code → same failure.
+    - ``trivial``: the apply step passed validation but the rule didn't
+      activate on any commander in the validation universe. Same code
+      → same no-op, no point re-shipping.
+
+    ``skipped`` outcomes don't block (they're already a refusal, not a
+    fresh attempt). ``passed`` doesn't block (caller wouldn't be
+    re-attempting a working rule anyway).
 
     Used by the scaffolder to refuse to re-try known-failing
-    combinations without ``--force``. Only ``reverted`` outcomes
-    block; ``skipped`` ones don't (those are themselves a refusal,
-    not a fresh attempt).
+    combinations without ``--force``.
     """
     for a in load_attempts():
-        if a.template == template and a.rule_id == rule_id and a.outcome == "reverted":
-            return (True, a.reason)
+        if a.template == template and a.rule_id == rule_id and a.outcome in _BLOCKING_OUTCOMES:
+            return (True, f"prior outcome={a.outcome}: {a.reason}")
     return (False, None)

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import json
 import re
 import shutil
 import sqlite3
@@ -1028,10 +1029,17 @@ def _restore_state(snapshot: dict[Path, str | None]) -> None:
 @dataclass
 class ValidationResult:
     """Outcome of post-apply validation. ``passed`` is the AND of all
-    individual checks; ``summary`` is a one-paragraph narrative."""
+    individual checks; ``summary`` is a one-paragraph narrative.
+    ``trivial`` flags rules that passed all checks but don't activate
+    on any commander in the validation universe — we have no evidence
+    they help anything. The autonomy stack records these as
+    ``outcome=trivial`` (kept on disk, but blocked from retry to avoid
+    polluting the registry with no-ops)."""
 
     passed: bool
     summary: str
+    trivial: bool = False
+    trivial_reason: str | None = None
 
 
 def _run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess:
@@ -1044,113 +1052,57 @@ def _run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)  # noqa: S603
 
 
-_GOLDEN_NDCG_RE = re.compile(r"(fresh|baseline) agg NDCG:\s+([\d.]+)")
-
-
 def _validate(art: ScaffoldArtifacts, allow_ndcg_drop: float) -> ValidationResult:
-    """Run pytest (generated test + full suite) and golden_set_track.
+    """Delegate to ``scripts/_validate_rule.py`` — one subprocess that
+    runs pytest + golden + broad + the trivial-impact check.
 
-    Passes iff:
-    - The generated test file passes.
-    - The full pytest suite passes.
-    - Aggregate golden NDCG didn't drop more than ``allow_ndcg_drop``
-      from the baseline.
+    Consolidates four ``uv run`` cold starts (~6s of overhead) into one,
+    and surfaces the trivial-impact verdict so the caller can record
+    rules that pass validation but don't actually move anything.
     """
-    # 1. Generated tests (fastest, most-targeted check).
-    gen_test = _run(
-        ["uv", "run", "pytest", str(art.test_module_path), "-q", "--no-cov"],
-        cwd=REPO_ROOT,
-    )
-    if gen_test.returncode != 0:
-        return ValidationResult(
-            passed=False,
-            summary=(f"Generated tests failed.\n\n{gen_test.stdout[-1500:]}\n\n{gen_test.stderr[-500:]}"),
-        )
-
-    # 2. Full test suite (catches regressions in pre-existing rules).
-    full_tests = _run(
-        ["uv", "run", "pytest", "tests/", "-q", "--no-cov"],
-        cwd=REPO_ROOT,
-    )
-    if full_tests.returncode != 0:
-        return ValidationResult(
-            passed=False,
-            summary=(f"Full test suite failed.\n\n{full_tests.stdout[-1500:]}\n\n{full_tests.stderr[-500:]}"),
-        )
-
-    # 3. Golden NDCG: drop must be <= allow_ndcg_drop.
-    golden = _run(
+    result = _run(
         [
             "uv",
             "run",
             "python",
-            "scripts/golden_set_track.py",
-            "--baseline",
-            "tests/fixtures/golden_set_run.json",
+            "scripts/_validate_rule.py",
+            "--rule-id",
+            art.rule_id,
+            "--allow-ndcg-drop",
+            str(allow_ndcg_drop),
+            "--gen-test-path",
+            str(art.test_module_path.relative_to(REPO_ROOT)),
         ],
         cwd=REPO_ROOT,
     )
-    fresh = baseline = None
-    for kind, val in _GOLDEN_NDCG_RE.findall(golden.stdout):
-        if kind == "fresh":
-            fresh = float(val)
-        elif kind == "baseline":
-            baseline = float(val)
-    if fresh is None or baseline is None:
-        return ValidationResult(
-            passed=False,
-            summary=f"golden_set_track.py output unparseable:\n{golden.stdout[-800:]}",
-        )
-
-    drop = baseline - fresh
-    if drop > allow_ndcg_drop:
+    # The orchestrator emits exactly one JSON line on stdout (the last
+    # non-blank line), preceded by pytest output and other prints.
+    json_line = next(
+        (ln for ln in reversed(result.stdout.splitlines()) if ln.strip().startswith("{")),
+        None,
+    )
+    if json_line is None:
         return ValidationResult(
             passed=False,
             summary=(
-                f"Golden NDCG dropped by {drop:.4f} "
-                f"(baseline {baseline:.4f} -> fresh {fresh:.4f}; "
-                f"allow_ndcg_drop={allow_ndcg_drop}).\n\n"
-                f"Per-commander breakdown:\n{golden.stdout[-1500:]}"
+                f"_validate_rule.py emitted no JSON result "
+                f"(exit {result.returncode}).\n\n"
+                f"stdout tail:\n{result.stdout[-1500:]}\n"
+                f"stderr tail:\n{result.stderr[-500:]}"
             ),
         )
-
-    # 4. Broad-set NDCG: 500-commander sample beyond the golden set.
-    # Catches regressions on the ~2790 commanders the golden set
-    # doesn't cover. Run only if the baseline file exists (allows
-    # opt-out by deleting / not snapshotting). Uses the script's
-    # default tolerances (aggregate 0.001, per-commander 0.05).
-    broad_baseline = REPO_ROOT / "tests" / "fixtures" / "broad_set_baseline.json"
-    if broad_baseline.exists():
-        broad = _run(
-            [
-                "uv",
-                "run",
-                "python",
-                "scripts/broad_set_track.py",
-                "--baseline",
-                str(broad_baseline.relative_to(REPO_ROOT)),
-            ],
-            cwd=REPO_ROOT,
+    try:
+        payload = json.loads(json_line)
+    except json.JSONDecodeError as exc:
+        return ValidationResult(
+            passed=False,
+            summary=f"Could not parse _validate_rule.py output: {exc}\nLine: {json_line[:500]}",
         )
-        if broad.returncode != 0:
-            return ValidationResult(
-                passed=False,
-                summary=(
-                    f"Broad-set NDCG check failed (500-commander sample).\n\n"
-                    f"{broad.stdout[-1500:]}\n{broad.stderr[-300:]}"
-                ),
-            )
-        broad_summary = broad.stdout.strip().splitlines()[-1] if broad.stdout else "PASS"
-    else:
-        broad_summary = "(broad baseline not present; skipped)"
-
     return ValidationResult(
-        passed=True,
-        summary=(
-            f"All checks passed. Generated tests + full suite green; "
-            f"golden NDCG {baseline:.4f} -> {fresh:.4f} "
-            f"(delta {-drop:+.4f}); broad set: {broad_summary}."
-        ),
+        passed=bool(payload.get("passed")),
+        summary=str(payload.get("summary", "")),
+        trivial=bool(payload.get("trivial")),
+        trivial_reason=payload.get("trivial_reason"),
     )
 
 
@@ -1276,8 +1228,26 @@ def _attempt_one(
         print("\n(Skipped validation — re-run pytest + golden_set_track manually)", file=sys.stderr)
         return "passed"  # No validation means we trust the user; treat as passed.
 
-    print("\nValidating (pytest + golden NDCG)...", file=sys.stderr)
+    print("\nValidating (pytest + golden NDCG + broad NDCG + trivial check)...", file=sys.stderr)
     result = _validate(art, allow_ndcg_drop=allow_ndcg_drop)
+    if result.passed and result.trivial:
+        # Kept on disk (rule is mechanically correct, no regressions),
+        # but flagged as trivial so the walk loop won't keep proposing
+        # the same template/signature pair without --force.
+        print(f"\n[TRIVIAL] {result.summary}", file=sys.stderr)
+        print(f"  reason: {result.trivial_reason}", file=sys.stderr)
+        record_attempt(
+            AttemptRecord(
+                timestamp=now_iso(),
+                rule_id=art.rule_id,
+                template=template_name,
+                signature=signature,
+                outcome="trivial",
+                reason=(result.trivial_reason or "rule activates on no validated commander"),
+                files_touched=files_touched,
+            )
+        )
+        return "trivial"
     if result.passed:
         print(f"\n[PASS] {result.summary}", file=sys.stderr)
         record_attempt(
@@ -1360,7 +1330,7 @@ def main() -> int:
         # Walk mode: drain the queue. Each iteration re-picks (the
         # picker skips known-bad combos), then applies+validates.
         if args.walk > 1:
-            counts = {"passed": 0, "reverted": 0, "skipped": 0}
+            counts = {"passed": 0, "reverted": 0, "skipped": 0, "trivial": 0}
             shipped: list[str] = []
             for i in range(1, args.walk + 1):
                 print(f"\n========== Walk iteration {i}/{args.walk} ==========", file=sys.stderr)
@@ -1395,6 +1365,7 @@ def main() -> int:
                 f"  passed:   {counts['passed']}  ({', '.join(shipped) or '—'})",
                 file=sys.stderr,
             )
+            print(f"  trivial:  {counts['trivial']}", file=sys.stderr)
             print(f"  reverted: {counts['reverted']}", file=sys.stderr)
             print(f"  skipped:  {counts['skipped']}", file=sys.stderr)
             if shipped:
@@ -1455,6 +1426,14 @@ def main() -> int:
     if outcome == "passed":
         print("\nKept changes. Suggested next: review the diff and commit.", file=sys.stderr)
         return 0
+    if outcome == "trivial":
+        print(
+            "\nKept changes (no regressions), but the rule activates on no "
+            "validated commander — its impact is invisible to the harness. "
+            "Either broaden the gate or extend the validation universe.",
+            file=sys.stderr,
+        )
+        return 1
     if outcome == "reverted":
         print(
             "\nRefine the template (QUALIFIER_BLOCKERS, multiplier, tier "

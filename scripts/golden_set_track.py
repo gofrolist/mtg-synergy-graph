@@ -23,12 +23,15 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from _touched_commanders import find_touched_card_names
+
 from mtg_synergy_graph import (
     SynergyEngine,
     bootstrap_golden_set,
     check_golden_set,
     regression_failed,
 )
+from mtg_synergy_graph.complement_rules.registry import RULE_GATES
 
 
 def _load_commanders(path: Path) -> list[object]:
@@ -51,7 +54,28 @@ def main() -> int:
     parser.add_argument("--bootstrap", action="store_true", help="Write current run as baseline (overwrites)")
     parser.add_argument("--ndcg-tolerance", type=float, default=0.005)
     parser.add_argument("--jitter", type=int, default=5)
+    parser.add_argument(
+        "--touched-only",
+        nargs="+",
+        metavar="RULE_ID",
+        help=(
+            "Re-score only golden commanders whose ports activate any of "
+            "the named rules' registered gates. Inherit baseline entries "
+            "for the rest. Safe ONLY for purely additive rule changes."
+        ),
+    )
     args = parser.parse_args()
+
+    if args.touched_only:
+        registered = {g.rule_id for g in RULE_GATES}
+        unregistered = [r for r in args.touched_only if r not in registered]
+        if unregistered:
+            print(
+                f"error: --touched-only rule(s) without registered gate: {unregistered}. "
+                "Inheriting baseline for everyone would silently mask regressions; refusing.",
+                file=sys.stderr,
+            )
+            return 2
 
     edhrec_conn: sqlite3.Connection | None = None
     if args.edhrec_db:
@@ -96,6 +120,23 @@ def main() -> int:
             return 2
 
         edhrec_db = args.edhrec_db if args.edhrec_db and args.edhrec_db.exists() else None
+
+        score_only: set[str] | None = None
+        if args.touched_only:
+            baseline_payload = json.loads(args.baseline.read_text())
+            baseline_names = [e["commander"] for e in baseline_payload.get("entries", [])]
+            # Partner pairs are joined with " + "; expand for gate-matching.
+            partner_names = {p for n in baseline_names for p in n.split(" + ")}
+            touched_partners = find_touched_card_names(args.db, partner_names, args.touched_only)
+            # A commander is "touched" iff any of its partner names is touched.
+            score_only = {n for n in baseline_names if any(p in touched_partners for p in n.split(" + "))}
+            print(
+                f"touched-only mode ({','.join(args.touched_only)}): "
+                f"re-scoring {len(score_only)}/{len(baseline_names)} commanders, "
+                f"inheriting baseline for {len(baseline_names) - len(score_only)}",
+                file=sys.stderr,
+            )
+
         report = check_golden_set(
             engine,
             args.baseline,
@@ -103,6 +144,7 @@ def main() -> int:
             edhrec_db_path=edhrec_db,
             jitter=args.jitter,
             ndcg_tolerance=args.ndcg_tolerance,
+            score_only=score_only,
         )
         print(f"check: {len(report.entries)} commanders")
         print(f"  fresh agg NDCG:    {report.aggregate_ndcg}")

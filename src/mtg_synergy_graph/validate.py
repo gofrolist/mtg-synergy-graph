@@ -402,6 +402,7 @@ def check_golden_set(
     jitter: int = 5,
     ndcg_tolerance: float = 0.005,
     parallel: bool = True,
+    score_only: set[str] | None = None,
 ) -> GoldenSetReport:
     """Re-run the engine on the baseline commanders and detect regressions.
 
@@ -414,11 +415,23 @@ def check_golden_set(
 
     Aggregate NDCG must also not drop by more than ``ndcg_tolerance`` across
     the whole set.
+
+    When ``score_only`` is provided, only those baseline commanders are
+    re-scored; the rest inherit their baseline entries verbatim (caller
+    is asserting their scores cannot have changed — e.g. for a purely
+    additive rule whose gate they don't activate).
     """
     payload = json.loads(Path(baseline_path).read_text())
     baseline_entries = {entry["commander"]: entry for entry in payload.get("entries", [])}
 
-    commander_lists = [canonical_name.split(" + ") for canonical_name in baseline_entries]
+    if score_only is None:
+        commanders_to_score = list(baseline_entries)
+        commanders_to_inherit: set[str] = set()
+    else:
+        commanders_to_score = [n for n in baseline_entries if n in score_only]
+        commanders_to_inherit = set(baseline_entries) - set(commanders_to_score)
+
+    commander_lists = [canonical_name.split(" + ") for canonical_name in commanders_to_score]
 
     if parallel and len(commander_lists) > 4:
         fresh_all = _run_parallel(
@@ -436,6 +449,20 @@ def check_golden_set(
 
     # Build lookup for diff comparison
     fresh_by_name = {e.commander: e for e in fresh_all}
+
+    # Inherited entries: hydrate GoldenSetEntry from baseline dict so the
+    # diff loop and aggregate see them as identity matches.
+    for name in commanders_to_inherit:
+        b = baseline_entries[name]
+        fresh_by_name[name] = GoldenSetEntry(
+            commander=name,
+            top10=tuple(b.get("top10", ())),
+            ndcg30=float(b.get("ndcg30") or 0.0),
+            hi_syn_total=int(b.get("hi_syn_total", 0) or 0),
+            hi_syn_hits=int(b.get("hi_syn_hits", 0) or 0),
+            on_page_hits=int(b.get("on_page_hits", 0) or 0),
+            edhrec_top10=tuple(b.get("edhrec_top10", ())),
+        )
 
     fresh_entries: list[GoldenSetEntry] = []
     drift: list[dict[str, Any]] = []
