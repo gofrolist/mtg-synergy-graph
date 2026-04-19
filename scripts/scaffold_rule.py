@@ -1114,12 +1114,42 @@ def _validate(art: ScaffoldArtifacts, allow_ndcg_drop: float) -> ValidationResul
             ),
         )
 
+    # 4. Broad-set NDCG: 500-commander sample beyond the golden set.
+    # Catches regressions on the ~2790 commanders the golden set
+    # doesn't cover. Run only if the baseline file exists (allows
+    # opt-out by deleting / not snapshotting). Uses the script's
+    # default tolerances (aggregate 0.001, per-commander 0.05).
+    broad_baseline = REPO_ROOT / "tests" / "fixtures" / "broad_set_baseline.json"
+    if broad_baseline.exists():
+        broad = _run(
+            [
+                "uv",
+                "run",
+                "python",
+                "scripts/broad_set_track.py",
+                "--baseline",
+                str(broad_baseline.relative_to(REPO_ROOT)),
+            ],
+            cwd=REPO_ROOT,
+        )
+        if broad.returncode != 0:
+            return ValidationResult(
+                passed=False,
+                summary=(
+                    f"Broad-set NDCG check failed (500-commander sample).\n\n"
+                    f"{broad.stdout[-1500:]}\n{broad.stderr[-300:]}"
+                ),
+            )
+        broad_summary = broad.stdout.strip().splitlines()[-1] if broad.stdout else "PASS"
+    else:
+        broad_summary = "(broad baseline not present; skipped)"
+
     return ValidationResult(
         passed=True,
         summary=(
             f"All checks passed. Generated tests + full suite green; "
             f"golden NDCG {baseline:.4f} -> {fresh:.4f} "
-            f"(delta {-drop:+.4f})."
+            f"(delta {-drop:+.4f}); broad set: {broad_summary}."
         ),
     )
 

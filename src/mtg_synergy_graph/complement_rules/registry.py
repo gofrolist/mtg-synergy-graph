@@ -42,6 +42,7 @@ from .generated.living_tribal import _living_tribal_gate
 from .generated.more_tribal import _more_tribal_gate
 from .generated.partner_friends_tribal import _partner_friends_tribal_gate
 from .generated.prowess_tribal import _prowess_tribal_gate
+from .generated.start_tribal import _start_tribal_gate
 from .generated.ward_1_tribal import _ward_1_tribal_gate
 from .generated.ward_2_tribal import _ward_2_tribal_gate
 
@@ -667,6 +668,7 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("etbreplacement_copy_dbcopy_optional_tribal", _etbreplacement_copy_dbcopy_optional_tribal_gate),
     RuleGate("firebending_2_tribal", _firebending_2_tribal_gate),
     RuleGate("partner_friends_tribal", _partner_friends_tribal_gate),
+    RuleGate("start_tribal", _start_tribal_gate),
 )
 
 
