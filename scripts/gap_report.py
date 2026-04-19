@@ -334,7 +334,7 @@ def _propose(gap: GapStat, conn: sqlite3.Connection) -> RuleProposal | None:
             "SELECT COUNT(DISTINCT card_name) FROM card_ports WHERE port_type = 'keyword' AND event_class = ?",
             (ev,),
         ).fetchone()[0]
-        if 0 < pool <= 80 and ev not in {
+        if 0 < pool <= 100 and ev not in {
             "Flying",
             "Trample",
             "Vigilance",
@@ -362,6 +362,131 @@ def _propose(gap: GapStat, conn: sqlite3.Connection) -> RuleProposal | None:
                 tier_sketches=(f"same-keyword pool: card_ports.event_class='{ev}'",),
                 pool_sizes={"same_keyword": pool},
             )
+
+    # Template: creature_count_scaler
+    # scales_with.Valid[*] where the valid_filter references Creature
+    # (commander scales with the count of creatures you control).
+    # Hamza / Shanna / Beastmaster Ascension shape. Payoff = anything
+    # that adds creatures quickly (token producers, wide anthems) and
+    # cards that count creatures themselves (other scalers stack IDF).
+    if pt == "scales_with" and ev == "Valid" and not sub:
+        token_pool = conn.execute(
+            "SELECT COUNT(DISTINCT cp.card_name) FROM card_ports cp "
+            "JOIN cards c ON c.name = cp.card_name "
+            "WHERE cp.port_type = 'effect' AND cp.event_class = 'Token' "
+            "AND cp.raw_line LIKE '%TokenScript%' "
+            "AND c.legal_commander = 1"
+        ).fetchone()[0]
+        anthem_pool = conn.execute(
+            "SELECT COUNT(DISTINCT card_name) FROM card_ports "
+            "WHERE port_type = 'static' AND event_class = 'Continuous' "
+            "AND raw_line LIKE '%Creature.YouCtrl%' "
+            "AND (raw_line LIKE '%AddPower%' OR raw_line LIKE '%AddToughness%' OR raw_line LIKE '%AddKeyword%')"
+        ).fetchone()[0]
+        return RuleProposal(
+            gap=gap,
+            template="creature_count_scaler",
+            rationale=(
+                f"Commander scales_with creature count (valid_filter references "
+                f"Creature). Wants token producers, anthems, wide payoffs. "
+                f"{gap.commanders - gap.activations} of {gap.commanders} "
+                f"currently uncovered."
+            ),
+            gate_sketch=(
+                "p.port_type='scales_with' AND p.event_class='Valid' "
+                "AND 'Creature' IN valid_filter AND no type token from "
+                "{Aura, Equipment, Enchantment, Artifact, Land, ...}"
+            ),
+            tier_sketches=(
+                "token_producer: effect=Token with TokenScript (creature tokens)",
+                "wide_anthem: static.Continuous Affected=Creature.YouCtrl + AddPower/Toughness/Keyword",
+                "other_scalers: scales_with.Valid with Creature in filter (stack IDF)",
+            ),
+            pool_sizes={"token_producer": token_pool, "wide_anthem": anthem_pool},
+        )
+
+    # Template: x_cost_scaler
+    # scales_with.xPaid[*] — commander has an X-cost ability that
+    # scales with mana paid (Mistform Ultimus, Hydras, Walking Ballista,
+    # Comet Storm). Payoff = mana acceleration (rituals, doublers),
+    # mana-infinite combos, cost reducers.
+    if pt == "scales_with" and ev == "xPaid":
+        mana_pool = conn.execute(
+            "SELECT COUNT(DISTINCT cp.card_name) FROM card_ports cp "
+            "JOIN cards c ON c.name = cp.card_name "
+            "WHERE cp.port_type = 'effect' AND cp.event_class = 'Mana' "
+            "AND (cp.amount IS NOT NULL OR cp.raw_line LIKE '%Amount%') "
+            "AND c.legal_commander = 1"
+        ).fetchone()[0]
+        ritual_pool = conn.execute(
+            "SELECT COUNT(DISTINCT cp.card_name) FROM card_ports cp "
+            "JOIN cards c ON c.name = cp.card_name "
+            "WHERE cp.port_type = 'effect' AND cp.event_class = 'Mana' "
+            "AND c.types LIKE '%Instant%' OR c.types LIKE '%Sorcery%'"
+        ).fetchone()[0]
+        doubler_pool = conn.execute(
+            "SELECT COUNT(DISTINCT card_name) FROM card_ports "
+            "WHERE port_type = 'replacement' AND replacement_event = 'ProduceMana'"
+        ).fetchone()[0]
+        return RuleProposal(
+            gap=gap,
+            template="x_cost_scaler",
+            rationale=(
+                f"Commander scales_with X paid — X-cost abilities want "
+                f"more mana. Matches existing mana_doubler and cost_reducer "
+                f"rules but needs its own gate to attribute xPaid-specific "
+                f"commanders. {gap.commanders} commanders on this axis."
+            ),
+            gate_sketch="p.port_type='scales_with' AND p.event_class='xPaid'",
+            tier_sketches=(
+                "mana_doubler: replacement.ProduceMana (stack with mana_doubler rule)",
+                "ritual: Instant/Sorcery with effect=Mana Amount>=2",
+                "x_cost_stacker: scales_with.xPaid (other X-cards)",
+            ),
+            pool_sizes={"mana_producer": mana_pool, "ritual": ritual_pool, "mana_doubler": doubler_pool},
+        )
+
+    # Template: counter_removal_payoff
+    # cost.remove_counter[*] — commander activates abilities by
+    # removing counters. Hamza's +1/+1 payoffs, Roalesk's proliferate
+    # variants, Ghave's sac-and-counter combos. Wants counter sources
+    # (producers, doublers, ETB-counter creatures).
+    if pt == "cost" and ev == "remove_counter":
+        producer_pool = conn.execute(
+            "SELECT COUNT(DISTINCT card_name) FROM card_ports "
+            "WHERE port_type = 'effect' "
+            "AND event_class IN ('PutCounter', 'PutCounterAll') "
+            "AND counter_type = 'P1P1'"
+        ).fetchone()[0]
+        doubler_pool = conn.execute(
+            "SELECT COUNT(DISTINCT card_name) FROM card_ports "
+            "WHERE port_type = 'replacement' AND event_class = 'AddCounter' "
+            "AND raw_line LIKE '%P1P1%'"
+        ).fetchone()[0]
+        proliferate_pool = conn.execute(
+            "SELECT COUNT(DISTINCT card_name) FROM card_ports "
+            "WHERE port_type = 'effect' AND event_class = 'Proliferate'"
+        ).fetchone()[0]
+        return RuleProposal(
+            gap=gap,
+            template="counter_removal_payoff",
+            rationale=(
+                f"Commander removes counters as a cost — synergizes with "
+                f"anything that ADDS counters. Cross-pollinates with "
+                f"counter_axis_feeder and modified_axis_feeder axes but "
+                f"keyed from the cost side. {gap.commanders} commanders."
+            ),
+            gate_sketch=(
+                "p.port_type='cost' AND p.event_class='remove_counter' "
+                "AND cost_target != 'self' (external counter-consumer)"
+            ),
+            tier_sketches=(
+                "counter_producer: effect.PutCounter[All] P1P1 (reuse counter_axis_feeder pool)",
+                "counter_doubler: replacement.AddCounter with P1P1 (Hardened Scales)",
+                "proliferate: effect.Proliferate",
+            ),
+            pool_sizes={"producer": producer_pool, "doubler": doubler_pool, "proliferate": proliferate_pool},
+        )
 
     # Template: replacement_stack (generic)
     # Any replacement.<E> with non-trivial commander reach but no
