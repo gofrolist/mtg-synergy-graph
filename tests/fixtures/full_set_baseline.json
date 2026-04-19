@@ -1,5 +1,5 @@
 {
-  "aggregate_ndcg": 0.11019827726312369,
+  "aggregate_ndcg": 0.11016035538219839,
   "names_by_oracle_id": {
     "00037840-6089-42ec-8c5c-281f9f474504": "Nissa, Worldsoul Speaker",
     "00173df7-a584-410c-af1d-ada9c791056a": "Greta, Sweettooth Scourge",
@@ -3316,7 +3316,7 @@
     "3e0a0276-b640-41c7-95bd-ba3067f5c911": 0.0,
     "3e2bfa3a-ae83-453a-8e3f-ca6205a9af12": 0.0,
     "3e7df01c-75af-440d-97fd-1b1b794281b9": 0.1,
-    "3e924a35-0e08-4050-b33a-a143d2ab5aea": 0.6,
+    "3e924a35-0e08-4050-b33a-a143d2ab5aea": 0.7,
     "3ed41d2d-211b-4013-8562-8c64d54cc43a": 0.0,
     "3ee451e7-2b2f-4ce7-af96-540bba555c60": 0.3,
     "3f166376-2739-411c-8f42-96f2ef28ef86": 0.0,
@@ -4270,7 +4270,7 @@
     "9956f9b7-0140-484c-b606-3685690b84cc": 0.5,
     "99c2d3ef-e5b4-48cd-b3f5-de9b02c7c36a": 0.2,
     "99e89098-bc55-4297-9407-ab9256b609da": 0.0,
-    "9a10668a-df42-40c2-88d1-ad3b2aba5b03": 0.1,
+    "9a10668a-df42-40c2-88d1-ad3b2aba5b03": 0.0,
     "9a1de7e4-9930-4db3-a8f3-d146d0abf38b": 0.0,
     "9a2fdc0e-e0de-47fc-95e4-04e725ddf060": 0.0,
     "9a63f950-2e8a-4617-896c-1d0af538dbc7": 0.0,
@@ -4773,7 +4773,7 @@
     "cf4b538d-7115-406d-94bf-bfa25197b6ef": 0.0,
     "cf5bd3a4-3899-4c25-ad1f-f1778c1d9c60": 0.0,
     "cf631c93-b7fb-4e4f-b405-3778c15b1117": 0.0,
-    "cf812f1e-f48a-4375-8d2c-f6e3cb82e067": 0.3,
+    "cf812f1e-f48a-4375-8d2c-f6e3cb82e067": 0.2,
     "cfa46f8f-b3ec-4ee0-acdd-622f3177e02a": 0.4,
     "cfb23c6b-6e4a-4fc9-b3bb-a3ddc2ba06b8": 0.2,
     "cfc5dc9c-6f26-460b-a624-3681b8584eb3": 0.1,
