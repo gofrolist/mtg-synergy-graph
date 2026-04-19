@@ -52,13 +52,16 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import broad_set_track  # noqa: E402
 import pytest  # noqa: E402
-from _audit_rule_impact import _MARGINAL_RATIO  # noqa: E402
-from _touched_commanders import find_touched_card_names  # noqa: E402
+from _audit_rule_impact import (  # noqa: E402
+    _MARGINAL_RATIO,
+    classify_impact,
+    hi_syn_hits,
+)
+from _touched_commanders import find_touched_card_names, find_touched_oracle_ids  # noqa: E402
 
 from mtg_synergy_graph import (  # noqa: E402
     SynergyEngine,
     check_golden_set,
-    compare_to_edhrec,
     regression_failed,
 )
 from mtg_synergy_graph.complement_rules import core  # noqa: E402
@@ -111,21 +114,8 @@ def _broad_touched_oids(
     """Return ``(touched_oids, names_by_oid)`` for the broad baseline."""
     payload = json.loads(baseline_path.read_text())
     names_by_oid: dict[str, str] = payload.get("names_by_oracle_id", {})
-    touched_names = find_touched_card_names(syn_db, names_by_oid.values(), [rule_id])
-    touched_oids = {oid for oid, name in names_by_oid.items() if name in touched_names}
+    touched_oids = find_touched_oracle_ids(syn_db, names_by_oid, [rule_id])
     return touched_oids, names_by_oid
-
-
-def _hi_syn_hits(engine: SynergyEngine, edhrec_conn: sqlite3.Connection, oid: str) -> int | None:
-    """Hi-Syn hits in top-30 for one oracle_id; ``None`` if no curated data."""
-    try:
-        page = engine.page_by_oracle_id([oid], offset=0, limit=30)
-    except (LookupError, ValueError):
-        return None
-    cmp = compare_to_edhrec(page, edhrec_conn, top_n=30)
-    if cmp.hi_syn_size == 0:
-        return None
-    return cmp.hi_syn_hits
 
 
 def _impact_check(
@@ -161,13 +151,13 @@ def _impact_check(
     edhrec_conn.row_factory = sqlite3.Row
     try:
         with SynergyEngine(syn_db) as eng:
-            with_scores = {oid: _hi_syn_hits(eng, edhrec_conn, oid) for oid in touched_oids}
+            with_scores = {oid: hi_syn_hits(eng, edhrec_conn, oid) for oid in touched_oids}
 
         original = getattr(core, helper_name)
         setattr(core, helper_name, lambda *a, **k: [])
         try:
             with SynergyEngine(syn_db) as eng:
-                without_scores = {oid: _hi_syn_hits(eng, edhrec_conn, oid) for oid in touched_oids}
+                without_scores = {oid: hi_syn_hits(eng, edhrec_conn, oid) for oid in touched_oids}
         finally:
             setattr(core, helper_name, original)
     finally:
@@ -185,25 +175,11 @@ def _impact_check(
             movers.append((names_by_oid.get(oid, oid), w, wo, d))
     movers.sort(key=lambda m: -abs(m[3]))
 
-    sum_delta = sum(m[3] for m in movers)
-    max_abs = max((abs(m[3]) for m in movers), default=0)
-    # Divide by ``scored`` (commanders with EDHREC data) — only those
-    # contribute to sum_delta. Matches _audit_rule_impact's denominator
-    # so the two tools agree on the MARGINAL/positive boundary.
-    n = scored or 1
-    ratio = sum_delta / n
-    if max_abs == 0 or sum_delta == 0:
-        verdict = "trivial"
-    elif sum_delta < 0:
-        verdict = "harmful"
-    elif ratio < _MARGINAL_RATIO:
-        verdict = "marginal"
-    else:
-        verdict = "positive"
+    cls = classify_impact(tuple(movers), scored)
     return {
-        "verdict": verdict,
-        "sum_delta": sum_delta,
-        "max_abs_delta": max_abs,
+        "verdict": cls.verdict,
+        "sum_delta": cls.sum_delta,
+        "max_abs_delta": cls.max_abs_delta,
         "movers": tuple(movers),
         "scored": scored,
     }
@@ -225,11 +201,6 @@ def main() -> int:
         default=Path("tests/fixtures/full_set_baseline.json"),
     )
     parser.add_argument("--allow-ndcg-drop", type=float, default=0.0)
-    parser.add_argument(
-        "--gen-test-path",
-        type=Path,
-        help="optional generated test file to run first as a fast smoke check",
-    )
     args = parser.parse_args()
 
     rule_id = args.rule_id
@@ -246,24 +217,11 @@ def main() -> int:
         )
         return 1
 
-    # ------------------------------------------------------------------
-    # 1. pytest (full suite) — in-process. Optionally pre-flight the
-    # generated test alone for a faster failure signal.
-    # ------------------------------------------------------------------
-    if args.gen_test_path is not None and args.gen_test_path.exists():
-        rc = pytest.main([str(args.gen_test_path), "-q", "--no-cov", "--tb=short"])
-        if rc != 0:
-            _fail(f"Generated test failed (pytest exit {int(rc)}).")
-            return 1
-
     rc = pytest.main(["tests/", "-q", "--no-cov", "--tb=short"])
     if rc != 0:
         _fail(f"Full pytest suite failed (exit {int(rc)}).")
         return 1
 
-    # ------------------------------------------------------------------
-    # 2. Golden NDCG (touched-only).
-    # ------------------------------------------------------------------
     score_only_golden, golden_total = _golden_score_only(args.db, args.golden_baseline, rule_id)
 
     edhrec_conn = sqlite3.connect(args.edhrec_db)
@@ -293,9 +251,6 @@ def main() -> int:
         )
         return 1
 
-    # ------------------------------------------------------------------
-    # 3. Broad NDCG (touched-only).
-    # ------------------------------------------------------------------
     if args.broad_baseline.exists():
         # _check prints to stderr; capture and replay only on FAIL to
         # keep the parent's output clean on the happy path.
@@ -323,16 +278,10 @@ def main() -> int:
         broad_total = 0
         broad_present = False
 
-    # ------------------------------------------------------------------
-    # 4. Per-rule impact check (subsumes the old binary trivial test).
-    #    Score touched commanders WITH and WITHOUT the rule; map the
-    #    net hi_syn delta to a verdict.
-    #
-    #    If the broad baseline isn't present we have nothing to measure
-    #    impact against — fall back to "positive" (preserves the rule
-    #    instead of silently classifying it TRIVIAL and locking it out
-    #    of future retries via the attempt log).
-    # ------------------------------------------------------------------
+    # If the broad baseline isn't present we have nothing to measure
+    # impact against — fall back to "positive" (preserves the rule
+    # instead of silently classifying it TRIVIAL and locking it out
+    # of future retries via the attempt log).
     if not broad_present:
         print(
             "WARNING: broad baseline not found; skipping impact check. "

@@ -1428,8 +1428,6 @@ def _validate(art: ScaffoldArtifacts, allow_ndcg_drop: float) -> ValidationResul
             art.rule_id,
             "--allow-ndcg-drop",
             str(allow_ndcg_drop),
-            "--gen-test-path",
-            str(art.test_module_path.relative_to(REPO_ROOT)),
         ],
         cwd=REPO_ROOT,
     )

@@ -56,6 +56,7 @@ import argparse
 import json
 import sqlite3
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -108,8 +109,12 @@ def _name_to_oid(syn_db: Path) -> dict[str, str]:
     return out
 
 
-def _hi_syn_hits(engine: SynergyEngine, edhrec_conn: sqlite3.Connection, oid: str) -> int | None:
-    """Hi-Syn hits in top-30 for one oracle_id. ``None`` if no curated data."""
+def hi_syn_hits(engine: SynergyEngine, edhrec_conn: sqlite3.Connection, oid: str) -> int | None:
+    """Hi-Syn hits in top-30 for one oracle_id. ``None`` if no curated data.
+
+    Public so the orchestrator (``_validate_rule.py``) can share the same
+    metric without re-implementing it.
+    """
     try:
         page = engine.page_by_oracle_id([oid], offset=0, limit=30)
     except (LookupError, ValueError):
@@ -118,6 +123,51 @@ def _hi_syn_hits(engine: SynergyEngine, edhrec_conn: sqlite3.Connection, oid: st
     if cmp.hi_syn_size == 0:
         return None
     return cmp.hi_syn_hits
+
+
+@dataclass(frozen=True)
+class ImpactClassification:
+    """Verdict + supporting metrics for a single rule's impact check.
+
+    ``verdict`` is always lowercase (``trivial`` / ``harmful`` / ``marginal``
+    / ``positive``). Display layers can uppercase as needed.
+    """
+
+    verdict: str
+    sum_delta: int
+    max_abs_delta: int
+    ratio: float
+
+
+def classify_impact(
+    movers: tuple[tuple[str, int, int, int], ...],
+    scored: int,
+) -> ImpactClassification:
+    """Map (movers, scored) to a verdict using ``_MARGINAL_RATIO``.
+
+    Verdicts:
+      - ``trivial``  : no movement OR wins offset losses (sum == 0)
+      - ``harmful``  : net negative
+      - ``marginal`` : net positive but ratio < _MARGINAL_RATIO
+      - ``positive`` : net positive at or above the ratio threshold
+    """
+    sum_delta = sum(m[3] for m in movers)
+    max_abs = max((abs(m[3]) for m in movers), default=0)
+    ratio = sum_delta / (scored or 1)
+    if max_abs == 0 or sum_delta == 0:
+        verdict = "trivial"
+    elif sum_delta < 0:
+        verdict = "harmful"
+    elif ratio < _MARGINAL_RATIO:
+        verdict = "marginal"
+    else:
+        verdict = "positive"
+    return ImpactClassification(
+        verdict=verdict,
+        sum_delta=sum_delta,
+        max_abs_delta=max_abs,
+        ratio=ratio,
+    )
 
 
 def _audit_one(
@@ -148,16 +198,14 @@ def _audit_one(
     edhrec_conn = sqlite3.connect(edhrec_db)
     edhrec_conn.row_factory = sqlite3.Row
     try:
-        # Pass 1: rule active.
         with SynergyEngine(syn_db) as eng:
-            with_scores = {oid: _hi_syn_hits(eng, edhrec_conn, oid) for _, oid in targets}
+            with_scores = {oid: hi_syn_hits(eng, edhrec_conn, oid) for _, oid in targets}
 
-        # Pass 2: rule disabled (helper returns []).
         original = getattr(core, helper_name)
         setattr(core, helper_name, lambda *a, **k: [])
         try:
             with SynergyEngine(syn_db) as eng:
-                without_scores = {oid: _hi_syn_hits(eng, edhrec_conn, oid) for _, oid in targets}
+                without_scores = {oid: hi_syn_hits(eng, edhrec_conn, oid) for _, oid in targets}
         finally:
             setattr(core, helper_name, original)
     finally:
@@ -175,30 +223,16 @@ def _audit_one(
             movers.append((name, w, wo, d))
     movers.sort(key=lambda m: -abs(m[3]))
 
-    sum_delta = sum(m[3] for m in movers)
-    max_abs = max((abs(m[3]) for m in movers), default=0)
-    n_scored = scored or 1  # avoid div-by-zero
-    ratio = sum_delta / n_scored
-    # max_abs == 0:                 no per-cmdr movement at all   -> trivial
-    # sum_delta < 0:                 net hi_syn loss               -> HARMFUL
-    # sum_delta == 0 (movers):       wins offset losses, net-zero  -> trivial
-    # 0 < ratio < _MARGINAL_RATIO:   net positive but barely above noise -> MARGINAL
-    # ratio >= _MARGINAL_RATIO:      real net hi_syn gain          -> positive
-    if max_abs == 0 or sum_delta == 0:
-        verdict = "TRIVIAL"
-    elif sum_delta < 0:
-        verdict = "HARMFUL"
-    elif ratio < _MARGINAL_RATIO:
-        verdict = "MARGINAL"
-    else:
-        verdict = "positive"
-
+    cls = classify_impact(tuple(movers), scored)
+    # Audit table uppercases the failure verdicts so they grep cleanly;
+    # the happy-path "positive" stays lowercase.
+    verdict = cls.verdict.upper() if cls.verdict != "positive" else "positive"
     return {
         "rule_id": rule_id,
         "touched": len(targets),
         "scored": scored,
-        "sum_delta": sum_delta,
-        "max_abs_delta": max_abs,
+        "sum_delta": cls.sum_delta,
+        "max_abs_delta": cls.max_abs_delta,
         "movers": tuple(movers),
         "verdict": verdict,
     }

@@ -41,6 +41,7 @@ from pathlib import Path
 from _touched_commanders import find_touched_oracle_ids
 
 from mtg_synergy_graph import SynergyEngine, commander_to_slug, compare_to_edhrec
+from mtg_synergy_graph.complement_rules.registry import RULE_GATES
 
 
 def _matched_commanders(syn_db: Path, edhrec_db: Path) -> list[tuple[str, str]]:
@@ -183,8 +184,6 @@ def _check(
     sample = [(names_by_oid.get(oid, oid), oid) for oid in baseline_per]
 
     if touched_only:
-        from mtg_synergy_graph.complement_rules.registry import RULE_GATES
-
         registered = {g.rule_id for g in RULE_GATES}
         unregistered = [r for r in touched_only if r not in registered]
         if unregistered:
