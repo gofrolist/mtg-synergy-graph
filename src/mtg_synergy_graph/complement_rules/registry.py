@@ -315,7 +315,286 @@ def _toughness_gate(port: PortRow) -> bool:
     return "CardToughness" in (port.get("event_class") or "")
 
 
+# ---------------------------------------------------------------------------
+# Batch 2: registry sweep (2026-04-18) — one-line gates per helper
+# ---------------------------------------------------------------------------
+
+_PRIMARY_TYPES: frozenset[str] = frozenset(
+    {"Creature", "Artifact", "Enchantment", "Planeswalker", "Land", "Instant", "Sorcery"}
+)
+
+_TYPE_TOKENS: frozenset[str] = frozenset(
+    {"Aura", "Equipment", "Enchantment", "Artifact", "Land", "Instant", "Sorcery", "Planeswalker"}
+)
+
+
+def _artifact_recursion_gate(port: PortRow) -> bool:
+    pt = (port.get("port_type") or "").strip()
+    ev = (port.get("event_class") or "").strip()
+    if pt != "effect":
+        return False
+    vf = port.get("valid_filter") or ""
+    raw = str(port.get("raw_line") or "")
+    if ev == "ChangeZone" and (port.get("zone_origin") or "").strip() == "Graveyard":
+        return "Artifact" in vf or "Artifact" in raw
+    if ev == "CopyPermanent":
+        return "Artifact" in vf or "Artifact" in raw
+    return False
+
+
+def _copy_synergy_gate(port: PortRow) -> bool:
+    if (port.get("port_type") or "").strip() != "effect":
+        return False
+    if (port.get("event_class") or "").strip() != "CopyPermanent":
+        return False
+    vf = port.get("valid_filter") or ""
+    raw = str(port.get("raw_line") or "")
+    return "Populate" in raw or "Creature" in vf or "Creature" in raw
+
+
+def _dies_drain_gate(port: PortRow) -> bool:
+    pt = (port.get("port_type") or "").strip()
+    ev = (port.get("event_class") or "").strip()
+    if pt == "trigger" and ev == "ChangesZone":
+        if (port.get("zone_origin") or "").strip() != "Battlefield":
+            return False
+        if (port.get("zone_destination") or "").strip() != "Graveyard":
+            return False
+        vf = port.get("valid_filter") or ""
+        main = vf.split(",")[0].split(".")[0].split("+")[0].strip()
+        return main in ("Creature", "Permanent") or (main == "Card" and "P1P1" in vf)
+    if pt == "static" and ev == "Panharmonicon":
+        raw = str(port.get("raw_line") or "")
+        return (
+            "'Origin': 'Battlefield'" in raw
+            and "'Destination': 'Graveyard'" in raw
+            and "'ValidCause': 'Creature" in raw
+        )
+    return False
+
+
+def _subject_zone_feeder_gate(port: PortRow) -> bool:
+    if (port.get("port_type") or "").strip() != "trigger":
+        return False
+    if (port.get("event_class") or "").strip() != "ChangesZone":
+        return False
+    if (port.get("zone_destination") or "").strip() != "Graveyard":
+        return False
+    vf = port.get("valid_filter") or ""
+    main = vf.split(",")[0].split(".")[0].split("+")[0].strip()
+    return main in ("Land", "Artifact", "Enchantment", "Planeswalker")
+
+
+def _cost_reducer_gate(port: PortRow) -> bool:
+    if (port.get("port_type") or "").strip() != "trigger":
+        return False
+    if (port.get("event_class") or "").strip() != "SpellCast":
+        return False
+    vf = port.get("valid_filter") or ""
+    return any(
+        t in vf
+        for t in ("Instant", "Sorcery", "Creature", "Artifact", "Enchantment", "Aura", "Equipment", "nonCreature")
+    )
+
+
+def _yard_caster_gate(port: PortRow) -> bool:
+    return "STYardCast" in str(port.get("raw_line") or "")
+
+
+def _edict_feeder_gate(port: PortRow) -> bool:
+    if (port.get("port_type") or "").strip() != "trigger":
+        return False
+    ev = (port.get("event_class") or "").strip()
+    if ev == "Sacrificed":
+        return True
+    if ev != "ChangesZone":
+        return False
+    if (port.get("zone_destination") or "").strip() != "Graveyard":
+        return False
+    vf = port.get("valid_filter") or ""
+    # Approximate _trigger_only_matches_self: reject Card.Self main token.
+    first_alt = vf.split(",")[0]
+    alt_tokens = first_alt.replace("+", ".").split(".")
+    return not any(tok.lstrip("!").strip() == "Self" for tok in alt_tokens)
+
+
+def _landfall_enabler_gate(port: PortRow) -> bool:
+    pt = (port.get("port_type") or "").strip()
+    ev = (port.get("event_class") or "").strip()
+    if pt == "trigger" and ev == "LandPlayed":
+        return True
+    if pt == "trigger" and ev == "ChangesZone":
+        vf = port.get("valid_filter") or ""
+        return "Land" in vf
+    if pt == "effect" and ev == "ChangeZone":
+        zo = (port.get("zone_origin") or "").strip()
+        zd = (port.get("zone_destination") or "").strip()
+        vf = port.get("valid_filter") or ""
+        raw = str(port.get("raw_line") or "")
+        return zo == "Graveyard" and zd == "Battlefield" and ("Land" in vf or "Land" in raw)
+    return False
+
+
+def _multicolor_untap_gate(port: PortRow) -> bool:
+    if (port.get("port_type") or "").strip() != "effect":
+        return False
+    return (port.get("event_class") or "").strip() in ("TapOrUntap", "Untap", "UntapAll")
+
+
+def _untap_synergy_gate(port: PortRow) -> bool:
+    pt = (port.get("port_type") or "").strip()
+    ev = (port.get("event_class") or "").strip()
+    if pt == "cost" and ev == "tap":
+        return True
+    return pt == "effect" and ev in ("TapOrUntap", "Untap")
+
+
+def _damage_synergy_gate(port: PortRow) -> bool:
+    """Non-combat DamageDone trigger (Niv-Mizzet / Toralf shape)."""
+    if (port.get("port_type") or "").strip() != "trigger":
+        return False
+    if (port.get("event_class") or "").strip() != "DamageDone":
+        return False
+    vf = port.get("valid_filter") or ""
+    first_alt = vf.split(",")[0]
+    alt_tokens = first_alt.replace("+", ".").split(".")
+    if any(tok.lstrip("!").strip() == "Self" for tok in alt_tokens):
+        return False
+    raw = str(port.get("raw_line") or "")
+    return "'CombatDamage': 'True'" not in raw
+
+
+def _cascade_value_gate(port: PortRow) -> bool:
+    if (port.get("port_type") or "").strip() != "keyword":
+        return False
+    return "Cascade" in (port.get("event_class") or "")
+
+
+def _token_producer_gate(port: PortRow) -> bool:
+    if (port.get("port_type") or "").strip() != "trigger":
+        return False
+    if (port.get("event_class") or "").strip() != "ChangesZone":
+        return False
+    if (port.get("zone_destination") or "").strip() != "Battlefield":
+        return False
+    vf = port.get("valid_filter") or ""
+    if "!token" in vf.lower():
+        return False
+    first_alt = vf.split(",")[0]
+    alt_tokens = first_alt.replace("+", ".").split(".")
+    if any(tok.lstrip("!").strip() == "Self" for tok in alt_tokens):
+        return False
+    main = vf.split(",")[0].split(".")[0].split("+")[0].strip()
+    return main == "Creature"
+
+
+def _token_sac_chain_gate(port: PortRow) -> bool:
+    if (port.get("port_type") or "").strip() != "trigger":
+        return False
+    return (port.get("event_class") or "").strip() == "Sacrificed"
+
+
+def _scaling_gate(port: PortRow) -> bool:
+    if (port.get("port_type") or "").strip() != "scales_with":
+        return False
+    raw = str(port.get("raw_line") or "")
+    vf = port.get("valid_filter") or ""
+    return any(t in raw or t in vf for t in _TYPE_TOKENS)
+
+
+_COUNTER_GATE_P1P1_RE = re.compile(r"counters_\w*P1P1")
+
+
+def _has_counter_interest(port: PortRow) -> bool:
+    """Single-port shape that signals P1P1 counter interest — matches
+    counter_doubler / counter_keyword / proliferate_synergy gates.
+    """
+    pt = (port.get("port_type") or "").strip()
+    ev = (port.get("event_class") or "").strip()
+    if pt == "trigger" and ev in ("CounterAdded", "CounterAddedOnce", "CounterAddedAll"):
+        ct = (port.get("counter_type") or "").strip()
+        return ct in ("", "P1P1")
+    if pt == "scales_with":
+        return "P1P1" in ev or "P1P1" in (port.get("valid_filter") or "")
+    if pt == "trigger":
+        return "P1P1" in (port.get("valid_filter") or "")
+    if pt == "effect" and ev in ("PutCounter", "PutCounterAll"):
+        if (port.get("counter_type") or "").strip() != "P1P1":
+            return False
+        vf = port.get("valid_filter") or ""
+        return bool(vf) and "Other" in vf
+    return False
+
+
+def _proliferate_synergy_gate(port: PortRow) -> bool:
+    pt = (port.get("port_type") or "").strip()
+    ev = (port.get("event_class") or "").strip()
+    if pt == "scales_with" and "Experience" in ev:
+        return True
+    if pt == "effect" and ev == "MultiplyCounter":
+        return True
+    if ev == "Proliferate":
+        return True
+    return _has_counter_interest(port)
+
+
+def _counter_producer_gate(port: PortRow) -> bool:
+    if (port.get("port_type") or "").strip() != "trigger":
+        return False
+    vf = port.get("valid_filter") or ""
+    return "counters_" in vf and "P1P1" in vf
+
+
+def _counter_target_payoff_gate(port: PortRow) -> bool:
+    """Ezuri-style XP-counter scaler. Gate on scales_with experience."""
+    if (port.get("port_type") or "").strip() != "scales_with":
+        return False
+    return "Experience" in (port.get("event_class") or "")
+
+
+def _pinger_gate(port: PortRow) -> bool:
+    if (port.get("port_type") or "").strip() != "scales_with":
+        return False
+    ev = (port.get("event_class") or "").strip()
+    return "LifeOppsLost" in ev or "LifeLost" in ev
+
+
+def _pan_density_gate(port: PortRow) -> bool:
+    if (port.get("event_class") or "").strip() != "Panharmonicon":
+        return False
+    return "'ValidMode'" in str(port.get("raw_line") or "")
+
+
+def _zone_resonance_gate(port: PortRow) -> bool:
+    if (port.get("port_type") or "").strip() != "trigger":
+        return False
+    if (port.get("event_class") or "").strip() != "ChangesZone":
+        return False
+    vf = port.get("valid_filter") or ""
+    if not vf:
+        return False
+    first_alt = vf.split(",")[0]
+    alt_tokens = first_alt.replace("+", ".").split(".")
+    if any(tok.lstrip("!").strip() == "Self" for tok in alt_tokens):
+        return False
+    main = vf.split(",")[0].split(".")[0].split("+")[0].strip()
+    return main in _PRIMARY_TYPES
+
+
+def _exalted_density_gate(port: PortRow) -> bool:
+    if (port.get("port_type") or "").strip() != "keyword":
+        return False
+    return (port.get("event_class") or "").strip() == "Exalted"
+
+
+def _aura_equipment_support_gate(port: PortRow) -> bool:
+    if (port.get("port_type") or "").strip() != "scales_with":
+        return False
+    return "Equipment" in (port.get("valid_filter") or "")
+
+
 _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
+    # Batch 1
     RuleGate("damage_doubler_synergy", _damage_doubler_gate),
     RuleGate("peer_evasion_tribal", _peer_evasion_gate),
     RuleGate("modified_axis_feeder", _modified_axis_gate),
@@ -328,7 +607,6 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("cost_payoff", _cost_payoff_gate),
     RuleGate("etb_self", _etb_self_gate),
     RuleGate("combat_enhancer", _combat_enhancer_gate),
-    RuleGate("flicker_synergy", _flicker_synergy_gate),
     RuleGate("attack_payoffs", _attack_payoff_gate),
     RuleGate("panharmonicon", _panharmonicon_gate),
     RuleGate("voltron", _voltron_gate),
@@ -342,6 +620,33 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("spellcast_resonance", _spellcast_density_gate),
     RuleGate("power_matters", _power_matters_gate),
     RuleGate("toughness_synergy", _toughness_gate),
+    # Batch 2 — registry sweep
+    RuleGate("artifact_recursion", _artifact_recursion_gate),
+    RuleGate("copy_synergy", _copy_synergy_gate),
+    RuleGate("populate_stack", _copy_synergy_gate),  # same helper, second rule_id
+    RuleGate("dies_drain", _dies_drain_gate),
+    RuleGate("subject_zone_feeder", _subject_zone_feeder_gate),
+    RuleGate("cost_reducer", _cost_reducer_gate),
+    RuleGate("yard_caster", _yard_caster_gate),
+    RuleGate("edict_feeder", _edict_feeder_gate),
+    RuleGate("landfall_enabler", _landfall_enabler_gate),
+    RuleGate("multicolor_untap", _multicolor_untap_gate),
+    RuleGate("untap_synergy", _untap_synergy_gate),
+    RuleGate("damage_synergy", _damage_synergy_gate),
+    RuleGate("cascade_value", _cascade_value_gate),
+    RuleGate("token_producer", _token_producer_gate),
+    RuleGate("token_sac_chain", _token_sac_chain_gate),
+    RuleGate("scaling", _scaling_gate),
+    RuleGate("proliferate_synergy", _proliferate_synergy_gate),
+    RuleGate("counter_doubler", _has_counter_interest),
+    RuleGate("counter_keyword", _has_counter_interest),
+    RuleGate("counter_producer", _counter_producer_gate),
+    RuleGate("counter_target_payoff", _counter_target_payoff_gate),
+    RuleGate("pinger", _pinger_gate),
+    RuleGate("pan_density", _pan_density_gate),
+    RuleGate("zone_resonance", _zone_resonance_gate),
+    RuleGate("exalted_density", _exalted_density_gate),
+    RuleGate("aura_equipment_support", _aura_equipment_support_gate),
 )
 
 
@@ -364,6 +669,21 @@ CARD_LEVEL_RULES: frozenset[str] = frozenset(
         "value_engine",
         "affinity_archetype",
         "static_strategy",
+        # Rules that require a conjunction of TWO distinct ports on
+        # the commander (e.g. cost.tap AND effect.Mana). Gating on
+        # either port alone would over-attribute to commanders that
+        # have one but not the other. Treating them as card-level
+        # keeps the auditor honest: their firing tells us nothing
+        # about per-port coverage.
+        "creature_untap_engine",  # cost.tap + effect.Mana
+        "flicker_synergy",  # ETB-self trigger + high-value effect
+        "flicker_payoff",  # effect Battlefield→Exile + Exile→Battlefield
+        "untap_combo",  # cost.tap + effect.Mana (TapsForMana branch is port-level but minor)
+        "cheat_cmc",  # path B has commander-wide negative guard
+        "scales_with_density",  # already runtime, no port-level gate
+        # Type-bending statics that operate on the commander's whole
+        # static set rather than a single port's gate condition.
+        "creatures_as_lands_landfall",
     }
 )
 
