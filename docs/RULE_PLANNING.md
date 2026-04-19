@@ -17,43 +17,49 @@ validation oracle, not the design oracle.
 
 | Script | Output | Purpose |
 |---|---|---|
+| `scripts/gap_report.py` | `docs/gap_report.md` | **Primary entry point.** Sub-cell coverage + template matching. Outputs a ranked markdown queue of concrete rule proposals. The next rule to write is the top entry — no human prioritization required. |
 | `scripts/port_universe.py` | `docs/port_universe.json` | Enumerate every distinct (port_type, event_class) cell in `card_ports` with commander reach, top valid_filter qualifiers, and top raw_line clause keys. Re-run after every importer change. |
-| `scripts/coverage_matrix.py` | `docs/coverage_matrix.json` | For each cell: formal-rule coverage (from `COMPLEMENT_RULES.event_pairs`) AND empirical activation rate (fraction of commanders carrying the shape that get any rule activation). Cross-tabulate to find gaps. |
+| `scripts/coverage_matrix.py` | `docs/coverage_matrix.json` | Cell-level coverage (coarser than `gap_report.py`). Useful for sanity checks and historical diffs. |
 | `scripts/golden_set_track.py` | stdout | Regression check on the 100-commander golden set NDCG@30 against `tests/fixtures/golden_set_run.json`. Run before/after every rule change. |
 | `scripts/compare_edhrec.py` | stdout | Hi-Syn / Top / OnPage breakdown for any commander or commander list — used for *validation*, not planning. |
 
 ## The pipeline
 
-### 1. Refresh the catalog
+### 1. Run the auditor
+
+```bash
+uv run python scripts/gap_report.py
+```
+
+Generates `docs/gap_report.md` with a ranked queue of sub-cell gaps,
+each annotated with:
+- Reach (commanders carrying the signature)
+- Activation rate (fraction with any rule activation today)
+- Impact (`commanders × (1 - activation_rate)`)
+- Best-fit template from the catalog (`peer_tribal`,
+  `damage_amp_doubler`, `damage_prevention_voltron`,
+  `replacement_stack`, `axis_feeder`)
+- Gate sketch + tier sketches + estimated pool sizes
+- Exemplar commanders with no rule activation
+
+### 2. Pick the top entry — no judgment required
+
+The next rule to write is the entry at position #1. Skip it only if
+the template label says `[IMPLEMENTED]` (auditor's safety net so we
+don't redo a finished rule).
+
+To refresh the underlying universe / coverage artifacts:
 
 ```bash
 uv run python scripts/port_universe.py
 uv run python scripts/coverage_matrix.py
 ```
 
-Both produce JSON artifacts under `docs/` plus a stdout summary.
-
-### 2. Identify a candidate cell
-
-Read `docs/coverage_matrix.json`. A cell is a *gap* iff:
-
-- `commanders ≥ 10` (meaningful reach), AND
-- `formally_covered_by` is empty (no static rule), AND
-- `activation_rate < 0.5` (card-attribute rules don't catch most
-  commanders carrying it).
-
-Today there are exactly 2 such cells: `replacement.DamageDone`
-(31 commanders, 48 %) and `keyword.Horsemanship` (14 commanders,
-36 %).
-
-A cell is also worth investigating if it has:
-- Specific qualifier tokens that the engine doesn't extract yet
-  (look at the cell's `filter_qualifiers` in `port_universe.json`),
-  even when overall activation looks healthy.
+Both produce JSON artifacts under `docs/`.
 
 ### 3. Plan the rule before coding
 
-Open a short note (PR description or scratch markdown) covering:
+The auditor's proposal is the seed. Expand it into a short note covering:
 
 - **Cell signature**: `(port_type, event_class)` plus any qualifier
   axis being extracted (e.g. `valid_filter ~ '%modified%'`).
@@ -149,14 +155,23 @@ Impact:
 
 ## Known limitations of the tooling
 
-- `coverage_matrix.py` reports activation per (port_type,
-  event_class) but doesn't attribute *which port* on a multi-port
-  commander triggered the rule. A commander whose `effect Pump`
-  port is uncovered may still show high cell activation because of
-  unrelated `trigger Attacks` matches. Treat low activation rates
-  as definitive ("uncovered") and high rates as indicative
-  ("probably covered, verify per-commander").
+- `coverage_matrix.py` and `gap_report.py` both attribute activation
+  at the commander level — if any rule fires for a commander, every
+  port shape they carry is marked covered. A commander with 8 ports
+  gets every shape marked even if only one port drove the
+  activation. Treat low activation rates as definitive ("uncovered")
+  and high rates as indicative ("probably covered, verify per-
+  commander"). Fixing this requires tagging `PortComplement` with
+  the originating commander port_id — a small but cross-cutting
+  refactor.
 - `port_universe.json` enumerates qualifier *tokens* but not their
   combinatorial overlap (e.g. `attacking+modified`). For nuanced
   axes look at the raw `valid_filter` distribution in
   `card_ports`.
+- `gap_report.py` template catalog is small (5 templates today). A
+  proposal labelled `replacement_stack` or `axis_feeder` is the
+  auditor's best fit, not a guaranteed match — investigate the
+  actual mechanic before implementing. Templates without a
+  reasonable fit fall through (`_propose` returns None) and the
+  gap is omitted from the report rather than surfacing a misleading
+  proposal.
