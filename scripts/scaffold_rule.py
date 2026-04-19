@@ -1501,7 +1501,11 @@ def _pick_top_proposal(conn: sqlite3.Connection) -> RuleProposal | None:
             continue
         try:
             art = _GENERATORS[prop.template](prop)
-        except Exception:  # noqa: S112  (skip generator errors and try the next eligible proposal)
+        except Exception as exc:
+            print(
+                f"[WARN] generator '{prop.template}' raised on signature {prop.gap.signature}: {exc!r}",
+                file=sys.stderr,
+            )
             continue
         blocked, _ = is_known_bad(prop.template, art.rule_id)
         if blocked:

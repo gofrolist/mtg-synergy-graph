@@ -52,6 +52,7 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import broad_set_track  # noqa: E402
 import pytest  # noqa: E402
+from _audit_rule_impact import _MARGINAL_RATIO  # noqa: E402
 from _touched_commanders import find_touched_card_names  # noqa: E402
 
 from mtg_synergy_graph import (  # noqa: E402
@@ -136,20 +137,25 @@ def _impact_check(
 ) -> dict:
     """Score touched commanders WITH and WITHOUT the rule (helper monkey-
     patched to ``[]``). Returns ``{verdict, sum_delta, max_abs_delta,
-    movers}`` where verdict is ``"positive"`` / ``"trivial"`` / ``"harmful"``.
+    movers, scored}`` where verdict is ``positive`` / ``trivial`` /
+    ``harmful`` / ``marginal``.
 
-    ``trivial`` covers both "no commander activates the gate" (touched
-    is empty) and "rule fires but never lands in top-30" (max|Δ| = 0).
+    ``trivial`` covers both "no commander activates the gate" AND "rule
+    fires but produces zero net top-30 movement" (max|Δ| = 0 OR offsetting
+    wins/losses). ``marginal`` fires when ratio
+    ``sum_delta / scored < _MARGINAL_RATIO`` — uses ``scored`` (commanders
+    with EDHREC data, who alone contribute to ``sum_delta``) so the
+    threshold matches ``scripts/_audit_rule_impact.py``.
     """
     if not touched_oids:
-        return {"verdict": "trivial", "sum_delta": 0, "max_abs_delta": 0, "movers": ()}
+        return {"verdict": "trivial", "sum_delta": 0, "max_abs_delta": 0, "movers": (), "scored": 0}
 
     helper_name = f"_find_{rule_id}"
     if not hasattr(core, helper_name):
         # No helper to monkey-patch — caller used a non-standard naming
         # convention. Fall back to "no impact measurement available";
         # treat as positive so we don't accidentally fail a working rule.
-        return {"verdict": "positive", "sum_delta": 0, "max_abs_delta": 0, "movers": ()}
+        return {"verdict": "positive", "sum_delta": 0, "max_abs_delta": 0, "movers": (), "scored": 0}
 
     edhrec_conn = sqlite3.connect(edhrec_db)
     edhrec_conn.row_factory = sqlite3.Row
@@ -168,10 +174,12 @@ def _impact_check(
         edhrec_conn.close()
 
     movers: list[tuple[str, int, int, int]] = []
+    scored = 0
     for oid in touched_oids:
         w, wo = with_scores.get(oid), without_scores.get(oid)
         if w is None or wo is None:
             continue
+        scored += 1
         d = w - wo
         if d != 0:
             movers.append((names_by_oid.get(oid, oid), w, wo, d))
@@ -179,15 +187,16 @@ def _impact_check(
 
     sum_delta = sum(m[3] for m in movers)
     max_abs = max((abs(m[3]) for m in movers), default=0)
-    n = len(touched_oids) or 1
+    # Divide by ``scored`` (commanders with EDHREC data) — only those
+    # contribute to sum_delta. Matches _audit_rule_impact's denominator
+    # so the two tools agree on the MARGINAL/positive boundary.
+    n = scored or 1
     ratio = sum_delta / n
-    # See _audit_rule_impact._MARGINAL_RATIO -- duplicated here to keep
-    # this module self-contained (one process, no extra imports).
     if max_abs == 0 or sum_delta == 0:
         verdict = "trivial"
     elif sum_delta < 0:
         verdict = "harmful"
-    elif ratio < 0.1:
+    elif ratio < _MARGINAL_RATIO:
         verdict = "marginal"
     else:
         verdict = "positive"
@@ -196,6 +205,7 @@ def _impact_check(
         "sum_delta": sum_delta,
         "max_abs_delta": max_abs,
         "movers": tuple(movers),
+        "scored": scored,
     }
 
 
@@ -307,22 +317,37 @@ def main() -> int:
             return 1
         broad_touched_oids, broad_names = _broad_touched_oids(args.db, args.broad_baseline, rule_id)
         broad_total = len(broad_names)
+        broad_present = True
     else:
         broad_touched_oids, broad_names = set(), {}
         broad_total = 0
+        broad_present = False
 
     # ------------------------------------------------------------------
     # 4. Per-rule impact check (subsumes the old binary trivial test).
     #    Score touched commanders WITH and WITHOUT the rule; map the
     #    net hi_syn delta to a verdict.
+    #
+    #    If the broad baseline isn't present we have nothing to measure
+    #    impact against — fall back to "positive" (preserves the rule
+    #    instead of silently classifying it TRIVIAL and locking it out
+    #    of future retries via the attempt log).
     # ------------------------------------------------------------------
-    impact = _impact_check(
-        args.db,
-        args.edhrec_db,
-        rule_id,
-        broad_touched_oids,
-        broad_names,
-    )
+    if not broad_present:
+        print(
+            "WARNING: broad baseline not found; skipping impact check. "
+            "Run scripts/broad_set_track.py --bootstrap to enable.",
+            file=sys.stderr,
+        )
+        impact = {"verdict": "positive", "sum_delta": 0, "max_abs_delta": 0, "movers": (), "scored": 0}
+    else:
+        impact = _impact_check(
+            args.db,
+            args.edhrec_db,
+            rule_id,
+            broad_touched_oids,
+            broad_names,
+        )
     verdict = impact["verdict"]
     sum_d = impact["sum_delta"]
     max_d = impact["max_abs_delta"]
