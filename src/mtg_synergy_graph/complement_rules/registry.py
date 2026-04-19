@@ -42,6 +42,7 @@ from .generated.firebending_2_tribal import _firebending_2_tribal_gate
 from .generated.mentor_tribal import _mentor_tribal_gate
 from .generated.more_tribal import _more_tribal_gate
 from .generated.prowess_tribal import _prowess_tribal_gate
+from .generated.repl_moved_exile_stack import _repl_moved_exile_stack_gate
 from .generated.start_tribal import _start_tribal_gate
 
 
@@ -665,6 +666,7 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("start_tribal", _start_tribal_gate),
     RuleGate("etbreplacement_other_choosect_tribal", _etbreplacement_other_choosect_tribal_gate),
     RuleGate("mentor_tribal", _mentor_tribal_gate),
+    RuleGate("repl_moved_exile_stack", _repl_moved_exile_stack_gate),
 )
 
 

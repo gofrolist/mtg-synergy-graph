@@ -310,8 +310,11 @@ class TestCreatureCountScalerGate:
 
 
 class TestFindCreatureCountScaler:
-    def _hamza_ports(self):
-        return [_port(port_type="scales_with", event_class="Valid", valid_filter="Creature.YouCtrl+counters_GE1_P1P1")]
+    def _shanna_ports(self):
+        # Pure creature-count scales_with port (no counter / attacking /
+        # tapped qualifier). Shanna, Sisay's Legacy is the canonical
+        # exemplar — gate rejects qualifier-bearing variants.
+        return [_port(port_type="scales_with", event_class="Valid", valid_filter="Creature.YouCtrl")]
 
     def test_no_matching_port_returns_empty(self, conn):
         ports = [_port(port_type="trigger", event_class="DamageDone")]
@@ -325,7 +328,7 @@ class TestFindCreatureCountScaler:
             event_class="Continuous",
             raw_line="{'Mode': 'Continuous', 'Affected': 'Creature.YouCtrl', 'AddKeyword': 'Anthem'}",
         )
-        results = _find_creature_count_scaler(conn, self._hamza_ports(), set())
+        results = _find_creature_count_scaler(conn, self._shanna_ports(), set())
         events = {r.candidate: r.cand_event for r in results}
         assert events.get("Coat of Arms") == "creature_count_anthem"
 
@@ -335,7 +338,7 @@ class TestFindCreatureCountScaler:
             "INSERT INTO card_ports (card_name, port_type, event_class, raw_line) VALUES (?, ?, ?, ?)",
             ("Avenger of Zendikar", "effect", "Token", "{'TokenScript': 'g_0_1_plant'}"),
         )
-        results = _find_creature_count_scaler(conn, self._hamza_ports(), set())
+        results = _find_creature_count_scaler(conn, self._shanna_ports(), set())
         events = {r.candidate: r.cand_event for r in results}
         assert events.get("Avenger of Zendikar") == "creature_count_token"
 
@@ -347,23 +350,29 @@ class TestFindCreatureCountScaler:
             event_class="Valid",
             valid_filter="Creature.YouCtrl",
         )
-        results = _find_creature_count_scaler(conn, self._hamza_ports(), set())
+        results = _find_creature_count_scaler(conn, self._shanna_ports(), set())
         events = {r.candidate: r.cand_event for r in results}
         assert events.get("Beastmaster Ascension") == "creature_count_scaler_stack"
 
     def test_excludes_commander(self, conn):
         _add_port(
             conn,
-            "Hamza, Guardian of Arashin",
+            "Shanna, Sisay's Legacy",
             port_type="static",
             event_class="Continuous",
             raw_line="{'Affected': 'Creature.YouCtrl', 'AddPower': '1'}",
         )
         results = _find_creature_count_scaler(
-            conn, self._hamza_ports(), {"Hamza, Guardian of Arashin"}
+            conn, self._shanna_ports(), {"Shanna, Sisay's Legacy"}
         )
         names = {r.candidate for r in results}
-        assert "Hamza, Guardian of Arashin" not in names
+        assert "Shanna, Sisay's Legacy" not in names
+
+    def test_qualifier_blocker_rejects_gate(self):
+        # counters_GE / attacking / tapped route to other rules; the
+        # bare-cell rule must not fire on them.
+        p = _port(port_type="scales_with", event_class="Valid", valid_filter="Creature.YouCtrl+counters_GE1_P1P1")
+        assert not _creature_count_scaler_gate(p)
 
     def test_dedup_anthem_wins(self, conn):
         # A card matching multiple tiers gets ONE complement in the
@@ -380,7 +389,7 @@ class TestFindCreatureCountScaler:
             "VALUES (?, 'scales_with', 'Valid', 'Creature.YouCtrl')",
             ("Dual Card",),
         )
-        results = _find_creature_count_scaler(conn, self._hamza_ports(), set())
+        results = _find_creature_count_scaler(conn, self._shanna_ports(), set())
         dual = [r for r in results if r.candidate == "Dual Card"]
         assert len(dual) == 1
         assert dual[0].cand_event == "creature_count_anthem"
@@ -393,7 +402,7 @@ class TestFindCreatureCountScaler:
             event_class="Continuous",
             raw_line="{'Affected': 'Creature.YouCtrl', 'AddKeyword': 'Anthem'}",
         )
-        results = _find_creature_count_scaler(conn, self._hamza_ports(), set())
+        results = _find_creature_count_scaler(conn, self._shanna_ports(), set())
         assert all(r.rule_id == "creature_count_scaler" for r in results)
 '''
 
@@ -616,6 +625,215 @@ class TestFind{slug.title().replace("_", "")}:
         registry_gate_line=f'    RuleGate("{rule_id}", _{rule_id}_gate),',
         scorer_bucket_entry=f'    "{rule_id}": "port_match",',
         scorer_multiplier_entry=f'    # AUTO-GENERATED keyword-tribal — IDF handles weighting\n    "{rule_id}": 2.0,',
+        bucket="port_match",
+        multiplier=2.0,
+    )
+
+
+def _gen_replacement_stack(proposal: RuleProposal) -> ScaffoldArtifacts:
+    """Generator for the replacement_stack template.
+
+    A commander with ``replacement.<event>[<result>]`` (e.g. Anafenza's
+    "creatures dying go to exile instead") wants other cards with the
+    SAME (event, result) shape — they stack the same replacement effect.
+    Same shape as peer_tribal_keyword but keyed on
+    ``(event_class, replacement_result)`` instead of a keyword.
+    """
+    event = proposal.gap.signature[1]
+    result = proposal.gap.signature[2]
+    if not event or not result:
+        raise ValueError("replacement_stack needs non-empty event_class and replacement_result")
+    slug = f"repl_{_sanitize_for_identifier(event)}_{_sanitize_for_identifier(result)}_stack"
+    rule_id = slug
+    pool_size = proposal.pool_sizes.get("same_shape", "?")
+
+    helper_src = f'''"""AUTO-GENERATED rule: {rule_id}.
+
+Generated by scripts/scaffold_rule.py from template
+'replacement_stack' on the (event, result) pair
+({event!r}, {result!r}). Surfaces the small pool of cards sharing
+the same replacement event + result as natural archetype partners.
+
+Auditor context at generation time:
+- Reach: {proposal.gap.commanders} commanders carrying replacement.{event}[{result}]
+- Currently uncovered: {proposal.gap.commanders - proposal.gap.activations}
+- Pool: {pool_size} cards with this replacement shape
+"""
+
+from __future__ import annotations
+
+import sqlite3
+
+from ..core import PortComplement, PortRow
+
+#: The (event, result) pair this rule fires on. Single-shape scope by
+#: design — each new pair scaffolds its own module so reverts stay
+#: isolated.
+_EVENT = {event!r}
+_RESULT = {result!r}
+
+
+def _{rule_id}_gate(port: PortRow) -> bool:
+    """True iff ``port`` is a replacement port for the target shape."""
+    if (port.get("port_type") or "").strip() != "replacement":
+        return False
+    if (port.get("event_class") or "").strip() != _EVENT:
+        return False
+    return (port.get("replacement_result") or "").strip() == _RESULT
+
+
+def _find_{rule_id}(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Return every other card carrying the same replacement shape.
+
+    Pool is small by gate construction (auditor only proposes this
+    template for shapes with limited card pools), so IDF naturally
+    rewards these matches.
+    """
+    if not any(_{rule_id}_gate(p) for p in cmdr_ports):
+        return []
+
+    rows = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE port_type = 'replacement' "
+        "AND event_class = ? AND replacement_result = ?",
+        (_EVENT, _RESULT),
+    )
+    results: list[PortComplement] = []
+    for row in rows:
+        name = row["card_name"]
+        if name in cmdr_set:
+            continue
+        results.append(
+            PortComplement(
+                rule_id={rule_id!r},
+                direction="synergy",
+                candidate=name,
+                cmdr_event={rule_id!r},
+                cand_event="same_shape_replacement",
+            )
+        )
+    return results
+'''
+
+    test_src = f'''"""AUTO-GENERATED tests for rule: {rule_id}."""
+
+from __future__ import annotations
+
+import sqlite3
+
+import pytest
+
+from mtg_synergy_graph.complement_rules.generated.{rule_id} import (
+    _find_{rule_id},
+    _{rule_id}_gate,
+)
+
+SCHEMA = """\\
+CREATE TABLE cards (name TEXT PRIMARY KEY, types TEXT);
+CREATE TABLE card_ports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    card_name TEXT NOT NULL,
+    port_type TEXT NOT NULL,
+    event_class TEXT NOT NULL,
+    valid_filter TEXT,
+    raw_line TEXT,
+    counter_type TEXT,
+    zone_origin TEXT,
+    zone_destination TEXT,
+    replacement_event TEXT,
+    replacement_result TEXT
+);
+"""
+
+
+@pytest.fixture()
+def conn():
+    c = sqlite3.connect(":memory:")
+    c.row_factory = sqlite3.Row
+    c.executescript(SCHEMA)
+    yield c
+    c.close()
+
+
+def _add_repl(conn, name, event, result):
+    conn.execute("INSERT OR IGNORE INTO cards (name) VALUES (?)", (name,))
+    conn.execute(
+        "INSERT INTO card_ports (card_name, port_type, event_class, replacement_result) "
+        "VALUES (?, 'replacement', ?, ?)",
+        (name, event, result),
+    )
+
+
+def _port(**kwargs):
+    return dict(kwargs)
+
+
+class TestGate:
+    def test_non_replacement_skips(self):
+        assert not _{rule_id}_gate(_port(port_type="trigger", event_class={event!r}, replacement_result={result!r}))
+
+    def test_other_event_skips(self):
+        assert not _{rule_id}_gate(_port(port_type="replacement", event_class="OtherEvent", replacement_result={result!r}))
+
+    def test_other_result_skips(self):
+        assert not _{rule_id}_gate(_port(port_type="replacement", event_class={event!r}, replacement_result="OtherResult"))
+
+    def test_target_shape_matches(self):
+        assert _{rule_id}_gate(_port(port_type="replacement", event_class={event!r}, replacement_result={result!r}))
+
+
+class TestFind:
+    def _cmdr_ports(self):
+        return [_port(port_type="replacement", event_class={event!r}, replacement_result={result!r})]
+
+    def test_no_replacement_port_returns_empty(self, conn):
+        assert _find_{rule_id}(conn, [_port(port_type="trigger", event_class="Attacks")], set()) == []
+
+    def test_finds_other_cards_with_same_shape(self, conn):
+        _add_repl(conn, "Partner Card A", {event!r}, {result!r})
+        _add_repl(conn, "Partner Card B", {event!r}, {result!r})
+        results = _find_{rule_id}(conn, self._cmdr_ports(), set())
+        names = {{r.candidate for r in results}}
+        assert "Partner Card A" in names
+        assert "Partner Card B" in names
+
+    def test_excludes_other_shapes(self, conn):
+        _add_repl(conn, "Wrong Result Card", {event!r}, "OtherResult")
+        _add_repl(conn, "Wrong Event Card", "OtherEvent", {result!r})
+        results = _find_{rule_id}(conn, self._cmdr_ports(), set())
+        names = {{r.candidate for r in results}}
+        assert "Wrong Result Card" not in names
+        assert "Wrong Event Card" not in names
+
+    def test_excludes_commander(self, conn):
+        _add_repl(conn, "Self Commander", {event!r}, {result!r})
+        results = _find_{rule_id}(conn, self._cmdr_ports(), {{"Self Commander"}})
+        names = {{r.candidate for r in results}}
+        assert "Self Commander" not in names
+
+    def test_rule_id(self, conn):
+        _add_repl(conn, "Partner Card", {event!r}, {result!r})
+        results = _find_{rule_id}(conn, self._cmdr_ports(), set())
+        assert all(r.rule_id == {rule_id!r} for r in results)
+        assert all(r.cand_event == "same_shape_replacement" for r in results)
+'''
+
+    return ScaffoldArtifacts(
+        rule_id=rule_id,
+        helper_module_path=GENERATED_DIR / f"{rule_id}.py",
+        helper_module_src=helper_src,
+        test_module_path=TESTS_DIR / f"test_generated_{rule_id}.py",
+        test_module_src=test_src,
+        core_import_line=f"from .generated.{rule_id} import _find_{rule_id}  # noqa: E402",
+        core_dispatch_line=f"        out.extend(_find_{rule_id}(conn, cmdr_ports, cmdr_set))",
+        registry_import_line=f"from .generated.{rule_id} import _{rule_id}_gate",
+        registry_gate_line=f'    RuleGate("{rule_id}", _{rule_id}_gate),',
+        scorer_bucket_entry=f'    "{rule_id}": "port_match",',
+        scorer_multiplier_entry=f'    # AUTO-GENERATED replacement-stack — IDF handles weighting\n    "{rule_id}": 2.0,',
         bucket="port_match",
         multiplier=2.0,
     )
@@ -1198,6 +1416,7 @@ _GENERATORS: dict[str, Callable[[RuleProposal], ScaffoldArtifacts]] = {
     "peer_tribal_keyword": _gen_peer_tribal_keyword,
     "x_cost_scaler": _gen_x_cost_scaler,
     "counter_removal_payoff": _gen_counter_removal_payoff,
+    "replacement_stack": _gen_replacement_stack,
 }
 
 

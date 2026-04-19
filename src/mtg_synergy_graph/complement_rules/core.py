@@ -944,6 +944,7 @@ from .generated.firebending_2_tribal import _find_firebending_2_tribal  # noqa: 
 from .generated.mentor_tribal import _find_mentor_tribal  # noqa: E402
 from .generated.more_tribal import _find_more_tribal  # noqa: E402
 from .generated.prowess_tribal import _find_prowess_tribal  # noqa: E402
+from .generated.repl_moved_exile_stack import _find_repl_moved_exile_stack  # noqa: E402
 from .generated.start_tribal import _find_start_tribal  # noqa: E402
 from .graveyard import (  # noqa: E402
     _find_artifact_recursion,
@@ -1174,6 +1175,7 @@ def find_all_complements(
         out.extend(_find_counter_axis_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_modified_axis_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_damage_doubler_synergy(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_repl_moved_exile_stack(conn, cmdr_ports, cmdr_set))
         out.extend(_find_mentor_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_etbreplacement_other_choosect_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_start_tribal(conn, cmdr_ports, cmdr_set))
