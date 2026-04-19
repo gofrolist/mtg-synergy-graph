@@ -36,6 +36,12 @@ from pathlib import Path
 
 # Ensure we can import gap_report for the proposal types.
 sys.path.insert(0, str(Path(__file__).parent))
+from _attempt_log import (
+    AttemptRecord,
+    is_known_bad,
+    now_iso,
+    record_attempt,
+)
 from gap_report import (
     GapStat,
     RuleProposal,
@@ -704,6 +710,13 @@ def main() -> int:
         default=0.0,
         help="(use with --apply) maximum tolerated golden NDCG drop. Default 0.0 = revert on any regression.",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="(use with --apply) override the attempt-log block on a "
+        "(template, rule_id) previously reverted. Use after refining "
+        "the template and expecting a different outcome.",
+    )
     args = parser.parse_args()
 
     conn = sqlite3.connect(args.db)
@@ -714,9 +727,7 @@ def main() -> int:
                 print(f"error: no generator for template '{args.template}'", file=sys.stderr)
                 print(f"available: {sorted(_GENERATORS)}", file=sys.stderr)
                 return 2
-            # Build a synthetic proposal from a stub gap. The user
-            # would pass a real signature in a more complete CLI; for
-            # now templating uses default reach=0.
+            # Build a synthetic proposal from a stub gap.
             stub = GapStat(signature=("", "", ""), commanders=0, activations=0, exemplars=(), top_rules=())
             stub_proposal = RuleProposal(
                 gap=stub,
@@ -726,6 +737,8 @@ def main() -> int:
                 tier_sketches=(),
                 pool_sizes={},
             )
+            template_name = args.template
+            signature = ("", "", "")
             art = _GENERATORS[args.template](stub_proposal)
         else:
             proposal = _pick_top_proposal(conn)
@@ -738,11 +751,41 @@ def main() -> int:
                 f"(reach={proposal.gap.commanders}, template={proposal.template})",
                 file=sys.stderr,
             )
+            template_name = proposal.template
+            signature = proposal.gap.signature
             art = _GENERATORS[proposal.template](proposal)
     finally:
         conn.close()
 
     if args.apply:
+        # Learning loop: refuse to retry a (template, rule_id) that
+        # was previously reverted, unless --force overrides. Records
+        # a "skipped" attempt so the log accumulates context.
+        blocked, prior_reason = is_known_bad(template_name, art.rule_id)
+        if blocked and not args.force:
+            print(
+                f"\n[SKIPPED] (template={template_name}, rule_id={art.rule_id}) "
+                f"was previously reverted:\n  {prior_reason[:200]}",
+                file=sys.stderr,
+            )
+            record_attempt(
+                AttemptRecord(
+                    timestamp=now_iso(),
+                    rule_id=art.rule_id,
+                    template=template_name,
+                    signature=signature,
+                    outcome="skipped",
+                    reason=f"prior revert: {prior_reason[:150]}",
+                )
+            )
+            print(
+                "\nRefine the template in scripts/scaffold_rule.py "
+                "(_QUALIFIER_BLOCKERS, multiplier, tier choices), "
+                "then re-run with --force.",
+                file=sys.stderr,
+            )
+            return 1
+
         snapshot = _capture_state(_affected_paths(art)) if args.validate else None
         results = apply_artifacts(art)
         print(f"\nApplied artifacts for `{art.rule_id}`:", file=sys.stderr)
@@ -750,12 +793,25 @@ def main() -> int:
             status = "wrote" if v else "skipped (already present)"
             print(f"  {k}: {status}", file=sys.stderr)
 
+        files_touched = tuple(str(p.relative_to(REPO_ROOT)) for p in _affected_paths(art))
+
         if args.validate and snapshot is not None:
             print("\nValidating (pytest + golden NDCG)...", file=sys.stderr)
             result = _validate(art, allow_ndcg_drop=args.allow_ndcg_drop)
             if result.passed:
                 print(f"\n[PASS] {result.summary}", file=sys.stderr)
                 print("\nKept changes. Suggested next: review the diff and commit.", file=sys.stderr)
+                record_attempt(
+                    AttemptRecord(
+                        timestamp=now_iso(),
+                        rule_id=art.rule_id,
+                        template=template_name,
+                        signature=signature,
+                        outcome="passed",
+                        reason=result.summary,
+                        files_touched=files_touched,
+                    )
+                )
             else:
                 print(f"\n[FAIL] {result.summary}", file=sys.stderr)
                 _restore_state(snapshot)
@@ -764,6 +820,17 @@ def main() -> int:
                     "(QUALIFIER_BLOCKERS, multiplier, tier choices) in "
                     "scripts/scaffold_rule.py and re-run.",
                     file=sys.stderr,
+                )
+                record_attempt(
+                    AttemptRecord(
+                        timestamp=now_iso(),
+                        rule_id=art.rule_id,
+                        template=template_name,
+                        signature=signature,
+                        outcome="reverted",
+                        reason=result.summary[:600],
+                        files_touched=files_touched,
+                    )
                 )
                 return 1
         else:

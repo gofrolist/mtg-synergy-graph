@@ -39,6 +39,10 @@ from mtg_synergy_graph.complement_rules.core import (
 )
 from mtg_synergy_graph.complement_rules.registry import RULE_GATES
 
+# Local sibling-script import for the attempt log.
+sys.path.insert(0, str(Path(__file__).parent))
+from _attempt_log import prior_attempts_for_template
+
 # ---------------------------------------------------------------------------
 # Sub-cell signature extraction
 # ---------------------------------------------------------------------------
@@ -649,6 +653,26 @@ def _format_report(proposals: list[RuleProposal], stats_total: int, eligible_tot
     for i, prop in enumerate(proposals, 1):
         pt, ev, sub = prop.gap.signature
         lines.append(f"### #{i}: `{pt}.{ev}[{sub or '*'}]`")
+        # Decorate with prior-attempt history (if any). Prevents the
+        # reader from re-attempting a known-failing template/rule_id
+        # combination without first refining it.
+        prior = prior_attempts_for_template(prop.template)
+        if prior:
+            reverts = [a for a in prior if a.outcome == "reverted"]
+            passes = [a for a in prior if a.outcome == "passed"]
+            if reverts:
+                latest = reverts[-1]
+                lines.append(
+                    f"- ⚠️ **Prior failure**: {len(reverts)} revert(s) on this "
+                    f"template — most recent {latest.timestamp}: "
+                    f"_{latest.reason[:200]}_"
+                )
+            if passes:
+                lines.append(
+                    f"- ✅ **Prior success**: {len(passes)} passing apply(s) — "
+                    "rule should already be in the registry; check why it's "
+                    "not catching this signature."
+                )
         lines.append(
             f"- **Reach**: {prop.gap.commanders} commanders carrying "
             f"this signature; {prop.gap.activations} get any rule "
