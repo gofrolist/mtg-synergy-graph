@@ -1033,16 +1033,23 @@ def _restore_state(snapshot: dict[Path, str | None]) -> None:
 class ValidationResult:
     """Outcome of post-apply validation. ``passed`` is the AND of all
     individual checks; ``summary`` is a one-paragraph narrative.
-    ``trivial`` flags rules that passed all checks but don't activate
-    on any commander in the validation universe — we have no evidence
-    they help anything. The autonomy stack records these as
-    ``outcome=trivial`` (kept on disk, but blocked from retry to avoid
-    polluting the registry with no-ops)."""
+
+    Three orthogonal signals from the orchestrator:
+
+    - ``trivial``: passed everything but contributes no measurable
+      hi_syn improvement (zero touched OR fires-but-never-lands).
+      Kept on disk but blocked from retry.
+    - ``harmful``: pre-ship impact check found NEGATIVE net hi_syn
+      delta across touched commanders — rule is displacing better
+      candidates from top-30. ``passed`` is False; auto-revert.
+    """
 
     passed: bool
     summary: str
     trivial: bool = False
     trivial_reason: str | None = None
+    harmful: bool = False
+    harmful_reason: str | None = None
 
 
 def _run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess:
@@ -1106,6 +1113,8 @@ def _validate(art: ScaffoldArtifacts, allow_ndcg_drop: float) -> ValidationResul
         summary=str(payload.get("summary", "")),
         trivial=bool(payload.get("trivial")),
         trivial_reason=payload.get("trivial_reason"),
+        harmful=bool(payload.get("harmful")),
+        harmful_reason=payload.get("harmful_reason"),
     )
 
 
@@ -1291,9 +1300,13 @@ def _attempt_one(
         )
         return "passed"
 
-    print(f"\n[FAIL] {result.summary}", file=sys.stderr)
+    tag = "HARMFUL" if result.harmful else "FAIL"
+    print(f"\n[{tag}] {result.summary}", file=sys.stderr)
+    if result.harmful_reason:
+        print(f"  reason: {result.harmful_reason}", file=sys.stderr)
     _restore_state(snapshot)
     print("Reverted all changes for this attempt.", file=sys.stderr)
+    reason = result.harmful_reason or result.summary
     record_attempt(
         AttemptRecord(
             timestamp=now_iso(),
@@ -1301,7 +1314,7 @@ def _attempt_one(
             template=template_name,
             signature=signature,
             outcome="reverted",
-            reason=result.summary[:600],
+            reason=(f"harmful: {reason}" if result.harmful else reason)[:600],
             files_touched=files_touched,
         )
     )

@@ -7,16 +7,28 @@ Runs in ONE subprocess (one ``uv run`` cold start) and executes:
    restricted to commanders whose ports activate the new rule's gate.
 3. Broad NDCG check via :func:`broad_set_track._check` with
    ``--touched-only`` for the same reason.
-4. Trivial-impact check: did the rule's gate activate on ANY commander
-   in the validation universe? If not, the rule's contribution is
-   invisible to our harness — we have no evidence it helps anything.
+4. Per-rule impact check (replaces the binary trivial test). For each
+   commander touched by the new rule's gate, compare ``hi_syn_hits``
+   in top-30 WITH vs WITHOUT the rule (helper monkey-patched to
+   return ``[]``). Three verdicts:
+
+   - **HARMFUL** (sum_delta < 0): rule's complements are displacing
+     better candidates from top-30 on its own touched cmdrs. Fail
+     validation -> auto-revert. This is the wart we missed before
+     ward_2_tribal shipped.
+   - **TRIVIAL** (max|delta| == 0): rule fires but never lands in
+     top-30 anywhere. Pass + flag trivial; same handling as before.
+   - **positive** (sum_delta > 0): rule contributes measurable
+     hi_syn improvement. Ship clean.
 
 Emits ONE JSON line on stdout for the parent to parse::
 
     {
-      "passed": bool,            # all stages green
-      "trivial": bool,           # rule has no measurable impact in our universe
+      "passed": bool,            # all stages green AND not harmful
+      "trivial": bool,           # passed, but no measurable impact
       "trivial_reason": str|null,
+      "harmful": bool,           # impact check found net-negative shift
+      "harmful_reason": str|null,
       "summary": str             # one-paragraph human narrative
     }
 
@@ -45,14 +57,30 @@ from _touched_commanders import find_touched_card_names  # noqa: E402
 from mtg_synergy_graph import (  # noqa: E402
     SynergyEngine,
     check_golden_set,
+    compare_to_edhrec,
     regression_failed,
 )
+from mtg_synergy_graph.complement_rules import core  # noqa: E402
 from mtg_synergy_graph.complement_rules.registry import RULE_GATES  # noqa: E402
 
 
 def _emit(payload: dict) -> None:
     """Write the result as a single JSON line to stdout."""
     print(json.dumps(payload))
+
+
+def _fail(summary: str) -> None:
+    """Emit a failure result with all impact-check fields zeroed."""
+    _emit(
+        {
+            "passed": False,
+            "trivial": False,
+            "trivial_reason": None,
+            "harmful": False,
+            "harmful_reason": None,
+            "summary": summary,
+        }
+    )
 
 
 def _golden_score_only(
@@ -72,16 +100,95 @@ def _golden_score_only(
     return score_only, len(names)
 
 
-def _broad_touched_count(
+def _broad_touched_oids(
     syn_db: Path,
     baseline_path: Path,
     rule_id: str,
-) -> tuple[int, int]:
-    """Return ``(touched_count, total_baseline_count)`` for the broad baseline."""
+) -> tuple[set[str], dict[str, str]]:
+    """Return ``(touched_oids, names_by_oid)`` for the broad baseline."""
     payload = json.loads(baseline_path.read_text())
     names_by_oid: dict[str, str] = payload.get("names_by_oracle_id", {})
-    touched = find_touched_card_names(syn_db, names_by_oid.values(), [rule_id])
-    return len(touched), len(names_by_oid)
+    touched_names = find_touched_card_names(syn_db, names_by_oid.values(), [rule_id])
+    touched_oids = {oid for oid, name in names_by_oid.items() if name in touched_names}
+    return touched_oids, names_by_oid
+
+
+def _hi_syn_hits(engine: SynergyEngine, edhrec_conn: sqlite3.Connection, oid: str) -> int | None:
+    """Hi-Syn hits in top-30 for one oracle_id; ``None`` if no curated data."""
+    try:
+        page = engine.page_by_oracle_id([oid], offset=0, limit=30)
+    except (LookupError, ValueError):
+        return None
+    cmp = compare_to_edhrec(page, edhrec_conn, top_n=30)
+    if cmp.hi_syn_size == 0:
+        return None
+    return cmp.hi_syn_hits
+
+
+def _impact_check(
+    syn_db: Path,
+    edhrec_db: Path,
+    rule_id: str,
+    touched_oids: set[str],
+    names_by_oid: dict[str, str],
+) -> dict:
+    """Score touched commanders WITH and WITHOUT the rule (helper monkey-
+    patched to ``[]``). Returns ``{verdict, sum_delta, max_abs_delta,
+    movers}`` where verdict is ``"positive"`` / ``"trivial"`` / ``"harmful"``.
+
+    ``trivial`` covers both "no commander activates the gate" (touched
+    is empty) and "rule fires but never lands in top-30" (max|Δ| = 0).
+    """
+    if not touched_oids:
+        return {"verdict": "trivial", "sum_delta": 0, "max_abs_delta": 0, "movers": ()}
+
+    helper_name = f"_find_{rule_id}"
+    if not hasattr(core, helper_name):
+        # No helper to monkey-patch — caller used a non-standard naming
+        # convention. Fall back to "no impact measurement available";
+        # treat as positive so we don't accidentally fail a working rule.
+        return {"verdict": "positive", "sum_delta": 0, "max_abs_delta": 0, "movers": ()}
+
+    edhrec_conn = sqlite3.connect(edhrec_db)
+    edhrec_conn.row_factory = sqlite3.Row
+    try:
+        with SynergyEngine(syn_db) as eng:
+            with_scores = {oid: _hi_syn_hits(eng, edhrec_conn, oid) for oid in touched_oids}
+
+        original = getattr(core, helper_name)
+        setattr(core, helper_name, lambda *a, **k: [])
+        try:
+            with SynergyEngine(syn_db) as eng:
+                without_scores = {oid: _hi_syn_hits(eng, edhrec_conn, oid) for oid in touched_oids}
+        finally:
+            setattr(core, helper_name, original)
+    finally:
+        edhrec_conn.close()
+
+    movers: list[tuple[str, int, int, int]] = []
+    for oid in touched_oids:
+        w, wo = with_scores.get(oid), without_scores.get(oid)
+        if w is None or wo is None:
+            continue
+        d = w - wo
+        if d != 0:
+            movers.append((names_by_oid.get(oid, oid), w, wo, d))
+    movers.sort(key=lambda m: -abs(m[3]))
+
+    sum_delta = sum(m[3] for m in movers)
+    max_abs = max((abs(m[3]) for m in movers), default=0)
+    if max_abs == 0:
+        verdict = "trivial"
+    elif sum_delta < 0:
+        verdict = "harmful"
+    else:
+        verdict = "positive"
+    return {
+        "verdict": verdict,
+        "sum_delta": sum_delta,
+        "max_abs_delta": max_abs,
+        "movers": tuple(movers),
+    }
 
 
 def main() -> int:
@@ -115,16 +222,9 @@ def main() -> int:
     # harness can't see at all.
     registered = {g.rule_id for g in RULE_GATES}
     if rule_id not in registered:
-        _emit(
-            {
-                "passed": False,
-                "trivial": False,
-                "trivial_reason": None,
-                "summary": (
-                    f"rule_id '{rule_id}' has no registered gate in RULE_GATES. "
-                    "Add a RuleGate alongside the helper before validating."
-                ),
-            }
+        _fail(
+            f"rule_id '{rule_id}' has no registered gate in RULE_GATES. "
+            "Add a RuleGate alongside the helper before validating."
         )
         return 1
 
@@ -135,26 +235,12 @@ def main() -> int:
     if args.gen_test_path is not None and args.gen_test_path.exists():
         rc = pytest.main([str(args.gen_test_path), "-q", "--no-cov", "--tb=short"])
         if rc != 0:
-            _emit(
-                {
-                    "passed": False,
-                    "trivial": False,
-                    "trivial_reason": None,
-                    "summary": f"Generated test failed (pytest exit {int(rc)}).",
-                }
-            )
+            _fail(f"Generated test failed (pytest exit {int(rc)}).")
             return 1
 
     rc = pytest.main(["tests/", "-q", "--no-cov", "--tb=short"])
     if rc != 0:
-        _emit(
-            {
-                "passed": False,
-                "trivial": False,
-                "trivial_reason": None,
-                "summary": f"Full pytest suite failed (exit {int(rc)}).",
-            }
-        )
+        _fail(f"Full pytest suite failed (exit {int(rc)}).")
         return 1
 
     # ------------------------------------------------------------------
@@ -179,20 +265,13 @@ def main() -> int:
 
     golden_drop = golden_report.baseline_ndcg - golden_report.aggregate_ndcg
     if regression_failed(golden_report, ndcg_tolerance=args.allow_ndcg_drop):
-        _emit(
-            {
-                "passed": False,
-                "trivial": False,
-                "trivial_reason": None,
-                "summary": (
-                    f"Golden NDCG regression: drop {golden_drop:+.4f} "
-                    f"(baseline {golden_report.baseline_ndcg:.4f} -> "
-                    f"fresh {golden_report.aggregate_ndcg:.4f}, "
-                    f"tolerance {args.allow_ndcg_drop}). "
-                    f"rank_shifts={len(golden_report.rank_shifts)} "
-                    f"ndcg_drops={len(golden_report.ndcg_drops)}"
-                ),
-            }
+        _fail(
+            f"Golden NDCG regression: drop {golden_drop:+.4f} "
+            f"(baseline {golden_report.baseline_ndcg:.4f} -> "
+            f"fresh {golden_report.aggregate_ndcg:.4f}, "
+            f"tolerance {args.allow_ndcg_drop}). "
+            f"rank_shifts={len(golden_report.rank_shifts)} "
+            f"ndcg_drops={len(golden_report.ndcg_drops)}"
         )
         return 1
 
@@ -214,48 +293,81 @@ def main() -> int:
             )
         if broad_rc != 0:
             sys.stderr.write(captured.getvalue())
-            _emit(
-                {
-                    "passed": False,
-                    "trivial": False,
-                    "trivial_reason": None,
-                    "summary": (
-                        f"Broad NDCG regression (exit {broad_rc}). "
-                        f"Last lines: {captured.getvalue().strip().splitlines()[-3:]}"
-                    ),
-                }
+            _fail(
+                f"Broad NDCG regression (exit {broad_rc}). Last lines: {captured.getvalue().strip().splitlines()[-3:]}"
             )
             return 1
-        broad_touched, broad_total = _broad_touched_count(args.db, args.broad_baseline, rule_id)
+        broad_touched_oids, broad_names = _broad_touched_oids(args.db, args.broad_baseline, rule_id)
+        broad_total = len(broad_names)
     else:
-        broad_touched, broad_total = 0, 0
+        broad_touched_oids, broad_names = set(), {}
+        broad_total = 0
 
     # ------------------------------------------------------------------
-    # 4. Trivial-impact check.
+    # 4. Per-rule impact check (subsumes the old binary trivial test).
+    #    Score touched commanders WITH and WITHOUT the rule; map the
+    #    net hi_syn delta to a verdict.
     # ------------------------------------------------------------------
-    total_touched = len(score_only_golden) + broad_touched
-    universe_size = golden_total + broad_total
-    trivial = total_touched == 0
-    trivial_reason = (
-        f"no commander in golden ({golden_total}) or broad ({broad_total}) "
-        f"sample activates the new gate; rule's contribution is invisible "
-        f"to the validation harness. Either the gate is too narrow or the "
-        f"validation universe doesn't cover the affected archetype."
-        if trivial
-        else None
+    impact = _impact_check(
+        args.db,
+        args.edhrec_db,
+        rule_id,
+        broad_touched_oids,
+        broad_names,
+    )
+    verdict = impact["verdict"]
+    sum_d = impact["sum_delta"]
+    max_d = impact["max_abs_delta"]
+    n_touched = len(broad_touched_oids)
+    base_summary = (
+        f"Touched {len(score_only_golden)}/{golden_total} golden + "
+        f"{n_touched}/{broad_total} broad. "
+        f"Golden NDCG {golden_report.baseline_ndcg:.4f} -> "
+        f"{golden_report.aggregate_ndcg:.4f} (delta {-golden_drop:+.4f}). "
+        f"Impact: sum_Δhi_syn={sum_d:+}, max|Δ|={max_d}."
     )
 
+    if verdict == "harmful":
+        worst = ", ".join(f"{n} ({d:+})" for n, _, _, d in impact["movers"][:3])
+        _emit(
+            {
+                "passed": False,
+                "trivial": False,
+                "trivial_reason": None,
+                "harmful": True,
+                "harmful_reason": (f"Net hi_syn delta {sum_d:+} across {n_touched} touched cmdrs; top losers: {worst}"),
+                "summary": f"HARMFUL: {base_summary} Top losers: {worst}",
+            }
+        )
+        return 1
+
+    if verdict == "trivial":
+        if n_touched == 0:
+            t_reason = f"no commander in broad universe ({broad_total}) activates the gate"
+        else:
+            t_reason = f"rule fires on {n_touched} commander(s) but never lands in top-30 (max|Δhi_syn|=0)"
+        _emit(
+            {
+                "passed": True,
+                "trivial": True,
+                "trivial_reason": t_reason,
+                "harmful": False,
+                "harmful_reason": None,
+                "summary": f"TRIVIAL: {base_summary}",
+            }
+        )
+        return 0
+
+    # positive
+    top_movers = ", ".join(f"{n} ({d:+})" for n, _, _, d in impact["movers"][:3])
     _emit(
         {
             "passed": True,
-            "trivial": trivial,
-            "trivial_reason": trivial_reason,
-            "summary": (
-                f"All checks passed. Touched {len(score_only_golden)}/{golden_total} golden + "
-                f"{broad_touched}/{broad_total} broad = {total_touched}/{universe_size} commanders. "
-                f"Golden NDCG {golden_report.baseline_ndcg:.4f} -> {golden_report.aggregate_ndcg:.4f} "
-                f"(delta {-golden_drop:+.4f})."
-            ),
+            "trivial": False,
+            "trivial_reason": None,
+            "harmful": False,
+            "harmful_reason": None,
+            "summary": (f"PASS: {base_summary}" + (f" Top movers: {top_movers}." if top_movers else "")),
         }
     )
     return 0
