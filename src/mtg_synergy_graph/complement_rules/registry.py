@@ -35,6 +35,11 @@ from dataclasses import dataclass
 
 from .core import COMPLEMENT_RULES, PortRow
 from .generated.choose_tribal import _choose_tribal_gate
+from .generated.doctor_s_tribal import _doctor_s_tribal_gate
+from .generated.living_tribal import _living_tribal_gate
+from .generated.more_tribal import _more_tribal_gate
+from .generated.prowess_tribal import _prowess_tribal_gate
+from .generated.ward_2_tribal import _ward_2_tribal_gate
 
 
 @dataclass(frozen=True)
@@ -649,6 +654,11 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("exalted_density", _exalted_density_gate),
     RuleGate("aura_equipment_support", _aura_equipment_support_gate),
     RuleGate("choose_tribal", _choose_tribal_gate),
+    RuleGate("ward_2_tribal", _ward_2_tribal_gate),
+    RuleGate("doctor_s_tribal", _doctor_s_tribal_gate),
+    RuleGate("more_tribal", _more_tribal_gate),
+    RuleGate("prowess_tribal", _prowess_tribal_gate),
+    RuleGate("living_tribal", _living_tribal_gate),
 )
 
 

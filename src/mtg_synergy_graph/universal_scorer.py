@@ -102,6 +102,11 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "damage_doubler_synergy": "port_match",
     "peer_evasion_tribal": "port_match",
     "choose_tribal": "port_match",
+    "ward_2_tribal": "port_match",
+    "doctor_s_tribal": "port_match",
+    "more_tribal": "port_match",
+    "prowess_tribal": "port_match",
+    "living_tribal": "port_match",
 }
 
 # ---------------------------------------------------------------------------
@@ -502,6 +507,16 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     "peer_evasion_tribal": 2.0,
     # AUTO-GENERATED keyword-tribal — IDF handles weighting
     "choose_tribal": 2.0,
+    # AUTO-GENERATED keyword-tribal — IDF handles weighting
+    "ward_2_tribal": 2.0,
+    # AUTO-GENERATED keyword-tribal — IDF handles weighting
+    "doctor_s_tribal": 2.0,
+    # AUTO-GENERATED keyword-tribal — IDF handles weighting
+    "more_tribal": 2.0,
+    # AUTO-GENERATED keyword-tribal — IDF handles weighting
+    "prowess_tribal": 2.0,
+    # AUTO-GENERATED keyword-tribal — IDF handles weighting
+    "living_tribal": 2.0,
 }
 
 

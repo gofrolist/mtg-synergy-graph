@@ -25,6 +25,7 @@ generator function here.
 from __future__ import annotations
 
 import argparse
+import importlib
 import re
 import shutil
 import sqlite3
@@ -660,6 +661,37 @@ def _patch_core(art: ScaffoldArtifacts) -> bool:
     return True
 
 
+def _insert_before_container_close(src: str, name: str, entry: str, open_char: str, close_char: str) -> str | None:
+    """Insert ``entry`` as the last line of a container literal named
+    ``name`` (a dict, tuple, or list). Returns the modified source, or
+    ``None`` if the container can't be located.
+
+    Walks the source brace-by-brace from the container's opening
+    delimiter, tracking nesting, until the matching close is found.
+    Robust against any number of pre-existing entries — anchors that
+    reference a specific previous entry break after each new
+    insertion, this approach doesn't.
+    """
+    match = re.search(rf"\b{re.escape(name)}\b[^=]*=\s*{re.escape(open_char)}", src)
+    if match is None:
+        return None
+    depth = 0
+    i = match.end() - 1  # position of the opening delimiter
+    while i < len(src):
+        c = src[i]
+        if c == open_char:
+            depth += 1
+        elif c == close_char:
+            depth -= 1
+            if depth == 0:
+                # i points at the matching close. Insert entry on its
+                # own line just before the line containing the close.
+                line_start = src.rfind("\n", 0, i) + 1
+                return src[:line_start] + entry + "\n" + src[line_start:]
+        i += 1
+    return None
+
+
 def _patch_registry(art: ScaffoldArtifacts) -> bool:
     src = REGISTRY_PATH.read_text()
     if art.registry_import_line in src:
@@ -671,13 +703,13 @@ def _patch_registry(art: ScaffoldArtifacts) -> bool:
         f"from .core import COMPLEMENT_RULES, PortRow\n{art.registry_import_line}",
         1,
     )
-    # Insert RuleGate entry at the END of _CARD_ATTR_GATES tuple.
-    src = src.replace(
-        '    RuleGate("aura_equipment_support", _aura_equipment_support_gate),\n)',
-        f'    RuleGate("aura_equipment_support", _aura_equipment_support_gate),\n{art.registry_gate_line}\n)',
-        1,
-    )
-    REGISTRY_PATH.write_text(src)
+    # Insert RuleGate entry at the END of the _CARD_ATTR_GATES tuple
+    # — using the brace-walking helper so subsequent insertions don't
+    # depend on a specific previous entry being the last one.
+    new_src = _insert_before_container_close(src, "_CARD_ATTR_GATES", art.registry_gate_line, "(", ")")
+    if new_src is None:
+        return False
+    REGISTRY_PATH.write_text(new_src)
     return True
 
 
@@ -686,19 +718,14 @@ def _patch_scorer(art: ScaffoldArtifacts) -> bool:
     if f'"{art.rule_id}":' in src:
         return False
 
-    # Insert bucket entry into _RULE_TO_BUCKET.
-    src = src.replace(
-        '    "peer_evasion_tribal": "port_match",\n}',
-        f'    "peer_evasion_tribal": "port_match",\n{art.scorer_bucket_entry}\n}}',
-        1,
-    )
-    # Insert multiplier entry — append to end of _RULE_QUALITY_MULTIPLIER.
-    src = src.replace(
-        '    "peer_evasion_tribal": 2.0,\n}',
-        f'    "peer_evasion_tribal": 2.0,\n{art.scorer_multiplier_entry}\n}}',
-        1,
-    )
-    SCORER_PATH.write_text(src)
+    # Same brace-walking insertion for both dicts.
+    new_src = _insert_before_container_close(src, "_RULE_TO_BUCKET", art.scorer_bucket_entry, "{", "}")
+    if new_src is None:
+        return False
+    new_src = _insert_before_container_close(new_src, "_RULE_QUALITY_MULTIPLIER", art.scorer_multiplier_entry, "{", "}")
+    if new_src is None:
+        return False
+    SCORER_PATH.write_text(new_src)
     return True
 
 
@@ -918,6 +945,107 @@ def _print_integration_steps(art: ScaffoldArtifacts) -> None:
     print("  uv run python scripts/gap_report.py  # confirm cell drops out of queue")
 
 
+def _refresh_registry() -> None:
+    """Reload the runtime registry module and propagate the fresh
+    ``RULE_GATES`` tuple into gap_report's namespace.
+
+    Required between walk iterations: gap_report.RULE_GATES is bound
+    at import time, so newly-registered gates from a freshly-shipped
+    rule are invisible to the picker on the next iteration without
+    explicit reload. Without this, the walker re-picks the same
+    signature every iteration and the patcher silently no-ops on
+    re-application.
+    """
+    from mtg_synergy_graph.complement_rules import registry
+
+    importlib.reload(registry)
+    import gap_report
+
+    gap_report.RULE_GATES = registry.RULE_GATES
+
+
+def _attempt_one(
+    art: ScaffoldArtifacts,
+    template_name: str,
+    signature: tuple[str, str, str],
+    *,
+    validate: bool,
+    allow_ndcg_drop: float,
+    force: bool,
+) -> str:
+    """Run one apply+validate cycle. Returns the outcome string
+    (``"passed"``, ``"reverted"``, ``"skipped"``).
+
+    Records the outcome to the attempt log on every code path. Also
+    handles the known-bad pre-check (returns ``"skipped"`` without
+    touching files).
+    """
+    blocked, prior_reason = is_known_bad(template_name, art.rule_id)
+    if blocked and not force:
+        print(
+            f"\n[SKIPPED] (template={template_name}, rule_id={art.rule_id}) "
+            f"was previously reverted:\n  {prior_reason[:200]}",
+            file=sys.stderr,
+        )
+        record_attempt(
+            AttemptRecord(
+                timestamp=now_iso(),
+                rule_id=art.rule_id,
+                template=template_name,
+                signature=signature,
+                outcome="skipped",
+                reason=f"prior revert: {prior_reason[:150]}",
+            )
+        )
+        return "skipped"
+
+    snapshot = _capture_state(_affected_paths(art)) if validate else None
+    results = apply_artifacts(art)
+    print(f"\nApplied artifacts for `{art.rule_id}`:", file=sys.stderr)
+    for k, v in results.items():
+        status = "wrote" if v else "skipped (already present)"
+        print(f"  {k}: {status}", file=sys.stderr)
+
+    files_touched = tuple(str(p.relative_to(REPO_ROOT)) for p in _affected_paths(art))
+
+    if not (validate and snapshot is not None):
+        print("\n(Skipped validation — re-run pytest + golden_set_track manually)", file=sys.stderr)
+        return "passed"  # No validation means we trust the user; treat as passed.
+
+    print("\nValidating (pytest + golden NDCG)...", file=sys.stderr)
+    result = _validate(art, allow_ndcg_drop=allow_ndcg_drop)
+    if result.passed:
+        print(f"\n[PASS] {result.summary}", file=sys.stderr)
+        record_attempt(
+            AttemptRecord(
+                timestamp=now_iso(),
+                rule_id=art.rule_id,
+                template=template_name,
+                signature=signature,
+                outcome="passed",
+                reason=result.summary,
+                files_touched=files_touched,
+            )
+        )
+        return "passed"
+
+    print(f"\n[FAIL] {result.summary}", file=sys.stderr)
+    _restore_state(snapshot)
+    print("Reverted all changes for this attempt.", file=sys.stderr)
+    record_attempt(
+        AttemptRecord(
+            timestamp=now_iso(),
+            rule_id=art.rule_id,
+            template=template_name,
+            signature=signature,
+            outcome="reverted",
+            reason=result.summary[:600],
+            files_touched=files_touched,
+        )
+    )
+    return "reverted"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path, default=Path("data/synergy.db"))
@@ -943,17 +1071,81 @@ def main() -> int:
         "(template, rule_id) previously reverted. Use after refining "
         "the template and expecting a different outcome.",
     )
+    parser.add_argument(
+        "--walk",
+        type=int,
+        default=1,
+        help="(use with --apply) drain the queue: try N proposals in a "
+        "row, picking the next one after each (skipping known-bad). "
+        "Default 1 = single attempt, current behavior. The picker "
+        "re-scans the universe each iteration so freshly-shipped "
+        "rules update the queue.",
+    )
     args = parser.parse_args()
+
+    if args.walk > 1 and not args.apply:
+        print("error: --walk requires --apply", file=sys.stderr)
+        return 2
+    if args.walk > 1 and args.template:
+        print("error: --walk can't be combined with --template (walk re-picks each iteration)", file=sys.stderr)
+        return 2
 
     conn = sqlite3.connect(args.db)
     conn.row_factory = sqlite3.Row
     try:
+        # Walk mode: drain the queue. Each iteration re-picks (the
+        # picker skips known-bad combos), then applies+validates.
+        if args.walk > 1:
+            counts = {"passed": 0, "reverted": 0, "skipped": 0}
+            shipped: list[str] = []
+            for i in range(1, args.walk + 1):
+                print(f"\n========== Walk iteration {i}/{args.walk} ==========", file=sys.stderr)
+                proposal = _pick_top_proposal(conn)
+                if proposal is None:
+                    print("Queue exhausted (no more eligible proposals).", file=sys.stderr)
+                    break
+                print(
+                    f"Picked: `{proposal.gap.signature[0]}.{proposal.gap.signature[1]}[{proposal.gap.signature[2] or '*'}]` "
+                    f"(reach={proposal.gap.commanders}, template={proposal.template})",
+                    file=sys.stderr,
+                )
+                art = _GENERATORS[proposal.template](proposal)
+                outcome = _attempt_one(
+                    art,
+                    proposal.template,
+                    proposal.gap.signature,
+                    validate=args.validate,
+                    allow_ndcg_drop=args.allow_ndcg_drop,
+                    force=args.force,
+                )
+                counts[outcome] += 1
+                if outcome == "passed":
+                    shipped.append(art.rule_id)
+                # Refresh the in-process registry so the next iteration's
+                # picker sees freshly-registered gates (or the absence of
+                # ones that were reverted). Without this, the walker
+                # re-picks the same signature every iteration.
+                _refresh_registry()
+            print("\n========== Walk summary ==========", file=sys.stderr)
+            print(
+                f"  passed:   {counts['passed']}  ({', '.join(shipped) or '—'})",
+                file=sys.stderr,
+            )
+            print(f"  reverted: {counts['reverted']}", file=sys.stderr)
+            print(f"  skipped:  {counts['skipped']}", file=sys.stderr)
+            if shipped:
+                print(
+                    "\nReview the working tree, then commit the shipped rules.",
+                    file=sys.stderr,
+                )
+            return 0 if counts["passed"] > 0 else 1
+
+        # Single-attempt mode (default).
         if args.template:
             if args.template not in _GENERATORS:
                 print(f"error: no generator for template '{args.template}'", file=sys.stderr)
                 print(f"available: {sorted(_GENERATORS)}", file=sys.stderr)
                 return 2
-            # Build a synthetic proposal from a stub gap.
             stub = GapStat(signature=("", "", ""), commanders=0, activations=0, exemplars=(), top_rules=())
             stub_proposal = RuleProposal(
                 gap=stub,
@@ -964,7 +1156,7 @@ def main() -> int:
                 pool_sizes={},
             )
             template_name = args.template
-            signature = ("", "", "")
+            signature: tuple[str, str, str] = ("", "", "")
             art = _GENERATORS[args.template](stub_proposal)
         else:
             proposal = _pick_top_proposal(conn)
@@ -983,88 +1175,37 @@ def main() -> int:
     finally:
         conn.close()
 
-    if args.apply:
-        # Learning loop: refuse to retry a (template, rule_id) that
-        # was previously reverted, unless --force overrides. Records
-        # a "skipped" attempt so the log accumulates context.
-        blocked, prior_reason = is_known_bad(template_name, art.rule_id)
-        if blocked and not args.force:
-            print(
-                f"\n[SKIPPED] (template={template_name}, rule_id={art.rule_id}) "
-                f"was previously reverted:\n  {prior_reason[:200]}",
-                file=sys.stderr,
-            )
-            record_attempt(
-                AttemptRecord(
-                    timestamp=now_iso(),
-                    rule_id=art.rule_id,
-                    template=template_name,
-                    signature=signature,
-                    outcome="skipped",
-                    reason=f"prior revert: {prior_reason[:150]}",
-                )
-            )
-            print(
-                "\nRefine the template in scripts/scaffold_rule.py "
-                "(_QUALIFIER_BLOCKERS, multiplier, tier choices), "
-                "then re-run with --force.",
-                file=sys.stderr,
-            )
-            return 1
-
-        snapshot = _capture_state(_affected_paths(art)) if args.validate else None
-        results = apply_artifacts(art)
-        print(f"\nApplied artifacts for `{art.rule_id}`:", file=sys.stderr)
-        for k, v in results.items():
-            status = "wrote" if v else "skipped (already present)"
-            print(f"  {k}: {status}", file=sys.stderr)
-
-        files_touched = tuple(str(p.relative_to(REPO_ROOT)) for p in _affected_paths(art))
-
-        if args.validate and snapshot is not None:
-            print("\nValidating (pytest + golden NDCG)...", file=sys.stderr)
-            result = _validate(art, allow_ndcg_drop=args.allow_ndcg_drop)
-            if result.passed:
-                print(f"\n[PASS] {result.summary}", file=sys.stderr)
-                print("\nKept changes. Suggested next: review the diff and commit.", file=sys.stderr)
-                record_attempt(
-                    AttemptRecord(
-                        timestamp=now_iso(),
-                        rule_id=art.rule_id,
-                        template=template_name,
-                        signature=signature,
-                        outcome="passed",
-                        reason=result.summary,
-                        files_touched=files_touched,
-                    )
-                )
-            else:
-                print(f"\n[FAIL] {result.summary}", file=sys.stderr)
-                _restore_state(snapshot)
-                print(
-                    "\nReverted all changes. Refine the template "
-                    "(QUALIFIER_BLOCKERS, multiplier, tier choices) in "
-                    "scripts/scaffold_rule.py and re-run.",
-                    file=sys.stderr,
-                )
-                record_attempt(
-                    AttemptRecord(
-                        timestamp=now_iso(),
-                        rule_id=art.rule_id,
-                        template=template_name,
-                        signature=signature,
-                        outcome="reverted",
-                        reason=result.summary[:600],
-                        files_touched=files_touched,
-                    )
-                )
-                return 1
-        else:
-            print("\n(Skipped validation — re-run pytest + golden_set_track manually)", file=sys.stderr)
-    else:
+    if not args.apply:
         _print_integration_steps(art)
         print("\n(Re-run with --apply to write files + patch integration points)")
-    return 0
+        return 0
+
+    outcome = _attempt_one(
+        art,
+        template_name,
+        signature,
+        validate=args.validate,
+        allow_ndcg_drop=args.allow_ndcg_drop,
+        force=args.force,
+    )
+    if outcome == "passed":
+        print("\nKept changes. Suggested next: review the diff and commit.", file=sys.stderr)
+        return 0
+    if outcome == "reverted":
+        print(
+            "\nRefine the template (QUALIFIER_BLOCKERS, multiplier, tier "
+            "choices) in scripts/scaffold_rule.py and re-run.",
+            file=sys.stderr,
+        )
+        return 1
+    # outcome == "skipped"
+    print(
+        "\nRefine the template in scripts/scaffold_rule.py "
+        "(_QUALIFIER_BLOCKERS, multiplier, tier choices), then re-run "
+        "with --force.",
+        file=sys.stderr,
+    )
+    return 1
 
 
 if __name__ == "__main__":
