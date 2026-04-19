@@ -6,7 +6,14 @@ Guidance for Claude Code working in this repo.
 
 MTG Synergy Graph — deterministic, rule-based EDH/Commander synergy scorer
 using Forge DSL ports. No training, no EDHREC at inference.
-Current aggregate NDCG@30 ~ 0.246, Hi-Syn 224/1000 on the 100-commander golden set.
+Current aggregate NDCG@30 ~ 0.251 on the 100-commander golden set.
+2026-04-19 audit-driven cleanup deleted 9 net-negative or dead rules
+(`etb_sac_target`, `power_matters`, `token_sac_chain`, `pan_density`,
+`token_etb_damage` → kept as CONTENTIOUS, `damage_synergy`,
+`counter_producer`, `pinger`, `peer_evasion_tribal`, `yard_caster`)
+for an aggregate NDCG lift of +0.0049 — see
+`scripts/_audit_rule_impact.py` for the per-rule impact methodology
+(NDCG@30 metric + golden-set safety net + CONTENTIOUS verdict).
 Filter-axis generalization (2026-04-18):
 - Extract the subject type (Land, Creature, Artifact, creature subtype) from a
   commander's ChangesZone BF→GY trigger filter, then narrow cost_feeds_trigger
@@ -202,7 +209,8 @@ uv run python scripts/import_cardsfolder.py                              # Impor
 uv run python scripts/recommend.py --commander "Korvold, Fae-Cursed King" --top 30 --explain
 uv run python scripts/compare_edhrec.py --commanders tests/fixtures/golden_set.json
 uv run python scripts/golden_set_track.py --baseline tests/fixtures/golden_set_run.json
-uv run pytest tests/                                                     # 649 tests, ~1s
+uv run pytest tests/                                                     # 959 tests, ~1s
+uv run python scripts/_audit_rule_impact.py                              # Per-rule impact audit (NDCG + golden safety net), ~10 min
 ```
 
 ## Scoring Architecture — Universal Port Matcher
@@ -244,7 +252,6 @@ pair creates a synergy. Each wraps an existing mechanical map.
 | token_producer | ChangesZone Creature trigger | Token effects | Purphoros |
 | go_wide | Continuous creature pump | Token effects | Jetmir |
 | voltron | Hexproof/Exalted keyword | Auras and Equipment | Sigarda/Rafiq |
-| etb_sac_target | GY reanimate effect | self-ETB + sacrifice cost creatures | Meren/Karador |
 | combat_enhancer | DamageDone trigger OR Attacks-Self trigger w/ engine effect (AddPhase/Dig/Play/Mana/Token/DealDamage/Discard/Mill, or 2+ value effects) | AddPhase + Double Strike | Saskia / Etali / Scourge of the Throne |
 | wheel_synergy | Drawn trigger (opp-facing OR self+Token/Counter payoff) | Mode:Hand Discard + Draw | Nekusar, Locust God |
 | monarch_synergy | BecomeMonarch effect | BecomeMonarch + CantAttackUnless pillowfort | Queen Marchesa |
@@ -253,20 +260,17 @@ pair creates a synergy. Each wraps an existing mechanical map.
 | populate_stack | CopyPermanent with Populate:True in raw | Other Populate CopyPermanent cards | Ghired |
 | artifact_recursion | GY→BF Artifact effect | self-sac artifacts, ETB artifacts | Osgir/Daretti |
 | copy_synergy | CopyPermanent effect | populate targets, ETB creatures | Ghired/Riku |
-| token_sac_chain | Sacrificed trigger | Treasure/Food/Clue/Blood producers | Korvold |
 | panharmonicon (reverse) | cmdr subtype match | candidates doubling cmdr triggers | Kykar+Harmonic Prodigy |
 | panharmonicon (stack) | cmdr Panharmonicon | other Panharmonicon statics | Yarok+Panharmonicon |
 | evasion | DamageDone combat (non-tribal) | self-unblockable creatures | Saskia/Derevi |
 | cheat_cmc | ChangeZone hand→BF with ChangeType | CMC-bucketed type matches (6+, 4-5) | Kaalia |
 | cost_reduction_target | ReduceCost static | high-CMC creatures (6+) | Rakdos/Animar |
-| pinger | scales_with LifeOppsLost | DealDamage/LoseLife targeting opponents | Rakdos |
 | toughness_synergy | scales_with CardToughness | Defender creatures | Phenax |
 | cascade_value | Cascade keyword | high-CMC spells with valuable effects | Maelstrom Wanderer |
 | subject_zone_feeder | ChangesZone BF→GY trigger w/ non-Creature subject (Land, Artifact, Enchantment) | effect=Sacrifice SacValid=<subject> + effect=ChangeZoneAll mass return from Graveyard. Scope-filtered (reject Defined=Opponent). | Titania (Land); any future subject-specific death-trigger commander |
 | counter_axis_feeder | any cmdr port valid_filter contains `counters_GE_<TYPE>` on non-Self scope | counter_axis_payoff > counter_producer (self-sac-only cards dropped) > etb_counter_keyword > self_recur_keyword (P1P1 only) | Marchesa (trigger), Hamza (scales_with); any future counters_GE commander |
 | modified_axis_feeder | any cmdr port carries the `modified` qualifier on a non-Self axis (rejecting `TargetsValid` / description clauses) | modified_p1p1_doubler > modified_p1p1_producer > modified_self_grower (creatures only) > modified_proliferate > modified_etb_keyword (etbCounter:P1P1 + Modular) | Kodama of the West Tree, Red XIII, SP//dr, Sephiroth, Chishiro, Goro-Goro, Silver Sable |
 | damage_doubler_synergy | replacement.DamageDone with amp `replacement_result` (DmgTwice/DmgTriple/DmgPlus*) targeting opponent; rejects Prevent / self-target / DmgMinus | damage_amp_stack (other replacement doublers) > damage_pinger (non-combat repeating trigger + DealDamage opponent) | Torbran, Gisela, Solphim, Tor Wauki, Raphael, Wolverine, Neriv, Ojer Axonil, Absorbing Man and Titania |
-| peer_evasion_tribal | commander has a keyword in `_PEER_BLOCKING_KEYWORDS` (Horsemanship, Shadow) | other cards with the SAME keyword | every Portal Three Kingdoms horsemanship legendary (Cao Ren, Liu Bei, Lu Bu, Lu Meng, Lu Xun, Ma Chao, Sun Ce, Xiahou Dun, Yuan Shao, Zhang Fei, Zhang He, Zhao Zilong, Lady Zhurong, Guan Yu) |
 | creatures_as_lands_landfall | static with Affected=Creature and AddType=Land | LandPlayed triggers + ChangesZone Land ETB triggers (landfall payoffs) | Ashaya, Soul of the Wild |
 
 ### IDF Weighting (`universal_scorer.py`)

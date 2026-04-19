@@ -56,9 +56,11 @@ Caveats:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import sqlite3
 import sys
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -79,6 +81,19 @@ FULL_BASELINE = REPO_ROOT / "tests" / "fixtures" / "full_set_baseline.json"
 #: classified MARGINAL: it contributes hi_syn improvement but barely
 #: above noise (under one hi_syn lift per ten touched commanders).
 _MARGINAL_RATIO: float = 0.1
+
+#: Per-commander golden-NDCG drop required to override an aggregate
+#: HARMFUL/TRIVIAL/MARGINAL verdict. If removing the rule drops a
+#: golden-set commander by at least this much NDCG@30, the rule is
+#: doing real work for that commander even if its aggregate looks
+#: net-negative — see the Prossh / token_etb_damage gotcha.
+_GOLDEN_DROP_THRESHOLD: float = 0.05
+
+#: Minimum |Δndcg| for a per-commander result to be tracked as a
+#: "mover" worth showing in the per-rule detail listing. Filters out
+#: floating-point noise where the rule's monkey-patch produces
+#: identical scoring up to ~1e-3.
+_MOVER_NDCG_THRESHOLD: float = 0.01
 
 
 #: Hand-written rules whose helper name doesn't follow the
@@ -295,6 +310,29 @@ def classify_impact(
     )
 
 
+@contextlib.contextmanager
+def _patched_helper(eng: SynergyEngine, helper_name: str, original: object) -> Iterator[None]:
+    """Monkey-patch ``core.<helper_name>`` to return ``[]`` and clear
+    the engine's score cache so the next ``page_by_oracle_id`` call
+    rebuilds with the patched helper. Restores both on exit.
+
+    The audit relies on ``SynergyEngine._score_cache`` being the cache
+    keyed by commander tuple consulted by ``page_by_oracle_id``.
+    Reaching into a private attribute is fragile — if the engine
+    renames the cache, ``setattr`` would silently create a new
+    attribute rather than failing, and the audit would start returning
+    stale (cached) WITH-rule scores for the WITHOUT-rule pass. Update
+    here whenever ``SynergyEngine`` internals change.
+    """
+    setattr(core, helper_name, lambda *a, **k: [])
+    eng._score_cache.clear()
+    try:
+        yield
+    finally:
+        setattr(core, helper_name, original)
+        eng._score_cache.clear()
+
+
 def _audit_many(
     rule_ids: list[str],
     syn_db: Path,
@@ -307,8 +345,9 @@ def _audit_many(
     is computed ONCE for the union of every rule's touched commander
     set, and a single ``SynergyEngine`` is reused across all rule
     audits (preserving its candidate cache + IDF cache between
-    monkey-patch swaps). Cuts wall-clock from ~30 min to ~2 min for
-    the full 76-rule audit.
+    monkey-patch swaps). Cuts wall-clock for the full 75-rule audit
+    from ~30 min (per-rule engine creation) down to ~10 min (single
+    engine + golden-set safety check on every rule).
     """
     # Step 1: resolve helpers + touched sets up-front; skip rules with
     # no helper or no touched commanders.
@@ -337,21 +376,20 @@ def _audit_many(
 
     # Step 2: union of all touched oracle_ids — score each ONCE WITH
     # all rules active to build the baseline.
-    union_oids = sorted({oid for _, _, targets in plans for _, oid in targets})
-    print(f"  baseline: scoring {len(union_oids)} unique commanders WITH all rules...", file=sys.stderr)
+    union_oids = {oid for _, _, targets in plans for _, oid in targets}
 
-    # Build oid → name lookup for label fetching (NDCG needs commander name).
+    # Build oid → name lookups for label fetching (NDCG needs commander
+    # name). Two maps because golden-only oids aren't in the touched-
+    # set plans; merging avoids an O(n) linear scan in the baseline
+    # loop.
     oid_to_name: dict[str, str] = {oid: name for _, _, targets in plans for name, oid in targets}
-
-    # Gate-miss safety net: golden-set commanders whose helper might
-    # actually fire even though the registered gate misses them.
-    # Score the golden 100 ONCE for baseline; per TRIVIAL/MARGINAL rule
-    # we re-score under the patch and check for NDCG drops the
-    # touched-set audit would have missed.
     golden_targets = _golden_set_oids(syn_db, name_to_oid)
-    golden_oids_set = {oid for _, oid in golden_targets}
-    # Add golden oids to the union so baseline scores them.
-    extended_union = sorted(set(union_oids) | golden_oids_set)
+    goid_to_name: dict[str, str] = dict((oid, name) for name, oid in [(n, o) for n, o in golden_targets])
+
+    # Gate-miss safety net: include golden-set oids in the baseline so
+    # we can re-score them per rule and detect commanders whose helper
+    # actually fires even though the registered gate misses them.
+    extended_union = sorted(union_oids | goid_to_name.keys())
     print(f"  baseline: scoring {len(extended_union)} unique commanders WITH all rules...", file=sys.stderr)
 
     edhrec_conn = sqlite3.connect(edhrec_db)
@@ -365,9 +403,7 @@ def _audit_many(
             for i, oid in enumerate(extended_union, 1):
                 if i % 100 == 0:
                     print(f"    baseline {i}/{len(extended_union)}", file=sys.stderr)
-                # oid_to_name covers union; for golden-only oids use
-                # the golden_targets map.
-                name = oid_to_name.get(oid) or next((n for n, o in golden_targets if o == oid), None)
+                name = oid_to_name.get(oid) or goid_to_name.get(oid)
                 if name is None:
                     continue
                 baseline[oid] = hi_syn_and_ndcg(eng, edhrec_conn, oid, name)
@@ -376,17 +412,10 @@ def _audit_many(
             # touched cmdrs. Engine + caches persist across patches.
             for rule_id, helper_name, targets in plans:
                 original = getattr(core, helper_name)
-                setattr(core, helper_name, lambda *a, **k: [])
-                try:
-                    # Bust per-engine score cache so the patched helper's
-                    # output is reflected (engine memoises by commander).
-                    eng._score_cache.clear()
+                with _patched_helper(eng, helper_name, original):
                     without_scores: dict[str, tuple[int, float] | None] = {
                         oid: hi_syn_and_ndcg(eng, edhrec_conn, oid, name) for name, oid in targets
                     }
-                finally:
-                    setattr(core, helper_name, original)
-                    eng._score_cache.clear()
 
                 # Movers: (name, w_hits, wo_hits, hits_delta, ndcg_delta).
                 movers: list[tuple[str, int, int, int, float]] = []
@@ -406,7 +435,7 @@ def _audit_many(
                     ndcg_sum_delta += ndcg_d
                     if ndcg_d < ndcg_max_drop:
                         ndcg_max_drop = ndcg_d
-                    if hits_d != 0 or abs(ndcg_d) >= 0.01:
+                    if hits_d != 0 or abs(ndcg_d) >= _MOVER_NDCG_THRESHOLD:
                         movers.append((name, w_hits, wo_hits, hits_d, ndcg_d))
                 # Rank by combined magnitude: hits dominate, NDCG breaks ties.
                 movers.sort(key=lambda m: (-abs(m[3]), -abs(m[4])))
@@ -430,9 +459,7 @@ def _audit_many(
                 golden_max_drop = 0.0
                 golden_max_cmdr = ""
                 if golden_targets:
-                    setattr(core, helper_name, lambda *a, **k: [])
-                    try:
-                        eng._score_cache.clear()
+                    with _patched_helper(eng, helper_name, original):
                         for gname, goid in golden_targets:
                             if goid not in baseline or baseline[goid] is None:
                                 continue
@@ -445,15 +472,13 @@ def _audit_many(
                             if d > golden_max_drop:
                                 golden_max_drop = d
                                 golden_max_cmdr = gname
-                    finally:
-                        setattr(core, helper_name, original)
-                        eng._score_cache.clear()
                     # If removing the rule drops a golden commander by
-                    # >=0.05 NDCG, override TRIVIAL/MARGINAL verdicts
-                    # to "positive" (rule is doing real work the gate
-                    # missed) AND override HARMFUL to "contentious"
-                    # (rule both helps + hurts; needs human review).
-                    if golden_max_drop >= 0.05:
+                    # at least the threshold, override TRIVIAL/MARGINAL
+                    # verdicts to "positive" (rule is doing real work
+                    # the gate missed) AND override HARMFUL to
+                    # "CONTENTIOUS" (rule both helps + hurts; needs
+                    # human review).
+                    if golden_max_drop >= _GOLDEN_DROP_THRESHOLD:
                         if verdict in ("TRIVIAL", "MARGINAL"):
                             verdict = "positive"
                         elif verdict == "HARMFUL":
@@ -625,6 +650,13 @@ def main() -> int:
         print(f"\nPer-commander movers (top {args.top_movers} by |Δ|):")
         for v in detail_rules:
             print(f"\n  {v['rule_id']} [{v['verdict']}]:")
+            # CONTENTIOUS / golden-rescued positives surface the
+            # specific golden-set commander whose NDCG would drop if
+            # the rule were removed — primary trigger for the verdict.
+            golden_cmdr = v.get("golden_max_cmdr") or ""
+            golden_drop = v.get("golden_max_drop", 0.0)
+            if golden_cmdr and golden_drop >= _GOLDEN_DROP_THRESHOLD:
+                print(f"    [golden-set anchor] {golden_cmdr[:50]}: -{golden_drop:.3f} NDCG if removed")
             for mover in v["movers"][: args.top_movers]:
                 # Movers can be 4-tuples (legacy _audit_one) or 5-tuples (_audit_many w/ NDCG).
                 if len(mover) == 5:
