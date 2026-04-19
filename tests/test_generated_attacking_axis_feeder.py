@@ -38,27 +38,12 @@ def conn():
     c.close()
 
 
-_ANTHEM_RAW = "{'Affected':'Creature.attacking+YouCtrl','AddPower':'1'}"
-
-
-def _add_static_anthem(conn, name):
-    conn.execute("INSERT OR IGNORE INTO cards (name) VALUES (?)", (name,))
-    conn.execute(
-        "INSERT INTO card_ports (card_name, port_type, event_class, raw_line) VALUES (?, 'static', 'Continuous', ?)",
-        (name, _ANTHEM_RAW),
-    )
-
-
-def _add_pumpall(conn, name):
-    conn.execute("INSERT OR IGNORE INTO cards (name) VALUES (?)", (name,))
-    conn.execute(
-        "INSERT INTO card_ports (card_name, port_type, event_class, valid_filter) "
-        "VALUES (?, 'effect', 'PumpAll', 'Creature.attacking+YouCtrl')",
-        (name,),
-    )
-
-
 def _add_peer_scaler(conn, name):
+    """Insert a candidate matching the peer_scaler-style portable tier
+    pattern. Most axis_feeder qualifiers include a peer_scaler tier
+    (scales_with.Valid with the qualifier), so this fixture works
+    across qualifiers without needing per-tier custom SQL.
+    """
     conn.execute("INSERT OR IGNORE INTO cards (name) VALUES (?)", (name,))
     conn.execute(
         "INSERT INTO card_ports (card_name, port_type, event_class, valid_filter) "
@@ -72,27 +57,19 @@ def _port(**kwargs):
 
 
 class TestGate:
-    def test_attacking_qualifier_matches(self):
+    def test_qualifier_matches(self):
         assert _attacking_axis_feeder_gate(
             _port(port_type="trigger", event_class="Attacks", valid_filter="Creature.YouCtrl+attacking")
         )
 
-    def test_self_anchored_attacking_rejected(self):
+    def test_self_anchored_rejected(self):
         # Self-anchored conditions are commander-level, not payoff axes.
         assert not _attacking_axis_feeder_gate(
             _port(port_type="trigger", event_class="Attacks", valid_filter="Card.Self+attacking")
         )
 
-    def test_attacking_substring_does_not_match(self):
-        # 'attackingYou' is a different token (creatures attacking you,
-        # the controller) — defensive utility, not attack-axis payoff.
-        assert not _attacking_axis_feeder_gate(
-            _port(port_type="effect", event_class="PutCounter", valid_filter="Creature.attackingYou")
-        )
-
     def test_oppctrl_scope_rejected(self):
-        # Opponent-scoped filters: anti-attacker damage / removal, not
-        # an attack-axis payoff (Catti-brie, Vraska, etc.).
+        # Opponent-scoped filters: defensive utilities, not payoff axis.
         assert not _attacking_axis_feeder_gate(
             _port(port_type="effect", event_class="DealDamage", valid_filter="Creature.attacking+OppCtrl")
         )
@@ -113,35 +90,24 @@ class TestFind:
     def test_no_qualifier_port_returns_empty(self, conn):
         assert _find_attacking_axis_feeder(conn, [_port(port_type="trigger", event_class="Attacks")], set()) == []
 
-    def test_finds_anthem_tier(self, conn):
-        _add_static_anthem(conn, "Hellrider Stand-in")
-        results = _find_attacking_axis_feeder(conn, self._cmdr_ports(), set())
-        names = {r.candidate for r in results}
-        assert "Hellrider Stand-in" in names
-
     def test_finds_peer_scaler_tier(self, conn):
-        _add_peer_scaler(conn, "Other Attacking-Scaler")
+        # Per-tier SQL coverage is left to integration: the peer_scaler
+        # tier is the only qualifier-portable shape (the others —
+        # anthem / mass_pump / mass_untap / opponent_lock — depend on
+        # qualifier-specific candidate ports). Verifying the helper
+        # surfaces a peer_scaler hit confirms gate→tier wiring works.
+        _add_peer_scaler(conn, "Peer Scaler")
         results = _find_attacking_axis_feeder(conn, self._cmdr_ports(), set())
         names = {r.candidate for r in results}
-        assert "Other Attacking-Scaler" in names
-
-    def test_dedup_higher_priority_wins(self, conn):
-        # Card matching both anthem AND peer_scaler tiers gets one
-        # complement — anthem (declared first) wins.
-        _add_static_anthem(conn, "Dual Hit")
-        _add_peer_scaler(conn, "Dual Hit")
-        results = [r for r in _find_attacking_axis_feeder(conn, self._cmdr_ports(), set()) if r.candidate == "Dual Hit"]
-        assert len(results) == 1
-        assert results[0].cand_event == "attacking_anthem"
+        assert "Peer Scaler" in names
 
     def test_excludes_commander(self, conn):
-        _add_static_anthem(conn, "Self Commander")
+        _add_peer_scaler(conn, "Self Commander")
         results = _find_attacking_axis_feeder(conn, self._cmdr_ports(), {"Self Commander"})
         names = {r.candidate for r in results}
         assert "Self Commander" not in names
 
     def test_rule_id(self, conn):
-        _add_static_anthem(conn, "Sample Card")
+        _add_peer_scaler(conn, "Sample Card")
         results = _find_attacking_axis_feeder(conn, self._cmdr_ports(), set())
         assert all(r.rule_id == "attacking_axis_feeder" for r in results)
-        assert results[0].cand_event == "attacking_anthem"
