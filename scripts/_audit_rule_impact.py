@@ -60,7 +60,7 @@ import contextlib
 import json
 import sqlite3
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -179,7 +179,7 @@ def _resolve_helper(rule_id: str) -> str:
     return _RULE_HELPER_OVERRIDES.get(rule_id, f"_find_{rule_id}")
 
 
-def _golden_set_oids(syn_db: Path, name_to_oid: dict[str, str]) -> list[tuple[str, str]]:
+def _golden_set_oids(name_to_oid: dict[str, str]) -> list[tuple[str, str]]:
     """Return ``[(commander_name, oracle_id), ...]`` for the 100-cmdr golden
     set. Used as a gate-miss safety net: if a rule classified TRIVIAL by
     its touched set still drops golden NDCG, the gate is missing
@@ -211,15 +211,15 @@ def _name_to_oid(syn_db: Path) -> dict[str, str]:
     partners = {p for e in golden.get("entries", []) for p in e["commander"].split(" + ")}
     missing = partners - out.keys()
     if missing:
-        conn = sqlite3.connect(syn_db)
-        conn.row_factory = sqlite3.Row
-        try:
+        # closing() ensures the connection closes on exception without
+        # the implicit commit() that sqlite3's own context manager runs
+        # — we only read here, no transaction to commit.
+        with contextlib.closing(sqlite3.connect(syn_db)) as conn:
+            conn.row_factory = sqlite3.Row
             for n in missing:
                 row = conn.execute("SELECT oracle_id FROM cards WHERE name=? LIMIT 1", (n,)).fetchone()
                 if row and row["oracle_id"]:
                     out[n] = row["oracle_id"]
-        finally:
-            conn.close()
     return out
 
 
@@ -311,7 +311,7 @@ def classify_impact(
 
 
 @contextlib.contextmanager
-def _patched_helper(eng: SynergyEngine, helper_name: str, original: object) -> Iterator[None]:
+def _patched_helper(eng: SynergyEngine, helper_name: str, original: Callable[..., list]) -> Iterator[None]:
     """Monkey-patch ``core.<helper_name>`` to return ``[]`` and clear
     the engine's score cache so the next ``page_by_oracle_id`` call
     rebuilds with the patched helper. Restores both on exit.
@@ -383,8 +383,8 @@ def _audit_many(
     # set plans; merging avoids an O(n) linear scan in the baseline
     # loop.
     oid_to_name: dict[str, str] = {oid: name for _, _, targets in plans for name, oid in targets}
-    golden_targets = _golden_set_oids(syn_db, name_to_oid)
-    goid_to_name: dict[str, str] = dict((oid, name) for name, oid in [(n, o) for n, o in golden_targets])
+    golden_targets = _golden_set_oids(name_to_oid)
+    goid_to_name: dict[str, str] = {oid: name for name, oid in golden_targets}
 
     # Gate-miss safety net: include golden-set oids in the baseline so
     # we can re-score them per rule and detect commanders whose helper
@@ -609,20 +609,15 @@ def main() -> int:
         file=sys.stderr,
     )
 
-    if len(rules) > 1:
-        # Bulk audit: shared baseline + single engine instance.
-        results = _audit_many(rules, args.db, args.edhrec_db, name_to_oid)
-        if not results:
-            print("  [skip] no auditable rules in input", file=sys.stderr)
-    else:
-        # Single-rule path retains the simpler one-shot flow.
-        results = []
-        for r in rules:
-            verdict = _audit_one(r, args.db, args.edhrec_db, name_to_oid)
-            if verdict is None:
-                print(f"  [skip] {r}: helper not found in core", file=sys.stderr)
-                continue
-            results.append(verdict)
+    # Always use _audit_many — even for a single rule. The shared-engine
+    # path computes NDCG@30 + the golden-set safety check that the
+    # legacy single-rule _audit_one fallback omits. _audit_one is kept
+    # importable for tests / external callers that need the simpler
+    # hits-only metric, but main() should always go through the
+    # NDCG-aware path.
+    results = _audit_many(rules, args.db, args.edhrec_db, name_to_oid)
+    if not results:
+        print("  [skip] no auditable rules in input", file=sys.stderr)
 
     # Summary table — hits + NDCG + golden-gate safety check.
     # ``goldDrop`` is the max NDCG drop on a golden-set commander when
