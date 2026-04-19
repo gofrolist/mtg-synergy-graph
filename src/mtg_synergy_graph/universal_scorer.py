@@ -53,7 +53,6 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "opponent_forcing": "opponent_forcing",
     "token_producer": "port_match",
     "voltron": "scaling",
-    "etb_sac_target": "etb_value",
     "combat_enhancer": "port_match",
     "wheel_synergy": "port_match",
     "artifact_recursion": "graveyard_synergy",
@@ -139,7 +138,6 @@ _FEEDS_COMMANDER_RULES: frozenset[str] = frozenset(
 _FED_BY_COMMANDER_RULES: frozenset[str] = frozenset(
     {
         "effect_feeds_trigger",
-        "etb_sac_target",
     }
 )
 
@@ -151,7 +149,6 @@ _FED_BY_COMMANDER_RULES: frozenset[str] = frozenset(
 _SYNERGY_PAIRS: dict[frozenset[str], float] = {
     # Sacrifice + recursion loop
     frozenset({"cost_feeds_trigger", "graveyard_play"}): 0.05,
-    frozenset({"cost_feeds_trigger", "etb_sac_target"}): 0.05,
     # Sacrifice fodder engine
     frozenset({"sacrifice_cluster", "token_sac_chain"}): 0.05,
     frozenset({"effect_feeds_trigger", "sacrifice_cluster"}): 0.04,
@@ -167,8 +164,6 @@ _SYNERGY_PAIRS: dict[frozenset[str], float] = {
     frozenset({"cost_reduction_target", "pinger"}): 0.05,
     # Cheat-into-play: type match + CMC bonus
     frozenset({"cheat_cmc", "value_engine"}): 0.03,
-    # Graveyard: ETB target + recursion
-    frozenset({"etb_sac_target", "graveyard_play"}): 0.04,
     # Landfall: land enabler + zone resonance
     frozenset({"landfall_enabler", "zone_resonance"}): 0.04,
     # Counter synergies

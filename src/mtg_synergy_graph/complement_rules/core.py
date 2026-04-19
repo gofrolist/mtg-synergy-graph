@@ -956,7 +956,6 @@ from .graveyard import (  # noqa: E402
     _find_artifact_recursion,
     _find_copy_synergy,
     _find_dies_drain,
-    _find_etb_sac_targets,
     _find_graveyard_fillers,
     _find_graveyard_sac_value,
     _find_gy_loader,
@@ -1137,7 +1136,6 @@ def find_all_complements(
         out.extend(_find_opponent_forcing(conn, cmdr_ports, cmdr_set))
         out.extend(_find_token_producers_for_trigger(conn, cmdr_ports, cmdr_set))
         out.extend(_find_static_strategy(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_etb_sac_targets(conn, cmdr_ports, cmdr_set))
         out.extend(_find_combat_enhancers(conn, cmdr_ports, cmdr_set))
         out.extend(_find_attack_payoffs(conn, cmdr_ports, cmdr_set, candidate_cache))
         out.extend(_find_wheel_synergy(conn, cmdr_ports, cmdr_set))

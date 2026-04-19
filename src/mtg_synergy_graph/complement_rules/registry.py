@@ -267,16 +267,6 @@ def _token_etb_damage_gate(port: PortRow) -> bool:
     return (port.get("event_class") or "").strip() == "Token"
 
 
-def _etb_sac_target_gate(port: PortRow) -> bool:
-    """Commander has GY-reanimate effect (Meren / Karador shape).
-    Gate matches the ChangeZone effect from Graveyard."""
-    if (port.get("port_type") or "").strip() != "effect":
-        return False
-    if (port.get("event_class") or "").strip() != "ChangeZone":
-        return False
-    return (port.get("zone_origin") or "").strip() == "Graveyard"
-
-
 def _graveyard_play_gate(port: PortRow) -> bool:
     """Commander has effects that interact with the graveyard
     (cast-from-grave, GY-replay grants, mass return). Gate fires on
@@ -628,7 +618,6 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("voltron", _voltron_gate),
     RuleGate("evasion", _evasion_gate),
     RuleGate("token_etb_damage", _token_etb_damage_gate),
-    RuleGate("etb_sac_target", _etb_sac_target_gate),
     RuleGate("graveyard_play", _graveyard_play_gate),
     RuleGate("gy_loader", _gy_loader_gate),
     RuleGate("cost_reduction_target", _cost_reduction_gate),

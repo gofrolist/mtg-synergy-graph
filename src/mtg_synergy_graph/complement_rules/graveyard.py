@@ -640,49 +640,6 @@ def _find_graveyard_sac_value(
     return results
 
 
-def _find_etb_sac_targets(
-    conn: sqlite3.Connection,
-    cmdr_ports: list[PortRow],
-    cmdr_set: set[str],
-) -> list[PortComplement]:
-    """Find creatures with self-ETB + sacrifice cost for reanimation commanders.
-
-    Meren recurs creatures from graveyard -> wants Plaguecrafter (ETB forces
-    sacrifice, then sacrifices itself), Spore Frog (sac to Fog), Sakura-Tribe
-    Elder (sac to fetch land). These are "sac-recur" creatures.
-
-    Narrow intersection: self-ETB trigger AND sacrifice cost -> ~200-400 cards.
-    """
-    if not _wants_graveyard_recursion(cmdr_ports):
-        return []
-
-    cur = conn.execute(
-        "SELECT DISTINCT a.card_name FROM card_ports a "
-        "WHERE a.port_type = 'trigger' AND a.event_class = 'ChangesZone' "
-        "AND a.valid_filter LIKE '%Card.Self%' "
-        "AND a.zone_destination = 'Battlefield' "
-        "AND a.card_name IN ("
-        "  SELECT card_name FROM card_ports "
-        "  WHERE port_type = 'cost' AND event_class = 'sacrifice'"
-        ")"
-    )
-    results: list[PortComplement] = []
-    for r in cur.fetchall():
-        name = r["card_name"]
-        if name not in cmdr_set:
-            results.append(
-                PortComplement(
-                    rule_id="etb_sac_target",
-                    direction="synergy",
-                    candidate=name,
-                    cmdr_event="graveyard_reanimate",
-                    cand_event="etb_sac_creature",
-                )
-            )
-
-    return results
-
-
 def _has_creature_dies_trigger(cmdr_ports: list[PortRow]) -> bool:
     """Return True iff the commander itself triggers on another creature
     dying, OR amplifies such triggers via a Panharmonicon-style static.
