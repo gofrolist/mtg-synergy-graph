@@ -15,15 +15,17 @@ This script closes that gap. For each rule:
 
 Verdicts:
 
-  * ``TRIVIAL``  — every touched commander has Δ = 0. Helper fires
-    but its emitted complements never surface in top-30. Safe to
-    delete; aggregate NDCG won't change.
+  * ``TRIVIAL``  — no per-commander movement OR wins offset losses
+    to net-zero. Helper fires but produces no useful net change.
   * ``HARMFUL``  — net Δ < 0 across touched commanders. Rule is
     actively displacing better candidates. Aggregate-NDCG
     validation can't catch this when the per-cmdr signal averages
     out across thousands of commanders.
-  * ``positive`` — net Δ > 0. Rule is contributing measurable
-    value. Keep.
+  * ``MARGINAL`` — net Δ > 0 but ratio sum/touched < 0.1, i.e.
+    fewer than one hi_syn improvement per ten touched commanders.
+    Rule contributes something but barely above noise; consider
+    whether the template is worth keeping.
+  * ``positive`` — net Δ > 0 with ratio >= 0.1. Real contribution.
 
 Usage::
 
@@ -67,6 +69,11 @@ from mtg_synergy_graph.complement_rules import core  # noqa: E402
 GENERATED_DIR = REPO_ROOT / "src" / "mtg_synergy_graph" / "complement_rules" / "generated"
 GOLDEN_BASELINE = REPO_ROOT / "tests" / "fixtures" / "golden_set_run.json"
 FULL_BASELINE = REPO_ROOT / "tests" / "fixtures" / "full_set_baseline.json"
+
+#: Below this ratio of (sum_delta / touched_count), a positive rule is
+#: classified MARGINAL: it contributes hi_syn improvement but barely
+#: above noise (under one hi_syn lift per ten touched commanders).
+_MARGINAL_RATIO: float = 0.1
 
 
 def _all_generated_rules() -> list[str]:
@@ -170,16 +177,19 @@ def _audit_one(
 
     sum_delta = sum(m[3] for m in movers)
     max_abs = max((abs(m[3]) for m in movers), default=0)
-    # max_abs == 0:           no per-cmdr movement at all -> trivial
-    # sum_delta < 0:           net hi_syn loss -> HARMFUL (revert)
-    # sum_delta == 0 (movers): wins offset losses, net-zero impact -> trivial
-    # sum_delta > 0:           net hi_syn gain -> positive (ship)
-    if max_abs == 0:
+    n_scored = scored or 1  # avoid div-by-zero
+    ratio = sum_delta / n_scored
+    # max_abs == 0:                 no per-cmdr movement at all   -> trivial
+    # sum_delta < 0:                 net hi_syn loss               -> HARMFUL
+    # sum_delta == 0 (movers):       wins offset losses, net-zero  -> trivial
+    # 0 < ratio < _MARGINAL_RATIO:   net positive but barely above noise -> MARGINAL
+    # ratio >= _MARGINAL_RATIO:      real net hi_syn gain          -> positive
+    if max_abs == 0 or sum_delta == 0:
         verdict = "TRIVIAL"
     elif sum_delta < 0:
         verdict = "HARMFUL"
-    elif sum_delta == 0:
-        verdict = "TRIVIAL"
+    elif ratio < _MARGINAL_RATIO:
+        verdict = "MARGINAL"
     else:
         verdict = "positive"
 

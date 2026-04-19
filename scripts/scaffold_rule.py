@@ -1374,14 +1374,20 @@ class ValidationResult:
     """Outcome of post-apply validation. ``passed`` is the AND of all
     individual checks; ``summary`` is a one-paragraph narrative.
 
-    Three orthogonal signals from the orchestrator:
+    Four orthogonal signals from the orchestrator:
 
     - ``trivial``: passed everything but contributes no measurable
-      hi_syn improvement (zero touched OR fires-but-never-lands).
-      Kept on disk but blocked from retry.
+      hi_syn improvement (zero touched OR fires-but-never-lands OR
+      wins offset losses to net zero). Kept on disk but blocked
+      from retry.
     - ``harmful``: pre-ship impact check found NEGATIVE net hi_syn
       delta across touched commanders — rule is displacing better
       candidates from top-30. ``passed`` is False; auto-revert.
+    - ``marginal``: net positive hi_syn delta but ratio
+      sum/touched < 0.1 — under one improvement per ten touched
+      commanders, barely above noise. Kept on disk but blocked
+      from retry on the same template (don't keep shipping rules
+      that barely register).
     """
 
     passed: bool
@@ -1390,6 +1396,8 @@ class ValidationResult:
     trivial_reason: str | None = None
     harmful: bool = False
     harmful_reason: str | None = None
+    marginal: bool = False
+    marginal_reason: str | None = None
 
 
 def _run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess:
@@ -1455,6 +1463,8 @@ def _validate(art: ScaffoldArtifacts, allow_ndcg_drop: float) -> ValidationResul
         trivial_reason=payload.get("trivial_reason"),
         harmful=bool(payload.get("harmful")),
         harmful_reason=payload.get("harmful_reason"),
+        marginal=bool(payload.get("marginal")),
+        marginal_reason=payload.get("marginal_reason"),
     )
 
 
@@ -1605,7 +1615,7 @@ def _attempt_one(
         print("\n(Skipped validation — re-run pytest + golden_set_track manually)", file=sys.stderr)
         return "passed"  # No validation means we trust the user; treat as passed.
 
-    print("\nValidating (pytest + golden NDCG + broad NDCG + trivial check)...", file=sys.stderr)
+    print("\nValidating (pytest + golden NDCG + broad NDCG + impact check)...", file=sys.stderr)
     result = _validate(art, allow_ndcg_drop=allow_ndcg_drop)
     if result.passed and result.trivial:
         # Kept on disk (rule is mechanically correct, no regressions),
@@ -1625,6 +1635,24 @@ def _attempt_one(
             )
         )
         return "trivial"
+    if result.passed and result.marginal:
+        # Kept on disk (mechanically correct + net positive) but signal
+        # is too weak to justify continuing on this template axis. Same
+        # blocking treatment as trivial.
+        print(f"\n[MARGINAL] {result.summary}", file=sys.stderr)
+        print(f"  reason: {result.marginal_reason}", file=sys.stderr)
+        record_attempt(
+            AttemptRecord(
+                timestamp=now_iso(),
+                rule_id=art.rule_id,
+                template=template_name,
+                signature=signature,
+                outcome="marginal",
+                reason=(result.marginal_reason or "barely-positive impact"),
+                files_touched=files_touched,
+            )
+        )
+        return "marginal"
     if result.passed:
         print(f"\n[PASS] {result.summary}", file=sys.stderr)
         record_attempt(
@@ -1721,6 +1749,7 @@ def main() -> int:
                     t,
                     counts.get("passed", 0),
                     counts.get("trivial", 0),
+                    counts.get("marginal", 0),
                     counts.get("reverted", 0),
                     counts.get("skipped", 0),
                     fresh,
@@ -1728,10 +1757,16 @@ def main() -> int:
                     "BLOCKED" if blocked else "ok",
                 )
             )
-        print(f"{'template':<35} {'pass':>5} {'triv':>5} {'rev':>5} {'skip':>5} {'fresh':>6} {'rate':>6}  status")
-        print("-" * 80)
+        print(
+            f"{'template':<35} {'pass':>5} {'triv':>5} {'marg':>5} {'rev':>5} "
+            f"{'skip':>5} {'fresh':>6} {'rate':>6}  status"
+        )
+        print("-" * 86)
         for row in rows:
-            print(f"{row[0]:<35} {row[1]:>5} {row[2]:>5} {row[3]:>5} {row[4]:>5} {row[5]:>6} {row[6]:>6.2f}  {row[7]}")
+            print(
+                f"{row[0]:<35} {row[1]:>5} {row[2]:>5} {row[3]:>5} {row[4]:>5} "
+                f"{row[5]:>5} {row[6]:>6} {row[7]:>6.2f}  {row[8]}"
+            )
         return 0
 
     if args.walk > 1 and not args.apply:
@@ -1747,7 +1782,7 @@ def main() -> int:
         # Walk mode: drain the queue. Each iteration re-picks (the
         # picker skips known-bad combos), then applies+validates.
         if args.walk > 1:
-            counts = {"passed": 0, "reverted": 0, "skipped": 0, "trivial": 0}
+            counts = {"passed": 0, "reverted": 0, "skipped": 0, "trivial": 0, "marginal": 0}
             shipped: list[str] = []
             for i in range(1, args.walk + 1):
                 print(f"\n========== Walk iteration {i}/{args.walk} ==========", file=sys.stderr)
@@ -1782,6 +1817,7 @@ def main() -> int:
                 f"  passed:   {counts['passed']}  ({', '.join(shipped) or '—'})",
                 file=sys.stderr,
             )
+            print(f"  marginal: {counts['marginal']}", file=sys.stderr)
             print(f"  trivial:  {counts['trivial']}", file=sys.stderr)
             print(f"  reverted: {counts['reverted']}", file=sys.stderr)
             print(f"  skipped:  {counts['skipped']}", file=sys.stderr)
@@ -1845,9 +1881,17 @@ def main() -> int:
         return 0
     if outcome == "trivial":
         print(
-            "\nKept changes (no regressions), but the rule activates on no "
-            "validated commander — its impact is invisible to the harness. "
-            "Either broaden the gate or extend the validation universe.",
+            "\nKept changes (no regressions), but the rule contributes no "
+            "measurable hi_syn improvement on any validated commander. "
+            "Either broaden the gate or rethink the template hypothesis.",
+            file=sys.stderr,
+        )
+        return 1
+    if outcome == "marginal":
+        print(
+            "\nKept changes (mechanically positive) but signal is barely above "
+            "noise (sum_Δhi_syn / touched < 0.1). Consider tightening the "
+            "gate to focus on the archetype where the rule actually helps.",
             file=sys.stderr,
         )
         return 1

@@ -78,6 +78,8 @@ def _fail(summary: str) -> None:
             "trivial_reason": None,
             "harmful": False,
             "harmful_reason": None,
+            "marginal": False,
+            "marginal_reason": None,
             "summary": summary,
         }
     )
@@ -177,14 +179,16 @@ def _impact_check(
 
     sum_delta = sum(m[3] for m in movers)
     max_abs = max((abs(m[3]) for m in movers), default=0)
-    # max_abs == 0:           no per-cmdr movement -> trivial
-    # sum_delta < 0:           net hi_syn loss -> harmful (revert)
-    # sum_delta == 0 (movers): wins offset losses, net-zero -> trivial
-    # sum_delta > 0:           net hi_syn gain -> positive (ship)
+    n = len(touched_oids) or 1
+    ratio = sum_delta / n
+    # See _audit_rule_impact._MARGINAL_RATIO -- duplicated here to keep
+    # this module self-contained (one process, no extra imports).
     if max_abs == 0 or sum_delta == 0:
         verdict = "trivial"
     elif sum_delta < 0:
         verdict = "harmful"
+    elif ratio < 0.1:
+        verdict = "marginal"
     else:
         verdict = "positive"
     return {
@@ -340,6 +344,8 @@ def main() -> int:
                 "trivial_reason": None,
                 "harmful": True,
                 "harmful_reason": (f"Net hi_syn delta {sum_d:+} across {n_touched} touched cmdrs; top losers: {worst}"),
+                "marginal": False,
+                "marginal_reason": None,
                 "summary": f"HARMFUL: {base_summary} Top losers: {worst}",
             }
         )
@@ -348,6 +354,11 @@ def main() -> int:
     if verdict == "trivial":
         if n_touched == 0:
             t_reason = f"no commander in broad universe ({broad_total}) activates the gate"
+        elif sum_d == 0 and max_d > 0:
+            t_reason = (
+                f"rule fires on {n_touched} commander(s) and shifts ranks "
+                f"(max|Δhi_syn|={max_d}) but wins offset losses to net zero"
+            )
         else:
             t_reason = f"rule fires on {n_touched} commander(s) but never lands in top-30 (max|Δhi_syn|=0)"
         _emit(
@@ -357,7 +368,29 @@ def main() -> int:
                 "trivial_reason": t_reason,
                 "harmful": False,
                 "harmful_reason": None,
+                "marginal": False,
+                "marginal_reason": None,
                 "summary": f"TRIVIAL: {base_summary}",
+            }
+        )
+        return 0
+
+    if verdict == "marginal":
+        top_movers = ", ".join(f"{n} ({d:+})" for n, _, _, d in impact["movers"][:3])
+        ratio = sum_d / (n_touched or 1)
+        _emit(
+            {
+                "passed": True,
+                "trivial": False,
+                "trivial_reason": None,
+                "harmful": False,
+                "harmful_reason": None,
+                "marginal": True,
+                "marginal_reason": (
+                    f"Net hi_syn delta {sum_d:+} across {n_touched} touched "
+                    f"cmdrs; ratio {ratio:.3f} < 0.1 threshold (barely above noise)"
+                ),
+                "summary": (f"MARGINAL: {base_summary}" + (f" Top movers: {top_movers}." if top_movers else "")),
             }
         )
         return 0
@@ -371,6 +404,8 @@ def main() -> int:
             "trivial_reason": None,
             "harmful": False,
             "harmful_reason": None,
+            "marginal": False,
+            "marginal_reason": None,
             "summary": (f"PASS: {base_summary}" + (f" Top movers: {top_movers}." if top_movers else "")),
         }
     )

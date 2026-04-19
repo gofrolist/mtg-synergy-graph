@@ -98,7 +98,7 @@ def prior_attempts_for_template(template: str) -> list[AttemptRecord]:
     return [a for a in load_attempts() if a.template == template]
 
 
-_BLOCKING_OUTCOMES: frozenset[str] = frozenset({"reverted", "trivial"})
+_BLOCKING_OUTCOMES: frozenset[str] = frozenset({"reverted", "trivial", "marginal"})
 
 #: Templates whose pass rate falls at or below this threshold AND have
 #: at least :data:`_TEMPLATE_BLOCK_MIN_FRESH` fresh attempts get blocked
@@ -124,7 +124,7 @@ def template_stats() -> dict[str, dict[str, int]]:
 def template_pass_rate(template: str) -> tuple[float, int]:
     """Laplace-smoothed pass rate + ``fresh`` attempt count for one
     template. Returns ``((passed + 1) / (fresh + 2), fresh)`` where
-    ``fresh = passed + trivial + reverted``.
+    ``fresh = passed + trivial + marginal + reverted``.
 
     Smoothing rationale:
     - templates with no history get a neutral 0.5 (give them a chance);
@@ -132,12 +132,15 @@ def template_pass_rate(template: str) -> tuple[float, int]:
     - at scale, converges to the true rate.
 
     ``skipped`` outcomes don't count — they're refusals, not new tries.
+    Only ``passed`` counts as a true success — ``trivial`` and
+    ``marginal`` ship the rule but signal weak template quality.
     """
     stats = template_stats().get(template, {})
     passed = stats.get("passed", 0)
     trivial = stats.get("trivial", 0)
+    marginal = stats.get("marginal", 0)
     reverted = stats.get("reverted", 0)
-    fresh = passed + trivial + reverted
+    fresh = passed + trivial + marginal + reverted
     return ((passed + 1) / (fresh + 2), fresh)
 
 
@@ -174,6 +177,9 @@ def is_known_bad(template: str, rule_id: str) -> tuple[bool, str | None]:
     - ``trivial``: the apply step passed validation but the rule didn't
       activate on any commander in the validation universe. Same code
       → same no-op, no point re-shipping.
+    - ``marginal``: the apply step passed validation and shipped, but
+      net hi_syn delta / touched < 0.1 — barely above noise. Don't
+      keep proposing the same template+rule_id when the signal is weak.
 
     ``skipped`` outcomes don't block (they're already a refusal, not a
     fresh attempt). ``passed`` doesn't block (caller wouldn't be
