@@ -111,6 +111,7 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "etbreplacement_other_choosect_tribal": "port_match",
     "mentor_tribal": "port_match",
     "repl_moved_exile_stack": "port_match",
+    "changeling_tribal": "port_match",
 }
 
 # ---------------------------------------------------------------------------
@@ -529,6 +530,8 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     "mentor_tribal": 2.0,
     # AUTO-GENERATED replacement-stack — IDF handles weighting
     "repl_moved_exile_stack": 2.0,
+    # AUTO-GENERATED keyword-tribal — IDF handles weighting
+    "changeling_tribal": 2.0,
 }
 
 

@@ -934,6 +934,7 @@ from .density import (  # noqa: E402
     _find_tribal_density_complements,
     _find_value_engine_density,
 )
+from .generated.changeling_tribal import _find_changeling_tribal  # noqa: E402
 from .generated.choose_tribal import _find_choose_tribal  # noqa: E402
 from .generated.doctor_s_tribal import _find_doctor_s_tribal  # noqa: E402
 from .generated.etbreplacement_copy_dbcopy_optional_tribal import (  # noqa: E402
@@ -1175,6 +1176,7 @@ def find_all_complements(
         out.extend(_find_counter_axis_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_modified_axis_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_damage_doubler_synergy(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_changeling_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_repl_moved_exile_stack(conn, cmdr_ports, cmdr_set))
         out.extend(_find_mentor_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_etbreplacement_other_choosect_tribal(conn, cmdr_ports, cmdr_set))

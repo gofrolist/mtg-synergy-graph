@@ -34,6 +34,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from .core import COMPLEMENT_RULES, PortRow
+from .generated.changeling_tribal import _changeling_tribal_gate
 from .generated.choose_tribal import _choose_tribal_gate
 from .generated.doctor_s_tribal import _doctor_s_tribal_gate
 from .generated.etbreplacement_copy_dbcopy_optional_tribal import _etbreplacement_copy_dbcopy_optional_tribal_gate
@@ -667,6 +668,7 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("etbreplacement_other_choosect_tribal", _etbreplacement_other_choosect_tribal_gate),
     RuleGate("mentor_tribal", _mentor_tribal_gate),
     RuleGate("repl_moved_exile_stack", _repl_moved_exile_stack_gate),
+    RuleGate("changeling_tribal", _changeling_tribal_gate),
 )
 
 
