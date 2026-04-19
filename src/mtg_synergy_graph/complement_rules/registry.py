@@ -136,6 +136,18 @@ def _modified_axis_gate(port: PortRow) -> bool:
     return bool(raw and _MODIFIED_QUALIFIER_RE.search(raw))
 
 
+def _cardpower_axis_gate(port: PortRow) -> bool:
+    """Mirror the runtime gate of ``_find_cardpower_axis_feeders``.
+
+    Fires on ``scales_with.CardPower`` ports. ``Count$CardPower`` resolves
+    to the commander's own power, so no Self-qualification filter is
+    needed — the port type itself is the signal.
+    """
+    if (port.get("port_type") or "").strip() != "scales_with":
+        return False
+    return (port.get("event_class") or "").strip() == "CardPower"
+
+
 def _counter_axis_gate(port: PortRow) -> bool:
     if (port.get("port_type") or "").strip() not in ("trigger", "scales_with", "static"):
         return False
@@ -546,6 +558,7 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("damage_doubler_synergy", _damage_doubler_gate),
     RuleGate("modified_axis_feeder", _modified_axis_gate),
     RuleGate("counter_axis_feeder", _counter_axis_gate),
+    RuleGate("cardpower_axis_feeder", _cardpower_axis_gate),
     RuleGate("opponent_forcing", _opponent_forcing_gate),
     RuleGate("wheel_synergy", _wheel_synergy_gate),
     RuleGate("mana_doubler", _mana_doubler_gate),

@@ -105,6 +105,7 @@ _MOVER_NDCG_THRESHOLD: float = 0.01
 #: to the convention.
 _RULE_HELPER_OVERRIDES: dict[str, str] = {
     "aura_equipment_support": "_find_static_strategy",
+    "cardpower_axis_feeder": "_find_cardpower_axis_feeders",
     "cheat_cmc": "_find_cheat_cmc_bonus",
     "combat_enhancer": "_find_combat_enhancers",
     "cost_payoff": "_find_cost_payoff_complements",

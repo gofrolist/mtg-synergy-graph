@@ -975,6 +975,7 @@ from .tokens import (  # noqa: E402
     _find_token_producers_for_trigger,
 )
 from .utility import (  # noqa: E402
+    _find_cardpower_axis_feeders,
     _find_cascade_value,
     _find_cost_payoff_complements,
     _find_counter_axis_feeders,
@@ -1163,6 +1164,7 @@ def find_all_complements(
         out.extend(_find_creature_untap_engine(conn, cmdr_ports, cmdr_set))
         out.extend(_find_counter_axis_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_modified_axis_feeders(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_cardpower_axis_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_damage_doubler_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_attacking_axis_feeder(conn, cmdr_ports, cmdr_set))
         out.extend(_find_repl_damagedone_counters_stack(conn, cmdr_ports, cmdr_set))

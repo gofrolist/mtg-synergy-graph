@@ -167,6 +167,43 @@ Schema-driven gap closures (2026-04-18):
   Multiplier 2.0×.
 - 20 new tests (14 doubler + 6 horsemanship); 872 total tests
   passing, 86% coverage. Golden set NDCG unchanged at 0.246137.
+cardpower_axis_feeder (2026-04-19):
+- New general rule for the 67 legendary-creature commanders whose
+  `SVar:X:Count$CardPower` scales an ability with their own power
+  (Combustion Man's damage = power, Krenko TSK's Goblin token count,
+  Carmen / Alesha / Ayesha Tanaka's cmcLEX reanimate/Dig cap,
+  Inferno of the Star Mounts's charge-up to 20). `Count$CardPower`
+  resolves to the commander's own power — different axis from
+  `TotalPower` / `greatestPower` which scan the board. The deleted
+  `power_matters` rule conflated the two and fed high-power creatures
+  to every scales_with Power commander; this rule targets only
+  CardPower and feeds **commander-pumping** cards.
+- Two deduped tiers (highest priority wins per card):
+  - `cardpower_big_attachment`: Equipment/Aura with static Continuous
+    `AddPower ≥ 3` OR `AddPower = X/Y/Z` (scaling SVar). ~220 cards —
+    Colossus Hammer, Eldrazi Conscription, Grafted Wargear, Kaldra
+    Compleat. +1 / +2 trinkets dropped (not meaningful pumps).
+  - `cardpower_p1p1_producer`: `effect=PutCounter[All] P1P1` on
+    Creature target (not Self); drops self-sac-only distributors via
+    `_only_self_sac_cost`. ~400 cards (Rishkar, Drana). Grower
+    archetypes (Alesha / Carmen / Krenko TSK / Agatha all put P1P1
+    counters on themselves as part of their triggered chain)
+    compound with external producers; non-grower CardPower
+    commanders still benefit because a P1P1 counter on the commander
+    raises the count.
+- Disjoint from `voltron` (4 of 67 overlap, gated on
+  Hexproof/Exalted/Shroud/Trample) and from `modified_axis_feeder` /
+  `counter_axis_feeder` (2 overlap each, require explicit qualifiers).
+- Per-rule audit: `positive` verdict — 59 commanders touched,
+  ndcgΣ +0.707 with max +0.244 (Raubahn +3 hits, +0.244 NDCG),
+  Ayesha Tanaka +0.208, Ian the Reckless +0.139, Combustion Man
+  +0.120. One regression: Velomachus Lorehold -0.222 (her
+  EDHREC Hi-Syn values high-CMC Instants/Sorceries she cheats via
+  Play.cmcLEX, which now yield top-30 slots to Equipment); net
+  remains strongly positive. Multiplier 2.5× (one notch below
+  counter/modified's 3.0× because the attachment tier partially
+  overlaps with the general voltron pool). Golden NDCG unchanged
+  at 0.25105. 13 new tests; 972 total.
 Port extraction: 108,644 ports from 32,327 cards (GenericChoice + StaticAbilities$
 expansion, deduped after A1's 2^N re-walk fix).
 
@@ -209,7 +246,7 @@ uv run python scripts/import_cardsfolder.py                              # Impor
 uv run python scripts/recommend.py --commander "Korvold, Fae-Cursed King" --top 30 --explain
 uv run python scripts/compare_edhrec.py --commanders tests/fixtures/golden_set.json
 uv run python scripts/golden_set_track.py --baseline tests/fixtures/golden_set_run.json
-uv run pytest tests/                                                     # 959 tests, ~1s
+uv run pytest tests/                                                     # 972 tests, ~1s
 uv run python scripts/_audit_rule_impact.py                              # Per-rule impact audit (NDCG + golden safety net), ~10 min
 ```
 
@@ -272,6 +309,7 @@ pair creates a synergy. Each wraps an existing mechanical map.
 | modified_axis_feeder | any cmdr port carries the `modified` qualifier on a non-Self axis (rejecting `TargetsValid` / description clauses) | modified_p1p1_doubler > modified_p1p1_producer > modified_self_grower (creatures only) > modified_proliferate > modified_etb_keyword (etbCounter:P1P1 + Modular) | Kodama of the West Tree, Red XIII, SP//dr, Sephiroth, Chishiro, Goro-Goro, Silver Sable |
 | damage_doubler_synergy | replacement.DamageDone with amp `replacement_result` (DmgTwice/DmgTriple/DmgPlus*) targeting opponent; rejects Prevent / self-target / DmgMinus | damage_amp_stack (other replacement doublers) > damage_pinger (non-combat repeating trigger + DealDamage opponent) | Torbran, Gisela, Solphim, Tor Wauki, Raphael, Wolverine, Neriv, Ojer Axonil, Absorbing Man and Titania |
 | creatures_as_lands_landfall | static with Affected=Creature and AddType=Land | LandPlayed triggers + ChangesZone Land ETB triggers (landfall payoffs) | Ashaya, Soul of the Wild |
+| cardpower_axis_feeder | `scales_with.CardPower` port (`SVar:X:Count$CardPower`) | cardpower_big_attachment (Equipment/Aura w/ static AddPower ≥ 3 or AddPower=X/Y/Z, ~220) > cardpower_p1p1_producer (PutCounter P1P1 on Creature target, self-sac-only excluded, ~400) | Combustion Man, Krenko (Tin Street Kingpin), Alesha, Carmen, Agatha, Inferno of the Star Mounts, Raubahn, Ian the Reckless |
 
 ### IDF Weighting (`universal_scorer.py`)
 

@@ -11,6 +11,7 @@ import sqlite3
 import pytest
 
 from mtg_synergy_graph.complement_rules.utility import (
+    _find_cardpower_axis_feeders,
     _find_cost_payoff_complements,
     _find_counter_axis_feeders,
     _find_counter_target_payoff,
@@ -1857,6 +1858,230 @@ class TestFindModifiedAxisFeeders:
         _add_port(conn, "Iron Apprentice", port_type="keyword", event_class="etbCounter:P1P1:1")
         results = _find_modified_axis_feeders(conn, self._kodama_ports(), set())
         assert all(r.rule_id == "modified_axis_feeder" for r in results)
+
+
+class TestFindCardPowerAxisFeeders:
+    """General rule for commanders with ``SVar:X:Count$CardPower`` —
+    their abilities scale with their own power, so they want to be
+    pumped (big-pump Equipment/Aura + P1P1 counter producers).
+
+    Rejects other scales_with axes (TotalPower, greatestPower) so the
+    rule stays mechanically distinct from the deleted ``power_matters``
+    rule that fed unrelated high-power creatures to this archetype."""
+
+    def _combustion_ports(self):
+        return [
+            _port_row(
+                port_type="scales_with",
+                event_class="CardPower",
+                valid_filter="",
+                scaling_expression="Count$CardPower",
+                raw_line="SVar:X:Count$CardPower",
+            )
+        ]
+
+    def test_no_cardpower_skips(self, conn):
+        ports = [_port_row(port_type="trigger", event_class="DamageDone", valid_filter="Card.Self")]
+        assert _find_cardpower_axis_feeders(conn, ports, set()) == []
+
+    def test_totalpower_does_not_activate(self, conn):
+        """``TotalPower`` / ``greatestPower`` are different axes (they
+        scan the board), not the self-power axis. Must not trigger."""
+        ports = [
+            _port_row(
+                port_type="scales_with",
+                event_class="TotalPower",
+                raw_line="SVar:X:Count$TotalPower",
+            )
+        ]
+        _add_port(
+            conn,
+            "Colossus Hammer",
+            port_type="static",
+            event_class="Continuous",
+            raw_line="{'Mode': 'Continuous', 'Affected': 'Creature.EquippedBy', 'AddPower': '10'}",
+        )
+        conn.execute("UPDATE cards SET types='Artifact Equipment' WHERE name='Colossus Hammer'")
+        assert _find_cardpower_axis_feeders(conn, ports, set()) == []
+
+    def test_big_attachment_tier_integer(self, conn):
+        """Equipment with ``AddPower: '10'`` ≥ 3 qualifies."""
+        _add_port(
+            conn,
+            "Colossus Hammer",
+            port_type="static",
+            event_class="Continuous",
+            raw_line="{'Mode': 'Continuous', 'Affected': 'Creature.EquippedBy', 'AddPower': '10'}",
+        )
+        conn.execute("UPDATE cards SET types='Artifact Equipment' WHERE name='Colossus Hammer'")
+        results = _find_cardpower_axis_feeders(conn, self._combustion_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Colossus Hammer") == "cardpower_big_attachment"
+
+    def test_big_attachment_tier_scaling_svar(self, conn):
+        """Equipment with ``AddPower: 'X'`` (scaling SVar) qualifies
+        regardless of the integer comparison."""
+        _add_port(
+            conn,
+            "Grafted Wargear",
+            port_type="static",
+            event_class="Continuous",
+            raw_line="{'Mode': 'Continuous', 'Affected': 'Creature.EquippedBy', 'AddPower': 'X'}",
+        )
+        conn.execute("UPDATE cards SET types='Artifact Equipment' WHERE name='Grafted Wargear'")
+        results = _find_cardpower_axis_feeders(conn, self._combustion_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Grafted Wargear") == "cardpower_big_attachment"
+
+    def test_small_attachment_rejected(self, conn):
+        """Equipment with ``AddPower: '1'`` < 3 does NOT qualify — +1/+0
+        trinkets aren't meaningful power-scaling fuel. The p1p1_producer
+        tier still won't pull it in because it has no PutCounter port."""
+        _add_port(
+            conn,
+            "Short Sword",
+            port_type="static",
+            event_class="Continuous",
+            raw_line="{'Mode': 'Continuous', 'Affected': 'Creature.EquippedBy', 'AddPower': '1'}",
+        )
+        conn.execute("UPDATE cards SET types='Artifact Equipment' WHERE name='Short Sword'")
+        results = _find_cardpower_axis_feeders(conn, self._combustion_ports(), set())
+        assert "Short Sword" not in _candidates(results)
+
+    def test_big_aura_tier(self, conn):
+        """Auras count too — Eldrazi Conscription-style +10/+10."""
+        _add_port(
+            conn,
+            "Eldrazi Conscription",
+            port_type="static",
+            event_class="Continuous",
+            raw_line="{'Mode': 'Continuous', 'Affected': 'Creature.EnchantedBy', 'AddPower': '10'}",
+        )
+        conn.execute("UPDATE cards SET types='Enchantment Aura' WHERE name='Eldrazi Conscription'")
+        results = _find_cardpower_axis_feeders(conn, self._combustion_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Eldrazi Conscription") == "cardpower_big_attachment"
+
+    def test_non_attachment_with_add_power_rejected(self, conn):
+        """A non-Equipment / non-Aura (e.g. a creature with an
+        AddPower-granting static) isn't in the attachment tier —
+        the gate specifically targets cards that STICK to the
+        commander, so creatures don't qualify here."""
+        _add_port(
+            conn,
+            "Battered Creature",
+            port_type="static",
+            event_class="Continuous",
+            raw_line="{'Mode': 'Continuous', 'Affected': 'Creature.YouCtrl', 'AddPower': '3'}",
+        )
+        conn.execute("UPDATE cards SET types='Creature' WHERE name='Battered Creature'")
+        results = _find_cardpower_axis_feeders(conn, self._combustion_ports(), set())
+        assert "Battered Creature" not in _candidates(results)
+
+    def test_p1p1_producer_tier(self, conn):
+        """Hardened Scales-style producer on Creature target qualifies
+        the p1p1_producer tier (even if no attachment pool present)."""
+        _add_port(
+            conn,
+            "Rishkar, Peema Renegade",
+            port_type="effect",
+            event_class="PutCounter",
+            counter_type="P1P1",
+            valid_filter="Creature.YouCtrl",
+        )
+        results = _find_cardpower_axis_feeders(conn, self._combustion_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Rishkar, Peema Renegade") == "cardpower_p1p1_producer"
+
+    def test_self_only_p1p1_rejected(self, conn):
+        """Self-only PutCounter (Champion of Lambholt grows itself only)
+        doesn't distribute counters to the commander — it should NOT
+        land in cardpower_p1p1_producer."""
+        _add_port(
+            conn,
+            "Champion of Lambholt",
+            port_type="effect",
+            event_class="PutCounter",
+            counter_type="P1P1",
+            valid_filter="Self",
+        )
+        results = _find_cardpower_axis_feeders(conn, self._combustion_ports(), set())
+        assert "Champion of Lambholt" not in _candidates(results)
+
+    def test_self_sac_only_p1p1_rejected(self, conn):
+        """A card whose ONLY sacrifice-cost targets itself is a
+        one-shot payoff, not a sustained distributor — rejected via
+        ``_only_self_sac_cost``."""
+        _add_port(
+            conn,
+            "One-Shot Counter",
+            port_type="effect",
+            event_class="PutCounter",
+            counter_type="P1P1",
+            valid_filter="Creature.YouCtrl",
+        )
+        _add_port(
+            conn,
+            "One-Shot Counter",
+            port_type="cost",
+            event_class="sacrifice",
+            cost_target="self",
+        )
+        results = _find_cardpower_axis_feeders(conn, self._combustion_ports(), set())
+        assert "One-Shot Counter" not in _candidates(results)
+
+    def test_excludes_commander(self, conn):
+        _add_port(
+            conn,
+            "Combustion Man",
+            port_type="effect",
+            event_class="PutCounter",
+            counter_type="P1P1",
+            valid_filter="Creature.YouCtrl",
+        )
+        results = _find_cardpower_axis_feeders(conn, self._combustion_ports(), {"Combustion Man"})
+        assert "Combustion Man" not in _candidates(results)
+
+    def test_attachment_wins_over_producer(self, conn):
+        """A single card carrying both an AddPower attachment port AND
+        a P1P1 PutCounter effect gets ONE complement — the attachment
+        tier (higher priority) wins."""
+        _add_port(
+            conn,
+            "Hybrid Blade",
+            port_type="static",
+            event_class="Continuous",
+            raw_line="{'Mode': 'Continuous', 'Affected': 'Creature.EquippedBy', 'AddPower': '5'}",
+        )
+        _add_port(
+            conn,
+            "Hybrid Blade",
+            port_type="effect",
+            event_class="PutCounter",
+            counter_type="P1P1",
+            valid_filter="Creature.YouCtrl",
+        )
+        conn.execute("UPDATE cards SET types='Artifact Equipment' WHERE name='Hybrid Blade'")
+        hybrids = [
+            r
+            for r in _find_cardpower_axis_feeders(conn, self._combustion_ports(), set())
+            if r.candidate == "Hybrid Blade"
+        ]
+        assert len(hybrids) == 1
+        assert hybrids[0].cand_event == "cardpower_big_attachment"
+
+    def test_rule_id(self, conn):
+        _add_port(
+            conn,
+            "Colossus Hammer",
+            port_type="static",
+            event_class="Continuous",
+            raw_line="{'Mode': 'Continuous', 'Affected': 'Creature.EquippedBy', 'AddPower': '10'}",
+        )
+        conn.execute("UPDATE cards SET types='Artifact Equipment' WHERE name='Colossus Hammer'")
+        results = _find_cardpower_axis_feeders(conn, self._combustion_ports(), set())
+        assert results
+        assert all(r.rule_id == "cardpower_axis_feeder" for r in results)
 
 
 class TestFindDamageDoublerSynergy:

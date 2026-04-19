@@ -90,6 +90,7 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "subject_zone_feeder": "graveyard_synergy",
     "counter_axis_feeder": "counter_synergy",
     "modified_axis_feeder": "counter_synergy",
+    "cardpower_axis_feeder": "port_match",
     "creatures_as_lands_landfall": "port_match",
     "damage_doubler_synergy": "port_match",
     "choose_tribal": "port_match",
@@ -462,6 +463,16 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # counter_axis_feeder rather than the lower 2.5× of subject_zone /
     # creatures_as_lands gates that target less-curated archetypes.
     "modified_axis_feeder": 3.0,
+    # cardpower_axis_feeder: commanders with ``SVar:X:Count$CardPower``
+    # scale their abilities with their own power. Two deduped tiers —
+    # cardpower_big_attachment (~220 Equipment/Aura with AddPower>=3 or
+    # AddPower=X/Y/Z) > cardpower_p1p1_producer (~400 after dropping
+    # self-sac-only). 2.5× (vs counter/modified's 3.0×) because the
+    # attachment tier overlaps with any commander's voltron pool — the
+    # more conservative multiplier guards against flooding the top-30
+    # of existing voltron commanders that happen to share the gate.
+    # Audit may bump to 3.0× if CardPower NDCG rises without regression.
+    "cardpower_axis_feeder": 2.5,
     # creatures_as_lands_landfall: commanders whose type-bending static
     # makes creatures also lands (Ashaya, Soul of the Wild). Pool ~237
     # landfall-trigger cards (Rampaging Baloths, Lotus Cobra, Avenger of

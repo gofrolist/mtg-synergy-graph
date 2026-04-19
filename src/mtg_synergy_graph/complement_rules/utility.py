@@ -778,6 +778,119 @@ def _find_modified_axis_feeders(
     return results
 
 
+#: Matches Forge's ``AddPower`` value inside a static Continuous
+#: raw_line. Captures integer amounts (``AddPower: '3'``) and scaling
+#: SVar references (``AddPower: 'X'``, ``'Y'``, ``'Z'``).
+_ADD_POWER_RE = re.compile(r"'AddPower':\s*'([XYZ]|\d+)'")
+
+
+def _find_cardpower_axis_feeders(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """General rule for commanders whose abilities scale with their own
+    power via ``SVar:<X>:Count$CardPower``.
+
+    ``Count$CardPower`` evaluates to the commander's current power.
+    Combustion Man deals that much damage, Krenko Tin Street Kingpin
+    makes that many Goblin tokens, Carmen and Alesha reanimate cards
+    with mana value up to it, Inferno of the Star Mounts checks for
+    power = 20. Every one of these wants **the commander itself
+    pumped** — not high-power creatures on the board (the deleted
+    ``power_matters`` rule's failure mode was conflating CardPower
+    with TotalPower/greatestPower and feeding unrelated beaters).
+
+    Two deduped tiers (highest priority wins per card):
+
+    - ``cardpower_big_attachment``: Equipment/Aura with a static
+      Continuous port whose ``AddPower`` value is ``>= 3`` OR a scaling
+      SVar (``X``/``Y``/``Z``). Narrows the ~1900 combined Aura+Equipment
+      pool to the ~220 "big pump" staples (Colossus Hammer +10,
+      Eldrazi Conscription +10/+10, Grafted Wargear +X, Kaldra Compleat
+      +5, Battle Mastery, Shadowspear). Small +1/+2 trinkets don't
+      meaningfully feed a power-scaling effect.
+    - ``cardpower_p1p1_producer``: ``effect=PutCounter[All] P1P1`` on a
+      Creature target (excludes Self-only placements and self-sac-only
+      distributors, via :func:`_only_self_sac_cost`). Grower
+      archetypes (Alesha/Carmen/Krenko TSK/Agatha all put counters on
+      themselves as part of their trigger chain) chain with external
+      counter producers; non-grower CardPower commanders still benefit
+      because a P1P1 counter on the commander raises the count.
+
+    Disjoint from ``voltron`` (which gates on
+    Hexproof/Exalted/Shroud/Trample keywords — only 4 of 67 CardPower
+    commanders overlap) and from ``modified_axis_feeder`` /
+    ``counter_axis_feeder`` (which require a ``modified`` /
+    ``counters_GE`` qualifier on the commander — 2 overlap each). The
+    CardPower axis is mechanically distinct: the commander itself is
+    the scaling target.
+    """
+    has_cardpower = any(
+        (p.get("port_type") or "").strip() == "scales_with" and (p.get("event_class") or "").strip() == "CardPower"
+        for p in cmdr_ports
+    )
+    if not has_cardpower:
+        return []
+
+    big_attachment_set: set[str] = set()
+    for row in conn.execute(
+        "SELECT DISTINCT cp.card_name, cp.raw_line "
+        "FROM card_ports cp JOIN cards c ON c.name = cp.card_name "
+        "WHERE cp.port_type = 'static' "
+        "AND cp.raw_line LIKE '%AddPower%' "
+        "AND (c.types LIKE '%Equipment%' OR c.types LIKE '%Aura%')"
+    ):
+        raw = row["raw_line"] or ""
+        match = _ADD_POWER_RE.search(raw)
+        if not match:
+            continue
+        value = match.group(1)
+        if value in ("X", "Y", "Z"):
+            big_attachment_set.add(row["card_name"])
+            continue
+        try:
+            if int(value) >= 3:
+                big_attachment_set.add(row["card_name"])
+        except ValueError:
+            continue
+
+    producer_set: set[str] = {
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports "
+            "WHERE port_type = 'effect' "
+            "AND event_class IN ('PutCounter', 'PutCounterAll') "
+            "AND counter_type = 'P1P1' "
+            "AND valid_filter LIKE '%Creature%' "
+            "AND valid_filter NOT LIKE '%Self%'"
+        )
+    }
+    producer_set -= _only_self_sac_cost(conn)
+
+    tier_priority = (
+        ("cardpower_big_attachment", big_attachment_set),
+        ("cardpower_p1p1_producer", producer_set),
+    )
+    seen: set[str] = set()
+    results: list[PortComplement] = []
+    for cand_event, candidates in tier_priority:
+        for name in candidates:
+            if name in cmdr_set or name in seen:
+                continue
+            seen.add(name)
+            results.append(
+                PortComplement(
+                    rule_id="cardpower_axis_feeder",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="cardpower_axis",
+                    cand_event=cand_event,
+                )
+            )
+    return results
+
+
 def _only_self_sac_cost(conn: sqlite3.Connection) -> frozenset[str]:
     """Return card names whose ONLY sacrifice cost targets themselves.
 
