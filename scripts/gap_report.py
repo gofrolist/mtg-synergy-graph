@@ -504,6 +504,13 @@ def _propose(gap: GapStat, conn: sqlite3.Connection) -> RuleProposal | None:
             "AND replacement_result = ?",
             (ev, sub),
         ).fetchone()[0]
+        # Peer-stack rules need a small pool — IDF only stays meaningful
+        # when the rule's match candidates are a curated subset, not a
+        # broad type. Mirrors the keyword-tribal threshold above. Larger
+        # pools (e.g. Moved[ETBTapped] = 589) ship as MARGINAL, displace
+        # better picks, and net negative — proven empirically.
+        if not 0 < pool <= 100:
+            return None
         return RuleProposal(
             gap=gap,
             template="replacement_stack",

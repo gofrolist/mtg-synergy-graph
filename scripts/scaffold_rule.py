@@ -2066,7 +2066,22 @@ def main() -> int:
             )
             template_name = args.template
             signature: tuple[str, str, str] = ("", "", "")
-            art = _GENERATORS[args.template](stub_proposal)
+            try:
+                art = _GENERATORS[args.template](stub_proposal)
+            except ValueError as exc:
+                # Some templates require concrete signature discriminators
+                # (e.g. replacement_stack needs a non-empty event_class +
+                # replacement_result). The walk picker feeds these from
+                # gap_report; manual --template invocations don't.
+                print(
+                    f"error: template '{args.template}' rejected stub proposal: {exc}",
+                    file=sys.stderr,
+                )
+                print(
+                    "       Use --apply --walk 1 to let the auditor pick a concrete signature.",
+                    file=sys.stderr,
+                )
+                return 2
         else:
             proposal = _pick_top_proposal(conn)
             if proposal is None:
