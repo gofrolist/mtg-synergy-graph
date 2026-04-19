@@ -21,7 +21,7 @@ conn = <sqlite3.Connection object at 0x109102110>
 - **Template**: `creature_count_scaler`
 - **Rationale**: Commander scales_with creature count (valid_filter references Creature). Wants token producers, anthems, wide payoffs. 115 of 175 currently uncovered.
 - **Exemplar commanders** (no rule activation): Adeline, Resplendent Cathar, Ajani, Nacatl Pariah, Alena, Kessig Trapper, Alistair, the Brigadier, Arabella, Abandoned Doll, Aragorn and Arwen, Wed, Ashcoat of the Shadow Swarm, Barret Wallace
-- **Existing rule activations**: scaling(60), aura_equipment_support(10), counter_doubler(1), counter_keyword(1), proliferate_synergy(1)
+- **Existing rule activations**: scaling(60), aura_equipment_support(10), counter_doubler(1), proliferate_synergy(1), counter_keyword(1)
 - **Gate sketch**: `p.port_type='scales_with' AND p.event_class='Valid' AND 'Creature' IN valid_filter AND no type token from {Aura, Equipment, Enchantment, Artifact, Land, ...}`
 - **Tier sketches**:
   - token_producer: effect=Token with TokenScript (creature tokens)
@@ -50,6 +50,7 @@ check: 100 commanders
 - **Estimated pool sizes**: mana_producer=1871, ritual=3436, mana_doubler=11
 
 ### #3: `cost.remove_counter[*]`
+- ⚠️ **Prior failure**: 4 revert(s) on this template — most recent 2026-04-19T03:46:21+00:00: _Golden NDCG regression: drop +0.0011 (baseline 0.2461 -> fresh 0.2451, tolerance 0.005). rank_shifts=0 ndcg_drops=1_
 - **Reach**: 42 commanders carrying this signature; 0 get any rule activation (0%).
 - **Impact**: 42.0
 - **Template**: `counter_removal_payoff`
