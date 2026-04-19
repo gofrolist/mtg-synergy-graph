@@ -942,7 +942,6 @@ from .generated.etbreplacement_copy_dbcopy_optional_tribal import (  # noqa: E40
 from .generated.firebending_2_tribal import _find_firebending_2_tribal  # noqa: E402
 from .generated.living_tribal import _find_living_tribal  # noqa: E402
 from .generated.more_tribal import _find_more_tribal  # noqa: E402
-from .generated.partner_friends_tribal import _find_partner_friends_tribal  # noqa: E402
 from .generated.prowess_tribal import _find_prowess_tribal  # noqa: E402
 from .generated.start_tribal import _find_start_tribal  # noqa: E402
 from .generated.ward_1_tribal import _find_ward_1_tribal  # noqa: E402
@@ -1177,7 +1176,6 @@ def find_all_complements(
         out.extend(_find_modified_axis_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_damage_doubler_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_start_tribal(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_partner_friends_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_firebending_2_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_etbreplacement_copy_dbcopy_optional_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_ward_1_tribal(conn, cmdr_ports, cmdr_set))
