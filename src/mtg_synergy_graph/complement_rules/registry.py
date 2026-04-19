@@ -42,8 +42,6 @@ from .generated.living_tribal import _living_tribal_gate
 from .generated.more_tribal import _more_tribal_gate
 from .generated.prowess_tribal import _prowess_tribal_gate
 from .generated.start_tribal import _start_tribal_gate
-from .generated.ward_1_tribal import _ward_1_tribal_gate
-from .generated.ward_2_tribal import _ward_2_tribal_gate
 
 
 @dataclass(frozen=True)
@@ -658,12 +656,10 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("exalted_density", _exalted_density_gate),
     RuleGate("aura_equipment_support", _aura_equipment_support_gate),
     RuleGate("choose_tribal", _choose_tribal_gate),
-    RuleGate("ward_2_tribal", _ward_2_tribal_gate),
     RuleGate("doctor_s_tribal", _doctor_s_tribal_gate),
     RuleGate("more_tribal", _more_tribal_gate),
     RuleGate("prowess_tribal", _prowess_tribal_gate),
     RuleGate("living_tribal", _living_tribal_gate),
-    RuleGate("ward_1_tribal", _ward_1_tribal_gate),
     RuleGate("etbreplacement_copy_dbcopy_optional_tribal", _etbreplacement_copy_dbcopy_optional_tribal_gate),
     RuleGate("firebending_2_tribal", _firebending_2_tribal_gate),
     RuleGate("start_tribal", _start_tribal_gate),

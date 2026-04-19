@@ -1,0 +1,247 @@
+"""Per-rule impact audit: measure each rule's actual NDCG contribution.
+
+The trivial-detection check in ``_validate_rule.py`` only catches
+rules that activate on **zero** commanders. It misses rules that
+activate but produce no measurable score change in any touched
+commander's top-30 — and rules that activate but *displace* better
+candidates from the top-30 (net-negative impact).
+
+This script closes that gap. For each rule:
+
+1. Find commanders whose ports activate the rule's gate (touched).
+2. Score those commanders WITH the rule (= current state).
+3. Monkey-patch the helper to ``return []`` and re-score them.
+4. Compare ``hi_syn_hits`` per commander; report the delta.
+
+Verdicts:
+
+  * ``TRIVIAL``  — every touched commander has Δ = 0. Helper fires
+    but its emitted complements never surface in top-30. Safe to
+    delete; aggregate NDCG won't change.
+  * ``HARMFUL``  — net Δ < 0 across touched commanders. Rule is
+    actively displacing better candidates. Aggregate-NDCG
+    validation can't catch this when the per-cmdr signal averages
+    out across thousands of commanders.
+  * ``positive`` — net Δ > 0. Rule is contributing measurable
+    value. Keep.
+
+Usage::
+
+    # Audit every generated rule.
+    uv run python scripts/_audit_rule_impact.py
+
+    # Audit specific rules.
+    uv run python scripts/_audit_rule_impact.py --rule-id ward_1_tribal ward_2_tribal
+
+Exits non-zero if any rule is HARMFUL (net Δ < 0), so this can run
+periodically as a smoke check.
+
+Caveats:
+
+  * Caller must pass rules whose helper is named ``_find_<rule_id>``
+    in ``mtg_synergy_graph.complement_rules.core``. All current
+    generated rules follow this convention.
+  * The "without rule" pass changes IDF bucket frequencies and the
+    multi-rule bonus for candidates the rule formerly helped. So
+    Δ measures the rule's contribution **including downstream
+    effects**, which is exactly what we want for an impact audit.
+  * Limited to commanders with EDHREC Hi-Syn data (the metric).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sqlite3
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+
+from _touched_commanders import find_touched_card_names  # noqa: E402
+
+from mtg_synergy_graph import SynergyEngine, compare_to_edhrec  # noqa: E402
+from mtg_synergy_graph.complement_rules import core  # noqa: E402
+
+GENERATED_DIR = REPO_ROOT / "src" / "mtg_synergy_graph" / "complement_rules" / "generated"
+GOLDEN_BASELINE = REPO_ROOT / "tests" / "fixtures" / "golden_set_run.json"
+FULL_BASELINE = REPO_ROOT / "tests" / "fixtures" / "full_set_baseline.json"
+
+
+def _all_generated_rules() -> list[str]:
+    """Discover generated rule modules. Stem == rule_id by convention."""
+    return sorted(p.stem for p in GENERATED_DIR.glob("*.py") if p.stem != "__init__")
+
+
+def _name_to_oid(syn_db: Path) -> dict[str, str]:
+    """Build the union name → oracle_id map across golden + full baselines."""
+    out: dict[str, str] = {}
+
+    # Full set is keyed by oracle_id.
+    full = json.loads(FULL_BASELINE.read_text())
+    for oid, name in full.get("names_by_oracle_id", {}).items():
+        out[name] = oid
+
+    # Golden is keyed by canonical (possibly partner-pair) name; resolve
+    # each partner via the cards table.
+    golden = json.loads(GOLDEN_BASELINE.read_text())
+    partners = {p for e in golden.get("entries", []) for p in e["commander"].split(" + ")}
+    missing = partners - out.keys()
+    if missing:
+        conn = sqlite3.connect(syn_db)
+        conn.row_factory = sqlite3.Row
+        try:
+            for n in missing:
+                row = conn.execute("SELECT oracle_id FROM cards WHERE name=? LIMIT 1", (n,)).fetchone()
+                if row and row["oracle_id"]:
+                    out[n] = row["oracle_id"]
+        finally:
+            conn.close()
+    return out
+
+
+def _hi_syn_hits(engine: SynergyEngine, edhrec_conn: sqlite3.Connection, oid: str) -> int | None:
+    """Hi-Syn hits in top-30 for one oracle_id. ``None`` if no curated data."""
+    try:
+        page = engine.page_by_oracle_id([oid], offset=0, limit=30)
+    except (LookupError, ValueError):
+        return None
+    cmp = compare_to_edhrec(page, edhrec_conn, top_n=30)
+    if cmp.hi_syn_size == 0:
+        return None
+    return cmp.hi_syn_hits
+
+
+def _audit_one(
+    rule_id: str,
+    syn_db: Path,
+    edhrec_db: Path,
+    name_to_oid: dict[str, str],
+) -> dict | None:
+    """Return a verdict dict for one rule, or ``None`` if helper missing."""
+    helper_name = f"_find_{rule_id}"
+    if not hasattr(core, helper_name):
+        return None
+
+    touched = find_touched_card_names(syn_db, name_to_oid.keys(), [rule_id])
+    targets = [(n, name_to_oid[n]) for n in touched if n in name_to_oid]
+
+    if not targets:
+        return {
+            "rule_id": rule_id,
+            "touched": 0,
+            "scored": 0,
+            "sum_delta": 0,
+            "max_abs_delta": 0,
+            "movers": (),
+            "verdict": "TRIVIAL",
+        }
+
+    edhrec_conn = sqlite3.connect(edhrec_db)
+    edhrec_conn.row_factory = sqlite3.Row
+    try:
+        # Pass 1: rule active.
+        with SynergyEngine(syn_db) as eng:
+            with_scores = {oid: _hi_syn_hits(eng, edhrec_conn, oid) for _, oid in targets}
+
+        # Pass 2: rule disabled (helper returns []).
+        original = getattr(core, helper_name)
+        setattr(core, helper_name, lambda *a, **k: [])
+        try:
+            with SynergyEngine(syn_db) as eng:
+                without_scores = {oid: _hi_syn_hits(eng, edhrec_conn, oid) for _, oid in targets}
+        finally:
+            setattr(core, helper_name, original)
+    finally:
+        edhrec_conn.close()
+
+    movers: list[tuple[str, int, int, int]] = []
+    scored = 0
+    for name, oid in targets:
+        w, wo = with_scores.get(oid), without_scores.get(oid)
+        if w is None or wo is None:
+            continue
+        scored += 1
+        d = w - wo
+        if d != 0:
+            movers.append((name, w, wo, d))
+    movers.sort(key=lambda m: -abs(m[3]))
+
+    sum_delta = sum(m[3] for m in movers)
+    max_abs = max((abs(m[3]) for m in movers), default=0)
+    if max_abs == 0:
+        verdict = "TRIVIAL"
+    elif sum_delta < 0:
+        verdict = "HARMFUL"
+    else:
+        verdict = "positive"
+
+    return {
+        "rule_id": rule_id,
+        "touched": len(targets),
+        "scored": scored,
+        "sum_delta": sum_delta,
+        "max_abs_delta": max_abs,
+        "movers": tuple(movers),
+        "verdict": verdict,
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--db", type=Path, default=Path("data/synergy.db"))
+    parser.add_argument("--edhrec-db", type=Path, default=Path("data/tags.db"))
+    parser.add_argument(
+        "--rule-id",
+        nargs="+",
+        metavar="RULE_ID",
+        help="Specific rules to audit. Default: all generated rules.",
+    )
+    parser.add_argument(
+        "--top-movers",
+        type=int,
+        default=5,
+        help="How many top-magnitude per-commander movers to print per rule.",
+    )
+    args = parser.parse_args()
+
+    rules = args.rule_id or _all_generated_rules()
+    name_to_oid = _name_to_oid(args.db)
+    print(
+        f"Auditing {len(rules)} rule(s) against {len(name_to_oid)} commanders...",
+        file=sys.stderr,
+    )
+
+    results: list[dict] = []
+    for r in rules:
+        verdict = _audit_one(r, args.db, args.edhrec_db, name_to_oid)
+        if verdict is None:
+            print(f"  [skip] {r}: no _find_{r} in core", file=sys.stderr)
+            continue
+        results.append(verdict)
+
+    # Summary table.
+    print(f"\n{'rule_id':<55} {'touched':>7} {'scored':>6} {'sum Δ':>6} {'max|Δ|':>7}  verdict")
+    print("-" * 95)
+    for v in results:
+        print(
+            f"{v['rule_id']:<55} {v['touched']:>7} {v['scored']:>6} "
+            f"{v['sum_delta']:>+6} {v['max_abs_delta']:>7}  {v['verdict']}"
+        )
+
+    # Per-rule mover detail (for non-trivial ones).
+    detail_rules = [v for v in results if v["movers"]]
+    if detail_rules:
+        print(f"\nPer-commander movers (top {args.top_movers} by |Δ|):")
+        for v in detail_rules:
+            print(f"\n  {v['rule_id']} [{v['verdict']}]:")
+            for name, w, wo, d in v["movers"][: args.top_movers]:
+                print(f"    {name[:50]:50}  with={w}  without={wo}  Δ={d:+d}")
+
+    harmful = [v for v in results if v["verdict"] == "HARMFUL"]
+    return 1 if harmful else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

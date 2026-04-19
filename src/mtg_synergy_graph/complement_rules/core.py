@@ -944,8 +944,6 @@ from .generated.living_tribal import _find_living_tribal  # noqa: E402
 from .generated.more_tribal import _find_more_tribal  # noqa: E402
 from .generated.prowess_tribal import _find_prowess_tribal  # noqa: E402
 from .generated.start_tribal import _find_start_tribal  # noqa: E402
-from .generated.ward_1_tribal import _find_ward_1_tribal  # noqa: E402
-from .generated.ward_2_tribal import _find_ward_2_tribal  # noqa: E402
 from .graveyard import (  # noqa: E402
     _find_artifact_recursion,
     _find_copy_synergy,
@@ -1178,12 +1176,10 @@ def find_all_complements(
         out.extend(_find_start_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_firebending_2_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_etbreplacement_copy_dbcopy_optional_tribal(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_ward_1_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_living_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_prowess_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_more_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_doctor_s_tribal(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_ward_2_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_choose_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_peer_evasion_tribal(conn, cmdr_ports, cmdr_set))
         return out
