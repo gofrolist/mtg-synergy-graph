@@ -37,7 +37,9 @@ from .core import COMPLEMENT_RULES, PortRow
 from .generated.choose_tribal import _choose_tribal_gate
 from .generated.doctor_s_tribal import _doctor_s_tribal_gate
 from .generated.etbreplacement_copy_dbcopy_optional_tribal import _etbreplacement_copy_dbcopy_optional_tribal_gate
+from .generated.etbreplacement_other_choosect_tribal import _etbreplacement_other_choosect_tribal_gate
 from .generated.firebending_2_tribal import _firebending_2_tribal_gate
+from .generated.mentor_tribal import _mentor_tribal_gate
 from .generated.more_tribal import _more_tribal_gate
 from .generated.prowess_tribal import _prowess_tribal_gate
 from .generated.start_tribal import _start_tribal_gate
@@ -661,6 +663,8 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("etbreplacement_copy_dbcopy_optional_tribal", _etbreplacement_copy_dbcopy_optional_tribal_gate),
     RuleGate("firebending_2_tribal", _firebending_2_tribal_gate),
     RuleGate("start_tribal", _start_tribal_gate),
+    RuleGate("etbreplacement_other_choosect_tribal", _etbreplacement_other_choosect_tribal_gate),
+    RuleGate("mentor_tribal", _mentor_tribal_gate),
 )
 
 
