@@ -36,9 +36,13 @@ from dataclasses import dataclass
 from .core import COMPLEMENT_RULES, PortRow
 from .generated.choose_tribal import _choose_tribal_gate
 from .generated.doctor_s_tribal import _doctor_s_tribal_gate
+from .generated.etbreplacement_copy_dbcopy_optional_tribal import _etbreplacement_copy_dbcopy_optional_tribal_gate
+from .generated.firebending_2_tribal import _firebending_2_tribal_gate
 from .generated.living_tribal import _living_tribal_gate
 from .generated.more_tribal import _more_tribal_gate
+from .generated.partner_friends_tribal import _partner_friends_tribal_gate
 from .generated.prowess_tribal import _prowess_tribal_gate
+from .generated.ward_1_tribal import _ward_1_tribal_gate
 from .generated.ward_2_tribal import _ward_2_tribal_gate
 
 
@@ -659,6 +663,10 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("more_tribal", _more_tribal_gate),
     RuleGate("prowess_tribal", _prowess_tribal_gate),
     RuleGate("living_tribal", _living_tribal_gate),
+    RuleGate("ward_1_tribal", _ward_1_tribal_gate),
+    RuleGate("etbreplacement_copy_dbcopy_optional_tribal", _etbreplacement_copy_dbcopy_optional_tribal_gate),
+    RuleGate("firebending_2_tribal", _firebending_2_tribal_gate),
+    RuleGate("partner_friends_tribal", _partner_friends_tribal_gate),
 )
 
 

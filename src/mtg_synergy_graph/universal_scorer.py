@@ -107,6 +107,10 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "more_tribal": "port_match",
     "prowess_tribal": "port_match",
     "living_tribal": "port_match",
+    "ward_1_tribal": "port_match",
+    "etbreplacement_copy_dbcopy_optional_tribal": "port_match",
+    "firebending_2_tribal": "port_match",
+    "partner_friends_tribal": "port_match",
 }
 
 # ---------------------------------------------------------------------------
@@ -517,6 +521,14 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     "prowess_tribal": 2.0,
     # AUTO-GENERATED keyword-tribal — IDF handles weighting
     "living_tribal": 2.0,
+    # AUTO-GENERATED keyword-tribal — IDF handles weighting
+    "ward_1_tribal": 2.0,
+    # AUTO-GENERATED keyword-tribal — IDF handles weighting
+    "etbreplacement_copy_dbcopy_optional_tribal": 2.0,
+    # AUTO-GENERATED keyword-tribal — IDF handles weighting
+    "firebending_2_tribal": 2.0,
+    # AUTO-GENERATED keyword-tribal — IDF handles weighting
+    "partner_friends_tribal": 2.0,
 }
 
 
