@@ -259,68 +259,6 @@ def _find_reverse_panharmonicon(
     return results
 
 
-def _find_panharmonicon_density(
-    conn: sqlite3.Connection,
-    cmdr_ports: list[PortRow],
-    cmdr_set: set[str],
-) -> list[PortComplement]:
-    """Flat-weight density signal for Panharmonicon commanders.
-
-    Isshin doubles attack triggers but ALL 1049 panharmonicon matches score
-    ~equally due to IDF stratification.  This density rule gives every card
-    with a matching trigger type a flat 0.10 bonus, so cards matching BOTH
-    panharmonicon (IDF ~0.15) AND pan_density (flat 0.10) rise above
-    single-axis matches.
-
-    Unlike the IDF-weighted panharmonicon rule, this does NOT filter on
-    valuable effects — the strategy IS having many triggers of the doubled
-    type (like spell_density for SpellCast commanders).
-    """
-    doubled_modes: set[str] = set()
-    for p in cmdr_ports:
-        ev = (p.get("event_class") or "").strip()
-        if ev != "Panharmonicon":
-            continue
-        raw = str(p.get("raw_line") or "")
-        m = re.search(r"'ValidMode':\s*'([^']+)'", raw)
-        if not m:
-            continue
-        doubled_modes.update(mode.strip() for mode in m.group(1).split(",") if mode.strip())
-
-    if not doubled_modes:
-        return []
-
-    placeholders = ",".join("?" * len(doubled_modes))
-    cur = conn.execute(
-        "SELECT card_name, event_class, valid_filter FROM card_ports "
-        f"WHERE port_type = 'trigger' AND event_class IN ({placeholders})",
-        tuple(doubled_modes),
-    )
-
-    results: list[PortComplement] = []
-    seen: set[str] = set()
-    for r in cur.fetchall():
-        card = r["card_name"]
-        if card in cmdr_set or card in seen:
-            continue
-        vf = r["valid_filter"] or ""
-        if _trigger_only_matches_self(vf):
-            continue
-        seen.add(card)
-        ev = r["event_class"]
-        results.append(
-            PortComplement(
-                rule_id="pan_density",
-                direction="synergy",
-                candidate=card,
-                cmdr_event=f"pan_density_{ev}",
-                cand_event=f"{ev}_trigger",
-            )
-        )
-
-    return results
-
-
 def _find_panharmonicon_stacking(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],

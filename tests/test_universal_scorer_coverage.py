@@ -134,14 +134,14 @@ def test_score_synergy_pair_bonus():
 def test_score_synergy_pair_bonus_multiple_pairs():
     """Cards matching multiple synergy pairs accumulate bonuses."""
     comps = [
-        _comp(rule_id="sacrifice_cluster", cmdr_event="A", cand_event="1"),
-        _comp(rule_id="token_sac_chain", cmdr_event="B", cand_event="2"),
-        _comp(rule_id="effect_feeds_trigger", cmdr_event="C", cand_event="3"),
+        _comp(rule_id="counter_doubler", cmdr_event="A", cand_event="1"),
+        _comp(rule_id="counter_keyword", cmdr_event="B", cand_event="2"),
+        _comp(rule_id="proliferate_synergy", cmdr_event="C", cand_event="3"),
     ]
     idf = {(c.rule_id, c.cmdr_event, c.cand_event, c.filter_group): 1.0 for c in comps}
     us = UniversalScore(complements=comps, staple_bonus=0.0, idf_weights=idf)
-    # 3 rules: flat 0.02*2=0.04 + pairs (sac+token=0.05 + eff_feeds+sac=0.04) = +0.13
-    assert abs(us.score - 3.13) < 1e-9
+    # 3 rules: flat 0.02*2=0.04 + pairs (doubler+keyword=0.03 + doubler+proliferate=0.03) = +0.10
+    assert abs(us.score - 3.10) < 1e-9
 
 
 def test_score_flat_bonus_only_for_undefined_pairs():

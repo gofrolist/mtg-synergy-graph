@@ -29,7 +29,6 @@ from mtg_synergy_graph.complement_rules.panharmonicon import (
 )
 from mtg_synergy_graph.complement_rules.tokens import (
     _find_effect_feeds_etb,
-    _find_token_sac_chain,
 )
 from mtg_synergy_graph.db import open_db
 from mtg_synergy_graph.graph_engine import load_ports_for_set
@@ -102,45 +101,6 @@ class TestFindAllComplements:
         results = find_all_complements(populated_db, ["Korvold, Fae-Cursed King"])
         synergy_candidates = {r.candidate for r in results if r.direction == "synergy"}
         assert "Wrath of God" not in synergy_candidates
-
-
-# ---------------------------------------------------------------------------
-# 3. _find_token_sac_chain
-# ---------------------------------------------------------------------------
-
-
-class TestFindTokenSacChain:
-    def test_korvold_finds_treasure_producer(self, populated_db):
-        """Korvold (Sacrificed trigger) should find Dockside Extortionist
-        which creates Treasure tokens (self-sacrificing)."""
-        cmdr_ports = load_ports_for_set(populated_db, ["Korvold, Fae-Cursed King"])
-        results = _find_token_sac_chain(
-            populated_db,
-            cmdr_ports,
-            {"Korvold, Fae-Cursed King"},
-        )
-        candidates = _candidates(results)
-        assert "Dockside Extortionist" in candidates
-
-    def test_token_sac_chain_has_correct_rule_id(self, populated_db):
-        """Results should have rule_id 'token_sac_chain'."""
-        cmdr_ports = load_ports_for_set(populated_db, ["Korvold, Fae-Cursed King"])
-        results = _find_token_sac_chain(
-            populated_db,
-            cmdr_ports,
-            {"Korvold, Fae-Cursed King"},
-        )
-        assert all(r.rule_id == "token_sac_chain" for r in results)
-
-    def test_non_sac_commander_returns_empty(self, populated_db):
-        """Rhystic Study has no Sacrificed trigger -- should return empty."""
-        cmdr_ports = load_ports_for_set(populated_db, ["Rhystic Study"])
-        results = _find_token_sac_chain(
-            populated_db,
-            cmdr_ports,
-            {"Rhystic Study"},
-        )
-        assert results == []
 
 
 # ---------------------------------------------------------------------------

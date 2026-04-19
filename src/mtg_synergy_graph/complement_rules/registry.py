@@ -98,7 +98,6 @@ _DAMAGE_AMP_RESULTS: frozenset[str] = frozenset(
     {"DmgTwice", "DmgTriple", "DmgPlus", "DmgPlus1", "DmgPlus2", "Dmg2", "Dmg3", "HarshDmg"}
 )
 
-_PEER_BLOCKING_KEYWORDS: frozenset[str] = frozenset({"Horsemanship", "Shadow"})
 
 _MODIFIED_QUALIFIER_RE = re.compile(r"(?<![A-Za-z])modified(?![A-Za-z])")
 _COUNTER_GATE_RE = re.compile(r"counters_GE\d*_[A-Z0-9]+")
@@ -120,12 +119,6 @@ def _damage_doubler_gate(port: PortRow) -> bool:
         return True
     val = m.group(1)
     return any(sub in val for sub in ("Opponent", "OppCtrl", "Player.Opp"))
-
-
-def _peer_evasion_gate(port: PortRow) -> bool:
-    if (port.get("port_type") or "").strip() != "keyword":
-        return False
-    return (port.get("event_class") or "").strip() in _PEER_BLOCKING_KEYWORDS
 
 
 def _modified_axis_gate(port: PortRow) -> bool:
@@ -309,12 +302,6 @@ def _spellcast_density_gate(port: PortRow) -> bool:
     return (port.get("event_class") or "").strip() == "SpellCast"
 
 
-def _power_matters_gate(port: PortRow) -> bool:
-    if (port.get("port_type") or "").strip() != "scales_with":
-        return False
-    return (port.get("event_class") or "").strip() in ("CardPower", "TotalPower")
-
-
 def _toughness_gate(port: PortRow) -> bool:
     if (port.get("port_type") or "").strip() != "scales_with":
         return False
@@ -403,10 +390,6 @@ def _cost_reducer_gate(port: PortRow) -> bool:
     )
 
 
-def _yard_caster_gate(port: PortRow) -> bool:
-    return "STYardCast" in str(port.get("raw_line") or "")
-
-
 def _edict_feeder_gate(port: PortRow) -> bool:
     if (port.get("port_type") or "").strip() != "trigger":
         return False
@@ -455,21 +438,6 @@ def _untap_synergy_gate(port: PortRow) -> bool:
     return pt == "effect" and ev in ("TapOrUntap", "Untap")
 
 
-def _damage_synergy_gate(port: PortRow) -> bool:
-    """Non-combat DamageDone trigger (Niv-Mizzet / Toralf shape)."""
-    if (port.get("port_type") or "").strip() != "trigger":
-        return False
-    if (port.get("event_class") or "").strip() != "DamageDone":
-        return False
-    vf = port.get("valid_filter") or ""
-    first_alt = vf.split(",")[0]
-    alt_tokens = first_alt.replace("+", ".").split(".")
-    if any(tok.lstrip("!").strip() == "Self" for tok in alt_tokens):
-        return False
-    raw = str(port.get("raw_line") or "")
-    return "'CombatDamage': 'True'" not in raw
-
-
 def _cascade_value_gate(port: PortRow) -> bool:
     if (port.get("port_type") or "").strip() != "keyword":
         return False
@@ -492,12 +460,6 @@ def _token_producer_gate(port: PortRow) -> bool:
         return False
     main = vf.split(",")[0].split(".")[0].split("+")[0].strip()
     return main == "Creature"
-
-
-def _token_sac_chain_gate(port: PortRow) -> bool:
-    if (port.get("port_type") or "").strip() != "trigger":
-        return False
-    return (port.get("event_class") or "").strip() == "Sacrificed"
 
 
 def _scaling_gate(port: PortRow) -> bool:
@@ -544,31 +506,11 @@ def _proliferate_synergy_gate(port: PortRow) -> bool:
     return _has_counter_interest(port)
 
 
-def _counter_producer_gate(port: PortRow) -> bool:
-    if (port.get("port_type") or "").strip() != "trigger":
-        return False
-    vf = port.get("valid_filter") or ""
-    return "counters_" in vf and "P1P1" in vf
-
-
 def _counter_target_payoff_gate(port: PortRow) -> bool:
     """Ezuri-style XP-counter scaler. Gate on scales_with experience."""
     if (port.get("port_type") or "").strip() != "scales_with":
         return False
     return "Experience" in (port.get("event_class") or "")
-
-
-def _pinger_gate(port: PortRow) -> bool:
-    if (port.get("port_type") or "").strip() != "scales_with":
-        return False
-    ev = (port.get("event_class") or "").strip()
-    return "LifeOppsLost" in ev or "LifeLost" in ev
-
-
-def _pan_density_gate(port: PortRow) -> bool:
-    if (port.get("event_class") or "").strip() != "Panharmonicon":
-        return False
-    return "'ValidMode'" in str(port.get("raw_line") or "")
 
 
 def _zone_resonance_gate(port: PortRow) -> bool:
@@ -602,7 +544,6 @@ def _aura_equipment_support_gate(port: PortRow) -> bool:
 _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     # Batch 1
     RuleGate("damage_doubler_synergy", _damage_doubler_gate),
-    RuleGate("peer_evasion_tribal", _peer_evasion_gate),
     RuleGate("modified_axis_feeder", _modified_axis_gate),
     RuleGate("counter_axis_feeder", _counter_axis_gate),
     RuleGate("opponent_forcing", _opponent_forcing_gate),
@@ -623,7 +564,6 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("cost_reduction_target", _cost_reduction_gate),
     RuleGate("spell_density", _spellcast_density_gate),
     RuleGate("spellcast_resonance", _spellcast_density_gate),
-    RuleGate("power_matters", _power_matters_gate),
     RuleGate("toughness_synergy", _toughness_gate),
     # Batch 2 — registry sweep
     RuleGate("artifact_recursion", _artifact_recursion_gate),
@@ -632,23 +572,17 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("dies_drain", _dies_drain_gate),
     RuleGate("subject_zone_feeder", _subject_zone_feeder_gate),
     RuleGate("cost_reducer", _cost_reducer_gate),
-    RuleGate("yard_caster", _yard_caster_gate),
     RuleGate("edict_feeder", _edict_feeder_gate),
     RuleGate("landfall_enabler", _landfall_enabler_gate),
     RuleGate("multicolor_untap", _multicolor_untap_gate),
     RuleGate("untap_synergy", _untap_synergy_gate),
-    RuleGate("damage_synergy", _damage_synergy_gate),
     RuleGate("cascade_value", _cascade_value_gate),
     RuleGate("token_producer", _token_producer_gate),
-    RuleGate("token_sac_chain", _token_sac_chain_gate),
     RuleGate("scaling", _scaling_gate),
     RuleGate("proliferate_synergy", _proliferate_synergy_gate),
     RuleGate("counter_doubler", _has_counter_interest),
     RuleGate("counter_keyword", _has_counter_interest),
-    RuleGate("counter_producer", _counter_producer_gate),
     RuleGate("counter_target_payoff", _counter_target_payoff_gate),
-    RuleGate("pinger", _pinger_gate),
-    RuleGate("pan_density", _pan_density_gate),
     RuleGate("zone_resonance", _zone_resonance_gate),
     RuleGate("exalted_density", _exalted_density_gate),
     RuleGate("aura_equipment_support", _aura_equipment_support_gate),

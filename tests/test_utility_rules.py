@@ -17,14 +17,12 @@ from mtg_synergy_graph.complement_rules.utility import (
     _find_creature_untap_engine,
     _find_creatures_as_lands_landfall,
     _find_damage_doubler_synergy,
-    _find_damage_effect_synergy,
     _find_extra_land_plays,
     _find_flicker_synergy,
     _find_mana_doubler_synergy,
     _find_modified_axis_feeders,
     _find_monarch_synergy,
     _find_opponent_forcing,
-    _find_peer_evasion_tribal,
     _find_wheel_synergy,
 )
 
@@ -1163,62 +1161,6 @@ class TestFindCreaturesAsLandsLandfall:
 
 
 # ---------------------------------------------------------------------------
-# _find_damage_effect_synergy
-# ---------------------------------------------------------------------------
-
-
-class TestDamageEffectSynergy:
-    def test_noncombat_damage_trigger_finds_dealerdamage(self, conn):
-        """Niv-Mizzet (DamageDone, non-combat) -> finds DealDamage effects."""
-        _add_port(conn, "Guttersnipe", port_type="effect", event_class="DealDamage")
-        cmdr_ports = [_port_row(port_type="trigger", event_class="DamageDone", valid_filter="", raw_line="")]
-        results = _find_damage_effect_synergy(conn, cmdr_ports, set())
-        assert len(results) == 1
-        assert results[0].candidate == "Guttersnipe"
-        assert results[0].rule_id == "damage_synergy"
-
-    def test_combat_damage_trigger_skipped(self, conn):
-        """Combat-only DamageDone trigger should NOT match (uses combat_enhancer)."""
-        _add_port(conn, "Guttersnipe", port_type="effect", event_class="DealDamage")
-        cmdr_ports = [
-            _port_row(
-                port_type="trigger",
-                event_class="DamageDone",
-                valid_filter="Creature.YouCtrl",
-                raw_line="{'CombatDamage': 'True'}",
-            )
-        ]
-        results = _find_damage_effect_synergy(conn, cmdr_ports, set())
-        assert results == []
-
-    def test_self_only_trigger_skipped(self, conn):
-        """Card.Self DamageDone trigger should NOT match."""
-        _add_port(conn, "Guttersnipe", port_type="effect", event_class="DealDamage")
-        cmdr_ports = [_port_row(port_type="trigger", event_class="DamageDone", valid_filter="Card.Self")]
-        results = _find_damage_effect_synergy(conn, cmdr_ports, set())
-        assert results == []
-
-    def test_also_finds_damageall(self, conn):
-        """DamageAll effects should also be found."""
-        _add_port(conn, "Earthquake", port_type="effect", event_class="DamageAll")
-        cmdr_ports = [_port_row(port_type="trigger", event_class="DamageDone")]
-        results = _find_damage_effect_synergy(conn, cmdr_ports, set())
-        assert len(results) == 1
-
-    def test_no_damage_trigger_returns_empty(self, conn):
-        _add_port(conn, "Guttersnipe", port_type="effect", event_class="DealDamage")
-        cmdr_ports = [_port_row(port_type="trigger", event_class="SpellCast")]
-        results = _find_damage_effect_synergy(conn, cmdr_ports, set())
-        assert results == []
-
-    def test_excludes_commander(self, conn):
-        _add_port(conn, "Cmdr", port_type="effect", event_class="DealDamage")
-        cmdr_ports = [_port_row(port_type="trigger", event_class="DamageDone")]
-        results = _find_damage_effect_synergy(conn, cmdr_ports, {"Cmdr"})
-        assert results == []
-
-
-# ---------------------------------------------------------------------------
 # _find_mana_doubler_synergy
 # ---------------------------------------------------------------------------
 
@@ -2191,57 +2133,3 @@ class TestFindDamageDoublerSynergy:
         )
         results = _find_damage_doubler_synergy(conn, self._torbran_ports(), set())
         assert all(r.rule_id == "damage_doubler_synergy" for r in results)
-
-
-class TestFindPeerEvasionTribal:
-    """Commanders carrying a peer-blocking keyword (Horsemanship,
-    Shadow) want the rest of the tiny pool as both attackers and the
-    only legal blockers against opposing copies. Any other keyword —
-    even Flying / Trample / Haste — must not activate the rule
-    because the pools are too large to spam-recommend."""
-
-    def _horsemanship_ports(self):
-        return [_port_row(port_type="keyword", event_class="Horsemanship")]
-
-    def _shadow_ports(self):
-        return [_port_row(port_type="keyword", event_class="Shadow")]
-
-    def test_no_peer_keyword_skips(self, conn):
-        ports = [_port_row(port_type="keyword", event_class="Flying")]
-        _add_port(conn, "Random Card", port_type="keyword", event_class="Flying")
-        assert _find_peer_evasion_tribal(conn, ports, set()) == []
-
-    def test_horsemanship_matches_horsemanship_pool(self, conn):
-        for n in ("Wei Scout", "Shu Cavalry", "Lu Bu, Master-at-Arms"):
-            _add_port(conn, n, port_type="keyword", event_class="Horsemanship")
-        results = _find_peer_evasion_tribal(conn, self._horsemanship_ports(), set())
-        names = _candidates(results)
-        assert "Wei Scout" in names
-        assert "Shu Cavalry" in names
-
-    def test_shadow_matches_shadow_pool(self, conn):
-        _add_port(conn, "Soltari Monk", port_type="keyword", event_class="Shadow")
-        _add_port(conn, "Rebel Informer", port_type="keyword", event_class="Shadow")
-        results = _find_peer_evasion_tribal(conn, self._shadow_ports(), set())
-        names = _candidates(results)
-        assert "Soltari Monk" in names
-        assert "Rebel Informer" in names
-
-    def test_horsemanship_does_not_match_shadow(self, conn):
-        """Pools are siloed — horsemanship commander shouldn't surface
-        Shadow cards (different mechanical axis, even though both are
-        peer-blocking)."""
-        _add_port(conn, "Soltari Monk", port_type="keyword", event_class="Shadow")
-        results = _find_peer_evasion_tribal(conn, self._horsemanship_ports(), set())
-        assert "Soltari Monk" not in _candidates(results)
-
-    def test_excludes_commander(self, conn):
-        _add_port(conn, "Lu Bu, Master-at-Arms", port_type="keyword", event_class="Horsemanship")
-        results = _find_peer_evasion_tribal(conn, self._horsemanship_ports(), {"Lu Bu, Master-at-Arms"})
-        assert "Lu Bu, Master-at-Arms" not in _candidates(results)
-
-    def test_rule_id(self, conn):
-        _add_port(conn, "Wei Scout", port_type="keyword", event_class="Horsemanship")
-        results = _find_peer_evasion_tribal(conn, self._horsemanship_ports(), set())
-        assert all(r.rule_id == "peer_evasion_tribal" for r in results)
-        assert all(r.cand_event == "peer_evasion_partner" for r in results)

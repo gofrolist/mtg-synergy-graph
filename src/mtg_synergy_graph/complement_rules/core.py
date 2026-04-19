@@ -920,11 +920,8 @@ from .density import (  # noqa: E402
     _find_cost_reduction_targets,
     _find_counter_doubler_synergy,
     _find_counter_keyword_synergy,
-    _find_counter_producer,
     _find_etb_self_complements,
     _find_lord_complements,
-    _find_pinger_synergy,
-    _find_power_matters_density,
     _find_proliferate_synergy,
     _find_scales_with_density,
     _find_scaling_complements,
@@ -962,7 +959,6 @@ from .graveyard import (  # noqa: E402
 )
 from .panharmonicon import (  # noqa: E402
     _find_panharmonicon_complements,
-    _find_panharmonicon_density,
     _find_panharmonicon_stacking,
     _find_reverse_panharmonicon,
 )
@@ -971,14 +967,12 @@ from .statics import (  # noqa: E402
     _find_cost_reduction_synergy,
     _find_edict_feeders,
     _find_graveyard_play_synergy,
-    _find_yard_caster,
 )
 from .tokens import (  # noqa: E402
     _find_effect_feeds_etb,
     _find_static_strategy,
     _find_token_etb_damage,
     _find_token_producers_for_trigger,
-    _find_token_sac_chain,
 )
 from .utility import (  # noqa: E402
     _find_cascade_value,
@@ -988,7 +982,6 @@ from .utility import (  # noqa: E402
     _find_creature_untap_engine,
     _find_creatures_as_lands_landfall,
     _find_damage_doubler_synergy,
-    _find_damage_effect_synergy,
     _find_extra_land_plays,
     _find_flicker_payoffs,
     _find_flicker_synergy,
@@ -998,7 +991,6 @@ from .utility import (  # noqa: E402
     _find_monarch_synergy,
     _find_multicolor_untap,
     _find_opponent_forcing,
-    _find_peer_evasion_tribal,
     _find_untap_combo,
     _find_untap_synergy,
     _find_wheel_synergy,
@@ -1141,7 +1133,6 @@ def find_all_complements(
         out.extend(_find_wheel_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_artifact_recursion(conn, cmdr_ports, cmdr_set))
         out.extend(_find_copy_synergy(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_token_sac_chain(conn, cmdr_ports, cmdr_set, candidate_cache))
         out.extend(_find_token_etb_damage(conn, cmdr_ports, cmdr_set, candidate_cache))
         out.extend(_find_dies_drain(conn, cmdr_ports, cmdr_set, candidate_cache))
         out.extend(_find_gy_loader(conn, cmdr_ports, cmdr_set, candidate_cache))
@@ -1154,22 +1145,16 @@ def find_all_complements(
         out.extend(_find_multicolor_untap(conn, cmdr_ports, cmdr_set))
         out.extend(_find_cost_reduction_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_graveyard_play_synergy(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_yard_caster(conn, cmdr_ports, cmdr_set))
         out.extend(_find_affinity_archetype(conn, cmdr_ports, cmdr_set))
         out.extend(_find_edict_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_value_engine_density(conn, cmdr_ports, cmdr_set))
         out.extend(_find_cheat_cmc_bonus(conn, cmdr_ports, cmdr_set))
         out.extend(_find_counter_doubler_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_counter_keyword_synergy(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_counter_producer(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_power_matters_density(conn, cmdr_ports, cmdr_set))
         out.extend(_find_proliferate_synergy(conn, cmdr_ports, cmdr_set, candidate_cache))
-        out.extend(_find_damage_effect_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_mana_doubler_synergy(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_panharmonicon_density(conn, cmdr_ports, cmdr_set))
         out.extend(_find_graveyard_sac_value(conn, cmdr_ports, cmdr_set))
         out.extend(_find_cost_reduction_targets(conn, cmdr_ports, cmdr_set, candidate_cache))
-        out.extend(_find_pinger_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_toughness_matters(conn, cmdr_ports, cmdr_set))
         out.extend(_find_cascade_value(conn, cmdr_ports, cmdr_set))
         out.extend(_find_flicker_payoffs(conn, cmdr_ports, cmdr_set))
@@ -1195,7 +1180,6 @@ def find_all_complements(
         out.extend(_find_more_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_doctor_s_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_choose_tribal(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_peer_evasion_tribal(conn, cmdr_ports, cmdr_set))
         return out
 
     if not needed_cand:

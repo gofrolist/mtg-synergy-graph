@@ -57,7 +57,6 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "wheel_synergy": "port_match",
     "artifact_recursion": "graveyard_synergy",
     "copy_synergy": "port_match",
-    "token_sac_chain": "sacrifice_synergy",
     "token_etb_damage": "token_etb_payoff",
     "evasion": "port_match",
     "spellcast_resonance": "spellcast_density",
@@ -65,22 +64,16 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "multicolor_untap": "port_match",
     "cost_reducer": "spellcast_density",
     "graveyard_play": "port_match",
-    "yard_caster": "graveyard_synergy",
     "affinity_archetype": "spellcast_density",
     "edict_feeder": "sacrifice_synergy",
     "counter_doubler": "counter_synergy",
     "counter_keyword": "counter_synergy",
-    "counter_producer": "counter_synergy",
-    "damage_synergy": "port_match",
     "mana_doubler": "port_match",
-    "pan_density": "port_match",
-    "power_matters": "scaling",  # IDF-weighted (not in _FLAT_COUNT_RULES); bucket is display-only
     "landfall_enabler": "port_match",
     "proliferate_synergy": "counter_synergy",
     "value_engine": "spellcast_density",
     "cheat_cmc": "port_match",
     "cost_reduction_target": "port_match",
-    "pinger": "port_match",
     "toughness_synergy": "scaling",
     "cascade_value": "port_match",
     "flicker_payoff": "port_match",
@@ -99,7 +92,6 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "modified_axis_feeder": "counter_synergy",
     "creatures_as_lands_landfall": "port_match",
     "damage_doubler_synergy": "port_match",
-    "peer_evasion_tribal": "port_match",
     "choose_tribal": "port_match",
     "doctor_s_tribal": "port_match",
     "more_tribal": "port_match",
@@ -128,7 +120,6 @@ _FEEDS_COMMANDER_RULES: frozenset[str] = frozenset(
         "cost_feeds_trigger",
         "trigger_effect",
         "sacrifice_cluster",
-        "token_sac_chain",
     }
 )
 
@@ -150,18 +141,14 @@ _SYNERGY_PAIRS: dict[frozenset[str], float] = {
     # Sacrifice + recursion loop
     frozenset({"cost_feeds_trigger", "graveyard_play"}): 0.05,
     # Sacrifice fodder engine
-    frozenset({"sacrifice_cluster", "token_sac_chain"}): 0.05,
     frozenset({"effect_feeds_trigger", "sacrifice_cluster"}): 0.04,
     # Bidirectional synergy: feeds and is fed by commander
     frozenset({"trigger_effect", "effect_feeds_trigger"}): 0.05,
     # Tribal: lord + is the tribe
     frozenset({"lord", "tribal_density"}): 0.03,
-    # Panharmonicon: doubled trigger + has the trigger type
-    frozenset({"panharmonicon", "pan_density"}): 0.03,
     # Toughness: scales + has Defender
     frozenset({"scaling", "toughness_synergy"}): 0.03,
     # Cost reduction: big creature + damage enabler
-    frozenset({"cost_reduction_target", "pinger"}): 0.05,
     # Cheat-into-play: type match + CMC bonus
     frozenset({"cheat_cmc", "value_engine"}): 0.03,
     # Landfall: land enabler + zone resonance
@@ -312,7 +299,6 @@ _FLAT_COUNT_RULES: frozenset[str] = frozenset(
         "tribal_density",
         "token_producer",
         "evasion",
-        "pan_density",
     }
 )
 
@@ -331,14 +317,12 @@ _FLAT_WEIGHT_OVERRIDES: dict[str, float] = {
     "tribal_density": 0.5,
     "token_producer": 0.25,
     "evasion": 0.15,
-    "pan_density": 0.10,
     "etb_self": 0.01,
 }
 
 #: Quality multiplier applied to IDF weights. Dampens broad effect-only
 #: rules and enabler-on-enabler trigger-trigger matches.
 _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
-    "damage_synergy": 0.5,
     # Trigger-trigger resonance is weaker than trigger-effect: finding
     # another card that triggers on the same event (enabler for enabler)
     # is less valuable than finding a payoff that feeds the trigger.
@@ -509,7 +493,6 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # nothing else for the engine to latch onto). All 14 P3K
     # legendary horsemanship commanders qualify automatically; any
     # future card / commander with these keywords does too.
-    "peer_evasion_tribal": 2.0,
     # AUTO-GENERATED keyword-tribal — IDF handles weighting
     "choose_tribal": 2.0,
     # AUTO-GENERATED keyword-tribal — IDF handles weighting
