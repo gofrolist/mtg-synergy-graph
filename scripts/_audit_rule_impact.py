@@ -170,10 +170,16 @@ def _audit_one(
 
     sum_delta = sum(m[3] for m in movers)
     max_abs = max((abs(m[3]) for m in movers), default=0)
+    # max_abs == 0:           no per-cmdr movement at all -> trivial
+    # sum_delta < 0:           net hi_syn loss -> HARMFUL (revert)
+    # sum_delta == 0 (movers): wins offset losses, net-zero impact -> trivial
+    # sum_delta > 0:           net hi_syn gain -> positive (ship)
     if max_abs == 0:
         verdict = "TRIVIAL"
     elif sum_delta < 0:
         verdict = "HARMFUL"
+    elif sum_delta == 0:
+        verdict = "TRIVIAL"
     else:
         verdict = "positive"
 

@@ -177,7 +177,11 @@ def _impact_check(
 
     sum_delta = sum(m[3] for m in movers)
     max_abs = max((abs(m[3]) for m in movers), default=0)
-    if max_abs == 0:
+    # max_abs == 0:           no per-cmdr movement -> trivial
+    # sum_delta < 0:           net hi_syn loss -> harmful (revert)
+    # sum_delta == 0 (movers): wins offset losses, net-zero -> trivial
+    # sum_delta > 0:           net hi_syn gain -> positive (ship)
+    if max_abs == 0 or sum_delta == 0:
         verdict = "trivial"
     elif sum_delta < 0:
         verdict = "harmful"
