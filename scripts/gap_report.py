@@ -667,20 +667,37 @@ def _format_report(proposals: list[RuleProposal], stats_total: int, eligible_tot
         # combination without first refining it.
         prior = prior_attempts_for_template(prop.template)
         if prior:
-            reverts = [a for a in prior if a.outcome == "reverted"]
-            passes = [a for a in prior if a.outcome == "passed"]
-            if reverts:
-                latest = reverts[-1]
+            sig_prior = [a for a in prior if tuple(a.signature) == tuple(prop.gap.signature)]
+            sig_reverts = [a for a in sig_prior if a.outcome == "reverted"]
+            sig_trivials = [a for a in sig_prior if a.outcome == "trivial"]
+            sig_passes = [a for a in sig_prior if a.outcome == "passed"]
+            tpl_reverts = [a for a in prior if a.outcome == "reverted"]
+            if sig_reverts:
+                latest = sig_reverts[-1]
                 lines.append(
-                    f"- ⚠️ **Prior failure**: {len(reverts)} revert(s) on this "
-                    f"template — most recent {latest.timestamp}: "
-                    f"_{latest.reason[:200]}_"
+                    f"- ⚠️ **Signature reverted**: {len(sig_reverts)} prior "
+                    f"revert(s) on this exact signature — most recent "
+                    f"{latest.timestamp}: _{latest.reason[:200]}_"
                 )
-            if passes:
+            elif sig_trivials:
+                latest = sig_trivials[-1]
                 lines.append(
-                    f"- ✅ **Prior success**: {len(passes)} passing apply(s) — "
-                    "rule should already be in the registry; check why it's "
-                    "not catching this signature."
+                    f"- 🟡 **Signature trivial**: {len(sig_trivials)} prior "
+                    f"trivial attempt(s) on this exact signature — most "
+                    f"recent {latest.timestamp}: _{latest.reason[:200]}_"
+                )
+            elif tpl_reverts:
+                latest = tpl_reverts[-1]
+                lines.append(
+                    f"- ⚠️ **Template caution**: {len(tpl_reverts)} revert(s) "
+                    f"elsewhere on this template — most recent "
+                    f"{latest.timestamp}: _{latest.reason[:200]}_"
+                )
+            if sig_passes:
+                lines.append(
+                    f"- ✅ **Signature already shipped**: {len(sig_passes)} "
+                    "passing apply(s) on this exact signature — rule should "
+                    "be in the registry; investigate runtime mismatch."
                 )
         lines.append(
             f"- **Reach**: {prop.gap.commanders} commanders carrying "
