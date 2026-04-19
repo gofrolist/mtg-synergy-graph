@@ -28,8 +28,14 @@ import time
 from pathlib import Path
 
 from mtg_synergy_graph.complement_rules.core import (
+    PortRow,
     find_all_complements,
     load_ports_for_set,
+)
+from mtg_synergy_graph.complement_rules.registry import (
+    CARD_LEVEL_RULES,
+    RULE_GATES,
+    registered_rule_ids,
 )
 from mtg_synergy_graph.penalties import build_candidate_cache
 
@@ -38,12 +44,18 @@ from mtg_synergy_graph.penalties import build_candidate_cache
 # ---------------------------------------------------------------------------
 
 #: ``valid_filter`` qualifier tokens that meaningfully discriminate a
-#: cell. ``modified`` / ``attacking`` / ``tapped`` / ``Self`` etc each
-#: imply distinct mechanical archetypes; matching them in the
-#: signature lets the auditor surface, e.g. ``trigger.Attacks[Self]``
-#: separately from ``trigger.Attacks[YouCtrl]``. Counter-axis tokens
-#: (``counters_GE*``) collapse to a single ``counters_GE`` signature
-#: so we don't fragment Hamza / Marchesa / etc into per-counter cells.
+#: cell. ``modified`` / ``attacking`` / ``tapped`` etc each imply
+#: distinct mechanical archetypes the engine should recognize.
+#: Counter-axis tokens (``counters_GE*``) collapse to a single
+#: ``counters_GE`` signature so we don't fragment Hamza / Marchesa /
+#: etc into per-counter cells.
+#:
+#: ``Self`` is intentionally excluded — it's a self-reference (the
+#: trigger / effect / cost mentions CARDNAME), not a payoff axis.
+#: Including it would surface false gaps like ``trigger.Attacks
+#: [Self]`` (every voltron commander) where the right discriminator
+#: is whether the trigger has an engine effect (covered by
+#: combat_enhancer), not whether it self-references.
 _NOTABLE_QUALIFIERS: frozenset[str] = frozenset(
     {
         "modified",
@@ -52,7 +64,6 @@ _NOTABLE_QUALIFIERS: frozenset[str] = frozenset(
         "tapped",
         "untapped",
         "kicked",
-        "Self",
         "Other",
         "token",
     }
@@ -73,7 +84,7 @@ def _notable_qualifier(valid_filter: str) -> str:
     if _COUNTER_GATE_RE.search(valid_filter):
         return "counters_GE"
     tokens = [t.strip().lstrip("!") for t in re.split(r"[.+,]", valid_filter)]
-    for priority in ("modified", "attacking", "blocking", "tapped", "untapped", "Self", "Other", "kicked", "token"):
+    for priority in ("modified", "attacking", "blocking", "tapped", "untapped", "Other", "kicked", "token"):
         if priority in tokens:
             return priority
     return ""
@@ -146,11 +157,30 @@ def _scan_universe(
     *,
     progress_every: int = 200,
 ) -> list[GapStat]:
-    cache = build_candidate_cache(conn)
+    """Per-port attribution scan.
 
+    For each commander, load all their ports and compute their
+    sub-cell signatures. Run find_all_complements once. For every
+    fired rule that has a registered gate, determine which of the
+    commander's ports actually satisfy that gate — those are the
+    ports the rule was attributed to. A sub-cell is "covered" for a
+    commander iff at least one of the commander's ports carrying that
+    signature is attributable to a fired rule via the registry.
+
+    Rules without a registered gate fall back to the legacy commander-
+    level signal: any unregistered rule that fired marks every one of
+    the commander's signatures as covered. This keeps the auditor
+    complete (no rule's activations are dropped) while letting
+    registered rules give exact attribution.
+    """
+    cache = build_candidate_cache(conn)
+    registered = registered_rule_ids()
+
+    ports_by_cmdr: dict[str, list[PortRow]] = {}
     sigs_by_cmdr: dict[str, set[tuple[str, str, str]]] = {}
     for name in commanders:
         ports = load_ports_for_set(conn, [name])
+        ports_by_cmdr[name] = ports
         sigs_by_cmdr[name] = {_port_signature(p) for p in ports}
 
     commanders_per_sig: collections.Counter[tuple[str, str, str]] = collections.Counter()
@@ -176,15 +206,35 @@ def _scan_universe(
         except Exception as exc:
             print(f"  [skip] {name}: {exc}", file=sys.stderr)
             continue
-        rule_ids = {c.rule_id for c in comps}
+        fired_rule_ids = {c.rule_id for c in comps}
+        # Card-level rules (tribal_density, lord, scaling, etc.) fire
+        # based on commander identity (subtypes / oracle text), not on
+        # any specific port's mechanical shape. Excluding them from
+        # the unregistered-fallback set keeps per-signature activation
+        # honest — a Goblin commander's tribal_density firing
+        # shouldn't mark their `trigger.DamageDone[Self]` port covered.
+        unregistered_fired = fired_rule_ids - registered - CARD_LEVEL_RULES
+
+        # For each port, compute the registered rules attributable to it
+        # AND whether any of those rules actually fired in this run.
+        sig_to_attributed_rules: dict[tuple[str, str, str], set[str]] = collections.defaultdict(set)
+        for port in ports_by_cmdr.get(name, ()):
+            sig = _port_signature(port)
+            for gate in RULE_GATES:
+                if gate.rule_id in fired_rule_ids and gate.predicate(port):
+                    sig_to_attributed_rules[sig].add(gate.rule_id)
+
         for sig in sigs_by_cmdr.get(name, ()):
-            if rule_ids:
+            attributed = sig_to_attributed_rules.get(sig, set())
+            # Fallback: unregistered rules fired but we can't attribute
+            # them to a specific port. Mark every signature as covered
+            # by them so we don't undercount unregistered-rule reach.
+            covered_by = attributed | unregistered_fired
+            if covered_by:
                 activations_per_sig[sig] += 1
-                for rid in rule_ids:
+                for rid in covered_by:
                     rules_per_sig[sig][rid] += 1
             else:
-                # Capture exemplars only for under-covered cells, and
-                # bound the list to a useful preview.
                 if len(exemplars_per_sig[sig]) < 8:
                     exemplars_per_sig[sig].append(name)
 

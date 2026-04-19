@@ -153,17 +153,46 @@ Impact:
 - **Skipping the regression baseline.** The golden set takes ~5 s to
   re-score. Never commit a rule without confirming NDCG.
 
+## Rule-gate registry
+
+`src/mtg_synergy_graph/complement_rules/registry.py` holds the per-
+rule gate predicates the auditor uses for exact per-port attribution.
+Two sources populate `RULE_GATES`:
+
+1. **Formal rules** — auto-registered from `COMPLEMENT_RULES`. Each
+   rule's gate is "port_type matches AND event_class in event_pairs".
+2. **Card-attribute rules** — hand-registered when their gate isn't
+   trivially derivable from a static dataclass. The rule author adds
+   a gate function (`(PortRow) -> bool`) alongside the helper
+   function in `utility.py` / `density.py` / etc. Without
+   registration, the rule still works at runtime but the auditor
+   can't attribute its activations to a specific port.
+
+`CARD_LEVEL_RULES` is a special set of rules whose activation is
+based on the commander's card-identity attributes (subtypes, oracle
+text features) rather than any port shape — `tribal_density`,
+`lord`, `value_engine`, `affinity_archetype`, `static_strategy`.
+These are excluded from the auditor's unregistered-rule fallback so
+their firing doesn't bloat per-signature activation rates.
+
+When adding a new rule:
+- Author the helper + tests as usual.
+- Add a gate function to `registry.py` if the rule consumes a
+  specific port shape.
+- Add to `CARD_LEVEL_RULES` if it operates on card identity.
+- Re-run `gap_report.py` to confirm the registry change shrinks
+  apparent gaps for ports the rule was supposed to cover.
+
 ## Known limitations of the tooling
 
-- `coverage_matrix.py` and `gap_report.py` both attribute activation
-  at the commander level — if any rule fires for a commander, every
-  port shape they carry is marked covered. A commander with 8 ports
-  gets every shape marked even if only one port drove the
-  activation. Treat low activation rates as definitive ("uncovered")
-  and high rates as indicative ("probably covered, verify per-
-  commander"). Fixing this requires tagging `PortComplement` with
-  the originating commander port_id — a small but cross-cutting
-  refactor.
+- Rules without a registered gate fall back to commander-level
+  attribution: if any unregistered rule fires for a commander, every
+  port shape they carry is marked "covered" by it. This means
+  unregistered rules can mask real gaps. Mitigation: register every
+  port-level rule. Today 35 of ~60 rules are registered (9 formal +
+  26 card-attribute); the remaining ~25 rules are either narrow
+  specialists or genuine card-level rules already in
+  `CARD_LEVEL_RULES`.
 - `port_universe.json` enumerates qualifier *tokens* but not their
   combinatorial overlap (e.g. `attacking+modified`). For nuanced
   axes look at the raw `valid_filter` distribution in
