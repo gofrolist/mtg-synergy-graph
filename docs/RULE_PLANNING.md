@@ -18,10 +18,48 @@ validation oracle, not the design oracle.
 | Script | Output | Purpose |
 |---|---|---|
 | `scripts/gap_report.py` | `docs/gap_report.md` | **Primary entry point.** Sub-cell coverage + template matching. Outputs a ranked markdown queue of concrete rule proposals. The next rule to write is the top entry — no human prioritization required. |
+| `scripts/scaffold_rule.py` | `src/.../generated/<rule_id>.py`, `tests/test_generated_<rule_id>.py`, integration patches | **Auto-generates rule scaffolding** from the top auditor proposal. Dry-run by default; `--apply` writes files and patches integration points (core.py, registry.py, universal_scorer.py). Output requires validation — scaffolded gates may fire too broadly for the curated EDHREC archetype. |
 | `scripts/port_universe.py` | `docs/port_universe.json` | Enumerate every distinct (port_type, event_class) cell in `card_ports` with commander reach, top valid_filter qualifiers, and top raw_line clause keys. Re-run after every importer change. |
 | `scripts/coverage_matrix.py` | `docs/coverage_matrix.json` | Cell-level coverage (coarser than `gap_report.py`). Useful for sanity checks and historical diffs. |
 | `scripts/golden_set_track.py` | stdout | Regression check on the 100-commander golden set NDCG@30 against `tests/fixtures/golden_set_run.json`. Run before/after every rule change. |
 | `scripts/compare_edhrec.py` | stdout | Hi-Syn / Top / OnPage breakdown for any commander or commander list — used for *validation*, not planning. |
+
+## Scaffolder workflow
+
+The auto-generation flow that closes the loop:
+
+```bash
+# 1. See what's at the top of the queue
+uv run python scripts/gap_report.py
+
+# 2. Generate code + apply integration patches
+uv run python scripts/scaffold_rule.py --apply
+
+# 3. Validate (REQUIRED — auto-generated gates may over-apply)
+uv run pytest tests/test_generated_<rule_id>.py -v
+uv run pytest tests/                                       # full suite
+uv run python scripts/golden_set_track.py \
+    --baseline tests/fixtures/golden_set_run.json
+uv run python scripts/gap_report.py                        # cell should drop
+
+# 4a. If golden NDCG drops -> tighten the generated gate's
+#     QUALIFIER_BLOCKERS / OTHER_TYPE_TOKENS, lower the multiplier,
+#     or `git checkout` to revert and refine the template.
+# 4b. If clean -> commit.
+```
+
+The scaffolder generates Python code that compiles and tests pass on
+the synthetic fixtures. But auto-generated tier choices may not
+match EDHREC's curated archetype for every commander the gate fires
+on (a creature-count scaler template fits Hamza but pushes anthems
+on Selvala, who's mana-axis instead). Treat scaffolder output as a
+starting point: review what commanders the gate fires on, run
+golden NDCG, refine before commit.
+
+Adding more generators: extend `_GENERATORS` dict in
+`scripts/scaffold_rule.py`. Each generator is a function that
+returns a `ScaffoldArtifacts` with helper source, test source, and
+integration-point strings.
 
 ## The pipeline
 
