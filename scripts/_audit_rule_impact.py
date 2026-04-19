@@ -13,19 +13,22 @@ This script closes that gap. For each rule:
 3. Monkey-patch the helper to ``return []`` and re-score them.
 4. Compare ``hi_syn_hits`` per commander; report the delta.
 
-Verdicts:
+Verdicts (post-2026-04-19 with NDCG + golden-set safety net):
 
   * ``TRIVIAL``  — no per-commander movement OR wins offset losses
     to net-zero. Helper fires but produces no useful net change.
-  * ``HARMFUL``  — net Δ < 0 across touched commanders. Rule is
-    actively displacing better candidates. Aggregate-NDCG
-    validation can't catch this when the per-cmdr signal averages
-    out across thousands of commanders.
-  * ``MARGINAL`` — net Δ > 0 but ratio sum/touched < 0.1, i.e.
-    fewer than one hi_syn improvement per ten touched commanders.
-    Rule contributes something but barely above noise; consider
-    whether the template is worth keeping.
-  * ``positive`` — net Δ > 0 with ratio >= 0.1. Real contribution.
+  * ``HARMFUL``  — net Δ < 0 across touched commanders AND no
+    golden commander loses ≥0.05 NDCG when the rule is removed.
+    Safe to delete.
+  * ``CONTENTIOUS`` — HARMFUL by aggregate hits/NDCG within touched,
+    BUT removing the rule drops a golden commander's NDCG by ≥0.05.
+    Rule is helping AND hurting different commanders — needs human
+    review before deletion. (e.g. token_etb_damage hurts 451 cmdrs
+    by tiny amounts but lifts Prossh by +0.195.)
+  * ``MARGINAL`` — net Δ > 0 but ratio sum/touched < 0.1.
+  * ``positive`` — net Δ > 0 with ratio >= 0.1, OR a golden
+    commander would lose ≥0.05 NDCG without this rule (gate-miss
+    safety net catches the attack_payoffs/Isshin pattern).
 
 Usage::
 
@@ -66,6 +69,7 @@ from _touched_commanders import find_touched_card_names  # noqa: E402
 
 from mtg_synergy_graph import SynergyEngine, compare_to_edhrec  # noqa: E402
 from mtg_synergy_graph.complement_rules import core  # noqa: E402
+from mtg_synergy_graph.validate import compute_ndcg, edhrec_labels_for_commander  # noqa: E402
 
 GENERATED_DIR = REPO_ROOT / "src" / "mtg_synergy_graph" / "complement_rules" / "generated"
 GOLDEN_BASELINE = REPO_ROOT / "tests" / "fixtures" / "golden_set_run.json"
@@ -160,6 +164,23 @@ def _resolve_helper(rule_id: str) -> str:
     return _RULE_HELPER_OVERRIDES.get(rule_id, f"_find_{rule_id}")
 
 
+def _golden_set_oids(syn_db: Path, name_to_oid: dict[str, str]) -> list[tuple[str, str]]:
+    """Return ``[(commander_name, oracle_id), ...]`` for the 100-cmdr golden
+    set. Used as a gate-miss safety net: if a rule classified TRIVIAL by
+    its touched set still drops golden NDCG, the gate is missing
+    commanders the helper actually fires for (Isshin / attack_payoffs
+    pattern — see feedback memory).
+    """
+    golden = json.loads(GOLDEN_BASELINE.read_text())
+    out: list[tuple[str, str]] = []
+    for e in golden.get("entries", []):
+        first = e["commander"].split(" + ")[0]
+        oid = name_to_oid.get(first)
+        if oid:
+            out.append((first, oid))
+    return out
+
+
 def _name_to_oid(syn_db: Path) -> dict[str, str]:
     """Build the union name → oracle_id map across golden + full baselines."""
     out: dict[str, str] = {}
@@ -201,6 +222,32 @@ def hi_syn_hits(engine: SynergyEngine, edhrec_conn: sqlite3.Connection, oid: str
     if cmp.hi_syn_size == 0:
         return None
     return cmp.hi_syn_hits
+
+
+def hi_syn_and_ndcg(
+    engine: SynergyEngine,
+    edhrec_conn: sqlite3.Connection,
+    oid: str,
+    name: str,
+) -> tuple[int, float] | None:
+    """Joint (hi_syn_hits, ndcg@30) for one commander. ``None`` if no
+    curated data.
+
+    Combined fetcher to avoid double-paging: the engine page is the
+    expensive step, so computing both metrics from one page is ~2× faster
+    than two separate calls.
+    """
+    try:
+        page = engine.page_by_oracle_id([oid], offset=0, limit=30)
+    except (LookupError, ValueError):
+        return None
+    cmp = compare_to_edhrec(page, edhrec_conn, top_n=30)
+    if cmp.hi_syn_size == 0:
+        return None
+    labels = edhrec_labels_for_commander(edhrec_conn, name)
+    ranking = [rec.card for rec in page.items]
+    ndcg = compute_ndcg(ranking, labels, k=30)
+    return (cmp.hi_syn_hits, ndcg)
 
 
 @dataclass(frozen=True)
@@ -293,16 +340,37 @@ def _audit_many(
     union_oids = sorted({oid for _, _, targets in plans for _, oid in targets})
     print(f"  baseline: scoring {len(union_oids)} unique commanders WITH all rules...", file=sys.stderr)
 
+    # Build oid → name lookup for label fetching (NDCG needs commander name).
+    oid_to_name: dict[str, str] = {oid: name for _, _, targets in plans for name, oid in targets}
+
+    # Gate-miss safety net: golden-set commanders whose helper might
+    # actually fire even though the registered gate misses them.
+    # Score the golden 100 ONCE for baseline; per TRIVIAL/MARGINAL rule
+    # we re-score under the patch and check for NDCG drops the
+    # touched-set audit would have missed.
+    golden_targets = _golden_set_oids(syn_db, name_to_oid)
+    golden_oids_set = {oid for _, oid in golden_targets}
+    # Add golden oids to the union so baseline scores them.
+    extended_union = sorted(set(union_oids) | golden_oids_set)
+    print(f"  baseline: scoring {len(extended_union)} unique commanders WITH all rules...", file=sys.stderr)
+
     edhrec_conn = sqlite3.connect(edhrec_db)
     edhrec_conn.row_factory = sqlite3.Row
     results: list[dict] = list(skipped)
     try:
         with SynergyEngine(syn_db) as eng:
-            baseline: dict[str, int | None] = {}
-            for i, oid in enumerate(union_oids, 1):
+            # Baseline: (hi_syn_hits, ndcg@30) per commander, scored ONCE
+            # with all rules active.
+            baseline: dict[str, tuple[int, float] | None] = {}
+            for i, oid in enumerate(extended_union, 1):
                 if i % 100 == 0:
-                    print(f"    baseline {i}/{len(union_oids)}", file=sys.stderr)
-                baseline[oid] = hi_syn_hits(eng, edhrec_conn, oid)
+                    print(f"    baseline {i}/{len(extended_union)}", file=sys.stderr)
+                # oid_to_name covers union; for golden-only oids use
+                # the golden_targets map.
+                name = oid_to_name.get(oid) or next((n for n, o in golden_targets if o == oid), None)
+                if name is None:
+                    continue
+                baseline[oid] = hi_syn_and_ndcg(eng, edhrec_conn, oid, name)
 
             # Step 3: per rule, monkey-patch and re-score only its
             # touched cmdrs. Engine + caches persist across patches.
@@ -313,25 +381,83 @@ def _audit_many(
                     # Bust per-engine score cache so the patched helper's
                     # output is reflected (engine memoises by commander).
                     eng._score_cache.clear()
-                    without_scores = {oid: hi_syn_hits(eng, edhrec_conn, oid) for _, oid in targets}
+                    without_scores: dict[str, tuple[int, float] | None] = {
+                        oid: hi_syn_and_ndcg(eng, edhrec_conn, oid, name) for name, oid in targets
+                    }
                 finally:
                     setattr(core, helper_name, original)
                     eng._score_cache.clear()
 
-                movers: list[tuple[str, int, int, int]] = []
+                # Movers: (name, w_hits, wo_hits, hits_delta, ndcg_delta).
+                movers: list[tuple[str, int, int, int, float]] = []
                 scored = 0
+                ndcg_sum_delta = 0.0
+                ndcg_max_drop = 0.0  # most negative per-cmdr NDCG drop
                 for name, oid in targets:
-                    w, wo = baseline.get(oid), without_scores.get(oid)
-                    if w is None or wo is None:
+                    base = baseline.get(oid)
+                    wo = without_scores.get(oid)
+                    if base is None or wo is None:
                         continue
                     scored += 1
-                    d = w - wo
-                    if d != 0:
-                        movers.append((name, w, wo, d))
-                movers.sort(key=lambda m: -abs(m[3]))
+                    w_hits, w_ndcg = base
+                    wo_hits, wo_ndcg = wo
+                    hits_d = w_hits - wo_hits
+                    ndcg_d = w_ndcg - wo_ndcg
+                    ndcg_sum_delta += ndcg_d
+                    if ndcg_d < ndcg_max_drop:
+                        ndcg_max_drop = ndcg_d
+                    if hits_d != 0 or abs(ndcg_d) >= 0.01:
+                        movers.append((name, w_hits, wo_hits, hits_d, ndcg_d))
+                # Rank by combined magnitude: hits dominate, NDCG breaks ties.
+                movers.sort(key=lambda m: (-abs(m[3]), -abs(m[4])))
 
-                cls = classify_impact(tuple(movers), scored)
+                # Classify on hits delta first. NDCG metrics are tracked
+                # separately as informational signals — within-touched
+                # NDCG variance can be large (rank shuffles within
+                # top-30) but doesn't change whether the rule is doing
+                # net useful work for commanders the gate caught.
+                hits_movers = tuple((m[0], m[1], m[2], m[3]) for m in movers if m[3] != 0)
+                cls = classify_impact(hits_movers, scored)
                 verdict = cls.verdict.upper() if cls.verdict != "positive" else "positive"
+
+                # Golden-set deletion-safety check: ALWAYS run, regardless
+                # of touched-set verdict. Audit aggregates can mask
+                # significant per-commander positives — token_etb_damage
+                # showed ndcgΣ -0.908 across 451 touched but Prossh
+                # alone gained +0.195 from the rule. HARMFUL by hits
+                # ≠ safe to delete; check the golden set to confirm
+                # no popular commander loses meaningful NDCG.
+                golden_max_drop = 0.0
+                golden_max_cmdr = ""
+                if golden_targets:
+                    setattr(core, helper_name, lambda *a, **k: [])
+                    try:
+                        eng._score_cache.clear()
+                        for gname, goid in golden_targets:
+                            if goid not in baseline or baseline[goid] is None:
+                                continue
+                            patched = hi_syn_and_ndcg(eng, edhrec_conn, goid, gname)
+                            if patched is None:
+                                continue
+                            _, base_ndcg = baseline[goid]
+                            _, p_ndcg = patched
+                            d = base_ndcg - p_ndcg  # positive = drop when removed
+                            if d > golden_max_drop:
+                                golden_max_drop = d
+                                golden_max_cmdr = gname
+                    finally:
+                        setattr(core, helper_name, original)
+                        eng._score_cache.clear()
+                    # If removing the rule drops a golden commander by
+                    # >=0.05 NDCG, override TRIVIAL/MARGINAL verdicts
+                    # to "positive" (rule is doing real work the gate
+                    # missed) AND override HARMFUL to "contentious"
+                    # (rule both helps + hurts; needs human review).
+                    if golden_max_drop >= 0.05:
+                        if verdict in ("TRIVIAL", "MARGINAL"):
+                            verdict = "positive"
+                        elif verdict == "HARMFUL":
+                            verdict = "CONTENTIOUS"
                 results.append(
                     {
                         "rule_id": rule_id,
@@ -339,6 +465,10 @@ def _audit_many(
                         "scored": scored,
                         "sum_delta": cls.sum_delta,
                         "max_abs_delta": cls.max_abs_delta,
+                        "ndcg_sum_delta": round(ndcg_sum_delta, 4),
+                        "ndcg_max_drop": round(ndcg_max_drop, 4),
+                        "golden_max_drop": round(golden_max_drop, 4),
+                        "golden_max_cmdr": golden_max_cmdr,
                         "movers": tuple(movers),
                         "verdict": verdict,
                     }
@@ -469,23 +599,40 @@ def main() -> int:
                 continue
             results.append(verdict)
 
-    # Summary table.
-    print(f"\n{'rule_id':<55} {'touched':>7} {'scored':>6} {'sum Δ':>6} {'max|Δ|':>7}  verdict")
-    print("-" * 95)
+    # Summary table — hits + NDCG + golden-gate safety check.
+    # ``goldDrop`` is the max NDCG drop on a golden-set commander when
+    # the rule is patched — catches gate-miss positives like
+    # attack_payoffs / Isshin that the touched-set hits metric misses.
+    print(
+        f"\n{'rule_id':<55} {'touched':>7} {'scored':>6} {'hitsΔ':>6} "
+        f"{'maxh':>5} {'ndcgΣ':>7} {'ndcgmin':>8} {'goldDrop':>9}  verdict"
+    )
+    print("-" * 120)
     for v in results:
+        ndcg_sum = v.get("ndcg_sum_delta", 0.0)
+        ndcg_min = v.get("ndcg_max_drop", 0.0)
+        golden = v.get("golden_max_drop", 0.0)
         print(
             f"{v['rule_id']:<55} {v['touched']:>7} {v['scored']:>6} "
-            f"{v['sum_delta']:>+6} {v['max_abs_delta']:>7}  {v['verdict']}"
+            f"{v['sum_delta']:>+6} {v['max_abs_delta']:>5} "
+            f"{ndcg_sum:>+7.3f} {ndcg_min:>+8.3f} {golden:>+9.3f}  {v['verdict']}"
         )
 
-    # Per-rule mover detail (for non-trivial ones).
+    # Per-rule mover detail (for non-trivial ones). Movers now carry
+    # NDCG delta as a 5th element when present.
     detail_rules = [v for v in results if v["movers"]]
     if detail_rules:
         print(f"\nPer-commander movers (top {args.top_movers} by |Δ|):")
         for v in detail_rules:
             print(f"\n  {v['rule_id']} [{v['verdict']}]:")
-            for name, w, wo, d in v["movers"][: args.top_movers]:
-                print(f"    {name[:50]:50}  with={w}  without={wo}  Δ={d:+d}")
+            for mover in v["movers"][: args.top_movers]:
+                # Movers can be 4-tuples (legacy _audit_one) or 5-tuples (_audit_many w/ NDCG).
+                if len(mover) == 5:
+                    name, w, wo, d, nd = mover
+                    print(f"    {name[:50]:50}  hits={w}/{wo} (Δ{d:+d})  ndcgΔ{nd:+.3f}")
+                else:
+                    name, w, wo, d = mover
+                    print(f"    {name[:50]:50}  with={w}  without={wo}  Δ={d:+d}")
 
     harmful = [v for v in results if v["verdict"] == "HARMFUL"]
     return 1 if harmful else 0
