@@ -4,8 +4,10 @@ End-to-end pipeline:
   1. Enumerate every commander port shape in the universe, sliced by
      fine-grained discriminators (replacement_result, zone tuple, top
      valid_filter qualifier token).
-  2. Compute empirical coverage per sub-cell via find_all_complements.
-  3. Rank surviving gaps by commander reach × inverse activation rate.
+  2. For each port, find which registered rules' gates match it
+     (pure static analysis — no rule simulation needed because the
+     registry's gate predicates ARE the commander-side conditions).
+  3. Rank gaps by commander reach * (1 - covered_rate).
   4. Match each gap to a rule template from a small catalog.
   5. Emit `docs/gap_report.md` with a ranked queue of concrete rule
      proposals — gate signature, exemplar commanders, candidate-tier
@@ -14,6 +16,11 @@ End-to-end pipeline:
 Replaces the manual "read coverage, pick a cell, propose a rule" loop
 with a single command. The next rule to write is whatever sits at the
 top of the report, with no human prioritization required.
+
+Rules without a registered gate are invisible to the auditor — by
+design. The contract for new rules is "register a gate alongside the
+helper". Without registration, the rule still works at runtime but
+the auditor can't attribute its activations.
 """
 
 from __future__ import annotations
@@ -24,20 +31,13 @@ import dataclasses
 import re
 import sqlite3
 import sys
-import time
 from pathlib import Path
 
 from mtg_synergy_graph.complement_rules.core import (
     PortRow,
-    find_all_complements,
     load_ports_for_set,
 )
-from mtg_synergy_graph.complement_rules.registry import (
-    CARD_LEVEL_RULES,
-    RULE_GATES,
-    registered_rule_ids,
-)
-from mtg_synergy_graph.penalties import build_candidate_cache
+from mtg_synergy_graph.complement_rules.registry import RULE_GATES
 
 # ---------------------------------------------------------------------------
 # Sub-cell signature extraction
@@ -151,92 +151,45 @@ def _commander_names(conn: sqlite3.Connection) -> list[str]:
     ]
 
 
-def _scan_universe(
-    conn: sqlite3.Connection,
-    commanders: list[str],
-    *,
-    progress_every: int = 200,
-) -> list[GapStat]:
-    """Per-port attribution scan.
+def _scan_universe(conn: sqlite3.Connection, commanders: list[str]) -> list[GapStat]:
+    """Static gate-matching scan — no rule simulation.
 
-    For each commander, load all their ports and compute their
-    sub-cell signatures. Run find_all_complements once. For every
-    fired rule that has a registered gate, determine which of the
-    commander's ports actually satisfy that gate — those are the
-    ports the rule was attributed to. A sub-cell is "covered" for a
-    commander iff at least one of the commander's ports carrying that
-    signature is attributable to a fired rule via the registry.
+    For each commander, load their ports and bucket by sub-cell
+    signature. For each (commander, signature) bucket, walk the
+    registered gates and check which match any port in the bucket. A
+    signature is "covered" for the commander iff at least one
+    registered rule's gate matches.
 
-    Rules without a registered gate fall back to the legacy commander-
-    level signal: any unregistered rule that fired marks every one of
-    the commander's signatures as covered. This keeps the auditor
-    complete (no rule's activations are dropped) while letting
-    registered rules give exact attribution.
+    Pure static analysis — O(commanders * ports * gates), runs in
+    seconds vs minutes for the simulation-based scan. The trade-off:
+    rules without a registered gate are invisible. The contract for
+    new rules is "register a gate alongside the helper" so the
+    auditor stays accurate as the rule set grows.
     """
-    cache = build_candidate_cache(conn)
-    registered = registered_rule_ids()
-
-    ports_by_cmdr: dict[str, list[PortRow]] = {}
-    sigs_by_cmdr: dict[str, set[tuple[str, str, str]]] = {}
-    for name in commanders:
-        ports = load_ports_for_set(conn, [name])
-        ports_by_cmdr[name] = ports
-        sigs_by_cmdr[name] = {_port_signature(p) for p in ports}
-
     commanders_per_sig: collections.Counter[tuple[str, str, str]] = collections.Counter()
     activations_per_sig: collections.Counter[tuple[str, str, str]] = collections.Counter()
     exemplars_per_sig: dict[tuple[str, str, str], list[str]] = collections.defaultdict(list)
     rules_per_sig: dict[tuple[str, str, str], collections.Counter[str]] = collections.defaultdict(collections.Counter)
 
-    for sigs in sigs_by_cmdr.values():
-        for sig in sigs:
+    for name in commanders:
+        ports = load_ports_for_set(conn, [name])
+        ports_by_sig: dict[tuple[str, str, str], list[PortRow]] = collections.defaultdict(list)
+        for port in ports:
+            ports_by_sig[_port_signature(port)].append(port)
+
+        for sig, sig_ports in ports_by_sig.items():
             commanders_per_sig[sig] += 1
-
-    t0 = time.time()
-    for i, name in enumerate(commanders):
-        if i and i % progress_every == 0:
-            elapsed = time.time() - t0
-            print(
-                f"  ...{i}/{len(commanders)}  ({elapsed:.0f}s, {i / elapsed:.0f}/s)",
-                file=sys.stderr,
-                flush=True,
-            )
-        try:
-            comps = find_all_complements(conn, [name], candidate_cache=cache)
-        except Exception as exc:
-            print(f"  [skip] {name}: {exc}", file=sys.stderr)
-            continue
-        fired_rule_ids = {c.rule_id for c in comps}
-        # Card-level rules (tribal_density, lord, scaling, etc.) fire
-        # based on commander identity (subtypes / oracle text), not on
-        # any specific port's mechanical shape. Excluding them from
-        # the unregistered-fallback set keeps per-signature activation
-        # honest — a Goblin commander's tribal_density firing
-        # shouldn't mark their `trigger.DamageDone[Self]` port covered.
-        unregistered_fired = fired_rule_ids - registered - CARD_LEVEL_RULES
-
-        # For each port, compute the registered rules attributable to it
-        # AND whether any of those rules actually fired in this run.
-        sig_to_attributed_rules: dict[tuple[str, str, str], set[str]] = collections.defaultdict(set)
-        for port in ports_by_cmdr.get(name, ()):
-            sig = _port_signature(port)
-            for gate in RULE_GATES:
-                if gate.rule_id in fired_rule_ids and gate.predicate(port):
-                    sig_to_attributed_rules[sig].add(gate.rule_id)
-
-        for sig in sigs_by_cmdr.get(name, ()):
-            attributed = sig_to_attributed_rules.get(sig, set())
-            # Fallback: unregistered rules fired but we can't attribute
-            # them to a specific port. Mark every signature as covered
-            # by them so we don't undercount unregistered-rule reach.
-            covered_by = attributed | unregistered_fired
-            if covered_by:
+            matched_rules: set[str] = set()
+            for port in sig_ports:
+                for gate in RULE_GATES:
+                    if gate.predicate(port):
+                        matched_rules.add(gate.rule_id)
+            if matched_rules:
                 activations_per_sig[sig] += 1
-                for rid in covered_by:
+                for rid in matched_rules:
                     rules_per_sig[sig][rid] += 1
-            else:
-                if len(exemplars_per_sig[sig]) < 8:
-                    exemplars_per_sig[sig].append(name)
+            elif len(exemplars_per_sig[sig]) < 8:
+                exemplars_per_sig[sig].append(name)
 
     out: list[GapStat] = []
     for sig, n_cmdrs in commanders_per_sig.items():
@@ -259,7 +212,14 @@ def _scan_universe(
 
 @dataclasses.dataclass(frozen=True)
 class RuleProposal:
-    """Concrete proposal: which template to apply to which gap."""
+    """Concrete proposal: which template to apply to which gap.
+
+    A proposal with ``template == "needs_template"`` represents a gap
+    that no template in the catalog matches. The auditor still
+    surfaces it (don't hide work just because the catalog is small)
+    — the rationale field documents what the writer needs to
+    investigate.
+    """
 
     gap: GapStat
     template: str
@@ -267,6 +227,39 @@ class RuleProposal:
     gate_sketch: str
     tier_sketches: tuple[str, ...]
     pool_sizes: dict[str, int]
+
+
+def _no_template_proposal(gap: GapStat) -> RuleProposal:
+    """Placeholder proposal for gaps the catalog can't match yet.
+
+    Lists the existing rule activations (if any) so the writer can
+    judge whether the gap needs a new rule or a registry tweak to an
+    existing one.
+    """
+    pt, ev, sub = gap.signature
+    if gap.top_rules:
+        existing = ", ".join(f"{r}({n})" for r, n in gap.top_rules)
+        rationale = (
+            f"No template in the catalog matches `{pt}.{ev}[{sub or '*'}]`. "
+            f"Some registered rules already partially cover it: {existing}. "
+            "Investigate whether broadening one of those gates is enough, "
+            "or whether a new template is warranted."
+        )
+    else:
+        rationale = (
+            f"No template in the catalog matches `{pt}.{ev}[{sub or '*'}]` "
+            "and no registered rule covers any commander carrying this "
+            "signature. Pure gap — needs both a new rule and (probably) "
+            "a new template entry."
+        )
+    return RuleProposal(
+        gap=gap,
+        template="needs_template",
+        rationale=rationale,
+        gate_sketch=(f"port_type='{pt}' AND event_class='{ev}'" + (f" AND sub_discriminator='{sub}'" if sub else "")),
+        tier_sketches=(),
+        pool_sizes={},
+    )
 
 
 #: Damage-amp ``replacement_result`` tokens (mirror of the set in
@@ -418,39 +411,103 @@ def _propose(gap: GapStat, conn: sqlite3.Connection) -> RuleProposal | None:
 # Reporting
 # ---------------------------------------------------------------------------
 
-#: Cells too broad to slice usefully — the bare cell-level signature
-#: is fine for them and sub-cell entries with empty discriminator are
-#: dropped from the report (they duplicate what coverage_matrix.py
-#: already shows).
-_DROP_EMPTY_SUB: frozenset[tuple[str, str]] = frozenset()
+#: Port shapes that are mechanically incidental — they exist on
+#: thousands of cards as side properties but don't drive payoff
+#: matching. A vanilla 4/4 with Flying isn't "uncovered" because
+#: Flying has no rule; Flying just isn't a payoff axis. These shapes
+#: would dominate the gap report with false positives, so we exclude
+#: them entirely. Reintroduce a shape only if a real peer-tribal /
+#: payoff template appears for it.
+_INCIDENTAL_SHAPES: frozenset[tuple[str, str]] = frozenset(
+    {
+        # Universal / common keywords — cards have them as static
+        # ability prints, not as commander-mechanic anchors. Tribal
+        # / peer-evasion payoffs route through dedicated rules with
+        # their own gates (combat_enhancer, peer_evasion_tribal,
+        # voltron, evasion).
+        ("keyword", "Flying"),
+        ("keyword", "Vigilance"),
+        ("keyword", "Trample"),
+        ("keyword", "Haste"),
+        ("keyword", "Reach"),
+        ("keyword", "Lifelink"),
+        ("keyword", "Menace"),
+        ("keyword", "Deathtouch"),
+        ("keyword", "First Strike"),
+        ("keyword", "Double Strike"),
+        ("keyword", "Defender"),
+        ("keyword", "Hexproof"),
+        ("keyword", "Indestructible"),
+        ("keyword", "Flash"),
+        ("keyword", "Partner"),
+        ("keyword", "Shroud"),
+        ("keyword", "Intimidate"),
+        ("keyword", "Fear"),
+        ("keyword", "Skulk"),
+        # Importer occasionally surfaces multi-word keywords as their
+        # first token (e.g. "First Strike" -> "First", "Double
+        # Strike" -> "Double"). Treat both forms as incidental.
+        ("keyword", "First"),
+        ("keyword", "Double"),
+        ("keyword", "Banding"),
+        ("keyword", "Phasing"),
+        ("keyword", "Bushido"),
+        ("keyword", "Protection"),
+        # Universal costs / structural ports.
+        ("cost", "tap"),
+        ("cost", "sacrifice"),
+        ("cost", "discard"),
+        ("cost", "exile"),
+        ("cost", "pay_life"),
+        # Wrapper / utility effects with no payoff semantics.
+        ("effect", "Cleanup"),
+        ("effect", "Effect"),
+        ("effect", "SetState"),
+        ("effect", "DelayedTrigger"),
+        ("effect", "ImmediateTrigger"),
+        ("effect", "Animate"),
+        ("effect", "AnimateAll"),
+    }
+)
 
 
-def _eligible(gap: GapStat, *, min_commanders: int, max_activation: float) -> bool:
-    if gap.commanders < min_commanders:
-        return False
+def _eligible(gap: GapStat, *, max_activation: float) -> bool:
+    """Eligibility filter — keep any gap with non-100% coverage.
+
+    No minimum commander threshold: a single uncovered commander is a
+    real gap (their port shape has no rule). The impact metric
+    (commanders * (1 - covered_rate)) sorts low-reach gaps to the
+    bottom naturally without dropping them.
+    """
     if gap.activation_rate >= max_activation:
         return False
-    pt, _ev, sub = gap.signature
+    pt, ev, sub = gap.signature
+    # Drop incidental port shapes (Flying, Vigilance, cost.tap,
+    # effect.Cleanup, etc.) — they don't drive payoff matching.
+    if (pt, ev) in _INCIDENTAL_SHAPES:
+        return False
     # Empty sub-discriminator entries duplicate the cell-level
     # coverage_matrix.py output — drop them unless the cell genuinely
-    # has no further structure (cost ports, keyword ports).
+    # has no further structure (cost ports, keyword ports,
+    # scales_with).
     return not (not sub and pt not in ("cost", "keyword", "scales_with"))
 
 
-def _format_report(proposals: list[RuleProposal], stats_total: int) -> str:
+def _format_report(proposals: list[RuleProposal], stats_total: int, eligible_total: int) -> str:
     lines: list[str] = []
     lines.append("# Rule coverage gap report")
     lines.append("")
     lines.append(
         "Auto-generated by `scripts/gap_report.py`. Each entry is a "
-        "sub-cell with non-trivial commander reach and low empirical "
-        "coverage, ranked by `commanders * (1 - activation_rate)`. "
-        "The proposed template is the auditor's best fit — implement "
-        "the top entry, then re-run."
+        "sub-cell with non-100% coverage, ranked by "
+        "`commanders * (1 - covered_rate)`. Proposals labelled "
+        "`needs_template` lack a matching template in the catalog — "
+        "they're real gaps, just unfit for any existing template."
     )
     lines.append("")
     lines.append(f"**Total sub-cells scanned**: {stats_total}")
-    lines.append(f"**Surviving gaps**: {len(proposals)}")
+    lines.append(f"**Eligible gaps (covered_rate < threshold)**: {eligible_total}")
+    lines.append(f"**Shown in this report**: {len(proposals)}")
     lines.append("")
 
     if not proposals:
@@ -509,22 +566,20 @@ def main() -> int:
         help="if >0, sample only the first N commanders (for fast iteration)",
     )
     parser.add_argument(
-        "--min-commanders",
-        type=int,
-        default=10,
-        help="minimum commander reach for a sub-cell to qualify as a gap",
-    )
-    parser.add_argument(
         "--max-activation",
         type=float,
-        default=0.5,
-        help="maximum activation_rate (fraction) for a sub-cell to qualify as a gap",
+        default=1.0,
+        help="upper bound on covered_rate; default 1.0 keeps every gap "
+        "with non-100% coverage. Lower (e.g. 0.5) to focus only on "
+        "severely uncovered sub-cells.",
     )
     parser.add_argument(
         "--top",
         type=int,
-        default=20,
-        help="how many ranked proposals to include in the report",
+        default=50,
+        help="how many ranked proposals to include in the report. "
+        "Sub-cells are sorted by impact = commanders * (1 - covered_rate); "
+        "single-commander gaps still appear (just lower in the queue).",
     )
     args = parser.parse_args()
 
@@ -540,18 +595,17 @@ def main() -> int:
         )
         stats = _scan_universe(conn, commanders)
 
-        eligible = [
-            s for s in stats if _eligible(s, min_commanders=args.min_commanders, max_activation=args.max_activation)
-        ]
-        eligible.sort(key=lambda s: -s.impact)
+        eligible = [s for s in stats if _eligible(s, max_activation=args.max_activation)]
+        eligible.sort(key=lambda s: (-s.impact, -s.commanders, s.signature))
 
         proposals: list[RuleProposal] = []
-        for gap in eligible[: args.top]:
+        for gap in eligible:
             prop = _propose(gap, conn)
-            if prop is not None:
-                proposals.append(prop)
+            if prop is None:
+                prop = _no_template_proposal(gap)
+            proposals.append(prop)
 
-        report = _format_report(proposals, stats_total=len(stats))
+        report = _format_report(proposals[: args.top], stats_total=len(stats), eligible_total=len(eligible))
     finally:
         conn.close()
 
