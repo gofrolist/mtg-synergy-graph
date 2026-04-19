@@ -26,7 +26,9 @@ from __future__ import annotations
 
 import argparse
 import re
+import shutil
 import sqlite3
+import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -500,6 +502,154 @@ def apply_artifacts(art: ScaffoldArtifacts) -> dict[str, bool]:
 
 
 # ---------------------------------------------------------------------------
+# State capture + auto-revert (makes --apply safe to run)
+# ---------------------------------------------------------------------------
+
+
+def _affected_paths(art: ScaffoldArtifacts) -> list[Path]:
+    """Files touched by ``apply_artifacts`` — captured before, restored
+    after if validation fails. The ``generated/`` directory is created
+    on demand; restoring it means deleting if it didn't exist.
+    """
+    return [
+        art.helper_module_path,
+        art.test_module_path,
+        CORE_PATH,
+        REGISTRY_PATH,
+        SCORER_PATH,
+        GENERATED_DIR / "__init__.py",
+    ]
+
+
+def _capture_state(paths: list[Path]) -> dict[Path, str | None]:
+    """Snapshot file contents (None for files that don't yet exist).
+
+    The snapshot is the source of truth for ``_restore_state`` — newly
+    created files become None entries which restore by deletion.
+    """
+    return {p: (p.read_text() if p.exists() else None) for p in paths}
+
+
+def _restore_state(snapshot: dict[Path, str | None]) -> None:
+    """Restore each file to its captured content (or delete if it
+    didn't exist when captured). Idempotent.
+    """
+    for path, content in snapshot.items():
+        if content is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_text(content)
+    # If the generated/ directory is now empty (we deleted the only
+    # files we created), remove it so the repo stays clean.
+    if GENERATED_DIR.exists() and not any(GENERATED_DIR.iterdir()):
+        shutil.rmtree(GENERATED_DIR)
+
+
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ValidationResult:
+    """Outcome of post-apply validation. ``passed`` is the AND of all
+    individual checks; ``summary`` is a one-paragraph narrative."""
+
+    passed: bool
+    summary: str
+
+
+def _run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess:
+    """Run a subprocess command and capture stdout+stderr.
+
+    Inputs are hard-coded ``["uv", "run", ...]`` invocations from this
+    file — no external/untrusted input flows into ``cmd``. Suppress
+    ruff's S603 here because the tainted-input model doesn't apply.
+    """
+    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)  # noqa: S603
+
+
+_GOLDEN_NDCG_RE = re.compile(r"(fresh|baseline) agg NDCG:\s+([\d.]+)")
+
+
+def _validate(art: ScaffoldArtifacts, allow_ndcg_drop: float) -> ValidationResult:
+    """Run pytest (generated test + full suite) and golden_set_track.
+
+    Passes iff:
+    - The generated test file passes.
+    - The full pytest suite passes.
+    - Aggregate golden NDCG didn't drop more than ``allow_ndcg_drop``
+      from the baseline.
+    """
+    # 1. Generated tests (fastest, most-targeted check).
+    gen_test = _run(
+        ["uv", "run", "pytest", str(art.test_module_path), "-q", "--no-cov"],
+        cwd=REPO_ROOT,
+    )
+    if gen_test.returncode != 0:
+        return ValidationResult(
+            passed=False,
+            summary=(f"Generated tests failed.\n\n{gen_test.stdout[-1500:]}\n\n{gen_test.stderr[-500:]}"),
+        )
+
+    # 2. Full test suite (catches regressions in pre-existing rules).
+    full_tests = _run(
+        ["uv", "run", "pytest", "tests/", "-q", "--no-cov"],
+        cwd=REPO_ROOT,
+    )
+    if full_tests.returncode != 0:
+        return ValidationResult(
+            passed=False,
+            summary=(f"Full test suite failed.\n\n{full_tests.stdout[-1500:]}\n\n{full_tests.stderr[-500:]}"),
+        )
+
+    # 3. Golden NDCG: drop must be <= allow_ndcg_drop.
+    golden = _run(
+        [
+            "uv",
+            "run",
+            "python",
+            "scripts/golden_set_track.py",
+            "--baseline",
+            "tests/fixtures/golden_set_run.json",
+        ],
+        cwd=REPO_ROOT,
+    )
+    fresh = baseline = None
+    for kind, val in _GOLDEN_NDCG_RE.findall(golden.stdout):
+        if kind == "fresh":
+            fresh = float(val)
+        elif kind == "baseline":
+            baseline = float(val)
+    if fresh is None or baseline is None:
+        return ValidationResult(
+            passed=False,
+            summary=f"golden_set_track.py output unparseable:\n{golden.stdout[-800:]}",
+        )
+
+    drop = baseline - fresh
+    if drop > allow_ndcg_drop:
+        return ValidationResult(
+            passed=False,
+            summary=(
+                f"Golden NDCG dropped by {drop:.4f} "
+                f"(baseline {baseline:.4f} -> fresh {fresh:.4f}; "
+                f"allow_ndcg_drop={allow_ndcg_drop}).\n\n"
+                f"Per-commander breakdown:\n{golden.stdout[-1500:]}"
+            ),
+        )
+
+    return ValidationResult(
+        passed=True,
+        summary=(
+            f"All checks passed. Generated tests + full suite green; "
+            f"golden NDCG {baseline:.4f} -> {fresh:.4f} "
+            f"(delta {-drop:+.4f})."
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -541,6 +691,19 @@ def main() -> int:
     parser.add_argument("--db", type=Path, default=Path("data/synergy.db"))
     parser.add_argument("--template", help="explicit template to scaffold (default: top auditor proposal)")
     parser.add_argument("--apply", action="store_true", help="write files AND patch integration points")
+    parser.add_argument(
+        "--no-validate",
+        dest="validate",
+        action="store_false",
+        default=True,
+        help="(use with --apply) skip post-apply validation. Default: validate and auto-revert on failure.",
+    )
+    parser.add_argument(
+        "--allow-ndcg-drop",
+        type=float,
+        default=0.0,
+        help="(use with --apply) maximum tolerated golden NDCG drop. Default 0.0 = revert on any regression.",
+    )
     args = parser.parse_args()
 
     conn = sqlite3.connect(args.db)
@@ -580,17 +743,31 @@ def main() -> int:
         conn.close()
 
     if args.apply:
+        snapshot = _capture_state(_affected_paths(art)) if args.validate else None
         results = apply_artifacts(art)
         print(f"\nApplied artifacts for `{art.rule_id}`:", file=sys.stderr)
         for k, v in results.items():
             status = "wrote" if v else "skipped (already present)"
             print(f"  {k}: {status}", file=sys.stderr)
-        print("\nNow run:", file=sys.stderr)
-        print(f"  uv run pytest {art.test_module_path.relative_to(REPO_ROOT)} -v", file=sys.stderr)
-        print(
-            "  uv run python scripts/golden_set_track.py --baseline tests/fixtures/golden_set_run.json", file=sys.stderr
-        )
-        print("  uv run python scripts/gap_report.py  # cell should drop", file=sys.stderr)
+
+        if args.validate and snapshot is not None:
+            print("\nValidating (pytest + golden NDCG)...", file=sys.stderr)
+            result = _validate(art, allow_ndcg_drop=args.allow_ndcg_drop)
+            if result.passed:
+                print(f"\n[PASS] {result.summary}", file=sys.stderr)
+                print("\nKept changes. Suggested next: review the diff and commit.", file=sys.stderr)
+            else:
+                print(f"\n[FAIL] {result.summary}", file=sys.stderr)
+                _restore_state(snapshot)
+                print(
+                    "\nReverted all changes. Refine the template "
+                    "(QUALIFIER_BLOCKERS, multiplier, tier choices) in "
+                    "scripts/scaffold_rule.py and re-run.",
+                    file=sys.stderr,
+                )
+                return 1
+        else:
+            print("\n(Skipped validation — re-run pytest + golden_set_track manually)", file=sys.stderr)
     else:
         _print_integration_steps(art)
         print("\n(Re-run with --apply to write files + patch integration points)")
