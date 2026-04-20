@@ -5,6 +5,38 @@ impact notes. See `scripts/_audit_rule_impact.py` for the per-rule impact
 methodology (NDCG@30 metric + golden-set safety net + CONTENTIOUS verdict).
 See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
+## 2026-04-20
+
+### life_total_feeder (after a reverted first attempt)
+
+- **First attempt, reverted (commit ec67250)**: Gate was
+  `scales_with.YourLifeTotal + any of {Lifelink, GainLife on 'You',
+  replacement.GainLife}`. Fed 27 peer cards (Serra Ascendant, Angel
+  of Vitality, Divinity of Pride, etc.) to all 8 YourLifeTotal
+  commanders. Audit verdict HARMFUL: -2 hi_syn hits / -0.017 NDCG
+  across 7 active cmdrs. Elenda +0.102 and Bilbo +0.067 were offset
+  by regressions on Ayli (-0.101), Jerren (-0.060), Linvala (-0.026),
+  Cecil (-0.013). Root cause: YourLifeTotal axis is heterogeneous —
+  Ayli reads life as an exile-power cap (query variable), Bane's LEX
+  threshold makes him indestructible at LOW life, Cecil/Jerren flip
+  on life-total thresholds, Linvala's angel token count scales with
+  life. Generic lifegain peers displaced their mechanical picks.
+- **Narrowed gate, shipped**: Commander must additionally carry an
+  up-biased lifegain signal — `replacement.GainLife` amp on self
+  (ValidPlayer 'You', not Prevent) OR `static.Continuous` whose
+  raw_line contains `SVarCompare: GT*` / `GE*` (up-biased life
+  threshold). Rejects Bane (`LEX`), Ayli / Beza / Cecil / Jerren /
+  Linvala (no such static). Only Bilbo (GainLife doubler) and Elenda
+  (+1/+1 when life > starting, +5/+5 when life ≥ +10) remain.
+- Peer pool: other cards with `scales_with.YourLifeTotal` that ALSO
+  satisfy the symmetric positive-life filter (Lifelink / GainLife on
+  'You' / replacement.GainLife), 27 cards.
+- Audit verdict TRIVIAL by hi_syn hit count (neither target hits
+  EDHREC's top-30 hi-syn list), but **NDCG@30 +0.169 aggregate**
+  (Elenda +0.102 Bilbo +0.067). Golden-set aggregate NDCG unchanged
+  (0.255904 ⇄ 0.255904 stash test) — no indirect IDF regression.
+  Multiplier 2.5×.
+
 ## 2026-04-19
 
 ### Audit-driven cleanup

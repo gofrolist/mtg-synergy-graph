@@ -23,6 +23,7 @@ from mtg_synergy_graph.complement_rules.utility import (
     _find_flicker_synergy,
     _find_gy_fuel_feeders,
     _find_hand_size_feeders,
+    _find_life_total_feeders,
     _find_lifegain_feeders,
     _find_mana_doubler_synergy,
     _find_modified_axis_feeders,
@@ -2976,6 +2977,264 @@ class TestFindLifegainFeeders:
         results = _find_lifegain_feeders(conn, self._lifegain_cmdr_ports(), set())
         assert results
         assert all(r.rule_id == "lifegain_feeder" for r in results)
+
+
+class TestFindLifeTotalFeeders:
+    """Rule for commanders with a ``scales_with YourLifeTotal`` port
+    AND an up-biased lifegain signal (GainLife replacement amp on
+    self OR static.Continuous with SVarCompare GT*/GE*).
+
+    Narrow gate leaves Bilbo-Birthday-Celebrant (GainLife doubler)
+    and Elenda-Saint-of-Dusk (+1/+1 when life > starting). Excludes
+    Ayli / Bane / Beza / Cecil / Jerren / Linvala where life is used
+    as a query variable — first attempt fed them generic lifegain
+    peers and regressed their top-30 (audit 2026-04-20, reverted in
+    commit ec67250)."""
+
+    def _elenda_ports(self):
+        """Elenda: scales_with.YourLifeTotal + up-biased Continuous static
+        (SVarCompare 'GTY' = life > starting life)."""
+        return [
+            _port_row(
+                port_type="scales_with",
+                event_class="YourLifeTotal",
+                raw_line="SVar:X:Count$YourLifeTotal",
+            ),
+            _port_row(
+                port_type="static",
+                event_class="Continuous",
+                raw_line=(
+                    "{'Mode': 'Continuous', 'Affected': 'Card.Self', "
+                    "'AddPower': '1', 'AddToughness': '1', 'CheckSVar': 'X', "
+                    "'SVarCompare': 'GTY'}"
+                ),
+            ),
+            _port_row(port_type="keyword", event_class="Lifelink"),
+        ]
+
+    def _bilbo_ports(self):
+        """Bilbo: scales_with.YourLifeTotal + replacement.GainLife amp."""
+        return [
+            _port_row(
+                port_type="scales_with",
+                event_class="YourLifeTotal",
+                raw_line="SVar:Z:Count$YourLifeTotal",
+            ),
+            _port_row(
+                port_type="replacement",
+                event_class="GainLife",
+                raw_line=("{'Event': 'GainLife', 'ValidPlayer': 'You', 'ReplaceWith': 'GainLife'}"),
+            ),
+        ]
+
+    def test_no_life_axis_skips(self, conn):
+        ports = [_port_row(port_type="keyword", event_class="Lifelink")]
+        assert _find_life_total_feeders(conn, ports, set()) == []
+
+    def test_down_biased_static_rejected(self, conn):
+        """Bane-style: SVarCompare 'LEX' (life <= half starting) —
+        down-biased threshold, must NOT fire the rule."""
+        bane_ports = [
+            _port_row(
+                port_type="scales_with",
+                event_class="YourLifeTotal",
+                raw_line="SVar:CurrentLife:Count$YourLifeTotal",
+            ),
+            _port_row(
+                port_type="static",
+                event_class="Continuous",
+                raw_line=(
+                    "{'Mode': 'Continuous', 'Affected': 'Card.Self', "
+                    "'AddKeyword': 'Indestructible', 'CheckSVar': 'CurrentLife', "
+                    "'SVarCompare': 'LEX'}"
+                ),
+            ),
+        ]
+        _add_port(
+            conn,
+            "Angel of Vitality",
+            port_type="scales_with",
+            event_class="YourLifeTotal",
+            raw_line="SVar:Y:Count$YourLifeTotal",
+        )
+        _add_port(conn, "Angel of Vitality", port_type="keyword", event_class="Lifelink")
+        assert _find_life_total_feeders(conn, bane_ports, set()) == []
+
+    def test_query_variable_cmdr_rejected(self, conn):
+        """Ayli-style: scales_with.YourLifeTotal without any up-biased
+        static or GainLife replacement — rule doesn't fire (avoids
+        feeding query-variable commanders like Ayli/Jerren/Cecil/Linvala)."""
+        ayli_ports = [
+            _port_row(
+                port_type="scales_with",
+                event_class="YourLifeTotal",
+                raw_line="SVar:X:Count$YourLifeTotal",
+            ),
+            _port_row(port_type="keyword", event_class="Deathtouch"),
+        ]
+        _add_port(
+            conn,
+            "Angel of Vitality",
+            port_type="scales_with",
+            event_class="YourLifeTotal",
+            raw_line="SVar:Y:Count$YourLifeTotal",
+        )
+        _add_port(conn, "Angel of Vitality", port_type="keyword", event_class="Lifelink")
+        assert _find_life_total_feeders(conn, ayli_ports, set()) == []
+
+    def test_up_biased_static_fires(self, conn):
+        """Elenda: GTY compare → up-biased, peer cards feed."""
+        _add_port(
+            conn,
+            "Angel of Vitality",
+            port_type="scales_with",
+            event_class="YourLifeTotal",
+            raw_line="SVar:Y:Count$YourLifeTotal",
+        )
+        _add_port(conn, "Angel of Vitality", port_type="keyword", event_class="Lifelink")
+        results = _find_life_total_feeders(conn, self._elenda_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Angel of Vitality") == "life_total_peer"
+
+    def test_gainlife_replacement_amp_fires(self, conn):
+        """Bilbo: replacement.GainLife amp on self → up-biased."""
+        _add_port(
+            conn,
+            "Leyline of Hope",
+            port_type="scales_with",
+            event_class="YourLifeTotal",
+            raw_line="SVar:X:Count$YourLifeTotal",
+        )
+        _add_port(
+            conn,
+            "Leyline of Hope",
+            port_type="replacement",
+            event_class="GainLife",
+            raw_line=("{'Event': 'GainLife', 'ValidPlayer': 'You', 'ReplaceWith': 'GainLife'}"),
+        )
+        results = _find_life_total_feeders(conn, self._bilbo_ports(), set())
+        assert "Leyline of Hope" in _candidates(results)
+
+    def test_gainlife_prevent_rejected_as_signal(self, conn):
+        """A replacement.GainLife with ``'Prevent': 'True'`` (Sulfuric
+        Vortex-style) must NOT count as up-bias."""
+        sulfuric_cmdr = [
+            _port_row(
+                port_type="scales_with",
+                event_class="YourLifeTotal",
+                raw_line="SVar:X:Count$YourLifeTotal",
+            ),
+            _port_row(
+                port_type="replacement",
+                event_class="GainLife",
+                raw_line=("{'Event': 'GainLife', 'ValidPlayer': 'You', 'Prevent': 'True'}"),
+            ),
+        ]
+        _add_port(
+            conn,
+            "Angel of Vitality",
+            port_type="scales_with",
+            event_class="YourLifeTotal",
+            raw_line="SVar:Y:Count$YourLifeTotal",
+        )
+        _add_port(conn, "Angel of Vitality", port_type="keyword", event_class="Lifelink")
+        assert _find_life_total_feeders(conn, sulfuric_cmdr, set()) == []
+
+    def test_inverse_bias_peer_rejected(self, conn):
+        """Death's Shadow: scales with life but only LoseLife effects —
+        fails symmetric positive-bias filter, must not be a peer."""
+        _add_port(
+            conn,
+            "Death's Shadow",
+            port_type="scales_with",
+            event_class="YourLifeTotal",
+            raw_line="SVar:Y:Count$YourLifeTotal",
+        )
+        _add_port(
+            conn,
+            "Death's Shadow",
+            port_type="effect",
+            event_class="LoseLife",
+            valid_filter="You",
+            raw_line="{'DB': 'LoseLife', 'Defined': 'You'}",
+        )
+        results = _find_life_total_feeders(conn, self._elenda_ports(), set())
+        assert "Death's Shadow" not in _candidates(results)
+
+    def test_non_you_gainlife_peer_rejected(self, conn):
+        """Peer with effect.GainLife on 'Opponent' shouldn't qualify."""
+        _add_port(
+            conn,
+            "Opponent GainLife Peer",
+            port_type="scales_with",
+            event_class="YourLifeTotal",
+            raw_line="SVar:X:Count$YourLifeTotal",
+        )
+        _add_port(
+            conn,
+            "Opponent GainLife Peer",
+            port_type="effect",
+            event_class="GainLife",
+            valid_filter="Opponent",
+            raw_line="{'DB': 'GainLife', 'Defined': 'Opponent'}",
+        )
+        results = _find_life_total_feeders(conn, self._elenda_ports(), set())
+        assert "Opponent GainLife Peer" not in _candidates(results)
+
+    def test_ge_compare_also_up_biased(self, conn):
+        """SVarCompare 'GEZ' (life >= +10 starting) is also up-biased —
+        Elenda's second static clause."""
+        ge_cmdr = [
+            _port_row(
+                port_type="scales_with",
+                event_class="YourLifeTotal",
+                raw_line="SVar:X:Count$YourLifeTotal",
+            ),
+            _port_row(
+                port_type="static",
+                event_class="Continuous",
+                raw_line=(
+                    "{'Mode': 'Continuous', 'Affected': 'Card.Self', "
+                    "'AddPower': '5', 'CheckSVar': 'X', 'SVarCompare': 'GEZ'}"
+                ),
+            ),
+        ]
+        _add_port(
+            conn,
+            "Angel of Vitality",
+            port_type="scales_with",
+            event_class="YourLifeTotal",
+            raw_line="SVar:Y:Count$YourLifeTotal",
+        )
+        _add_port(conn, "Angel of Vitality", port_type="keyword", event_class="Lifelink")
+        results = _find_life_total_feeders(conn, ge_cmdr, set())
+        assert "Angel of Vitality" in _candidates(results)
+
+    def test_excludes_commander(self, conn):
+        _add_port(
+            conn,
+            "Elenda, Saint of Dusk",
+            port_type="scales_with",
+            event_class="YourLifeTotal",
+            raw_line="SVar:X:Count$YourLifeTotal",
+        )
+        _add_port(conn, "Elenda, Saint of Dusk", port_type="keyword", event_class="Lifelink")
+        results = _find_life_total_feeders(conn, self._elenda_ports(), {"Elenda, Saint of Dusk"})
+        assert "Elenda, Saint of Dusk" not in _candidates(results)
+
+    def test_rule_id(self, conn):
+        _add_port(
+            conn,
+            "Angel of Vitality",
+            port_type="scales_with",
+            event_class="YourLifeTotal",
+            raw_line="SVar:Y:Count$YourLifeTotal",
+        )
+        _add_port(conn, "Angel of Vitality", port_type="keyword", event_class="Lifelink")
+        results = _find_life_total_feeders(conn, self._elenda_ports(), set())
+        assert results
+        assert all(r.rule_id == "life_total_feeder" for r in results)
+        assert all(r.cmdr_event == "life_total_axis" for r in results)
 
 
 class TestFindDamageDoublerSynergy:

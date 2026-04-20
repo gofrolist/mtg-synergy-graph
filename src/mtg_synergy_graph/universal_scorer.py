@@ -95,6 +95,7 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "hand_size_feeder": "port_match",
     "gy_fuel_feeder": "port_match",
     "lifegain_feeder": "port_match",
+    "life_total_feeder": "port_match",
     "creatures_as_lands_landfall": "port_match",
     "damage_doubler_synergy": "port_match",
     "choose_tribal": "port_match",
@@ -521,6 +522,19 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # matches hand_size/gy_fuel — narrow single-axis feeder with
     # IDF ~0.20 per match across a tight pool of ~55 total candidates.
     "lifegain_feeder": 2.5,
+    # life_total_feeder: commanders with scales_with YourLifeTotal AND
+    # an up-biased lifegain signal (GainLife replacement amp on self OR
+    # static.Continuous with SVarCompare GT*/GE*). Narrow gate leaves
+    # Bilbo (Birthday Celebrant — GainLife doubler) and Elenda (Saint
+    # of Dusk — +1/+1 when life > starting, +5/+5 when life >= +10);
+    # explicitly excludes Ayli / Bane / Beza / Cecil / Jerren / Linvala
+    # which carry the axis but read life as a query variable (exile
+    # power cap, indestructible-at-low-life, token count, flip
+    # thresholds) — first attempt regressed those cmdrs by -0.2 net
+    # NDCG (audit 2026-04-20, reverted in ec67250). 2.5× matches
+    # hand_size/gy_fuel/lifegain — narrow single-axis feeder with a
+    # tight archetype-defining pool (~27 cards, IDF ~0.18 per match).
+    "life_total_feeder": 2.5,
     # creatures_as_lands_landfall: commanders whose type-bending static
     # makes creatures also lands (Ashaya, Soul of the Wild). Pool ~237
     # landfall-trigger cards (Rampaging Baloths, Lotus Cobra, Avenger of

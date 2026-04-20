@@ -1412,6 +1412,112 @@ def _find_lifegain_feeders(
     return results
 
 
+#: Matches a Forge ``'SVarCompare': 'GT*'`` or ``'SVarCompare': 'GE*'``
+#: clause, signalling an UP-biased threshold ("life > X" / "life >= X").
+#: Down-biased commanders (Bane's ``'LEX'`` — "life <= half starting")
+#: carry the same ``scales_with.YourLifeTotal`` axis but want inverse
+#: payoffs, so the up-bias check is the discriminator.
+_UP_BIASED_SVAR_COMPARE_RE = re.compile(r"'SVarCompare':\s*'G[TE]")
+
+
+def _find_life_total_feeders(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Rule for commanders with a ``scales_with YourLifeTotal`` port
+    **AND** a strong up-biased lifegain signal.
+
+    Target archetype: "grow with life" / "reward high life" commanders
+    whose payoff scales upward. The YourLifeTotal axis alone is
+    heterogeneous (Ayli uses life as an exile-power-cap query, Bane
+    wants LOW life for indestructible, Cecil/Jerren use life-total
+    thresholds as flip conditions — audit 2026-04-20 showed those
+    cmdrs regress when fed generic lifegain peers). The up-bias gate
+    narrows the rule to: Bilbo (Birthday Celebrant — GainLife
+    replacement amp) and Elenda (Saint of Dusk — continuous stat
+    boost conditional on ``SVarCompare: GTY`` / ``GEZ``).
+
+    Up-bias signal (at least one of):
+
+    - ``replacement.GainLife`` with ``ValidPlayer: 'You'`` (not
+      ``Prevent: True``) — a lifegain amplifier on self.
+    - ``static.Continuous`` whose raw line contains
+      ``'SVarCompare': 'GT...'`` or ``'SVarCompare': 'GE...'`` (up-
+      biased threshold comparing against a life-total SVar).
+
+    Single tier:
+
+    - ``life_total_peer``: other cards carrying ``scales_with.YourLifeTotal``
+      that ALSO satisfy ``_is_positive_life_port`` (Lifelink / GainLife
+      / replacement.GainLife). ~27 cards: Angel of Vitality, Blood
+      Baron of Vizkopa, Divinity of Pride, Honor Troll, Path of
+      Bravery, Righteous Valkyrie, Serra Ascendant, Sigarda's
+      Splendor, Speaker of the Heavens, Leyline of Hope, Phial of
+      Galadriel.
+    """
+    has_life_axis = any(
+        (p.get("port_type") or "").strip() == "scales_with" and (p.get("event_class") or "").strip() == "YourLifeTotal"
+        for p in cmdr_ports
+    )
+    if not has_life_axis:
+        return []
+
+    has_up_bias = False
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ec = (p.get("event_class") or "").strip()
+        raw = p.get("raw_line") or ""
+        if (
+            pt == "replacement"
+            and ec == "GainLife"
+            and "'ValidPlayer': 'You'" in raw
+            and "'Prevent': 'True'" not in raw
+        ):
+            has_up_bias = True
+            break
+        if pt == "static" and ec == "Continuous" and _UP_BIASED_SVAR_COMPARE_RE.search(raw):
+            has_up_bias = True
+            break
+    if not has_up_bias:
+        return []
+
+    peer_set: set[str] = {
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT p1.card_name "
+            "FROM card_ports p1 "
+            "WHERE p1.port_type = 'scales_with' "
+            "AND p1.event_class = 'YourLifeTotal' "
+            "AND EXISTS ("
+            "  SELECT 1 FROM card_ports p2 "
+            "  WHERE p2.card_name = p1.card_name "
+            "  AND ("
+            "    (p2.port_type='keyword' AND p2.event_class='Lifelink') "
+            "    OR (p2.port_type='effect' AND p2.event_class='GainLife' "
+            "        AND p2.valid_filter='You') "
+            "    OR (p2.port_type='replacement' AND p2.event_class='GainLife')"
+            "  )"
+            ")"
+        )
+    }
+
+    results: list[PortComplement] = []
+    for name in peer_set:
+        if name in cmdr_set:
+            continue
+        results.append(
+            PortComplement(
+                rule_id="life_total_feeder",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="life_total_axis",
+                cand_event="life_total_peer",
+            )
+        )
+    return results
+
+
 def _only_self_sac_cost(conn: sqlite3.Connection) -> frozenset[str]:
     """Return card names whose ONLY sacrifice cost targets themselves.
 

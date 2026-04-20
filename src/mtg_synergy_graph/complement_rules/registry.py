@@ -171,6 +171,23 @@ def _lifegain_feeder_gate(port: PortRow) -> bool:
     return (port.get("event_class") or "").strip() == "LifeYouGainedThisTurn"
 
 
+def _life_total_feeder_gate(port: PortRow) -> bool:
+    """Mirror the per-port signature of ``_find_life_total_feeders``.
+
+    Fires on ``scales_with YourLifeTotal`` ports. The helper additionally
+    requires commander-level up-bias (a GainLife replacement amp OR a
+    static.Continuous with ``SVarCompare`` starting ``GT``/``GE``), which
+    is a cmdr-wide AND-check not expressible in a single-port predicate.
+    Every Bilbo/Elenda port on this axis still passes the port-level
+    gate; the helper filters at call time. Gate-miss auditing over the
+    golden set remains meaningful (no overlap with the 8 YourLifeTotal
+    cmdrs anyway).
+    """
+    if (port.get("port_type") or "").strip() != "scales_with":
+        return False
+    return (port.get("event_class") or "").strip() == "YourLifeTotal"
+
+
 def _gy_fuel_feeder_gate(port: PortRow) -> bool:
     """Mirror the runtime gate of ``_find_gy_fuel_feeders``.
 
@@ -619,6 +636,7 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("hand_size_feeder", _hand_size_feeder_gate),
     RuleGate("gy_fuel_feeder", _gy_fuel_feeder_gate),
     RuleGate("lifegain_feeder", _lifegain_feeder_gate),
+    RuleGate("life_total_feeder", _life_total_feeder_gate),
     RuleGate("opponent_forcing", _opponent_forcing_gate),
     RuleGate("wheel_synergy", _wheel_synergy_gate),
     RuleGate("mana_doubler", _mana_doubler_gate),
