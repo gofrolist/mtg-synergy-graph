@@ -344,11 +344,17 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # 1.0× (no dampening) so they can crack top-30 when no other rule fires.
     "cost_reduction_target": 1.0,
     # token_etb_damage has ~40 matches giving IDF ≈ 0.19. For commanders
-    # with creature-heavy decks this lifts correct picks (Prossh +0.197,
-    # Kykar +0.100), but for spell-based token commanders (Talrand) it
-    # can displace spell staples from top-30. The 0.5 multiplier
-    # preserves the gain magnitudes while shrinking off-target damage.
-    "token_etb_damage": 0.5,
+    # with creature-heavy decks this lifts correct picks (Prossh +0.195),
+    # but for 451 total touched cmdrs the audit 2026-04-20 still flagged
+    # CONTENTIOUS at multiplier 0.5 — aggregate -0.885 NDCG, Breya -2
+    # hits / -0.212, Zidane -2 / -0.099. Further dampen to 0.3: Prossh's
+    # golden anchor (+0.195 at 0.5x) drops to ~+0.117 — still above the
+    # 0.05 override threshold — while the off-archetype displacement on
+    # Breya/Zidane drops proportionally. Tighter gates were considered
+    # (require multiple Token effects, exclude spell/artifact cmdrs) but
+    # a scalar dampen preserves the simple gate and lets IDF do the
+    # ranking work.
+    "token_etb_damage": 0.3,
     # combat_enhancer has a ~192-card pool (52 AddPhase + 140 Double
     # Strike) and a 501-cmdr touched set — the Attacks-Self-with-value
     # gate catches any commander with an engine-effect on-attack trigger
