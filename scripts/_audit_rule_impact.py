@@ -56,8 +56,10 @@ Caveats:
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import contextlib
 import json
+import os
 import sqlite3
 import sys
 from collections.abc import Callable, Iterator
@@ -340,11 +342,167 @@ def _patched_helper(eng: SynergyEngine, helper_name: str, original: Callable[...
         eng._score_cache.clear()
 
 
+def _worker_baseline_chunk(
+    args: tuple[list[tuple[str, str]], str, str],
+) -> dict[str, tuple[int, float] | None]:
+    """Score a chunk of (oid, name) pairs WITH all rules active.
+
+    Each worker process opens its own ``SynergyEngine`` + edhrec
+    connection — engine startup is ~1-2s, amortised across the chunk.
+    Returns ``{oid: (hi_syn_hits, ndcg@30) | None}``. ``None`` = no
+    curated EDHREC data for that commander (skipped in aggregation).
+    """
+    chunk, syn_db, edhrec_db = args
+    edhrec_conn = sqlite3.connect(edhrec_db)
+    edhrec_conn.row_factory = sqlite3.Row
+    out: dict[str, tuple[int, float] | None] = {}
+    try:
+        with SynergyEngine(Path(syn_db)) as eng:
+            for oid, name in chunk:
+                out[oid] = hi_syn_and_ndcg(eng, edhrec_conn, oid, name)
+    finally:
+        edhrec_conn.close()
+    return out
+
+
+def _worker_audit_rules(
+    args: tuple[
+        list[tuple[str, str, list[tuple[str, str]]]],
+        str,
+        str,
+        dict[str, tuple[int, float] | None],
+        list[tuple[str, str]],
+    ],
+) -> list[dict]:
+    """Audit a chunk of rules in one worker process.
+
+    Each worker opens its own engine (amortising ~1-2s startup over
+    its chunk of rules) and runs the same per-rule loop as the serial
+    fallback: monkey-patch helper → re-score touched cmdrs →
+    optionally re-score golden cmdrs for the safety-net verdict
+    override. Returns a list of result dicts (one per rule).
+    """
+    rule_plans, syn_db, edhrec_db, baseline, golden_targets = args
+    edhrec_conn = sqlite3.connect(edhrec_db)
+    edhrec_conn.row_factory = sqlite3.Row
+    results: list[dict] = []
+    try:
+        with SynergyEngine(Path(syn_db)) as eng:
+            for rule_id, helper_name, targets in rule_plans:
+                results.append(
+                    _audit_rule_single(
+                        eng,
+                        edhrec_conn,
+                        rule_id,
+                        helper_name,
+                        targets,
+                        baseline,
+                        golden_targets,
+                    )
+                )
+    finally:
+        edhrec_conn.close()
+    return results
+
+
+def _audit_rule_single(
+    eng: SynergyEngine,
+    edhrec_conn: sqlite3.Connection,
+    rule_id: str,
+    helper_name: str,
+    targets: list[tuple[str, str]],
+    baseline: dict[str, tuple[int, float] | None],
+    golden_targets: list[tuple[str, str]],
+) -> dict:
+    """Audit one rule on an open engine — shared by serial + worker paths.
+
+    Extracted so the serial fallback and the parallel worker share the
+    classification + golden-check logic verbatim. Caller is responsible
+    for opening / closing the engine and edhrec connection.
+    """
+    original = getattr(core, helper_name)
+    target_oid_set = {oid for _, oid in targets}
+
+    # First patched pass: re-score TOUCHED cmdrs.
+    with _patched_helper(eng, helper_name, original):
+        without_scores: dict[str, tuple[int, float] | None] = {
+            oid: hi_syn_and_ndcg(eng, edhrec_conn, oid, name) for name, oid in targets
+        }
+
+    movers: list[tuple[str, int, int, int, float]] = []
+    scored = 0
+    ndcg_sum_delta = 0.0
+    ndcg_max_drop = 0.0
+    for name, oid in targets:
+        base = baseline.get(oid)
+        wo = without_scores.get(oid)
+        if base is None or wo is None:
+            continue
+        scored += 1
+        w_hits, w_ndcg = base
+        wo_hits, wo_ndcg = wo
+        hits_d = w_hits - wo_hits
+        ndcg_d = w_ndcg - wo_ndcg
+        ndcg_sum_delta += ndcg_d
+        if ndcg_d < ndcg_max_drop:
+            ndcg_max_drop = ndcg_d
+        if hits_d != 0 or abs(ndcg_d) >= _MOVER_NDCG_THRESHOLD:
+            movers.append((name, w_hits, wo_hits, hits_d, ndcg_d))
+    movers.sort(key=lambda m: (-abs(m[3]), -abs(m[4])))
+
+    hits_movers = tuple((m[0], m[1], m[2], m[3]) for m in movers if m[3] != 0)
+    cls = classify_impact(hits_movers, scored)
+    verdict = cls.verdict.upper() if cls.verdict != "positive" else "positive"
+
+    # Golden-set safety net. Skipped for "positive" verdicts since
+    # those can't be further upgraded.
+    golden_max_drop = 0.0
+    golden_max_cmdr = ""
+    if verdict != "positive" and golden_targets:
+        golden_extra = [(gname, goid) for gname, goid in golden_targets if goid not in target_oid_set]
+        with _patched_helper(eng, helper_name, original):
+            golden_patched: dict[str, tuple[int, float] | None] = {
+                goid: hi_syn_and_ndcg(eng, edhrec_conn, goid, gname) for gname, goid in golden_extra
+            }
+        for gname, goid in golden_targets:
+            if goid not in baseline or baseline[goid] is None:
+                continue
+            patched = without_scores.get(goid) if goid in target_oid_set else golden_patched.get(goid)
+            if patched is None:
+                continue
+            _, base_ndcg = baseline[goid]
+            _, p_ndcg = patched
+            d = base_ndcg - p_ndcg
+            if d > golden_max_drop:
+                golden_max_drop = d
+                golden_max_cmdr = gname
+        if golden_max_drop >= _GOLDEN_DROP_THRESHOLD:
+            if verdict in ("TRIVIAL", "MARGINAL"):
+                verdict = "positive"
+            elif verdict == "HARMFUL":
+                verdict = "CONTENTIOUS"
+
+    return {
+        "rule_id": rule_id,
+        "touched": len(targets),
+        "scored": scored,
+        "sum_delta": cls.sum_delta,
+        "max_abs_delta": cls.max_abs_delta,
+        "ndcg_sum_delta": round(ndcg_sum_delta, 4),
+        "ndcg_max_drop": round(ndcg_max_drop, 4),
+        "golden_max_drop": round(golden_max_drop, 4),
+        "golden_max_cmdr": golden_max_cmdr,
+        "movers": tuple(movers),
+        "verdict": verdict,
+    }
+
+
 def _audit_many(
     rule_ids: list[str],
     syn_db: Path,
     edhrec_db: Path,
     name_to_oid: dict[str, str],
+    workers: int = 1,
 ) -> list[dict]:
     """Audit many rules with shared baseline + single engine instance.
 
@@ -397,116 +555,84 @@ def _audit_many(
     # we can re-score them per rule and detect commanders whose helper
     # actually fires even though the registered gate misses them.
     extended_union = sorted(union_oids | goid_to_name.keys())
-    print(f"  baseline: scoring {len(extended_union)} unique commanders WITH all rules...", file=sys.stderr)
-
-    edhrec_conn = sqlite3.connect(edhrec_db)
-    edhrec_conn.row_factory = sqlite3.Row
     results: list[dict] = list(skipped)
-    try:
-        with SynergyEngine(syn_db) as eng:
-            # Baseline: (hi_syn_hits, ndcg@30) per commander, scored ONCE
-            # with all rules active.
-            baseline: dict[str, tuple[int, float] | None] = {}
-            for i, oid in enumerate(extended_union, 1):
-                if i % 100 == 0:
-                    print(f"    baseline {i}/{len(extended_union)}", file=sys.stderr)
-                name = oid_to_name.get(oid) or goid_to_name.get(oid)
-                if name is None:
-                    continue
-                baseline[oid] = hi_syn_and_ndcg(eng, edhrec_conn, oid, name)
 
-            # Step 3: per rule, monkey-patch and re-score only its
-            # touched cmdrs. Engine + caches persist across patches.
-            for rule_id, helper_name, targets in plans:
-                original = getattr(core, helper_name)
-                with _patched_helper(eng, helper_name, original):
-                    without_scores: dict[str, tuple[int, float] | None] = {
-                        oid: hi_syn_and_ndcg(eng, edhrec_conn, oid, name) for name, oid in targets
-                    }
+    baseline: dict[str, tuple[int, float] | None] = {}
+    # Build list of (oid, name) pairs for baseline scoring.
+    baseline_items: list[tuple[str, str]] = []
+    for oid in extended_union:
+        name = oid_to_name.get(oid) or goid_to_name.get(oid)
+        if name is not None:
+            baseline_items.append((oid, name))
 
-                # Movers: (name, w_hits, wo_hits, hits_delta, ndcg_delta).
-                movers: list[tuple[str, int, int, int, float]] = []
-                scored = 0
-                ndcg_sum_delta = 0.0
-                ndcg_max_drop = 0.0  # most negative per-cmdr NDCG drop
-                for name, oid in targets:
-                    base = baseline.get(oid)
-                    wo = without_scores.get(oid)
-                    if base is None or wo is None:
-                        continue
-                    scored += 1
-                    w_hits, w_ndcg = base
-                    wo_hits, wo_ndcg = wo
-                    hits_d = w_hits - wo_hits
-                    ndcg_d = w_ndcg - wo_ndcg
-                    ndcg_sum_delta += ndcg_d
-                    if ndcg_d < ndcg_max_drop:
-                        ndcg_max_drop = ndcg_d
-                    if hits_d != 0 or abs(ndcg_d) >= _MOVER_NDCG_THRESHOLD:
-                        movers.append((name, w_hits, wo_hits, hits_d, ndcg_d))
-                # Rank by combined magnitude: hits dominate, NDCG breaks ties.
-                movers.sort(key=lambda m: (-abs(m[3]), -abs(m[4])))
+    if workers > 1 and len(baseline_items) > 100:
+        # Parallel baseline: split cmdrs across workers. Each worker
+        # creates its own engine (≈1-2 s startup, amortised across the
+        # chunk). Total wall-clock ≈ (baseline_items / workers) ×
+        # per-cmdr + worker-startup.
+        print(
+            f"  baseline: scoring {len(baseline_items)} commanders WITH all rules across {workers} workers...",
+            file=sys.stderr,
+        )
+        chunks = [baseline_items[i::workers] for i in range(workers)]
+        chunk_args = [(c, str(syn_db), str(edhrec_db)) for c in chunks]
+        with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as ex:
+            for chunk_result in ex.map(_worker_baseline_chunk, chunk_args):
+                baseline.update(chunk_result)
+    else:
+        # Serial baseline (fallback / small runs).
+        print(
+            f"  baseline: scoring {len(baseline_items)} commanders WITH all rules...",
+            file=sys.stderr,
+        )
+        edhrec_conn = sqlite3.connect(edhrec_db)
+        edhrec_conn.row_factory = sqlite3.Row
+        try:
+            with SynergyEngine(syn_db) as eng:
+                for i, (oid, name) in enumerate(baseline_items, 1):
+                    if i % 100 == 0:
+                        print(f"    baseline {i}/{len(baseline_items)}", file=sys.stderr)
+                    baseline[oid] = hi_syn_and_ndcg(eng, edhrec_conn, oid, name)
+        finally:
+            edhrec_conn.close()
 
-                # Classify on hits delta first. NDCG metrics are tracked
-                # separately as informational signals — within-touched
-                # NDCG variance can be large (rank shuffles within
-                # top-30) but doesn't change whether the rule is doing
-                # net useful work for commanders the gate caught.
-                hits_movers = tuple((m[0], m[1], m[2], m[3]) for m in movers if m[3] != 0)
-                cls = classify_impact(hits_movers, scored)
-                verdict = cls.verdict.upper() if cls.verdict != "positive" else "positive"
-
-                # Golden-set deletion-safety check: ALWAYS run, regardless
-                # of touched-set verdict. Audit aggregates can mask
-                # significant per-commander positives — token_etb_damage
-                # showed ndcgΣ -0.908 across 451 touched but Prossh
-                # alone gained +0.195 from the rule. HARMFUL by hits
-                # ≠ safe to delete; check the golden set to confirm
-                # no popular commander loses meaningful NDCG.
-                golden_max_drop = 0.0
-                golden_max_cmdr = ""
-                if golden_targets:
-                    with _patched_helper(eng, helper_name, original):
-                        for gname, goid in golden_targets:
-                            if goid not in baseline or baseline[goid] is None:
-                                continue
-                            patched = hi_syn_and_ndcg(eng, edhrec_conn, goid, gname)
-                            if patched is None:
-                                continue
-                            _, base_ndcg = baseline[goid]
-                            _, p_ndcg = patched
-                            d = base_ndcg - p_ndcg  # positive = drop when removed
-                            if d > golden_max_drop:
-                                golden_max_drop = d
-                                golden_max_cmdr = gname
-                    # If removing the rule drops a golden commander by
-                    # at least the threshold, override TRIVIAL/MARGINAL
-                    # verdicts to "positive" (rule is doing real work
-                    # the gate missed) AND override HARMFUL to
-                    # "CONTENTIOUS" (rule both helps + hurts; needs
-                    # human review).
-                    if golden_max_drop >= _GOLDEN_DROP_THRESHOLD:
-                        if verdict in ("TRIVIAL", "MARGINAL"):
-                            verdict = "positive"
-                        elif verdict == "HARMFUL":
-                            verdict = "CONTENTIOUS"
-                results.append(
-                    {
-                        "rule_id": rule_id,
-                        "touched": len(targets),
-                        "scored": scored,
-                        "sum_delta": cls.sum_delta,
-                        "max_abs_delta": cls.max_abs_delta,
-                        "ndcg_sum_delta": round(ndcg_sum_delta, 4),
-                        "ndcg_max_drop": round(ndcg_max_drop, 4),
-                        "golden_max_drop": round(golden_max_drop, 4),
-                        "golden_max_cmdr": golden_max_cmdr,
-                        "movers": tuple(movers),
-                        "verdict": verdict,
-                    }
-                )
-    finally:
-        edhrec_conn.close()
+    # Per-rule audits: parallelise across rules (each rule's work is
+    # independent — monkey-patch is local to the worker's engine).
+    if workers > 1 and len(plans) > 1:
+        print(
+            f"  per-rule: auditing {len(plans)} rules across {workers} workers...",
+            file=sys.stderr,
+        )
+        rule_chunks: list[list[tuple[str, str, list[tuple[str, str]]]]] = [[] for _ in range(workers)]
+        # Round-robin distribution so chunks balance out on varying
+        # target-set sizes (a few large rules shouldn't saturate one
+        # worker while others go idle).
+        for i, plan in enumerate(plans):
+            rule_chunks[i % workers].append(plan)
+        rule_args = [(chunk, str(syn_db), str(edhrec_db), baseline, golden_targets) for chunk in rule_chunks if chunk]
+        with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as ex:
+            for chunk_results in ex.map(_worker_audit_rules, rule_args):
+                results.extend(chunk_results)
+    else:
+        # Serial per-rule (fallback / single rule).
+        edhrec_conn = sqlite3.connect(edhrec_db)
+        edhrec_conn.row_factory = sqlite3.Row
+        try:
+            with SynergyEngine(syn_db) as eng:
+                for rule_id, helper_name, targets in plans:
+                    results.append(
+                        _audit_rule_single(
+                            eng,
+                            edhrec_conn,
+                            rule_id,
+                            helper_name,
+                            targets,
+                            baseline,
+                            golden_targets,
+                        )
+                    )
+        finally:
+            edhrec_conn.close()
 
     # Preserve input rule order.
     by_id = {r["rule_id"]: r for r in results}
@@ -602,6 +728,13 @@ def main() -> int:
         default=5,
         help="How many top-magnitude per-commander movers to print per rule.",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=max(1, (os.cpu_count() or 4) // 2),
+        help="Parallel worker processes for baseline + per-rule scoring. "
+        "Defaults to half the CPU count. Pass 1 to run serially.",
+    )
     args = parser.parse_args()
 
     if args.rule_id:
@@ -622,7 +755,7 @@ def main() -> int:
     # importable for tests / external callers that need the simpler
     # hits-only metric, but main() should always go through the
     # NDCG-aware path.
-    results = _audit_many(rules, args.db, args.edhrec_db, name_to_oid)
+    results = _audit_many(rules, args.db, args.edhrec_db, name_to_oid, workers=args.workers)
     if not results:
         print("  [skip] no auditable rules in input", file=sys.stderr)
 
