@@ -1198,6 +1198,108 @@ def _find_hand_size_feeders(
     return results
 
 
+#: Matches Forge's ``NumCards`` clause inside a Mill effect raw_line.
+#: Captures integer amounts (``NumCards: '3'``) and scaling SVar
+#: references (``NumCards: 'X'`` / ``'Y'`` / ``'Z'``).
+_NUM_CARDS_RE = re.compile(r"'NumCards':\s*'([XYZ]|\d+)'")
+
+
+def _find_gy_fuel_feeders(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Rule for commanders whose signature ability pays by **exiling
+    cards from any graveyard** — ``cost.exile_from_grave`` with
+    ``cost_target='any'``.
+
+    Aphemia (tap + exile Enchantment → 2/2 Zombie), Ashnod (exile
+    Creature → draw), Araumi (tap + exile X → encore targets),
+    Drivnod (exile 3 Creatures → reset trigger), Egon (exile a
+    Creature → Cleric/Demigod activation), Gorex (exile X Creatures
+    → +X/+X), Imoen (exile Instant/Sorcery → copy), Ishkanah (exile
+    2 cards → Spider token), Kethis (exile 2 legendary → cast from
+    GY), Kroxa and Kunoros, Ludevic, Osgir, Sigarda, Taigam, Tawnos,
+    Ultimecia, Varina, Winter, and Baron Helmut Zemo.
+
+    The archetype-defining payoff is **self-mill**: the more cards
+    in your graveyard, the more often you can pay the cost. Commanders
+    with ``cost_target='self'`` (Wilson, Symbiote Spider-Man, Tocasia,
+    Venom, Morbius, Spider-Slayer, Beetle) are a different archetype
+    — they escape themselves, so their reward is sacrifice outlets
+    and dies triggers, not GY filling. They're excluded by the gate.
+
+    Single tier:
+
+    - ``gy_fuel_self_mill``: ``effect.Mill`` with ``Defined: 'You'``
+      and ``NumCards >= 3`` OR a scaling SVar (``X``/``Y``/``Z``).
+      ~100 cards. Aftermath Analyst, Altar of Dementia (X), Hedron
+      Crab, Ashiok Nightmare Weaver, Mesmeric Orb, Sphinx's Tutelage.
+      Opponent-targeting (``Opponent``/``EachPlayer``) mills are
+      rejected — they don't fill YOUR graveyard. The threshold was
+      tightened from 2 to 3 after audit: NumCards=2 cantrip-mills
+      (Peek at Peeler / Oneirophage) flooded Osgir's top-30 with
+      one-shot cantrips, pushing out her archetype artifact picks
+      (-0.093 golden-set NDCG, -0.436 on non-golden Ultimecia).
+
+    Disjoint from ``graveyard_filler`` (fires on commanders with
+    trigger.ChangesZone GY→BF or effect=Play from graveyard; these
+    exile_from_grave commanders typically lack those ports — the
+    gap_report confirmed 0% coverage for this signature before
+    the rule was added).
+    """
+    has_any_target_cost = False
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "cost":
+            continue
+        if (p.get("event_class") or "").strip() != "exile_from_grave":
+            continue
+        if (p.get("cost_target") or "").strip() == "any":
+            has_any_target_cost = True
+            break
+    if not has_any_target_cost:
+        return []
+
+    self_mill_set: set[str] = set()
+    for row in conn.execute(
+        "SELECT DISTINCT card_name, raw_line FROM card_ports "
+        "WHERE port_type = 'effect' "
+        "AND event_class = 'Mill' "
+        "AND raw_line LIKE ? "
+        "AND raw_line NOT LIKE '%Opponent%' "
+        "AND raw_line NOT LIKE '%EachPlayer%'",
+        ("%'Defined': 'You'%",),
+    ):
+        raw = row["raw_line"] or ""
+        match = _NUM_CARDS_RE.search(raw)
+        if not match:
+            continue
+        value = match.group(1)
+        if value in ("X", "Y", "Z"):
+            self_mill_set.add(row["card_name"])
+            continue
+        try:
+            if int(value) >= 3:
+                self_mill_set.add(row["card_name"])
+        except ValueError:
+            continue
+
+    results: list[PortComplement] = []
+    for name in self_mill_set:
+        if name in cmdr_set:
+            continue
+        results.append(
+            PortComplement(
+                rule_id="gy_fuel_feeder",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="gy_fuel_cost",
+                cand_event="gy_fuel_self_mill",
+            )
+        )
+    return results
+
+
 def _only_self_sac_cost(conn: sqlite3.Connection) -> frozenset[str]:
     """Return card names whose ONLY sacrifice cost targets themselves.
 

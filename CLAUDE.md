@@ -6,7 +6,7 @@ Guidance for Claude Code working in this repo.
 
 MTG Synergy Graph — deterministic, rule-based EDH/Commander synergy scorer
 using Forge DSL ports. No training, no EDHREC at inference.
-Current aggregate NDCG@30 ~ 0.251 on the 100-commander golden set.
+Current aggregate NDCG@30 ~ 0.253 on the 100-commander golden set.
 2026-04-19 audit-driven cleanup deleted 9 net-negative or dead rules
 (`etb_sac_target`, `power_matters`, `token_sac_chain`, `pan_density`,
 `token_etb_damage` → kept as CONTENTIOUS, `damage_synergy`,
@@ -271,6 +271,40 @@ hand_size_feeder (2026-04-19):
   surfaces, Hazoret skipped, fixed max rejected, non-static
   Effect rejected, commander self-exclusion, rule_id). 1007
   total tests, 82% coverage.
+gy_fuel_feeder (2026-04-19):
+- New rule for the 18 commanders with `cost.exile_from_grave` +
+  `cost_target='any'` — Araumi (golden anchor), Aphemia, Ashnod,
+  Drivnod, Egon, Gorex, Ishkanah, Kethis, Osgir, Ultimecia,
+  Varina, Winter, Kroxa and Kunoros, Ludevic, Taigam, Tawnos,
+  Baron Zemo, Capitoline Triad.
+- Archetype: pay by exiling graveyard cards → reward is self-mill
+  (more cards in GY = more fuel for the cost).
+- Single tier `gy_fuel_self_mill`: `effect.Mill` with
+  `Defined: 'You'`, `NumCards >= 3` OR scaling `X/Y/Z`. ~100
+  cards (Aftermath Analyst, Altar of Dementia, Hedron Crab,
+  Ashiok Nightmare Weaver, Mesmeric Orb, Sphinx's Tutelage).
+  Rejects Opponent / EachPlayer targets.
+- Initial draft at NumCards >= 2 flooded Osgir's top-30 with
+  cantrip-mills and pushed her archetype artifact picks out
+  (Osgir golden NDCG 0.3458 → 0.2528 = -0.093, Ultimecia
+  -0.436). Tightening to NumCards >= 3 cut Osgir drop to -0.022
+  and flipped the audit verdict from CONTENTIOUS to positive.
+- Self-target escape-style commanders (`cost_target='self'`:
+  Wilson, Symbiote Spider-Man, Tocasia, Venom, Morbius,
+  Spider-Slayer, Beetle) excluded at the gate — they want
+  die-triggers and sac outlets, a different archetype.
+- Per-rule audit verdict: positive. 18 commanders touched,
+  +1 hit net, ndcgΣ -0.250 (the Ultimecia / Varina -0.441 /
+  -0.183 rank-shuffle regressions exceed the other lifts), BUT
+  the safety net catches Araumi on the golden set: without the
+  rule, Araumi would drop -0.236 NDCG. Net golden aggregate:
+  0.251127 → 0.253267 (+0.0021). Top non-golden wins: Egon +2
+  hits +0.257, Gorex +2 hits +0.156.
+- 10 new tests: gate (no exile cost, self-target excluded),
+  tier matching (integer N, scaling SVar, N=2 rejected,
+  Opponent rejected, EachPlayer rejected, non-Defined-You
+  rejected), commander self-exclusion, rule_id. 1017 total
+  tests, 82% coverage.
 Port extraction: 108,644 ports from 32,327 cards (GenericChoice + StaticAbilities$
 expansion, deduped after A1's 2^N re-walk fix).
 
@@ -313,7 +347,7 @@ uv run python scripts/import_cardsfolder.py                              # Impor
 uv run python scripts/recommend.py --commander "Korvold, Fae-Cursed King" --top 30 --explain
 uv run python scripts/compare_edhrec.py --commanders tests/fixtures/golden_set.json
 uv run python scripts/golden_set_track.py --baseline tests/fixtures/golden_set_run.json
-uv run pytest tests/                                                     # 1007 tests, ~1s
+uv run pytest tests/                                                     # 1017 tests, ~1s
 uv run python scripts/_audit_rule_impact.py                              # Per-rule impact audit (NDCG + golden safety net), ~10 min
 ```
 
@@ -379,6 +413,7 @@ pair creates a synergy. Each wraps an existing mechanical map.
 | cardpower_axis_feeder | `scales_with.CardPower` port (`SVar:X:Count$CardPower`) | cardpower_big_attachment (Equipment/Aura w/ static AddPower ≥ 3 or AddPower=X/Y/Z, ~220) > cardpower_p1p1_producer (PutCounter P1P1 on Creature target, self-sac-only excluded, ~400) | Combustion Man, Krenko (Tin Street Kingpin), Alesha, Carmen, Agatha, Inferno of the Star Mounts, Raubahn, Ian the Reckless |
 | tap_type_feeder | `cost.tap_type` port (`tapXType<N/SUBJECT>`). Subject classified as creature / artifact / permanent via `_classify_tap_type_axis` — filters candidates so creature-tappers only see creature/permanent untaps, artifact-tappers only see artifact/permanent untaps. | tap_type_sustained_untap (static.UntapOtherPlayer matching the axis, non-Self, ~10 cards per axis) > tap_type_phase_untap (trigger.Phase + effect.UntapAll matching the axis, ~10 cards) | Azami, Urza (Lord High Artificer), Aryel, Kumena, Lathril, Apothecary White, Baylen, Caparocti |
 | hand_size_feeder | `scales_with ValidHand Card.YouOwn` port AND `_is_big_hand_commander(cmdr_ports)` returns True (no `LE0`/`LE1`/`EQ0`/`GE2`/`GE3` SVarCompare on the hand-binding SVar). | hand_size_no_max (static.Continuous with `SetMaxHandSize: 'Unlimited'`, ~46 cards) | Alandra, Damia, Kefnet, Tishana, Soramaro, Kagemaro, Syr Elenora, Alrund, Jin-Gitaxias, Kozilek, Doctor Octopus, Duggan, Mr. Foxglove, Krang, Leonardo da Vinci, and 6 more |
+| gy_fuel_feeder | `cost.exile_from_grave` port with `cost_target='any'` (not 'self'). Excludes self-escape recursion commanders (Wilson, Symbiote Spider-Man, Tocasia, Venom, Morbius, Spider-Slayer, Beetle). | gy_fuel_self_mill (effect.Mill with `Defined: 'You'`, `NumCards >= 3` or scaling `X`/`Y`/`Z`, rejecting Opponent/EachPlayer targets, ~100 cards) | Araumi, Aphemia, Ashnod, Drivnod, Egon, Gorex, Ishkanah, Kethis, Osgir, Ultimecia, Varina, Winter, Kroxa-and-Kunoros, Ludevic, Taigam, Tawnos, Baron Zemo |
 
 ### IDF Weighting (`universal_scorer.py`)
 

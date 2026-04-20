@@ -93,6 +93,7 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "cardpower_axis_feeder": "port_match",
     "tap_type_feeder": "port_match",
     "hand_size_feeder": "port_match",
+    "gy_fuel_feeder": "port_match",
     "creatures_as_lands_landfall": "port_match",
     "damage_doubler_synergy": "port_match",
     "choose_tribal": "port_match",
@@ -499,6 +500,14 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # No voltron/tribal overlap — the candidates are Artifact/
     # Enchantment mana rocks / libraries, not stat-sticks.
     "hand_size_feeder": 2.5,
+    # gy_fuel_feeder: commanders with cost.exile_from_grave (any-
+    # target) pay by exiling cards from graveyards — Aphemia,
+    # Ashnod, Araumi, Drivnod, Egon, Ishkanah, Kethis, etc. Single
+    # tier — gy_fuel_self_mill (~151 effect.Mill cards with
+    # Defined: 'You' and NumCards >= 2 or X/Y/Z). 2.5× to match
+    # hand_size_feeder — both are narrow-axis-gate + single-tier
+    # archetype feeders with IDF ~0.14 per match.
+    "gy_fuel_feeder": 2.5,
     # creatures_as_lands_landfall: commanders whose type-bending static
     # makes creatures also lands (Ashaya, Soul of the Wild). Pool ~237
     # landfall-trigger cards (Rampaging Baloths, Lotus Cobra, Avenger of

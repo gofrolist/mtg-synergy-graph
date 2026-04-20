@@ -21,6 +21,7 @@ from mtg_synergy_graph.complement_rules.utility import (
     _find_damage_doubler_synergy,
     _find_extra_land_plays,
     _find_flicker_synergy,
+    _find_gy_fuel_feeders,
     _find_hand_size_feeders,
     _find_mana_doubler_synergy,
     _find_modified_axis_feeders,
@@ -2592,6 +2593,157 @@ class TestFindHandSizeFeeders:
         results = _find_hand_size_feeders(conn, self._big_hand_cmdr_ports(), set())
         assert results
         assert all(r.rule_id == "hand_size_feeder" for r in results)
+
+
+class TestFindGyFuelFeeders:
+    """Rule for commanders with ``cost.exile_from_grave`` +
+    ``cost_target='any'`` — Aphemia / Ashnod / Araumi / Drivnod /
+    Egon / Gorex / Ishkanah / Kethis / Osgir / Ultimecia / Varina /
+    Winter. They pay by exiling graveyard cards, so the archetype
+    reward is self-mill (fills graveyard, lets the cost fire more).
+
+    Self-target escape-style commanders (Wilson, Symbiote Spider-Man,
+    Venom, Tocasia, Morbius, Spider-Slayer, Beetle) are a different
+    archetype and rejected by the gate."""
+
+    def _any_target_cost(self):
+        """Araumi-style: tap + exile X cards from any graveyard."""
+        return _port_row(
+            port_type="cost",
+            event_class="exile_from_grave",
+            cost_target="any",
+            raw_line="T ExileFromGrave<X/Card>",
+        )
+
+    def _self_target_cost(self):
+        """Wilson-style: exile CARDNAME from your own graveyard."""
+        return _port_row(
+            port_type="cost",
+            event_class="exile_from_grave",
+            cost_target="self",
+            raw_line="1 G W ExileFromGrave<1/CARDNAME>",
+        )
+
+    def test_no_exile_cost_skips(self, conn):
+        ports = [_port_row(port_type="trigger", event_class="Attacks")]
+        assert _find_gy_fuel_feeders(conn, ports, set()) == []
+
+    def test_self_target_cost_skipped(self, conn):
+        """Self-escape commanders want different support (die-triggers,
+        sac outlets). The rule explicitly gates on cost_target='any'."""
+        _add_port(
+            conn,
+            "Hedron Crab",
+            port_type="effect",
+            event_class="Mill",
+            raw_line="{'DB': 'Mill', 'Defined': 'You', 'NumCards': '3'}",
+        )
+        assert _find_gy_fuel_feeders(conn, [self._self_target_cost()], set()) == []
+
+    def test_self_mill_tier_integer(self, conn):
+        """Hedron Crab: NumCards: 3, Defined: You — qualifies."""
+        _add_port(
+            conn,
+            "Hedron Crab",
+            port_type="effect",
+            event_class="Mill",
+            raw_line="{'DB': 'Mill', 'Defined': 'You', 'NumCards': '3'}",
+        )
+        results = _find_gy_fuel_feeders(conn, [self._any_target_cost()], set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Hedron Crab") == "gy_fuel_self_mill"
+
+    def test_self_mill_scaling_svar_qualifies(self, conn):
+        """Altar of Dementia: NumCards: X (scaled by sacrificed creature
+        power) — X/Y/Z all qualify regardless of the integer check."""
+        _add_port(
+            conn,
+            "Altar of Dementia",
+            port_type="effect",
+            event_class="Mill",
+            raw_line="{'AB': 'Mill', 'Cost': 'Sac<1/Creature>', 'NumCards': 'X', 'Defined': 'You'}",
+        )
+        results = _find_gy_fuel_feeders(conn, [self._any_target_cost()], set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Altar of Dementia") == "gy_fuel_self_mill"
+
+    def test_num_cards_2_rejected(self, conn):
+        """NumCards=2 cantrip-mill rejected (tightened from 2 to 3
+        after audit — Osgir -0.093 / Ultimecia -0.441 regressed when
+        NumCards=2 trinkets flooded their top-30)."""
+        _add_port(
+            conn,
+            "Small Mill Cantrip",
+            port_type="effect",
+            event_class="Mill",
+            raw_line="{'DB': 'Mill', 'Defined': 'You', 'NumCards': '2'}",
+        )
+        results = _find_gy_fuel_feeders(conn, [self._any_target_cost()], set())
+        assert "Small Mill Cantrip" not in _candidates(results)
+
+    def test_opponent_mill_rejected(self, conn):
+        """Mills that target Opponent / Player.Opp don't fill YOUR
+        graveyard, so they're rejected."""
+        _add_port(
+            conn,
+            "Traumatize",
+            port_type="effect",
+            event_class="Mill",
+            raw_line=("{'SP': 'Mill', 'Defined': 'You', 'NumCards': '15', 'ValidTgts': 'Opponent'}"),
+        )
+        results = _find_gy_fuel_feeders(conn, [self._any_target_cost()], set())
+        assert "Traumatize" not in _candidates(results)
+
+    def test_each_player_mill_rejected(self, conn):
+        """Mills targeting all players (EachPlayer) aren't solo
+        self-mill — they also benefit opponents, so rejected."""
+        _add_port(
+            conn,
+            "Tasha's Hideous Laughter",
+            port_type="effect",
+            event_class="Mill",
+            raw_line=("{'SP': 'Mill', 'Defined': 'You', 'NumCards': '20', 'ValidPlayer': 'EachPlayer'}"),
+        )
+        results = _find_gy_fuel_feeders(conn, [self._any_target_cost()], set())
+        assert "Tasha's Hideous Laughter" not in _candidates(results)
+
+    def test_mill_without_defined_you_rejected(self, conn):
+        """Mill effects that don't explicitly target You are rejected
+        to avoid generic mill spells aimed at random players."""
+        _add_port(
+            conn,
+            "Generic Mill",
+            port_type="effect",
+            event_class="Mill",
+            raw_line="{'DB': 'Mill', 'NumCards': '5'}",
+        )
+        results = _find_gy_fuel_feeders(conn, [self._any_target_cost()], set())
+        assert "Generic Mill" not in _candidates(results)
+
+    def test_excludes_commander(self, conn):
+        """Araumi has no self-mill effect but even if she did we'd
+        skip the commander herself."""
+        _add_port(
+            conn,
+            "Araumi of the Dead Tide",
+            port_type="effect",
+            event_class="Mill",
+            raw_line="{'DB': 'Mill', 'Defined': 'You', 'NumCards': '3'}",
+        )
+        results = _find_gy_fuel_feeders(conn, [self._any_target_cost()], {"Araumi of the Dead Tide"})
+        assert "Araumi of the Dead Tide" not in _candidates(results)
+
+    def test_rule_id(self, conn):
+        _add_port(
+            conn,
+            "Hedron Crab",
+            port_type="effect",
+            event_class="Mill",
+            raw_line="{'DB': 'Mill', 'Defined': 'You', 'NumCards': '3'}",
+        )
+        results = _find_gy_fuel_feeders(conn, [self._any_target_cost()], set())
+        assert results
+        assert all(r.rule_id == "gy_fuel_feeder" for r in results)
 
 
 class TestFindDamageDoublerSynergy:

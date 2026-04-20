@@ -159,6 +159,22 @@ def _tap_type_feeder_gate(port: PortRow) -> bool:
     return (port.get("event_class") or "").strip() == "tap_type"
 
 
+def _gy_fuel_feeder_gate(port: PortRow) -> bool:
+    """Mirror the runtime gate of ``_find_gy_fuel_feeders``.
+
+    Fires on ``cost.exile_from_grave`` ports where ``cost_target``
+    is ``any`` (not ``self``). Self-target costs (Wilson, Symbiote
+    Spider-Man, Venom, Morbius, Beetle, Spider-Slayer, Tocasia)
+    are a different archetype — escape-style recursion — and this
+    rule isn't aimed at them.
+    """
+    if (port.get("port_type") or "").strip() != "cost":
+        return False
+    if (port.get("event_class") or "").strip() != "exile_from_grave":
+        return False
+    return (port.get("cost_target") or "").strip() == "any"
+
+
 def _hand_size_feeder_gate(port: PortRow) -> bool:
     """Mirror the runtime gate of ``_find_hand_size_feeders``.
 
@@ -589,6 +605,7 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("cardpower_axis_feeder", _cardpower_axis_gate),
     RuleGate("tap_type_feeder", _tap_type_feeder_gate),
     RuleGate("hand_size_feeder", _hand_size_feeder_gate),
+    RuleGate("gy_fuel_feeder", _gy_fuel_feeder_gate),
     RuleGate("opponent_forcing", _opponent_forcing_gate),
     RuleGate("wheel_synergy", _wheel_synergy_gate),
     RuleGate("mana_doubler", _mana_doubler_gate),
