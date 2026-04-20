@@ -364,6 +364,18 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # dropped Narset below the golden threshold (-0.064); 0.7× keeps
     # her at her original +0.046 gain.
     "combat_enhancer": 0.7,
+    # counter_keyword has a ~100-card pool (Modular / Undying / Persist
+    # / Evolve / Fabricate / Riot creatures) feeding all +1/+1-counter-
+    # interested commanders. Audit 2026-04-20: -0.876 NDCG across 53
+    # touched, -1 hits, saved only by Ezuri's golden anchor at +0.053
+    # (right on the override threshold). Shalai and Hallar -3 hits /
+    # -0.345 NDCG, Blaster -1 / -0.193 — their EDHREC decks run
+    # specific keyword creatures but the broad pool displaced correct
+    # picks. Ezuri has redundant anchors (counter_doubler, counter_-
+    # target_payoff at +0.068) so dampening here is safe. 0.5×
+    # dampens the IDF pressure while leaving the +1 wins (Ezuri,
+    # Marchesa) intact.
+    "counter_keyword": 0.5,
     # dies_drain: payoff cards (Blood Artist, Grim Haruspex, Pitiless
     # Plunderer) are pure consequence cards — they don't feed the
     # engine the way sac-cost creatures do, so they accumulate fewer
