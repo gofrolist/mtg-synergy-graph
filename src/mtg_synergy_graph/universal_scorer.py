@@ -370,6 +370,15 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # dropped Narset below the golden threshold (-0.064); 0.7× keeps
     # her at her original +0.046 gain.
     "combat_enhancer": 0.7,
+    # zone_resonance: 172 touched cmdrs, +1.146 NDCG, +13 hits at the
+    # default 1.0 multiplier — MARGINAL verdict at ratio 0.076, just
+    # below the 0.1 positive threshold. Top movers show canonical
+    # landfall / tribal resonance wins (Ambrosia +4 hits / +0.144,
+    # Sek'Kuar +1 / +0.140, Syr Ginger +2 / +0.067) with only tiny
+    # losses (Omnath -0.025, Reaper -0.016). Bumping to 1.3 boosts
+    # the clear wins across the hit threshold without amplifying the
+    # near-noise-level losses enough to cross the 0.05 golden bar.
+    "zone_resonance": 1.3,
     # counter_keyword has a ~100-card pool (Modular / Undying / Persist
     # / Evolve / Fabricate / Riot creatures) feeding all +1/+1-counter-
     # interested commanders. Audit 2026-04-20: -0.876 NDCG across 53
