@@ -34,7 +34,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from .core import COMPLEMENT_RULES, PortRow
-from .generated.attacking_axis_feeder import _attacking_axis_feeder_gate
 from .generated.changeling_tribal import _changeling_tribal_gate
 from .generated.choose_tribal import _choose_tribal_gate
 from .generated.doctor_s_tribal import _doctor_s_tribal_gate
@@ -712,7 +711,6 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("melee_tribal", _melee_tribal_gate),
     RuleGate("training_tribal", _training_tribal_gate),
     RuleGate("repl_damagedone_counters_stack", _repl_damagedone_counters_stack_gate),
-    RuleGate("attacking_axis_feeder", _attacking_axis_feeder_gate),
 )
 
 

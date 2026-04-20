@@ -931,7 +931,6 @@ from .density import (  # noqa: E402
     _find_tribal_density_complements,
     _find_value_engine_density,
 )
-from .generated.attacking_axis_feeder import _find_attacking_axis_feeder  # noqa: E402
 from .generated.changeling_tribal import _find_changeling_tribal  # noqa: E402
 from .generated.choose_tribal import _find_choose_tribal  # noqa: E402
 from .generated.doctor_s_tribal import _find_doctor_s_tribal  # noqa: E402
@@ -1178,7 +1177,6 @@ def find_all_complements(
         out.extend(_find_life_total_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_land_bounce_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_damage_doubler_synergy(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_attacking_axis_feeder(conn, cmdr_ports, cmdr_set))
         out.extend(_find_repl_damagedone_counters_stack(conn, cmdr_ports, cmdr_set))
         out.extend(_find_training_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_melee_tribal(conn, cmdr_ports, cmdr_set))
