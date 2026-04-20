@@ -23,6 +23,7 @@ from mtg_synergy_graph.complement_rules.utility import (
     _find_flicker_synergy,
     _find_gy_fuel_feeders,
     _find_hand_size_feeders,
+    _find_lifegain_feeders,
     _find_mana_doubler_synergy,
     _find_modified_axis_feeders,
     _find_monarch_synergy,
@@ -2744,6 +2745,211 @@ class TestFindGyFuelFeeders:
         results = _find_gy_fuel_feeders(conn, [self._any_target_cost()], set())
         assert results
         assert all(r.rule_id == "gy_fuel_feeder" for r in results)
+
+
+class TestFindLifegainFeeders:
+    """Rule for commanders with a ``scales_with LifeYouGainedThisTurn``
+    port (Aerith, Astarion, Celestine, Frodo, Lathiel, Licia, Saint
+    Elenda, Willowdusk). The lifegain axis is monotonic-positive
+    (every commander wants MORE lifegain) so no bidirectional gate
+    is needed.
+
+    Two tiers: ``lifegain_amp`` (replacement.GainLife doublers) >
+    ``lifegain_etb_trigger`` (creature-ETB → GainLife soul sisters)."""
+
+    def _lifegain_cmdr_ports(self):
+        """Celestine-style port signature."""
+        return [
+            _port_row(
+                port_type="scales_with",
+                event_class="LifeYouGainedThisTurn",
+                raw_line="SVar:X:Count$LifeYouGainedThisTurn",
+            )
+        ]
+
+    def test_no_lifegain_axis_skips(self, conn):
+        ports = [_port_row(port_type="trigger", event_class="Attacks")]
+        assert _find_lifegain_feeders(conn, ports, set()) == []
+
+    def test_amp_tier_gain_double(self, conn):
+        """Rhox Faithmender: ReplaceWith: 'GainDouble' = pure doubler,
+        archetype-defining."""
+        _add_port(
+            conn,
+            "Rhox Faithmender",
+            port_type="replacement",
+            event_class="GainLife",
+            raw_line=("{'Event': 'GainLife', 'ValidPlayer': 'You', 'ReplaceWith': 'GainDouble'}"),
+        )
+        results = _find_lifegain_feeders(conn, self._lifegain_cmdr_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Rhox Faithmender") == "lifegain_amp"
+
+    def test_amp_tier_replace_gain_life_qualifies(self, conn):
+        """Angel of Vitality: ReplaceWith: 'GainLife' (gain an extra
+        N) — also qualifies for the amp tier."""
+        _add_port(
+            conn,
+            "Angel of Vitality",
+            port_type="replacement",
+            event_class="GainLife",
+            raw_line=("{'Event': 'GainLife', 'ValidPlayer': 'You', 'ReplaceWith': 'GainLife'}"),
+        )
+        results = _find_lifegain_feeders(conn, self._lifegain_cmdr_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Angel of Vitality") == "lifegain_amp"
+
+    def test_opponent_targeting_amp_rejected(self, conn):
+        """Tainted Remedy / Plague Drone: ValidPlayer: 'Opponent'
+        converts opponents' gain to loss. Anti-synergy for a
+        lifegain commander — rejected."""
+        _add_port(
+            conn,
+            "Tainted Remedy",
+            port_type="replacement",
+            event_class="GainLife",
+            raw_line=("{'Event': 'GainLife', 'ValidPlayer': 'Opponent', 'ReplaceWith': 'RLoseLife'}"),
+        )
+        results = _find_lifegain_feeders(conn, self._lifegain_cmdr_ports(), set())
+        assert "Tainted Remedy" not in _candidates(results)
+
+    def test_prevention_static_rejected(self, conn):
+        """Sulfuric Vortex: ``Prevent: True`` prevents all lifegain.
+        Strict anti-synergy — must be rejected even though it
+        replaces GainLife for ValidPlayer: 'You' (implicitly)."""
+        _add_port(
+            conn,
+            "Sulfuric Vortex",
+            port_type="replacement",
+            event_class="GainLife",
+            raw_line=("{'Event': 'GainLife', 'ValidPlayer': 'You', 'Prevent': 'True', 'ReplaceWith': 'GainDouble'}"),
+        )
+        results = _find_lifegain_feeders(conn, self._lifegain_cmdr_ports(), set())
+        assert "Sulfuric Vortex" not in _candidates(results)
+
+    def test_etb_trigger_tier(self, conn):
+        """Soul Warden: trigger.ChangesZone with Creature filter +
+        Destination Battlefield + effect.GainLife."""
+        _add_port(
+            conn,
+            "Soul Warden",
+            port_type="trigger",
+            event_class="ChangesZone",
+            valid_filter="Creature.Other",
+            raw_line=(
+                "{'Mode': 'ChangesZone', 'Destination': 'Battlefield', "
+                "'ValidCard': 'Creature.Other', 'Execute': 'TrigGainLife'}"
+            ),
+        )
+        _add_port(
+            conn,
+            "Soul Warden",
+            port_type="effect",
+            event_class="GainLife",
+            raw_line="{'DB': 'GainLife', 'LifeAmount': '1'}",
+        )
+        results = _find_lifegain_feeders(conn, self._lifegain_cmdr_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Soul Warden") == "lifegain_etb_trigger"
+
+    def test_non_creature_etb_trigger_rejected(self, conn):
+        """A ChangesZone trigger with non-Creature filter (e.g. an
+        artifact ETB) shouldn't fire the soul-sister tier."""
+        _add_port(
+            conn,
+            "Artifact ETB Trigger",
+            port_type="trigger",
+            event_class="ChangesZone",
+            valid_filter="Artifact.YouCtrl",
+            raw_line=(
+                "{'Mode': 'ChangesZone', 'Destination': 'Battlefield', "
+                "'ValidCard': 'Artifact.YouCtrl', 'Execute': 'TrigGainLife'}"
+            ),
+        )
+        _add_port(
+            conn,
+            "Artifact ETB Trigger",
+            port_type="effect",
+            event_class="GainLife",
+            raw_line="{'DB': 'GainLife', 'LifeAmount': '1'}",
+        )
+        results = _find_lifegain_feeders(conn, self._lifegain_cmdr_ports(), set())
+        assert "Artifact ETB Trigger" not in _candidates(results)
+
+    def test_etb_trigger_without_gainlife_rejected(self, conn):
+        """Trigger.ChangesZone with Creature filter but no effect.GainLife
+        doesn't qualify — the soul-sister tier requires the GainLife
+        effect coupling."""
+        _add_port(
+            conn,
+            "Creature ETB No Life",
+            port_type="trigger",
+            event_class="ChangesZone",
+            valid_filter="Creature.Other",
+            raw_line=(
+                "{'Mode': 'ChangesZone', 'Destination': 'Battlefield', "
+                "'ValidCard': 'Creature.Other', 'Execute': 'TrigDraw'}"
+            ),
+        )
+        results = _find_lifegain_feeders(conn, self._lifegain_cmdr_ports(), set())
+        assert "Creature ETB No Life" not in _candidates(results)
+
+    def test_amp_wins_over_etb_dedup(self, conn):
+        """A card matching BOTH tiers (hypothetical: a soul sister
+        that also replaces GainLife) gets one complement — the
+        higher-priority amp tier wins."""
+        _add_port(
+            conn,
+            "Hybrid Lifegain",
+            port_type="replacement",
+            event_class="GainLife",
+            raw_line=("{'Event': 'GainLife', 'ValidPlayer': 'You', 'ReplaceWith': 'GainDouble'}"),
+        )
+        _add_port(
+            conn,
+            "Hybrid Lifegain",
+            port_type="trigger",
+            event_class="ChangesZone",
+            valid_filter="Creature.Other",
+            raw_line=("{'Mode': 'ChangesZone', 'Destination': 'Battlefield', 'ValidCard': 'Creature.Other'}"),
+        )
+        _add_port(
+            conn,
+            "Hybrid Lifegain",
+            port_type="effect",
+            event_class="GainLife",
+            raw_line="{'DB': 'GainLife', 'LifeAmount': '1'}",
+        )
+        hybrids = [
+            r
+            for r in _find_lifegain_feeders(conn, self._lifegain_cmdr_ports(), set())
+            if r.candidate == "Hybrid Lifegain"
+        ]
+        assert len(hybrids) == 1
+        assert hybrids[0].cand_event == "lifegain_amp"
+
+    def test_excludes_commander(self, conn):
+        _add_port(
+            conn,
+            "Celestine, the Living Saint",
+            port_type="replacement",
+            event_class="GainLife",
+            raw_line=("{'Event': 'GainLife', 'ValidPlayer': 'You', 'ReplaceWith': 'GainDouble'}"),
+        )
+        results = _find_lifegain_feeders(conn, self._lifegain_cmdr_ports(), {"Celestine, the Living Saint"})
+        assert "Celestine, the Living Saint" not in _candidates(results)
+
+    def test_rule_id(self, conn):
+        _add_port(
+            conn,
+            "Rhox Faithmender",
+            port_type="replacement",
+            event_class="GainLife",
+            raw_line=("{'Event': 'GainLife', 'ValidPlayer': 'You', 'ReplaceWith': 'GainDouble'}"),
+        )
+        results = _find_lifegain_feeders(conn, self._lifegain_cmdr_ports(), set())
+        assert results
+        assert all(r.rule_id == "lifegain_feeder" for r in results)
 
 
 class TestFindDamageDoublerSynergy:

@@ -1300,6 +1300,108 @@ def _find_gy_fuel_feeders(
     return results
 
 
+def _find_lifegain_feeders(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Rule for commanders with a ``scales_with LifeYouGainedThisTurn``
+    port — their mechanic fires off life gained this turn (draw N
+    cards = life gained, deal N damage = life gained, +N/+N until
+    end of turn = life gained).
+
+    Aerith, Astarion, Betor, Bre of Clan Stoutarm, Celestine, Cerise,
+    Frodo (Adventurous Hobbit), Gollum, Gwaihir, Haliya, Hope Estheim,
+    Lathiel, Licia, Ragost, Ratchet, Rodolf, Saint Elenda, Shanna,
+    Sorin of House Markov, The Gaffer, Tivash, Will, Willowdusk.
+
+    The axis is strictly **monotonic-positive** — every commander
+    wants MORE life gained, unlike hand_size which is bidirectional.
+    No rejection filter needed at the gate.
+
+    Two deduped tiers:
+
+    - ``lifegain_amp``: ``replacement.GainLife`` with ``ValidPlayer:
+      'You'`` and an amplifying ReplaceWith (``GainDouble`` / ``GainLife``
+      / ``ReplaceGain``). Rejects prevention statics (Sulfuric
+      Vortex — ``'Prevent': 'True'``) and opponent-targeting
+      (Tainted Remedy / Plague Drone — ``ValidPlayer: 'Opponent'``
+      converts gain → lose). ~12 cards: Alhammarret's Archive,
+      Rhox Faithmender, Boon Reflection, The Wind Crystal, Cleric
+      Class, Honor Troll, Heron of Hope, Angel of Vitality, Leyline
+      of Hope, Bilbo Birthday Celebrant, Knight of Dawn's Light,
+      Phial of Galadriel.
+    - ``lifegain_etb_trigger``: ``trigger.ChangesZone`` whose
+      ``valid_filter`` references Creature and ``Destination:
+      Battlefield``, paired with ``effect.GainLife``. ~45 cards.
+      Soul Warden, Auriok Champion, Soul's Attendant, Ajani's
+      Welcome, Anointer Priest, Angelic Chorus, Daxos Blessed by
+      the Sun, Authority of the Consuls. These fire on every
+      creature ETB (yours or opponents') so they stack life gain
+      across the whole table.
+    """
+    has_lifegain_axis = any(
+        (p.get("port_type") or "").strip() == "scales_with"
+        and (p.get("event_class") or "").strip() == "LifeYouGainedThisTurn"
+        for p in cmdr_ports
+    )
+    if not has_lifegain_axis:
+        return []
+
+    amp_set: set[str] = {
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports "
+            "WHERE port_type = 'replacement' "
+            "AND event_class = 'GainLife' "
+            "AND raw_line LIKE '%''ValidPlayer'': ''You''%' "
+            "AND raw_line NOT LIKE '%''Prevent'': ''True''%' "
+            "AND ("
+            "    raw_line LIKE '%GainDouble%' "
+            "    OR raw_line LIKE '%''ReplaceWith'': ''GainLife''%' "
+            "    OR raw_line LIKE '%ReplaceGain%'"
+            ")"
+        )
+    }
+
+    etb_trigger_set: set[str] = {
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT cp1.card_name "
+            "FROM card_ports cp1 "
+            "JOIN card_ports cp2 ON cp2.card_name = cp1.card_name "
+            "WHERE cp1.port_type = 'trigger' "
+            "AND cp1.event_class = 'ChangesZone' "
+            "AND cp1.valid_filter LIKE '%Creature%' "
+            "AND cp1.raw_line LIKE '%''Destination'': ''Battlefield''%' "
+            "AND cp2.port_type = 'effect' "
+            "AND cp2.event_class = 'GainLife'"
+        )
+    }
+
+    tier_priority = (
+        ("lifegain_amp", amp_set),
+        ("lifegain_etb_trigger", etb_trigger_set),
+    )
+    seen: set[str] = set()
+    results: list[PortComplement] = []
+    for cand_event, candidates in tier_priority:
+        for name in candidates:
+            if name in cmdr_set or name in seen:
+                continue
+            seen.add(name)
+            results.append(
+                PortComplement(
+                    rule_id="lifegain_feeder",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="lifegain_axis",
+                    cand_event=cand_event,
+                )
+            )
+    return results
+
+
 def _only_self_sac_cost(conn: sqlite3.Connection) -> frozenset[str]:
     """Return card names whose ONLY sacrifice cost targets themselves.
 

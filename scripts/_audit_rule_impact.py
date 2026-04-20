@@ -122,6 +122,7 @@ _RULE_HELPER_OVERRIDES: dict[str, str] = {
     "graveyard_play": "_find_graveyard_play_synergy",
     "gy_fuel_feeder": "_find_gy_fuel_feeders",
     "hand_size_feeder": "_find_hand_size_feeders",
+    "lifegain_feeder": "_find_lifegain_feeders",
     "landfall_enabler": "_find_landfall_enablers",
     "lord": "_find_lord_complements",
     "mana_doubler": "_find_mana_doubler_synergy",

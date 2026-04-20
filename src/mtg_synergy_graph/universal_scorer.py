@@ -94,6 +94,7 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "tap_type_feeder": "port_match",
     "hand_size_feeder": "port_match",
     "gy_fuel_feeder": "port_match",
+    "lifegain_feeder": "port_match",
     "creatures_as_lands_landfall": "port_match",
     "damage_doubler_synergy": "port_match",
     "choose_tribal": "port_match",
@@ -508,6 +509,16 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # hand_size_feeder — both are narrow-axis-gate + single-tier
     # archetype feeders with IDF ~0.14 per match.
     "gy_fuel_feeder": 2.5,
+    # lifegain_feeder: commanders with scales_with LifeYouGainedThisTurn
+    # scale their mechanic by life gained this turn (Astarion draw,
+    # Bre power/toughness, Willowdusk counters, Licia pump). Two
+    # deduped tiers — lifegain_amp (~12 replacement.GainLife
+    # amplifiers: Alhammarret / Rhox / Boon Reflection / Wind Crystal)
+    # > lifegain_etb_trigger (~45 soul sisters: Soul Warden /
+    # Auriok Champion / Ajani's Welcome / Anointer Priest). 2.5×
+    # matches hand_size/gy_fuel — narrow single-axis feeder with
+    # IDF ~0.20 per match across a tight pool of ~55 total candidates.
+    "lifegain_feeder": 2.5,
     # creatures_as_lands_landfall: commanders whose type-bending static
     # makes creatures also lands (Ashaya, Soul of the Wild). Pool ~237
     # landfall-trigger cards (Rampaging Baloths, Lotus Cobra, Avenger of

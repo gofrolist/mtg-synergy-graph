@@ -6,7 +6,7 @@ Guidance for Claude Code working in this repo.
 
 MTG Synergy Graph — deterministic, rule-based EDH/Commander synergy scorer
 using Forge DSL ports. No training, no EDHREC at inference.
-Current aggregate NDCG@30 ~ 0.253 on the 100-commander golden set.
+Current aggregate NDCG@30 ~ 0.256 on the 100-commander golden set.
 2026-04-19 audit-driven cleanup deleted 9 net-negative or dead rules
 (`etb_sac_target`, `power_matters`, `token_sac_chain`, `pan_density`,
 `token_etb_damage` → kept as CONTENTIOUS, `damage_synergy`,
@@ -305,6 +305,42 @@ gy_fuel_feeder (2026-04-19):
   Opponent rejected, EachPlayer rejected, non-Defined-You
   rejected), commander self-exclusion, rule_id. 1017 total
   tests, 82% coverage.
+lifegain_feeder (2026-04-19):
+- New rule for the 21 commanders with `scales_with
+  LifeYouGainedThisTurn` — Celestine, Aerith, Astarion, Bre,
+  Haliya, Hope Estheim, Frodo, Gollum, Gwaihir, Lathiel (golden
+  anchor), Licia, Saint Elenda, Sorin House Markov, Willowdusk,
+  Will Scion of Peace, plus 6 more. Monotonic-positive axis —
+  no bidirectional filter.
+- Two tiers (deduped, tier 1 wins):
+  - `lifegain_amp`: `replacement.GainLife` with
+    `ValidPlayer: 'You'`, non-Prevent, amp ReplaceWith
+    (`GainDouble` / `GainLife` / `ReplaceGain`). ~12 cards:
+    Alhammarret's Archive, Rhox Faithmender, Boon Reflection,
+    Wind Crystal, Cleric Class, Honor Troll, Heron of Hope,
+    Angel of Vitality, Leyline of Hope, Bilbo Birthday
+    Celebrant, Knight of Dawn's Light, Phial of Galadriel.
+    Rejects opponent-target (Tainted Remedy / Plague Drone —
+    converts gain → lose) and prevention (Sulfuric Vortex).
+  - `lifegain_etb_trigger`: `trigger.ChangesZone` with Creature
+    filter + `Destination: Battlefield` + coupled
+    `effect.GainLife`. ~45 cards: Soul Warden, Auriok Champion,
+    Soul's Attendant, Ajani's Welcome, Anointer Priest, Angelic
+    Chorus, Daxos Blessed by the Sun, Authority of the Consuls.
+- Per-rule audit verdict: positive. **+4.353 NDCG sum (new
+  session record)** across 21 commanders, **+45 hits net,
+  ZERO regressions** (ndcgmin +0.000 — every touched commander
+  improved). Top wins: Bre +6 hits +0.469, Aerith +6 +0.325,
+  Hope Estheim +5 +0.373, Haliya +5 +0.358, Celestine +5
+  +0.344. Lathiel golden anchor would drop -0.264 without rule.
+- Golden aggregate: 0.253267 → 0.255904 (+0.0026). Cumulative
+  session lift: 0.246137 → 0.255904 = **+0.0098** (best single-
+  session improvement on record).
+- 11 new tests: gate, both tiers (GainDouble amp, ReplaceGain
+  amp, ChangesZone Creature ETB), rejections (Opponent-target
+  amp, Prevent static, non-Creature ETB, ETB-without-GainLife),
+  tier priority dedup, commander self-exclusion, rule_id.
+  1028 total tests, 82% coverage.
 Port extraction: 108,644 ports from 32,327 cards (GenericChoice + StaticAbilities$
 expansion, deduped after A1's 2^N re-walk fix).
 
@@ -347,7 +383,7 @@ uv run python scripts/import_cardsfolder.py                              # Impor
 uv run python scripts/recommend.py --commander "Korvold, Fae-Cursed King" --top 30 --explain
 uv run python scripts/compare_edhrec.py --commanders tests/fixtures/golden_set.json
 uv run python scripts/golden_set_track.py --baseline tests/fixtures/golden_set_run.json
-uv run pytest tests/                                                     # 1017 tests, ~1s
+uv run pytest tests/                                                     # 1028 tests, ~1s
 uv run python scripts/_audit_rule_impact.py                              # Per-rule impact audit (NDCG + golden safety net), ~10 min
 ```
 
@@ -414,6 +450,7 @@ pair creates a synergy. Each wraps an existing mechanical map.
 | tap_type_feeder | `cost.tap_type` port (`tapXType<N/SUBJECT>`). Subject classified as creature / artifact / permanent via `_classify_tap_type_axis` — filters candidates so creature-tappers only see creature/permanent untaps, artifact-tappers only see artifact/permanent untaps. | tap_type_sustained_untap (static.UntapOtherPlayer matching the axis, non-Self, ~10 cards per axis) > tap_type_phase_untap (trigger.Phase + effect.UntapAll matching the axis, ~10 cards) | Azami, Urza (Lord High Artificer), Aryel, Kumena, Lathril, Apothecary White, Baylen, Caparocti |
 | hand_size_feeder | `scales_with ValidHand Card.YouOwn` port AND `_is_big_hand_commander(cmdr_ports)` returns True (no `LE0`/`LE1`/`EQ0`/`GE2`/`GE3` SVarCompare on the hand-binding SVar). | hand_size_no_max (static.Continuous with `SetMaxHandSize: 'Unlimited'`, ~46 cards) | Alandra, Damia, Kefnet, Tishana, Soramaro, Kagemaro, Syr Elenora, Alrund, Jin-Gitaxias, Kozilek, Doctor Octopus, Duggan, Mr. Foxglove, Krang, Leonardo da Vinci, and 6 more |
 | gy_fuel_feeder | `cost.exile_from_grave` port with `cost_target='any'` (not 'self'). Excludes self-escape recursion commanders (Wilson, Symbiote Spider-Man, Tocasia, Venom, Morbius, Spider-Slayer, Beetle). | gy_fuel_self_mill (effect.Mill with `Defined: 'You'`, `NumCards >= 3` or scaling `X`/`Y`/`Z`, rejecting Opponent/EachPlayer targets, ~100 cards) | Araumi, Aphemia, Ashnod, Drivnod, Egon, Gorex, Ishkanah, Kethis, Osgir, Ultimecia, Varina, Winter, Kroxa-and-Kunoros, Ludevic, Taigam, Tawnos, Baron Zemo |
+| lifegain_feeder | `scales_with LifeYouGainedThisTurn` port. Axis is monotonic-positive (no bidirectional filter needed). | lifegain_amp (replacement.GainLife with `ValidPlayer: 'You'`, non-Prevent, amplifying ReplaceWith — `GainDouble`/`GainLife`/`ReplaceGain`, ~12 cards) > lifegain_etb_trigger (trigger.ChangesZone with Creature filter + Destination Battlefield + effect.GainLife, ~45 soul sisters) | Celestine, Aerith, Astarion, Bre of Clan Stoutarm, Haliya, Hope Estheim, Frodo, Gollum, Gwaihir, Lathiel, Licia, Saint Elenda, Sorin of House Markov, Willowdusk, Will Scion of Peace, and 9 more |
 
 ### IDF Weighting (`universal_scorer.py`)
 

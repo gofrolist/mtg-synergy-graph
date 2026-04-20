@@ -159,6 +159,18 @@ def _tap_type_feeder_gate(port: PortRow) -> bool:
     return (port.get("event_class") or "").strip() == "tap_type"
 
 
+def _lifegain_feeder_gate(port: PortRow) -> bool:
+    """Mirror the runtime gate of ``_find_lifegain_feeders``.
+
+    Fires on ``scales_with LifeYouGainedThisTurn`` ports. The axis
+    is monotonic-positive (every such commander wants more lifegain)
+    so no small-side rejection filter is needed.
+    """
+    if (port.get("port_type") or "").strip() != "scales_with":
+        return False
+    return (port.get("event_class") or "").strip() == "LifeYouGainedThisTurn"
+
+
 def _gy_fuel_feeder_gate(port: PortRow) -> bool:
     """Mirror the runtime gate of ``_find_gy_fuel_feeders``.
 
@@ -606,6 +618,7 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("tap_type_feeder", _tap_type_feeder_gate),
     RuleGate("hand_size_feeder", _hand_size_feeder_gate),
     RuleGate("gy_fuel_feeder", _gy_fuel_feeder_gate),
+    RuleGate("lifegain_feeder", _lifegain_feeder_gate),
     RuleGate("opponent_forcing", _opponent_forcing_gate),
     RuleGate("wheel_synergy", _wheel_synergy_gate),
     RuleGate("mana_doubler", _mana_doubler_gate),
