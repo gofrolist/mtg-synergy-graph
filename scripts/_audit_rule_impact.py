@@ -132,6 +132,7 @@ _RULE_HELPER_OVERRIDES: dict[str, str] = {
     "scaling": "_find_scaling_complements",
     "spell_density": "_find_spellcast_density_complements",
     "subject_zone_feeder": "_find_subject_zone_feeders",
+    "tap_type_feeder": "_find_tap_type_feeders",
     "token_producer": "_find_token_producers_for_trigger",
     "toughness_synergy": "_find_toughness_matters",
     "tribal_density": "_find_tribal_density_complements",

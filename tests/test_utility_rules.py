@@ -11,6 +11,7 @@ import sqlite3
 import pytest
 
 from mtg_synergy_graph.complement_rules.utility import (
+    _classify_tap_type_axis,
     _find_cardpower_axis_feeders,
     _find_cost_payoff_complements,
     _find_counter_axis_feeders,
@@ -24,6 +25,7 @@ from mtg_synergy_graph.complement_rules.utility import (
     _find_modified_axis_feeders,
     _find_monarch_synergy,
     _find_opponent_forcing,
+    _find_tap_type_feeders,
     _find_wheel_synergy,
 )
 
@@ -2082,6 +2084,260 @@ class TestFindCardPowerAxisFeeders:
         results = _find_cardpower_axis_feeders(conn, self._combustion_ports(), set())
         assert results
         assert all(r.rule_id == "cardpower_axis_feeder" for r in results)
+
+
+class TestClassifyTapTypeAxis:
+    """Axis resolver extracts the SUBJECT from a ``tapXType<N/SUBJECT>``
+    cost and classifies it as ``creature`` / ``artifact`` / ``permanent``.
+
+    Mixed-subject costs (Caparocti: ``Artifact;Creature``) yield both
+    classes. Permanent subsumes both — it's surfaced explicitly so
+    ``Permanent``-tappers (Baylen / Hazel) can match every untap card.
+    """
+
+    def _cost(self, raw_line: str) -> dict:
+        return _port_row(port_type="cost", event_class="tap_type", raw_line=raw_line)
+
+    def test_no_cost_returns_empty(self):
+        assert _classify_tap_type_axis([_port_row(port_type="trigger", event_class="Attacks")]) == frozenset()
+
+    def test_creature_subtype_resolves_to_creature(self):
+        ports = [self._cost("tapXType<1/Wizard>")]
+        assert _classify_tap_type_axis(ports) == frozenset({"creature"})
+
+    def test_generic_creature_resolves_to_creature(self):
+        ports = [self._cost("G T tapXType<2/Creature>")]
+        assert _classify_tap_type_axis(ports) == frozenset({"creature"})
+
+    def test_artifact_resolves_to_artifact(self):
+        ports = [self._cost("T tapXType<X/Artifact/artifacts you control>")]
+        assert _classify_tap_type_axis(ports) == frozenset({"artifact"})
+
+    def test_food_resolves_to_artifact(self):
+        """``Food`` is an Artifact subtype and goes on the artifact axis."""
+        ports = [self._cost("W T tapXType<X/Food>")]
+        assert _classify_tap_type_axis(ports) == frozenset({"artifact"})
+
+    def test_permanent_resolves_to_permanent(self):
+        ports = [self._cost("tapXType<2/Permanent.token/token>")]
+        assert _classify_tap_type_axis(ports) == frozenset({"permanent"})
+
+    def test_subtype_qualifier_ignored(self):
+        """``Halfling.Other`` / ``Artifact.!token`` qualifiers don't
+        change the axis class — the head token before the first ``.``
+        is what matters."""
+        ports = [
+            self._cost("tapXType<2/Halfling.Other/other halflings>"),
+            self._cost("tapXType<1/Artifact.!token/nontoken artifact>"),
+        ]
+        assert _classify_tap_type_axis(ports) == frozenset({"creature", "artifact"})
+
+    def test_mixed_subjects_yield_both(self):
+        """Caparocti: ``Artifact;Creature`` — both classes."""
+        ports = [self._cost("tapXType<2/Artifact;Creature/artifacts and/or creatures>")]
+        assert _classify_tap_type_axis(ports) == frozenset({"creature", "artifact"})
+
+    def test_multi_creature_subtypes_collapse(self):
+        """The Archimandrite: ``Advisor.YouCtrl;Monk.YouCtrl;Artificer.YouCtrl``
+        — all three are creature subtypes so just ``creature``."""
+        ports = [
+            self._cost(
+                "tapXType<3/Advisor.YouCtrl;Monk.YouCtrl;Artificer.YouCtrl/"
+                "Advisors, Artificers, and/or Monks you control>"
+            )
+        ]
+        assert _classify_tap_type_axis(ports) == frozenset({"creature"})
+
+
+class TestFindTapTypeFeeders:
+    """General rule for ``cost.tap_type`` commanders (Azami, Urza,
+    Aryel, Kumena, Apothecary White, Baylen). Matches untap engines
+    that refresh the cost-target each rotation.
+
+    Axis-aware: a creature-tap commander (Azami) doesn't get
+    artifact-specific untappers (Unwinding Clock), and vice versa.
+    Permanent-tappers (Baylen) match everything."""
+
+    def _creature_cost(self):
+        """Azami: tap Wizards (creature axis)."""
+        return _port_row(port_type="cost", event_class="tap_type", raw_line="tapXType<1/Wizard>")
+
+    def _artifact_cost(self):
+        """Urza: tap Artifacts (artifact axis)."""
+        return _port_row(port_type="cost", event_class="tap_type", raw_line="tapXType<1/Artifact>")
+
+    def _permanent_cost(self):
+        """Baylen: tap Permanent.token (permanent axis)."""
+        return _port_row(port_type="cost", event_class="tap_type", raw_line="tapXType<2/Permanent.token/token>")
+
+    def test_no_tap_type_cost_skips(self, conn):
+        ports = [_port_row(port_type="trigger", event_class="Attacks")]
+        assert _find_tap_type_feeders(conn, ports, set()) == []
+
+    def test_sustained_untap_tier_creature_axis(self, conn):
+        """Seedborn Muse (UntapOtherPlayer Permanent.YouCtrl) fires for
+        a Wizard-tap commander — Permanent subsumes Creature."""
+        _add_port(
+            conn,
+            "Seedborn Muse",
+            port_type="static",
+            event_class="UntapOtherPlayer",
+            raw_line="{'Mode': 'UntapOtherPlayer', 'ValidCard': 'Permanent.YouCtrl'}",
+        )
+        results = _find_tap_type_feeders(conn, [self._creature_cost()], set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Seedborn Muse") == "tap_type_sustained_untap"
+
+    def test_sustained_untap_tier_artifact_axis(self, conn):
+        """Unwinding Clock (UntapOtherPlayer Artifact.YouCtrl) fires
+        for an Urza (artifact-tap) commander."""
+        _add_port(
+            conn,
+            "Unwinding Clock",
+            port_type="static",
+            event_class="UntapOtherPlayer",
+            raw_line="{'Mode': 'UntapOtherPlayer', 'ValidCard': 'Artifact.YouCtrl'}",
+        )
+        results = _find_tap_type_feeders(conn, [self._artifact_cost()], set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Unwinding Clock") == "tap_type_sustained_untap"
+
+    def test_artifact_untap_rejected_on_creature_axis(self, conn):
+        """Unwinding Clock (Artifact.YouCtrl) MUST NOT fire for a
+        Wizard-tap commander — the subject mismatch was the regression
+        observed during the first audit pass (Aryel -0.167 NDCG)."""
+        _add_port(
+            conn,
+            "Unwinding Clock",
+            port_type="static",
+            event_class="UntapOtherPlayer",
+            raw_line="{'Mode': 'UntapOtherPlayer', 'ValidCard': 'Artifact.YouCtrl'}",
+        )
+        results = _find_tap_type_feeders(conn, [self._creature_cost()], set())
+        assert "Unwinding Clock" not in _candidates(results)
+
+    def test_creature_untap_rejected_on_artifact_axis(self, conn):
+        """Drumbellower (Creature.YouCtrl) MUST NOT fire for an
+        Artifact-tap commander."""
+        _add_port(
+            conn,
+            "Drumbellower",
+            port_type="static",
+            event_class="UntapOtherPlayer",
+            raw_line="{'Mode': 'UntapOtherPlayer', 'ValidCard': 'Creature.YouCtrl'}",
+        )
+        results = _find_tap_type_feeders(conn, [self._artifact_cost()], set())
+        assert "Drumbellower" not in _candidates(results)
+
+    def test_permanent_axis_matches_all(self, conn):
+        """Baylen (Permanent.token cost) matches every axis — no
+        rejection based on subject class."""
+        _add_port(
+            conn,
+            "Drumbellower",
+            port_type="static",
+            event_class="UntapOtherPlayer",
+            raw_line="{'Mode': 'UntapOtherPlayer', 'ValidCard': 'Creature.YouCtrl'}",
+        )
+        _add_port(
+            conn,
+            "Unwinding Clock",
+            port_type="static",
+            event_class="UntapOtherPlayer",
+            raw_line="{'Mode': 'UntapOtherPlayer', 'ValidCard': 'Artifact.YouCtrl'}",
+        )
+        names = _candidates(_find_tap_type_feeders(conn, [self._permanent_cost()], set()))
+        assert {"Drumbellower", "Unwinding Clock"} <= names
+
+    def test_self_only_untap_rejected(self, conn):
+        """Bender's Waterskin (ValidCard: 'Card.Self') untaps only
+        itself — no help for an external tap-cost commander."""
+        _add_port(
+            conn,
+            "Bender's Waterskin",
+            port_type="static",
+            event_class="UntapOtherPlayer",
+            raw_line="{'Mode': 'UntapOtherPlayer', 'ValidCard': 'Card.Self'}",
+        )
+        results = _find_tap_type_feeders(conn, [self._creature_cost()], set())
+        assert "Bender's Waterskin" not in _candidates(results)
+
+    def test_phase_untap_tier_creature_axis(self, conn):
+        """Awakening: trigger.Phase (Upkeep) + effect.UntapAll
+        (Creature,Land) — phase_untap tier for creature-axis."""
+        _add_port(
+            conn,
+            "Awakening",
+            port_type="trigger",
+            event_class="Phase",
+            phase="Upkeep",
+            raw_line="{'Mode': 'Phase', 'Phase': 'Upkeep', 'Execute': 'TrigUntapAll'}",
+        )
+        _add_port(
+            conn,
+            "Awakening",
+            port_type="effect",
+            event_class="UntapAll",
+            valid_filter="Creature,Land",
+        )
+        results = _find_tap_type_feeders(conn, [self._creature_cost()], set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Awakening") == "tap_type_phase_untap"
+
+    def test_sustained_wins_over_phase_on_dedup(self, conn):
+        """A card matching BOTH tiers (hypothetical) gets one
+        complement — the sustained (tier 1) wins over phase (tier 2)."""
+        _add_port(
+            conn,
+            "Hybrid Untapper",
+            port_type="static",
+            event_class="UntapOtherPlayer",
+            raw_line="{'Mode': 'UntapOtherPlayer', 'ValidCard': 'Creature.YouCtrl'}",
+        )
+        _add_port(
+            conn,
+            "Hybrid Untapper",
+            port_type="trigger",
+            event_class="Phase",
+            phase="Upkeep",
+            raw_line="{'Mode': 'Phase', 'Phase': 'Upkeep'}",
+        )
+        _add_port(
+            conn,
+            "Hybrid Untapper",
+            port_type="effect",
+            event_class="UntapAll",
+            valid_filter="Creature.YouCtrl",
+        )
+        hybrids = [
+            r for r in _find_tap_type_feeders(conn, [self._creature_cost()], set()) if r.candidate == "Hybrid Untapper"
+        ]
+        assert len(hybrids) == 1
+        assert hybrids[0].cand_event == "tap_type_sustained_untap"
+
+    def test_excludes_commander(self, conn):
+        """Commander's own ports must not surface as candidates."""
+        _add_port(
+            conn,
+            "Azami, Lady of Scrolls",
+            port_type="static",
+            event_class="UntapOtherPlayer",
+            raw_line="{'Mode': 'UntapOtherPlayer', 'ValidCard': 'Creature.YouCtrl'}",
+        )
+        results = _find_tap_type_feeders(conn, [self._creature_cost()], {"Azami, Lady of Scrolls"})
+        assert "Azami, Lady of Scrolls" not in _candidates(results)
+
+    def test_rule_id(self, conn):
+        _add_port(
+            conn,
+            "Seedborn Muse",
+            port_type="static",
+            event_class="UntapOtherPlayer",
+            raw_line="{'Mode': 'UntapOtherPlayer', 'ValidCard': 'Permanent.YouCtrl'}",
+        )
+        results = _find_tap_type_feeders(conn, [self._creature_cost()], set())
+        assert results
+        assert all(r.rule_id == "tap_type_feeder" for r in results)
 
 
 class TestFindDamageDoublerSynergy:

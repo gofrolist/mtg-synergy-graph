@@ -91,6 +91,7 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "counter_axis_feeder": "counter_synergy",
     "modified_axis_feeder": "counter_synergy",
     "cardpower_axis_feeder": "port_match",
+    "tap_type_feeder": "port_match",
     "creatures_as_lands_landfall": "port_match",
     "damage_doubler_synergy": "port_match",
     "choose_tribal": "port_match",
@@ -473,6 +474,19 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # of existing voltron commanders that happen to share the gate.
     # Audit may bump to 3.0× if CardPower NDCG rises without regression.
     "cardpower_axis_feeder": 2.5,
+    # tap_type_feeder: commanders with a ``cost.tap_type`` port
+    # (``tapXType<N/SUBJECT>``) tap N permanents of a subject as activation
+    # cost. Two deduped tiers — tap_type_sustained_untap (~10 cards per
+    # axis, static.UntapOtherPlayer: Seedborn Muse, Prophet of Kruphix,
+    # Murkfiend Liege) > tap_type_phase_untap (~10 cards per axis,
+    # Phase-trigger + UntapAll: Awakening, White Plume Adventurer).
+    # 2.0× multiplier (vs counter/modified's 3.0×) because the pool is
+    # very narrow (~20 cards per axis) so each match's IDF is already
+    # high (~0.29). 3.0× flooded Aryel/Kumena's top-30 with untap
+    # cards and displaced their tribal EDHREC Hi-Syn picks (-0.16 /
+    # -0.07 NDCG); 2.0× keeps the tier visible (6 untaps in Aryel's
+    # top 15) without dominating Knight-lords / Merfolk-lords.
+    "tap_type_feeder": 2.0,
     # creatures_as_lands_landfall: commanders whose type-bending static
     # makes creatures also lands (Ashaya, Soul of the Wild). Pool ~237
     # landfall-trigger cards (Rampaging Baloths, Lotus Cobra, Avenger of

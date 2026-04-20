@@ -148,6 +148,17 @@ def _cardpower_axis_gate(port: PortRow) -> bool:
     return (port.get("event_class") or "").strip() == "CardPower"
 
 
+def _tap_type_feeder_gate(port: PortRow) -> bool:
+    """Mirror the runtime gate of ``_find_tap_type_feeders``.
+
+    Fires on ``cost.tap_type`` ports (``tapXType<N/SUBJECT>`` costs).
+    The port type/event pair uniquely identifies the archetype.
+    """
+    if (port.get("port_type") or "").strip() != "cost":
+        return False
+    return (port.get("event_class") or "").strip() == "tap_type"
+
+
 def _counter_axis_gate(port: PortRow) -> bool:
     if (port.get("port_type") or "").strip() not in ("trigger", "scales_with", "static"):
         return False
@@ -559,6 +570,7 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("modified_axis_feeder", _modified_axis_gate),
     RuleGate("counter_axis_feeder", _counter_axis_gate),
     RuleGate("cardpower_axis_feeder", _cardpower_axis_gate),
+    RuleGate("tap_type_feeder", _tap_type_feeder_gate),
     RuleGate("opponent_forcing", _opponent_forcing_gate),
     RuleGate("wheel_synergy", _wheel_synergy_gate),
     RuleGate("mana_doubler", _mana_doubler_gate),

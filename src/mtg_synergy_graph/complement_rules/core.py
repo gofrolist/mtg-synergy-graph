@@ -992,6 +992,7 @@ from .utility import (  # noqa: E402
     _find_monarch_synergy,
     _find_multicolor_untap,
     _find_opponent_forcing,
+    _find_tap_type_feeders,
     _find_untap_combo,
     _find_untap_synergy,
     _find_wheel_synergy,
@@ -1165,6 +1166,7 @@ def find_all_complements(
         out.extend(_find_counter_axis_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_modified_axis_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_cardpower_axis_feeders(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_tap_type_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_damage_doubler_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_attacking_axis_feeder(conn, cmdr_ports, cmdr_set))
         out.extend(_find_repl_damagedone_counters_stack(conn, cmdr_ports, cmdr_set))

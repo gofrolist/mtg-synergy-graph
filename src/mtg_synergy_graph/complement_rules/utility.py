@@ -783,6 +783,26 @@ def _find_modified_axis_feeders(
 #: SVar references (``AddPower: 'X'``, ``'Y'``, ``'Z'``).
 _ADD_POWER_RE = re.compile(r"'AddPower':\s*'([XYZ]|\d+)'")
 
+#: Marker for self-only ``UntapOtherPlayer`` statics. Cards whose
+#: ``ValidCard`` is ``Card.Self`` untap themselves on every other
+#: player's untap step (Bender's Waterskin, Endbringer, Victory Chimes,
+#: Thousand Moons Infantry). They give a tap-cost commander no
+#: re-tap headroom on external creatures, so they're excluded from
+#: ``tap_type_feeder``'s sustained-untap tier.
+_UNTAP_SELF_ONLY_MARKER = "'ValidCard': 'Card.Self'"
+
+#: Extracts the SUBJECT tokens from a ``tapXType<N/SUBJECT[;SUBJECT2]/prose>``
+#: cost raw_line. Captures the first segment after the ``/`` separator;
+#: individual ``;``-separated subjects are then split by the caller.
+_TAP_TYPE_SUBJECT_RE = re.compile(r"tapXType<[^/]+/([^/>]+)")
+
+#: Subject head tokens that resolve to the **artifact** axis
+#: (Urza / Shao Jun / Glacian / Meria tap Artifacts, Apothecary
+#: White / Cabbage Merchant tap the Food artifact subtype).
+#: ``Food`` is included as a literal because it's an Artifact
+#: subtype named directly in the cost.
+_ARTIFACT_SUBJECT_HEADS: frozenset[str] = frozenset({"Artifact", "Food"})
+
 
 def _find_cardpower_axis_feeders(
     conn: sqlite3.Connection,
@@ -885,6 +905,164 @@ def _find_cardpower_axis_feeders(
                     direction="synergy",
                     candidate=name,
                     cmdr_event="cardpower_axis",
+                    cand_event=cand_event,
+                )
+            )
+    return results
+
+
+def _classify_tap_type_axis(cmdr_ports: list[PortRow]) -> frozenset[str]:
+    """Resolve the set of axis classes implied by a commander's
+    ``cost.tap_type`` ports.
+
+    Returns a subset of ``{"creature", "artifact", "permanent"}``:
+
+    * ``permanent`` — commander taps untyped ``Permanent`` tokens
+      (Baylen / Hazel). Matches every subsuming untap card.
+    * ``artifact`` — commander taps ``Artifact`` or the ``Food``
+      subtype (Urza / Shao Jun / Apothecary White).
+    * ``creature`` — default. ``Creature`` itself plus every
+      tribal subtype (Wizard for Azami, Knight for Aryel, Elf for
+      Lathril, Merfolk for Kumena, Archer, Octopus, Halfling,
+      Druid, Rebel, Advisor, Monk, Artificer, ...).
+
+    A commander with mixed subjects (``Artifact;Creature`` on
+    Caparocti) yields both classes. Empty result means the gate
+    didn't find a valid ``cost.tap_type`` port.
+    """
+    classes: set[str] = set()
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "cost":
+            continue
+        if (p.get("event_class") or "").strip() != "tap_type":
+            continue
+        raw = str(p.get("raw_line") or "")
+        match = _TAP_TYPE_SUBJECT_RE.search(raw)
+        if not match:
+            continue
+        subject_list = match.group(1)
+        for subject in subject_list.split(";"):
+            # Head token is everything before the first ``.`` — the
+            # type or subtype. Qualifiers (``YouCtrl``, ``!token``,
+            # ``Other``) follow and don't change the axis class.
+            head = subject.split(".", 1)[0].strip()
+            if not head:
+                continue
+            if head == "Permanent":
+                classes.add("permanent")
+            elif head in _ARTIFACT_SUBJECT_HEADS:
+                classes.add("artifact")
+            else:
+                # Creature, Wizard, Elf, Merfolk, Knight, Rebel,
+                # Druid, Advisor, Monk, Artificer, Halfling,
+                # Octopus, Archer, ... — all creature-axis.
+                classes.add("creature")
+    return frozenset(classes)
+
+
+def _find_tap_type_feeders(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Rule for commanders with a ``cost.tap_type`` port
+    (``tapXType<N/SUBJECT>``).
+
+    These commanders pay by tapping N untapped permanents of a given
+    subject (Wizards for Azami, Artifacts for Urza, Elves for Lathril,
+    Knights for Aryel, Merfolk for Kumena). Regardless of the exact
+    subject, every one of them wants **to fire the cost twice** — so
+    the universal archetype reward is a sustained untap effect that
+    refreshes the cost-targets each rotation.
+
+    The axis class is extracted from the cost raw_line via
+    :func:`_classify_tap_type_axis` so commanders are fed only untap
+    candidates that actually touch their subject: Azami (tapping
+    Wizards) gets Creature/Permanent untappers but NOT Unwinding Clock
+    (artifact-only), and Urza (tapping Artifacts) gets Unwinding Clock
+    but NOT Drumbellower (creature-only). Early spot-checks without
+    axis filtering caused regressions on Aryel (-0.145) and Kumena
+    (-0.107) by surfacing Artifact untappers to creature-tap tribes.
+
+    Two deduped tiers (highest priority wins per card):
+
+    - ``tap_type_sustained_untap``: ``static.UntapOtherPlayer`` whose
+      ``ValidCard`` matches the commander's axis class. ~10 cards per
+      axis. Seedborn Muse / Prophet of Kruphix / Murkfiend Liege for
+      creature tappers; Unwinding Clock + Seedborn Muse (Permanent)
+      for artifact tappers. Archetype-defining — these turn a
+      once-per-turn tap-cost ability into a once-per-rotation engine.
+    - ``tap_type_phase_untap``: ``trigger.Phase`` paired with
+      ``effect.UntapAll`` on a valid_filter matching the axis. ~10
+      cards per axis. Awakening, White Plume Adventurer, Virtue of
+      Loyalty, Unstoppable Plan. Weaker than tier 1 (once per turn
+      instead of once per opponent's turn) but still premium.
+
+    Self-only untaps (Bender's Waterskin, Endbringer, Victory Chimes
+    — ``ValidCard: Card.Self``) are rejected because they don't
+    refresh external tap-cost targets.
+    """
+    axis_classes = _classify_tap_type_axis(cmdr_ports)
+    if not axis_classes:
+        return []
+
+    # Build the set of filter tokens that are valid for this commander.
+    # ``Permanent`` always qualifies because it subsumes every axis.
+    match_tokens: set[str] = {"Permanent"}
+    if "creature" in axis_classes or "permanent" in axis_classes:
+        match_tokens.add("Creature")
+    if "artifact" in axis_classes or "permanent" in axis_classes:
+        match_tokens.add("Artifact")
+
+    like_clauses = " OR ".join(["raw_line LIKE ?"] * len(match_tokens))
+    like_params = [f"%{token}%" for token in sorted(match_tokens)]
+
+    sustained_set: set[str] = {
+        row["card_name"]
+        for row in conn.execute(
+            f"SELECT DISTINCT card_name FROM card_ports "
+            f"WHERE port_type = 'static' "
+            f"AND event_class = 'UntapOtherPlayer' "
+            f"AND (raw_line IS NULL OR raw_line NOT LIKE ?) "
+            f"AND ({like_clauses})",
+            [f"%{_UNTAP_SELF_ONLY_MARKER}%", *like_params],
+        )
+    }
+
+    # Phase-trigger + UntapAll needs filter matching on the EFFECT's
+    # valid_filter (not the trigger's). Build the effect-side clause
+    # from the same token set.
+    effect_clauses = " OR ".join(["cp2.valid_filter LIKE ?"] * len(match_tokens))
+    phase_untap_set: set[str] = {
+        row["card_name"]
+        for row in conn.execute(
+            f"SELECT DISTINCT cp1.card_name "
+            f"FROM card_ports cp1 "
+            f"JOIN card_ports cp2 ON cp2.card_name = cp1.card_name "
+            f"WHERE cp1.port_type = 'trigger' AND cp1.event_class = 'Phase' "
+            f"AND cp2.port_type = 'effect' AND cp2.event_class = 'UntapAll' "
+            f"AND ({effect_clauses})",
+            [f"%{token}%" for token in sorted(match_tokens)],
+        )
+    }
+
+    tier_priority = (
+        ("tap_type_sustained_untap", sustained_set),
+        ("tap_type_phase_untap", phase_untap_set),
+    )
+    seen: set[str] = set()
+    results: list[PortComplement] = []
+    for cand_event, candidates in tier_priority:
+        for name in candidates:
+            if name in cmdr_set or name in seen:
+                continue
+            seen.add(name)
+            results.append(
+                PortComplement(
+                    rule_id="tap_type_feeder",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="tap_type_cost",
                     cand_event=cand_event,
                 )
             )

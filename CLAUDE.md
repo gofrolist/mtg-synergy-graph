@@ -204,6 +204,37 @@ cardpower_axis_feeder (2026-04-19):
   counter/modified's 3.0× because the attachment tier partially
   overlaps with the general voltron pool). Golden NDCG unchanged
   at 0.25105. 13 new tests; 972 total.
+tap_type_feeder (2026-04-19):
+- New rule for the 27 legendary-creature commanders with a
+  `cost.tap_type` port (`tapXType<N/SUBJECT>`) — Azami (tap Wizard),
+  Urza (Artifact), Aryel (Knight), Kumena (Merfolk), Lathril (Elf),
+  Apothecary White (Food), Baylen (Permanent.token), Caparocti
+  (Artifact;Creature). Every tap-cost commander wants to fire the
+  cost TWICE per rotation, so the universal reward is a sustained
+  untap engine.
+- Axis-aware via `_classify_tap_type_axis`: extract SUBJECT from
+  raw_line, classify as creature / artifact / permanent. Creature-
+  taps (Azami) get Seedborn Muse / Prophet of Kruphix / Murkfiend
+  Liege but NOT Unwinding Clock. Artifact-taps (Urza) get Unwinding
+  Clock + Seedborn Muse (Permanent-subsuming) but NOT Drumbellower.
+  Permanent-taps (Baylen) match everything.
+- Two tiers (deduped, tier 1 wins):
+  - `tap_type_sustained_untap`: static.UntapOtherPlayer whose
+    ValidCard matches the axis, non-Self. ~10 per axis.
+    Archetype-defining — Seedborn Muse et al.
+  - `tap_type_phase_untap`: trigger.Phase + effect.UntapAll on
+    axis-matching valid_filter. ~10 per axis. Awakening, White
+    Plume Adventurer, Virtue of Loyalty.
+- First draft at 3.0x multiplier flooded Aryel/Kumena top-30 with
+  untaps and displaced tribal Hi-Syn picks (Aryel -0.167 NDCG,
+  Kumena -0.107). Subject-aware filter cut that to -0.039 / +0.004.
+  Multiplier lowered to 2.0x (vs counter/modified's 3.0x) because
+  the pool is already tight — 20 cards total per axis — so IDF
+  ~0.29 per match is premium on its own.
+- Per-rule audit verdict: MARGINAL (+0.101 NDCG sum, +1 hit net,
+  ratio 0.004 < 0.1 positive threshold). Top lifts: Kirol +0.138,
+  Belisarius Cawl +0.080, Shao Jun +0.018. Golden NDCG unchanged
+  at 0.25113. 20 new tests (9 axis classifier + 11 rule). 992 total.
 Port extraction: 108,644 ports from 32,327 cards (GenericChoice + StaticAbilities$
 expansion, deduped after A1's 2^N re-walk fix).
 
@@ -246,7 +277,7 @@ uv run python scripts/import_cardsfolder.py                              # Impor
 uv run python scripts/recommend.py --commander "Korvold, Fae-Cursed King" --top 30 --explain
 uv run python scripts/compare_edhrec.py --commanders tests/fixtures/golden_set.json
 uv run python scripts/golden_set_track.py --baseline tests/fixtures/golden_set_run.json
-uv run pytest tests/                                                     # 972 tests, ~1s
+uv run pytest tests/                                                     # 992 tests, ~1s
 uv run python scripts/_audit_rule_impact.py                              # Per-rule impact audit (NDCG + golden safety net), ~10 min
 ```
 
@@ -310,6 +341,7 @@ pair creates a synergy. Each wraps an existing mechanical map.
 | damage_doubler_synergy | replacement.DamageDone with amp `replacement_result` (DmgTwice/DmgTriple/DmgPlus*) targeting opponent; rejects Prevent / self-target / DmgMinus | damage_amp_stack (other replacement doublers) > damage_pinger (non-combat repeating trigger + DealDamage opponent) | Torbran, Gisela, Solphim, Tor Wauki, Raphael, Wolverine, Neriv, Ojer Axonil, Absorbing Man and Titania |
 | creatures_as_lands_landfall | static with Affected=Creature and AddType=Land | LandPlayed triggers + ChangesZone Land ETB triggers (landfall payoffs) | Ashaya, Soul of the Wild |
 | cardpower_axis_feeder | `scales_with.CardPower` port (`SVar:X:Count$CardPower`) | cardpower_big_attachment (Equipment/Aura w/ static AddPower ≥ 3 or AddPower=X/Y/Z, ~220) > cardpower_p1p1_producer (PutCounter P1P1 on Creature target, self-sac-only excluded, ~400) | Combustion Man, Krenko (Tin Street Kingpin), Alesha, Carmen, Agatha, Inferno of the Star Mounts, Raubahn, Ian the Reckless |
+| tap_type_feeder | `cost.tap_type` port (`tapXType<N/SUBJECT>`). Subject classified as creature / artifact / permanent via `_classify_tap_type_axis` — filters candidates so creature-tappers only see creature/permanent untaps, artifact-tappers only see artifact/permanent untaps. | tap_type_sustained_untap (static.UntapOtherPlayer matching the axis, non-Self, ~10 cards per axis) > tap_type_phase_untap (trigger.Phase + effect.UntapAll matching the axis, ~10 cards) | Azami, Urza (Lord High Artificer), Aryel, Kumena, Lathril, Apothecary White, Baylen, Caparocti |
 
 ### IDF Weighting (`universal_scorer.py`)
 
