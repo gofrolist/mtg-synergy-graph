@@ -349,6 +349,21 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # can displace spell staples from top-30. The 0.5 multiplier
     # preserves the gain magnitudes while shrinking off-target damage.
     "token_etb_damage": 0.5,
+    # combat_enhancer has a ~192-card pool (52 AddPhase + 140 Double
+    # Strike) and a 501-cmdr touched set — the Attacks-Self-with-value
+    # gate catches any commander with an engine-effect on-attack trigger
+    # (Kroxa mill, Green Goblin draw-and-discard) but only a small
+    # subset actually builds the deck around extra combat steps
+    # (Etali, Aurelia, Saskia). Default 1.0× multiplier displaced
+    # archetype-correct EDHREC picks on the false-positive tail
+    # (audit 2026-04-20: -0.281 NDCG aggregate, Kroxa -4 hits,
+    # Green Goblin -2). 0.7× dampens the IDF weight without losing
+    # the top winners (Etali +5, Djeru +3, Narset +2 preserved) —
+    # retune lifted the aggregate to +0.205 NDCG / +14 hits across
+    # the same 501 cmdrs, golden unchanged. 0.5× was tested first and
+    # dropped Narset below the golden threshold (-0.064); 0.7× keeps
+    # her at her original +0.046 gain.
+    "combat_enhancer": 0.7,
     # dies_drain: payoff cards (Blood Artist, Grim Haruspex, Pitiless
     # Plunderer) are pure consequence cards — they don't feed the
     # engine the way sac-cost creatures do, so they accumulate fewer
