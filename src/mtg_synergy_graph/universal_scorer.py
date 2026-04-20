@@ -504,10 +504,12 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # gy_fuel_feeder: commanders with cost.exile_from_grave (any-
     # target) pay by exiling cards from graveyards — Aphemia,
     # Ashnod, Araumi, Drivnod, Egon, Ishkanah, Kethis, etc. Single
-    # tier — gy_fuel_self_mill (~151 effect.Mill cards with
-    # Defined: 'You' and NumCards >= 2 or X/Y/Z). 2.5× to match
-    # hand_size_feeder — both are narrow-axis-gate + single-tier
-    # archetype feeders with IDF ~0.14 per match.
+    # tier — gy_fuel_self_mill (~100 effect.Mill cards with
+    # Defined: 'You' and NumCards >= 3 or scaling X/Y/Z; threshold
+    # tightened from 2 to 3 after initial audit flagged cantrip-mill
+    # flooding on Osgir / Ultimecia). 2.5× to match hand_size_feeder
+    # — narrow-axis-gate + single-tier archetype feeder with IDF
+    # ~0.16 per match.
     "gy_fuel_feeder": 2.5,
     # lifegain_feeder: commanders with scales_with LifeYouGainedThisTurn
     # scale their mechanic by life gained this turn (Astarion draw,

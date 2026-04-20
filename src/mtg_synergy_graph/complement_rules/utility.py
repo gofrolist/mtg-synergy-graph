@@ -814,6 +814,13 @@ _ARTIFACT_SUBJECT_HEADS: frozenset[str] = frozenset({"Artifact", "Food"})
 #: vigilance/haste), Flubs (``EQ0`` on draw-vs-discard branch). The
 #: hand_size_feeder rule must skip these commanders — they want
 #: cards OUT of hand, not in it.
+#:
+#: ``GE4``/``GE5``/``GE6`` are intentionally absent — they're
+#: big-hand threshold signals in the observed corpus (Damia ``LT7``
+#: refill-to-7, Kefnet ``LE6`` attack-unless-7+, Jin-Gitaxias
+#: ``GE7`` transform-at-7). Any future attempt to expand this set
+#: should re-audit the threshold against the 24 hand-size
+#: commanders before committing.
 _SMALL_HAND_COMPARES: frozenset[str] = frozenset({"LE0", "LE1", "EQ0", "GE2", "GE3"})
 
 #: Matches ``'SVarCompare': 'VALUE'`` and ``'BranchConditionSVarCompare':
@@ -1040,11 +1047,14 @@ def _find_tap_type_feeders(
 
     # Build the set of filter tokens that are valid for this commander.
     # ``Permanent`` always qualifies because it subsumes every axis.
-    match_tokens: set[str] = {"Permanent"}
+    # Assembled as an immutable frozenset — the tokens are fully
+    # derived from ``axis_classes`` and never mutate after this.
+    extra: set[str] = set()
     if "creature" in axis_classes or "permanent" in axis_classes:
-        match_tokens.add("Creature")
+        extra.add("Creature")
     if "artifact" in axis_classes or "permanent" in axis_classes:
-        match_tokens.add("Artifact")
+        extra.add("Artifact")
+    match_tokens: frozenset[str] = frozenset({"Permanent"} | extra)
 
     like_clauses = " OR ".join(["raw_line LIKE ?"] * len(match_tokens))
     like_params = [f"%{token}%" for token in sorted(match_tokens)]

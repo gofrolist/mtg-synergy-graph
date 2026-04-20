@@ -2152,6 +2152,15 @@ class TestClassifyTapTypeAxis:
         ]
         assert _classify_tap_type_axis(ports) == frozenset({"creature"})
 
+    def test_malformed_raw_line_silently_skipped(self):
+        """A malformed ``tapXType<N>`` with no ``/`` separator between
+        count and subject fails the regex and is silently skipped.
+        Pins the safe-fallback contract — if a future schema change
+        accidentally loosens the regex, the port with no subject
+        would otherwise leak into the creature branch by default."""
+        ports = [self._cost("tapXType<1>")]
+        assert _classify_tap_type_axis(ports) == frozenset()
+
 
 class TestFindTapTypeFeeders:
     """General rule for ``cost.tap_type`` commanders (Azami, Urza,
@@ -2470,6 +2479,23 @@ class TestIsBigHandCommander:
             ),
         ]
         assert _is_big_hand_commander(ports) is True
+
+    def test_condition_check_svar_variant_rejected(self):
+        """``ConditionCheckSVar`` is the third variant captured by
+        ``_CHECK_SVAR_RE`` (alongside ``CheckSVar`` for Hazoret and
+        ``BranchConditionSVar`` for Flubs). A small-hand compare
+        paired with this variant must also trigger the rejection —
+        otherwise any future commander emitting ``ConditionCheckSVar``
+        would slip past the gate as a false-positive big-hand."""
+        ports = [
+            self._hand_svar(),
+            _port_row(
+                port_type="effect",
+                event_class="ChangeZone",
+                raw_line=("{'DB': 'ChangeZone', 'ConditionCheckSVar': 'X', 'SVarCompare': 'LE1'}"),
+            ),
+        ]
+        assert _is_big_hand_commander(ports) is False
 
 
 class TestFindHandSizeFeeders:
