@@ -92,6 +92,7 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "modified_axis_feeder": "counter_synergy",
     "cardpower_axis_feeder": "port_match",
     "tap_type_feeder": "port_match",
+    "hand_size_feeder": "port_match",
     "creatures_as_lands_landfall": "port_match",
     "damage_doubler_synergy": "port_match",
     "choose_tribal": "port_match",
@@ -487,6 +488,17 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # -0.07 NDCG); 2.0× keeps the tier visible (6 untaps in Aryel's
     # top 15) without dominating Knight-lords / Merfolk-lords.
     "tap_type_feeder": 2.0,
+    # hand_size_feeder: big-hand commanders (scales_with ValidHand
+    # Card.YouOwn, rejecting small-hand signals LE0/LE1/EQ0/GE2/GE3
+    # on the hand-binding SVar — Hazoret/Neheb/Djeru-and-Hazoret/Flubs).
+    # Single tier — hand_size_no_max (~46 cards, SetMaxHandSize:
+    # Unlimited statics: Reliquary Tower, Thought Vessel, Library of
+    # Leng, Spellbook, Venser's Journal, Decanter of Endless Water,
+    # Folio of Fancies). 2.5× to match subject_zone/creatures_as_lands:
+    # narrow, archetype-defining pool with IDF ~0.18 per match.
+    # No voltron/tribal overlap — the candidates are Artifact/
+    # Enchantment mana rocks / libraries, not stat-sticks.
+    "hand_size_feeder": 2.5,
     # creatures_as_lands_landfall: commanders whose type-bending static
     # makes creatures also lands (Ashaya, Soul of the Wild). Pool ~237
     # landfall-trigger cards (Rampaging Baloths, Lotus Cobra, Avenger of

@@ -120,6 +120,7 @@ _RULE_HELPER_OVERRIDES: dict[str, str] = {
     "exalted_density": "_find_static_strategy",
     "flicker_payoff": "_find_flicker_payoffs",
     "graveyard_play": "_find_graveyard_play_synergy",
+    "hand_size_feeder": "_find_hand_size_feeders",
     "landfall_enabler": "_find_landfall_enablers",
     "lord": "_find_lord_complements",
     "mana_doubler": "_find_mana_doubler_synergy",

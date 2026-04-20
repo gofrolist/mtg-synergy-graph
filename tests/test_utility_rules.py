@@ -21,12 +21,14 @@ from mtg_synergy_graph.complement_rules.utility import (
     _find_damage_doubler_synergy,
     _find_extra_land_plays,
     _find_flicker_synergy,
+    _find_hand_size_feeders,
     _find_mana_doubler_synergy,
     _find_modified_axis_feeders,
     _find_monarch_synergy,
     _find_opponent_forcing,
     _find_tap_type_feeders,
     _find_wheel_synergy,
+    _is_big_hand_commander,
 )
 
 # ---------------------------------------------------------------------------
@@ -2338,6 +2340,258 @@ class TestFindTapTypeFeeders:
         results = _find_tap_type_feeders(conn, [self._creature_cost()], set())
         assert results
         assert all(r.rule_id == "tap_type_feeder" for r in results)
+
+
+class TestIsBigHandCommander:
+    """Classify hand-size commanders as big-hand (reward more cards in
+    hand) or small-hand (reward empty hand). Hand-size axis is
+    bidirectional so feeding Reliquary-Tower staples to Hazoret /
+    Neheb / Djeru-and-Hazoret / Flubs would be anti-synergy.
+
+    Small-hand signals on the hand-binding SVar: ``LE0``/``LE1``/
+    ``EQ0`` (mechanic fires when hand is tiny) or ``GE2``/``GE3``
+    (Hazoret pattern — blocked when hand reaches 2+)."""
+
+    def _hand_svar(self, name: str = "X") -> dict:
+        return _port_row(
+            port_type="scales_with",
+            event_class="ValidHand Card.YouOwn",
+            raw_line=f"SVar:{name}:Count$ValidHand Card.YouOwn",
+        )
+
+    def test_no_hand_svar_returns_false(self):
+        """Non-hand-size commanders are neither big nor small — the
+        gate returns False so the rule doesn't fire."""
+        ports = [_port_row(port_type="trigger", event_class="Attacks")]
+        assert _is_big_hand_commander(ports) is False
+
+    def test_alandra_default_big_hand(self):
+        """Alandra has a hand-SVar but no small-hand compare — classified
+        as big-hand by default."""
+        ports = [
+            self._hand_svar(),
+            _port_row(
+                port_type="effect",
+                event_class="PumpAll",
+                raw_line=("{'DB': 'PumpAll', 'ValidCards': 'Card.Self,Drake.YouCtrl', 'NumAtt': '+X', 'NumDef': '+X'}"),
+            ),
+        ]
+        assert _is_big_hand_commander(ports) is True
+
+    def test_hazoret_ge2_rejected(self):
+        """Hazoret: ``CheckSVar: X`` + ``SVarCompare: GE2`` on
+        CantAttack = blocked when hand ≥ 2, wants ≤ 1."""
+        ports = [
+            self._hand_svar(),
+            _port_row(
+                port_type="static",
+                event_class="CantAttack,CantBlock",
+                raw_line=(
+                    "{'Mode': 'CantAttack,CantBlock', 'ValidCard': 'Card.Self', 'CheckSVar': 'X', 'SVarCompare': 'GE2'}"
+                ),
+            ),
+        ]
+        assert _is_big_hand_commander(ports) is False
+
+    def test_neheb_le1_rejected(self):
+        """Neheb: ``CheckSVar: X`` + ``SVarCompare: LE1`` on +2/+0
+        static = bonus when hand ≤ 1, wants small hand."""
+        ports = [
+            self._hand_svar(),
+            _port_row(
+                port_type="static",
+                event_class="Continuous",
+                raw_line=(
+                    "{'Mode': 'Continuous', 'Affected': 'Minotaur.YouCtrl', "
+                    "'AddPower': '2', 'CheckSVar': 'X', 'SVarCompare': 'LE1'}"
+                ),
+            ),
+        ]
+        assert _is_big_hand_commander(ports) is False
+
+    def test_flubs_eq0_rejected_via_branch_compare(self):
+        """Flubs: ``BranchConditionSVar: X`` + ``BranchConditionSVarCompare:
+        EQ0`` = draw when hand empty, discard otherwise. Ambiguous
+        archetype but tilts small-hand."""
+        ports = [
+            self._hand_svar(),
+            _port_row(
+                port_type="effect",
+                event_class="Branch",
+                raw_line=(
+                    "{'DB': 'Branch', 'BranchConditionSVar': 'X', "
+                    "'BranchConditionSVarCompare': 'EQ0', "
+                    "'TrueSubAbility': 'DBDraw', 'FalseSubAbility': 'DBDiscard'}"
+                ),
+            ),
+        ]
+        assert _is_big_hand_commander(ports) is False
+
+    def test_damia_lt7_is_big_hand(self):
+        """Damia: ``SVarCompare: LT7`` on Upkeep trigger = refill to 7.
+        LT7 is NOT in the small-hand set — big-hand."""
+        ports = [
+            self._hand_svar(),
+            _port_row(
+                port_type="trigger",
+                event_class="Phase",
+                raw_line=(
+                    "{'Mode': 'Phase', 'Phase': 'Upkeep', "
+                    "'CheckSVar': 'X', 'SVarCompare': 'LT7', 'Execute': 'TrigDraw'}"
+                ),
+            ),
+        ]
+        assert _is_big_hand_commander(ports) is True
+
+    def test_jin_gitaxias_ge7_is_big_hand(self):
+        """Jin-Gitaxias: ``SVarCompare: GE7`` for transform = wants ≥ 7."""
+        ports = [
+            self._hand_svar(),
+            _port_row(
+                port_type="effect",
+                event_class="ChangeZone",
+                raw_line=("{'AB': 'ChangeZone', 'CheckSVar': 'X', 'SVarCompare': 'GE7', 'Origin': 'Battlefield'}"),
+            ),
+        ]
+        assert _is_big_hand_commander(ports) is True
+
+    def test_compare_on_non_hand_svar_ignored(self):
+        """A small-hand-looking compare on a DIFFERENT SVar (e.g., a
+        counter count) must not reject the commander. Only compares
+        bound to a hand-size SVar matter."""
+        ports = [
+            self._hand_svar("X"),
+            _port_row(
+                port_type="trigger",
+                event_class="Phase",
+                raw_line=("{'Mode': 'Phase', 'CheckSVar': 'Z', 'SVarCompare': 'LE1', 'Execute': 'TrigSomething'}"),
+            ),
+        ]
+        assert _is_big_hand_commander(ports) is True
+
+
+class TestFindHandSizeFeeders:
+    """Rule for big-hand commanders: surface SetMaxHandSize:
+    Unlimited statics (Reliquary Tower, Thought Vessel, Library of
+    Leng). Skip small-hand commanders entirely."""
+
+    def _big_hand_cmdr_ports(self):
+        """Damia-style: hand SVar + no small-hand compare."""
+        return [
+            _port_row(
+                port_type="scales_with",
+                event_class="ValidHand Card.YouOwn",
+                raw_line="SVar:X:Count$ValidHand Card.YouOwn",
+            ),
+            _port_row(
+                port_type="effect",
+                event_class="Draw",
+                raw_line="{'DB': 'Draw', 'NumCards': 'Difference'}",
+            ),
+        ]
+
+    def _hazoret_ports(self):
+        """Small-hand: CheckSVar X + SVarCompare GE2."""
+        return [
+            _port_row(
+                port_type="scales_with",
+                event_class="ValidHand Card.YouOwn",
+                raw_line="SVar:X:Count$ValidHand Card.YouOwn",
+            ),
+            _port_row(
+                port_type="static",
+                event_class="CantAttack,CantBlock",
+                raw_line=(
+                    "{'Mode': 'CantAttack,CantBlock', 'ValidCard': 'Card.Self', 'CheckSVar': 'X', 'SVarCompare': 'GE2'}"
+                ),
+            ),
+        ]
+
+    def test_no_hand_svar_skips(self, conn):
+        """Non-hand-size commanders get no complements."""
+        ports = [_port_row(port_type="trigger", event_class="Attacks")]
+        assert _find_hand_size_feeders(conn, ports, set()) == []
+
+    def test_big_hand_surfaces_unlimited(self, conn):
+        """Reliquary Tower qualifies — SetMaxHandSize: Unlimited."""
+        _add_port(
+            conn,
+            "Reliquary Tower",
+            port_type="static",
+            event_class="Continuous",
+            raw_line=("{'Mode': 'Continuous', 'Affected': 'You', 'SetMaxHandSize': 'Unlimited'}"),
+        )
+        results = _find_hand_size_feeders(conn, self._big_hand_cmdr_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Reliquary Tower") == "hand_size_no_max"
+
+    def test_small_hand_cmdr_skipped(self, conn):
+        """Hazoret-style small-hand commander gets NO complements even
+        with a full SetMaxHandSize pool — feeding her those cards
+        would be anti-synergy."""
+        _add_port(
+            conn,
+            "Reliquary Tower",
+            port_type="static",
+            event_class="Continuous",
+            raw_line=("{'Mode': 'Continuous', 'Affected': 'You', 'SetMaxHandSize': 'Unlimited'}"),
+        )
+        assert _find_hand_size_feeders(conn, self._hazoret_ports(), set()) == []
+
+    def test_non_unlimited_max_hand_size_rejected(self, conn):
+        """A static that sets a FIXED max hand size (e.g. Doctor Octopus
+        ``SetMaxHandSize: '8'``) doesn't match — only ``Unlimited``
+        qualifies for the tier."""
+        _add_port(
+            conn,
+            "Doctor Octopus, Master Planner",
+            port_type="static",
+            event_class="Continuous",
+            raw_line=("{'Mode': 'Continuous', 'Affected': 'You', 'SetMaxHandSize': '8'}"),
+        )
+        results = _find_hand_size_feeders(conn, self._big_hand_cmdr_ports(), set())
+        assert "Doctor Octopus, Master Planner" not in _candidates(results)
+
+    def test_non_static_max_hand_size_rejected(self, conn):
+        """A SetMaxHandSize mention outside a static.Continuous port
+        (e.g. in a one-shot Effect) doesn't qualify — the tier targets
+        persistent statics only."""
+        _add_port(
+            conn,
+            "Temporary Effect",
+            port_type="effect",
+            event_class="Effect",
+            raw_line=(
+                "{'DB': 'Effect', 'StaticAbilities': 'STHandSize', "
+                "'Duration': 'AsLongAsControl', 'SetMaxHandSize': 'Unlimited'}"
+            ),
+        )
+        results = _find_hand_size_feeders(conn, self._big_hand_cmdr_ports(), set())
+        assert "Temporary Effect" not in _candidates(results)
+
+    def test_excludes_commander(self, conn):
+        """Jin-Gitaxias has the static himself — must not self-match."""
+        _add_port(
+            conn,
+            "Jin-Gitaxias",
+            port_type="static",
+            event_class="Continuous",
+            raw_line=("{'Mode': 'Continuous', 'Affected': 'You', 'SetMaxHandSize': 'Unlimited'}"),
+        )
+        results = _find_hand_size_feeders(conn, self._big_hand_cmdr_ports(), {"Jin-Gitaxias"})
+        assert "Jin-Gitaxias" not in _candidates(results)
+
+    def test_rule_id(self, conn):
+        _add_port(
+            conn,
+            "Thought Vessel",
+            port_type="static",
+            event_class="Continuous",
+            raw_line=("{'Mode': 'Continuous', 'Affected': 'You', 'SetMaxHandSize': 'Unlimited'}"),
+        )
+        results = _find_hand_size_feeders(conn, self._big_hand_cmdr_ports(), set())
+        assert results
+        assert all(r.rule_id == "hand_size_feeder" for r in results)
 
 
 class TestFindDamageDoublerSynergy:

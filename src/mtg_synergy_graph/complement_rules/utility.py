@@ -803,6 +803,38 @@ _TAP_TYPE_SUBJECT_RE = re.compile(r"tapXType<[^/]+/([^/>]+)")
 #: subtype named directly in the cost.
 _ARTIFACT_SUBJECT_HEADS: frozenset[str] = frozenset({"Artifact", "Food"})
 
+#: SVar comparison values that flag a commander's hand-size mechanic
+#: as a **small-hand** archetype: the mechanic triggers when the
+#: hand is empty or nearly empty (``LE0``/``LE1``/``EQ0``) OR is
+#: blocked when the hand reaches 2+ cards (``GE2``/``GE3`` paired
+#: with ``CantAttack``/``CantBlock``).
+#:
+#: Hazoret (``SVarCompare: GE2`` on CantAttack = can't unless ≤ 1),
+#: Neheb (``LE1`` on +2/+0 static), Djeru and Hazoret (``LE1``
+#: vigilance/haste), Flubs (``EQ0`` on draw-vs-discard branch). The
+#: hand_size_feeder rule must skip these commanders — they want
+#: cards OUT of hand, not in it.
+_SMALL_HAND_COMPARES: frozenset[str] = frozenset({"LE0", "LE1", "EQ0", "GE2", "GE3"})
+
+#: Matches ``'SVarCompare': 'VALUE'`` and ``'BranchConditionSVarCompare':
+#: 'VALUE'`` clauses inside a Forge raw_line. Covers both the plain
+#: CheckSVar comparison and the Branch effect's own compare clause
+#: used by Flubs-style conditional branches.
+_SVAR_COMPARE_RE = re.compile(r"'(?:BranchCondition)?SVarCompare':\s*'([A-Z]+\d+)'")
+
+#: Matches ``'CheckSVar': 'VAR'``, ``'ConditionCheckSVar': 'VAR'``,
+#: and ``'BranchConditionSVar': 'VAR'`` clauses. Used together with
+#: :const:`_SVAR_COMPARE_RE` to pair a compare value with the SVar
+#: it targets — only compares against the hand-size-bound SVar
+#: matter for the small-hand rejection.
+_CHECK_SVAR_RE = re.compile(r"'(?:ConditionCheckSVar|CheckSVar|BranchConditionSVar)':\s*'([A-Z])'")
+
+#: Matches ``SVar:<NAME>:Count$ValidHand`` bindings. Extracts the
+#: SVar name (``X``, ``Y``, ``Z``) that counts hand size. A
+#: commander may have more than one — Jin-Gitaxias binds both X
+#: and Y to Count$ValidHand.
+_HAND_SVAR_BINDING_RE = re.compile(r"SVar:([A-Z]):Count\$ValidHand Card\.YouOwn")
+
 
 def _find_cardpower_axis_feeders(
     conn: sqlite3.Connection,
@@ -1066,6 +1098,103 @@ def _find_tap_type_feeders(
                     cand_event=cand_event,
                 )
             )
+    return results
+
+
+def _is_big_hand_commander(cmdr_ports: list[PortRow]) -> bool:
+    """Classify a commander with ``scales_with ValidHand Card.YouOwn``
+    as big-hand (wants many cards in hand) or small-hand (wants an
+    empty hand).
+
+    The hand-size axis is bidirectional: Alandra/Damia/Kefnet/
+    Tishana reward LARGE hands; Hazoret/Neheb/Djeru-and-Hazoret
+    reward EMPTY hands. Feeding a SetMaxHandSize: Unlimited card to
+    a small-hand commander is anti-synergy.
+
+    The small-hand signal is a comparison on the SVar that binds
+    ``Count$ValidHand``: ``LE0``/``LE1``/``EQ0`` (mechanic fires
+    when hand is tiny) or ``GE2``/``GE3`` paired with a
+    CantAttack / CantBlock blocker (Hazoret pattern — blocked when
+    hand reaches 2+). Any such compare on a hand-binding SVar
+    returns False.
+    """
+    hand_svars: set[str] = set()
+    for p in cmdr_ports:
+        raw = str(p.get("raw_line") or "")
+        hand_svars.update(_HAND_SVAR_BINDING_RE.findall(raw))
+    if not hand_svars:
+        return False  # not a hand-size commander at all
+
+    for p in cmdr_ports:
+        raw = str(p.get("raw_line") or "")
+        if not raw:
+            continue
+        checked_svars = set(_CHECK_SVAR_RE.findall(raw))
+        if not (checked_svars & hand_svars):
+            continue
+        compares = set(_SVAR_COMPARE_RE.findall(raw))
+        if compares & _SMALL_HAND_COMPARES:
+            return False
+    return True
+
+
+def _find_hand_size_feeders(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Rule for big-hand commanders — those with ``SVar:<X>:Count$
+    ValidHand Card.YouOwn`` where the mechanic rewards MANY cards in
+    hand.
+
+    Alandra (pump Drakes by hand size), Damia (draw up to 7 each
+    turn), Kefnet (can't attack unless 7+), Tishana (P/T = hand
+    size + hand-size draw), Iymrith, Jin-Gitaxias, Kozilek, Soramaro,
+    Syr Elenora, Kiyomaro, Jolrael (both), Kagemaro (board wipe -X/-X),
+    Krang, Leonardo da Vinci, Mr. Foxglove, Doctor Octopus, Duggan,
+    Alrund, A-Alrund, Akuta (more-than-opponents), Eleven the Mage.
+
+    Rejects small-hand counterparts (Hazoret, Neheb, Djeru-and-
+    Hazoret, Flubs) via :func:`_is_big_hand_commander` — these want
+    an EMPTY hand and would be hurt by SetMaxHandSize: Unlimited
+    cards, which let opponents also sit on big hands.
+
+    Single tier:
+
+    - ``hand_size_no_max``: ``static.Continuous`` with
+      ``SetMaxHandSize: Unlimited``. Pool ~46 cards. Reliquary
+      Tower, Thought Vessel, Library of Leng, Spellbook, Venser's
+      Journal, Decanter of Endless Water, Folio of Fancies. These
+      are archetype-defining for any big-hand deck — they remove
+      the end-of-turn discard constraint that would otherwise cap
+      the scaling-axis value at 7.
+    """
+    if not _is_big_hand_commander(cmdr_ports):
+        return []
+
+    no_max_set: set[str] = {
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports "
+            "WHERE port_type = 'static' "
+            "AND event_class = 'Continuous' "
+            "AND raw_line LIKE '%SetMaxHandSize'': ''Unlimited''%'"
+        )
+    }
+
+    results: list[PortComplement] = []
+    for name in no_max_set:
+        if name in cmdr_set:
+            continue
+        results.append(
+            PortComplement(
+                rule_id="hand_size_feeder",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="hand_size_axis",
+                cand_event="hand_size_no_max",
+            )
+        )
     return results
 
 

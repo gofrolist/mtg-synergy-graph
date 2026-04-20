@@ -235,6 +235,42 @@ tap_type_feeder (2026-04-19):
   ratio 0.004 < 0.1 positive threshold). Top lifts: Kirol +0.138,
   Belisarius Cawl +0.080, Shao Jun +0.018. Golden NDCG unchanged
   at 0.25113. 20 new tests (9 axis classifier + 11 rule). 992 total.
+hand_size_feeder (2026-04-19):
+- New rule for the 24 big-hand commanders with a `scales_with
+  ValidHand Card.YouOwn` port whose mechanic rewards LARGE hands
+  (Alandra Drakes pump, Damia refill-to-7, Kefnet attack-if-7+,
+  Tishana P/T=hand, Soramaro / Kagemaro / Syr Elenora / Alrund /
+  Jin-Gitaxias / Kozilek / Doctor Octopus / Duggan / Mr. Foxglove
+  / Krang / Leonardo da Vinci).
+- The axis is BIDIRECTIONAL — 4 commanders (Hazoret, Neheb,
+  Djeru and Hazoret, Flubs the Fool) want EMPTY hands. Feeding
+  them SetMaxHandSize: Unlimited staples would be anti-synergy.
+  `_is_big_hand_commander` rejects them via small-hand SVarCompare
+  signals (`LE0`/`LE1`/`EQ0` fires-on-empty, `GE2`/`GE3` pairs
+  with CantAttack/CantBlock) on the hand-binding SVar (extracted
+  from `SVar:<X>:Count$ValidHand Card.YouOwn` bindings).
+- Single tier: `hand_size_no_max` — static.Continuous with
+  `SetMaxHandSize: 'Unlimited'` (~46 cards: Reliquary Tower,
+  Thought Vessel, Library of Leng, Spellbook, Venser's Journal,
+  Decanter of Endless Water, Folio of Fancies, The Magic Mirror).
+  Narrow, archetype-defining — these remove the end-of-turn
+  discard cap that would otherwise pin the hand-size axis at 7.
+- Per-rule audit verdict: positive. 24 commanders touched, ndcgΣ
+  +2.686 (largest per-rule lift ever). Top wins: Soramaro +4 hits
+  +0.397 NDCG, Kagemaro +3 +0.349, Syr Elenora +3 +0.335, Kefnet
+  +2 +0.272, Alrund +2 +0.270. One regression: Damia -0.194
+  (her 79-candidate pool is tiny so 46 new hand-size cards
+  displace 7 generic on-page staples — net Hi-Syn unchanged at
+  0/10 but on-page drops from 9 → 2). All 4 small-hand
+  commanders correctly rejected — zero false positives in the
+  gate. Golden set NDCG unchanged at 0.25113.
+- 15 new tests — 8 for `_is_big_hand_commander` (no SVar,
+  default big-hand, Hazoret GE2, Neheb LE1, Flubs EQ0 via branch,
+  Damia LT7 big-hand, Jin-Gitaxias GE7 big-hand, non-hand-SVar
+  compare ignored) and 7 for the rule (gate, Reliquary Tower
+  surfaces, Hazoret skipped, fixed max rejected, non-static
+  Effect rejected, commander self-exclusion, rule_id). 1007
+  total tests, 82% coverage.
 Port extraction: 108,644 ports from 32,327 cards (GenericChoice + StaticAbilities$
 expansion, deduped after A1's 2^N re-walk fix).
 
@@ -277,7 +313,7 @@ uv run python scripts/import_cardsfolder.py                              # Impor
 uv run python scripts/recommend.py --commander "Korvold, Fae-Cursed King" --top 30 --explain
 uv run python scripts/compare_edhrec.py --commanders tests/fixtures/golden_set.json
 uv run python scripts/golden_set_track.py --baseline tests/fixtures/golden_set_run.json
-uv run pytest tests/                                                     # 992 tests, ~1s
+uv run pytest tests/                                                     # 1007 tests, ~1s
 uv run python scripts/_audit_rule_impact.py                              # Per-rule impact audit (NDCG + golden safety net), ~10 min
 ```
 
@@ -342,6 +378,7 @@ pair creates a synergy. Each wraps an existing mechanical map.
 | creatures_as_lands_landfall | static with Affected=Creature and AddType=Land | LandPlayed triggers + ChangesZone Land ETB triggers (landfall payoffs) | Ashaya, Soul of the Wild |
 | cardpower_axis_feeder | `scales_with.CardPower` port (`SVar:X:Count$CardPower`) | cardpower_big_attachment (Equipment/Aura w/ static AddPower ≥ 3 or AddPower=X/Y/Z, ~220) > cardpower_p1p1_producer (PutCounter P1P1 on Creature target, self-sac-only excluded, ~400) | Combustion Man, Krenko (Tin Street Kingpin), Alesha, Carmen, Agatha, Inferno of the Star Mounts, Raubahn, Ian the Reckless |
 | tap_type_feeder | `cost.tap_type` port (`tapXType<N/SUBJECT>`). Subject classified as creature / artifact / permanent via `_classify_tap_type_axis` — filters candidates so creature-tappers only see creature/permanent untaps, artifact-tappers only see artifact/permanent untaps. | tap_type_sustained_untap (static.UntapOtherPlayer matching the axis, non-Self, ~10 cards per axis) > tap_type_phase_untap (trigger.Phase + effect.UntapAll matching the axis, ~10 cards) | Azami, Urza (Lord High Artificer), Aryel, Kumena, Lathril, Apothecary White, Baylen, Caparocti |
+| hand_size_feeder | `scales_with ValidHand Card.YouOwn` port AND `_is_big_hand_commander(cmdr_ports)` returns True (no `LE0`/`LE1`/`EQ0`/`GE2`/`GE3` SVarCompare on the hand-binding SVar). | hand_size_no_max (static.Continuous with `SetMaxHandSize: 'Unlimited'`, ~46 cards) | Alandra, Damia, Kefnet, Tishana, Soramaro, Kagemaro, Syr Elenora, Alrund, Jin-Gitaxias, Kozilek, Doctor Octopus, Duggan, Mr. Foxglove, Krang, Leonardo da Vinci, and 6 more |
 
 ### IDF Weighting (`universal_scorer.py`)
 

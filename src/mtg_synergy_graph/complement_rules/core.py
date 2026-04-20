@@ -986,6 +986,7 @@ from .utility import (  # noqa: E402
     _find_extra_land_plays,
     _find_flicker_payoffs,
     _find_flicker_synergy,
+    _find_hand_size_feeders,
     _find_landfall_enablers,
     _find_mana_doubler_synergy,
     _find_modified_axis_feeders,
@@ -1167,6 +1168,7 @@ def find_all_complements(
         out.extend(_find_modified_axis_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_cardpower_axis_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_tap_type_feeders(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_hand_size_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_damage_doubler_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_attacking_axis_feeder(conn, cmdr_ports, cmdr_set))
         out.extend(_find_repl_damagedone_counters_stack(conn, cmdr_ports, cmdr_set))

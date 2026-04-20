@@ -159,6 +159,23 @@ def _tap_type_feeder_gate(port: PortRow) -> bool:
     return (port.get("event_class") or "").strip() == "tap_type"
 
 
+def _hand_size_feeder_gate(port: PortRow) -> bool:
+    """Mirror the runtime gate of ``_find_hand_size_feeders``.
+
+    Fires on ``scales_with ValidHand Card.YouOwn`` ports. The
+    small-hand rejection (LE0/LE1/EQ0/GE2/GE3 compare on the
+    hand-binding SVar) lives in the runtime helper because it
+    inspects other ports on the same commander; at the per-port
+    level the registry can't see that context, so this gate is
+    permissive (covers all hand-size commanders for coverage-audit
+    purposes). The runtime still correctly rejects Hazoret / Neheb /
+    Djeru-and-Hazoret / Flubs.
+    """
+    if (port.get("port_type") or "").strip() != "scales_with":
+        return False
+    return (port.get("event_class") or "").strip() == "ValidHand Card.YouOwn"
+
+
 def _counter_axis_gate(port: PortRow) -> bool:
     if (port.get("port_type") or "").strip() not in ("trigger", "scales_with", "static"):
         return False
@@ -571,6 +588,7 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("counter_axis_feeder", _counter_axis_gate),
     RuleGate("cardpower_axis_feeder", _cardpower_axis_gate),
     RuleGate("tap_type_feeder", _tap_type_feeder_gate),
+    RuleGate("hand_size_feeder", _hand_size_feeder_gate),
     RuleGate("opponent_forcing", _opponent_forcing_gate),
     RuleGate("wheel_synergy", _wheel_synergy_gate),
     RuleGate("mana_doubler", _mana_doubler_gate),
