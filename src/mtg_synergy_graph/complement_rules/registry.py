@@ -188,6 +188,25 @@ def _life_total_feeder_gate(port: PortRow) -> bool:
     return (port.get("event_class") or "").strip() == "YourLifeTotal"
 
 
+def _land_bounce_feeder_gate(port: PortRow) -> bool:
+    """Mirror the runtime gate of ``_find_land_bounce_feeders``.
+
+    Fires on ``cost.return`` ports whose ``cost_subtype`` is ``<N>/Land*``
+    and whose ``cost_target`` is ``any`` (external land, not self-
+    bounce). Self-bounce commanders (Rootha / Shigeki / Bilbo returning
+    themselves) are a different archetype and are excluded.
+    """
+    if (port.get("port_type") or "").strip() != "cost":
+        return False
+    if (port.get("event_class") or "").strip() != "return":
+        return False
+    if (port.get("cost_target") or "").strip() != "any":
+        return False
+    cst = (port.get("cost_subtype") or "").strip()
+    parts = cst.split("/")
+    return len(parts) >= 2 and parts[1] == "Land"
+
+
 def _gy_fuel_feeder_gate(port: PortRow) -> bool:
     """Mirror the runtime gate of ``_find_gy_fuel_feeders``.
 
@@ -637,6 +656,7 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("gy_fuel_feeder", _gy_fuel_feeder_gate),
     RuleGate("lifegain_feeder", _lifegain_feeder_gate),
     RuleGate("life_total_feeder", _life_total_feeder_gate),
+    RuleGate("land_bounce_feeder", _land_bounce_feeder_gate),
     RuleGate("opponent_forcing", _opponent_forcing_gate),
     RuleGate("wheel_synergy", _wheel_synergy_gate),
     RuleGate("mana_doubler", _mana_doubler_gate),

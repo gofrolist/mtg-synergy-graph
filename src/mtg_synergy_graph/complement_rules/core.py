@@ -988,6 +988,7 @@ from .utility import (  # noqa: E402
     _find_flicker_synergy,
     _find_gy_fuel_feeders,
     _find_hand_size_feeders,
+    _find_land_bounce_feeders,
     _find_landfall_enablers,
     _find_life_total_feeders,
     _find_lifegain_feeders,
@@ -1175,6 +1176,7 @@ def find_all_complements(
         out.extend(_find_gy_fuel_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_lifegain_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_life_total_feeders(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_land_bounce_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_damage_doubler_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_attacking_axis_feeder(conn, cmdr_ports, cmdr_set))
         out.extend(_find_repl_damagedone_counters_stack(conn, cmdr_ports, cmdr_set))

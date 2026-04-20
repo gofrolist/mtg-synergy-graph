@@ -23,6 +23,7 @@ from mtg_synergy_graph.complement_rules.utility import (
     _find_flicker_synergy,
     _find_gy_fuel_feeders,
     _find_hand_size_feeders,
+    _find_land_bounce_feeders,
     _find_life_total_feeders,
     _find_lifegain_feeders,
     _find_mana_doubler_synergy,
@@ -2977,6 +2978,239 @@ class TestFindLifegainFeeders:
         results = _find_lifegain_feeders(conn, self._lifegain_cmdr_ports(), set())
         assert results
         assert all(r.rule_id == "lifegain_feeder" for r in results)
+
+
+class TestFindLandBounceFeeders:
+    """Rule for commanders whose activated ability costs a land-return
+    (Meloku / Mina and Denn / Multani / Soramaro / Sutina / Tameshi).
+
+    Two deduped tiers: land_bounce_extra_drops (AdjustLandPlays statics)
+    > land_bounce_gy_recur (Land recursion from graveyard)."""
+
+    def _meloku_ports(self):
+        """Meloku-style: cost.return with cost_subtype '1/Land' target any."""
+        return [
+            _port_row(
+                port_type="cost",
+                event_class="return",
+                cost_subtype="1/Land",
+                cost_target="any",
+                raw_line="1 Return<1/Land>",
+            )
+        ]
+
+    def test_no_land_return_skips(self, conn):
+        ports = [_port_row(port_type="trigger", event_class="Attacks")]
+        assert _find_land_bounce_feeders(conn, ports, set()) == []
+
+    def test_self_bounce_rejected(self, conn):
+        """Rootha / Shigeki / Bilbo: cost.return with cost_target='self' —
+        they return THEMSELVES, not lands. Different archetype."""
+        ports = [
+            _port_row(
+                port_type="cost",
+                event_class="return",
+                cost_subtype="1/CARDNAME",
+                cost_target="self",
+                raw_line="2 Return<1/CARDNAME>",
+            ),
+        ]
+        _add_port(
+            conn,
+            "Azusa, Lost but Seeking",
+            port_type="static",
+            event_class="Continuous",
+            raw_line="{'Mode': 'Continuous', 'Affected': 'Self', 'AdjustLandPlays': '2'}",
+        )
+        assert _find_land_bounce_feeders(conn, ports, set()) == []
+
+    def test_big_hand_cmdr_excluded(self, conn):
+        """Soramaro-style: has cost.return<Land> AND scales_with.ValidHand
+        Card.YouOwn (big-hand primary axis). Rule must not fire — the
+        bounce is incidental to her hand-size payoff."""
+        soramaro_ports = [
+            _port_row(
+                port_type="cost",
+                event_class="return",
+                cost_subtype="1/Land",
+                cost_target="any",
+                raw_line="4 Return<1/Land>",
+            ),
+            _port_row(
+                port_type="scales_with",
+                event_class="ValidHand Card.YouOwn",
+                raw_line="SVar:X:Count$ValidHand Card.YouOwn",
+            ),
+        ]
+        _add_port(
+            conn,
+            "Azusa, Lost but Seeking",
+            port_type="static",
+            event_class="Continuous",
+            raw_line="{'Mode': 'Continuous', 'Affected': 'Self', 'AdjustLandPlays': '2'}",
+        )
+        assert _find_land_bounce_feeders(conn, soramaro_ports, set()) == []
+
+    def test_xpaid_cmdr_excluded(self, conn):
+        """Tameshi-style: has cost.return<Land> AND scales_with.xPaid
+        (X-cost flicker primary axis). Rule must not fire."""
+        tameshi_ports = [
+            _port_row(
+                port_type="cost",
+                event_class="return",
+                cost_subtype="1/Land/land",
+                cost_target="any",
+                raw_line="X W Return<1/Land/land>",
+            ),
+            _port_row(
+                port_type="scales_with",
+                event_class="xPaid",
+                raw_line="SVar:X:Count$xPaid",
+            ),
+        ]
+        _add_port(
+            conn,
+            "Azusa, Lost but Seeking",
+            port_type="static",
+            event_class="Continuous",
+            raw_line="{'Mode': 'Continuous', 'Affected': 'Self', 'AdjustLandPlays': '2'}",
+        )
+        assert _find_land_bounce_feeders(conn, tameshi_ports, set()) == []
+
+    def test_non_land_return_rejected(self, conn):
+        """cost.return with cost_subtype Creature/Artifact — not a land-bounce
+        archetype; rule must not fire."""
+        ports = [
+            _port_row(
+                port_type="cost",
+                event_class="return",
+                cost_subtype="1/Creature",
+                cost_target="any",
+                raw_line="2 Return<1/Creature>",
+            ),
+        ]
+        _add_port(
+            conn,
+            "Azusa, Lost but Seeking",
+            port_type="static",
+            event_class="Continuous",
+            raw_line="{'Mode': 'Continuous', 'Affected': 'Self', 'AdjustLandPlays': '2'}",
+        )
+        assert _find_land_bounce_feeders(conn, ports, set()) == []
+
+    def test_extra_drops_tier_fires(self, conn):
+        """Azusa: static.Continuous with AdjustLandPlays — tier 1 payoff."""
+        _add_port(
+            conn,
+            "Azusa, Lost but Seeking",
+            port_type="static",
+            event_class="Continuous",
+            raw_line="{'Mode': 'Continuous', 'Affected': 'Self', 'AdjustLandPlays': '2'}",
+        )
+        results = _find_land_bounce_feeders(conn, self._meloku_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Azusa, Lost but Seeking") == "land_bounce_extra_drops"
+
+    def test_gy_recur_tier_fires(self, conn):
+        """Crucible of Worlds: effect.ChangeZone Graveyard-origin Land."""
+        _add_port(
+            conn,
+            "Crucible of Worlds",
+            port_type="effect",
+            event_class="ChangeZone",
+            zone_origin="Graveyard",
+            valid_filter="Land.YouOwn",
+            raw_line="{'DB': 'ChangeZone', 'Origin': 'Graveyard', 'ValidCard': 'Land.YouOwn'}",
+        )
+        results = _find_land_bounce_feeders(conn, self._meloku_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Crucible of Worlds") == "land_bounce_gy_recur"
+
+    def test_opponent_grave_rejected(self, conn):
+        """Land-recursion card that targets opponents' graveyard must be
+        rejected — it doesn't bring YOUR lands back."""
+        _add_port(
+            conn,
+            "Opp Grave Grab",
+            port_type="effect",
+            event_class="ChangeZone",
+            zone_origin="Graveyard",
+            valid_filter="Land.YouOwn",
+            raw_line="{'DB': 'ChangeZone', 'Origin': 'Graveyard', 'Defined': 'Opponent'}",
+        )
+        results = _find_land_bounce_feeders(conn, self._meloku_ports(), set())
+        assert "Opp Grave Grab" not in _candidates(results)
+
+    def test_extra_drops_wins_over_gy_recur_dedup(self, conn):
+        """A hybrid card matching BOTH tiers gets ONE complement —
+        the higher-priority extra_drops tier wins."""
+        _add_port(
+            conn,
+            "Hybrid Land Card",
+            port_type="static",
+            event_class="Continuous",
+            raw_line="{'Mode': 'Continuous', 'Affected': 'Self', 'AdjustLandPlays': '1'}",
+        )
+        _add_port(
+            conn,
+            "Hybrid Land Card",
+            port_type="effect",
+            event_class="ChangeZone",
+            zone_origin="Graveyard",
+            valid_filter="Land.YouOwn",
+            raw_line="{'DB': 'ChangeZone', 'Origin': 'Graveyard', 'ValidCard': 'Land.YouOwn'}",
+        )
+        hybrids = [
+            r for r in _find_land_bounce_feeders(conn, self._meloku_ports(), set()) if r.candidate == "Hybrid Land Card"
+        ]
+        assert len(hybrids) == 1
+        assert hybrids[0].cand_event == "land_bounce_extra_drops"
+
+    def test_typed_tagged_land_subtype_fires(self, conn):
+        """Tameshi's cost_subtype is ``1/Land/land`` (typed-and-tagged).
+        The gate must accept this variant."""
+        tameshi_ports = [
+            _port_row(
+                port_type="cost",
+                event_class="return",
+                cost_subtype="1/Land/land",
+                cost_target="any",
+                raw_line="X W Return<1/Land/land>",
+            )
+        ]
+        _add_port(
+            conn,
+            "Azusa, Lost but Seeking",
+            port_type="static",
+            event_class="Continuous",
+            raw_line="{'Mode': 'Continuous', 'Affected': 'Self', 'AdjustLandPlays': '2'}",
+        )
+        results = _find_land_bounce_feeders(conn, tameshi_ports, set())
+        assert "Azusa, Lost but Seeking" in _candidates(results)
+
+    def test_excludes_commander(self, conn):
+        _add_port(
+            conn,
+            "Meloku the Clouded Mirror",
+            port_type="static",
+            event_class="Continuous",
+            raw_line="{'Mode': 'Continuous', 'Affected': 'Self', 'AdjustLandPlays': '2'}",
+        )
+        results = _find_land_bounce_feeders(conn, self._meloku_ports(), {"Meloku the Clouded Mirror"})
+        assert "Meloku the Clouded Mirror" not in _candidates(results)
+
+    def test_rule_id(self, conn):
+        _add_port(
+            conn,
+            "Azusa, Lost but Seeking",
+            port_type="static",
+            event_class="Continuous",
+            raw_line="{'Mode': 'Continuous', 'Affected': 'Self', 'AdjustLandPlays': '2'}",
+        )
+        results = _find_land_bounce_feeders(conn, self._meloku_ports(), set())
+        assert results
+        assert all(r.rule_id == "land_bounce_feeder" for r in results)
+        assert all(r.cmdr_event == "land_bounce_cost" for r in results)
 
 
 class TestFindLifeTotalFeeders:

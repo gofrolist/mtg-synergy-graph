@@ -7,6 +7,36 @@ See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
 ## 2026-04-20
 
+### land_bounce_feeder
+
+- New rule for commanders whose activated ability costs a land-return
+  (Meloku, Mina and Denn, Multani, Sutina, Uyo — 5 scored, 7 touched
+  before archetype exclusion, 0% prior coverage). Two deduped tiers:
+  - `land_bounce_extra_drops` (~38): `static.Continuous` with
+    `AdjustLandPlays` — Azusa, Exploration, Oracle of Mul Daya,
+    Dryad of the Ilysian Grove, Fastbond, Ghirapur Orrery,
+    Rites of Flourishing, Burgeoning, Flubs (the Fool), Hugs,
+    Aesi Tyrant of Gyre Strait. Turns the land-bounce into a neutral
+    tempo play (replay the bounced land, still land drop).
+  - `land_bounce_gy_recur` (~56): `effect.ChangeZone` with
+    `zone_origin='Graveyard'` and `valid_filter` containing `Land`,
+    rejecting opponent-targeting — Crucible of Worlds, Ramunap
+    Excavator, Splendid Reclamation, World Shaper, Life from the
+    Loam, Emeria Shepherd, Lord Windgrace, Molderhulk. Compounds
+    with the bounce loop.
+- Archetype exclusion: cmdrs with `scales_with.xPaid` (Tameshi —
+  X-cost flicker engine) or `scales_with.ValidHand Card.YouOwn`
+  (Soramaro — big-hand payoff) are dropped from the rule. Initial
+  draft without these exclusions regressed Soramaro -0.139 NDCG and
+  Tameshi -0.056 NDCG — their land-return cost is incidental to a
+  different primary engine, and generic AdjustLandPlays / GY-land-
+  recur feeds displaced their real archetype picks.
+- Audit verdict TRIVIAL by hi_syn hit count (Sutina +1 / Mina -1
+  cancel at the net level) but NDCG@30 aggregate **+0.235** (Sutina
+  +0.095, Mina +0.060, Uyo +0.051, Multani +0.029, Meloku small).
+  Zero per-commander regressions (ndcgmin +0.000), golden unchanged.
+  Multiplier 2.5×.
+
 ### life_total_feeder (after a reverted first attempt)
 
 - **First attempt, reverted (commit ec67250)**: Gate was

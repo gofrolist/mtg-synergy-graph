@@ -96,6 +96,7 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "gy_fuel_feeder": "port_match",
     "lifegain_feeder": "port_match",
     "life_total_feeder": "port_match",
+    "land_bounce_feeder": "port_match",
     "creatures_as_lands_landfall": "port_match",
     "damage_doubler_synergy": "port_match",
     "choose_tribal": "port_match",
@@ -535,6 +536,21 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # hand_size/gy_fuel/lifegain — narrow single-axis feeder with a
     # tight archetype-defining pool (~27 cards, IDF ~0.18 per match).
     "life_total_feeder": 2.5,
+    # land_bounce_feeder: commanders whose activated ability costs a
+    # land-return (Meloku / Mina and Denn / Multani / Soramaro / Sutina
+    # / Tameshi — 6 cmdrs, 0% prior coverage). Two deduped tiers:
+    # land_bounce_extra_drops (~38 static.Continuous AdjustLandPlays —
+    # Azusa, Exploration, Oracle of Mul Daya, Dryad of the Ilysian
+    # Grove, Fastbond) > land_bounce_gy_recur (~56 effect.ChangeZone
+    # Graveyard-source with Land filter — Crucible of Worlds, Ramunap
+    # Excavator, Splendid Reclamation, Life from the Loam, Lord
+    # Windgrace). Multiplier 2.5× matches other single-axis feeders —
+    # tight pool (~94 cards total, IDF ~0.15 per match), archetype-
+    # defining. No overlap with extra_land_plays (inverse gate: that
+    # rule feeds landfall triggers to cmdrs with AdjustLandPlays
+    # statics; this one feeds AdjustLandPlays to cmdrs with a land-
+    # return cost).
+    "land_bounce_feeder": 2.5,
     # creatures_as_lands_landfall: commanders whose type-bending static
     # makes creatures also lands (Ashaya, Soul of the Wild). Pool ~237
     # landfall-trigger cards (Rampaging Baloths, Lotus Cobra, Avenger of

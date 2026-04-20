@@ -1518,6 +1518,126 @@ def _find_life_total_feeders(
     return results
 
 
+def _find_land_bounce_feeders(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Rule for commanders whose activated ability requires returning a
+    land from the battlefield to the hand as a cost.
+
+    Target archetype: land-bounce / land-recursion commanders. Meloku
+    the Clouded Mirror (return land → Spirit token), Mina and Denn
+    Wildborn (return land → play extra land), Multani Yavimaya's
+    Avatar (return 2 lands → creature pump), Sutina Speaker of the
+    Tajuru (return land → ramp / counters), Soramaro First to Dream
+    (return land → Dig X), Tameshi Reality Architect (return land →
+    flicker/recast non-creature permanent).
+
+    Gate:
+
+    - cmdr has ``cost.return`` port with ``cost_subtype`` of the form
+      ``<N>/Land...`` (e.g. ``1/Land``, ``2/Land``, ``1/Land/land``)
+    - AND ``cost_target='any'`` (external land, not self-bounce like
+      Rootha / Shigeki / Bilbo which tuck themselves)
+
+    Two deduped tiers:
+
+    - ``land_bounce_extra_drops``: ``static.Continuous`` whose raw
+      line contains ``AdjustLandPlays``. ~38 cards — Azusa, Explore,
+      Exploration, Oracle of Mul Daya, Dryad of the Ilysian Grove,
+      Fastbond, Ghirapur Orrery, Rites of Flourishing, Burgeoning,
+      Flubs (the Fool), Hugs, Aesi. Turning the land-bounce into a
+      neutral tempo play (replay the bounced land, still land drop).
+    - ``land_bounce_gy_recur``: ``effect.ChangeZone`` with
+      ``zone_origin='Graveyard'`` and ``valid_filter`` containing
+      ``Land``, rejecting opponent-targeting. ~56 cards — Crucible of
+      Worlds, Ramunap Excavator, Splendid Reclamation, World Shaper,
+      Life from the Loam, Emeria Shepherd, Lord Windgrace, Molderhulk,
+      Deathrite Shaman (mode), Groundskeeper, Lodestone Bauble. Turns
+      destroyed/sacrificed lands back into resources, compounding
+      with the bounce loop.
+    """
+    has_land_return_cost = False
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "cost":
+            continue
+        if (p.get("event_class") or "").strip() != "return":
+            continue
+        if (p.get("cost_target") or "").strip() != "any":
+            continue
+        cst = (p.get("cost_subtype") or "").strip()
+        # cost_subtype is "N/Type" (Forge pattern) — accept "Land" or
+        # "Land/land" (typed-and-tagged variants both occur).
+        parts = cst.split("/")
+        if len(parts) >= 2 and parts[1] == "Land":
+            has_land_return_cost = True
+            break
+    if not has_land_return_cost:
+        return []
+
+    # Exclude commanders whose PRIMARY axis is not land-focused: big-
+    # hand (scales_with.ValidHand Card.YouOwn — Soramaro) and X-cost
+    # spell-payoff (scales_with.xPaid — Tameshi whose bounce cost
+    # enables a flicker/recast of a non-creature permanent). For these
+    # commanders the land-return is an incidental cost, not the engine,
+    # and feeding them AdjustLandPlays / GY-land-recur displaces their
+    # real archetype picks (audit 2026-04-20: Soramaro -0.139 NDCG,
+    # Tameshi -0.056 on the initial rule without this exclusion).
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "scales_with":
+            continue
+        ec = (p.get("event_class") or "").strip()
+        if ec == "xPaid":
+            return []
+        if ec.startswith("ValidHand "):
+            return []
+
+    extra_drops_set: set[str] = {
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports "
+            "WHERE port_type = 'static' "
+            "AND event_class = 'Continuous' "
+            "AND raw_line LIKE '%AdjustLandPlays%'"
+        )
+    }
+
+    gy_recur_set: set[str] = {
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports "
+            "WHERE port_type = 'effect' "
+            "AND event_class = 'ChangeZone' "
+            "AND zone_origin = 'Graveyard' "
+            "AND valid_filter LIKE '%Land%' "
+            "AND raw_line NOT LIKE '%Opponent%'"
+        )
+    }
+
+    tier_priority = (
+        ("land_bounce_extra_drops", extra_drops_set),
+        ("land_bounce_gy_recur", gy_recur_set),
+    )
+    seen: set[str] = set()
+    results: list[PortComplement] = []
+    for cand_event, candidates in tier_priority:
+        for name in candidates:
+            if name in cmdr_set or name in seen:
+                continue
+            seen.add(name)
+            results.append(
+                PortComplement(
+                    rule_id="land_bounce_feeder",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="land_bounce_cost",
+                    cand_event=cand_event,
+                )
+            )
+    return results
+
+
 def _only_self_sac_cost(conn: sqlite3.Connection) -> frozenset[str]:
     """Return card names whose ONLY sacrifice cost targets themselves.
 
