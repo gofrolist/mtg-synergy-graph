@@ -22,6 +22,5 @@ mtg_synergy.db
 logs/
 .coverage
 
-# MemPalace per-project files (issue #185)
-mempalace.yaml
-entities.json
+# commit graph outputs, ignore the extraction cache
+graphify-out/cache/
