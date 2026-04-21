@@ -21,3 +21,7 @@ mtg_synergy.db
 .ecc/
 logs/
 .coverage
+
+# MemPalace per-project files (issue #185)
+mempalace.yaml
+entities.json
