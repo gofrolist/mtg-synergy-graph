@@ -395,6 +395,17 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # dampens the IDF pressure while leaving the +1 wins (Ezuri,
     # Marchesa) intact.
     "counter_keyword": 0.5,
+    # counter_doubler: ~30-50 card pool (Hardened Scales, Doubling
+    # Season, Winding Constrictor, Branching Evolution, etc.) feeding
+    # 53 touched +1/+1 commanders. At 1.0× the audit was already
+    # positive (+12 hits, +2.040 NDCG, 0 golden drops) but the rule
+    # leaves flagship doublers buried — Animar's Hardened Scales sits
+    # at rank 66 behind proliferate noise. Bump to 1.5× to promote
+    # these into top-30 on the commanders where they genuinely belong.
+    # Mirrors the dies_drain / gy_loader pattern: narrow payoff pool
+    # with clear semantics, IDF correctly sized, multiplier compensates
+    # for competition from broader rules in the port_match bucket.
+    "counter_doubler": 1.5,
     # dies_drain: payoff cards (Blood Artist, Grim Haruspex, Pitiless
     # Plunderer) are pure consequence cards — they don't feed the
     # engine the way sac-cost creatures do, so they accumulate fewer
