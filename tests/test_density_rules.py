@@ -20,6 +20,7 @@ from mtg_synergy_graph.complement_rules.density import (
     _find_scales_with_density,
     _find_scaling_complements,
     _find_spellcast_density_complements,
+    _find_spellcast_resonance,
     _find_tribal_density_complements,
     _find_value_engine_density,
 )
@@ -503,6 +504,150 @@ class TestFindScalingComplements:
         results = _find_scaling_complements(conn, cmdr_ports, {"DupCmdr"})
         enchant_matches = [r for r in results if r.candidate == "Enchant Aura"]
         assert len(enchant_matches) == 1  # deduped
+
+
+# ---------------------------------------------------------------------------
+# _find_spellcast_resonance — universal-filter coverage
+# ---------------------------------------------------------------------------
+
+
+class TestFindSpellcastResonanceUniversalFilters:
+    """``_find_spellcast_resonance`` pairs commanders and candidates whose
+    ``SpellCast`` triggers share a card-type filter. Baseline coverage is
+    fine for typed filters (Animar ``Creature`` ↔ Beast Whisperer
+    ``Creature``), but two blind spots drop real synergies:
+
+    1. Commander filters ``Card`` / empty (Alela, Rashmi) used to
+       early-return an empty list.
+    2. Candidate filters ``Card`` / empty (Forgotten Ancient,
+       Bontu's Monument) used to be dropped by the SQL ``valid_filter IS
+       NOT NULL AND valid_filter != ''`` guard.
+
+    Universal filters should match any specific type — Forge stored them
+    as ``Card`` precisely because the trigger fires on any spell cast.
+    """
+
+    def test_universal_commander_skips_typed_candidate(self, conn):
+        """Rashmi (``Card``) must NOT match Beast Whisperer (``Creature``).
+
+        Mechanically both triggers fire when Rashmi casts a creature, but
+        typed candidates for a universal commander are wrong-theme often
+        enough to displace her real (non-trigger) Hi-Syn staples in the
+        IDF bucket — audit 2026-04-21 showed Rashmi crashing 0.0972 → 0
+        NDCG when this pairing was allowed, because enchantress cards
+        (typed Enchantment) outranked Brainstorm / Cyclonic Rift.
+        Universal × universal stays the only universal pathway."""
+        _insert_card(conn, "Rashmi", card_types="Creature", types="Creature")
+        _insert_card(conn, "Beast Whisperer", card_types="Creature")
+        _insert_port(conn, "Rashmi", "trigger", "SpellCast", valid_filter="Card")
+        _insert_port(conn, "Beast Whisperer", "trigger", "SpellCast", valid_filter="Creature")
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Rashmi",)).fetchall()
+        ]
+        results = _find_spellcast_resonance(conn, cmdr_ports, {"Rashmi"})
+        assert "Beast Whisperer" not in _candidates(results)
+
+    def test_typed_commander_skips_universal_candidate(self, conn):
+        """Tuvasa (``Enchantment``) must NOT match Arjun-style universal
+        candidates (``Card``). Universal candidates have non-targeted
+        effects that displace real enchantress payoffs in the IDF bucket —
+        golden-set audit showed Tuvasa, Sram, Veyran all regressed when
+        this pairing was allowed. Restrict universal candidates to
+        universal commanders."""
+        _insert_card(conn, "Tuvasa", card_types="Creature", types="Creature")
+        _insert_card(conn, "Arjun", card_types="Creature")
+        _insert_port(conn, "Tuvasa", "trigger", "SpellCast", valid_filter="Enchantment")
+        _insert_port(conn, "Arjun", "trigger", "SpellCast", valid_filter="Card")
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Tuvasa",)).fetchall()
+        ]
+        results = _find_spellcast_resonance(conn, cmdr_ports, {"Tuvasa"})
+        assert "Arjun" not in _candidates(results)
+
+    def test_universal_candidate_requires_universal_commander(self, conn):
+        """Empty ``valid_filter`` on candidate is universal too — same
+        exclusion as the ``Card`` case."""
+        _insert_card(conn, "Animar", card_types="Creature", types="Creature")
+        _insert_card(conn, "Scopeless Watcher", card_types="Creature")
+        _insert_port(conn, "Animar", "trigger", "SpellCast", valid_filter="Creature")
+        _insert_port(conn, "Scopeless Watcher", "trigger", "SpellCast", valid_filter="")
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Animar",)).fetchall()
+        ]
+        results = _find_spellcast_resonance(conn, cmdr_ports, {"Animar"})
+        assert "Scopeless Watcher" not in _candidates(results)
+
+    def test_universal_commander_ignores_card_self_candidate(self, conn):
+        """``Card.Self`` triggers (the card firing on its own cast) must
+        still be excluded — they describe the card being cast, not a
+        payoff for another spell. This existing guard must survive the
+        universal-filter patch."""
+        _insert_card(conn, "Rashmi", card_types="Creature", types="Creature")
+        _insert_card(conn, "Crystalline Sliver", card_types="Creature", subtypes="Sliver")
+        _insert_port(conn, "Rashmi", "trigger", "SpellCast", valid_filter="Card")
+        _insert_port(conn, "Crystalline Sliver", "trigger", "SpellCast", valid_filter="Card.Self")
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Rashmi",)).fetchall()
+        ]
+        results = _find_spellcast_resonance(conn, cmdr_ports, {"Rashmi"})
+        assert "Crystalline Sliver" not in _candidates(results)
+
+    def test_universal_both_sides_match(self, conn):
+        """Two ``Card``-filter commanders paired via candidate: universal
+        on both sides should still produce a match."""
+        _insert_card(conn, "Alela", card_types="Creature", types="Creature")
+        _insert_card(conn, "Forgotten Ancient", card_types="Creature")
+        _insert_port(conn, "Alela", "trigger", "SpellCast", valid_filter="Card")
+        _insert_port(conn, "Forgotten Ancient", "trigger", "SpellCast", valid_filter="Card")
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Alela",)).fetchall()
+        ]
+        results = _find_spellcast_resonance(conn, cmdr_ports, {"Alela"})
+        assert "Forgotten Ancient" in _candidates(results)
+
+    def test_typed_cmdr_typed_cand_still_matches(self, conn):
+        """Regression: existing Animar (``Creature``) ↔ Beast Whisperer
+        (``Creature``) behaviour must be preserved."""
+        _insert_card(conn, "Animar", card_types="Creature", types="Creature")
+        _insert_card(conn, "Beast Whisperer", card_types="Creature")
+        _insert_port(conn, "Animar", "trigger", "SpellCast", valid_filter="Creature")
+        _insert_port(conn, "Beast Whisperer", "trigger", "SpellCast", valid_filter="Creature")
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Animar",)).fetchall()
+        ]
+        results = _find_spellcast_resonance(conn, cmdr_ports, {"Animar"})
+        assert "Beast Whisperer" in _candidates(results)
+
+    def test_typed_disjoint_still_rejected(self, conn):
+        """Regression: Animar (``Creature``) must NOT match Talrand
+        (``Instant,Sorcery``) — disjoint types share no cast events."""
+        _insert_card(conn, "Animar", card_types="Creature", types="Creature")
+        _insert_card(conn, "Talrand", card_types="Creature")
+        _insert_port(conn, "Animar", "trigger", "SpellCast", valid_filter="Creature")
+        _insert_port(conn, "Talrand", "trigger", "SpellCast", valid_filter="Instant,Sorcery")
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Animar",)).fetchall()
+        ]
+        results = _find_spellcast_resonance(conn, cmdr_ports, {"Animar"})
+        assert "Talrand" not in _candidates(results)
+
+    def test_universal_commander_excludes_self(self, conn):
+        """Universal commander must not emit a self-match."""
+        _insert_card(conn, "Rashmi", card_types="Creature", types="Creature")
+        _insert_port(conn, "Rashmi", "trigger", "SpellCast", valid_filter="Card")
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("Rashmi",)).fetchall()
+        ]
+        results = _find_spellcast_resonance(conn, cmdr_ports, {"Rashmi"})
+        assert "Rashmi" not in _candidates(results)
 
 
 # ---------------------------------------------------------------------------

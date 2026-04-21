@@ -117,6 +117,7 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "melee_tribal": "port_match",
     "training_tribal": "port_match",
     "repl_damagedone_counters_stack": "port_match",
+    "cascade_tribal": "port_match",
 }
 
 # ---------------------------------------------------------------------------
@@ -700,6 +701,8 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     "training_tribal": 2.0,
     # AUTO-GENERATED replacement-stack — IDF handles weighting
     "repl_damagedone_counters_stack": 2.0,
+    # AUTO-GENERATED keyword-tribal — IDF handles weighting
+    "cascade_tribal": 2.0,
 }
 
 

@@ -409,12 +409,124 @@ _REPLACEMENT_WANTS_PRODUCER: dict[str, dict[str, EventCheck]] = {
 }
 
 
+#: Base card types recognised at the head of a ``ChangeZone`` valid_filter.
+#: ``Permanent`` expands to every permanent type; ``Card`` to everything.
+#: Runtime tokens (``TriggeredCard``, ``DelayTriggerRemembered*``,
+#: ``Targeted``, ``Card.Self``) and empty filters are rejected — they
+#: don't identify a card-type family.
+_CHANGEZONE_PERMANENT_TYPES: frozenset[str] = frozenset(
+    {"Artifact", "Creature", "Enchantment", "Land", "Planeswalker", "Battle"}
+)
+_CHANGEZONE_ALL_CARD_TYPES: frozenset[str] = _CHANGEZONE_PERMANENT_TYPES | frozenset({"Instant", "Sorcery", "Tribal"})
+_CHANGEZONE_RUNTIME_HEADS: frozenset[str] = frozenset(
+    {"TriggeredCard", "Targeted", "Remembered", "RememberedCard", "DelayTriggerRemembered", "DelayTriggerRememberedLKI"}
+)
+
+#: Splits a Forge valid_filter alt into its head token and qualifiers.
+#: ``Card.Creature+cmcLE2+YouCtrl`` -> [``Card``, ``Creature``, ``cmcLE2``,
+#: ``YouCtrl``]. Used by ``_changezone_type_set`` to find the specific
+#: type qualifier sitting alongside scope and CMC qualifiers when the
+#: head is ``Card``.
+_CHANGEZONE_QUALIFIER_SPLIT_RE = re.compile(r"[.+]")
+
+
+def _changezone_type_set(valid_filter: str | None) -> frozenset[str] | None:
+    """Extract the card-type family a ``ChangeZone`` effect targets.
+
+    Returns ``None`` when the filter is empty, runtime-bound, or
+    ``Card.Self`` only — these don't describe a card-type family and
+    therefore don't participate in resonance. A filter head of
+    ``Permanent`` expands to the full permanent-type set.
+
+    The ``Card.<Type>`` shape deserves special care: Forge uses it to
+    mean "a <Type> card" (e.g. Ajani's ``Card.Creature+cmcLE2+YouCtrl``
+    is a creature-card recursion, not universal). A bare ``Card`` or
+    ``Card.<Scope>`` with no type qualifier is the universal Eternal-
+    Witness pattern and expands to all card types.
+    """
+    s = (valid_filter or "").strip()
+    if not s:
+        return None
+    types: set[str] = set()
+    for alt in s.split(","):
+        alt = alt.strip()
+        if not alt or alt.startswith("Card.Self"):
+            continue
+        head = alt.split(".", 1)[0].split("+", 1)[0].strip()
+        if not head:
+            continue
+        if head in _CHANGEZONE_RUNTIME_HEADS or head.startswith("DelayTrigger"):
+            continue
+        if head == "Permanent":
+            types.update(_CHANGEZONE_PERMANENT_TYPES)
+            continue
+        if head == "Card":
+            # Look for a specific type qualifier after the dot. The
+            # remainder can contain +/ . separated tokens — Type
+            # qualifiers sit alongside scope / CMC qualifiers.
+            qualifiers = _CHANGEZONE_QUALIFIER_SPLIT_RE.split(alt)[1:]
+            found_specific: set[str] = set()
+            for token in qualifiers:
+                tok = token.strip()
+                if tok == "Permanent":
+                    found_specific.update(_CHANGEZONE_PERMANENT_TYPES)
+                elif tok in _CHANGEZONE_ALL_CARD_TYPES:
+                    found_specific.add(tok)
+            if found_specific:
+                types.update(found_specific)
+            else:
+                types.update(_CHANGEZONE_ALL_CARD_TYPES)
+            continue
+        if head in _CHANGEZONE_ALL_CARD_TYPES:
+            types.add(head)
+    return frozenset(types) if types else None
+
+
+def _changezone_resonance_check(cmdr: PortRow, cand: PortRow) -> bool:
+    """Two ``ChangeZone`` effects resonate iff they move cards between
+    the same zones AND their card-type families overlap.
+
+    Canonical pair: Meren (Creature.YouOwn, Graveyard→Battlefield) ×
+    Karmic Guide (Creature.YouCtrl, same zones) → both fire "creature
+    from graveyard to battlefield" effects. Disallows Meren × Lord
+    Windgrace (Land) — disjoint types — and Meren × Eternal Witness
+    (Graveyard→Hand) — different destination. Runtime-bound filters
+    (Tergrid's ``TriggeredCard``, Marchesa's
+    ``DelayTriggerRememberedLKI``) return ``None`` from the type
+    extractor and are silently excluded.
+    """
+    if (cmdr.get("zone_origin") or "").strip() != (cand.get("zone_origin") or "").strip():
+        return False
+    if (cmdr.get("zone_destination") or "").strip() != (cand.get("zone_destination") or "").strip():
+        return False
+    cmdr_types = _changezone_type_set(cmdr.get("valid_filter"))
+    cand_types = _changezone_type_set(cand.get("valid_filter"))
+    if cmdr_types is None or cand_types is None:
+        return False
+    return bool(cmdr_types & cand_types)
+
+
 def _build_resonance_pairs() -> dict[str, dict[str, EventCheck]]:
-    """effect_event -> {effect_event -> _always} for resonant effects."""
+    """effect_event -> {effect_event -> _always} for resonant effects.
+
+    ``ChangeZone`` and ``ChangeZoneAll`` are added with a narrow
+    zone+filter compatibility check so graveyard-recursion commanders
+    (Meren, Sharuum) resonate with candidates doing the same thing
+    (Karmic Guide, Sun Titan, Reveillark, Daretti) without polluting
+    the bucket with mismatched zone pairs or card-type families.
+    """
     out: dict[str, dict[str, EventCheck]] = {}
     for ev in _RESONANT_EFFECTS:
         family = _RESONANT_EFFECT_FAMILY.get(ev, frozenset({ev}))
         out[ev] = {fam_ev: _always for fam_ev in family}
+    out["ChangeZone"] = {
+        "ChangeZone": _changezone_resonance_check,
+        "ChangeZoneAll": _changezone_resonance_check,
+    }
+    out["ChangeZoneAll"] = {
+        "ChangeZone": _changezone_resonance_check,
+        "ChangeZoneAll": _changezone_resonance_check,
+    }
     return out
 
 
@@ -931,6 +1043,7 @@ from .density import (  # noqa: E402
     _find_tribal_density_complements,
     _find_value_engine_density,
 )
+from .generated.cascade_tribal import _find_cascade_tribal  # noqa: E402
 from .generated.changeling_tribal import _find_changeling_tribal  # noqa: E402
 from .generated.choose_tribal import _find_choose_tribal  # noqa: E402
 from .generated.doctor_s_tribal import _find_doctor_s_tribal  # noqa: E402
@@ -1198,6 +1311,7 @@ def find_all_complements(
         out.extend(_find_more_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_doctor_s_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_choose_tribal(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_cascade_tribal(conn, cmdr_ports, cmdr_set))
         return out
 
     if not needed_cand:

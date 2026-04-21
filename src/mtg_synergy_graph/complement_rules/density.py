@@ -328,6 +328,13 @@ def _find_spellcast_resonance(
     triggers on Enchantment entering -> resonance. These enchantress-
     style payoffs are more synergistic than random enchantments.
 
+    Universal filters (``Card`` or empty) on either side represent
+    "watches any spell cast" — Alela, Rashmi, Forgotten Ancient. They
+    match any specific type because the trigger literally fires on every
+    cast. When paired with a typed commander they adopt the commander's
+    type for IDF bucketing; a universal × universal pair bucket is
+    tagged ``Any``.
+
     Unlike spell_density (flat weight for every card of the type),
     this uses IDF weighting so rare payoffs (Enchantment: N=23,
     IDF~0.22) score higher than common ones (Instant: N=186, IDF~0.13).
@@ -343,21 +350,29 @@ def _find_spellcast_resonance(
         }
     )
 
-    # Extract type filters from commander SpellCast triggers
+    # Extract type filters from commander SpellCast triggers.
+    # ``cmdr_universal`` is set when the commander has any SpellCast
+    # trigger with an empty or ``Card`` filter — Alela / Rashmi fire on
+    # every spell cast regardless of type.
     cmdr_types: set[str] = set()
     cmdr_subtypes: set[str] = set()
+    cmdr_universal = False
     for p in cmdr_ports:
         if p.get("port_type") != "trigger":
             continue
         ev = (p.get("event_class") or "").strip()
         if ev not in ("SpellCast", "SpellCastOrCopy"):
             continue
-        vf = p.get("valid_filter") or ""
-        if not vf:
+        vf = (p.get("valid_filter") or "").strip()
+        if not vf or vf == "Card":
+            cmdr_universal = True
             continue
         for alt in vf.split(","):
             alt = alt.strip()
             if not alt or alt.startswith("Card.Self"):
+                continue
+            if alt == "Card":
+                cmdr_universal = True
                 continue
             if "nonCreature" in alt or "non-Creature" in alt:
                 cmdr_types.update({"Instant", "Sorcery", "Artifact", "Enchantment", "Planeswalker"})
@@ -368,15 +383,17 @@ def _find_spellcast_resonance(
             elif base and base[0].isupper() and base not in ("Card", "Permanent"):
                 cmdr_subtypes.add(base)
 
-    if not cmdr_types and not cmdr_subtypes:
+    if not cmdr_types and not cmdr_subtypes and not cmdr_universal:
         return []
 
-    # Find candidate SpellCast triggers with overlapping type filters
+    # Find candidate SpellCast triggers. Widen the scan to include
+    # empty / NULL filters: those are universal candidates (Forgotten
+    # Ancient's ``Card``, a blank filter = same semantics) that used to
+    # be silently dropped by the SQL guard.
     cur = conn.execute(
         "SELECT DISTINCT card_name, valid_filter FROM card_ports "
         "WHERE port_type = 'trigger' "
-        "AND event_class IN ('SpellCast', 'SpellCastOrCopy') "
-        "AND valid_filter IS NOT NULL AND valid_filter != ''"
+        "AND event_class IN ('SpellCast', 'SpellCastOrCopy')"
     )
     results: list[PortComplement] = []
     seen: set[str] = set()
@@ -384,20 +401,35 @@ def _find_spellcast_resonance(
         card = r["card_name"]
         if card in cmdr_set or card in seen:
             continue
-        vf = r["valid_filter"] or ""
+        vf = (r["valid_filter"] or "").strip()
         if vf.startswith("Card.Self"):
             continue
-        # Extract candidate's type filter — find the best matching type
-        # (check all alts so Instant,Sorcery matches a Sorcery-only commander)
+        cand_universal = not vf or vf == "Card"
         matched_type = ""
-        for alt in vf.split(","):
-            base = alt.strip().split(".")[0].split("+")[0].strip()
-            if base in cmdr_types:
-                matched_type = base
-                break
-            if base in cmdr_subtypes:
-                matched_type = base
-                break
+        # Only universal × universal pairs are allowed through the
+        # universal path. Mixed pairs (typed cmdr × universal cand, or
+        # universal cmdr × typed cand) regressed the golden set in
+        # audit: Tuvasa / Sram / Veyran lost NDCG when universal
+        # candidates polluted their typed-typed bucket, and Rashmi
+        # (universal cmdr) lost NDCG when typed enchantress candidates
+        # displaced her real Hi-Syn staples (Rashmi's payoffs are
+        # draw-spell value, not on-cast trigger payoffs). Universal ×
+        # universal still unlocks Alela ↔ Arjun / Forgotten Ancient
+        # and similar hub-on-hub pairs that were previously dropped.
+        if cand_universal:
+            if cmdr_universal:
+                matched_type = "Universal"
+        else:
+            for alt in vf.split(","):
+                base = alt.strip().split(".")[0].split("+")[0].strip()
+                if not base:
+                    continue
+                if base in cmdr_types:
+                    matched_type = base
+                    break
+                if base in cmdr_subtypes:
+                    matched_type = base
+                    break
         if matched_type and card not in seen:
             seen.add(card)
             results.append(
