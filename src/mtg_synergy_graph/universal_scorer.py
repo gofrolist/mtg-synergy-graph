@@ -97,6 +97,9 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "lifegain_feeder": "port_match",
     "life_total_feeder": "port_match",
     "land_bounce_feeder": "port_match",
+    "etb_tapped_stax_feeder": "port_match",
+    "party_feeder": "port_match",
+    "creature_died_feeder": "port_match",
     "creatures_as_lands_landfall": "port_match",
     "damage_doubler_synergy": "port_match",
     "choose_tribal": "port_match",
@@ -592,6 +595,50 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # statics; this one feeds AdjustLandPlays to cmdrs with a land-
     # return cost).
     "land_bounce_feeder": 2.5,
+    # etb_tapped_stax_feeder: stax/pillowfort commanders whose
+    # replacement.Moved port forces EXTERNAL permanents to ETB tapped
+    # (Reidane, Spider-Woman, Thalia+Gitrog, Thalia Heretic Cathar,
+    # Urabrask, Zhao, Archelos — 7 legendary cmdrs, 0% prior coverage).
+    # Single tier etb_tapped_stax_peer pulls ~24 other cards with the
+    # same mechanical shape: Authority of the Consuls, Kismet, Blind
+    # Obedience, Loxodon Gatekeeper, Kinjalli's Sunwing, Imposing
+    # Sovereign, Manglehorn, Dauntless Dismantler, Archon of Emeria,
+    # Frozen Aether, Orb of Dreams, Root Maze — EDHREC stax staples.
+    # 2.5× matches other single-axis feeders; pool ~24 → IDF ~0.22,
+    # effective ~0.55 per match. Excludes Card.Self (that covers 542
+    # tapped-land cards + drawback-ETB creatures like Grimgrin /
+    # Ebondeath who belong to sac-outlet / reanimator archetypes).
+    "etb_tapped_stax_feeder": 2.5,
+    # party_feeder: commanders whose payoff scales with Forge's
+    # Count$Party (distinct Cleric / Rogue / Warrior / Wizard count,
+    # capped at 4). 9 legendary cmdrs, 0% prior coverage: Burakos,
+    # Linvala Shield of Sea Gate, Nalia de'Arnise, Tazri Beacon of
+    # Unity, The Destined Black Mage / Thief / Warrior / White Mage,
+    # Zagras Thief of Heartbeats. Single tier party_peer pulls the
+    # other 34 cards with scales_with.Party — the Zendikar Rising /
+    # Baldur's Gate / Final Fantasy Party staple set (Coveted Prize,
+    # Spoils of Adventure, Thwart the Grave, Acquisitions Expert,
+    # Kabira Outrider, Emeria Captain, Malakir Blood-Priest, Ravager's
+    # Mace, Multiclass Baldric). Pool is mechanically identical to the
+    # cmdrs themselves — strongest possible archetype signal. IDF
+    # ~0.17 per match; 2.5× multiplier matches other small-pool
+    # single-axis feeders.
+    "party_feeder": 2.5,
+    # creature_died_feeder: aristocrats commanders whose payoff scales
+    # with Count$ThisTurnEntered_Graveyard_from_Battlefield_Creature
+    # (any filter variant: .YouCtrl / .YouOwn / .!token / .!namedX).
+    # 15 legendary cmdrs, 0% prior coverage: Asmira, Bontu, Denethor,
+    # Ebondeath, Faramir, Gadrak, Gimli Mournful Avenger, Inga Rune-
+    # Eyes, Kuon, Lagomos, Mahadi, Nevinyrral, Shessra, Sméagol,
+    # Tobias. Single tier pulls ~49 non-legendary peers — Feast of
+    # the Victorious Dead, Fresh Meat, Caller of the Claw, Deathreap
+    # Ritual, Grizzly Ghoul, Khabál Ghoul, Tallyman of Nurgle,
+    # Liliana's Devotee, Warlock Class, Ichor Shade, Rise of the
+    # Dread Marn, Osai Vultures, Vile Redeemer, Spoils of Blood, Body
+    # Count, Spymaster's Vault — the aristocrats staple set. Same
+    # pattern as party_feeder (pool IS the archetype). 2.5× multiplier
+    # matches other single-axis feeders; IDF ~0.17 per match.
+    "creature_died_feeder": 2.5,
     # creatures_as_lands_landfall: commanders whose type-bending static
     # makes creatures also lands (Ashaya, Soul of the Wild). Pool ~237
     # landfall-trigger cards (Rampaging Baloths, Lotus Cobra, Avenger of

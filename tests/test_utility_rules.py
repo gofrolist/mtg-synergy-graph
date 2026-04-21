@@ -16,9 +16,11 @@ from mtg_synergy_graph.complement_rules.utility import (
     _find_cost_payoff_complements,
     _find_counter_axis_feeders,
     _find_counter_target_payoff,
+    _find_creature_died_feeders,
     _find_creature_untap_engine,
     _find_creatures_as_lands_landfall,
     _find_damage_doubler_synergy,
+    _find_etb_tapped_stax_feeders,
     _find_extra_land_plays,
     _find_flicker_synergy,
     _find_gy_fuel_feeders,
@@ -30,6 +32,7 @@ from mtg_synergy_graph.complement_rules.utility import (
     _find_modified_axis_feeders,
     _find_monarch_synergy,
     _find_opponent_forcing,
+    _find_party_feeders,
     _find_tap_type_feeders,
     _find_wheel_synergy,
     _is_big_hand_commander,
@@ -3211,6 +3214,388 @@ class TestFindLandBounceFeeders:
         assert results
         assert all(r.rule_id == "land_bounce_feeder" for r in results)
         assert all(r.cmdr_event == "land_bounce_cost" for r in results)
+
+
+class TestFindCreatureDiedFeeders:
+    """Rule for aristocrats commanders whose payoff scales with the
+    count of creatures that died this turn (Asmira, Bontu, Denethor,
+    Ebondeath, Faramir, Gadrak, Gimli Mournful Avenger, Inga Rune-
+    Eyes, Kuon, Lagomos, Mahadi, Nevinyrral, Shessra, Sméagol,
+    Tobias). Covers all Forge filter variants via prefix-match."""
+
+    def _mahadi_ports(self):
+        """Mahadi-style: plain scales_with.ThisTurnEntered_Graveyard..."""
+        return [
+            _port_row(
+                port_type="scales_with",
+                event_class="ThisTurnEntered_Graveyard_from_Battlefield_Creature",
+                raw_line="SVar:X:Count$ThisTurnEntered_Graveyard_from_Battlefield_Creature",
+            )
+        ]
+
+    def _bontu_ports(self):
+        """Bontu-style: .YouCtrl filter variant."""
+        return [
+            _port_row(
+                port_type="scales_with",
+                event_class="ThisTurnEntered_Graveyard_from_Battlefield_Creature.YouCtrl",
+                raw_line="SVar:X:Count$ThisTurnEntered_Graveyard_from_Battlefield_Creature.YouCtrl",
+            )
+        ]
+
+    def test_no_axis_skips(self, conn):
+        ports = [_port_row(port_type="trigger", event_class="Attacks")]
+        assert _find_creature_died_feeders(conn, ports, set()) == []
+
+    def test_plain_axis_fires(self, conn):
+        _add_port(
+            conn,
+            "Feast of the Victorious Dead",
+            port_type="scales_with",
+            event_class="ThisTurnEntered_Graveyard_from_Battlefield_Creature",
+            raw_line="SVar:X:Count$ThisTurnEntered_Graveyard_from_Battlefield_Creature",
+        )
+        results = _find_creature_died_feeders(conn, self._mahadi_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Feast of the Victorious Dead") == "creature_died_peer"
+
+    def test_youctrl_variant_fires(self, conn):
+        """Bontu's .YouCtrl variant must also activate the gate."""
+        _add_port(
+            conn,
+            "Fresh Meat",
+            port_type="scales_with",
+            event_class="ThisTurnEntered_Graveyard_from_Battlefield_Creature",
+            raw_line="SVar:X:Count$ThisTurnEntered_Graveyard_from_Battlefield_Creature",
+        )
+        results = _find_creature_died_feeders(conn, self._bontu_ports(), set())
+        assert "Fresh Meat" in _candidates(results)
+
+    def test_peer_pool_covers_filter_variants(self, conn):
+        """Peer query uses LIKE prefix-match, so a peer with .YouOwn
+        variant reaches a cmdr with .YouCtrl variant."""
+        _add_port(
+            conn,
+            "Asmira, Holy Avenger",
+            port_type="scales_with",
+            event_class="ThisTurnEntered_Graveyard_from_Battlefield_Creature.YouOwn",
+            raw_line="SVar:X:Count$ThisTurnEntered_Graveyard_from_Battlefield_Creature.YouOwn",
+        )
+        results = _find_creature_died_feeders(conn, self._bontu_ports(), set())
+        assert "Asmira, Holy Avenger" in _candidates(results)
+
+    def test_wrong_scales_axis_rejected(self, conn):
+        """A scales_with on a different axis (YourLifeTotal, Party,
+        ValidGraveyard Creature) must not trigger the rule — the
+        prefix is strict."""
+        ports = [
+            _port_row(
+                port_type="scales_with",
+                event_class="ValidGraveyard Creature.YouOwn",
+                raw_line="SVar:X:Count$ValidGraveyard Creature.YouOwn",
+            )
+        ]
+        assert _find_creature_died_feeders(conn, ports, set()) == []
+
+    def test_excludes_commander(self, conn):
+        _add_port(
+            conn,
+            "Mahadi, Emporium Master",
+            port_type="scales_with",
+            event_class="ThisTurnEntered_Graveyard_from_Battlefield_Creature",
+            raw_line="SVar:X:Count$ThisTurnEntered_Graveyard_from_Battlefield_Creature",
+        )
+        _add_port(
+            conn,
+            "Fresh Meat",
+            port_type="scales_with",
+            event_class="ThisTurnEntered_Graveyard_from_Battlefield_Creature",
+            raw_line="SVar:X:Count$ThisTurnEntered_Graveyard_from_Battlefield_Creature",
+        )
+        results = _find_creature_died_feeders(
+            conn,
+            self._mahadi_ports(),
+            {"Mahadi, Emporium Master"},
+        )
+        assert "Mahadi, Emporium Master" not in _candidates(results)
+        assert "Fresh Meat" in _candidates(results)
+
+    def test_rule_id(self, conn):
+        _add_port(
+            conn,
+            "Feast of the Victorious Dead",
+            port_type="scales_with",
+            event_class="ThisTurnEntered_Graveyard_from_Battlefield_Creature",
+            raw_line="SVar:X:Count$ThisTurnEntered_Graveyard_from_Battlefield_Creature",
+        )
+        results = _find_creature_died_feeders(conn, self._mahadi_ports(), set())
+        assert results
+        assert all(r.rule_id == "creature_died_feeder" for r in results)
+        assert all(r.cmdr_event == "creature_died_axis" for r in results)
+
+
+class TestFindPartyFeeders:
+    """Rule for Party-count commanders (Burakos, Linvala Shield of Sea
+    Gate, Nalia de'Arnise, Tazri Beacon of Unity, The Destined FF
+    cycle, Zagras). Single peer tier pulls all other cards with
+    ``scales_with.Party``."""
+
+    def _tazri_ports(self):
+        """Tazri: scales_with.Party port."""
+        return [
+            _port_row(
+                port_type="scales_with",
+                event_class="Party",
+                raw_line="SVar:X:Count$Party",
+            )
+        ]
+
+    def test_no_party_axis_skips(self, conn):
+        ports = [_port_row(port_type="trigger", event_class="Attacks")]
+        assert _find_party_feeders(conn, ports, set()) == []
+
+    def test_wrong_scales_axis_rejected(self, conn):
+        """A commander with scales_with but on a different axis (e.g.
+        Valid / YourLifeTotal / xPaid) must not trigger the rule."""
+        ports = [
+            _port_row(
+                port_type="scales_with",
+                event_class="YourLifeTotal",
+                raw_line="SVar:X:Count$YourLifeTotal",
+            )
+        ]
+        assert _find_party_feeders(conn, ports, set()) == []
+
+    def test_peer_tier_fires(self, conn):
+        """Tazri + Coveted Prize (scales_with.Party) peer match."""
+        _add_port(
+            conn,
+            "Coveted Prize",
+            port_type="scales_with",
+            event_class="Party",
+            raw_line="SVar:X:Count$Party",
+        )
+        results = _find_party_feeders(conn, self._tazri_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Coveted Prize") == "party_peer"
+
+    def test_multi_peer_fires(self, conn):
+        """Rule scales to multiple party-scaled peers."""
+        for name in ("Coveted Prize", "Spoils of Adventure", "Kabira Outrider"):
+            _add_port(
+                conn,
+                name,
+                port_type="scales_with",
+                event_class="Party",
+                raw_line="SVar:X:Count$Party",
+            )
+        results = _find_party_feeders(conn, self._tazri_ports(), set())
+        names = _candidates(results)
+        assert {"Coveted Prize", "Spoils of Adventure", "Kabira Outrider"} <= names
+
+    def test_excludes_commander(self, conn):
+        """Tazri shouldn't recommend herself."""
+        _add_port(
+            conn,
+            "Tazri, Beacon of Unity",
+            port_type="scales_with",
+            event_class="Party",
+            raw_line="SVar:X:Count$Party",
+        )
+        _add_port(
+            conn,
+            "Coveted Prize",
+            port_type="scales_with",
+            event_class="Party",
+            raw_line="SVar:X:Count$Party",
+        )
+        results = _find_party_feeders(
+            conn,
+            self._tazri_ports(),
+            {"Tazri, Beacon of Unity"},
+        )
+        assert "Tazri, Beacon of Unity" not in _candidates(results)
+        assert "Coveted Prize" in _candidates(results)
+
+    def test_non_party_scaled_card_rejected(self, conn):
+        """A Cleric/Rogue/Warrior/Wizard creature that does NOT carry
+        scales_with.Party is not a peer — Forge's Party SVar is the
+        discriminator, not subtype. The peer pool is tight by design."""
+        _add_port(
+            conn,
+            "Plain Wizard",
+            port_type="trigger",
+            event_class="Attacks",
+            raw_line="T:Event$ Attacks",
+        )
+        results = _find_party_feeders(conn, self._tazri_ports(), set())
+        assert "Plain Wizard" not in _candidates(results)
+
+    def test_rule_id(self, conn):
+        _add_port(
+            conn,
+            "Coveted Prize",
+            port_type="scales_with",
+            event_class="Party",
+            raw_line="SVar:X:Count$Party",
+        )
+        results = _find_party_feeders(conn, self._tazri_ports(), set())
+        assert results
+        assert all(r.rule_id == "party_feeder" for r in results)
+        assert all(r.cmdr_event == "party_axis" for r in results)
+
+
+class TestFindEtbTappedStaxFeeders:
+    """Rule for stax / pillowfort commanders whose replacement.Moved
+    port forces EXTERNAL permanents to ETB tapped (Reidane, Spider-
+    Woman, Thalia+Gitrog, Thalia Heretic Cathar, Urabrask, Zhao,
+    Archelos). Self-ETBTapped creatures (Grimgrin, Ebondeath, Alirios,
+    Taeko) are rejected — their "ETBs tapped" is a drawback covered
+    by sacrifice_outlets / graveyard_filler / etb_self."""
+
+    def _reidane_ports(self):
+        """Reidane-style: replacement.Moved ETBTapped with opp-scoped filter."""
+        return [
+            _port_row(
+                port_type="replacement",
+                event_class="Moved",
+                replacement_result="ETBTapped",
+                valid_filter="Land.Snow+OppCtrl",
+                raw_line="R:Event$ Moved ValidCard$ Land.Snow+OppCtrl Destination$ Battlefield ReplaceWith$ ETBTapped",
+            )
+        ]
+
+    def test_no_etb_tapped_port_skips(self, conn):
+        ports = [_port_row(port_type="trigger", event_class="Attacks")]
+        assert _find_etb_tapped_stax_feeders(conn, ports, set()) == []
+
+    def test_self_etb_tapped_rejected(self, conn):
+        """Grimgrin / Ebondeath / Alirios / Taeko: Card.Self means the
+        card itself ETBs tapped — a drawback, not a stax tool. Rule
+        must not fire."""
+        grimgrin_ports = [
+            _port_row(
+                port_type="replacement",
+                event_class="Moved",
+                replacement_result="ETBTapped",
+                valid_filter="Card.Self",
+                raw_line="R:Event$ Moved ValidCard$ Card.Self Destination$ Battlefield ReplaceWith$ ETBTapped",
+            )
+        ]
+        _add_port(
+            conn,
+            "Authority of the Consuls",
+            port_type="replacement",
+            event_class="Moved",
+            replacement_result="ETBTapped",
+            valid_filter="Creature.OppCtrl",
+            raw_line="R:Event$ Moved ValidCard$ Creature.OppCtrl ReplaceWith$ ETBTapped",
+        )
+        assert _find_etb_tapped_stax_feeders(conn, grimgrin_ports, set()) == []
+
+    def test_wrong_replacement_result_rejected(self, conn):
+        """replacement.Moved with a different ReplaceWith (e.g. ETBCounter,
+        Exile, GraveyardFromAnywhere) is not this axis."""
+        ports = [
+            _port_row(
+                port_type="replacement",
+                event_class="Moved",
+                replacement_result="Exile",
+                valid_filter="Creature.OppCtrl",
+                raw_line="R:Event$ Moved ValidCard$ Creature.OppCtrl ReplaceWith$ Exile",
+            )
+        ]
+        assert _find_etb_tapped_stax_feeders(conn, ports, set()) == []
+
+    def test_opp_scoped_stax_fires(self, conn):
+        """Reidane + Authority of the Consuls peer match."""
+        _add_port(
+            conn,
+            "Authority of the Consuls",
+            port_type="replacement",
+            event_class="Moved",
+            replacement_result="ETBTapped",
+            valid_filter="Creature.OppCtrl",
+            raw_line="R:Event$ Moved ValidCard$ Creature.OppCtrl ReplaceWith$ ETBTapped",
+        )
+        results = _find_etb_tapped_stax_feeders(conn, self._reidane_ports(), set())
+        events = {r.candidate: r.cand_event for r in results}
+        assert events.get("Authority of the Consuls") == "etb_tapped_stax_peer"
+
+    def test_symmetric_stax_included(self, conn):
+        """Orb of Dreams (Permanent, no opp marker) and Root Maze
+        (Artifact,Land) are symmetric but still stax staples. The rule
+        should include them — only Card.Self is excluded."""
+        _add_port(
+            conn,
+            "Orb of Dreams",
+            port_type="replacement",
+            event_class="Moved",
+            replacement_result="ETBTapped",
+            valid_filter="Permanent",
+            raw_line="R:Event$ Moved ValidCard$ Permanent ReplaceWith$ ETBTapped",
+        )
+        results = _find_etb_tapped_stax_feeders(conn, self._reidane_ports(), set())
+        assert "Orb of Dreams" in _candidates(results)
+
+    def test_tapped_lands_excluded_from_peer_pool(self, conn):
+        """Every tapped land carries replacement.Moved ETBTapped with
+        Card.Self. The peer-pool query must exclude them — otherwise
+        the rule would offer 540+ cards and tank IDF."""
+        _add_port(
+            conn,
+            "Tapped Land",
+            port_type="replacement",
+            event_class="Moved",
+            replacement_result="ETBTapped",
+            valid_filter="Card.Self",
+            raw_line="R:Event$ Moved ValidCard$ Card.Self ReplaceWith$ ETBTapped",
+        )
+        results = _find_etb_tapped_stax_feeders(conn, self._reidane_ports(), set())
+        assert "Tapped Land" not in _candidates(results)
+
+    def test_excludes_commander(self, conn):
+        """Reidane shouldn't recommend herself."""
+        _add_port(
+            conn,
+            "Reidane, God of the Worthy",
+            port_type="replacement",
+            event_class="Moved",
+            replacement_result="ETBTapped",
+            valid_filter="Land.Snow+OppCtrl",
+            raw_line="R:Event$ Moved ValidCard$ Land.Snow+OppCtrl ReplaceWith$ ETBTapped",
+        )
+        _add_port(
+            conn,
+            "Authority of the Consuls",
+            port_type="replacement",
+            event_class="Moved",
+            replacement_result="ETBTapped",
+            valid_filter="Creature.OppCtrl",
+            raw_line="R:Event$ Moved ValidCard$ Creature.OppCtrl ReplaceWith$ ETBTapped",
+        )
+        results = _find_etb_tapped_stax_feeders(
+            conn,
+            self._reidane_ports(),
+            {"Reidane, God of the Worthy"},
+        )
+        assert "Reidane, God of the Worthy" not in _candidates(results)
+        assert "Authority of the Consuls" in _candidates(results)
+
+    def test_rule_id(self, conn):
+        _add_port(
+            conn,
+            "Authority of the Consuls",
+            port_type="replacement",
+            event_class="Moved",
+            replacement_result="ETBTapped",
+            valid_filter="Creature.OppCtrl",
+            raw_line="R:Event$ Moved ValidCard$ Creature.OppCtrl ReplaceWith$ ETBTapped",
+        )
+        results = _find_etb_tapped_stax_feeders(conn, self._reidane_ports(), set())
+        assert results
+        assert all(r.rule_id == "etb_tapped_stax_feeder" for r in results)
+        assert all(r.cmdr_event == "etb_tapped_stax_axis" for r in results)
 
 
 class TestFindLifeTotalFeeders:

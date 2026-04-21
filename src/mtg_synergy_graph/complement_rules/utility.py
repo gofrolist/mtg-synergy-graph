@@ -1638,6 +1638,237 @@ def _find_land_bounce_feeders(
     return results
 
 
+#: Prefix for Forge's "creature died this turn" scaling axis.
+#: Filter variants attach suffixes: ``.YouCtrl`` (Bontu, Denethor,
+#: Faramir, Gimli, Sméagol), ``.YouOwn`` (Asmira), ``.!token``
+#: (Gadrak), ``.!namedX`` / ``.!token+YouCtrl`` (Ebondeath, Tobias).
+#: All variants share the same mechanical archetype — aristocrats —
+#: so the rule gates and the peer query both match the prefix.
+_CREATURE_DIED_AXIS_PREFIX = "ThisTurnEntered_Graveyard_from_Battlefield_Creature"
+
+
+def _find_creature_died_feeders(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Rule for aristocrats commanders whose payoff scales with the
+    count of creatures that died this turn.
+
+    Forge's ``Count$ThisTurnEntered_Graveyard_from_Battlefield_Creature``
+    SVar returns how many creatures hit the graveyard this turn.
+    Filter suffixes narrow to ``YouCtrl`` / ``YouOwn`` / ``!token`` /
+    self-exclusion variants, but all commanders on any of these
+    variants play the same archetype: sacrifice fodder + death
+    triggers + payoff X-effects.
+
+    Target cmdrs (15 legendary): Asmira Holy Avenger, Bontu the
+    Glorified, Denethor Ruling Steward, Ebondeath Dracolich, Faramir
+    Field Commander, Gadrak Crown-Scourge, Gimli Mournful Avenger,
+    Inga Rune-Eyes, Kuon Ogre Ascendant, Lagomos Hand of Hatred,
+    Mahadi Emporium Master, Nevinyrral Urborg Tyrant, Shessra Death's
+    Whisper, Sméagol Helpful Guide, Tobias Doomed Conqueror. 0% prior
+    coverage on this axis across all 15.
+
+    Single tier:
+
+    - ``creature_died_peer``: other cards with any
+      ``scales_with.ThisTurnEntered_Graveyard_from_Battlefield_Creature*``
+      variant. ~49 non-legendary peers — Feast of the Victorious
+      Dead, Fresh Meat, Caller of the Claw, Deathreap Ritual, Grizzly
+      Ghoul, Khabál Ghoul, Tallyman of Nurgle, Liliana's Devotee /
+      Scrounger / Standard Bearer, Warlock Class, Ichor Shade, Rise
+      of the Dread Marn, Osai Vultures, Vile Redeemer, Spoils of
+      Blood, Body Count, Spymaster's Vault, Séance Board, Diregraf
+      Rebirth, Season of Loss, Gravelighter, Compy Swarm, Canopy
+      Stalker, Bone Devourer, Death-Priest of Myrkul. Pool IS the
+      aristocrats staple set — same mechanical-shape discriminator as
+      party_feeder.
+
+    Follows the party_feeder pattern: uniform mechanical archetype,
+    peer pool mechanically identical to the cmdrs, no tribal
+    overlays to displace (unlike gy_creature_count_feeder reverted
+    2026-04-21). Gate uses a LIKE prefix-match so all filter variants
+    are covered (YouCtrl / YouOwn / !token / !namedX).
+    """
+    prefix = _CREATURE_DIED_AXIS_PREFIX
+    has_axis = any(
+        (p.get("port_type") or "").strip() == "scales_with" and (p.get("event_class") or "").strip().startswith(prefix)
+        for p in cmdr_ports
+    )
+    if not has_axis:
+        return []
+
+    peer_set: set[str] = {
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports WHERE port_type = 'scales_with' AND event_class LIKE ?",
+            (f"{prefix}%",),
+        )
+    }
+
+    results: list[PortComplement] = []
+    for name in peer_set:
+        if name in cmdr_set:
+            continue
+        results.append(
+            PortComplement(
+                rule_id="creature_died_feeder",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="creature_died_axis",
+                cand_event="creature_died_peer",
+            )
+        )
+    return results
+
+
+def _find_party_feeders(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Rule for Party-count commanders (Zendikar Rising / Baldur's Gate /
+    Final Fantasy Party mechanic).
+
+    Forge's ``Count$Party`` SVar returns 1–4 = distinct count of
+    Cleric / Rogue / Warrior / Wizard creatures you control, capped at
+    one of each. A full party scales every Party-keyed effect to 4×.
+    Commanders on this axis play a hard-locked tribal-adjacent deck
+    whose core is: recruit one of each of the 4 party types, then
+    resolve Party-scaled payoffs.
+
+    Target cmdrs: Burakos Party Leader, Linvala Shield of Sea Gate,
+    Nalia de'Arnise, Tazri Beacon of Unity, The Destined Black Mage /
+    Thief / Warrior / White Mage, Zagras Thief of Heartbeats — 9
+    legendary cmdrs, 0% prior coverage.
+
+    Single tier:
+
+    - ``party_peer``: other cards with ``scales_with.Party`` port.
+      ~34 cards — Acquisitions Expert, Allied Assault, Archpriest of
+      Iona, Ardent Electromancer, Cascade Seer, Coveted Prize,
+      Deadly Alliance, Drana's Silencer, Emeria Captain, Grotag
+      Bug-Catcher, Journey to Oblivion, Kabira Outrider, Malakir
+      Blood-Priest, Multiclass Baldric, Nimble Trapfinder, Ravager's
+      Mace, Sea Gate Colossus, Seafloor Stalker, Shatterskull
+      Minotaur, Spoils of Adventure, Squad Commander, Strength of
+      Solidarity, Synchronized Spellcraft, Thundering Sparkmage,
+      Thwart the Grave, Veteran Adventurer — Zendikar Rising /
+      Commander Legends Baldur's Gate / Final Fantasy Party staples.
+      Every one of these cards literally defines the archetype's
+      payoff set.
+
+    The axis is mechanically uniform (all 35 cards use the identical
+    ``SVar:X:Count$Party`` / ``SVar:Y:Count$Party`` pattern) so a
+    peer-only rule is the correct shape.
+    """
+    has_party_axis = any(
+        (p.get("port_type") or "").strip() == "scales_with" and (p.get("event_class") or "").strip() == "Party"
+        for p in cmdr_ports
+    )
+    if not has_party_axis:
+        return []
+
+    peer_set: set[str] = {
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports WHERE port_type = 'scales_with' AND event_class = 'Party'"
+        )
+    }
+
+    results: list[PortComplement] = []
+    for name in peer_set:
+        if name in cmdr_set:
+            continue
+        results.append(
+            PortComplement(
+                rule_id="party_feeder",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="party_axis",
+                cand_event="party_peer",
+            )
+        )
+    return results
+
+
+def _find_etb_tapped_stax_feeders(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Rule for stax / pillowfort commanders whose ``replacement.Moved``
+    port forces **external** permanents to enter the battlefield tapped.
+
+    Target archetype: tempo-denial hatebear commanders — Reidane (snow
+    lands ETB tapped), Spider-Woman (opp artifacts + creatures),
+    Thalia and The Gitrog Monster and Thalia, Heretic Cathar (opp
+    creatures + non-basic lands), Urabrask the Hidden (opp creatures),
+    Zhao, the Moon Slayer (non-basic lands), Archelos, Lagoon Mystic
+    (all permanents while Self tapped).
+
+    The gate explicitly excludes the Card.Self flavor (~542 cards —
+    every tapped land plus creatures like Grimgrin / Ebondeath /
+    Alirios / Taeko whose "ETBs tapped" is a drawback, not a stax
+    tool). Those cmdrs have their own archetype coverage via
+    sacrifice_outlets / graveyard_filler / etb_self.
+
+    Single tier:
+
+    - ``etb_tapped_stax_peer``: other cards with
+      ``replacement.Moved`` + ``replacement_result='ETBTapped'`` whose
+      ``valid_filter`` does NOT reference ``Card.Self``. ~24 cards —
+      Authority of the Consuls, Kismet, Blind Obedience, Loxodon
+      Gatekeeper, Kinjalli's Sunwing, Imposing Sovereign, Manglehorn,
+      Dauntless Dismantler, Archon of Emeria, Phyrexian Censor, Frozen
+      Aether, Orb of Dreams, Root Maze, False Floor, Uphill Battle,
+      Ashling's Prerogative, Radiant Grace. Tight pool, high IDF, all
+      EDHREC stax staples.
+    """
+    has_external_etb_tapped = False
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "replacement":
+            continue
+        if (p.get("event_class") or "").strip() != "Moved":
+            continue
+        if (p.get("replacement_result") or "").strip() != "ETBTapped":
+            continue
+        vf = p.get("valid_filter") or ""
+        if "Self" in vf:
+            continue
+        has_external_etb_tapped = True
+        break
+    if not has_external_etb_tapped:
+        return []
+
+    peer_set: set[str] = {
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports "
+            "WHERE port_type = 'replacement' "
+            "AND event_class = 'Moved' "
+            "AND replacement_result = 'ETBTapped' "
+            "AND (valid_filter IS NULL OR valid_filter NOT LIKE '%Self%')"
+        )
+    }
+
+    results: list[PortComplement] = []
+    for name in peer_set:
+        if name in cmdr_set:
+            continue
+        results.append(
+            PortComplement(
+                rule_id="etb_tapped_stax_feeder",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="etb_tapped_stax_axis",
+                cand_event="etb_tapped_stax_peer",
+            )
+        )
+    return results
+
+
 def _only_self_sac_cost(conn: sqlite3.Connection) -> frozenset[str]:
     """Return card names whose ONLY sacrifice cost targets themselves.
 

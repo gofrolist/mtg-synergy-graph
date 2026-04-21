@@ -5,6 +5,107 @@ impact notes. See `scripts/_audit_rule_impact.py` for the per-rule impact
 methodology (NDCG@30 metric + golden-set safety net + CONTENTIOUS verdict).
 See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
+## 2026-04-21
+
+### creature_died_feeder
+
+- New rule for aristocrats-archetype commanders whose payoff scales
+  with Forge's `Count$ThisTurnEntered_Graveyard_from_Battlefield_Creature`
+  SVar (count of creatures that died this turn). Covers all filter
+  variants via LIKE prefix-match — plain / `.YouCtrl` / `.YouOwn` /
+  `.!token` / `.!namedSelf` / `.!token+YouCtrl`.
+- 15 legendary cmdrs, 0% prior coverage on this axis: Asmira Holy
+  Avenger, Bontu the Glorified, Denethor Ruling Steward, Ebondeath
+  Dracolich, Faramir Field Commander, Gadrak Crown-Scourge, Gimli
+  Mournful Avenger, Inga Rune-Eyes, Kuon Ogre Ascendant, Lagomos Hand
+  of Hatred, Mahadi Emporium Master, Nevinyrral Urborg Tyrant,
+  Shessra Death's Whisper, Sméagol Helpful Guide, Tobias Doomed
+  Conqueror.
+- Single tier `creature_died_peer` pulls the ~49 non-legendary cards
+  on the same axis — Feast of the Victorious Dead, Fresh Meat,
+  Caller of the Claw, Deathreap Ritual, Grizzly Ghoul, Khabál Ghoul,
+  Tallyman of Nurgle, Liliana's Devotee / Scrounger / Standard
+  Bearer, Warlock Class, Ichor Shade, Rise of the Dread Marn, Osai
+  Vultures, Vile Redeemer, Spoils of Blood, Body Count, Spymaster's
+  Vault, Séance Board, Season of Loss. Pool is mechanically uniform
+  with the cmdrs — same peer-shape pattern as party_feeder.
+- Audit verdict **positive**: 12 scored, +5 hi_syn hits, **+0.301
+  NDCG aggregate**. Top movers: Shessra +0.141 (+2 hits), Denethor
+  +0.069 (+1), Bontu +0.061, Mahadi +0.059 (+2). Only regression
+  Nevinyrral -0.038 (under 0.05 tolerance).
+- Multiplier 2.5× (matches party_feeder and other single-axis
+  feeders). No archetype exclusions needed — the aristocrats archetype
+  is uniform across all 15 cmdrs.
+- Sibling-revert note: tried `gy_creature_count_feeder` (gap #22,
+  scales_with.ValidGraveyard Creature.YouOwn) earlier today —
+  reverted TRIVIAL because that 77-card peer pool included fringe
+  scalers (Boneyard Wurm, Soulshriek, Nightstalker Engine) which
+  aren't EDHREC hi_syn, and Bladewing regressed -0.128 (Zombie Knight
+  deck displaced by generic GY peers). creature_died_feeder avoids
+  that trap because the 49-peer pool IS the aristocrats staple set —
+  Feast / Fresh Meat / Deathreap Ritual ARE EDHREC hi_syn for every
+  sac-death-trigger deck.
+
+### party_feeder
+
+- New rule for Party-count commanders (Zendikar Rising / Baldur's
+  Gate / Final Fantasy Party mechanic). Forge's `Count$Party` SVar
+  returns 1-4 = distinct count of Cleric / Rogue / Warrior / Wizard
+  creatures you control, capped at one of each. 9 legendary cmdrs,
+  0% prior coverage: Burakos Party Leader, Linvala Shield of Sea
+  Gate, Nalia de'Arnise, Tazri Beacon of Unity, The Destined Black
+  Mage / Thief / Warrior / White Mage, Zagras Thief of Heartbeats.
+- Single tier `party_peer` pulls all other ~34 cards with
+  `scales_with.Party` — Acquisitions Expert, Allied Assault,
+  Archpriest of Iona, Ardent Electromancer, Cascade Seer, Coveted
+  Prize, Deadly Alliance, Drana's Silencer, Emeria Captain, Grotag
+  Bug-Catcher, Journey to Oblivion, Kabira Outrider, Malakir Blood-
+  Priest, Multiclass Baldric, Nimble Trapfinder, Ravager's Mace,
+  Sea Gate Colossus, Seafloor Stalker, Spoils of Adventure, Squad
+  Commander, Synchronized Spellcraft, Thundering Sparkmage, Thwart
+  the Grave, Veteran Adventurer. Pool is mechanically identical to
+  the cmdrs — strongest possible archetype signal.
+- Audit verdict **positive**: 9 touched, 9 scored, **+14 hi_syn
+  hits**, **+1.607 NDCG aggregate** (biggest single-rule lift in
+  session). Zero regressions (ndcgmin +0.000). Top movers: Linvala
+  Shield of Sea Gate +0.332 (+3 hi_syn), Burakos +0.321 (+3), The
+  Destined Black Mage +0.241 (+2), Zagras +0.164 (+2), Nalia
+  +0.142 (+2).
+- Multiplier 2.5× (matches other narrow single-axis feeders). No
+  need for archetype exclusion — the Party mechanic is mechanically
+  uniform across all 9 cmdrs.
+
+### etb_tapped_stax_feeder
+
+- New rule for stax / pillowfort commanders whose `replacement.Moved`
+  port forces EXTERNAL permanents to ETB tapped. 7 legendary cmdrs,
+  0% prior coverage: Reidane (opp snow lands), Spider-Woman (opp
+  artifacts + creatures), Thalia and The Gitrog Monster and Thalia
+  Heretic Cathar (opp creatures + non-basic lands), Urabrask the
+  Hidden (opp creatures), Zhao the Moon Slayer (non-basic lands),
+  Archelos Lagoon Mystic (all permanents while Self tapped).
+- Single-tier `etb_tapped_stax_peer` pulls the ~24 other cards with
+  the same mechanical shape: Authority of the Consuls, Kismet, Blind
+  Obedience, Loxodon Gatekeeper, Kinjalli's Sunwing, Imposing
+  Sovereign, Manglehorn, Dauntless Dismantler, Archon of Emeria,
+  Phyrexian Censor, Frozen Aether, Orb of Dreams, Root Maze, False
+  Floor, Radiant Grace, Ashling's Prerogative — all EDHREC stax
+  staples.
+- Gate explicitly rejects Card.Self (~542 cards: every tapped land
+  plus creatures like Grimgrin / Ebondeath / Alirios / Taeko whose
+  "ETBs tapped" is a drawback, not a stax tool — covered by
+  sacrifice_outlets / graveyard_filler / etb_self).
+- Gap report context: this sub-cell was `replacement.Moved[ETBTapped]`
+  at impact 14 (7 external cmdrs + 7 self-ETBTapped creature cmdrs
+  that are out of scope).
+- Audit verdict **positive**: 7 touched, 7 scored, +6 hi_syn hits,
+  **+0.725 NDCG aggregate**. Spider-Woman +0.267 (0→4 hi_syn), Thalia
+  Heretic Cathar +0.297 (0→2 hi_syn), Reidane +0.181, Zhao +0.016.
+  Only wobble Thalia+Gitrog -0.031 (well under 0.05 tolerance).
+  Golden unchanged at 0.2566.
+- Multiplier 2.5× (matches other narrow single-axis feeders — tight
+  pool of ~24, IDF ~0.22 per match, effective ~0.55).
+
 ## 2026-04-20
 
 ### land_bounce_feeder
