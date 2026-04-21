@@ -1470,6 +1470,19 @@ _AXIS_FEEDER_TIERS: dict[str, tuple[tuple[str, str, str], ...]] = {
     # scale with tapped permanents (Aang and Katara). A single
     # tier-ranked rule can't serve all three archetypes — the picks
     # for one displace better cards for the others.
+    #
+    # 'token' qualifier is intentionally absent — same failure mode as
+    # 'tapped'. gap_report's `_notable_qualifier` strips `!` before
+    # matching, so `Creature.token` (positive — wants producers) and
+    # `Creature.!token` (negative — wants non-token / hardcast creatures)
+    # collapse into one signature. The positive lane is already covered
+    # by `token_producer` (complement_rules/tokens.py) + `token_etb_damage`;
+    # the negative lane is sparse and overlaps with existing density /
+    # tribal rules. A single axis_feeder can't serve both polarities,
+    # and shipping one biased toward producers would displace the
+    # existing token_producer picks on commanders it already serves.
+    # If a specific token lane turns up missing, extend `token_producer`
+    # itself (e.g. token-anthem tier) rather than adding this qualifier.
 }
 
 
