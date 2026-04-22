@@ -1510,7 +1510,7 @@ def _find_land_to_gy_synergy(
     feeder_rows = conn.execute(
         "SELECT DISTINCT card_name FROM card_ports "
         "WHERE (port_type='cost' AND event_class='sacrifice' "
-        "       AND (raw_line LIKE '%/Land>%' OR raw_line LIKE '%Land<%')) "
+        "       AND raw_line LIKE '%/Land>%') "
         "   OR (port_type='keyword' AND event_class LIKE 'Dredge%')"
     )
     for r in feeder_rows:

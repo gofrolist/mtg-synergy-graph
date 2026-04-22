@@ -460,17 +460,6 @@ def _toughness_gate(port: PortRow) -> bool:
     return "CardToughness" in (port.get("event_class") or "")
 
 
-def _land_to_gy_gate(port: PortRow) -> bool:
-    """Commander has a land-to-graveyard trigger (Gitrog, Titania Voice)."""
-    if (port.get("port_type") or "").strip() != "trigger":
-        return False
-    if (port.get("event_class") or "").strip() not in ("ChangesZoneAll", "ChangesZone"):
-        return False
-    if (port.get("zone_destination") or "").strip() != "Graveyard":
-        return False
-    return "Land" in (port.get("valid_filter") or "")
-
-
 # ---------------------------------------------------------------------------
 # Batch 2: registry sweep (2026-04-18) — one-line gates per helper
 # ---------------------------------------------------------------------------
@@ -702,6 +691,17 @@ def _aura_equipment_support_gate(port: PortRow) -> bool:
     if (port.get("port_type") or "").strip() != "scales_with":
         return False
     return "Equipment" in (port.get("valid_filter") or "")
+
+
+def _land_to_gy_gate(port: PortRow) -> bool:
+    """Commander has a land-to-graveyard trigger (Gitrog, Titania Voice)."""
+    if (port.get("port_type") or "").strip() != "trigger":
+        return False
+    if (port.get("event_class") or "").strip() not in ("ChangesZoneAll", "ChangesZone"):
+        return False
+    if (port.get("zone_destination") or "").strip() != "Graveyard":
+        return False
+    return "Land" in (port.get("valid_filter") or "")
 
 
 _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
