@@ -46,6 +46,12 @@ def _load_commanders(path: Path) -> list[object]:
 
 
 def main() -> int:
+    from mtg_synergy_graph.bench._deprecation import emit_deprecation
+
+    emit_deprecation(
+        "scripts/golden_set_track.py",
+        "bench.py audit --expect-identity (or --repin --yes to bootstrap)",
+    )
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path, default=Path("data/synergy.db"))
     parser.add_argument("--edhrec-db", type=Path, default=Path("data/tags.db"), help="data/tags.db (for NDCG@30)")

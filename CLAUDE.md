@@ -19,12 +19,23 @@ impact notes, see [docs/RULE_HISTORY.md](docs/RULE_HISTORY.md).
 ```bash
 uv run python scripts/import_cardsfolder.py                              # Import fresh DB
 uv run python scripts/recommend.py --commander "Korvold, Fae-Cursed King" --top 30 --explain
-uv run python scripts/compare_edhrec.py --commanders tests/fixtures/golden_set.json
-uv run python scripts/golden_set_track.py --baseline tests/fixtures/golden_set_run.json
-uv run pytest tests/                                                     # 1028 tests, ~1s
-uv run python scripts/_audit_rule_impact.py                              # Per-rule impact audit (NDCG + golden safety net), ~10 min
+uv run pytest tests/                                                     # ~1230 tests, ~1-2s
 uv run python scripts/gap_report.py                                      # Ranked list of coverage gaps — next rule to add
+
+# Unified eval harness (bench.py) — replaces _audit_rule_impact /
+# golden_set_track / compare_edhrec / weight_grid_search / broad_set_track.
+# See docs/brainstorms/2026-04-21-unified-eval-harness-requirements.md.
+uv run scripts/bench.py audit                                            # Compare live scoring vs pinned baseline, emit verdict + .audit/last.md
+uv run scripts/bench.py audit --rule RULE_ID                             # Per-rule ablation summary (SQL over persisted tensor; <2s)
+uv run scripts/bench.py audit --inspect RULE_ID --limit 20               # Top contribution rows for RULE_ID
+uv run scripts/bench.py audit --collinearity                             # Pairwise VIF + Pearson correlation across rules
+uv run scripts/bench.py audit --expect-identity                          # Assert bitwise-identical scores (for pure refactors)
+uv run scripts/bench.py audit --repin --yes                              # Rebuild pinned fixture from current working tree
 ```
+
+The bench.py hook also runs advisorily on pre-commit when edits touch
+`complement_rules/`, `universal_scorer.py`, or `graph_engine.py`; see
+`memory/feedback_audit_every_change.md` for the guardrail.
 
 ## Data Model
 

@@ -76,6 +76,9 @@ def _score_with_weights(
 
 
 def main() -> None:
+    from mtg_synergy_graph.bench._deprecation import emit_deprecation
+
+    emit_deprecation("scripts/weight_grid_search.py", "bench.py audit")
     gs_path = Path("tests/fixtures/golden_set.json")
     commanders = json.loads(gs_path.read_text())["commanders"]
 

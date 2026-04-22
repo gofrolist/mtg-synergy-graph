@@ -711,6 +711,9 @@ def _audit_one(
 
 
 def main() -> int:
+    from mtg_synergy_graph.bench._deprecation import emit_deprecation
+
+    emit_deprecation("scripts/_audit_rule_impact.py", "bench.py audit --rule RULE_ID")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path, default=Path("data/synergy.db"))
     parser.add_argument("--edhrec-db", type=Path, default=Path("data/tags.db"))

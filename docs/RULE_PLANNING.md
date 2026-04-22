@@ -21,7 +21,8 @@ validation oracle, not the design oracle.
 | `scripts/scaffold_rule.py` | `src/.../generated/<rule_id>.py`, `tests/test_generated_<rule_id>.py`, integration patches | **Auto-generates rule scaffolding** from the top auditor proposal. Dry-run by default; `--apply` writes files and patches integration points (core.py, registry.py, universal_scorer.py). Output requires validation — scaffolded gates may fire too broadly for the curated EDHREC archetype. |
 | `scripts/port_universe.py` | `docs/port_universe.json` | Enumerate every distinct (port_type, event_class) cell in `card_ports` with commander reach, top valid_filter qualifiers, and top raw_line clause keys. Re-run after every importer change. |
 | `scripts/coverage_matrix.py` | `docs/coverage_matrix.json` | Cell-level coverage (coarser than `gap_report.py`). Useful for sanity checks and historical diffs. |
-| `scripts/golden_set_track.py` | stdout | Regression check on the 100-commander golden set NDCG@30 against `tests/fixtures/golden_set_run.json`. Run before/after every rule change. |
+| `scripts/bench.py audit` | `.audit/last.md` + stdout | **Authoritative eval harness** (Unit 1-8 of `docs/plans/2026-04-22-001-feat-unified-eval-harness-plan.md`). Replaces `_audit_rule_impact.py`, `golden_set_track.py`, `compare_edhrec.py`, `weight_grid_search.py`, `broad_set_track.py`. Persists per-rule contributions to the DB so `--rule RULE_ID` / `--inspect RULE_ID` / `--collinearity` answer as SQL queries in <2s. Run before/after every scoring-path change. |
+| `scripts/golden_set_track.py` | stdout | **DEPRECATED** — prints a bench.py pointer and still runs the legacy NDCG@30 regression check. Will be removed in a follow-up cleanup. Prefer `bench.py audit --expect-identity` + `--repin --yes`. |
 | `scripts/compare_edhrec.py` | stdout | Hi-Syn / Top / OnPage breakdown for any commander or commander list — used for *validation*, not planning. |
 
 ## Scaffolder workflow
