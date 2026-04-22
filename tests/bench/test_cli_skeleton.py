@@ -66,7 +66,6 @@ def test_mutually_exclusive_modes_rejected(capsys: pytest.CaptureFixture[str]) -
 @pytest.mark.parametrize(
     ("argv", "label"),
     [
-        (["audit"], "audit"),
         (["audit", "--rule", "cheat_cmc"], "rule"),
         (["audit", "--inspect", "cheat_cmc"], "inspect"),
         (["audit", "--collinearity"], "collinearity"),
@@ -75,19 +74,15 @@ def test_mutually_exclusive_modes_rejected(capsys: pytest.CaptureFixture[str]) -
 def test_each_mode_routes_to_stub(argv: list[str], label: str) -> None:
     """Every still-stubbed mode dispatches to ``_stubs`` cleanly.
 
-    Unit 3 replaced the ``repin`` and ``expect_identity`` stubs with real
-    handlers (see ``tests/bench/test_fixture_roundtrip.py`` etc.); the
-    remaining stubs stay until Units 4-6 fill them in.
+    Units 3 and 4 replaced the ``audit``, ``repin`` and
+    ``expect_identity`` stubs with real handlers; only ``--rule``,
+    ``--inspect``, and ``--collinearity`` remain stubbed (Unit 6).
     """
     with pytest.raises(NotImplementedError) as exc_info:
         bench_cli.main(argv)
-    # The stub's message embeds the CLI form of the mode.
     msg = str(exc_info.value)
-    # All stubs mention "bench.py" + their mode keyword.
     assert "bench.py" in msg
-    if label == "audit":
-        assert "audit" in msg
-    elif label == "rule":
+    if label == "rule":
         assert "--rule" in msg
     elif label == "inspect":
         assert "--inspect" in msg
