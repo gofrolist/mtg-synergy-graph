@@ -13,12 +13,22 @@ from __future__ import annotations
 from mtg_synergy_graph.bench import cli as _cli
 from mtg_synergy_graph.bench.audit import handle_audit
 from mtg_synergy_graph.bench.cli import main
-from mtg_synergy_graph.bench.handlers import handle_expect_identity, handle_repin
+from mtg_synergy_graph.bench.handlers import (
+    handle_collinearity,
+    handle_expect_identity,
+    handle_inspect,
+    handle_repin,
+    handle_rule,
+)
 
-# Unit 3: --repin and --expect-identity handlers.
-# Unit 4: main audit handler.
+# Unit 3: --repin, --expect-identity.
+# Unit 4: main audit.
+# Unit 6: --rule, --inspect, --collinearity.
 _cli.register("audit", handle_audit)
 _cli.register("repin", handle_repin)
 _cli.register("expect_identity", handle_expect_identity)
+_cli.register("rule", handle_rule)
+_cli.register("inspect", handle_inspect)
+_cli.register("collinearity", handle_collinearity)
 
 __all__ = ["main"]

@@ -12,11 +12,16 @@ import argparse
 import sys
 from pathlib import Path
 
+from mtg_synergy_graph.bench.collinearity import (
+    CollinearityReport,
+    compute_collinearity,
+)
 from mtg_synergy_graph.bench.fixture import (
     IdentityReport,
     PinnedFixture,
     build_fixture,
 )
+from mtg_synergy_graph.bench.rule_ops import ablate_rule, inspect_rule
 from mtg_synergy_graph.db import open_db
 
 
@@ -175,3 +180,102 @@ def _print_identity_report(report: IdentityReport, fixture_path: Path) -> None:
         "if the drift is intentional.",
         file=sys.stderr,
     )
+
+
+# ---------------------------------------------------------------------------
+# Unit 6 handlers: --rule / --inspect / --collinearity
+# ---------------------------------------------------------------------------
+
+
+def handle_rule(args: argparse.Namespace) -> int:
+    """Handle ``bench.py audit --rule RULE_ID`` — per-rule ablation summary."""
+    conn = open_db(args.db)
+    try:
+        summary = ablate_rule(conn, args.rule)
+    finally:
+        conn.close()
+
+    if summary is None:
+        print(
+            f"no tensor rows for rule {args.rule!r} under the current config_hash. "
+            "The rule may never fire on golden commanders, or the persisted tensor "
+            "is stale — run `bench.py audit --repin --yes` to refresh.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(f"# bench.py audit --rule {summary.rule_id}")
+    print(f"config_hash: {summary.config_hash[:12]}...")
+    print(f"commanders_affected: {summary.commanders_affected}")
+    print(f"candidates_affected: {summary.candidates_affected}")
+    print(f"aggregate_contribution_removed: {summary.aggregate_contribution_removed:+.4f}")
+    print()
+    print("Top commanders by |aggregate contribution|:")
+    for cmdr, contrib in summary.per_commander_removed:
+        print(f"  {cmdr}: {contrib:+.4f}")
+    return 0
+
+
+def handle_inspect(args: argparse.Namespace) -> int:
+    """Handle ``bench.py audit --inspect RULE_ID`` — per-(cmdr, cand) rows."""
+    conn = open_db(args.db)
+    try:
+        rows = inspect_rule(conn, args.inspect, limit=args.limit, commander=args.commander)
+    finally:
+        conn.close()
+
+    if not rows:
+        scope = f" for commander {args.commander!r}" if args.commander else ""
+        print(
+            f"no tensor rows for rule {args.inspect!r}{scope} under the current config_hash.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(f"# bench.py audit --inspect {args.inspect}")
+    if args.commander:
+        print(f"commander filter: {args.commander}")
+    print(f"rows: {len(rows)} (limit: {args.limit})")
+    print()
+    print(f"{'commander':<40} {'candidate':<40} {'contrib':>10} {'idf':>8} {'cnt':>4}")
+    for row in rows:
+        print(
+            f"{row.commander[:40]:<40} {row.candidate[:40]:<40} "
+            f"{row.contribution:>+10.4f} {row.idf_weight:>8.4f} {row.raw_count:>4d}"
+        )
+    return 0
+
+
+def handle_collinearity(args: argparse.Namespace) -> int:
+    """Handle ``bench.py audit --collinearity`` — pairwise VIF + Pearson."""
+    conn = open_db(args.db)
+    try:
+        report = compute_collinearity(conn)
+    finally:
+        conn.close()
+
+    _print_collinearity_report(report)
+    return 0
+
+
+def _print_collinearity_report(report: CollinearityReport) -> None:
+    print("# bench.py audit --collinearity")
+    print(f"config_hash: {report.config_hash[:12]}...")
+    print(f"rules_examined: {report.rules_examined}")
+    if report.rules_dropped:
+        print(
+            f"rules dropped (zero variance): {len(report.rules_dropped)} — "
+            f"{', '.join(report.rules_dropped[:5])}" + (", …" if len(report.rules_dropped) > 5 else "")
+        )
+    if not report.pairs_flagged:
+        print()
+        print("No collinear pairs detected (VIF > 5 AND |r| > 0.8).")
+        return
+
+    print()
+    print(f"{'rule_a':<30} {'rule_b':<30} {'r':>7} {'VIF_a':>8} {'VIF_b':>8}")
+    for pair in report.pairs_flagged[:30]:
+        print(
+            f"{pair.rule_a[:30]:<30} {pair.rule_b[:30]:<30} "
+            f"{pair.pearson_r:>+7.3f} {pair.vif_a:>8.2f} {pair.vif_b:>8.2f}"
+        )

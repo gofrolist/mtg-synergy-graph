@@ -63,31 +63,23 @@ def test_mutually_exclusive_modes_rejected(capsys: pytest.CaptureFixture[str]) -
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("argv", "label"),
-    [
-        (["audit", "--rule", "cheat_cmc"], "rule"),
-        (["audit", "--inspect", "cheat_cmc"], "inspect"),
-        (["audit", "--collinearity"], "collinearity"),
-    ],
-)
-def test_each_mode_routes_to_stub(argv: list[str], label: str) -> None:
-    """Every still-stubbed mode dispatches to ``_stubs`` cleanly.
+def test_unregistered_mode_still_raises_via_stub_fallback() -> None:
+    """Defense in depth: if a future refactor forgets to register a mode,
+    the stub table fallback surfaces a loud NotImplementedError instead
+    of silently no-oping.
 
-    Units 3 and 4 replaced the ``audit``, ``repin`` and
-    ``expect_identity`` stubs with real handlers; only ``--rule``,
-    ``--inspect``, and ``--collinearity`` remain stubbed (Unit 6).
+    Exercised by directly reaching into the handler table and swapping a
+    mode back to its stub, then invoking that mode.
     """
-    with pytest.raises(NotImplementedError) as exc_info:
-        bench_cli.main(argv)
-    msg = str(exc_info.value)
-    assert "bench.py" in msg
-    if label == "rule":
-        assert "--rule" in msg
-    elif label == "inspect":
-        assert "--inspect" in msg
-    elif label == "collinearity":
-        assert "--collinearity" in msg
+    from mtg_synergy_graph.bench import _stubs as stubs
+
+    original = bench_cli._HANDLERS["rule"]
+    try:
+        bench_cli._HANDLERS["rule"] = stubs.rule_stub
+        with pytest.raises(NotImplementedError):
+            bench_cli.main(["audit", "--rule", "x"])
+    finally:
+        bench_cli._HANDLERS["rule"] = original
 
 
 def test_register_overrides_stub() -> None:
