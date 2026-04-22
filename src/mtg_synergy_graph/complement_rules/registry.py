@@ -34,7 +34,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from .core import COMPLEMENT_RULES, PortRow
-from .generated.cascade_tribal import _cascade_tribal_gate
 from .generated.changeling_tribal import _changeling_tribal_gate
 from .generated.choose_tribal import _choose_tribal_gate
 from .generated.doctor_s_tribal import _doctor_s_tribal_gate
@@ -777,7 +776,10 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("melee_tribal", _melee_tribal_gate),
     RuleGate("training_tribal", _training_tribal_gate),
     RuleGate("repl_damagedone_counters_stack", _repl_damagedone_counters_stack_gate),
-    RuleGate("cascade_tribal", _cascade_tribal_gate),
+    # cascade_tribal removed from card-attribute gates in plan 003 Unit 7 —
+    # it's now a declarative rule. Per-port auditor attribution via the
+    # interpreter's own gate predicate is a follow-up (tracked as a
+    # deferred item in plan 003 Open Questions).
 )
 
 
@@ -828,7 +830,7 @@ RULE_GATES: tuple[RuleGate, ...] = tuple(_formal_rule_gates()) + _CARD_ATTR_GATE
 #: to data rows. A rule_id appears in EXACTLY ONE of this set or the
 #: Python-helper dispatch — the auditor at
 #: ``find_all_complements`` call time refuses duplicates.
-DECLARATIVE_RULE_IDS: frozenset[str] = frozenset()
+DECLARATIVE_RULE_IDS: frozenset[str] = frozenset({"cascade_tribal"})
 
 
 def registered_rule_ids() -> frozenset[str]:
