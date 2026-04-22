@@ -31,6 +31,7 @@ uv run scripts/bench.py audit --inspect RULE_ID --limit 20               # Top c
 uv run scripts/bench.py audit --collinearity                             # Pairwise VIF + Pearson correlation across rules
 uv run scripts/bench.py audit --expect-identity                          # Assert bitwise-identical scores (for pure refactors)
 uv run scripts/bench.py audit --repin --yes                              # Rebuild pinned fixture from current working tree
+uv run scripts/bench.py audit --unknowns                                 # List port_nodes rows with node_kind='UNKNOWN' (plan 003 Unit 6)
 ```
 
 The bench.py hook also runs advisorily on pre-commit when edits touch
@@ -84,14 +85,54 @@ gy_fuel, lifegain, life_total, land_bounce, …).
 Full rule catalogue, per-rule gate logic, and IDF weighting details:
 see [docs/COMPLEMENT_RULES.md](docs/COMPLEMENT_RULES.md).
 
+### Typed port graph (`port_graph/`, plan 003)
+
+Layered on top of the Python rule helpers: a data-layer substrate
+that lets a growing subset of rules be authored as data rows instead
+of Python code.
+
+- **Canonical vocabulary** (`port_graph/vocabulary.py`) — closed
+  versioned sets of `NODE_KINDS` (21 event-node kinds), `MATCH_QUALITIES`
+  (6 predicate kinds), `GATE_OPS` (10 JSON predicate ops) with
+  `VOCAB_VERSION`. Every downstream table, view, and interpreter
+  check references these constants.
+- **`port_nodes` SQL view** (`port_graph/projection.py`) — projects
+  every `card_ports` row to a canonical `node_kind` + `subkind`;
+  unmapped shapes fall through to `UNKNOWN` with the raw
+  `(port_type, event_class)` preserved. Drives the `--unknowns`
+  audit reporter.
+- **`event_match_map` + `cost_feeds_trigger` tables** (`port_graph/
+  event_maps.py`) — SQLite tables seeded from
+  `data/event_match_seed.json`. The Python dicts in `graph_engine.py`
+  are loaded from the same JSON at module import, so both
+  representations cannot drift. Edit the JSON to add an equivalence.
+- **`rules` table + `RuleInterpreter`** (`port_graph/rules_schema.py`,
+  `port_graph/interpreter.py`) — declarative complement-rule rows in
+  `data/rules_seed.json`; each row's JSON predicates compile to SQL
+  fragments + Python gate callables at interpreter init. Rule IDs
+  in `complement_rules.registry.DECLARATIVE_RULE_IDS` route through
+  the interpreter; every other rule_id stays on the Python-helper
+  path. A rule_id lives in EXACTLY ONE of the two sides.
+- **Authoring new rules for covered families**: edit
+  `data/rules_seed.json` + `DECLARATIVE_RULE_IDS`; re-import (or
+  call `seed_rules_db(conn)`); no new Python file. The
+  `peer_tribal_keyword` family (16 migrated rules in plan 003 Units
+  7-8) is the canonical template.
+- **`--unknowns` CLI** — `bench.py audit --unknowns` surfaces
+  `port_nodes` rows classified as `UNKNOWN`, ranked by distinct
+  cards × EDHREC rank weight. Run after each Forge cardsfolder
+  refresh to see candidate shapes for vocabulary expansion.
+
 ### Algorithm
 
 1. Load commander ports (cached)
 2. For each complement rule, find matching candidate ports (2 SQL queries)
 3. For card-attribute rules, match against cards table
-4. Compute IDF weights from candidate frequency
-5. Score each candidate = sum of IDF-weighted synergy - anti-synergy + staple bonus
-6. Sort by (-score, cmc, edhrec_rank, name)
+4. For declarative rules in `DECLARATIVE_RULE_IDS`, run the
+   interpreter against the `rules` table
+5. Compute IDF weights from candidate frequency
+6. Score each candidate = sum of IDF-weighted synergy - anti-synergy + staple bonus
+7. Sort by (-score, cmc, edhrec_rank, name)
 
 ### Key Files
 
@@ -99,6 +140,12 @@ see [docs/COMPLEMENT_RULES.md](docs/COMPLEMENT_RULES.md).
 - `universal_scorer.py` — IDF computation, `score_all_universal()`
 - `engine.py` — `SynergyEngine.page()`, public API
 - `graph_engine.py` — `EVENT_MATCH_MAP`, `COST_FEEDS_TRIGGER`, port matching primitives
+- `port_graph/` — typed port-graph substrate: vocabulary, `port_nodes`
+  view, `event_match_map`/`cost_feeds_trigger`/`rules` tables,
+  `RuleInterpreter`
+- `data/event_match_seed.json`, `data/rules_seed.json` — committed
+  seed artifacts. Edit these instead of code for equivalence /
+  declarative-rule changes
 
 ## Conventions
 
