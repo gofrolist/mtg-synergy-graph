@@ -18,6 +18,9 @@ main.py
 mtg_synergy.db
 .pytest_cache/
 .ruff_cache/
+
+# bench-audit hook output (regenerated per commit)
+.audit/
 .ecc/
 logs/
 .coverage

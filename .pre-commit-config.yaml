@@ -23,3 +23,16 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+
+      # Advisory scoring-path audit: runs bench.py audit when the staged
+      # diff touches complement rules, universal_scorer, or graph_engine.
+      # Always exits 0 — HARMFUL verdicts warn but never block. See
+      # memory/feedback_audit_every_change.md for the guardrail.
+      - id: bench-audit
+        name: bench-audit (advisory)
+        entry: uv run python -m mtg_synergy_graph.bench.hook_entry
+        language: system
+        pass_filenames: false
+        files: ^src/mtg_synergy_graph/(complement_rules/.*\.py|universal_scorer\.py|graph_engine\.py)$
+        stages: [pre-commit]
+        verbose: true
