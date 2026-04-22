@@ -1335,17 +1335,19 @@ def _find_cheat_cmc_bonus(
     return _query_cheat_cmc_brackets(conn, wanted, cmdr_set)
 
 
-#: CMC brackets for cheat-into-play scoring: (min_cmc, max_cmc, label).
-#: Only cmc_high (CMC ≥ 6) gets the bonus — cheating a CMC-4 creature
-#: saves 4 mana, cheating a CMC-8 creature saves 8 mana, and Kaalia's
-#: actual EDHREC hi-syn (Avacyn/Gisela/Rune-Scarred/Vilis/Balefire)
-#: is all CMC ≥ 6. The cmc_mid bracket (4 ≤ cmc < 6) was dropped
-#: 2026-04-21: its smaller pool gave CMC 4-5 cards higher per-card IDF
-#: than CMC 6+ cards under IDF normalization, inverting the
-#: mana-saved semantic — Nightmare Shepherd (CMC 5 Demon) outscored
-#: Avacyn (CMC 8 Angel) on Kaalia. cmc_mid cards still score via
-#: trigger_effect for their ChangesZone-into-play triggers.
-_CMC_BRACKETS: tuple[tuple[int, int | None, str], ...] = ((6, None, "cmc_high"),)
+#: Minimum CMC for a cheat-into-play bonus. Cheating a CMC-8 creature
+#: saves 8 mana; cheating a CMC-4 creature saves only 4. Kaalia's
+#: actual EDHREC hi-syn (Avacyn / Gisela / Rune-Scarred / Vilis /
+#: Balefire) is all CMC ≥ 6, so that's where the bonus fires.
+#:
+#: History: a ``cmc_mid`` bracket (4 ≤ cmc < 6) was dropped 2026-04-21.
+#: Its smaller pool gave CMC 4-5 cards higher per-card IDF than
+#: CMC ≥ 6, inverting the mana-saved semantic — Nightmare Shepherd
+#: (CMC 5 Demon) outscored Avacyn (CMC 8 Angel) on Kaalia. CMC 4-5
+#: cheats still score via trigger_effect on their ChangesZone-into-play
+#: triggers, just without an extra cheat_cmc weight.
+_CHEAT_CMC_MIN: int = 6
+_CHEAT_CMC_LABEL: str = "cmc_high"
 
 
 def _query_cheat_cmc_brackets(
@@ -1353,7 +1355,14 @@ def _query_cheat_cmc_brackets(
     wanted: list[tuple[str, str]],
     cmdr_set: set[str],
 ) -> list[PortComplement]:
-    """Query cards matching wanted types within each CMC bracket."""
+    """Emit a cheat_cmc complement for each unique cheat-target (kind,
+    target) pair whose CMC meets ``_CHEAT_CMC_MIN``.
+
+    All emissions share ``cand_event='cheatable'`` and
+    ``filter_group='cmc_high'`` so Angel / Demon / Dragon land in one
+    IDF pool per invocation (see docstring on ``_CHEAT_CMC_MIN`` for
+    why per-subtype bucketing was removed).
+    """
     results: list[PortComplement] = []
     seen: set[str] = set()
 
@@ -1362,37 +1371,25 @@ def _query_cheat_cmc_brackets(
         if col is None:
             continue
         safe = _escape_like(target)
-
-        for min_cmc, max_cmc, label in _CMC_BRACKETS:
-            if max_cmc is None:
-                sql = f"SELECT name FROM cards WHERE {col} LIKE ? ESCAPE '\\' AND cmc >= ?"
-                params: tuple[str | int, ...] = (f"%{safe}%", min_cmc)
-            else:
-                sql = f"SELECT name FROM cards WHERE {col} LIKE ? ESCAPE '\\' AND cmc >= ? AND cmc < ?"
-                params = (f"%{safe}%", min_cmc, max_cmc)
-
-            for r in conn.execute(sql, params).fetchall():
-                name = r["name"]
-                if name not in cmdr_set and name not in seen:
-                    seen.add(name)
-                    results.append(
-                        PortComplement(
-                            rule_id="cheat_cmc",
-                            direction="synergy",
-                            candidate=name,
-                            cmdr_event="cheat_into_play",
-                            # Unified cand_event across all cheat-target subtypes
-                            # so Angel / Demon / Dragon share one IDF pool per CMC
-                            # bracket. Without this, the three subtypes bucket
-                            # separately: Demon's 83-card cmc_mid pool gets higher
-                            # per-card IDF than Angel's 98-card cmc_high pool, so
-                            # cheap Demons outscored expensive Angels on Kaalia
-                            # (Nightmare Shepherd rank 5 > Avacyn rank 160).
-                            # The subtype is now recorded in filter_group instead.
-                            cand_event="cheatable",
-                            filter_group=label,
-                        )
-                    )
+        rows = conn.execute(
+            f"SELECT name FROM cards WHERE {col} LIKE ? ESCAPE '\\' AND cmc >= ?",
+            (f"%{safe}%", _CHEAT_CMC_MIN),
+        ).fetchall()
+        for r in rows:
+            name = r["name"]
+            if name in cmdr_set or name in seen:
+                continue
+            seen.add(name)
+            results.append(
+                PortComplement(
+                    rule_id="cheat_cmc",
+                    direction="synergy",
+                    candidate=name,
+                    cmdr_event="cheat_into_play",
+                    cand_event="cheatable",
+                    filter_group=_CHEAT_CMC_LABEL,
+                )
+            )
 
     return results
 

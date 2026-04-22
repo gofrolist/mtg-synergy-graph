@@ -261,6 +261,39 @@ def test_trigger_no_first_time_leaves_source_none():
     assert ports[0]["valid_filter"] == "Creature.YouCtrl"
 
 
+def test_trigger_falls_back_to_valid_cards_plural():
+    """ChangesZoneAll triggers use ``ValidCards`` (plural) where other
+    modes use ``ValidCard`` (singular). Without the fallback, Gitrog /
+    Titania Voice of Gaea / Crawling Sensation's Land-to-GY triggers
+    silently drop their filter — and every complement rule querying
+    ``valid_filter LIKE '%Land%'`` misses them.
+    """
+    parsed = {
+        "Mode": "ChangesZoneAll",
+        "ValidCards": "Land.YouOwn+!token",
+        "Origin": "Any",
+        "Destination": "Graveyard",
+    }
+    ports = extract_trigger_ports("The Gitrog Monster", parsed, {})
+    assert ports[0]["valid_filter"] == "Land.YouOwn+!token"
+
+
+def test_trigger_valid_card_singular_takes_precedence_over_plural():
+    """When both ``ValidCard`` and ``ValidCards`` appear (hypothetical
+    — Forge modes are mutually exclusive today), singular wins. The
+    fallback chain is specifically ``ValidCard`` → ``ValidSource`` →
+    ``ValidCards`` so a future Forge change to emit both won't silently
+    reorder the priority.
+    """
+    parsed = {
+        "Mode": "ChangesZone",
+        "ValidCard": "Creature.YouCtrl",
+        "ValidCards": "Land.YouCtrl",  # plural must not win
+    }
+    ports = extract_trigger_ports("X", parsed, {})
+    assert ports[0]["valid_filter"] == "Creature.YouCtrl"
+
+
 # ---------------------------------------------------------------------------
 # Phase A3 — DB$ Mana RestrictValid$
 # ---------------------------------------------------------------------------

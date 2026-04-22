@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,72 @@ import pytest
 from mtg_synergy_graph import parse_card_file
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+# ---------------------------------------------------------------------------
+# In-memory SQLite schema for complement-rule tests
+# ---------------------------------------------------------------------------
+#
+# Historically each complement-rule test file defined its own SCHEMA
+# string + ``_port`` / ``_add_port`` helpers. Copies drifted
+# independently: schema additions (e.g., ``counter_type``,
+# ``branch_kind``, ``effect_conditional``) had to land in every file.
+# The helpers below consolidate one superset schema matching the
+# production ``card_ports`` / ``cards`` columns used by any existing
+# ``_find_*`` rule query. New tests should prefer ``rules_db`` +
+# ``add_port``; older files keep their local copies until touched for
+# other reasons.
+
+
+_RULES_SCHEMA = """\
+CREATE TABLE cards (
+    name TEXT PRIMARY KEY,
+    card_types TEXT,
+    types TEXT,
+    subtypes TEXT,
+    supertypes TEXT,
+    keywords TEXT,
+    color_identity TEXT,
+    cmc INTEGER,
+    edhrec_rank INTEGER,
+    oracle_id TEXT,
+    legal_commander INTEGER DEFAULT 1
+);
+CREATE TABLE card_ports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    card_name TEXT NOT NULL,
+    port_type TEXT NOT NULL,
+    event_class TEXT NOT NULL,
+    valid_filter TEXT,
+    raw_line TEXT,
+    zone_origin TEXT,
+    zone_destination TEXT,
+    counter_type TEXT,
+    affected_scope TEXT,
+    branch_kind TEXT,
+    effect_conditional INTEGER DEFAULT 0,
+    replacement_event TEXT,
+    replacement_result TEXT,
+    execute_ref TEXT
+);
+"""
+
+
+@pytest.fixture()
+def rules_db():
+    """In-memory SQLite connection with the complement-rule schema.
+
+    Schema is the superset of columns touched by any existing
+    ``_find_*`` helper. Tests that only need a subset of columns can
+    still use this fixture — unused columns default to NULL.
+    """
+    c = sqlite3.connect(":memory:")
+    c.row_factory = sqlite3.Row
+    c.executescript(_RULES_SCHEMA)
+    try:
+        yield c
+    finally:
+        c.close()
 
 
 def _load(name: str) -> dict:

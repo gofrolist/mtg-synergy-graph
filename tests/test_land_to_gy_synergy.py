@@ -1,4 +1,10 @@
-"""Tests for _find_land_to_gy_synergy (Gitrog / Titania Voice of Gaea)."""
+"""Tests for _find_land_to_gy_synergy (Gitrog / Titania Voice of Gaea).
+
+Schema is provided by the shared ``rules_db`` fixture in conftest.py.
+``_port`` / ``_add_port`` remain local helpers because they're small
+(dict builder and 4-line INSERT) and give the test file a stable
+call-site style without coupling to a cross-file signature.
+"""
 
 from __future__ import annotations
 
@@ -9,30 +15,16 @@ import pytest
 from mtg_synergy_graph.complement_rules.density import _find_land_to_gy_synergy
 from mtg_synergy_graph.complement_rules.registry import _land_to_gy_gate
 
-SCHEMA = """\
-CREATE TABLE card_ports (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    card_name TEXT NOT NULL,
-    port_type TEXT NOT NULL,
-    event_class TEXT NOT NULL,
-    valid_filter TEXT,
-    raw_line TEXT,
-    zone_origin TEXT,
-    zone_destination TEXT
-);
-"""
-
 
 @pytest.fixture()
-def conn():
-    c = sqlite3.connect(":memory:")
-    c.row_factory = sqlite3.Row
-    c.executescript(SCHEMA)
-    yield c
-    c.close()
+def conn(rules_db):
+    """Local alias that keeps existing ``conn`` parameter names working
+    while delegating schema setup to the shared ``rules_db`` fixture.
+    """
+    return rules_db
 
 
-def _port(**kwargs):
+def _port(**kwargs) -> dict:
     return dict(kwargs)
 
 
