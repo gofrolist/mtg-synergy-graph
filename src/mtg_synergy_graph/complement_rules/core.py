@@ -1045,25 +1045,11 @@ from .density import (  # noqa: E402
     _find_value_engine_density,
 )
 
-# cascade_tribal removed in plan 003 Unit 7 — now a declarative row
-# in data/rules_seed.json, executed by port_graph.interpreter.RuleInterpreter.
-from .generated.changeling_tribal import _find_changeling_tribal  # noqa: E402
-from .generated.choose_tribal import _find_choose_tribal  # noqa: E402
-from .generated.doctor_s_tribal import _find_doctor_s_tribal  # noqa: E402
-from .generated.etbreplacement_copy_dbcopy_optional_tribal import (  # noqa: E402
-    _find_etbreplacement_copy_dbcopy_optional_tribal,
-)
-from .generated.etbreplacement_other_choosect_tribal import _find_etbreplacement_other_choosect_tribal  # noqa: E402
-from .generated.firebending_2_tribal import _find_firebending_2_tribal  # noqa: E402
-from .generated.landwalk_island_tribal import _find_landwalk_island_tribal  # noqa: E402
-from .generated.melee_tribal import _find_melee_tribal  # noqa: E402
-from .generated.mentor_tribal import _find_mentor_tribal  # noqa: E402
-from .generated.more_tribal import _find_more_tribal  # noqa: E402
-from .generated.prowess_tribal import _find_prowess_tribal  # noqa: E402
-from .generated.repl_damagedone_counters_stack import _find_repl_damagedone_counters_stack  # noqa: E402
-from .generated.repl_moved_exile_stack import _find_repl_moved_exile_stack  # noqa: E402
-from .generated.start_tribal import _find_start_tribal  # noqa: E402
-from .generated.training_tribal import _find_training_tribal  # noqa: E402
+# Plan 003 Units 7 & 8: all 16 auto-generated tribal /
+# replacement-stack rules migrated to declarative rows in
+# data/rules_seed.json. The ``generated/`` subpackage is empty now;
+# the interpreter (port_graph.interpreter.RuleInterpreter) handles
+# every migrated rule via DECLARATIVE_RULE_IDS in registry.py.
 from .graveyard import (  # noqa: E402
     _find_artifact_recursion,
     _find_copy_synergy,
@@ -1300,21 +1286,10 @@ def find_all_complements(
         out.extend(_find_party_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_creature_died_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_damage_doubler_synergy(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_repl_damagedone_counters_stack(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_training_tribal(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_melee_tribal(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_landwalk_island_tribal(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_changeling_tribal(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_repl_moved_exile_stack(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_mentor_tribal(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_etbreplacement_other_choosect_tribal(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_start_tribal(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_firebending_2_tribal(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_etbreplacement_copy_dbcopy_optional_tribal(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_prowess_tribal(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_more_tribal(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_doctor_s_tribal(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_choose_tribal(conn, cmdr_ports, cmdr_set))
+        # Plan 003 Units 7 & 8: all 16 auto-generated keyword /
+        # replacement-stack tribal rules migrated to declarative
+        # rows. The interpreter block just below this comment
+        # executes every rule_id in DECLARATIVE_RULE_IDS.
         # Declarative rules (plan 003 Unit 5) — the interpreter is the
         # single entry point for any rule_id in DECLARATIVE_RULE_IDS.
         # Placed inside _card_attr_complements so every caller path
