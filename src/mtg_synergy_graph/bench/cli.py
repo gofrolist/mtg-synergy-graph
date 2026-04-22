@@ -36,6 +36,9 @@ _HANDLERS: dict[str, Callable[[Namespace], int]] = {
     "inspect": _stubs.inspect_stub,
     "rule": _stubs.rule_stub,
     "collinearity": _stubs.collinearity_stub,
+    # Unit 6 of plan 003 — report UNKNOWN-kind port_nodes rows
+    # ranked by distinct cards × EDHREC rank weight.
+    "unknowns": _stubs.unknowns_stub,
 }
 
 
@@ -108,6 +111,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Assert bitwise-identical per-(cmdr, cand) scores against the "
         "pinned baseline. Used to verify pure-refactor changes.",
     )
+    mode.add_argument(
+        "--unknowns",
+        action="store_true",
+        help="Report port_nodes rows with node_kind='UNKNOWN', ranked by "
+        "distinct_cards x EDHREC rank weight. Surfaces novel Forge "
+        "port shapes that need canonical-vocabulary coverage. "
+        "(plan 003 Unit 6)",
+    )
 
     # Shared flags.
     audit.add_argument(
@@ -167,6 +178,8 @@ def _resolve_mode(args: Namespace) -> str:
         return "repin"
     if args.expect_identity:
         return "expect_identity"
+    if args.unknowns:
+        return "unknowns"
     return "audit"
 
 
