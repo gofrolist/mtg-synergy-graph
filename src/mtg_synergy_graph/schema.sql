@@ -189,3 +189,32 @@ CREATE TABLE IF NOT EXISTS card_hints (
 
 CREATE INDEX IF NOT EXISTS idx_card_hints_lookup
     ON card_hints(kind, category, value);
+
+-- ---------------------------------------------------------------------------
+-- rule_contributions: persisted per-(commander, candidate, rule) contribution
+-- tensor for bench.py. Written by the eval harness, never by the inference
+-- path. Enables audit / --rule ablation / --inspect / --collinearity as SQL
+-- queries instead of re-scores. See docs/plans/2026-04-22-001-feat-unified-
+-- eval-harness-plan.md FR1/FR2.
+--
+-- config_hash = sha256 over (sorted rule_ids + sorted _RULE_QUALITY_MULTIPLIER
+-- + sorted _FLAT_WEIGHT_OVERRIDES). Any scoring-config change produces a new
+-- hash; queries filter by the hash so stale rows are never silently read.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS rule_contributions (
+    commander    TEXT NOT NULL,
+    candidate    TEXT NOT NULL,
+    rule_id      TEXT NOT NULL,
+    contribution REAL NOT NULL,
+    idf_weight   REAL NOT NULL,
+    raw_count    INTEGER NOT NULL,
+    config_hash  TEXT NOT NULL,
+    computed_at  TEXT NOT NULL,  -- ISO-8601 timestamp
+    PRIMARY KEY (commander, candidate, rule_id, config_hash)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rule_contributions_rule
+    ON rule_contributions(rule_id, config_hash);
+
+CREATE INDEX IF NOT EXISTS idx_rule_contributions_cmdr_hash
+    ON rule_contributions(commander, config_hash);
