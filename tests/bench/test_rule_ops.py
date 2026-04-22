@@ -64,10 +64,10 @@ def test_ablate_rule_aggregates_per_commander(tensor_db: sqlite3.Connection) -> 
     # Two DISTINCT candidates (Bloodghast, Mayhem Devil) — Bloodghast
     # appears for both commanders but dedups in COUNT(DISTINCT candidate).
     assert summary.candidates_affected == 2
-    assert summary.aggregate_contribution_removed == pytest.approx(0.9)
+    assert summary.aggregate_contribution == pytest.approx(0.9)
     # Korvold has the largest |aggregate|.
-    assert summary.per_commander_removed[0][0] == "Korvold"
-    assert summary.per_commander_removed[0][1] == pytest.approx(0.8)
+    assert summary.per_commander[0][0] == "Korvold"
+    assert summary.per_commander[0][1] == pytest.approx(0.8)
 
 
 def test_ablate_rule_filters_by_config_hash(tensor_db: sqlite3.Connection) -> None:
@@ -84,7 +84,7 @@ def test_ablate_rule_filters_by_config_hash(tensor_db: sqlite3.Connection) -> No
     summary = ablate_rule(tensor_db, "r1")
     assert summary is not None
     # Only the row under the current config_hash counts.
-    assert summary.aggregate_contribution_removed == pytest.approx(0.5)
+    assert summary.aggregate_contribution == pytest.approx(0.5)
     assert summary.candidates_affected == 1
 
 

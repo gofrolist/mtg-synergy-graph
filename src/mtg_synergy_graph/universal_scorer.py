@@ -11,10 +11,10 @@ from __future__ import annotations
 import math
 import sqlite3
 from collections import defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple, Protocol
 
 from .complement_rules import (
     PortComplement,
@@ -26,12 +26,37 @@ from .scoring import BUCKETS
 if TYPE_CHECKING:
     from .penalties import CandidateCache
 
-#: Signature of the tensor-sink hook wired by ``bench.py``. Called once
-#: per (candidate, rule_id) after scoring completes; see
-#: ``docs/plans/2026-04-22-001-feat-unified-eval-harness-plan.md`` FR2
-#: for the persistence contract.
-TensorSink = Callable[[str, str, str, float, float, int], None]
-#: (commander, candidate, rule_id, contribution, idf_weight, raw_count)
+
+@dataclass(frozen=True)
+class TensorRow:
+    """One per-(commander, candidate, rule_id) contribution row.
+
+    Passed to the ``TensorSink`` hook wired by ``bench.py``; the
+    interchange type between scoring and persistence. Fields are
+    accessed by name in every caller; positional access is avoided
+    so a future field addition is non-breaking.
+    """
+
+    commander: str
+    candidate: str
+    rule_id: str
+    contribution: float
+    idf_weight: float
+    raw_count: int
+
+
+class TensorSink(Protocol):
+    """Callable that receives one ``TensorRow`` per emission.
+
+    Used by ``score_all_universal(tensor_sink=...)`` to externalize
+    the per-(cmdr, cand, rule_id) contribution tensor without the
+    scorer needing to know how it's persisted. See
+    ``docs/plans/2026-04-22-001-feat-unified-eval-harness-plan.md``
+    FR2 for the persistence contract.
+    """
+
+    def __call__(self, row: TensorRow) -> None: ...
+
 
 # ---------------------------------------------------------------------------
 # §1  UniversalScore — per-candidate result
@@ -184,6 +209,45 @@ def _compute_pair_bonus(rules: frozenset[str]) -> float:
         if pair <= rules:
             bonus += value
     return bonus
+
+
+# ---------------------------------------------------------------------------
+# §1c  Public scoring-config accessor
+# ---------------------------------------------------------------------------
+
+
+class ScoringConfigInputs(NamedTuple):
+    """Public view over the module-private scoring-config dicts.
+
+    Exposed so ``bench.tensor.compute_config_hash`` (and any future
+    tooling) can observe what fingerprints tensor staleness without
+    importing the underscore-private symbols directly. Rename the
+    underlying dicts freely — consumers read them through this
+    NamedTuple.
+
+    The returned dicts are *live references*, not copies — tests that
+    use ``unittest.mock.patch.dict`` on the private names still mutate
+    what this function returns, which is the correct behavior for a
+    config-fingerprint API.
+    """
+
+    rule_quality_multiplier: dict[str, float]
+    flat_weight_overrides: dict[str, float]
+    synergy_pairs: dict[frozenset[str], float]
+
+
+def get_scoring_config_inputs() -> ScoringConfigInputs:
+    """Return the three scoring-config dicts that affect ``score()`` output.
+
+    Intended consumer: ``bench.tensor.compute_config_hash``. If you
+    tune ``score()`` with a new module-global dict, add it here too —
+    otherwise tensor staleness will go undetected.
+    """
+    return ScoringConfigInputs(
+        rule_quality_multiplier=_RULE_QUALITY_MULTIPLIER,
+        flat_weight_overrides=_FLAT_WEIGHT_OVERRIDES,
+        synergy_pairs=_SYNERGY_PAIRS,
+    )
 
 
 @dataclass
@@ -944,10 +1008,12 @@ def _emit_tensor_rows(
             if contrib == 0.0:
                 continue
             sink(
-                commander,
-                cand,
-                rule_id,
-                contrib,
-                per_rule_max_idf[rule_id],
-                per_rule_count[rule_id],
+                TensorRow(
+                    commander=commander,
+                    candidate=cand,
+                    rule_id=rule_id,
+                    contribution=contrib,
+                    idf_weight=per_rule_max_idf[rule_id],
+                    raw_count=per_rule_count[rule_id],
+                )
             )

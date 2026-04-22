@@ -17,7 +17,9 @@ def open_db(path: str | Path) -> sqlite3.Connection:
     Safe to call repeatedly — uses CREATE TABLE IF NOT EXISTS, so existing
     rows are preserved. Foreign keys + WAL are enabled for the new package.
     """
-    conn = sqlite3.connect(str(path))
+    # check_same_thread=False is required: consumers like mtg-edh-builder
+    # run engine methods via Starlette's run_in_threadpool (multi-threaded).
+    conn = sqlite3.connect(str(path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")

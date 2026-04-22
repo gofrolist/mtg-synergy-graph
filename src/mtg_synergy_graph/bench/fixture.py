@@ -35,6 +35,7 @@ from typing import Any
 
 from mtg_synergy_graph.bench.tensor import TensorWriter, compute_config_hash
 from mtg_synergy_graph.universal_scorer import (
+    TensorRow,
     TensorSink,
     UniversalScore,
     score_all_universal,
@@ -53,19 +54,10 @@ SCHEMA_VERSION = 2
 TOP_N_PINNED = 100
 
 
-@dataclass(frozen=True)
-class TensorRow:
-    """One (candidate, rule_id) contribution row.
-
-    Used as the interchange type between ``score_all_universal``'s sink
-    and the SQLite persistence layer. Not stored in JSON.
-    """
-
-    candidate: str
-    rule_id: str
-    contribution: float
-    idf_weight: float
-    raw_count: int
+# ``TensorRow`` is defined in ``universal_scorer`` so the sink contract
+# and the dataclass ship together. Re-export from this module for
+# backwards compatibility with callers that already import it from
+# ``bench.fixture``.
 
 
 @dataclass
@@ -230,28 +222,14 @@ def score_commander(
     rows: list[TensorRow] = []
     capture_locally = tensor_sink is None
 
-    def sink(
-        cmdr: str,
-        cand: str,
-        rule_id: str,
-        contribution: float,
-        idf_weight: float,
-        raw_count: int,
-    ) -> None:
+    def sink(row: TensorRow) -> None:
         if capture_locally:
-            rows.append(
-                TensorRow(
-                    candidate=cand,
-                    rule_id=rule_id,
-                    contribution=contribution,
-                    idf_weight=idf_weight,
-                    raw_count=raw_count,
-                )
-            )
+            rows.append(row)
         else:
-            # tensor_sink is not None — mypy/pyright narrow it here.
+            # tensor_sink is not None — pyright narrows on the outer
+            # closure capture.
             assert tensor_sink is not None
-            tensor_sink(cmdr, cand, rule_id, contribution, idf_weight, raw_count)
+            tensor_sink(row)
 
     scores = score_all_universal(conn, [commander], tensor_sink=sink)
     return _top_n_scores(scores, top_n), rows

@@ -21,6 +21,7 @@ import pytest
 
 from mtg_synergy_graph.db import open_db
 from mtg_synergy_graph.universal_scorer import (
+    TensorRow,
     UniversalScore,
     score_all_universal,
 )
@@ -108,10 +109,10 @@ def test_sink_noop_produces_identical_scores(scoring_fixture: sqlite3.Connection
     """
     baseline = score_all_universal(scoring_fixture, ["Test Commander"])
 
-    captured: list[tuple[str, str, str, float, float, int]] = []
+    captured: list[TensorRow] = []
 
-    def sink(cmdr: str, cand: str, rule_id: str, contrib: float, idf: float, count: int) -> None:
-        captured.append((cmdr, cand, rule_id, contrib, idf, count))
+    def sink(row: TensorRow) -> None:
+        captured.append(row)
 
     with_sink = score_all_universal(scoring_fixture, ["Test Commander"], tensor_sink=sink)
 
@@ -125,22 +126,22 @@ def test_sink_captures_rows_when_rules_fire(scoring_fixture: sqlite3.Connection)
     scored for, each rule_id maps to a real registered rule. Exact
     contribution values are checked in ``test_sink_matches_legacy_buckets``.
     """
-    captured: list[tuple[str, str, str, float, float, int]] = []
+    captured: list[TensorRow] = []
 
-    def sink(cmdr: str, cand: str, rule_id: str, contrib: float, idf: float, count: int) -> None:
-        captured.append((cmdr, cand, rule_id, contrib, idf, count))
+    def sink(row: TensorRow) -> None:
+        captured.append(row)
 
     score_all_universal(scoring_fixture, ["Test Commander"], tensor_sink=sink)
 
     # Every row is for the expected commander.
-    assert {r[0] for r in captured} == {"Test Commander"}
+    assert {r.commander for r in captured} == {"Test Commander"}
     # No row has zero contribution — the sink filters empty contributions.
-    assert all(r[3] != 0 for r in captured)
+    assert all(r.contribution != 0 for r in captured)
     # No duplicate (cand, rule_id) — each rule's contribution is aggregated.
-    pairs = [(r[1], r[2]) for r in captured]
+    pairs = [(r.candidate, r.rule_id) for r in captured]
     assert len(pairs) == len(set(pairs))
     # Each raw_count is >= 1 when there's any contribution.
-    assert all(r[5] >= 1 for r in captured)
+    assert all(r.raw_count >= 1 for r in captured)
 
 
 def test_sink_rejects_multi_commander_calls(scoring_fixture: sqlite3.Connection) -> None:
@@ -152,7 +153,7 @@ def test_sink_rejects_multi_commander_calls(scoring_fixture: sqlite3.Connection)
     1-element list; this test locks that invariant.
     """
 
-    def sink(*args: object) -> None:
+    def sink(row: TensorRow) -> None:
         pass
 
     with pytest.raises(ValueError, match="single-commander"):
@@ -164,12 +165,12 @@ def test_sink_matches_legacy_buckets(scoring_fixture: sqlite3.Connection) -> Non
     ``UniversalScore.to_legacy_buckets()`` produces in-memory.
 
     The tensor is the persisted form of the same math — if these numbers
-    drift apart, ``bench.py audit --rule`` ablation will be wrong.
+    drift apart, ``bench.py audit --rule`` output will be wrong.
     """
     captured: dict[tuple[str, str], float] = {}
 
-    def sink(cmdr: str, cand: str, rule_id: str, contrib: float, idf: float, count: int) -> None:
-        captured[(cand, rule_id)] = contrib
+    def sink(row: TensorRow) -> None:
+        captured[(row.candidate, row.rule_id)] = row.contribution
 
     scores = score_all_universal(scoring_fixture, ["Test Commander"], tensor_sink=sink)
 

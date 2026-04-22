@@ -15,16 +15,14 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import TracebackType
 
 from mtg_synergy_graph.complement_rules.core import COMPLEMENT_RULES
 from mtg_synergy_graph.universal_scorer import (
-    _FLAT_WEIGHT_OVERRIDES,
-    _RULE_QUALITY_MULTIPLIER,
-    _SYNERGY_PAIRS,
+    TensorRow,
     TensorSink,
+    get_scoring_config_inputs,
 )
 
 #: Flush rows to SQLite in chunks of this size to avoid transaction overhead.
@@ -57,27 +55,21 @@ def compute_config_hash() -> str:
     rule_ids = sorted(rule.rule_id for rule in COMPLEMENT_RULES)
     h.update(b"rule_ids:")
     h.update(repr(rule_ids).encode("utf-8"))
+
+    # Read the scoring-config inputs through the public accessor so a
+    # rename / split of the underlying private dicts is visible here
+    # instead of silently producing stale hashes.
+    cfg = get_scoring_config_inputs()
     h.update(b"|quality:")
-    h.update(repr(sorted(_RULE_QUALITY_MULTIPLIER.items())).encode("utf-8"))
+    h.update(repr(sorted(cfg.rule_quality_multiplier.items())).encode("utf-8"))
     h.update(b"|flat:")
-    h.update(repr(sorted(_FLAT_WEIGHT_OVERRIDES.items())).encode("utf-8"))
+    h.update(repr(sorted(cfg.flat_weight_overrides.items())).encode("utf-8"))
     # Pair bonuses fire inside ``score()`` after the per-rule sum, so
     # adding / removing / retuning a pair flips downstream scores even
-    # when per-rule IDF weights are unchanged. Hash it so tensor
-    # staleness is caught when pair bonuses move.
+    # when per-rule IDF weights are unchanged.
     h.update(b"|pairs:")
-    h.update(repr(sorted((sorted(pair), weight) for pair, weight in _SYNERGY_PAIRS.items())).encode("utf-8"))
+    h.update(repr(sorted((sorted(pair), weight) for pair, weight in cfg.synergy_pairs.items())).encode("utf-8"))
     return h.hexdigest()
-
-
-@dataclass(frozen=True)
-class _Row:
-    commander: str
-    candidate: str
-    rule_id: str
-    contribution: float
-    idf_weight: float
-    raw_count: int
 
 
 class TensorWriter(AbstractContextManager["TensorWriter"]):
@@ -103,7 +95,7 @@ class TensorWriter(AbstractContextManager["TensorWriter"]):
         self._conn = conn
         self.config_hash = config_hash or compute_config_hash()
         self.computed_at = computed_at or datetime.now(UTC).isoformat(timespec="seconds")
-        self._buffer: list[_Row] = []
+        self._buffer: list[TensorRow] = []
         self._rows_written = 0
         self._closed = False
 
@@ -112,18 +104,10 @@ class TensorWriter(AbstractContextManager["TensorWriter"]):
         """A ``TensorSink`` callable bound to this writer."""
         return self._record
 
-    def _record(
-        self,
-        commander: str,
-        candidate: str,
-        rule_id: str,
-        contribution: float,
-        idf_weight: float,
-        raw_count: int,
-    ) -> None:
+    def _record(self, row: TensorRow) -> None:
         if self._closed:
             raise RuntimeError("cannot record into a closed TensorWriter")
-        self._buffer.append(_Row(commander, candidate, rule_id, contribution, idf_weight, raw_count))
+        self._buffer.append(row)
         if len(self._buffer) >= _BATCH_SIZE:
             self._flush()
 

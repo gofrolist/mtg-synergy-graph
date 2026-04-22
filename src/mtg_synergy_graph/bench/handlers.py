@@ -21,7 +21,10 @@ from mtg_synergy_graph.bench.fixture import (
     PinnedFixture,
     build_fixture,
 )
-from mtg_synergy_graph.bench.rule_ops import ablate_rule, inspect_rule
+from mtg_synergy_graph.bench.rule_ops import (
+    inspect_rule,
+    summarize_rule_contributions,
+)
 from mtg_synergy_graph.db import open_db
 
 
@@ -197,10 +200,16 @@ def _print_identity_report(report: IdentityReport, fixture_path: Path) -> None:
 
 
 def handle_rule(args: argparse.Namespace) -> int:
-    """Handle ``bench.py audit --rule RULE_ID`` — per-rule ablation summary."""
+    """Handle ``bench.py audit --rule RULE_ID`` — per-rule raw-contribution summary.
+
+    Reports how much this rule contributed across the golden set.
+    **Not** an ablation / score-delta estimate — the underlying
+    per-(cmdr, cand) values in the tensor are pre-dampening. See
+    ``bench/rule_ops.py`` module docstring for why.
+    """
     conn = open_db(args.db)
     try:
-        summary = ablate_rule(conn, args.rule)
+        summary = summarize_rule_contributions(conn, args.rule)
     finally:
         conn.close()
 
@@ -217,10 +226,10 @@ def handle_rule(args: argparse.Namespace) -> int:
     print(f"config_hash: {summary.config_hash[:12]}...")
     print(f"commanders_affected: {summary.commanders_affected}")
     print(f"candidates_affected: {summary.candidates_affected}")
-    print(f"aggregate_contribution_removed: {summary.aggregate_contribution_removed:+.4f}")
+    print(f"aggregate_contribution (raw / pre-dampening): {summary.aggregate_contribution:+.4f}")
     print()
     print("Top commanders by |aggregate contribution|:")
-    for cmdr, contrib in summary.per_commander_removed:
+    for cmdr, contrib in summary.per_commander:
         print(f"  {cmdr}: {contrib:+.4f}")
     return 0
 

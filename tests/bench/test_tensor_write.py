@@ -21,8 +21,29 @@ from mtg_synergy_graph.universal_scorer import (
     _FLAT_WEIGHT_OVERRIDES,
     _RULE_QUALITY_MULTIPLIER,
     _SYNERGY_PAIRS,
+    TensorRow,
     score_all_universal,
 )
+
+
+def _row(
+    cmdr: str = "Cmdr",
+    cand: str = "Card",
+    rule_id: str = "rule_x",
+    contribution: float = 0.5,
+    idf: float = 0.5,
+    count: int = 1,
+) -> TensorRow:
+    """Short factory for test TensorRow construction."""
+    return TensorRow(
+        commander=cmdr,
+        candidate=cand,
+        rule_id=rule_id,
+        contribution=contribution,
+        idf_weight=idf,
+        raw_count=count,
+    )
+
 
 # ---------------------------------------------------------------------------
 # config_hash
@@ -147,7 +168,7 @@ def test_writer_commits_on_normal_exit(tmp_path: Path) -> None:
     conn = _minimal_fixture(tmp_path / "synergy.db")
     try:
         with TensorWriter(conn) as writer:
-            writer.sink("Cmdr", "Card", "rule_x", 0.5, 0.5, 1)
+            writer.sink(_row())
         # After exit, another connection can see the row (autocommit mode
         # is off, so commit must have been explicit).
         conn2 = sqlite3.connect(str(tmp_path / "synergy.db"))
@@ -168,7 +189,7 @@ def test_writer_discards_on_exception(tmp_path: Path) -> None:
     conn = _minimal_fixture(tmp_path / "synergy.db")
     try:
         with pytest.raises(ValueError), TensorWriter(conn) as writer:
-            writer.sink("Cmdr", "Card", "rule_x", 0.5, 0.5, 1)
+            writer.sink(_row())
             # Row is buffered, not yet flushed. Raising here must not
             # persist it.
             raise ValueError("simulated failure")
@@ -195,7 +216,7 @@ def test_writer_flushes_batches_over_size(tmp_path: Path) -> None:
     try:
         with patch.object(tensor_mod, "_BATCH_SIZE", 3), TensorWriter(conn) as writer:
             for i in range(10):
-                writer.sink("Cmdr", f"Card{i}", "rule_x", 0.1 + i * 0.01, 0.1, 1)
+                writer.sink(_row(cand=f"Card{i}", contribution=0.1 + i * 0.01, idf=0.1))
             # 10 rows / batch of 3 → 3 auto-flushes happened before
             # close; remaining 1 row still buffered → flushed on exit.
             assert writer.rows_written >= 9
@@ -220,7 +241,7 @@ def test_writer_cannot_record_after_close(tmp_path: Path) -> None:
         writer = TensorWriter(conn)
         writer.close()
         with pytest.raises(RuntimeError):
-            writer.sink("Cmdr", "Card", "rule_x", 0.5, 0.5, 1)
+            writer.sink(_row())
     finally:
         conn.close()
 
@@ -230,7 +251,7 @@ def test_writer_close_is_idempotent(tmp_path: Path) -> None:
     conn = _minimal_fixture(tmp_path / "synergy.db")
     try:
         writer = TensorWriter(conn)
-        writer.sink("Cmdr", "Card", "rule_x", 0.5, 0.5, 1)
+        writer.sink(_row())
         writer.close()
         writer.close()  # must not raise
     finally:
@@ -247,7 +268,7 @@ def test_writer_upserts_on_duplicate_rows(tmp_path: Path) -> None:
     try:
         for _ in range(2):
             with TensorWriter(conn) as writer:
-                writer.sink("Cmdr", "Card", "rule_x", 0.3, 0.3, 1)
+                writer.sink(_row(contribution=0.3, idf=0.3))
 
         row = conn.execute(
             "SELECT COUNT(*) AS n FROM rule_contributions "
