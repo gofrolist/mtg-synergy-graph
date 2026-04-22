@@ -27,6 +27,7 @@ from mtg_synergy_graph.bench.handlers import (
     handle_inspect,
     handle_repin,
     handle_rule,
+    handle_unknowns,
 )
 from mtg_synergy_graph.bench.histogram import Bucket, Histogram, Verdict
 from mtg_synergy_graph.bench.report import AuditReport, build_report
@@ -44,6 +45,8 @@ _cli.register("expect_identity", handle_expect_identity)
 _cli.register("rule", handle_rule)
 _cli.register("inspect", handle_inspect)
 _cli.register("collinearity", handle_collinearity)
+# Plan 003 Unit 6 — UNKNOWN port_nodes reporter.
+_cli.register("unknowns", handle_unknowns)
 
 __all__ = [
     "AuditReport",

@@ -276,6 +276,62 @@ def handle_collinearity(args: argparse.Namespace) -> int:
     return 0
 
 
+def handle_unknowns(args: argparse.Namespace) -> int:
+    """Handle ``bench.py audit --unknowns`` — report port_nodes rows
+    with ``node_kind = 'UNKNOWN'`` ranked by
+    ``distinct_cards × sum_edhrec_rank_weight`` so an operator can
+    see which novel Forge port shapes are most worth adding to the
+    canonical vocabulary.
+
+    Emits a Markdown table to stdout. Exit code is always 0 — the
+    command is informational; UNKNOWN rows existing is a normal
+    steady state (Forge ships new mechanics regularly).
+    """
+    conn = open_db(args.db)
+    try:
+        rows = conn.execute(
+            # rank_weight: EDHREC ranks from ~1 (most-played) to ~30000.
+            # Invert so high-rank-popularity contributes more to the
+            # weight; floor at 0 so missing / >30000 ranks don't go
+            # negative. COALESCE handles the LEFT JOIN nulls when a
+            # card_ports row references a name absent from cards
+            # (shouldn't happen but defends against import races).
+            "SELECT pn.subkind, "
+            "       COUNT(DISTINCT pn.card_name) AS distinct_cards, "
+            "       COALESCE("
+            "           SUM(CASE "
+            "                   WHEN c.edhrec_rank IS NULL THEN 0 "
+            "                   WHEN c.edhrec_rank > 30000 THEN 0 "
+            "                   ELSE (30001 - c.edhrec_rank) "
+            "               END), "
+            "           0"
+            "       ) AS rank_weight "
+            "FROM port_nodes pn "
+            "LEFT JOIN cards c ON c.name = pn.card_name "
+            "WHERE pn.node_kind = 'UNKNOWN' "
+            "GROUP BY pn.subkind "
+            "ORDER BY rank_weight DESC, distinct_cards DESC, pn.subkind ASC"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    print("# bench.py audit --unknowns")
+    if not rows:
+        print()
+        print("No UNKNOWN port shapes detected.")
+        return 0
+
+    total_unknown_cards = sum(r["distinct_cards"] for r in rows)
+    print()
+    print(f"{len(rows)} distinct UNKNOWN subkind(s) across {total_unknown_cards} card(s).")
+    print()
+    print(f"{'subkind':<40} {'distinct_cards':>15} {'rank_weight':>14}")
+    print("-" * 71)
+    for r in rows:
+        print(f"{r['subkind'][:40]:<40} {r['distinct_cards']:>15} {r['rank_weight']:>14,.0f}")
+    return 0
+
+
 def _print_collinearity_report(report: CollinearityReport) -> None:
     print("# bench.py audit --collinearity")
     print(f"config_hash: {report.config_hash[:12]}...")
