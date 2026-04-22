@@ -251,6 +251,30 @@ CREATE TABLE IF NOT EXISTS cost_feeds_trigger (
 CREATE INDEX IF NOT EXISTS idx_cost_feeds_cost ON cost_feeds_trigger(cost_event);
 
 -- ---------------------------------------------------------------------------
+-- rules: declarative complement-rule rows consumed by the RuleInterpreter
+-- (plan 003 Unit 4 + Unit 5). Each row's gate / commander / candidate
+-- predicates are JSON trees built from port_graph.vocabulary.GATE_OPS.
+-- Populated from data/rules_seed.json by the importer; empty in Unit 4
+-- (migrations land in Units 7 & 8). The rules table coexists with the
+-- Python-helper registry: a rule_id lives in ONE of the two, never both.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS rules (
+    rule_id                    TEXT PRIMARY KEY,
+    family                     TEXT NOT NULL,
+    gate_predicate             TEXT NOT NULL,   -- JSON tree
+    commander_port_predicate   TEXT NOT NULL,   -- JSON tree
+    candidate_port_predicate   TEXT NOT NULL,   -- JSON tree
+    filter_group               TEXT NOT NULL DEFAULT '',
+    cmdr_event                 TEXT NOT NULL,
+    cand_event                 TEXT NOT NULL,
+    weight_hint                REAL NOT NULL DEFAULT 1.0,
+    active                     INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_rules_family ON rules(family);
+CREATE INDEX IF NOT EXISTS idx_rules_active ON rules(active);
+
+-- ---------------------------------------------------------------------------
 -- port_nodes: canonical projection over card_ports (plan 003 Unit 2).
 -- Maps each (port_type, event_class) pair to a value in
 -- mtg_synergy_graph.port_graph.vocabulary.NODE_KINDS; unmapped pairs
