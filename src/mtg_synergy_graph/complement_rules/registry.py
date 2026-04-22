@@ -687,14 +687,23 @@ def _aura_equipment_support_gate(port: PortRow) -> bool:
 
 
 def _land_to_gy_gate(port: PortRow) -> bool:
-    """Commander has a land-to-graveyard trigger (Gitrog, Titania Voice)."""
+    """Commander has a land-to-graveyard trigger (Gitrog, Titania Voice).
+
+    Delegates the filter check to
+    ``density._filter_has_land_base_type`` so the gate and helper share
+    one source of truth — a bare ``"Land" in valid_filter`` substring
+    test would false-positive on ``Creature.nonLand+YouCtrl`` (Princess
+    Yue) and other non-land reanimator filters.
+    """
+    from .density import _filter_has_land_base_type
+
     if (port.get("port_type") or "").strip() != "trigger":
         return False
     if (port.get("event_class") or "").strip() not in ("ChangesZoneAll", "ChangesZone"):
         return False
     if (port.get("zone_destination") or "").strip() != "Graveyard":
         return False
-    return "Land" in (port.get("valid_filter") or "")
+    return _filter_has_land_base_type((port.get("valid_filter") or "").strip())
 
 
 _CARD_ATTR_GATES: tuple[RuleGate, ...] = (

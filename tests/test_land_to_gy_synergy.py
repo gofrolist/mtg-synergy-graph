@@ -129,6 +129,44 @@ class TestLandToGyGate:
             )
         )
 
+    def test_nonland_creature_death_trigger_skips(self):
+        """Princess Yue's dies trigger on 'Card.Self+Creature+nonLand'
+        must NOT activate the land-to-GY gate. Substring 'Land' in
+        'nonLand' is a false-positive trap."""
+        assert not _land_to_gy_gate(
+            _port(
+                port_type="trigger",
+                event_class="ChangesZone",
+                zone_destination="Graveyard",
+                valid_filter="Card.Self+Creature+nonLand",
+            )
+        )
+
+    def test_nonland_permanent_dies_trigger_skips(self):
+        """Filters like 'Permanent.nonLand+YouCtrl' cover non-land
+        permanents dying — not the land-to-GY shape."""
+        assert not _land_to_gy_gate(
+            _port(
+                port_type="trigger",
+                event_class="ChangesZoneAll",
+                zone_destination="Graveyard",
+                valid_filter="Permanent.nonLand+YouOwn",
+            )
+        )
+
+    def test_compound_filter_with_real_land_alt_matches(self):
+        """A compound filter like 'Creature.YouOwn,Land.YouOwn' still
+        has a real Land alt and must activate the gate (Titania Voice
+        of Gaea-style filters that combine creature and land watches)."""
+        assert _land_to_gy_gate(
+            _port(
+                port_type="trigger",
+                event_class="ChangesZoneAll",
+                zone_destination="Graveyard",
+                valid_filter="Creature.YouOwn,Land.YouOwn",
+            )
+        )
+
 
 def _gitrog_ports():
     return [
@@ -260,6 +298,41 @@ class TestFindLandToGySynergy:
         results = _find_land_to_gy_synergy(conn, _gitrog_ports(), set())
         names = {r.candidate for r in results}
         assert "Karmic Guide" not in names
+
+    def test_recursion_pool_rejects_nonland_reanimator_effect(self, conn):
+        """Emeria Shepherd / Moira and Teshar / Pull Through the Weft
+        reanimate non-land permanents with filter like
+        'Permanent.nonLand+YouOwn'. Substring 'Land' in 'nonLand' is a
+        false positive — these must not be tagged as Gitrog recursion."""
+        _add_port(
+            conn,
+            "Emeria Shepherd",
+            "effect",
+            "ChangeZone",
+            valid_filter="Permanent.nonLand+YouOwn",
+            zone_origin="Graveyard",
+            zone_destination="Battlefield",
+        )
+        results = _find_land_to_gy_synergy(conn, _gitrog_ports(), set())
+        names = {r.candidate for r in results}
+        assert "Emeria Shepherd" not in names
+
+    def test_recursion_pool_rejects_nonland_static(self, conn):
+        """Yawgmoth's Will-style static with MayPlay for nonLand cards
+        in Graveyard must not be tagged as Gitrog recursion."""
+        _add_port(
+            conn,
+            "Yawgmoth's Will",
+            "static",
+            "Continuous",
+            raw_line=(
+                "{'Mode': 'Continuous', 'Affected': 'Card.nonLand+YouOwn', "
+                "'MayPlay': 'True', 'AffectedZone': 'Graveyard'}"
+            ),
+        )
+        results = _find_land_to_gy_synergy(conn, _gitrog_ports(), set())
+        names = {r.candidate for r in results}
+        assert "Yawgmoth's Will" not in names
 
     def test_excludes_commander_self(self, conn):
         """The commander shouldn't recommend itself even if its ports

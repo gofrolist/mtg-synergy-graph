@@ -49,13 +49,16 @@ class TestReanimateCmcCheat:
 
         ports = load_ports_for_set(conn, ["Sharuum the Hegemon"])
         results = _find_cheat_cmc_bonus(conn, ports, {"Sharuum the Hegemon"})
-        # Should catch EDHREC picks: Magister Sphinx (CMC 7), Noxious Gearhulk
-        # (CMC 6), Sphinx Summoner (CMC 5), Solemn Simulacrum (CMC 4).
+        # Should catch EDHREC picks at cmc_high (CMC ≥ 6): Magister
+        # Sphinx (CMC 7), Noxious Gearhulk (CMC 6). CMC 4-5 cards
+        # (Sphinx Summoner, Solemn Simulacrum) are not emitted — the
+        # cmc_mid bracket was dropped 2026-04-21 because IDF
+        # normalization inverted the mana-saved semantic. CMC 4-5
+        # cheat targets still score via trigger_effect on their
+        # ChangesZone-into-play triggers.
         names = {r.candidate for r in results}
         assert "Magister Sphinx" in names
         assert "Noxious Gearhulk" in names
-        # CMC 5 falls in cmc_mid bracket (4-5), should be there too
-        assert "Sphinx Summoner" in names
 
     def test_meren_does_not_match(self, conn):
         """Meren's end-step reanimate is effect_conditional (XP ≥ CMC

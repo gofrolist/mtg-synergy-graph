@@ -1464,6 +1464,26 @@ def _find_cost_reduction_targets(
     return results
 
 
+def _filter_has_land_base_type(valid_filter: str) -> bool:
+    """True iff any comma-alt in ``valid_filter`` has base type ``Land``.
+
+    Substring checks like ``"Land" in valid_filter`` false-positive on
+    ``Creature.nonLand+YouCtrl`` (Princess Yue's dies trigger) and on
+    ``Permanent.nonLand+YouOwn`` (most generic reanimator effects —
+    Emeria Shepherd, Moira and Teshar, Pull Through the Weft, etc.).
+    A Forge filter is ``BaseType[.Subtype][+Qualifier...]``, so the
+    base is the first token before ``.`` or ``+``. Only accept alts
+    where the base equals exactly ``Land``.
+    """
+    if not valid_filter:
+        return False
+    for alt in valid_filter.split(","):
+        base = alt.strip().split(".")[0].split("+")[0].strip()
+        if base == "Land":
+            return True
+    return False
+
+
 def _find_land_to_gy_synergy(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
@@ -1492,7 +1512,7 @@ def _find_land_to_gy_synergy(
         (p.get("port_type") or "").strip() == "trigger"
         and (p.get("event_class") or "").strip() in ("ChangesZoneAll", "ChangesZone")
         and (p.get("zone_destination") or "").strip() == "Graveyard"
-        and "Land" in (p.get("valid_filter") or "").strip()
+        and _filter_has_land_base_type((p.get("valid_filter") or "").strip())
         for p in cmdr_ports
     )
     if not has_land_gy_trigger:
@@ -1523,19 +1543,33 @@ def _find_land_to_gy_synergy(
             )
         )
 
-    recursion_rows = conn.execute(
+    # MayPlay Land statics: scoped to raw_line carrying ``Land.YouOwn``
+    # + MayPlay + Graveyard — the Crucible of Worlds / Ramunap Excavator
+    # shape. ChangeZone Land recursion is fetched separately so we can
+    # apply the base-type check in Python to reject compound filters
+    # like ``Permanent.nonLand,Land.YouOwn`` (safe) vs. bare
+    # ``Permanent.nonLand+YouOwn`` (Emeria Shepherd — reject).
+    static_recursion_rows = conn.execute(
         "SELECT DISTINCT card_name FROM card_ports "
-        "WHERE (port_type='static' AND event_class='Continuous' "
-        "       AND raw_line LIKE '%Land.YouOwn%' "
-        "       AND raw_line LIKE '%MayPlay%' "
-        "       AND raw_line LIKE '%Graveyard%') "
-        "   OR (port_type='effect' AND event_class='ChangeZone' "
-        "       AND zone_origin='Graveyard' "
-        "       AND zone_destination IN ('Hand','Battlefield') "
-        "       AND valid_filter LIKE '%Land%')"
+        "WHERE port_type='static' AND event_class='Continuous' "
+        "  AND raw_line LIKE '%Land.YouOwn%' "
+        "  AND raw_line LIKE '%MayPlay%' "
+        "  AND raw_line LIKE '%Graveyard%' "
+        "  AND raw_line NOT LIKE '%nonLand%'"
     )
-    for r in recursion_rows:
-        name = r["card_name"]
+    effect_recursion_rows = conn.execute(
+        "SELECT DISTINCT card_name, valid_filter FROM card_ports "
+        "WHERE port_type='effect' AND event_class='ChangeZone' "
+        "  AND zone_origin='Graveyard' "
+        "  AND zone_destination IN ('Hand','Battlefield') "
+        "  AND valid_filter LIKE '%Land%' "
+        "  AND valid_filter NOT LIKE '%nonLand%'"
+    )
+    recursion_names: set[str] = {r["card_name"] for r in static_recursion_rows}
+    for r in effect_recursion_rows:
+        if _filter_has_land_base_type(r["valid_filter"] or ""):
+            recursion_names.add(r["card_name"])
+    for name in recursion_names:
         if name in cmdr_set or name in seen:
             continue
         seen.add(name)
