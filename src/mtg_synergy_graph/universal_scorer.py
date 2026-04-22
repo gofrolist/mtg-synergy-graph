@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 import sqlite3
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
 from typing import TYPE_CHECKING
@@ -25,6 +25,13 @@ from .scoring import BUCKETS
 
 if TYPE_CHECKING:
     from .penalties import CandidateCache
+
+#: Signature of the tensor-sink hook wired by ``bench.py``. Called once
+#: per (candidate, rule_id) after scoring completes; see
+#: ``docs/plans/2026-04-22-001-feat-unified-eval-harness-plan.md`` FR2
+#: for the persistence contract.
+TensorSink = Callable[[str, str, str, float, float, int], None]
+#: (commander, candidate, rule_id, contribution, idf_weight, raw_count)
 
 # ---------------------------------------------------------------------------
 # §1  UniversalScore — per-candidate result
@@ -784,6 +791,8 @@ def score_all_universal(
     conn: sqlite3.Connection,
     commander_set: Sequence[str],
     candidate_cache: CandidateCache | None = None,
+    *,
+    tensor_sink: TensorSink | None = None,
 ) -> dict[str, UniversalScore]:
     """Score every candidate via IDF-weighted port matching.
 
@@ -798,6 +807,13 @@ def score_all_universal(
     cmc/edhrec_rank load is skipped in favour of the cache, and the
     cache is forwarded to ``find_all_complements`` so the complement
     rule layer can also skip its redundant SQL.
+
+    When ``tensor_sink`` is provided, it is called once per
+    ``(candidate, rule_id)`` pair after scoring completes with the
+    net IDF-weighted contribution, the per-key IDF weight, and the
+    raw count of distinct complement keys that fired. Default
+    ``None`` keeps inference paths bitwise-identical — see the R7
+    identity invariant in the plan.
     """
     complements = find_all_complements(conn, commander_set, candidate_cache=candidate_cache)
     idf = _compute_idf_weights(complements)
@@ -865,4 +881,57 @@ def score_all_universal(
                 rank_bonus=0.005 * max(0.0, 1.0 - rank / 30000.0),
             )
 
+    if tensor_sink is not None:
+        _emit_tensor_rows(commander_set[0], results, tensor_sink)
+
     return results
+
+
+def _emit_tensor_rows(
+    commander: str,
+    results: dict[str, UniversalScore],
+    sink: TensorSink,
+) -> None:
+    """Emit one sink call per (candidate, rule_id) with the net contribution.
+
+    Mirrors the dedup rules in ``UniversalScore.score()``: each
+    ``(rule_id, cmdr_event, cand_event, filter_group)`` key contributes
+    at most once per direction, so a candidate with two redundant
+    trigger_effect rows yields exactly one synergy contribution. Anti-
+    synergy contributes with a negative sign. Zero-contribution
+    (synergy fully cancelled by anti) rows are dropped so consumers
+    don't store noise.
+    """
+    for cand, score_obj in results.items():
+        per_rule_contrib: dict[str, float] = defaultdict(float)
+        per_rule_max_idf: dict[str, float] = defaultdict(float)
+        per_rule_count: dict[str, int] = defaultdict(int)
+        seen_syn: set[tuple[str, str, str, str]] = set()
+        seen_anti: set[tuple[str, str, str, str]] = set()
+        for c in score_obj.complements:
+            key = (c.rule_id, c.cmdr_event, c.cand_event, c.filter_group)
+            w = score_obj.idf_weights.get(key, 1.0)
+            if c.direction == "synergy":
+                if key in seen_syn:
+                    continue
+                seen_syn.add(key)
+                per_rule_contrib[c.rule_id] += w
+            else:
+                if key in seen_anti:
+                    continue
+                seen_anti.add(key)
+                per_rule_contrib[c.rule_id] -= w
+            per_rule_count[c.rule_id] += 1
+            if w > per_rule_max_idf[c.rule_id]:
+                per_rule_max_idf[c.rule_id] = w
+        for rule_id, contrib in per_rule_contrib.items():
+            if contrib == 0.0:
+                continue
+            sink(
+                commander,
+                cand,
+                rule_id,
+                contrib,
+                per_rule_max_idf[rule_id],
+                per_rule_count[rule_id],
+            )
