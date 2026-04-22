@@ -5,6 +5,58 @@ impact notes. See `scripts/_audit_rule_impact.py` for the per-rule impact
 methodology (NDCG@30 metric + golden-set safety net + CONTENTIOUS verdict).
 See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
+## 2026-04-22
+
+### IDF reforms plan 002 (BM25F + conditional denominator — not landed)
+
+- Prior infrastructure-only branch `feat/idf-reforms-bm25f-conditional`
+  explored BM25F length-normalization and conditional color-pool
+  IDF denominators. Both reforms audited as HARMFUL on the
+  100-commander golden set (best BM25F +0.0016 agg with 15 losers
+  ≥0.05; conditional −0.0142 agg with 18 losers). Defaults stayed
+  legacy/global; code preserved on a local branch for reference.
+  See plan 002 (docs/plans/2026-04-22-002-feat-idf-reforms-bm25f-
+  conditional-plan.md on the abandoned branch) for the full sweep
+  data.
+
+### Typed port graph plan 003 (substrate + 16-rule POC migration, LANDED)
+
+- Data-layer refactor: canonical `NODE_KINDS` vocabulary,
+  `port_nodes` SQL view, `event_match_map` / `cost_feeds_trigger`
+  tables seeded from `data/event_match_seed.json`, `rules` table
+  seeded from `data/rules_seed.json`, and a `RuleInterpreter` that
+  compiles JSON predicate trees to SQL + Python gate callables.
+- 16 auto-generated tribal / replacement-stack rules migrated
+  from Python helpers to declarative JSON rows — `cascade_tribal`
+  plus the 13 other keyword-tribals plus 2 replacement-stack rules.
+  `src/mtg_synergy_graph/complement_rules/generated/` shrinks from
+  16 files (~1,100 LOC) to just `__init__.py`; the same rule set
+  fits in a 375-line seed JSON.
+- **Identity-preserving**: aggregate NDCG@30 bitwise-identical to
+  10 decimals (0.262219416007 before and after); zero commanders
+  with any per-commander delta > 1e-12; `bench.py audit
+  --expect-identity` PASS on every unit of the plan.
+- New `bench.py audit --unknowns` reports port-graph subkinds
+  that fell through to `UNKNOWN` classification — 375 distinct
+  subkinds across 29,711 prod-DB cards, ranked by
+  distinct_cards × EDHREC rank weight. Candidates for future
+  vocabulary expansion: `effect.Pump`, `effect.Cleanup`,
+  `trigger.Phase`, `effect.Effect`, `effect.LoseLife` (top 5 by
+  rank weight).
+- Scope boundary: FR8 at scale (migrate ~28 non-tribal rules) and
+  FR9 (rewrite `scripts/scaffold_rule.py` to emit JSON rows) are
+  explicitly deferred to a follow-up plan — gated on this
+  infrastructure proving out on the POC migrations (which it did).
+- Vocabulary bump to v2: added `zone_dest_battlefield`
+  match_quality to preserve the exact semantics of the legacy
+  inline lambdas under `ChangesZone` (Token / CopyPermanent /
+  Animate). The lambda checks only trigger side; mapping to
+  `zone_compatible` would drift on Graveyard-triggered rows.
+- Deferred follow-ups recorded in the plan's Open Questions:
+  per-port auditor attribution for declarative rules,
+  `card_hints` revisit, `scales_with.value` vs `scales_with.valid`
+  field split for future BM25F revisits.
+
 ## 2026-04-21
 
 ### creature_died_feeder

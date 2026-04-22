@@ -1,8 +1,9 @@
 ---
 title: "feat: Typed Port-Graph Substrate + Rule-Interpreter POC"
 type: feat
-status: active
+status: landed
 date: 2026-04-22
+landed: 2026-04-22
 origin: docs/brainstorms/2026-04-21-typed-port-graph-requirements.md
 ---
 
@@ -386,7 +387,7 @@ keyword varying per row (17 rows for the current tribal set).
 
 ## Implementation Units
 
-- [ ] **Unit 1: Canonical vocabulary module + versioning**
+- [x] **Unit 1: Canonical vocabulary module + versioning**
 
 **Goal:** Commit the closed set of `node_kind` values as a Python
 module constant so every downstream unit depends on a single source
@@ -431,7 +432,7 @@ of truth. No runtime behavior change.
 
 ---
 
-- [ ] **Unit 2: `port_nodes` view + schema**
+- [x] **Unit 2: `port_nodes` view + schema**
 
 **Goal:** Add a SQL view that projects every `card_ports` row to a
 `node_kind`-typed row with the brainstorm's attribute columns.
@@ -501,7 +502,7 @@ that count.
 
 ---
 
-- [ ] **Unit 3: `event_match_map` + `cost_feeds_trigger` tables + loaders**
+- [x] **Unit 3: `event_match_map` + `cost_feeds_trigger` tables + loaders**
 
 **Goal:** Move `graph_engine.EVENT_MATCH_MAP` and
 `COST_FEEDS_TRIGGER` into first-class SQLite tables. The Python
@@ -574,7 +575,7 @@ Python loader to read from the table.
 
 ---
 
-- [ ] **Unit 4: `rules` table schema + seed-loader infrastructure**
+- [x] **Unit 4: `rules` table schema + seed-loader infrastructure**
 
 **Goal:** Add the `rules` table and the seed-from-JSON mechanism.
 No rules are migrated yet — this unit is pure schema + infra.
@@ -641,7 +642,7 @@ with well-defined inputs/outputs.
 
 ---
 
-- [ ] **Unit 5: `RuleInterpreter` class**
+- [x] **Unit 5: `RuleInterpreter` class**
 
 **Goal:** Compile rule-row JSON predicates into SQL fragments and
 Python guards at interpreter init, then execute them to produce
@@ -730,7 +731,7 @@ happens in Unit 7.
 
 ---
 
-- [ ] **Unit 6: `bench.py audit --unknowns`**
+- [x] **Unit 6: `bench.py audit --unknowns`**
 
 **Goal:** New bench subcommand that groups `port_nodes` rows with
 `node_kind = 'UNKNOWN'` by `subkind`, emitting a ranked Markdown
@@ -782,7 +783,7 @@ feedback loop.
 
 ---
 
-- [ ] **Unit 7: POC migration 1 — `cascade_tribal` as declarative row**
+- [x] **Unit 7: POC migration 1 — `cascade_tribal` as declarative row**
 
 **Goal:** Migrate `src/mtg_synergy_graph/complement_rules/generated/
 cascade_tribal.py` to a single row in `data/rules_seed.json`.
@@ -862,7 +863,7 @@ interpreter produces the same list byte-for-byte after.
 
 ---
 
-- [ ] **Unit 8: POC migration 2 — 16 keyword/replacement-stack rules → 17 data rows**
+- [x] **Unit 8: POC migration 2 — 16 keyword/replacement-stack rules → 17 data rows**
 
 **Goal:** Migrate the remaining 16 generated rules to data rows
 using a parameterized `peer_tribal_keyword` shape. The rule_ids
