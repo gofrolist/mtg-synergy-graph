@@ -526,7 +526,13 @@ def extract_trigger_ports(
     scoring can then dampen trigger_effect matches for such triggers,
     since the trigger fires broadly but the payoff is gated.
     """
-    valid_filter = parsed.get("ValidCard") or parsed.get("ValidSource", "")
+    # ``ValidCards`` (plural) is used by ``ChangesZoneAll`` triggers where
+    # ``ValidCard`` (singular) would apply to other modes. Without this
+    # fallback, Gitrog / Titania Voice of Gaea / Crawling Sensation's
+    # Land-to-GY trigger filters were silently dropped, and every
+    # complement rule querying ``valid_filter LIKE '%Land%'`` missed
+    # them. Matches the effect-port convention (see extract_effect_ports).
+    valid_filter = parsed.get("ValidCard") or parsed.get("ValidSource") or parsed.get("ValidCards", "")
 
     trigger_source: str | None = None
     if parsed.get("FirstTime", "") == "True":
