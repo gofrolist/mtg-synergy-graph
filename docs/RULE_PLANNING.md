@@ -25,6 +25,54 @@ validation oracle, not the design oracle.
 | `scripts/golden_set_track.py` | stdout | **DEPRECATED** — prints a bench.py pointer and still runs the legacy NDCG@30 regression check. Will be removed in a follow-up cleanup. Prefer `bench.py audit --expect-identity` + `--repin --yes`. |
 | `scripts/compare_edhrec.py` | stdout | Hi-Syn / Top / OnPage breakdown for any commander or commander list — used for *validation*, not planning. |
 
+## Declarative Rules (plan 003+)
+
+For rule families covered by the `port_graph.interpreter.RuleInterpreter`
+(currently `peer_tribal_keyword` — 14 keyword-tribal rules + 2
+replacement-stack rules), new rules land as rows in
+`data/rules_seed.json`, **not** as new Python files in
+`complement_rules/generated/`. The interpreter compiles each row's JSON
+predicates to SQL fragments + Python gate callables at load time.
+
+### Adding a new keyword-tribal rule
+
+1. Add a row to `data/rules_seed.json`. Start by copying an existing
+   tribal row and changing only the `rule_id`, `event_class` (five
+   places in a tribal row), and `cmdr_event`. Keep `weight_hint = 2.0`
+   to match the family's existing calibration.
+2. Add the new `rule_id` to `DECLARATIVE_RULE_IDS` in
+   `src/mtg_synergy_graph/complement_rules/registry.py`.
+3. Re-seed the DB: `uv run python -c "from mtg_synergy_graph.db import
+   open_db; from mtg_synergy_graph.port_graph.rules_schema import
+   seed_rules_db; conn = open_db('data/synergy.db');
+   seed_rules_db(conn); conn.close()"`.
+4. Run `uv run scripts/bench.py audit` against the pinned golden
+   fixture. If the rule introduces genuine new matches, the audit
+   will show a positive NDCG delta. If it should be identity-
+   preserving against the pin (rare for a new rule), use
+   `bench.py audit --expect-identity`.
+5. Commit: `data/rules_seed.json` + `registry.py` + updated pinned
+   fixture (via `bench.py audit --repin --yes` if positive landing).
+
+### Adding a new replacement-stack rule
+
+Same as keyword-tribal but the predicate tree has `replacement_result`
+on each `has_port` leaf (in addition to `port_type` + `event_class`).
+See `repl_moved_exile_stack` / `repl_damagedone_counters_stack` in the
+seed for reference.
+
+### When to scaffold Python instead
+
+Rules outside the declarative-family coverage still use the
+`scripts/scaffold_rule.py` Python-file workflow below. The interpreter
+gate grammar (`has_port`, `filter_tag`, `zone_eq`, `counter_type`,
+`tribe`, `color`, `not_in_commander_set`, plus `and`/`or`/`not`
+combinators) covers single-port-shape rules; anything needing multi-
+port conjunction / per-card attribute inspection / custom aggregation
+stays Python. See the brainstorm
+`docs/brainstorms/2026-04-21-typed-port-graph-requirements.md` FR6
+for the imperative-escape-hatch principle.
+
 ## Scaffolder workflow
 
 The auto-generation flow that closes the loop:

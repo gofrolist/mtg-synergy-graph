@@ -116,8 +116,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Report port_nodes rows with node_kind='UNKNOWN', ranked by "
         "distinct_cards x EDHREC rank weight. Surfaces novel Forge "
-        "port shapes that need canonical-vocabulary coverage. "
-        "(plan 003 Unit 6)",
+        "port shapes that need canonical-vocabulary coverage.",
     )
 
     # Shared flags.

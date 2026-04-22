@@ -325,6 +325,99 @@ def test_load_filters_inactive_rules(tmp_path: Path) -> None:
         conn.close()
 
 
+def test_seed_rejects_missing_predicate_column(tmp_path: Path) -> None:
+    """A seed row missing ``commander_port_predicate`` raises ValueError
+    before any DB write; the error message names the missing column."""
+    conn = _fresh_db(tmp_path)
+    try:
+        seed_path = _write_seed(
+            tmp_path,
+            [
+                {
+                    "rule_id": "incomplete_rule",
+                    "family": "test",
+                    "gate_predicate": {"op": "has_port", "port_type": "keyword"},
+                    # commander_port_predicate deliberately omitted
+                    "candidate_port_predicate": {"op": "has_port", "port_type": "keyword"},
+                    "filter_group": "",
+                    "cmdr_event": "x",
+                    "cand_event": "y",
+                    "weight_hint": 1.0,
+                    "active": 1,
+                },
+            ],
+        )
+        with pytest.raises(ValueError, match="commander_port_predicate"):
+            seed_rules_db(conn, seed_path)
+        assert load_rules_from_db(conn) == []
+    finally:
+        conn.close()
+
+
+def test_seed_rejects_non_numeric_weight_hint(tmp_path: Path) -> None:
+    """A seed row with a non-numeric ``weight_hint`` raises ValueError
+    mentioning the rule_id so the operator can locate the bad row."""
+    conn = _fresh_db(tmp_path)
+    try:
+        seed_path = _write_seed(
+            tmp_path,
+            [
+                {
+                    "rule_id": "bad_weight_rule",
+                    "family": "test",
+                    "gate_predicate": {"op": "has_port", "port_type": "keyword"},
+                    "commander_port_predicate": {"op": "has_port", "port_type": "keyword"},
+                    "candidate_port_predicate": {"op": "has_port", "port_type": "keyword"},
+                    "filter_group": "",
+                    "cmdr_event": "x",
+                    "cand_event": "y",
+                    "weight_hint": "not-a-number",
+                    "active": 1,
+                },
+            ],
+        )
+        with pytest.raises(ValueError, match="bad_weight_rule"):
+            seed_rules_db(conn, seed_path)
+        assert load_rules_from_db(conn) == []
+    finally:
+        conn.close()
+
+
+def test_tribal_family_rejects_mismatched_event_class(tmp_path: Path) -> None:
+    """A tribal-family row where the gate event_class differs from the
+    candidate event_class raises ValueError with rule_id context."""
+    conn = _fresh_db(tmp_path)
+    try:
+        seed_path = _write_seed(
+            tmp_path,
+            [
+                {
+                    "rule_id": "mismatched_tribal",
+                    "family": "tribal",
+                    "gate_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "A"},
+                    "commander_port_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "A"},
+                    "candidate_port_predicate": {
+                        "op": "and",
+                        "args": [
+                            {"op": "has_port", "port_type": "keyword", "event_class": "B"},
+                            {"op": "not_in_commander_set"},
+                        ],
+                    },
+                    "filter_group": "",
+                    "cmdr_event": "x",
+                    "cand_event": "y",
+                    "weight_hint": 2.0,
+                    "active": 1,
+                },
+            ],
+        )
+        with pytest.raises(ValueError, match="mismatched_tribal"):
+            seed_rules_db(conn, seed_path)
+        assert load_rules_from_db(conn) == []
+    finally:
+        conn.close()
+
+
 def test_default_seed_path_resolves_to_repo_json() -> None:
     """The auto-discover path resolves to the committed
     ``data/rules_seed.json`` at repo root when invoked inside the

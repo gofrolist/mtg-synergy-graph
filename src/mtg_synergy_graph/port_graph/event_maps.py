@@ -122,17 +122,10 @@ _QUALITY_DISPATCH: dict[str, EventCheck] = {
 
 
 def _default_seed_path() -> Path:
-    """Return the repo-committed seed path, resolving via package
-    resources so the seed ships with installable wheels too."""
-    # ``data/event_match_seed.json`` is tracked at repo root, next
-    # to the other committed audit fixtures. Walk up from this file
-    # to find it; package-resources would require moving the seed
-    # into the package, which is more invasive than a path walk.
-    for candidate in (Path.cwd(), *Path(__file__).resolve().parents):
-        p = candidate / "data" / "event_match_seed.json"
-        if p.exists():
-            return p
-    raise FileNotFoundError("data/event_match_seed.json not found")
+    """Resolve ``data/event_match_seed.json`` via the shared helper."""
+    from ._paths import default_seed_path
+
+    return default_seed_path("event_match_seed.json")
 
 
 def _load_seed_json(path: Path | None = None) -> dict[str, Any]:
@@ -141,7 +134,10 @@ def _load_seed_json(path: Path | None = None) -> dict[str, Any]:
     the JSON fails at import instead of silently producing the
     ``_always`` or a missing entry."""
     seed_path = path or _default_seed_path()
-    data = json.loads(seed_path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(seed_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"corrupt seed at {seed_path}: {exc}") from exc
     for row in data.get("event_match_map", []):
         mq = row.get("match_quality")
         if mq not in MATCH_QUALITIES:
@@ -221,7 +217,14 @@ def load_event_match_map_from_db(
     """
     out: dict[str, dict[str, EventCheck]] = {}
     for row in conn.execute("SELECT from_event, to_event, match_quality FROM event_match_map").fetchall():
-        out.setdefault(row["from_event"], {})[row["to_event"]] = _QUALITY_DISPATCH[row["match_quality"]]
+        fn = _QUALITY_DISPATCH.get(row["match_quality"])
+        if fn is None:
+            raise ValueError(
+                f"event_match_map row {row['from_event']!r} -> {row['to_event']!r}: "
+                f"unknown match_quality {row['match_quality']!r}; "
+                f"valid set is {sorted(_QUALITY_DISPATCH)}"
+            )
+        out.setdefault(row["from_event"], {})[row["to_event"]] = fn
     return out
 
 

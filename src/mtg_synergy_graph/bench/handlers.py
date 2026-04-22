@@ -1,14 +1,18 @@
-"""CLI-layer handlers for ``--repin`` and ``--expect-identity``.
+"""CLI-layer handlers for every ``bench.py audit`` mode.
 
-Keeps the argparse-facing code thin: each handler parses its own args,
-opens the DB, delegates to :mod:`bench.fixture`, and formats a human-
-readable report. The functions here are what :mod:`bench.cli`'s handler
-table binds to at import time (via ``register()``).
+Covers ``--repin``, ``--expect-identity``, ``--rule``, ``--inspect``,
+``--collinearity``, and ``--unknowns``. Keeps the argparse-facing code
+thin: each handler parses its own args, opens the DB, delegates to
+:mod:`bench.fixture` (or the per-mode helpers in this module), and
+formats a human-readable or JSON report. The functions here are what
+:mod:`bench.cli`'s handler table binds to at import time (via
+``register()``).
 """
 
 from __future__ import annotations
 
 import argparse
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -283,37 +287,74 @@ def handle_unknowns(args: argparse.Namespace) -> int:
     see which novel Forge port shapes are most worth adding to the
     canonical vocabulary.
 
-    Emits a Markdown table to stdout. Exit code is always 0 — the
-    command is informational; UNKNOWN rows existing is a normal
-    steady state (Forge ships new mechanics regularly).
+    Emits a Markdown table (or JSON with ``--format json``) to stdout.
+    Exit code is always 0 — the command is informational; UNKNOWN rows
+    existing is a normal steady state (Forge ships new mechanics
+    regularly).
     """
+    if getattr(args, "commander", None):
+        print(
+            "error: --commander is not supported with --unknowns (unknowns are global across all cards).",
+            file=sys.stderr,
+        )
+        return 2
+
     conn = open_db(args.db)
     try:
-        rows = conn.execute(
-            # rank_weight: EDHREC ranks from ~1 (most-played) to ~30000.
-            # Invert so high-rank-popularity contributes more to the
-            # weight; floor at 0 so missing / >30000 ranks don't go
-            # negative. COALESCE handles the LEFT JOIN nulls when a
-            # card_ports row references a name absent from cards
-            # (shouldn't happen but defends against import races).
-            "SELECT pn.subkind, "
-            "       COUNT(DISTINCT pn.card_name) AS distinct_cards, "
-            "       COALESCE("
-            "           SUM(CASE "
-            "                   WHEN c.edhrec_rank IS NULL THEN 0 "
-            "                   WHEN c.edhrec_rank > 30000 THEN 0 "
-            "                   ELSE (30001 - c.edhrec_rank) "
-            "               END), "
-            "           0"
-            "       ) AS rank_weight "
-            "FROM port_nodes pn "
-            "LEFT JOIN cards c ON c.name = pn.card_name "
-            "WHERE pn.node_kind = 'UNKNOWN' "
-            "GROUP BY pn.subkind "
-            "ORDER BY rank_weight DESC, distinct_cards DESC, pn.subkind ASC"
-        ).fetchall()
+        try:
+            rows = conn.execute(
+                # rank_weight: EDHREC ranks from ~1 (most-played) to ~30000.
+                # Invert so high-rank-popularity contributes more to the
+                # weight; floor at 0 so missing / >30000 ranks don't go
+                # negative. COALESCE handles the LEFT JOIN nulls when a
+                # card_ports row references a name absent from cards
+                # (shouldn't happen but defends against import races).
+                "SELECT pn.subkind, "
+                "       COUNT(DISTINCT pn.card_name) AS distinct_cards, "
+                "       COALESCE("
+                "           SUM(CASE "
+                "                   WHEN c.edhrec_rank IS NULL THEN 0 "
+                "                   WHEN c.edhrec_rank > 30000 THEN 0 "
+                "                   ELSE (30001 - c.edhrec_rank) "
+                "               END), "
+                "           0"
+                "       ) AS rank_weight "
+                "FROM port_nodes pn "
+                "LEFT JOIN cards c ON c.name = pn.card_name "
+                "WHERE pn.node_kind = 'UNKNOWN' "
+                "GROUP BY pn.subkind "
+                "ORDER BY rank_weight DESC, distinct_cards DESC, pn.subkind ASC"
+            ).fetchall()
+            total_unknown_cards = conn.execute(
+                "SELECT COUNT(DISTINCT card_name) AS n FROM port_nodes WHERE node_kind = 'UNKNOWN'"
+            ).fetchone()["n"]
+        except sqlite3.OperationalError as exc:
+            print(
+                f"error: port_nodes view not available on {args.db}: {exc}. "
+                "Re-import the DB via scripts/import_cardsfolder.py.",
+                file=sys.stderr,
+            )
+            return 2
     finally:
         conn.close()
+
+    if getattr(args, "format", "md") == "json":
+        import json as _json
+
+        payload = {
+            "total_unknown_subkinds": len(rows),
+            "total_unknown_cards": total_unknown_cards,
+            "rows": [
+                {
+                    "subkind": r["subkind"],
+                    "distinct_cards": r["distinct_cards"],
+                    "rank_weight": int(r["rank_weight"]),
+                }
+                for r in rows
+            ],
+        }
+        print(_json.dumps(payload, indent=2))
+        return 0
 
     print("# bench.py audit --unknowns")
     if not rows:
@@ -321,14 +362,13 @@ def handle_unknowns(args: argparse.Namespace) -> int:
         print("No UNKNOWN port shapes detected.")
         return 0
 
-    total_unknown_cards = sum(r["distinct_cards"] for r in rows)
     print()
     print(f"{len(rows)} distinct UNKNOWN subkind(s) across {total_unknown_cards} card(s).")
     print()
     print(f"{'subkind':<40} {'distinct_cards':>15} {'rank_weight':>14}")
     print("-" * 71)
     for r in rows:
-        print(f"{r['subkind'][:40]:<40} {r['distinct_cards']:>15} {r['rank_weight']:>14,.0f}")
+        print(f"{r['subkind'][:40]:<40} {r['distinct_cards']:>15} {int(r['rank_weight']):>14}")
     return 0
 
 

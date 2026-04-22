@@ -115,6 +115,35 @@ def test_seed_is_idempotent(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_load_from_db_raises_on_unknown_match_quality(tmp_path: Path) -> None:
+    """Inserting a row with an unrecognised ``match_quality`` and then
+    reading it back raises ValueError with the row's from/to context,
+    not an unadorned KeyError."""
+    conn = _fresh_db(tmp_path)
+    try:
+        conn.execute(
+            "INSERT INTO event_match_map (from_event, to_event, match_quality) VALUES (?, ?, ?)",
+            ("FakeFrom", "FakeTo", "typo_quality"),
+        )
+        conn.commit()
+        with pytest.raises(ValueError, match="typo_quality"):
+            load_event_match_map_from_db(conn)
+    finally:
+        conn.close()
+
+
+def test_load_seed_json_raises_on_corrupt_json(tmp_path: Path) -> None:
+    """A truncated / invalid JSON file raises ValueError that includes
+    the file path — not a bare json.JSONDecodeError — so operators
+    know which file to fix."""
+    from mtg_synergy_graph.port_graph.event_maps import _load_seed_json
+
+    bad_file = tmp_path / "event_match_seed.json"
+    bad_file.write_text("{corrupt json", encoding="utf-8")
+    with pytest.raises(ValueError, match=str(bad_file)):
+        _load_seed_json(bad_file)
+
+
 @pytest.mark.parametrize(
     ("trig", "eff", "expected"),
     [
