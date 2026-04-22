@@ -40,22 +40,15 @@ EventCheck = Callable[[PortRow, PortRow], bool]
 
 
 # ---------------------------------------------------------------------------
-# Predicate primitives — historical module-level helpers retained as thin
-# aliases for the canonical implementations in port_graph.event_maps.
-# External code that imported them (tests, ad-hoc scripts) keeps working.
+# Event-map loaders — imported directly from port_graph.event_maps so
+# EVENT_MATCH_MAP / COST_FEEDS_TRIGGER can be populated at module-import
+# time without a runtime alias layer.
 # ---------------------------------------------------------------------------
 
-from .port_graph import event_maps as _event_maps  # noqa: E402
-
-# Re-export legacy predicate helpers. ``complement_rules.core`` and other
-# modules import these by name directly from ``graph_engine``; kept as
-# aliases to the canonical implementations in ``port_graph.event_maps``
-# so a single definition change flows through.
-_always = _event_maps._always
-_zones_compatible = _event_maps._zones_compatible
-_counters_compatible = _event_maps._counters_compatible
-load_event_match_map_from_json = _event_maps.load_event_match_map_from_json
-load_cost_feeds_trigger_from_json = _event_maps.load_cost_feeds_trigger_from_json
+from .port_graph.event_maps import (  # noqa: E402
+    load_cost_feeds_trigger_from_json,
+    load_event_match_map_from_json,
+)
 
 #: Triggers whose semantic is "the candidate card itself, when cast/played/
 #: attacking, is the event" — these are NOT matched against arbitrary effect

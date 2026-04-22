@@ -38,9 +38,12 @@ from typing import Any
 from .vocabulary import GATE_OPS
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class RuleRow:
     """Typed view over one row of the ``rules`` table.
+
+    The constructor is keyword-only (``kw_only=True``) to prevent
+    positional-argument mistakes when column ordering changes.
 
     The JSON predicate columns are stored as ``str`` in SQLite and
     kept as ``str`` here too — callers who need the parsed tree use
@@ -119,30 +122,54 @@ def validate_gate_predicate(predicate: Any, *, path: str = "$") -> None:
 def _load_seed_json(path: Path | None = None) -> dict[str, Any]:
     """Load and parse ``data/rules_seed.json``."""
     seed_path = path or _default_seed_path()
-    return json.loads(seed_path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(seed_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"corrupt seed at {seed_path}: {exc}") from exc
 
 
 def _default_seed_path() -> Path:
-    """Resolve the committed rules-seed JSON path; walk up from the
-    package location to find the repo-root ``data/`` directory so
-    installs and source checkouts both work."""
-    for candidate in (Path.cwd(), *Path(__file__).resolve().parents):
-        p = candidate / "data" / "rules_seed.json"
-        if p.exists():
-            return p
-    raise FileNotFoundError("data/rules_seed.json not found")
+    """Resolve ``data/rules_seed.json`` via the shared helper."""
+    from ._paths import default_seed_path
+
+    return default_seed_path("rules_seed.json")
 
 
 def _validate_row(row: dict[str, Any]) -> None:
-    """Validate the three predicate columns of a single seed row.
-    Raises ``ValueError`` with a ``rule_id``-qualified path on any
-    violation."""
+    """Validate predicate columns + scalar types on a seed row.
+    Raises ``ValueError`` with a ``rule_id``-qualified message on any
+    violation — the executemany loop should never see a row that
+    could raise a coercion error."""
     rule_id = row.get("rule_id", "<unknown>")
     for column in ("gate_predicate", "commander_port_predicate", "candidate_port_predicate"):
         predicate = row.get(column)
         if predicate is None:
             raise ValueError(f"rule {rule_id!r}: missing required column {column!r}")
         validate_gate_predicate(predicate, path=f"rule[{rule_id!r}].{column}")
+    # Scalar-type pre-check so executemany never raises an uncontexted
+    # TypeError on float() / int() coercion.
+    try:
+        float(row.get("weight_hint", 1.0))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"rule {rule_id!r}: weight_hint must be numeric, got {row.get('weight_hint')!r}") from exc
+    try:
+        int(row.get("active", 1))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"rule {rule_id!r}: active must be int-coercible, got {row.get('active')!r}") from exc
+    # Plan 003 Unit 8: tribal-family rules encode the same event_class
+    # in 5 places per row. A copy-paste mismatch produces silently
+    # wrong scoring. Reject at seed time.
+    if row.get("family") == "tribal":
+        gate_ev = row.get("gate_predicate", {}).get("event_class")
+        cmdr_ev = row.get("commander_port_predicate", {}).get("event_class")
+        cand_args = row.get("candidate_port_predicate", {}).get("args") or []
+        cand_ev = cand_args[0].get("event_class") if cand_args else None
+        if not (gate_ev == cmdr_ev == cand_ev):
+            raise ValueError(
+                f"rule {rule_id!r} (family=tribal): event_class mismatch — "
+                f"gate={gate_ev!r}, commander_port={cmdr_ev!r}, "
+                f"candidate_port={cand_ev!r}; all three must match."
+            )
 
 
 def seed_rules_db(
@@ -167,28 +194,28 @@ def seed_rules_db(
     for row in rows:
         _validate_row(row)
 
-    conn.executemany(
-        "INSERT OR REPLACE INTO rules "
-        "(rule_id, family, gate_predicate, commander_port_predicate, "
-        "candidate_port_predicate, filter_group, cmdr_event, cand_event, "
-        "weight_hint, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [
-            (
-                row["rule_id"],
-                row["family"],
-                json.dumps(row["gate_predicate"]),
-                json.dumps(row["commander_port_predicate"]),
-                json.dumps(row["candidate_port_predicate"]),
-                row.get("filter_group", ""),
-                row["cmdr_event"],
-                row["cand_event"],
-                float(row.get("weight_hint", 1.0)),
-                int(row.get("active", 1)),
-            )
-            for row in rows
-        ],
-    )
-    conn.commit()
+    with conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO rules "
+            "(rule_id, family, gate_predicate, commander_port_predicate, "
+            "candidate_port_predicate, filter_group, cmdr_event, cand_event, "
+            "weight_hint, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    row["rule_id"],
+                    row["family"],
+                    json.dumps(row["gate_predicate"]),
+                    json.dumps(row["commander_port_predicate"]),
+                    json.dumps(row["candidate_port_predicate"]),
+                    row.get("filter_group", ""),
+                    row["cmdr_event"],
+                    row["cand_event"],
+                    float(row.get("weight_hint", 1.0)),
+                    int(row.get("active", 1)),
+                )
+                for row in rows
+            ],
+        )
     return len(rows)
 
 

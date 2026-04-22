@@ -24,14 +24,16 @@ from ..graph_engine import (
     COST_FEEDS_TRIGGER,
     EVENT_MATCH_MAP,
     REPLACEMENT_BLOCKS_TRIGGER,
-    _always,
-    _counters_compatible,
     _effect_produced_attrs,
     _trigger_only_matches_self,
-    _zones_compatible,
     load_ports_for_set,
 )
 from ..penalties import CandidateCache, _token_subtype
+from ..port_graph.event_maps import (
+    _always,
+    _counters_compatible,
+    _zones_compatible,
+)
 
 PortRow = dict[str, Any]
 EventCheck = Callable[[PortRow, PortRow], bool]

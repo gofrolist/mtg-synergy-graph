@@ -467,6 +467,46 @@ def test_interpreter_multiple_rules_fire_independently(tmp_path: Path) -> None:
         conn.close()
 
 
+def test_gate_zone_eq_rejects_invalid_zone() -> None:
+    """``zone_eq`` with an unknown zone value raises ValueError at
+    compile time — mis-wired seed JSON fails loudly rather than
+    silently matching the wrong column."""
+    with pytest.raises(ValueError, match=r"unknown zone"):
+        _compile_gate_predicate({"op": "zone_eq", "zone": "unknown", "value": "x"})
+
+
+def test_candidate_tribe_compiles_to_like() -> None:
+    """``tribe`` leaf emits a LIKE fragment against ``valid_filter``."""
+    c = _compile_candidate_predicate({"op": "tribe", "name": "Elf"})
+    assert c.sql == "valid_filter LIKE ?"
+    assert c.static_params == ("%Elf%",)
+    assert c.needs_commander_set is False
+
+
+def test_candidate_color_compiles_to_like() -> None:
+    """``color`` leaf emits a LIKE fragment against ``valid_filter``."""
+    c = _compile_candidate_predicate({"op": "color", "color": "G"})
+    assert c.sql == "valid_filter LIKE ?"
+    assert c.static_params == ("%G%",)
+    assert c.needs_commander_set is False
+
+
+def test_gate_tribe_matches_substring_in_filter() -> None:
+    """Gate callable for ``tribe`` returns True when the tribe name
+    appears anywhere in the port's ``valid_filter`` string."""
+    gate = _compile_gate_predicate({"op": "tribe", "name": "Elf"})
+    assert gate({"valid_filter": "Creature.Elf.YouCtrl"}) is True
+    assert gate({"valid_filter": "Creature.Wizard.YouCtrl"}) is False
+    assert gate({"valid_filter": None}) is False
+
+
+def test_candidate_zone_eq_origin() -> None:
+    """``zone_eq`` with ``zone='origin'`` compiles to ``zone_origin = ?``."""
+    c = _compile_candidate_predicate({"op": "zone_eq", "zone": "origin", "value": "Hand"})
+    assert c.sql == "zone_origin = ?"
+    assert c.static_params == ("Hand",)
+
+
 def test_interpreter_empty_commander_set_still_queries(tmp_path: Path) -> None:
     """An empty ``cmdr_set`` (edge case — shouldn't happen in
     production but defended at the boundary) falls back to a

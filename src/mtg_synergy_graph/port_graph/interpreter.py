@@ -46,6 +46,11 @@ from typing import Any
 from ..complement_rules.core import PortComplement, PortRow
 from .rules_schema import RuleRow, load_rules_from_db, validate_gate_predicate
 
+#: Accepted ``zone`` values for the ``zone_eq`` leaf op. Kept as a
+#: frozenset so both compilers can validate consistently (CLAUDE.md
+#: convention: frozenset + ValueError, never assert).
+_VALID_ZONES: frozenset[str] = frozenset({"destination", "origin"})
+
 # ---------------------------------------------------------------------------
 # Compiled predicates
 # ---------------------------------------------------------------------------
@@ -143,20 +148,15 @@ def _compile_candidate_predicate(predicate: dict[str, Any]) -> _CompiledCandidat
 
     if op == "zone_eq":
         zone = predicate["zone"]
+        if zone not in _VALID_ZONES:
+            raise ValueError(f"zone_eq: unknown zone {zone!r}; expected one of {sorted(_VALID_ZONES)}")
         value = predicate["value"]
-        if zone == "destination":
-            return _CompiledCandidate(
-                sql="zone_destination = ?",
-                static_params=(value,),
-                needs_commander_set=False,
-            )
-        if zone == "origin":
-            return _CompiledCandidate(
-                sql="zone_origin = ?",
-                static_params=(value,),
-                needs_commander_set=False,
-            )
-        raise ValueError(f"zone_eq: unknown zone {zone!r}; expected 'origin' or 'destination'")
+        column = "zone_destination" if zone == "destination" else "zone_origin"
+        return _CompiledCandidate(
+            sql=f"{column} = ?",
+            static_params=(value,),
+            needs_commander_set=False,
+        )
 
     if op == "counter_type":
         return _CompiledCandidate(
@@ -246,6 +246,8 @@ def _compile_gate_predicate(predicate: dict[str, Any]) -> GatePredicate:
 
     if op == "zone_eq":
         zone = predicate["zone"]
+        if zone not in _VALID_ZONES:
+            raise ValueError(f"zone_eq: unknown zone {zone!r}; expected one of {sorted(_VALID_ZONES)}")
         value = predicate["value"]
         field = "zone_destination" if zone == "destination" else "zone_origin"
         return lambda port: (port.get(field) or "").strip() == value
