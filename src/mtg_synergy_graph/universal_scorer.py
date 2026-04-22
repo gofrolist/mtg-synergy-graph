@@ -74,6 +74,7 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "value_engine": "spellcast_density",
     "cheat_cmc": "port_match",
     "cost_reduction_target": "port_match",
+    "land_to_gy_synergy": "port_match",
     "toughness_synergy": "scaling",
     "cascade_value": "port_match",
     "flicker_payoff": "port_match",

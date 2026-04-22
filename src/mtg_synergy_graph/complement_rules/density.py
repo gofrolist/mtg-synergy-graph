@@ -1464,6 +1464,101 @@ def _find_cost_reduction_targets(
     return results
 
 
+def _find_land_to_gy_synergy(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Land-to-graveyard payoffs for Gitrog / Titania Voice of Gaea.
+
+    These commanders trigger on ``ChangesZoneAll Any→Graveyard`` with
+    ``valid_filter='Land*'``. Their mechanical demand is:
+
+    1. Feeders — cards that put lands in the graveyard (sac-a-land
+       costs, dredge). These directly feed the commander's trigger.
+    2. Recursion — cards that use lands FROM the graveyard (MayPlay
+       statics like Crucible of Worlds / Ramunap Excavator, or
+       GY→Hand/Battlefield ChangeZone effects like Life from the Loam
+       / Splendid Reclamation). Secondary payoff: lands keep
+       cycling through the graveyard.
+
+    Split into two ``filter_group`` buckets so IDF sizes each pool
+    separately (feeders ≈ 120 cards, recursion ≈ 56 cards).
+
+    Gate population is 2 commanders by design — narrow high-signal
+    rule, same pattern as ``cascade_tribal``.
+    """
+    has_land_gy_trigger = False
+    for p in cmdr_ports:
+        pt = (p.get("port_type") or "").strip()
+        ev = (p.get("event_class") or "").strip()
+        if pt != "trigger" or ev not in ("ChangesZoneAll", "ChangesZone"):
+            continue
+        if (p.get("zone_destination") or "").strip() != "Graveyard":
+            continue
+        vf = (p.get("valid_filter") or "").strip()
+        if "Land" in vf:
+            has_land_gy_trigger = True
+            break
+
+    if not has_land_gy_trigger:
+        return []
+
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+
+    feeder_rows = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE (port_type='cost' AND event_class='sacrifice' "
+        "       AND (raw_line LIKE '%/Land>%' OR raw_line LIKE '%Land<%')) "
+        "   OR (port_type='keyword' AND event_class LIKE 'Dredge%')"
+    )
+    for r in feeder_rows:
+        name = r["card_name"]
+        if name in cmdr_set or name in seen:
+            continue
+        seen.add(name)
+        results.append(
+            PortComplement(
+                rule_id="land_to_gy_synergy",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="land_to_graveyard",
+                cand_event="feeder",
+                filter_group="feeder",
+            )
+        )
+
+    recursion_rows = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE (port_type='static' AND event_class='Continuous' "
+        "       AND raw_line LIKE '%Land.YouOwn%' "
+        "       AND raw_line LIKE '%MayPlay%' "
+        "       AND raw_line LIKE '%Graveyard%') "
+        "   OR (port_type='effect' AND event_class='ChangeZone' "
+        "       AND zone_origin='Graveyard' "
+        "       AND zone_destination IN ('Hand','Battlefield') "
+        "       AND valid_filter LIKE '%Land%')"
+    )
+    for r in recursion_rows:
+        name = r["card_name"]
+        if name in cmdr_set or name in seen:
+            continue
+        seen.add(name)
+        results.append(
+            PortComplement(
+                rule_id="land_to_gy_synergy",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="land_to_graveyard",
+                cand_event="recursion",
+                filter_group="recursion",
+            )
+        )
+
+    return results
+
+
 def _find_toughness_matters(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],

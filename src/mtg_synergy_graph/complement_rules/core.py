@@ -1033,6 +1033,7 @@ from .density import (  # noqa: E402
     _find_counter_doubler_synergy,
     _find_counter_keyword_synergy,
     _find_etb_self_complements,
+    _find_land_to_gy_synergy,
     _find_lord_complements,
     _find_proliferate_synergy,
     _find_scales_with_density,
@@ -1277,6 +1278,7 @@ def find_all_complements(
         out.extend(_find_mana_doubler_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_graveyard_sac_value(conn, cmdr_ports, cmdr_set))
         out.extend(_find_cost_reduction_targets(conn, cmdr_ports, cmdr_set, candidate_cache))
+        out.extend(_find_land_to_gy_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_toughness_matters(conn, cmdr_ports, cmdr_set))
         out.extend(_find_cascade_value(conn, cmdr_ports, cmdr_set))
         out.extend(_find_flicker_payoffs(conn, cmdr_ports, cmdr_set))

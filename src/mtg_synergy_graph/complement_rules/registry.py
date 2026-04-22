@@ -460,6 +460,17 @@ def _toughness_gate(port: PortRow) -> bool:
     return "CardToughness" in (port.get("event_class") or "")
 
 
+def _land_to_gy_gate(port: PortRow) -> bool:
+    """Commander has a land-to-graveyard trigger (Gitrog, Titania Voice)."""
+    if (port.get("port_type") or "").strip() != "trigger":
+        return False
+    if (port.get("event_class") or "").strip() not in ("ChangesZoneAll", "ChangesZone"):
+        return False
+    if (port.get("zone_destination") or "").strip() != "Graveyard":
+        return False
+    return "Land" in (port.get("valid_filter") or "")
+
+
 # ---------------------------------------------------------------------------
 # Batch 2: registry sweep (2026-04-18) — one-line gates per helper
 # ---------------------------------------------------------------------------
@@ -724,6 +735,7 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("graveyard_play", _graveyard_play_gate),
     RuleGate("gy_loader", _gy_loader_gate),
     RuleGate("cost_reduction_target", _cost_reduction_gate),
+    RuleGate("land_to_gy_synergy", _land_to_gy_gate),
     RuleGate("spell_density", _spellcast_density_gate),
     RuleGate("spellcast_resonance", _spellcast_density_gate),
     RuleGate("toughness_synergy", _toughness_gate),
