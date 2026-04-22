@@ -9,7 +9,6 @@ movement. Unit 5 will layer the rank-shuffle histogram verdict on top.
 from __future__ import annotations
 
 import json
-from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -155,42 +154,18 @@ def _commander_delta(pinned: Any, live: Any) -> CommanderDelta:  # FixtureEntry;
     )
 
 
-def _build_rule_deltas(pinned_by_cmdr: dict[str, Any], live_by_cmdr: dict[str, Any]) -> list[RuleDelta]:
-    """Roll up tensor_rows across (cmdr, cand) grouped by rule_id."""
-    per_rule_delta: dict[str, float] = defaultdict(float)
-    per_rule_cmdrs: dict[str, set[str]] = defaultdict(set)
-    per_rule_cands: dict[str, set[str]] = defaultdict(set)
+def _build_rule_deltas(
+    pinned_by_cmdr: dict[str, Any],
+    live_by_cmdr: dict[str, Any],
+) -> list[RuleDelta]:
+    """Per-rule rollup lives in SQLite now (see ``bench.rule_ops``).
 
-    all_cmdrs = set(pinned_by_cmdr) | set(live_by_cmdr)
-    for cmdr in all_cmdrs:
-        pinned_entry = pinned_by_cmdr.get(cmdr)
-        live_entry = live_by_cmdr.get(cmdr)
-        pinned_tensor = (
-            {(r.candidate, r.rule_id): r.contribution for r in pinned_entry.tensor_rows}
-            if pinned_entry is not None
-            else {}
-        )
-        live_tensor = (
-            {(r.candidate, r.rule_id): r.contribution for r in live_entry.tensor_rows} if live_entry is not None else {}
-        )
-        all_keys = set(pinned_tensor) | set(live_tensor)
-        for cand, rule_id in all_keys:
-            p = pinned_tensor.get((cand, rule_id), 0.0)
-            q = live_tensor.get((cand, rule_id), 0.0)
-            if p != q:
-                per_rule_delta[rule_id] += q - p
-                per_rule_cmdrs[rule_id].add(cmdr)
-                per_rule_cands[rule_id].add(cand)
-
-    return [
-        RuleDelta(
-            rule_id=rule_id,
-            contribution_delta_sum=delta,
-            commanders_touched=len(per_rule_cmdrs[rule_id]),
-            candidates_touched=len(per_rule_cands[rule_id]),
-        )
-        for rule_id, delta in per_rule_delta.items()
-    ]
+    The fixture JSON no longer carries tensor rows — they're in the
+    ``rule_contributions`` table, reached via ``bench.py audit --rule``.
+    Returning an empty list here keeps the ``AuditReport`` shape stable
+    while the rollup moves to its proper home in a follow-up.
+    """
+    return []
 
 
 # ---------------------------------------------------------------------------

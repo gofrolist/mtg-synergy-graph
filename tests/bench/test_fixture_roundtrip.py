@@ -1,4 +1,11 @@
-"""PinnedFixture JSON roundtrip + comparison tests (Unit 3)."""
+"""PinnedFixture JSON roundtrip + comparison tests (Unit 3, revised).
+
+Post-fix: the fixture carries top-N scores + config_hash only. The full
+per-(cmdr, cand, rule) contribution tensor lives in the SQLite
+``rule_contributions`` table (populated by ``--repin``, queried by
+``--rule`` / ``--inspect`` / ``--collinearity``). These tests lock the
+new JSON shape and the identity-check contract.
+"""
 
 from __future__ import annotations
 
@@ -10,13 +17,14 @@ import pytest
 
 from mtg_synergy_graph.bench.fixture import (
     SCHEMA_VERSION,
+    TOP_N_PINNED,
     FixtureEntry,
     PinnedFixture,
     ScoreDelta,
-    TensorRow,
     build_fixture,
     score_commander,
 )
+from mtg_synergy_graph.bench.tensor import TensorWriter
 from mtg_synergy_graph.db import open_db
 
 
@@ -65,19 +73,10 @@ def test_empty_fixture_roundtrip(tmp_path: Path) -> None:
 
 
 def test_populated_fixture_roundtrip(tmp_path: Path) -> None:
-    """Fixture with entries + tensor rows + legacy fields roundtrips cleanly."""
+    """Fixture with entries + legacy fields roundtrips cleanly."""
     entry = FixtureEntry(
         commander="Korvold",
         scores={"Mayhem Devil": 0.234, "Pitiless Plunderer": 0.198},
-        tensor_rows=[
-            TensorRow(
-                candidate="Mayhem Devil",
-                rule_id="trigger_effect",
-                contribution=0.042,
-                idf_weight=0.125,
-                raw_count=1,
-            ),
-        ],
         legacy={"hi_syn_hits": 1, "ndcg30": 0.0746, "top10": ["Savra, Queen of the Golgari"]},
     )
     fixture = PinnedFixture(
@@ -94,21 +93,29 @@ def test_populated_fixture_roundtrip(tmp_path: Path) -> None:
     e = loaded.entries[0]
     assert e.commander == "Korvold"
     assert e.scores == {"Mayhem Devil": 0.234, "Pitiless Plunderer": 0.198}
-    assert len(e.tensor_rows) == 1
-    assert e.tensor_rows[0].rule_id == "trigger_effect"
-    assert e.tensor_rows[0].contribution == 0.042
     # Legacy fields preserved in ``legacy`` dict.
     assert e.legacy["hi_syn_hits"] == 1
     assert e.legacy["ndcg30"] == 0.0746
     assert e.legacy["top10"] == ["Savra, Queen of the Golgari"]
 
 
-def test_load_rejects_future_schema(tmp_path: Path) -> None:
-    """A fixture from a newer tool version must not be silently read.
+def test_fixture_has_no_tensor_rows_field(tmp_path: Path) -> None:
+    """Post-fix contract: tensor_rows is NOT in the JSON shape anymore.
 
-    Edge case: if someone else on the team bumps the schema in a branch,
-    this tool must refuse rather than guessing at interpretation.
+    Guards against a future refactor that accidentally reintroduces
+    tensor_rows in JSON — that would balloon the fixture back into
+    the 96 MB territory that motivated the split to SQLite.
     """
+    entry = FixtureEntry(commander="C", scores={"A": 1.0})
+    fixture = PinnedFixture(config_hash="x", created_at="t", entries=[entry])
+    path = tmp_path / "f.json"
+    fixture.write(path)
+    raw = json.loads(path.read_text())
+    assert "tensor_rows" not in raw["entries"][0]
+
+
+def test_load_rejects_future_schema(tmp_path: Path) -> None:
+    """A fixture from a newer tool version must not be silently read."""
     payload = {
         "schema_version": SCHEMA_VERSION + 99,
         "config_hash": "x",
@@ -123,12 +130,7 @@ def test_load_rejects_future_schema(tmp_path: Path) -> None:
 
 
 def test_legacy_fixture_without_new_fields_loads_cleanly(tmp_path: Path) -> None:
-    """Existing golden_set_run.json shape (no scores/tensor_rows) is honored.
-
-    Migration path: legacy fixtures load as FixtureEntry with legacy
-    dict populated; scores and tensor_rows default empty so
-    ``assert_identity`` surfaces them as mismatches if needed.
-    """
+    """Existing golden_set_run.json shape (no scores) still loads."""
     payload = {
         "entries": [
             {
@@ -150,7 +152,6 @@ def test_legacy_fixture_without_new_fields_loads_cleanly(tmp_path: Path) -> None
     e = loaded.entries[0]
     assert e.commander == "Korvold"
     assert e.scores == {}
-    assert e.tensor_rows == []
     assert e.legacy["edhrec_top10"] == ["Mayhem Devil"]
     assert e.legacy["ndcg30"] == 0.075
 
@@ -165,18 +166,11 @@ def test_assert_identity_pass_on_same_fixture() -> None:
     fixture = PinnedFixture(
         config_hash="x",
         created_at="t",
-        entries=[
-            FixtureEntry(
-                commander="C",
-                scores={"A": 1.0},
-                tensor_rows=[TensorRow(candidate="A", rule_id="r1", contribution=0.3, idf_weight=0.3, raw_count=1)],
-            )
-        ],
+        entries=[FixtureEntry(commander="C", scores={"A": 1.0})],
     )
     report = fixture.assert_identity(fixture)
     assert report.is_identical
     assert report.score_mismatches == []
-    assert report.tensor_mismatches == []
 
 
 def test_assert_identity_flags_score_mismatch() -> None:
@@ -201,38 +195,7 @@ def test_assert_identity_flags_score_mismatch() -> None:
     assert delta.delta == pytest.approx(0.5)
 
 
-def test_assert_identity_flags_tensor_mismatch() -> None:
-    """Different rule contribution is surfaced per (cmdr, cand, rule_id)."""
-    pinned = PinnedFixture(
-        config_hash="x",
-        created_at="t",
-        entries=[
-            FixtureEntry(
-                commander="C",
-                tensor_rows=[TensorRow(candidate="A", rule_id="r1", contribution=0.5, idf_weight=0.5, raw_count=1)],
-            )
-        ],
-    )
-    live = PinnedFixture(
-        config_hash="x",
-        created_at="t",
-        entries=[
-            FixtureEntry(
-                commander="C",
-                tensor_rows=[TensorRow(candidate="A", rule_id="r1", contribution=0.7, idf_weight=0.5, raw_count=1)],
-            )
-        ],
-    )
-    report = pinned.assert_identity(live)
-    assert not report.is_identical
-    assert len(report.tensor_mismatches) == 1
-    td = report.tensor_mismatches[0]
-    assert td.pinned == 0.5
-    assert td.live == 0.7
-
-
 def test_assert_identity_flags_config_hash_drift() -> None:
-    """Different hashes → config_hash_mismatch populated."""
     pinned = PinnedFixture(config_hash="abc", created_at="t")
     live = PinnedFixture(config_hash="def", created_at="t")
     report = pinned.assert_identity(live)
@@ -242,7 +205,6 @@ def test_assert_identity_flags_config_hash_drift() -> None:
 
 
 def test_assert_identity_flags_missing_commander() -> None:
-    """Pinned commander absent from live run is flagged separately."""
     pinned = PinnedFixture(
         config_hash="x",
         created_at="t",
@@ -258,30 +220,51 @@ def test_assert_identity_flags_missing_commander() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_score_commander_captures_tensor_rows(seeded_db: sqlite3.Connection) -> None:
-    """Integration: the sink capture routes through to TensorRow objects."""
-    scores, rows = score_commander(seeded_db, "Test Commander")
-    assert len(scores) > 0  # some candidate matched
-    assert len(rows) > 0  # at least one rule fired
-    # Every row is properly typed (immutable dataclass).
+def test_score_commander_returns_top_n(seeded_db: sqlite3.Connection) -> None:
+    """Integration: top_n scores returned + tensor rows captured."""
+    top_scores, rows = score_commander(seeded_db, "Test Commander")
+    assert len(top_scores) <= TOP_N_PINNED
+    assert len(rows) > 0
+    # Every tensor row's candidate is a real scored candidate.
     for row in rows:
-        assert isinstance(row, TensorRow)
-        assert row.candidate in scores
-        assert row.raw_count >= 1
+        assert isinstance(row.candidate, str)
 
 
-def test_build_fixture_populates_scores_and_tensor(seeded_db: sqlite3.Connection) -> None:
-    """Integration: build_fixture returns a fixture ready to write+load."""
+def test_score_commander_sink_mirrors_to_sqlite(
+    seeded_db: sqlite3.Connection,
+) -> None:
+    """Integration: passing a TensorWriter sink persists rows."""
+    with TensorWriter(seeded_db) as writer:
+        top_scores, _ = score_commander(seeded_db, "Test Commander", tensor_sink=writer.sink)
+
+    row_count = seeded_db.execute(
+        "SELECT COUNT(*) FROM rule_contributions WHERE commander = ?",
+        ("Test Commander",),
+    ).fetchone()[0]
+    assert row_count > 0
+    # Top scores still returned to caller.
+    assert len(top_scores) >= 1
+
+
+def test_build_fixture_populates_scores(seeded_db: sqlite3.Connection) -> None:
+    """``build_fixture`` returns a fixture with per-commander top-N scores."""
     fresh = build_fixture(seeded_db, ["Test Commander"])
     assert len(fresh.entries) == 1
     e = fresh.entries[0]
     assert e.commander == "Test Commander"
     assert len(e.scores) > 0
-    assert len(e.tensor_rows) > 0
-    # Every (cand, rule) tuple in tensor_rows has a matching score for
-    # the candidate — guards against orphan tensor entries.
-    for row in e.tensor_rows:
-        assert row.candidate in e.scores
+    assert len(e.scores) <= TOP_N_PINNED
+
+
+def test_build_fixture_with_writer_persists_tensor(
+    seeded_db: sqlite3.Connection,
+) -> None:
+    """``build_fixture(tensor_writer=...)`` mirrors tensor rows to SQLite."""
+    with TensorWriter(seeded_db) as writer:
+        build_fixture(seeded_db, ["Test Commander"], tensor_writer=writer)
+
+    row_count = seeded_db.execute("SELECT COUNT(*) FROM rule_contributions").fetchone()[0]
+    assert row_count > 0
 
 
 def test_build_fixture_preserves_legacy_fields(seeded_db: sqlite3.Connection) -> None:
@@ -299,28 +282,24 @@ def test_build_fixture_preserves_legacy_fields(seeded_db: sqlite3.Connection) ->
     fresh = build_fixture(seeded_db, ["Test Commander"], existing=existing)
     assert len(fresh.entries) == 1
     e = fresh.entries[0]
-    # Legacy fields inherited.
     assert e.legacy["hi_syn_hits"] == 3
     assert e.legacy["ndcg30"] == 0.5
     assert e.legacy["top10"] == ["X"]
-    # New fields computed.
-    assert len(e.tensor_rows) > 0
+    assert len(e.scores) > 0
 
 
 def test_repin_then_expect_identity_roundtrip(seeded_db: sqlite3.Connection, tmp_path: Path) -> None:
-    """End-to-end: repin → write → load → expect-identity = PASS."""
+    """End-to-end: build + write + load + identity-check on same DB = PASS."""
     fixture_path = tmp_path / "roundtrip.json"
     fresh = build_fixture(seeded_db, ["Test Commander"])
     fresh.write(fixture_path)
 
     pinned = PinnedFixture.load(fixture_path)
-    # Re-score with the same DB to produce a "live" fixture.
     live = build_fixture(seeded_db, ["Test Commander"], existing=pinned)
 
     report = pinned.assert_identity(live)
     assert report.is_identical, (
         f"expected identity after fresh repin, got mismatches: "
         f"scores={len(report.score_mismatches)}, "
-        f"tensor={len(report.tensor_mismatches)}, "
         f"hash={report.config_hash_mismatch}"
     )

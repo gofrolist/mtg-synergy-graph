@@ -12,7 +12,6 @@ from mtg_synergy_graph.bench.audit import run_audit
 from mtg_synergy_graph.bench.fixture import (
     FixtureEntry,
     PinnedFixture,
-    TensorRow,
     build_fixture,
 )
 from mtg_synergy_graph.bench.report import build_report
@@ -64,13 +63,7 @@ def _prepin(db_path: Path, fixture_path: Path, commanders: list[str]) -> None:
 
 def test_build_report_clean_pass() -> None:
     """Pinned == live → identical report, aggregate delta 0."""
-    entry = FixtureEntry(
-        commander="C",
-        scores={"A": 1.0, "B": 0.5},
-        tensor_rows=[
-            TensorRow(candidate="A", rule_id="r1", contribution=0.5, idf_weight=0.5, raw_count=1),
-        ],
-    )
+    entry = FixtureEntry(commander="C", scores={"A": 1.0, "B": 0.5})
     pinned = PinnedFixture(config_hash="x", created_at="t", entries=[entry])
     live = PinnedFixture(config_hash="x", created_at="t", entries=[entry])
 
@@ -80,6 +73,7 @@ def test_build_report_clean_pass() -> None:
     assert report.per_commander[0].score_delta_sum == 0.0
     assert report.per_commander[0].added_to_top30 == ()
     assert report.per_commander[0].removed_from_top30 == ()
+    # per_rule rollup moved to SQLite; build_report no longer populates it.
     assert report.per_rule == []
 
 
@@ -119,33 +113,24 @@ def test_build_report_top30_add_remove() -> None:
     assert "cand_29" in cd.removed_from_top30
 
 
-def test_build_report_rule_rollup() -> None:
-    """Tensor drift rolls up into per-rule deltas with cmdr/cand counts."""
-    pinned_entry = FixtureEntry(
-        commander="C",
-        scores={"A": 0.5},
-        tensor_rows=[
-            TensorRow(candidate="A", rule_id="r1", contribution=0.5, idf_weight=0.5, raw_count=1),
-        ],
-    )
-    live_entry = FixtureEntry(
-        commander="C",
-        scores={"A": 0.8},
-        tensor_rows=[
-            TensorRow(candidate="A", rule_id="r1", contribution=0.8, idf_weight=0.5, raw_count=1),
-        ],
-    )
+def test_build_report_rule_rollup_deferred_to_sqlite() -> None:
+    """Post-fix: per-rule rollup lives in SQLite (queried via ``--rule``).
+
+    ``build_report`` returns an empty ``per_rule`` list — rule-level
+    analysis runs against ``rule_contributions`` via ``bench.py audit
+    --rule RULE_ID`` instead. This test guards against a regression that
+    tries to reintroduce tensor_rows into the JSON fixture.
+    """
+    pinned_entry = FixtureEntry(commander="C", scores={"A": 0.5})
+    live_entry = FixtureEntry(commander="C", scores={"A": 0.8})
 
     pinned = PinnedFixture(config_hash="x", created_at="t", entries=[pinned_entry])
     live = PinnedFixture(config_hash="x", created_at="t", entries=[live_entry])
 
     report = build_report("baseline.json", pinned, live)
-    assert len(report.per_rule) == 1
-    rd = report.per_rule[0]
-    assert rd.rule_id == "r1"
-    assert rd.contribution_delta_sum == pytest.approx(0.3)
-    assert rd.commanders_touched == 1
-    assert rd.candidates_touched == 1
+    assert report.per_rule == []
+    # The score-level delta is still present.
+    assert report.aggregate_score_delta == pytest.approx(0.3)
 
 
 # ---------------------------------------------------------------------------

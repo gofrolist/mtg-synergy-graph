@@ -71,12 +71,31 @@ def handle_repin(args: argparse.Namespace) -> int:
     commanders = _load_commanders_from_fixture(existing)
     conn = open_db(args.db)
     try:
-        fresh = build_fixture(conn, commanders, existing=existing)
+        # Clear any stale rows for the current config_hash before
+        # repopulating; TensorWriter's INSERT OR REPLACE handles the
+        # per-primary-key case but a rule that no longer fires would
+        # leave an orphan row otherwise.
+        from mtg_synergy_graph.bench.tensor import (  # local import: avoid cycle
+            TensorWriter,
+            compute_config_hash,
+        )
+
+        live_hash = compute_config_hash()
+        conn.execute("DELETE FROM rule_contributions WHERE config_hash = ?", (live_hash,))
+        conn.commit()
+
+        writer = TensorWriter(conn, config_hash=live_hash)
+        with writer:
+            fresh = build_fixture(conn, commanders, existing=existing, tensor_writer=writer)
+        # rows_written is updated on _flush(), which __exit__ calls via close().
+        rows_written = writer.rows_written
     finally:
         conn.close()
     fresh.write(fixture_path)
     print(
-        f"--repin wrote {len(fresh.entries)} commanders to {fixture_path} (config_hash={fresh.config_hash[:12]}...)",
+        f"--repin wrote {len(fresh.entries)} commanders to {fixture_path} "
+        f"(config_hash={fresh.config_hash[:12]}..., "
+        f"tensor rows persisted to SQLite: ~{rows_written})",
         file=sys.stderr,
     )
     return 0
@@ -159,18 +178,6 @@ def _print_identity_report(report: IdentityReport, fixture_path: Path) -> None:
                 f"  {delta.commander} / {delta.candidate}: "
                 f"live={delta.live:.9f} pinned={delta.pinned:.9f} "
                 f"(Δ={delta.delta:+.9f})",
-                file=sys.stderr,
-            )
-
-    if report.tensor_mismatches:
-        print(
-            f"tensor mismatches: {len(report.tensor_mismatches)}",
-            file=sys.stderr,
-        )
-        for tdelta in report.tensor_mismatches[:10]:
-            print(
-                f"  {tdelta.commander} / {tdelta.candidate} / "
-                f"{tdelta.rule_id}: live={tdelta.live} pinned={tdelta.pinned}",
                 file=sys.stderr,
             )
 
