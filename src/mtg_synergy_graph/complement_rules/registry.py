@@ -369,13 +369,6 @@ def _combat_enhancer_gate(port: PortRow) -> bool:
     return False
 
 
-def _flicker_synergy_gate(port: PortRow) -> bool:
-    if (port.get("port_type") or "").strip() != "effect":
-        return False
-    ev = (port.get("event_class") or "").strip()
-    return ev in ("ChangeZone", "ChangeZoneAll")
-
-
 def _attack_payoff_gate(port: PortRow) -> bool:
     if (port.get("port_type") or "").strip() != "trigger":
         return False
