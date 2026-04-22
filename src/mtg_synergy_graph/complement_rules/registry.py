@@ -34,21 +34,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from .core import COMPLEMENT_RULES, PortRow
-from .generated.changeling_tribal import _changeling_tribal_gate
-from .generated.choose_tribal import _choose_tribal_gate
-from .generated.doctor_s_tribal import _doctor_s_tribal_gate
-from .generated.etbreplacement_copy_dbcopy_optional_tribal import _etbreplacement_copy_dbcopy_optional_tribal_gate
-from .generated.etbreplacement_other_choosect_tribal import _etbreplacement_other_choosect_tribal_gate
-from .generated.firebending_2_tribal import _firebending_2_tribal_gate
-from .generated.landwalk_island_tribal import _landwalk_island_tribal_gate
-from .generated.melee_tribal import _melee_tribal_gate
-from .generated.mentor_tribal import _mentor_tribal_gate
-from .generated.more_tribal import _more_tribal_gate
-from .generated.prowess_tribal import _prowess_tribal_gate
-from .generated.repl_damagedone_counters_stack import _repl_damagedone_counters_stack_gate
-from .generated.repl_moved_exile_stack import _repl_moved_exile_stack_gate
-from .generated.start_tribal import _start_tribal_gate
-from .generated.training_tribal import _training_tribal_gate
+
+# All 15 generated tribal + replacement-stack rules migrated to
+# declarative rows in data/rules_seed.json (plan 003 Unit 8).
+# Their per-port gate predicates are compiled at interpreter load
+# time; auditor per-port attribution via interpreter.rule_ids is
+# a deferred follow-up.
 
 
 @dataclass(frozen=True)
@@ -761,25 +752,12 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("zone_resonance", _zone_resonance_gate),
     RuleGate("exalted_density", _exalted_density_gate),
     RuleGate("aura_equipment_support", _aura_equipment_support_gate),
-    RuleGate("choose_tribal", _choose_tribal_gate),
-    RuleGate("doctor_s_tribal", _doctor_s_tribal_gate),
-    RuleGate("more_tribal", _more_tribal_gate),
-    RuleGate("prowess_tribal", _prowess_tribal_gate),
-    RuleGate("etbreplacement_copy_dbcopy_optional_tribal", _etbreplacement_copy_dbcopy_optional_tribal_gate),
-    RuleGate("firebending_2_tribal", _firebending_2_tribal_gate),
-    RuleGate("start_tribal", _start_tribal_gate),
-    RuleGate("etbreplacement_other_choosect_tribal", _etbreplacement_other_choosect_tribal_gate),
-    RuleGate("mentor_tribal", _mentor_tribal_gate),
-    RuleGate("repl_moved_exile_stack", _repl_moved_exile_stack_gate),
-    RuleGate("changeling_tribal", _changeling_tribal_gate),
-    RuleGate("landwalk_island_tribal", _landwalk_island_tribal_gate),
-    RuleGate("melee_tribal", _melee_tribal_gate),
-    RuleGate("training_tribal", _training_tribal_gate),
-    RuleGate("repl_damagedone_counters_stack", _repl_damagedone_counters_stack_gate),
-    # cascade_tribal removed from card-attribute gates in plan 003 Unit 7 —
-    # it's now a declarative rule. Per-port auditor attribution via the
-    # interpreter's own gate predicate is a follow-up (tracked as a
-    # deferred item in plan 003 Open Questions).
+    # Unit 8: all 15 tribal / replacement-stack rules migrated to
+    # declarative rows. Previously enumerated per-rule RuleGate
+    # entries here; now the interpreter's own gate predicates are
+    # the canonical attribution source. Per-port auditor attribution
+    # through the interpreter is a deferred follow-up item in plan
+    # 003 Open Questions.
 )
 
 
@@ -830,7 +808,26 @@ RULE_GATES: tuple[RuleGate, ...] = tuple(_formal_rule_gates()) + _CARD_ATTR_GATE
 #: to data rows. A rule_id appears in EXACTLY ONE of this set or the
 #: Python-helper dispatch — the auditor at
 #: ``find_all_complements`` call time refuses duplicates.
-DECLARATIVE_RULE_IDS: frozenset[str] = frozenset({"cascade_tribal"})
+DECLARATIVE_RULE_IDS: frozenset[str] = frozenset(
+    {
+        "cascade_tribal",
+        "changeling_tribal",
+        "choose_tribal",
+        "doctor_s_tribal",
+        "etbreplacement_copy_dbcopy_optional_tribal",
+        "etbreplacement_other_choosect_tribal",
+        "firebending_2_tribal",
+        "landwalk_island_tribal",
+        "melee_tribal",
+        "mentor_tribal",
+        "more_tribal",
+        "prowess_tribal",
+        "repl_damagedone_counters_stack",
+        "repl_moved_exile_stack",
+        "start_tribal",
+        "training_tribal",
+    }
+)
 
 
 def registered_rule_ids() -> frozenset[str]:

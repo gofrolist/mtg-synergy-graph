@@ -110,17 +110,26 @@ def _compile_candidate_predicate(predicate: dict[str, Any]) -> _CompiledCandidat
         )
 
     if op == "has_port":
+        # ``has_port`` supports three optional equality constraints
+        # on the port row: ``event_class``, ``replacement_result``,
+        # and a future extension list documented in
+        # rules_schema. Only ``port_type`` is required. Additional
+        # constraints accumulate as AND clauses so the compiled SQL
+        # stays O(k) where k = active constraints.
         port_type = predicate["port_type"]
+        clauses: list[str] = ["port_type = ?"]
+        params: list[Any] = [port_type]
         event_class = predicate.get("event_class")
-        if event_class is None:
-            return _CompiledCandidate(
-                sql="port_type = ?",
-                static_params=(port_type,),
-                needs_commander_set=False,
-            )
+        if event_class is not None:
+            clauses.append("event_class = ?")
+            params.append(event_class)
+        replacement_result = predicate.get("replacement_result")
+        if replacement_result is not None:
+            clauses.append("replacement_result = ?")
+            params.append(replacement_result)
         return _CompiledCandidate(
-            sql="port_type = ? AND event_class = ?",
-            static_params=(port_type, event_class),
+            sql=" AND ".join(clauses),
+            static_params=tuple(params),
             needs_commander_set=False,
         )
 
@@ -218,12 +227,18 @@ def _compile_gate_predicate(predicate: dict[str, Any]) -> GatePredicate:
     if op == "has_port":
         port_type = predicate["port_type"]
         event_class = predicate.get("event_class")
-        if event_class is None:
-            return lambda port: (port.get("port_type") or "").strip() == port_type
-        return lambda port: (
-            (port.get("port_type") or "").strip() == port_type
-            and (port.get("event_class") or "").strip() == event_class
-        )
+        replacement_result = predicate.get("replacement_result")
+
+        def _check(port: PortRow) -> bool:
+            if (port.get("port_type") or "").strip() != port_type:
+                return False
+            if event_class is not None and (port.get("event_class") or "").strip() != event_class:
+                return False
+            return not (
+                replacement_result is not None and (port.get("replacement_result") or "").strip() != replacement_result
+            )
+
+        return _check
 
     if op == "filter_tag":
         tag = predicate["tag"]
