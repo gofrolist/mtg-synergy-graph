@@ -70,16 +70,14 @@ def test_mutually_exclusive_modes_rejected(capsys: pytest.CaptureFixture[str]) -
         (["audit", "--rule", "cheat_cmc"], "rule"),
         (["audit", "--inspect", "cheat_cmc"], "inspect"),
         (["audit", "--collinearity"], "collinearity"),
-        (["audit", "--repin"], "repin"),
-        (["audit", "--expect-identity"], "expect_identity"),
     ],
 )
 def test_each_mode_routes_to_stub(argv: list[str], label: str) -> None:
-    """Every mode dispatches to the stub table; none silently no-op.
+    """Every still-stubbed mode dispatches to ``_stubs`` cleanly.
 
-    The stub raises NotImplementedError with the mode name embedded, which
-    proves argparse → mode-resolution → handler-lookup is wired correctly
-    before any Unit 2+ code lands.
+    Unit 3 replaced the ``repin`` and ``expect_identity`` stubs with real
+    handlers (see ``tests/bench/test_fixture_roundtrip.py`` etc.); the
+    remaining stubs stay until Units 4-6 fill them in.
     """
     with pytest.raises(NotImplementedError) as exc_info:
         bench_cli.main(argv)
@@ -95,10 +93,6 @@ def test_each_mode_routes_to_stub(argv: list[str], label: str) -> None:
         assert "--inspect" in msg
     elif label == "collinearity":
         assert "--collinearity" in msg
-    elif label == "repin":
-        assert "--repin" in msg
-    elif label == "expect_identity":
-        assert "--expect-identity" in msg
 
 
 def test_register_overrides_stub() -> None:

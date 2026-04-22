@@ -10,6 +10,14 @@ for the origin requirements.
 
 from __future__ import annotations
 
+from mtg_synergy_graph.bench import cli as _cli
 from mtg_synergy_graph.bench.cli import main
+from mtg_synergy_graph.bench.handlers import handle_expect_identity, handle_repin
+
+# Unit 3: wire the fixture-repin and expect-identity handlers into the
+# dispatch table. Units 4-6 will add their own register() calls the same
+# way so cli.py stays unaware of implementations.
+_cli.register("repin", handle_repin)
+_cli.register("expect_identity", handle_expect_identity)
 
 __all__ = ["main"]
