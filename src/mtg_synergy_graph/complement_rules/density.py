@@ -1488,19 +1488,13 @@ def _find_land_to_gy_synergy(
     Gate population is 2 commanders by design — narrow high-signal
     rule, same pattern as ``cascade_tribal``.
     """
-    has_land_gy_trigger = False
-    for p in cmdr_ports:
-        pt = (p.get("port_type") or "").strip()
-        ev = (p.get("event_class") or "").strip()
-        if pt != "trigger" or ev not in ("ChangesZoneAll", "ChangesZone"):
-            continue
-        if (p.get("zone_destination") or "").strip() != "Graveyard":
-            continue
-        vf = (p.get("valid_filter") or "").strip()
-        if "Land" in vf:
-            has_land_gy_trigger = True
-            break
-
+    has_land_gy_trigger = any(
+        (p.get("port_type") or "").strip() == "trigger"
+        and (p.get("event_class") or "").strip() in ("ChangesZoneAll", "ChangesZone")
+        and (p.get("zone_destination") or "").strip() == "Graveyard"
+        and "Land" in (p.get("valid_filter") or "").strip()
+        for p in cmdr_ports
+    )
     if not has_land_gy_trigger:
         return []
 

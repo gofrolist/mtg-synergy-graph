@@ -37,16 +37,16 @@ def _port(**kwargs):
 
 
 def _add_port(
-    conn,
-    name,
-    port_type,
-    event_class,
+    conn: sqlite3.Connection,
+    name: str,
+    port_type: str,
+    event_class: str,
     *,
-    valid_filter=None,
-    raw_line=None,
-    zone_origin=None,
-    zone_destination=None,
-):
+    valid_filter: str | None = None,
+    raw_line: str | None = None,
+    zone_origin: str | None = None,
+    zone_destination: str | None = None,
+) -> None:
     conn.execute(
         "INSERT INTO card_ports (card_name, port_type, event_class, valid_filter, raw_line, zone_origin, zone_destination) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -173,10 +173,14 @@ class TestFindLandToGySynergy:
         _add_port(conn, "Dakmor Salvage", "keyword", "Dredge:2")
         _add_port(conn, "Golgari Grave-Troll", "keyword", "Dredge:6")
         results = _find_land_to_gy_synergy(conn, _gitrog_ports(), set())
-        names = {r.candidate for r in results}
+        dredge_hits = [
+            r for r in results if r.candidate in {"Life from the Loam", "Dakmor Salvage", "Golgari Grave-Troll"}
+        ]
+        names = {r.candidate for r in dredge_hits}
         assert "Life from the Loam" in names
         assert "Dakmor Salvage" in names
         assert "Golgari Grave-Troll" in names
+        assert all(r.filter_group == "feeder" for r in dredge_hits)
 
     def test_feeder_pool_rejects_sac_creature_cost(self, conn):
         """Sac<1/Creature> is a creature outlet, not a land feeder."""
