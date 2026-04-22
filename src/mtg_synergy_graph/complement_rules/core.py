@@ -1044,7 +1044,9 @@ from .density import (  # noqa: E402
     _find_tribal_density_complements,
     _find_value_engine_density,
 )
-from .generated.cascade_tribal import _find_cascade_tribal  # noqa: E402
+
+# cascade_tribal removed in plan 003 Unit 7 — now a declarative row
+# in data/rules_seed.json, executed by port_graph.interpreter.RuleInterpreter.
 from .generated.changeling_tribal import _find_changeling_tribal  # noqa: E402
 from .generated.choose_tribal import _find_choose_tribal  # noqa: E402
 from .generated.doctor_s_tribal import _find_doctor_s_tribal  # noqa: E402
@@ -1313,7 +1315,20 @@ def find_all_complements(
         out.extend(_find_more_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_doctor_s_tribal(conn, cmdr_ports, cmdr_set))
         out.extend(_find_choose_tribal(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_cascade_tribal(conn, cmdr_ports, cmdr_set))
+        # Declarative rules (plan 003 Unit 5) — the interpreter is the
+        # single entry point for any rule_id in DECLARATIVE_RULE_IDS.
+        # Placed inside _card_attr_complements so every caller path
+        # (including the two early returns in find_all_complements
+        # below) picks up the interpreter output. Empty
+        # DECLARATIVE_RULE_IDS short-circuits cleanly.
+        from .registry import DECLARATIVE_RULE_IDS  # local import: avoids cycle
+
+        if DECLARATIVE_RULE_IDS:
+            from ..port_graph.interpreter import RuleInterpreter
+
+            interpreter = RuleInterpreter(conn)
+            out.extend(interpreter.find_complements(conn, cmdr_ports, cmdr_set))
+
         return out
 
     if not needed_cand:
@@ -1473,19 +1488,5 @@ def find_all_complements(
 
     # -- Card-attribute rules -----------------------------------------------
     results.extend(_card_attr_complements())
-
-    # -- Declarative interpreter (plan 003 Unit 5) -----------------------------
-    # Plan 003 Unit 5: declarative rules from the `rules` SQLite
-    # table. Empty DECLARATIVE_RULE_IDS (the Unit-5 default) means
-    # the interpreter is never instantiated, preserving identity.
-    # Units 7 and 8 will populate this set as Python helpers
-    # migrate to data rows.
-    from .registry import DECLARATIVE_RULE_IDS  # local import: avoids cycle
-
-    if DECLARATIVE_RULE_IDS:
-        from ..port_graph.interpreter import RuleInterpreter
-
-        interpreter = RuleInterpreter(conn)
-        results.extend(interpreter.find_complements(conn, cmdr_ports, cmdr_set))
 
     return results
