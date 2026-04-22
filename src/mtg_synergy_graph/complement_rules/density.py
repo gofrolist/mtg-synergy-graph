@@ -1336,10 +1336,16 @@ def _find_cheat_cmc_bonus(
 
 
 #: CMC brackets for cheat-into-play scoring: (min_cmc, max_cmc, label).
-_CMC_BRACKETS: tuple[tuple[int, int | None, str], ...] = (
-    (6, None, "cmc_high"),
-    (4, 6, "cmc_mid"),
-)
+#: Only cmc_high (CMC ≥ 6) gets the bonus — cheating a CMC-4 creature
+#: saves 4 mana, cheating a CMC-8 creature saves 8 mana, and Kaalia's
+#: actual EDHREC hi-syn (Avacyn/Gisela/Rune-Scarred/Vilis/Balefire)
+#: is all CMC ≥ 6. The cmc_mid bracket (4 ≤ cmc < 6) was dropped
+#: 2026-04-21: its smaller pool gave CMC 4-5 cards higher per-card IDF
+#: than CMC 6+ cards under IDF normalization, inverting the
+#: mana-saved semantic — Nightmare Shepherd (CMC 5 Demon) outscored
+#: Avacyn (CMC 8 Angel) on Kaalia. cmc_mid cards still score via
+#: trigger_effect for their ChangesZone-into-play triggers.
+_CMC_BRACKETS: tuple[tuple[int, int | None, str], ...] = ((6, None, "cmc_high"),)
 
 
 def _query_cheat_cmc_brackets(
@@ -1375,7 +1381,15 @@ def _query_cheat_cmc_brackets(
                             direction="synergy",
                             candidate=name,
                             cmdr_event="cheat_into_play",
-                            cand_event=target,
+                            # Unified cand_event across all cheat-target subtypes
+                            # so Angel / Demon / Dragon share one IDF pool per CMC
+                            # bracket. Without this, the three subtypes bucket
+                            # separately: Demon's 83-card cmc_mid pool gets higher
+                            # per-card IDF than Angel's 98-card cmc_high pool, so
+                            # cheap Demons outscored expensive Angels on Kaalia
+                            # (Nightmare Shepherd rank 5 > Avacyn rank 160).
+                            # The subtype is now recorded in filter_group instead.
+                            cand_event="cheatable",
                             filter_group=label,
                         )
                     )
