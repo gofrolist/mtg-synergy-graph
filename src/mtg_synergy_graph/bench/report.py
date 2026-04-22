@@ -17,6 +17,18 @@ from mtg_synergy_graph.bench.fixture import (
     IdentityReport,
     PinnedFixture,
 )
+from mtg_synergy_graph.bench.histogram import (
+    Bucket,
+    Histogram,
+    Verdict,
+    _top_n_candidates,
+    compute_histogram,
+    rollup_to_verdict,
+)
+
+
+def _bucket_for_label(label: str) -> Bucket:
+    return Bucket(label)
 
 
 @dataclass(frozen=True)
@@ -56,6 +68,8 @@ class AuditReport:
     aggregate_score_delta: float
     commanders_compared: int
     identity_report: IdentityReport
+    histogram: Histogram = field(default_factory=lambda: Histogram(samples={}))
+    verdict: Verdict = Verdict.TRIVIAL
     per_commander: list[CommanderDelta] = field(default_factory=list)
     per_rule: list[RuleDelta] = field(default_factory=list)
 
@@ -97,6 +111,9 @@ def build_report(
 
     per_rule = _build_rule_deltas(pinned_by_cmdr, live_by_cmdr)
 
+    histogram = compute_histogram(pinned, live)
+    verdict = rollup_to_verdict(histogram, aggregate_score_delta)
+
     return AuditReport(
         fixture_path=fixture_path,
         pinned_config_hash=pinned.config_hash,
@@ -104,6 +121,8 @@ def build_report(
         aggregate_score_delta=aggregate_score_delta,
         commanders_compared=len(per_commander),
         identity_report=identity,
+        histogram=histogram,
+        verdict=verdict,
         per_commander=sorted(per_commander, key=lambda d: abs(d.score_delta_sum), reverse=True),
         per_rule=sorted(per_rule, key=lambda d: abs(d.contribution_delta_sum), reverse=True),
     )
@@ -134,11 +153,6 @@ def _commander_delta(pinned: Any, live: Any) -> CommanderDelta:  # FixtureEntry;
         removed_from_top30=removed,
         reordered_in_top30=reordered,
     )
-
-
-def _top_n_candidates(scores: dict[str, float], n: int) -> list[str]:
-    """Top-N candidate names by score desc, tiebreaking by name for stability."""
-    return [name for name, _ in sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))[:n]]
 
 
 def _build_rule_deltas(pinned_by_cmdr: dict[str, Any], live_by_cmdr: dict[str, Any]) -> list[RuleDelta]:
@@ -193,6 +207,8 @@ def _as_json_dict(report: AuditReport) -> dict[str, Any]:
         "aggregate_score_delta": report.aggregate_score_delta,
         "commanders_compared": report.commanders_compared,
         "is_identical": report.is_identical,
+        "verdict": report.verdict.value,
+        "histogram": report.histogram.to_dict(),
         "per_commander": [cd.to_dict() for cd in report.per_commander[:50]],
         "per_rule": [rd.to_dict() for rd in report.per_rule[:50]],
         "missing_commanders": report.identity_report.missing_commanders,
@@ -206,6 +222,7 @@ def _render_markdown(report: AuditReport) -> str:
 
     status_icon = "✓" if report.is_identical else "✗"
     lines.append(f"**Status:** {status_icon} {'identical' if report.is_identical else 'drift detected'}")
+    lines.append(f"**Verdict:** `{report.verdict.value}`")
     lines.append(
         f"**Config hash:** "
         f"`{report.pinned_config_hash[:12]}...` "
@@ -213,6 +230,23 @@ def _render_markdown(report: AuditReport) -> str:
     )
     lines.append(f"**Aggregate score Δ:** `{report.aggregate_score_delta:+.6f}`")
     lines.append(f"**Commanders compared:** {report.commanders_compared}")
+    lines.append("")
+
+    lines.append("## Histogram")
+    lines.append("")
+    lines.append("| Bucket | Count | Sample commanders |")
+    lines.append("|---|---:|---|")
+    samples = report.histogram.samples or {}
+    for bucket, count in (
+        ("no_change", report.histogram.no_change),
+        ("rank_shuffle_within_top30", report.histogram.rank_shuffle_within_top30),
+        ("rank_shuffle_across_top30_boundary", report.histogram.rank_shuffle_across_top30_boundary),
+        ("hi_syn_gain", report.histogram.hi_syn_gain),
+        ("hi_syn_loss", report.histogram.hi_syn_loss),
+    ):
+        names = samples.get(_bucket_for_label(bucket), ())
+        preview = ", ".join(names[:3]) if names else "—"
+        lines.append(f"| {bucket} | {count} | {preview} |")
     lines.append("")
 
     if report.identity_report.missing_commanders:

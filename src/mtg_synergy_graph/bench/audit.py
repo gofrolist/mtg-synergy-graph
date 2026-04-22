@@ -89,9 +89,11 @@ def _print_summary(report: AuditReport) -> None:
     """One-line status summary to stderr (visible in pre-commit output)."""
     status = "PASS" if report.is_identical else "DRIFT"
     print(
-        f"bench.py audit: {status} "
+        f"bench.py audit: {status} [{report.verdict.value}] "
         f"(Δ={report.aggregate_score_delta:+.4f}, "
         f"{report.commanders_compared} cmdrs, "
-        f"{len(report.per_commander)} changed)",
+        f"{len(report.per_commander)} changed, "
+        f"no_change={report.histogram.no_change}, "
+        f"shuffle_across={report.histogram.rank_shuffle_across_top30_boundary})",
         file=sys.stderr,
     )
