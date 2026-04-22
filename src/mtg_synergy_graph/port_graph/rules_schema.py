@@ -1,0 +1,223 @@
+"""``rules`` table schema + JSON-predicate validator (Unit 4 of plan 003).
+
+Shape and validation for the declarative complement-rule rows that
+will replace Python-authored helpers in Units 7 & 8. Unit 4 lands
+the schema + a loader that seeds the table from
+``data/rules_seed.json`` (empty on first land). No runtime routing
+change here — the interpreter (Unit 5) is what actually reads the
+table and emits ``PortComplement`` records.
+
+Predicate validation is implemented as a recursive walk over the
+JSON tree:
+
+* Combinators (``and`` / ``or``) require a non-empty ``args`` list;
+  ``not`` requires a single-element ``args`` list.
+* Every leaf op must be in
+  :data:`mtg_synergy_graph.port_graph.vocabulary.GATE_OPS` AND carry
+  the fields its specific op requires (see ``_LEAF_OP_REQUIRED``).
+* Any unknown op raises ``ValueError`` with a pointer to the
+  offending subtree, so a typo or a stale op in ``rules_seed.json``
+  fails loudly at import instead of producing silently-broken scores.
+
+The validator is pure-Python and called at two seams:
+
+1. ``seed_rules_db(conn)`` — validates every row before writing it,
+   so an invalid JSON in the seed never reaches the DB.
+2. ``RuleInterpreter.__init__`` (Unit 5) — double-checks at load
+   time in case an operator edited the DB directly.
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from .vocabulary import GATE_OPS
+
+
+@dataclass(frozen=True)
+class RuleRow:
+    """Typed view over one row of the ``rules`` table.
+
+    The JSON predicate columns are stored as ``str`` in SQLite and
+    kept as ``str`` here too — callers who need the parsed tree use
+    ``json.loads(row.gate_predicate)``. Keeping the raw text avoids
+    surprises at the SQLite boundary and lets the validator catch
+    encoding drift at load time.
+    """
+
+    rule_id: str
+    family: str
+    gate_predicate: str
+    commander_port_predicate: str
+    candidate_port_predicate: str
+    filter_group: str
+    cmdr_event: str
+    cand_event: str
+    weight_hint: float
+    active: int
+
+
+#: Required extra fields per leaf-op name. ``and``/``or``/``not`` are
+#: combinators and handled separately. Leaf ops not listed here are
+#: still allowed (if they appear in ``GATE_OPS``) and are treated as
+#: argument-less — useful for ``not_in_commander_set``, which needs
+#: nothing beyond the op name.
+_LEAF_OP_REQUIRED: dict[str, frozenset[str]] = {
+    "has_port": frozenset({"port_type"}),  # event_class is optional
+    "filter_tag": frozenset({"tag"}),
+    "zone_eq": frozenset({"zone", "value"}),
+    "counter_type": frozenset({"type"}),
+    "tribe": frozenset({"name"}),
+    "color": frozenset({"color"}),
+}
+
+
+def validate_gate_predicate(predicate: Any, *, path: str = "$") -> None:
+    """Walk the JSON tree and raise ``ValueError`` on any violation.
+
+    ``path`` accumulates a dotted pointer to the current subtree so
+    error messages point at the offending location. Successful
+    validation returns ``None``; invalid trees raise with a message
+    containing the path and the offending subtree.
+
+    Accepts any JSON-parsable value for flexibility — strings,
+    numbers, bools, and None are all allowed inside leaf-op
+    arguments.
+    """
+    if not isinstance(predicate, dict):
+        raise ValueError(f"{path}: predicate must be an object, got {type(predicate).__name__}")
+    op = predicate.get("op")
+    if op not in GATE_OPS:
+        raise ValueError(f"{path}: unknown op {op!r}; valid ops are {sorted(GATE_OPS)}")
+
+    if op in ("and", "or"):
+        args = predicate.get("args")
+        if not isinstance(args, list) or not args:
+            raise ValueError(f"{path}.args: {op!r} requires a non-empty list")
+        for i, child in enumerate(args):
+            validate_gate_predicate(child, path=f"{path}.args[{i}]")
+        return
+
+    if op == "not":
+        args = predicate.get("args")
+        if not isinstance(args, list) or len(args) != 1:
+            raise ValueError(f"{path}.args: 'not' requires exactly one child")
+        validate_gate_predicate(args[0], path=f"{path}.args[0]")
+        return
+
+    # Leaf op.
+    required = _LEAF_OP_REQUIRED.get(op, frozenset())
+    for field in required:
+        if field not in predicate:
+            raise ValueError(f"{path}: op {op!r} missing required field {field!r}")
+
+
+def _load_seed_json(path: Path | None = None) -> dict[str, Any]:
+    """Load and parse ``data/rules_seed.json``."""
+    seed_path = path or _default_seed_path()
+    return json.loads(seed_path.read_text(encoding="utf-8"))
+
+
+def _default_seed_path() -> Path:
+    """Resolve the committed rules-seed JSON path; walk up from the
+    package location to find the repo-root ``data/`` directory so
+    installs and source checkouts both work."""
+    for candidate in (Path.cwd(), *Path(__file__).resolve().parents):
+        p = candidate / "data" / "rules_seed.json"
+        if p.exists():
+            return p
+    raise FileNotFoundError("data/rules_seed.json not found")
+
+
+def _validate_row(row: dict[str, Any]) -> None:
+    """Validate the three predicate columns of a single seed row.
+    Raises ``ValueError`` with a ``rule_id``-qualified path on any
+    violation."""
+    rule_id = row.get("rule_id", "<unknown>")
+    for column in ("gate_predicate", "commander_port_predicate", "candidate_port_predicate"):
+        predicate = row.get(column)
+        if predicate is None:
+            raise ValueError(f"rule {rule_id!r}: missing required column {column!r}")
+        validate_gate_predicate(predicate, path=f"rule[{rule_id!r}].{column}")
+
+
+def seed_rules_db(
+    conn: sqlite3.Connection,
+    path: Path | None = None,
+) -> int:
+    """Populate the ``rules`` SQLite table from ``rules_seed.json``.
+
+    Returns the number of rows written. Validates each row's JSON
+    predicates BEFORE writing; on any validation error, raises
+    without touching the DB so a broken seed never produces a
+    partially-loaded rules table.
+
+    ``INSERT OR REPLACE`` means calling seed on an already-populated
+    DB is idempotent. Rules deleted from the JSON are NOT removed
+    from the DB (to avoid surprise-deletion during partial seed
+    edits); call the importer's full reset path to prune stale rows.
+    """
+    data = _load_seed_json(path)
+    rows = data.get("rules", [])
+
+    for row in rows:
+        _validate_row(row)
+
+    conn.executemany(
+        "INSERT OR REPLACE INTO rules "
+        "(rule_id, family, gate_predicate, commander_port_predicate, "
+        "candidate_port_predicate, filter_group, cmdr_event, cand_event, "
+        "weight_hint, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            (
+                row["rule_id"],
+                row["family"],
+                json.dumps(row["gate_predicate"]),
+                json.dumps(row["commander_port_predicate"]),
+                json.dumps(row["candidate_port_predicate"]),
+                row.get("filter_group", ""),
+                row["cmdr_event"],
+                row["cand_event"],
+                float(row.get("weight_hint", 1.0)),
+                int(row.get("active", 1)),
+            )
+            for row in rows
+        ],
+    )
+    conn.commit()
+    return len(rows)
+
+
+def load_rules_from_db(conn: sqlite3.Connection) -> list[RuleRow]:
+    """Read active rule rows from the DB as ``RuleRow`` tuples.
+
+    Only ``active = 1`` rows are returned — the interpreter never
+    sees deactivated rules. Ordering is by ``rule_id`` ascending so
+    iteration is deterministic across runs; rule ordering does not
+    affect scoring output (every rule emits independent
+    ``PortComplement`` records deduped downstream).
+    """
+    rows = conn.execute(
+        "SELECT rule_id, family, gate_predicate, commander_port_predicate, "
+        "candidate_port_predicate, filter_group, cmdr_event, cand_event, "
+        "weight_hint, active FROM rules WHERE active = 1 ORDER BY rule_id"
+    ).fetchall()
+    return [
+        RuleRow(
+            rule_id=r["rule_id"],
+            family=r["family"],
+            gate_predicate=r["gate_predicate"],
+            commander_port_predicate=r["commander_port_predicate"],
+            candidate_port_predicate=r["candidate_port_predicate"],
+            filter_group=r["filter_group"],
+            cmdr_event=r["cmdr_event"],
+            cand_event=r["cand_event"],
+            weight_hint=r["weight_hint"],
+            active=r["active"],
+        )
+        for r in rows
+    ]

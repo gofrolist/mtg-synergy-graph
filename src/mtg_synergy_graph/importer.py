@@ -654,4 +654,11 @@ def import_cards_folder(
 
     seed_event_match_map_db(conn)
 
+    # Seed the rules table from data/rules_seed.json (plan 003 Unit 4).
+    # Empty on first land; populated in Units 7 & 8 as the POC rule
+    # migrations land. Idempotent via INSERT OR REPLACE.
+    from .port_graph.rules_schema import seed_rules_db
+
+    seed_rules_db(conn)
+
     return card_count, port_count
