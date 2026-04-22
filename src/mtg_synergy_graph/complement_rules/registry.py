@@ -822,6 +822,15 @@ CARD_LEVEL_RULES: frozenset[str] = frozenset(
 RULE_GATES: tuple[RuleGate, ...] = tuple(_formal_rule_gates()) + _CARD_ATTR_GATES
 
 
+#: Rule ids owned by the declarative interpreter (plan 003 Unit 5).
+#: Starts empty in Unit 5 so the interpreter is loaded but contributes
+#: zero complements; Units 7 & 8 add entries as Python helpers migrate
+#: to data rows. A rule_id appears in EXACTLY ONE of this set or the
+#: Python-helper dispatch — the auditor at
+#: ``find_all_complements`` call time refuses duplicates.
+DECLARATIVE_RULE_IDS: frozenset[str] = frozenset()
+
+
 def registered_rule_ids() -> frozenset[str]:
     """Set of rule_ids the registry can attribute to a specific port."""
     return frozenset(g.rule_id for g in RULE_GATES)

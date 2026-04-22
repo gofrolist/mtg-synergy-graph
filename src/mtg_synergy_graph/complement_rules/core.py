@@ -1474,4 +1474,18 @@ def find_all_complements(
     # -- Card-attribute rules -----------------------------------------------
     results.extend(_card_attr_complements())
 
+    # -- Declarative interpreter (plan 003 Unit 5) -----------------------------
+    # Plan 003 Unit 5: declarative rules from the `rules` SQLite
+    # table. Empty DECLARATIVE_RULE_IDS (the Unit-5 default) means
+    # the interpreter is never instantiated, preserving identity.
+    # Units 7 and 8 will populate this set as Python helpers
+    # migrate to data rows.
+    from .registry import DECLARATIVE_RULE_IDS  # local import: avoids cycle
+
+    if DECLARATIVE_RULE_IDS:
+        from ..port_graph.interpreter import RuleInterpreter
+
+        interpreter = RuleInterpreter(conn)
+        results.extend(interpreter.find_complements(conn, cmdr_ports, cmdr_set))
+
     return results
