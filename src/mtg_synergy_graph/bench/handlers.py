@@ -33,10 +33,12 @@ def _load_commanders_from_fixture(fixture: PinnedFixture) -> list[str]:
 def handle_repin(args: argparse.Namespace) -> int:
     """Handle ``bench.py audit --repin``.
 
-    Without ``--yes``: prints a preview and exits non-zero so a stray
-    invocation cannot overwrite the baseline. With ``--yes``: re-scores
-    the commander list (from the existing fixture if present) and writes
-    the new baseline.
+    Without ``--yes``: prints a preview and exits 1 (confirmation
+    gate — a deliberate dry-run, not an error). With ``--yes``: re-
+    scores the commander list (from the existing fixture if present)
+    and writes the new baseline. Missing fixture or other usage errors
+    return 2 so CI callers can distinguish "user needs to add --yes"
+    from "harness is broken." On success returns 0.
     """
     fixture_path = Path(args.fixture)
     existing: PinnedFixture | None = None
@@ -57,7 +59,7 @@ def handle_repin(args: argparse.Namespace) -> int:
                 "Re-run with --yes to confirm.",
                 file=sys.stderr,
             )
-        return 2
+        return 1
 
     if existing is None:
         print(

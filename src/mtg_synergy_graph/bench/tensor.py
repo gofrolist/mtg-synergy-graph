@@ -23,6 +23,7 @@ from mtg_synergy_graph.complement_rules.core import COMPLEMENT_RULES
 from mtg_synergy_graph.universal_scorer import (
     _FLAT_WEIGHT_OVERRIDES,
     _RULE_QUALITY_MULTIPLIER,
+    _SYNERGY_PAIRS,
     TensorSink,
 )
 
@@ -39,15 +40,17 @@ _INSERT_SQL = (
 def compute_config_hash() -> str:
     """Hex SHA-256 over the current scoring config.
 
-    Changes to the registered rule set, ``_RULE_QUALITY_MULTIPLIER``, or
-    ``_FLAT_WEIGHT_OVERRIDES`` all flip the hash. Stale tensor rows
-    retain the old hash, so queries can filter by the current hash and
-    refuse to read a pre-change tensor.
+    Changes to the registered rule set, ``_RULE_QUALITY_MULTIPLIER``,
+    ``_FLAT_WEIGHT_OVERRIDES``, or ``_SYNERGY_PAIRS`` all flip the hash.
+    Stale tensor rows retain the old hash, so queries can filter by the
+    current hash and refuse to read a pre-change tensor.
 
-    Tensor-agnostic inputs (IDF formula shape, bonus constants, the
-    scoring function structure itself) are NOT in the hash — those are
+    NOT in the hash (because either constant-in-function or captured
+    elsewhere): the IDF formula shape, the 70% concentration-dampening
+    threshold, multi-rule-bonus coefficients, circuit/cmc/rank bonus
+    coefficients, and the scoring-function structure itself. These are
     code changes that refactors catch via ``bench.py audit
-    --expect-identity`` instead.
+    --expect-identity`` instead of via hash invalidation.
     """
     h = hashlib.sha256()
     # Registered rule ids, in registration order converted to sorted.
@@ -58,6 +61,12 @@ def compute_config_hash() -> str:
     h.update(repr(sorted(_RULE_QUALITY_MULTIPLIER.items())).encode("utf-8"))
     h.update(b"|flat:")
     h.update(repr(sorted(_FLAT_WEIGHT_OVERRIDES.items())).encode("utf-8"))
+    # Pair bonuses fire inside ``score()`` after the per-rule sum, so
+    # adding / removing / retuning a pair flips downstream scores even
+    # when per-rule IDF weights are unchanged. Hash it so tensor
+    # staleness is caught when pair bonuses move.
+    h.update(b"|pairs:")
+    h.update(repr(sorted((sorted(pair), weight) for pair, weight in _SYNERGY_PAIRS.items())).encode("utf-8"))
     return h.hexdigest()
 
 

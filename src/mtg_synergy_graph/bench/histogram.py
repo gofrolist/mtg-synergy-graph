@@ -21,7 +21,7 @@ so rank shuffles that would previously have been buried as TRIVIAL
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from mtg_synergy_graph.bench.fixture import FixtureEntry, PinnedFixture
@@ -84,7 +84,7 @@ class Histogram:
 
     #: Per-bucket commander rosters. Kept short (first ~10 per bucket)
     #: so the histogram can be rendered inline without bloating reports.
-    samples: dict[Bucket, tuple[str, ...]] = None  # type: ignore[assignment]
+    samples: dict[Bucket, tuple[str, ...]] = field(default_factory=dict)
 
     @property
     def total(self) -> int:
@@ -103,7 +103,7 @@ class Histogram:
             "rank_shuffle_across_top30_boundary": self.rank_shuffle_across_top30_boundary,
             "hi_syn_gain": self.hi_syn_gain,
             "hi_syn_loss": self.hi_syn_loss,
-            "samples": {b.value: list(names) for b, names in (self.samples or {}).items()},
+            "samples": {b.value: list(names) for b, names in self.samples.items()},
         }
 
 

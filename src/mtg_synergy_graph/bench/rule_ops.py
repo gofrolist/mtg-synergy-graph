@@ -27,7 +27,9 @@ class AblationSummary:
     commanders_affected: int
     candidates_affected: int
     aggregate_contribution_removed: float
-    per_commander_removed: list[tuple[str, float]]  # top (commander, Σ |contribution|)
+    #: Top (commander, Σ contribution) tuples. Immutable so the frozen
+    #: dataclass contract actually holds (list would be mutable).
+    per_commander_removed: tuple[tuple[str, float], ...]
 
 
 @dataclass(frozen=True)
@@ -66,7 +68,7 @@ def ablate_rule(conn: sqlite3.Connection, rule_id: str, config_hash: str | None 
 
     commanders_affected = len(rows)
     aggregate = sum(r["total_contribution"] for r in rows)
-    per_commander = [(r["commander"], r["total_contribution"]) for r in rows[:20]]
+    per_commander = tuple((r["commander"], r["total_contribution"]) for r in rows[:20])
     cand_row = conn.execute(
         "SELECT COUNT(DISTINCT candidate) AS n FROM rule_contributions WHERE rule_id = ? AND config_hash = ?",
         (rule_id, h),

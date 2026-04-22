@@ -11,14 +11,28 @@ for the origin requirements.
 from __future__ import annotations
 
 from mtg_synergy_graph.bench import cli as _cli
-from mtg_synergy_graph.bench.audit import handle_audit
+from mtg_synergy_graph.bench.audit import handle_audit, run_audit
 from mtg_synergy_graph.bench.cli import main
+from mtg_synergy_graph.bench.fixture import (
+    FixtureEntry,
+    PinnedFixture,
+    ScoreDelta,
+    TensorRow,
+    build_fixture,
+    score_commander,
+)
 from mtg_synergy_graph.bench.handlers import (
     handle_collinearity,
     handle_expect_identity,
     handle_inspect,
     handle_repin,
     handle_rule,
+)
+from mtg_synergy_graph.bench.histogram import Bucket, Histogram, Verdict
+from mtg_synergy_graph.bench.report import AuditReport, build_report
+from mtg_synergy_graph.bench.tensor import (
+    TensorWriter,
+    compute_config_hash,
 )
 
 # Unit 3: --repin, --expect-identity.
@@ -31,4 +45,20 @@ _cli.register("rule", handle_rule)
 _cli.register("inspect", handle_inspect)
 _cli.register("collinearity", handle_collinearity)
 
-__all__ = ["main"]
+__all__ = [
+    "AuditReport",
+    "Bucket",
+    "FixtureEntry",
+    "Histogram",
+    "PinnedFixture",
+    "ScoreDelta",
+    "TensorRow",
+    "TensorWriter",
+    "Verdict",
+    "build_fixture",
+    "build_report",
+    "compute_config_hash",
+    "main",
+    "run_audit",
+    "score_commander",
+]

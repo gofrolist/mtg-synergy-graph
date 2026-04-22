@@ -20,7 +20,6 @@ from mtg_synergy_graph.bench.histogram import (
     Bucket,
     Histogram,
     Verdict,
-    _top_n_candidates,
     compute_histogram,
     rollup_to_verdict,
 )
@@ -28,6 +27,16 @@ from mtg_synergy_graph.bench.histogram import (
 
 def _bucket_for_label(label: str) -> Bucket:
     return Bucket(label)
+
+
+def _top_n_names(scores: dict[str, float], n: int) -> list[str]:
+    """Top-N candidate names by score desc, tiebreaking by name for stability.
+
+    Duplicated (not imported) from histogram.py to avoid a cross-module
+    private import; the helper is 1 line and the duplication cost is
+    negligible.
+    """
+    return [name for name, _ in sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))[:n]]
 
 
 @dataclass(frozen=True)
@@ -134,8 +143,8 @@ def _commander_delta(pinned: Any, live: Any) -> CommanderDelta:  # FixtureEntry;
     all_cands = set(pinned_scores) | set(live_scores)
     delta_sum = sum(live_scores.get(c, 0.0) - pinned_scores.get(c, 0.0) for c in all_cands)
 
-    pinned_top30 = _top_n_candidates(pinned_scores, 30)
-    live_top30 = _top_n_candidates(live_scores, 30)
+    pinned_top30 = _top_n_names(pinned_scores, 30)
+    live_top30 = _top_n_names(live_scores, 30)
     added = tuple(c for c in live_top30 if c not in pinned_top30)
     removed = tuple(c for c in pinned_top30 if c not in live_top30)
 
@@ -211,7 +220,7 @@ def _render_markdown(report: AuditReport) -> str:
     lines.append("")
     lines.append("| Bucket | Count | Sample commanders |")
     lines.append("|---|---:|---|")
-    samples = report.histogram.samples or {}
+    samples = report.histogram.samples
     for bucket, count in (
         ("no_change", report.histogram.no_change),
         ("rank_shuffle_within_top30", report.histogram.rank_shuffle_within_top30),

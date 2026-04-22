@@ -47,6 +47,20 @@ def register(mode: str, handler: Callable[[Namespace], int]) -> None:
     _HANDLERS[mode] = handler
 
 
+_ENV_VAR_EPILOG = """\
+Environment variables (hook mode):
+  BENCH_DB       Override --db for the pre-commit hook. Default: data/synergy.db.
+  BENCH_FIXTURE  Override --fixture for the pre-commit hook.
+                 Default: tests/fixtures/golden_set_run.json.
+  BENCH_FORMAT   Override --format for the pre-commit hook. md | json. Default: md.
+
+Exit codes:
+  0  Clean / identical to pinned baseline.
+  1  Drift detected, or --repin dry-run (use --yes to confirm).
+  2  Usage / config error (missing DB, missing fixture, empty fixture).
+"""
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="bench.py",
@@ -55,6 +69,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "Replaces _audit_rule_impact.py, golden_set_track.py, "
             "compare_edhrec.py, weight_grid_search.py, broad_set_track.py."
         ),
+        epilog=_ENV_VAR_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = parser.add_subparsers(dest="subcommand", required=True)
 
@@ -124,8 +140,9 @@ def _build_parser() -> argparse.ArgumentParser:
     audit.add_argument(
         "--db",
         metavar="PATH",
-        default="synergy.db",
-        help="Path to the SQLite synergy DB. Default: synergy.db.",
+        default="data/synergy.db",
+        help="Path to the SQLite synergy DB. Default: data/synergy.db "
+        "(matches the legacy scripts and scripts/import_cardsfolder.py output).",
     )
     audit.add_argument(
         "--fixture",

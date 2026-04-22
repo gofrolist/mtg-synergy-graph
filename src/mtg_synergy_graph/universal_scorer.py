@@ -882,6 +882,10 @@ def score_all_universal(
             )
 
     if tensor_sink is not None:
+        if len(commander_set) != 1:
+            raise ValueError(
+                f"tensor_sink requires a single-commander call; got {len(commander_set)} commanders in commander_set"
+            )
         _emit_tensor_rows(commander_set[0], results, tensor_sink)
 
     return results
@@ -901,6 +905,18 @@ def _emit_tensor_rows(
     synergy contributes with a negative sign. Zero-contribution
     (synergy fully cancelled by anti) rows are dropped so consumers
     don't store noise.
+
+    Contributions emitted here are **pre-dampening** — the sum over
+    (rule_id) does NOT equal ``UniversalScore.score()`` for candidates
+    where one rule dominates >70% of the synergy total, because
+    ``score()`` applies a concentration penalty on top. ``bench.py
+    audit --rule RULE_ID`` surfaces these raw per-rule sums directly,
+    which is the right answer for the question "how much did this rule
+    contribute?" but only an approximation of the answer to "what would
+    the score be without this rule?" (the naive answer assumes the
+    concentration structure stays stable). If that distinction matters,
+    re-score without the rule; the tensor is a fast O(1) lookup, the
+    ground truth is the scorer.
     """
     for cand, score_obj in results.items():
         per_rule_contrib: dict[str, float] = defaultdict(float)

@@ -29,7 +29,7 @@ from mtg_synergy_graph.bench.histogram import Verdict
 
 
 def main(argv: list[str] | None = None) -> int:
-    db_path = Path(os.environ.get("BENCH_DB", "synergy.db"))
+    db_path = Path(os.environ.get("BENCH_DB", "data/synergy.db"))
     fixture_path = Path(os.environ.get("BENCH_FIXTURE", "tests/fixtures/golden_set_run.json"))
     fmt = os.environ.get("BENCH_FORMAT", "md")
 

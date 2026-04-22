@@ -20,6 +20,7 @@ from mtg_synergy_graph.db import open_db
 from mtg_synergy_graph.universal_scorer import (
     _FLAT_WEIGHT_OVERRIDES,
     _RULE_QUALITY_MULTIPLIER,
+    _SYNERGY_PAIRS,
     score_all_universal,
 )
 
@@ -67,6 +68,21 @@ def test_config_hash_changes_on_flat_weight_change() -> None:
     rule = next(iter(mutated))
     mutated[rule] = mutated[rule] + 0.042
     with patch.dict(_FLAT_WEIGHT_OVERRIDES, mutated, clear=True):
+        assert compute_config_hash() != baseline
+
+
+def test_config_hash_changes_on_pair_bonus_change() -> None:
+    """_SYNERGY_PAIRS tuning flips the hash too.
+
+    Pair bonuses fire inside ``score()`` after the per-rule sum, so
+    retuning them changes downstream scoring even when IDF weights are
+    stable. Hashing _SYNERGY_PAIRS catches this class of staleness.
+    """
+    baseline = compute_config_hash()
+    mutated = dict(_SYNERGY_PAIRS)
+    pair = next(iter(mutated))
+    mutated[pair] = mutated[pair] + 0.013
+    with patch.dict(_SYNERGY_PAIRS, mutated, clear=True):
         assert compute_config_hash() != baseline
 
 

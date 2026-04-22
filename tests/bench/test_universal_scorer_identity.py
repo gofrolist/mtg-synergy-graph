@@ -143,6 +143,22 @@ def test_sink_captures_rows_when_rules_fire(scoring_fixture: sqlite3.Connection)
     assert all(r[5] >= 1 for r in captured)
 
 
+def test_sink_rejects_multi_commander_calls(scoring_fixture: sqlite3.Connection) -> None:
+    """Safety guard: ``tensor_sink`` + ``len(commander_set) != 1`` is a ValueError.
+
+    Prevents the latent bug where ``_emit_tensor_rows`` would stamp
+    every row with ``commander_set[0]`` regardless of how many
+    commanders the caller passed. All current call paths pass a
+    1-element list; this test locks that invariant.
+    """
+
+    def sink(*args: object) -> None:
+        pass
+
+    with pytest.raises(ValueError, match="single-commander"):
+        score_all_universal(scoring_fixture, ["Test Commander", "Generic Creature"], tensor_sink=sink)
+
+
 def test_sink_matches_legacy_buckets(scoring_fixture: sqlite3.Connection) -> None:
     """Correctness: sink rows aggregate to the same per-rule totals that
     ``UniversalScore.to_legacy_buckets()`` produces in-memory.

@@ -189,6 +189,11 @@ def test_hook_returns_1_on_internal_error(isolated_cwd: Path, capsys: pytest.Cap
 
 
 def test_audit_dir_is_gitignored() -> None:
-    """`.audit/` is in .gitignore so reports don't leak into commits."""
-    gitignore = Path(".gitignore").read_text(encoding="utf-8")
+    """`.audit/` is in .gitignore so reports don't leak into commits.
+
+    Resolves the repo root explicitly so this test passes regardless of
+    pytest's cwd. ``tests/bench/`` is two parents down from the repo.
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+    gitignore = (repo_root / ".gitignore").read_text(encoding="utf-8")
     assert ".audit/" in gitignore

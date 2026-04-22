@@ -221,11 +221,14 @@ def score_commander(
 ) -> tuple[dict[str, float], list[TensorRow]]:
     """Score one commander, returning (top-N scores, tensor_rows).
 
-    If ``tensor_sink`` is provided, its writes mirror the in-memory
-    ``tensor_rows`` return value — used to persist to SQLite during
-    ``--repin`` without a second scoring pass.
+    When a downstream ``tensor_sink`` is wired (typically a
+    ``TensorWriter`` during ``--repin``) the returned row list is
+    empty — the sink is the single persistence path and the local
+    list would be redundant memory pressure on a ~5k-row per-commander
+    result. Tests that exercise the return list call without a sink.
     """
     rows: list[TensorRow] = []
+    capture_locally = tensor_sink is None
 
     def sink(
         cmdr: str,
@@ -235,16 +238,19 @@ def score_commander(
         idf_weight: float,
         raw_count: int,
     ) -> None:
-        rows.append(
-            TensorRow(
-                candidate=cand,
-                rule_id=rule_id,
-                contribution=contribution,
-                idf_weight=idf_weight,
-                raw_count=raw_count,
+        if capture_locally:
+            rows.append(
+                TensorRow(
+                    candidate=cand,
+                    rule_id=rule_id,
+                    contribution=contribution,
+                    idf_weight=idf_weight,
+                    raw_count=raw_count,
+                )
             )
-        )
-        if tensor_sink is not None:
+        else:
+            # tensor_sink is not None — mypy/pyright narrow it here.
+            assert tensor_sink is not None
             tensor_sink(cmdr, cand, rule_id, contribution, idf_weight, raw_count)
 
     scores = score_all_universal(conn, [commander], tensor_sink=sink)

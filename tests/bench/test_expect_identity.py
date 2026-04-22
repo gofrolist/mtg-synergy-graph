@@ -71,7 +71,9 @@ def test_repin_without_yes_is_refused(tmp_path: Path, seeded_db_path: Path, caps
             str(fixture_path),
         ]
     )
-    assert exit_code == 2
+    # Exit 1: confirmation gate (dry-run preview), not a usage error.
+    # Exit 2 is reserved for "missing/malformed fixture or DB."
+    assert exit_code == 1
     # File untouched.
     assert fixture_path.stat().st_mtime == before_mtime
     err = capsys.readouterr().err

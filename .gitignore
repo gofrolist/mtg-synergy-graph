@@ -21,6 +21,9 @@ mtg_synergy.db
 
 # bench-audit hook output (regenerated per commit)
 .audit/
+
+# ce-code-review + other compound-engineering per-run artifacts
+.context/
 .ecc/
 logs/
 .coverage
