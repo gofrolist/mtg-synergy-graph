@@ -25,7 +25,14 @@ from __future__ import annotations
 #: frozen sets below grows or shrinks. Schema migrations may key on
 #: this value; ``compute_config_hash()`` folds it in so stale
 #: tensor rows under an older vocabulary are refused.
-VOCAB_VERSION: str = "1"
+#:
+#: History:
+#:   v1 — initial vocabulary (Unit 1 of plan 003).
+#:   v2 — Unit 3 added ``zone_dest_battlefield`` match quality to
+#:        preserve the exact semantics of the inline lambdas in
+#:        ``graph_engine.EVENT_MATCH_MAP`` for Token /
+#:        CopyPermanent / Animate entries.
+VOCAB_VERSION: str = "2"
 
 #: Canonical event-node kinds. Projection (Unit 2) maps every
 #: ``card_ports`` row to exactly one of these (or to ``"UNKNOWN"``).
@@ -67,6 +74,7 @@ MATCH_QUALITIES: frozenset[str] = frozenset(
     {
         "always",
         "zone_compatible",
+        "zone_dest_battlefield",  # v2: preserves inline-lambda semantics
         "counter_compatible",
         "tribe_match",
         "color_match",

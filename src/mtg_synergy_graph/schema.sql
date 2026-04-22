@@ -220,6 +220,37 @@ CREATE INDEX IF NOT EXISTS idx_rule_contributions_cmdr_hash
     ON rule_contributions(commander, config_hash);
 
 -- ---------------------------------------------------------------------------
+-- event_match_map: trigger event → effect event equivalences (plan 003 Unit 3).
+-- Rows: (from_event, to_event, match_quality) where match_quality is one
+-- of mtg_synergy_graph.port_graph.vocabulary.MATCH_QUALITIES. The table is
+-- populated from data/event_match_seed.json by the importer (via
+-- port_graph.event_maps.seed_event_match_map_db). Scoring-side callers
+-- continue to read the nested Python dict in graph_engine.py, which is
+-- itself populated from the same JSON seed at module import — both
+-- representations cannot drift because they share the source.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS event_match_map (
+    from_event     TEXT NOT NULL,
+    to_event       TEXT NOT NULL,
+    match_quality  TEXT NOT NULL,
+    PRIMARY KEY (from_event, to_event)
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_match_from ON event_match_map(from_event);
+
+-- ---------------------------------------------------------------------------
+-- cost_feeds_trigger: cost port event_class → trigger event it feeds.
+-- Companion to event_match_map; same seed workflow.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS cost_feeds_trigger (
+    cost_event     TEXT NOT NULL,
+    trigger_event  TEXT NOT NULL,
+    PRIMARY KEY (cost_event, trigger_event)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cost_feeds_cost ON cost_feeds_trigger(cost_event);
+
+-- ---------------------------------------------------------------------------
 -- port_nodes: canonical projection over card_ports (plan 003 Unit 2).
 -- Maps each (port_type, event_class) pair to a value in
 -- mtg_synergy_graph.port_graph.vocabulary.NODE_KINDS; unmapped pairs

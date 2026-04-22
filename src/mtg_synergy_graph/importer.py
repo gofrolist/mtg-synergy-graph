@@ -646,4 +646,12 @@ def import_cards_folder(
                 suffix,
             )
 
+    # Seed the event_match_map + cost_feeds_trigger tables from
+    # data/event_match_seed.json (plan 003 Unit 3). Idempotent —
+    # INSERT OR REPLACE — so re-imports on an existing DB refresh
+    # the tables without disturbing other data.
+    from .port_graph.event_maps import seed_event_match_map_db
+
+    seed_event_match_map_db(conn)
+
     return card_count, port_count

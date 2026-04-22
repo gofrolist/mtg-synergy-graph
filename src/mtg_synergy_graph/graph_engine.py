@@ -39,26 +39,23 @@ PortRow = dict[str, Any]
 EventCheck = Callable[[PortRow, PortRow], bool]
 
 
-def _zones_compatible(trig: PortRow, eff: PortRow) -> bool:
-    """ChangesZone matching: effect's destination must be a subset of trigger's."""
-    t_dest = (trig.get("zone_destination") or "").strip()
-    e_dest = (eff.get("zone_destination") or "").strip()
-    if not t_dest or t_dest in ("Any", "*"):
-        return True
-    return not e_dest or e_dest == t_dest
+# ---------------------------------------------------------------------------
+# Predicate primitives — historical module-level helpers retained as thin
+# aliases for the canonical implementations in port_graph.event_maps.
+# External code that imported them (tests, ad-hoc scripts) keeps working.
+# ---------------------------------------------------------------------------
 
+from .port_graph import event_maps as _event_maps  # noqa: E402
 
-def _counters_compatible(trig: PortRow, eff: PortRow) -> bool:
-    t_ct = (trig.get("counter_type") or "").strip()
-    e_ct = (eff.get("counter_type") or "").strip()
-    if not t_ct:
-        return True
-    return e_ct == "" or e_ct == t_ct
-
-
-def _always(trig: PortRow, eff: PortRow) -> bool:
-    return True
-
+# Re-export legacy predicate helpers. ``complement_rules.core`` and other
+# modules import these by name directly from ``graph_engine``; kept as
+# aliases to the canonical implementations in ``port_graph.event_maps``
+# so a single definition change flows through.
+_always = _event_maps._always
+_zones_compatible = _event_maps._zones_compatible
+_counters_compatible = _event_maps._counters_compatible
+load_event_match_map_from_json = _event_maps.load_event_match_map_from_json
+load_cost_feeds_trigger_from_json = _event_maps.load_cost_feeds_trigger_from_json
 
 #: Triggers whose semantic is "the candidate card itself, when cast/played/
 #: attacking, is the event" — these are NOT matched against arbitrary effect
@@ -72,59 +69,18 @@ CATCH_ALL_TRIGGERS: frozenset[str] = frozenset(
 
 
 #: Trigger event class → {effect event class | "*": predicate}.
-EVENT_MATCH_MAP: dict[str, dict[str, EventCheck]] = {
-    "ChangesZone": {
-        "Token": lambda t, e: t.get("zone_destination") in ("Battlefield", "", None),
-        "ChangeZone": _zones_compatible,
-        "ChangeZoneAll": _zones_compatible,
-        "CopyPermanent": lambda t, e: t.get("zone_destination") in ("Battlefield", "", None),
-        "Animate": lambda t, e: t.get("zone_destination") in ("Battlefield", "", None),
-    },
-    "CounterAdded": {
-        "PutCounter": _counters_compatible,
-        "PutCounterAll": _counters_compatible,
-        "Proliferate": _always,
-        "MultiplyCounter": _always,  # Vorel, Deepglow Skate (44 cards)
-    },
-    "SpellCast": {"*": _always},
-    "DamageDone": {"DealDamage": _always, "DamageAll": _always, "AddPhase": _always},
-    "LifeGained": {"GainLife": _always},
-    "Sacrificed": {"Sacrifice": _always, "SacrificeAll": _always},
-    "Discarded": {"Discard": _always},
-    "Drawn": {"Draw": _always},
-    "Taps": {"Tap": _always, "TapAll": _always, "TapOrUntap": _always},
-    "Untaps": {"Untap": _always, "UntapAll": _always, "TapOrUntap": _always},
-    "LandPlayed": {"*": _always},
-    "Attacks": {"*": _always},
-    "AttackerBlocked": {"*": _always},
-    "TapsForMana": {"Mana": _always},
-    "BecomesTarget": {"*": _always},
-    # Phase B1: trigger ↔ effect pairs from corpus inventory.
-    # Sacrificed/Discarded/Drawn are already covered above; these were
-    # missing because the trigger Mode$ value differs from the effect
-    # verb name (Investigated vs Investigate, etc.).
-    "Proliferate": {"Proliferate": _always},  # 7 trigs / 69 effects
-    "Investigated": {"Investigate": _always},  # 2 trigs / 117 effects
-    "Surveil": {"Surveil": _always},  # 11 trigs / 136 effects
-    "LifeLost": {"LoseLife": _always},  # 21 trigs / 1000 effects
-    "BecomeMonarch": {"BecomeMonarch": _always},  # 4 trigs / 47 effects
-}
+#:
+#: Populated at module import from ``data/event_match_seed.json`` via
+#: :func:`port_graph.event_maps.load_event_match_map_from_json`. Edit the
+#: JSON to add a new equivalence — the ``event_match_map`` SQLite table
+#: is re-seeded from the same JSON on next DB import, so both
+#: representations stay in sync.
+EVENT_MATCH_MAP: dict[str, dict[str, EventCheck]] = load_event_match_map_from_json()
 
 #: Cost-port event_class → set of trigger event_classes that this cost
 #: directly feeds (paying the cost causes the trigger to fire).
-#: §6.3 cost↔trigger feed.
-COST_FEEDS_TRIGGER: dict[str, frozenset[str]] = {
-    "sacrifice": frozenset({"Sacrificed"}),
-    "discard": frozenset({"Discarded"}),
-    "exile": frozenset({"Exiled"}),
-    "exile_from_grave": frozenset({"Exiled"}),
-    "exile_from_hand": frozenset({"Exiled"}),
-    "exile_from_top": frozenset({"Exiled"}),
-    "mill": frozenset({"Milled"}),
-    "pay_life": frozenset({"LifeLost"}),
-    "tap": frozenset({"Taps"}),
-    "tap_type": frozenset({"Taps"}),
-}
+#: §6.3 cost↔trigger feed. Same JSON-sourced loader as EVENT_MATCH_MAP.
+COST_FEEDS_TRIGGER: dict[str, frozenset[str]] = load_cost_feeds_trigger_from_json()
 
 
 def match_event(trigger: PortRow, effect: PortRow) -> bool:
