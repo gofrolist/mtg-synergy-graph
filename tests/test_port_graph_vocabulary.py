@@ -46,12 +46,19 @@ def test_node_kinds_is_closed_set() -> None:
 
 
 def test_match_qualities_is_closed_set() -> None:
-    """MATCH_QUALITIES is exactly the 5 predicate kinds mapped from
+    """MATCH_QUALITIES is the enumerated predicate kinds mapped from
     graph_engine.EVENT_MATCH_MAP's Python lambdas. Expanding requires
-    a new interpreter case plus a VOCAB_VERSION bump."""
+    a new interpreter case plus a VOCAB_VERSION bump.
+
+    v2 added ``zone_dest_battlefield`` for the inline lambdas under
+    ChangesZone (Token / CopyPermanent / Animate) whose semantic
+    differs from ``zone_compatible`` — they check the trigger's
+    zone_destination only, not the effect side.
+    """
     expected = {
         "always",
         "zone_compatible",
+        "zone_dest_battlefield",
         "counter_compatible",
         "tribe_match",
         "color_match",
