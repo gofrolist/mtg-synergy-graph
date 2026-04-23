@@ -45,6 +45,7 @@ _RANKED_ROWS = [
     ("09" * 16, "Wrath of God", "Sorcery", 320),
     ("0a" * 16, "Sol Ring", "Artifact", 1),
     ("0b" * 16, "Urza, Lord High Artificer", "Legendary Creature — Human Artificer", 450),
+    ("0d" * 16, "Bloodghast", "Creature — Vampire Spirit", 520),
     # Obscure: NULL edhrec_rank — must sort below any ranked card.
     ("0c" * 16, "Phantom Unobscure", "Creature — Phantom", None),
 ]
