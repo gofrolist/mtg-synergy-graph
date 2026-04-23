@@ -31,6 +31,7 @@ import dataclasses
 import re
 import sqlite3
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from mtg_synergy_graph.complement_rules.core import (
@@ -744,6 +745,63 @@ def _format_report(proposals: list[RuleProposal], stats_total: int, eligible_tot
 
 
 # ---------------------------------------------------------------------------
+# Public API for in-process callers (e.g., scripts/forge_oracle.py propose-rules).
+# ---------------------------------------------------------------------------
+
+
+def rank_gaps(
+    conn: sqlite3.Connection,
+    *,
+    forge_oracle_db: Path | None = None,
+    max_activation: float = 1.0,
+    commanders_limit: int = 0,
+    warn_fn: Callable[[str], None] | None = None,
+) -> tuple[list[RuleProposal], int, int]:
+    """Scan universe, apply forge_signal, rank, and propose.
+
+    Returns ``(proposals, stats_total, eligible_total)``. Proposals are
+    sorted by descending ``weighted_impact``. Callers should slice to
+    their desired depth.
+
+    ``warn_fn`` is called with human-readable status messages. Pass
+    ``print(..., file=sys.stderr)`` or ``logger.warning`` to surface
+    them; pass ``None`` to silence.
+    """
+    commanders = _commander_names(conn)
+    if commanders_limit > 0:
+        commanders = commanders[:commanders_limit]
+    if warn_fn is not None:
+        warn_fn(f"scanning {len(commanders)} commanders for sub-cell coverage...")
+    stats = _scan_universe(conn, commanders)
+
+    forge_signals = _forge_gap_weight.load_forge_signals(forge_oracle_db) if forge_oracle_db is not None else {}
+    if not forge_signals and warn_fn is not None:
+        warn_fn(
+            f"forge_oracle.db at {forge_oracle_db} is missing or empty — "
+            "falling back to volume-only ranking (forge_signal = 1.0 for all gaps)."
+        )
+    stats = [
+        dataclasses.replace(
+            s,
+            forge_signal=_forge_gap_weight.forge_weight_for_signature(s.signature, forge_signals),
+        )
+        for s in stats
+    ]
+
+    eligible = [s for s in stats if _eligible(s, max_activation=max_activation)]
+    eligible.sort(key=lambda s: (-s.weighted_impact, -s.commanders, s.signature))
+
+    proposals: list[RuleProposal] = []
+    for gap in eligible:
+        prop = _propose(gap, conn)
+        if prop is None:
+            prop = _no_template_proposal(gap)
+        proposals.append(prop)
+
+    return proposals, len(stats), len(eligible)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -787,45 +845,14 @@ def main() -> int:
     conn = sqlite3.connect(args.db)
     conn.row_factory = sqlite3.Row
     try:
-        commanders = _commander_names(conn)
-        if args.limit > 0:
-            commanders = commanders[: args.limit]
-        print(
-            f"scanning {len(commanders)} commanders for sub-cell coverage...",
-            file=sys.stderr,
+        proposals, stats_total, eligible_total = rank_gaps(
+            conn,
+            forge_oracle_db=args.forge_oracle_db,
+            max_activation=args.max_activation,
+            commanders_limit=args.limit,
+            warn_fn=lambda msg: print(msg, file=sys.stderr),
         )
-        stats = _scan_universe(conn, commanders)
-
-        # Plan 002 Unit 6: boost gaps whose subkind has a strong Forge
-        # precon-PPMI signal. Silent fallback to neutral weight (1.0)
-        # when the sidecar is missing — gap_report must always produce
-        # a report.
-        forge_signals = _forge_gap_weight.load_forge_signals(args.forge_oracle_db)
-        if not forge_signals:
-            print(
-                f"forge_oracle.db at {args.forge_oracle_db} is missing or empty — "
-                "falling back to volume-only ranking (forge_signal = 1.0 for all gaps).",
-                file=sys.stderr,
-            )
-        stats = [
-            dataclasses.replace(
-                s,
-                forge_signal=_forge_gap_weight.forge_weight_for_signature(s.signature, forge_signals),
-            )
-            for s in stats
-        ]
-
-        eligible = [s for s in stats if _eligible(s, max_activation=args.max_activation)]
-        eligible.sort(key=lambda s: (-s.weighted_impact, -s.commanders, s.signature))
-
-        proposals: list[RuleProposal] = []
-        for gap in eligible:
-            prop = _propose(gap, conn)
-            if prop is None:
-                prop = _no_template_proposal(gap)
-            proposals.append(prop)
-
-        report = _format_report(proposals[: args.top], stats_total=len(stats), eligible_total=len(eligible))
+        report = _format_report(proposals[: args.top], stats_total=stats_total, eligible_total=eligible_total)
     finally:
         conn.close()
 
