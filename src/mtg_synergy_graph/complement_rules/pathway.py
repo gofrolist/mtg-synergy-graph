@@ -18,10 +18,13 @@ import itertools
 import sqlite3
 from collections import defaultdict
 from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..graph_engine import COST_FEEDS_TRIGGER, EVENT_MATCH_MAP
 from .core import _CHANGEZONE_RUNTIME_HEADS, PortComplement, _changezone_type_set
+
+if TYPE_CHECKING:
+    from ..penalties import CandidateCache
 
 PortRow = dict[str, Any]
 
@@ -163,13 +166,23 @@ def _valid_filter_edge(p1: PortRow, p2: PortRow) -> bool:
 
 
 def _port_pair_matches(a: PortRow, b: PortRow) -> bool:
-    """True iff ``(a, b)`` form a match via any of the walker's three
-    channels (event_match, cost_feeds, valid_filter).
+    """True iff ``(a, b)`` form a match via any of three channels:
+    event_match, cost_feeds, or valid_filter.
 
     Used in :func:`_find_self_bridging_cascade` to build the candidate's
-    ``M`` set -- the ports that match any commander port. Same semantics
-    as the internal-edge channels in :func:`_walk_self_paths`, just
-    applied across the commander/candidate boundary.
+    ``M`` set -- the ports that match any commander port.
+
+    **Intentional asymmetry with the walker.** :func:`_walk_self_paths`
+    accepts only two channels (``event_match`` and ``cost_feeds``),
+    having dropped ``valid_filter`` after the 2026-04-23 audit. This
+    helper keeps all three so that the M-set criterion is liberal
+    (commander-candidate matching admits valid_filter overlaps) while
+    the internal-edge criterion stays tight. A candidate port that
+    enters M only via valid_filter still contributes to ``|M| >= 2``
+    satisfaction, but the walker will not accept it as an edge
+    endpoint unless it also participates in an event_match or
+    cost_feeds pair. Changing this symmetry requires a fresh audit --
+    see ``docs/RULE_HISTORY.md`` 2026-04-23 for the prior variants.
     """
     return _event_match_edge(a, b) or _cost_feeds_edge(a, b) or _valid_filter_edge(a, b)
 
@@ -230,6 +243,8 @@ def _find_self_bridging_cascade(
     conn: sqlite3.Connection,
     cmdr_ports: Sequence[PortRow],
     cmdr_set: set[str],
+    stax_excluded: set[str] | None = None,
+    candidate_cache: CandidateCache | None = None,
 ) -> list[PortComplement]:
     """Emit one ``PortComplement`` per candidate whose internal
     port-graph forms a length-<=2 loop that reinforces two distinct
@@ -268,55 +283,106 @@ def _find_self_bridging_cascade(
     ev_placeholders = ",".join("?" * len(relevant_sorted))
     params: list[str] = list(relevant_sorted)
 
+    # Exclude both commander names and stax-blocked candidates. stax_excluded
+    # is built once per commander in find_all_complements and threaded through
+    # so the self_bridging_cascade rule doesn't surface stax pieces that
+    # actively hurt the commander's strategy (e.g., Disable Triggers against
+    # a ChangesZone commander).
+    excluded: set[str] = set(cmdr_set)
+    if stax_excluded:
+        excluded |= stax_excluded
     cmdr_exclude = ""
-    if cmdr_set:
-        cmdr_placeholders = ",".join("?" * len(cmdr_set))
+    if excluded:
+        cmdr_placeholders = ",".join("?" * len(excluded))
         cmdr_exclude = f"AND card_name NOT IN ({cmdr_placeholders}) "
-        params.extend(sorted(cmdr_set))
+        params.extend(sorted(excluded))
 
     sql_stage1 = (
         "SELECT card_name FROM card_ports "
         f"WHERE event_class IN ({ev_placeholders}) "
         f"{cmdr_exclude}"
         "GROUP BY card_name "
-        "HAVING COUNT(DISTINCT event_class) >= 2"
+        # SQLite lacks tuple-DISTINCT, so concat port_type + event_class into a
+        # single string to count distinct shapes. A card with two rows sharing
+        # event_class but different port_types (cost.sacrifice + trigger.Sacrificed)
+        # must pass this gate to reach the Stage-3 walker.
+        "HAVING COUNT(DISTINCT port_type || '|' || event_class) >= 2"
     )
     candidate_names = [row["card_name"] for row in conn.execute(sql_stage1, params).fetchall()]
     if not candidate_names:
         return []
 
-    # Stage 2: bulk-fetch all ports of those candidates.
-    cand_placeholders = ",".join("?" * len(candidate_names))
-    port_rows = conn.execute(
-        "SELECT card_name, port_type, event_class, valid_filter, "
-        "zone_origin, zone_destination, counter_type "
-        f"FROM card_ports WHERE card_name IN ({cand_placeholders})",
-        candidate_names,
-    ).fetchall()
-    ports_by_card: dict[str, list[PortRow]] = defaultdict(list)
-    for r in port_rows:
-        ports_by_card[r["card_name"]].append(dict(r))
+    # Stage 2: build ports_by_card for the Stage-1 candidates. When a
+    # CandidateCache is available, do a dict-slice over the pre-loaded
+    # ports_by_card (commander-independent, cached once per session).
+    # Otherwise fall back to a bulk SQL fetch -- correct but slow on
+    # broad commanders (profiling showed +2000% overhead for Korvold
+    # without the cache).
+    ports_by_card: dict[str, list[PortRow]]
+    if candidate_cache is not None:
+        cached = candidate_cache.ports_by_card
+        ports_by_card = {name: cached[name] for name in candidate_names if name in cached}
+    else:
+        cand_placeholders = ",".join("?" * len(candidate_names))
+        port_rows = conn.execute(
+            "SELECT card_name, port_type, event_class, valid_filter, "
+            "zone_origin, zone_destination, counter_type "
+            f"FROM card_ports WHERE card_name IN ({cand_placeholders})",
+            candidate_names,
+        ).fetchall()
+        fallback: dict[str, list[PortRow]] = defaultdict(list)
+        for r in port_rows:
+            fallback[r["card_name"]].append(dict(r))
+        ports_by_card = fallback
 
-    # Stage 3: walker on M ports per candidate.
+    # Stage 3: walker on M ports per candidate. ``ports_by_card`` is a
+    # defaultdict, so keys are already unique -- no outer dedup needed.
+    # Thread commander matches alongside each M port to avoid a second
+    # O(|cmdr_ports|) scan when building the cmdr_event label.
+    #
+    # Performance: memoise cand_port -> matched commander port lookups
+    # keyed on the full set of fields that feed the three channel
+    # predicates (port_type, event_class, valid_filter, zone_origin,
+    # zone_destination, counter_type). A narrower key (e.g., only
+    # port_type + event_class) would conflate ports with different
+    # zone_destinations that differ under the ChangesZone zone_compatible
+    # predicate, silently producing scoring drift. For broad commanders
+    # (Korvold: 1336 firings) the memo cuts wall time because many ports
+    # on different cards share identical full shapes.
     results: list[PortComplement] = []
-    seen: set[str] = set()
+    match_memo: dict[tuple[str, str, str, str, str, str], PortRow | None] = {}
     for card, cand_ports in ports_by_card.items():
-        if card in seen:
+        m_entries: list[tuple[PortRow, PortRow]] = []
+        for cp in cand_ports:
+            key = (
+                cp.get("port_type") or "",
+                cp.get("event_class") or "",
+                cp.get("valid_filter") or "",
+                cp.get("zone_origin") or "",
+                cp.get("zone_destination") or "",
+                cp.get("counter_type") or "",
+            )
+            if key in match_memo:
+                cached_match = match_memo[key]
+            else:
+                cached_match = _cand_port_matches_any_cmdr(cp, cmdr_ports)
+                match_memo[key] = cached_match
+            if cached_match is not None:
+                m_entries.append((cp, cached_match))
+        if len(m_entries) < 2:
             continue
-        m_ports = [p for p in cand_ports if _cand_port_matches_any_cmdr(p, cmdr_ports) is not None]
-        if len(m_ports) < 2:
-            continue
+        m_ports = [cp for cp, _ in m_entries]
         found = _walk_self_paths(m_ports)
         if found is None:
             continue
         p1, p2, channel = found
-        cp1 = _cand_port_matches_any_cmdr(p1, cmdr_ports)
-        cp2 = _cand_port_matches_any_cmdr(p2, cmdr_ports)
+        cmdr_by_cand_id = {id(cp): cmdr for cp, cmdr in m_entries}
+        cp1 = cmdr_by_cand_id.get(id(p1))
+        cp2 = cmdr_by_cand_id.get(id(p2))
         ev1 = ((cp1 or {}).get("event_class") or "").strip() or "unknown"
         ev2 = ((cp2 or {}).get("event_class") or "").strip() or "unknown"
         cmdr_event = "+".join(sorted([ev1, ev2]))
         path_info = _format_path_info(p1, p2, channel)
-        seen.add(card)
         results.append(
             PortComplement(
                 rule_id="self_bridging_cascade",

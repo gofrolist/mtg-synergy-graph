@@ -277,6 +277,15 @@ class CandidateCache:
     #: ``_find_cost_reduction_targets``. Caching cuts ~650 ms per
     #: commander to one upfront query.
     cost_reduction_target_pool: frozenset[str]
+    #: Per-card list of port-row dicts for the columns the pathway walker
+    #: needs (``port_type``, ``event_class``, ``valid_filter``,
+    #: ``zone_origin``, ``zone_destination``, ``counter_type``). Precomputed
+    #: once so ``pathway._find_self_bridging_cascade`` can skip a Stage-2
+    #: bulk SQL fetch for every commander in a batch run — the Stage-2
+    #: query on Korvold-shape commanders pulled ~17 k port rows per call
+    #: and dominated the per-page cost (+2000% overhead in profiling).
+    #: Consumed by ``complement_rules.pathway._find_self_bridging_cascade``.
+    ports_by_card: dict[str, list[dict[str, Any]]]
 
 
 def build_candidate_cache(conn: sqlite3.Connection) -> CandidateCache:
@@ -305,7 +314,29 @@ def build_candidate_cache(conn: sqlite3.Connection) -> CandidateCache:
         attack_payoff_cards=_bulk_load_attack_payoff_cards(conn),
         untap_combo_cards=_bulk_load_untap_combo_cards(conn),
         cost_reduction_target_pool=_bulk_load_cost_reduction_target_pool(conn),
+        ports_by_card=_bulk_load_ports_by_card(conn),
     )
+
+
+def _bulk_load_ports_by_card(conn: sqlite3.Connection) -> dict[str, list[dict[str, Any]]]:
+    """Bulk-fetch every ``card_ports`` row into ``dict[card_name, list[PortRow]]``.
+
+    Used by ``pathway._find_self_bridging_cascade`` Stage-2 to avoid
+    re-issuing the bulk port query per commander. Profiling showed
+    the per-commander query dominated at +2000% overhead on broad
+    commanders (Korvold: 329 ms extra per page); caching amortises
+    the cost to a single upfront SQL query shared by every commander
+    in a batch run.
+    """
+    out: dict[str, list[dict[str, Any]]] = {}
+    rows = conn.execute(
+        "SELECT card_name, port_type, event_class, valid_filter, "
+        "zone_origin, zone_destination, counter_type "
+        "FROM card_ports"
+    ).fetchall()
+    for r in rows:
+        out.setdefault(r["card_name"], []).append(dict(r))
+    return out
 
 
 # ---------------------------------------------------------------------------

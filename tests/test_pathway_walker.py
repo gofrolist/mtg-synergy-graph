@@ -22,8 +22,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from mtg_synergy_graph.complement_rules.pathway import _walk_self_paths
 
 PortRow = dict[str, Any]
@@ -249,11 +247,21 @@ def test_returned_tuple_contains_the_two_original_ports() -> None:
     assert p1 is not p2
 
 
-@pytest.mark.parametrize(
-    "channel",
-    ["event_match", "cost_feeds"],
-)
-def test_channel_identifier_is_one_of_expected_set(channel: str) -> None:
-    """Sanity: the walker's channel strings are the two documented
-    identifiers. Guards against typos drifting the public contract."""
-    assert channel in {"event_match", "cost_feeds"}
+def test_walker_returns_known_channel_identifier() -> None:
+    """Sanity: when the walker fires, the returned channel string is
+    one of the two documented identifiers. Guards against typos or
+    silent expansion of the public contract."""
+    # cost_feeds channel (canonical sac-cost + sac-trigger pair).
+    cost_case = [_port("cost", "sacrifice"), _port("trigger", "Sacrificed")]
+    cost_result = _walk_self_paths(cost_case)
+    assert cost_result is not None
+    assert cost_result[2] in {"event_match", "cost_feeds"}
+
+    # event_match channel (ChangesZone trigger -> ChangeZone effect).
+    event_case = [
+        _port("trigger", "ChangesZone", zone_destination="Battlefield"),
+        _port("effect", "ChangeZone", zone_destination="Battlefield"),
+    ]
+    event_result = _walk_self_paths(event_case)
+    assert event_result is not None
+    assert event_result[2] in {"event_match", "cost_feeds"}

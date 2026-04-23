@@ -220,7 +220,7 @@ class SynergyEngine:
         else:
             scores = us.to_legacy_buckets()
 
-        explanation = self._render_explanation(card, scores) if include_explanation else None
+        explanation = self._render_explanation(card, scores, us) if include_explanation else None
 
         return Recommendation(
             rank=0,

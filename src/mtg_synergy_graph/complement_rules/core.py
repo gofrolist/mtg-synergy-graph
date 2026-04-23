@@ -1303,7 +1303,7 @@ def find_all_complements(
         from . import pathway  # local import: flag toggle + module-level
 
         if pathway._ENABLE_PATHWAY_RULES:
-            out.extend(pathway._find_self_bridging_cascade(conn, cmdr_ports, cmdr_set))
+            out.extend(pathway._find_self_bridging_cascade(conn, cmdr_ports, cmdr_set, stax_excluded, candidate_cache))
         # Plan 003 Units 7 & 8: all 16 auto-generated keyword /
         # replacement-stack tribal rules migrated to declarative
         # rows. The interpreter block just below this comment
