@@ -686,6 +686,13 @@ class PortComplement:
     cand_event: str  # candidate port event_class
     filter_group: str = ""  # filter context from commander's valid_filter
     branch_kind: str = "root"
+    #: Free-form narrator metadata used by ``SynergyEngine._render_explanation``
+    #: for rules that want to surface richer detail than the 4-tuple dedup
+    #: key alone can carry. Populated by the ``self_bridging_cascade`` rule
+    #: with the two bridging ports + channel (see
+    #: ``complement_rules.pathway._find_self_bridging_cascade``). Default
+    #: empty -- excluded from dedup/IDF keys; does NOT affect scoring.
+    path_info: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -1288,6 +1295,15 @@ def find_all_complements(
         out.extend(_find_party_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_creature_died_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_damage_doubler_synergy(conn, cmdr_ports, cmdr_set))
+        # Plan 2026-04-23-001: depth-2 self-bridging pathway rule
+        # family. Gated behind pathway._ENABLE_PATHWAY_RULES (default
+        # False) until Unit 6's bench.py audit produces a landing
+        # verdict. Local import — avoids pulling graph_engine at core
+        # import time before EVENT_MATCH_MAP is needed.
+        from . import pathway  # local import: flag toggle + module-level
+
+        if pathway._ENABLE_PATHWAY_RULES:
+            out.extend(pathway._find_self_bridging_cascade(conn, cmdr_ports, cmdr_set))
         # Plan 003 Units 7 & 8: all 16 auto-generated keyword /
         # replacement-stack tribal rules migrated to declarative
         # rows. The interpreter block just below this comment

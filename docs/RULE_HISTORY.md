@@ -5,6 +5,54 @@ impact notes. See `scripts/_audit_rule_impact.py` for the per-rule impact
 methodology (NDCG@30 metric + golden-set safety net + CONTENTIOUS verdict).
 See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
+## 2026-04-23
+
+### `self_bridging_cascade` depth-2 pathway rule (LANDED, plan 2026-04-23-001)
+
+- New complement-rule family `self_bridging_cascade` ships
+  `_ENABLE_PATHWAY_RULES = True`. Fires when a candidate has >=2 ports
+  each matching a commander port AND two of those ports form an
+  internal length-<=2 edge via a canonical cascade substrate.
+- **Two channels after audit tuning**: the walker accepts
+  `event_match` (named trigger->effect entries in `EVENT_MATCH_MAP`,
+  wildcard `*` rejected) and `cost_feeds` (`COST_FEEDS_TRIGGER`).
+  The brainstorm proposed a third `valid_filter` channel but it was
+  dropped mid-audit (see below).
+- **Audit verdict**: POSITIVE at three successively narrower walker
+  configurations; hidden_gem_hit_rate identical at 0.8423 across all
+  three (up from 0.7287 baseline, +0.1136 on the stated goal metric).
+
+  | variant | agg Δ | no_change | hi_syn_loss | hidden_gem |
+  |---|---|---|---|---|
+  | v1: 3 channels (event_match + cost_feeds + valid_filter) | +463.7 | 14 | 0 | 0.8423 |
+  | v2: 2 channels (drop valid_filter) | +377.4 | 16 | 0 | 0.8423 |
+  | v3: 2 channels, wildcard `*` rejected (LANDED) | +209.3 | 36 | 0 | 0.8423 |
+
+- **Why valid_filter was dropped**: fired on voltron / proliferate /
+  monarch commanders whose typed triggers matched equipment-aura
+  cascade shapes that weren't genuine internal edges. Qualitative
+  collateral (Rafiq + Strength-Testing Hammer type of drift) without
+  improving the hidden-gem metric.
+- **Why wildcard (`*`) was dropped**: `Attacks->*` /
+  `SpellCast->*` / `LandPlayed->*` created spurious internal edges
+  on cards where the port extractor splits a single ability into
+  `trigger` + `effect` ports (e.g., equipment with
+  "equipped creature attacks -> pump"). The landed walker
+  (`_canonical_trigger_effect`) rejects wildcard entries; the public
+  `graph_engine.match_event` still honors them for commander-vs-
+  candidate matching where wildcard semantics are appropriate.
+- **Target commander impact** (plan FR1): Korvold +8.98, Gitrog +3.51,
+  Meren +1.98, Muldrotha/Teysa low-magnitude. All positive deltas.
+- **No regressions**: zero commanders with hi_syn_loss, zero
+  commanders with score_delta < -0.05 (all 100 commanders landed
+  positive or no_change).
+- **Config hash invalidation**: `enable_pathway_rules` added to
+  `ScoringConfigInputs`; flipping the flag shifts
+  `compute_config_hash()` so stale tensor rows are refused. Pinned
+  fixture re-pinned at flag=True.
+- Plan: `docs/plans/2026-04-23-001-feat-self-bridging-cascade-pathway-plan.md`.
+- Seed commits: 594873f (walker, Unit 1), Unit 2, Unit 3, Unit 4, Unit 6.
+
 ## 2026-04-22
 
 ### IDF reforms plan 002 (BM25F + conditional denominator — not landed)

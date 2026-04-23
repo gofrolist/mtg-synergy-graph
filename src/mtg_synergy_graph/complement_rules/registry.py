@@ -797,6 +797,10 @@ CARD_LEVEL_RULES: frozenset[str] = frozenset(
         # Type-bending statics that operate on the commander's whole
         # static set rather than a single port's gate condition.
         "creatures_as_lands_landfall",
+        # Depth-2 self-bridging pathway (plan 2026-04-23-001). Requires
+        # TWO distinct commander ports to match into the candidate's
+        # port bag; gating on a single port would over-attribute.
+        "self_bridging_cascade",
     }
 )
 

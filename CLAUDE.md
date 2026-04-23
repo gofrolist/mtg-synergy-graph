@@ -85,9 +85,22 @@ Each rule wraps an existing mechanical map and declares when a
 (commander_port, candidate_port) pair creates a synergy. Rules group into
 primitives (trigger_effect, cost_feeds_trigger, resonance family), density
 rules (spell/scaling/tribal/etb_self), archetype rules (voltron, go_wide,
-combat_enhancer, graveyard_filler), and gated axis-feeders
+combat_enhancer, graveyard_filler), gated axis-feeders
 (`<axis>_feeder`: counter, modified, cardpower, tap_type, hand_size,
-gy_fuel, lifegain, life_total, land_bounce, …).
+gy_fuel, lifegain, life_total, land_bounce, …), and the depth-2
+pathway family.
+
+**Depth-2 pathway (`complement_rules/pathway.py`, plan 2026-04-23-001).**
+`self_bridging_cascade` fires on candidates whose internal port-graph
+forms a length-≤2 loop reinforcing two distinct commander-port
+matches — Gravecrawler (sac cost + Sacrificed trigger) for Korvold,
+ETB+Token shapes for aristocrats, etc. Internal edges use two
+canonical cascade substrates: `EVENT_MATCH_MAP` named trigger→effect
+pairs (wildcard `*` rejected post-audit) and `COST_FEEDS_TRIGGER`.
+Flag `_ENABLE_PATHWAY_RULES = True` since 2026-04-23 after POSITIVE
+verdict at agg Δ +209.3 / hidden_gem_hit_rate 0.7287 → 0.8423.
+Explainability: `--explain` emits a `path_info` line per firing
+(`<subkind_a> <-> <subkind_b> (channel: event_match|cost_feeds)`).
 
 Full rule catalogue, per-rule gate logic, and IDF weighting details:
 see [docs/COMPLEMENT_RULES.md](docs/COMPLEMENT_RULES.md).
