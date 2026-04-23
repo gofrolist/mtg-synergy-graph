@@ -83,7 +83,7 @@ def compute_ppmi_table(
     values: ``0.0`` (no smoothing, raw PMI) to ``1.0`` (aggressive
     smoothing). ``0.5`` is a reasonable default for ~1000-deck corpora.
     """
-    deck_list: list[frozenset[str]] = [d for d in decks]
+    deck_list: list[frozenset[str]] = list(decks)
 
     # Aggregate weighted joint + marginal counts; also track raw decks_count.
     joint_weighted: dict[tuple[str, str], float] = {}

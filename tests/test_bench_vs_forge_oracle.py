@@ -213,7 +213,8 @@ def test_stale_config_hash_returns_2(tmp_path: Path, capsys: pytest.CaptureFixtu
     fixture = _make_fixture(tmp_path, [FixtureEntry(commander="Commander One", scores={"Goblin A": 10.0})])
     rc = handle_vs_forge_oracle(_args(fixture=fixture, db=db, forge_oracle_db=forge_db))
     assert rc == 2
-    assert "different config" in capsys.readouterr().err.lower() or "rebuild" in capsys.readouterr().err.lower()
+    err = capsys.readouterr().err.lower()
+    assert "different config" in err or "rebuild" in err
 
 
 def test_unknown_commander_filter_returns_2(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -274,3 +275,37 @@ def test_cli_conflicting_mode_flags_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(SystemExit):
         bench_main(["audit", "--vs-forge-oracle", "--repin"])
+
+
+def test_cli_vs_forge_oracle_format_json_through_argparse(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """End-to-end: `bench.py audit --vs-forge-oracle --format json` emits parseable JSON.
+
+    Regression guard for plan 002 code-review finding W2 — the shared `--format`
+    flag on the audit subparser must wire through to handle_vs_forge_oracle's
+    JSON renderer.
+    """
+    from mtg_synergy_graph.bench import main as bench_main
+
+    db = _make_synergy_db(tmp_path)
+    forge_db = _make_forge_oracle_db(tmp_path)
+    fixture = _make_fixture(
+        tmp_path,
+        [FixtureEntry(commander="Commander One", scores={"Goblin A": 10.0, "Goblin B": 5.0})],
+    )
+    argv = [
+        "audit",
+        "--vs-forge-oracle",
+        "--fixture",
+        str(fixture),
+        "--db",
+        str(db),
+        "--forge-oracle-db",
+        str(forge_db),
+        "--format",
+        "json",
+    ]
+    rc = bench_main(argv)
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert "aggregate_tau" in payload
+    assert payload["n_commanders"] == 1

@@ -775,7 +775,7 @@ def rank_gaps(
     stats = _scan_universe(conn, commanders)
 
     forge_signals = _forge_gap_weight.load_forge_signals(forge_oracle_db) if forge_oracle_db is not None else {}
-    if not forge_signals and warn_fn is not None:
+    if not forge_signals and forge_oracle_db is not None and warn_fn is not None:
         warn_fn(
             f"forge_oracle.db at {forge_oracle_db} is missing or empty — "
             "falling back to volume-only ranking (forge_signal = 1.0 for all gaps)."

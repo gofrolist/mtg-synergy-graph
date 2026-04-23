@@ -11,15 +11,13 @@ Plan: docs/plans/2026-04-23-002-feat-forge-second-oracle-plan.md Unit 6.
 from __future__ import annotations
 
 import dataclasses
-import sys
 from pathlib import Path
 
+# scripts/ is on sys.path via tests/conftest.py
+import gap_report as gr
 import pytest
 
-# Make scripts/ importable for tests that want to drive the internals.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(_REPO_ROOT / "scripts"))
-import gap_report as gr  # noqa: E402
 
 
 def _make_gap(pt: str, ev: str, sub: str, commanders: int, activations: int) -> gr.GapStat:

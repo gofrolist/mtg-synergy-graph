@@ -6,20 +6,18 @@ Plan: docs/plans/2026-04-23-002-feat-forge-second-oracle-plan.md Unit 8.
 from __future__ import annotations
 
 import sqlite3
-import sys
 from dataclasses import replace
 from pathlib import Path
 
+# scripts/ is on sys.path via tests/conftest.py
+import forge_oracle as fo_cli
+import gap_report as gr
 import pytest
 
 from mtg_synergy_graph.db import open_db
 from mtg_synergy_graph.forge_oracle import config as fo_config
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(_REPO_ROOT / "scripts"))
-
-import forge_oracle as fo_cli  # noqa: E402
-import gap_report as gr  # noqa: E402
 
 
 def _make_forge_oracle_db(tmp_path: Path) -> Path:

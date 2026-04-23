@@ -23,6 +23,7 @@ from pathlib import Path
 
 from mtg_synergy_graph.forge_oracle import config as fo_config
 from mtg_synergy_graph.forge_oracle import ingest
+from mtg_synergy_graph.forge_oracle import version as fo_version
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -73,13 +74,18 @@ def _cmd_propose_rules(args: argparse.Namespace) -> int:
         print(f"error: forge_oracle.db unusable: {exc}", file=sys.stderr)
         return 2
     try:
-        inputs = fo_config.get_oracle_config_inputs(
-            ppmi_smoothing_k=args.smoothing_k,
-            min_decks_count=args.min_decks,
-        )
         try:
+            inputs = fo_config.get_oracle_config_inputs(
+                ppmi_smoothing_k=args.smoothing_k,
+                min_decks_count=args.min_decks,
+            )
             fo_config.verify_current_or_raise(forge_conn, inputs)
-        except (fo_config.OracleConfigStaleError, fo_config.OracleConfigMissingError) as exc:
+        except (
+            fo_config.OracleConfigStaleError,
+            fo_config.OracleConfigMissingError,
+            fo_version.OracleVersionFileError,
+            fo_version.OracleForgeCheckoutError,
+        ) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
     finally:
@@ -96,7 +102,11 @@ def _cmd_propose_rules(args: argparse.Namespace) -> int:
     if not synergy_db.is_file():
         print(f"error: synergy DB not found at {synergy_db}", file=sys.stderr)
         return 2
-    conn = sqlite3.connect(synergy_db)
+    try:
+        conn = sqlite3.connect(synergy_db)
+    except sqlite3.DatabaseError as exc:
+        print(f"error: synergy DB at {synergy_db} is unusable: {exc}", file=sys.stderr)
+        return 2
     conn.row_factory = sqlite3.Row
     try:
         proposals, stats_total, eligible_total = gr.rank_gaps(
@@ -182,6 +192,12 @@ def _render_proposals_markdown(
         try:
             artifacts = gen(prop)
         except Exception as exc:  # proposer must not crash on one bad template
+            logging.getLogger(__name__).warning(
+                "scaffold generator %r raised %s: %s",
+                prop.template,
+                type(exc).__name__,
+                exc,
+            )
             lines.append(f"- **Scaffold**: _generator raised_ `{type(exc).__name__}: {exc}`")
             lines.append("")
             continue

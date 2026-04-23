@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import sqlite3
+import sys
 from pathlib import Path
 
 import pytest
 
-from mtg_synergy_graph import parse_card_file
+# scripts/ is not a package but test files import gap_report / forge_oracle /
+# scaffold_rule from it for in-process testing. Centralize the sys.path mutation
+# here so individual test modules don't each carry their own copy (plan 002
+# code-review finding KP-007).
+_SCRIPTS_DIR = str(Path(__file__).resolve().parent.parent / "scripts")
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+
+from mtg_synergy_graph import parse_card_file  # noqa: E402 — after sys.path mutation
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 

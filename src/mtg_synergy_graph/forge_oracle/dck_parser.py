@@ -28,7 +28,7 @@ ignored. See plan 2026-04-23-002 Unit 4.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -125,6 +125,6 @@ def iter_deck_names(deck: PreconDeck) -> Iterator[str]:
             yield name
 
 
-def iter_deck_files(root: Path) -> Iterable[Path]:
+def iter_deck_files(root: Path) -> Iterator[Path]:
     """Walk ``root`` recursively for ``.dck`` files, sorted for determinism."""
     yield from sorted(p for p in root.rglob("*.dck") if p.is_file())
