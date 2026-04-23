@@ -22,6 +22,49 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 # ---------------------------------------------------------------------------
+# Forge-Second-Oracle (plan 002) — CI-friendly shim
+# ---------------------------------------------------------------------------
+#
+# forge_oracle tests call ``fo_version.read_current_forge_sha()`` indirectly
+# via ``get_oracle_config_inputs()`` from many code paths (build, verify,
+# handler, propose-rules). The real function shells out to
+# ``git -C data/forge rev-parse HEAD``, which requires the vendored partial
+# clone at ``data/forge/`` — present on developer machines (setup per
+# ``docs/FORGE_ORACLE.md``) but absent in CI runners (``data/`` is
+# ``.gitignore``-ed and the workflow does not clone Forge).
+#
+# The autouse fixture below detects a missing ``data/forge/.git`` and stubs
+# ``read_current_forge_sha`` to return the pinned SHA from
+# ``data/forge_oracle/version.txt``. This keeps the core oracle logic
+# (config hash, build pipeline, strict-consumer verification) testable
+# without the live Forge checkout. When ``forge_dir`` is an explicit path
+# other than the default (as in ``test_read_current_forge_sha_raises_on_missing_checkout``),
+# the stub delegates to the real function so negative-path tests still
+# exercise the real behavior.
+
+
+@pytest.fixture(autouse=True)
+def _stub_forge_sha_when_checkout_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mtg_synergy_graph.forge_oracle import version as fo_version
+
+    if (fo_version._FORGE_DIR / ".git").exists():
+        # Real checkout present — exercise the real function.
+        return
+
+    pinned_sha = fo_version.read_pinned_sha()
+    real_read = fo_version.read_current_forge_sha
+
+    def _stub(forge_dir: Path = fo_version._FORGE_DIR) -> str:
+        # Preserve negative-path semantics: explicit non-default paths go
+        # through the real function so tests targeting error modes still fire.
+        if forge_dir != fo_version._FORGE_DIR:
+            return real_read(forge_dir)
+        return pinned_sha
+
+    monkeypatch.setattr(fo_version, "read_current_forge_sha", _stub)
+
+
+# ---------------------------------------------------------------------------
 # In-memory SQLite schema for complement-rule tests
 # ---------------------------------------------------------------------------
 #
