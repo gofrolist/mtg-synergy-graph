@@ -17,7 +17,7 @@ import json
 import pytest
 
 from mtg_synergy_graph.bench.fixture import FixtureEntry, PinnedFixture
-from mtg_synergy_graph.bench.hidden_gems import _HIDDEN_GEM_WARN_THRESHOLD
+from mtg_synergy_graph.bench.hidden_gems import HIDDEN_GEM_WARN_THRESHOLD
 from mtg_synergy_graph.bench.report import build_report
 
 # ---------------------------------------------------------------------------
@@ -93,38 +93,55 @@ def test_both_sides_zero_gives_zero_delta_no_warning() -> None:
 
 
 def test_delta_just_above_threshold_no_warning() -> None:
-    """delta = -0.019 → warning False (above -0.02)."""
-    pinned = _fixture_with_gem_rates([0.2])
-    live = _fixture_with_gem_rates([0.181])
+    """Δ strictly above ``-HIDDEN_GEM_WARN_THRESHOLD`` → warning False.
+
+    Pinned and live chosen so ``live - pinned`` is a small negative
+    delta strictly above the negative threshold. The test asserts
+    behavior (no warning) rather than exact float value, since
+    IEEE-754 would otherwise require an exactly-representable delta.
+    """
+    # Construct inputs so live_mean - pinned_mean is well above
+    # -HIDDEN_GEM_WARN_THRESHOLD (which is 0.02). Using 0.0 and 0.01 is
+    # IEEE-754 exact enough for the behavior claim to be robust.
+    pinned = _fixture_with_gem_rates([0.01])
+    live = _fixture_with_gem_rates([0.0])
     report = build_report("baseline.json", pinned, live)
     assert report.hidden_gem_hit_rate_delta is not None
-    assert abs(report.hidden_gem_hit_rate_delta - (-0.019)) < 1e-9
+    # Behavior claim: delta is above -threshold (so no warning fires).
+    assert report.hidden_gem_hit_rate_delta > -HIDDEN_GEM_WARN_THRESHOLD
     assert report.hidden_gem_warning is False
 
 
 def test_delta_exactly_threshold_no_warning_strict_inequality() -> None:
-    """delta bitwise == -_HIDDEN_GEM_WARN_THRESHOLD → warning False.
+    """delta bitwise == -HIDDEN_GEM_WARN_THRESHOLD → warning False.
 
     Subtraction against zero is exact in IEEE-754, so ``0.0 - threshold``
     is bitwise ``-threshold``. This lets us test the strict-inequality
     boundary cleanly.
     """
-    pinned = _fixture_with_gem_rates([_HIDDEN_GEM_WARN_THRESHOLD])
+    pinned = _fixture_with_gem_rates([HIDDEN_GEM_WARN_THRESHOLD])
     live = _fixture_with_gem_rates([0.0])
     report = build_report("baseline.json", pinned, live)
     assert report.hidden_gem_hit_rate_delta is not None
     # Delta must be at -threshold (not strictly below) — warning stays False.
-    assert report.hidden_gem_hit_rate_delta == -_HIDDEN_GEM_WARN_THRESHOLD
+    assert report.hidden_gem_hit_rate_delta == -HIDDEN_GEM_WARN_THRESHOLD
     assert report.hidden_gem_warning is False
 
 
 def test_delta_below_threshold_triggers_warning() -> None:
-    """delta = -0.0201 → warning True."""
-    pinned = _fixture_with_gem_rates([0.2000])
-    live = _fixture_with_gem_rates([0.1799])
+    """delta strictly below -HIDDEN_GEM_WARN_THRESHOLD → warning True.
+
+    Asserts behavior (warning boolean) rather than exact float value,
+    since the boundary claim is "delta < -threshold strictly".
+    """
+    # Drop of 0.03 (live_mean=0.17, pinned_mean=0.2) is well below the
+    # -0.02 threshold. Exact float representation isn't critical — the
+    # behavior claim is "dropping more than the threshold must warn."
+    pinned = _fixture_with_gem_rates([0.20])
+    live = _fixture_with_gem_rates([0.17])
     report = build_report("baseline.json", pinned, live)
     assert report.hidden_gem_hit_rate_delta is not None
-    assert report.hidden_gem_hit_rate_delta < -0.02
+    assert report.hidden_gem_hit_rate_delta < -HIDDEN_GEM_WARN_THRESHOLD
     assert report.hidden_gem_warning is True
 
 

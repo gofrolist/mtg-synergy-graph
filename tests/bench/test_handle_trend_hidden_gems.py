@@ -255,6 +255,116 @@ def test_trend_rejects_unknown_value() -> None:
 
 
 # ---------------------------------------------------------------------------
+# CLI validation (P2 fixes #14 / #15 / #16)
+# ---------------------------------------------------------------------------
+
+
+def test_format_csv_rejected_outside_trend_mode(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``--format csv`` with a non-trend mode → exit 2 with parser.error.
+
+    Previously silent fallback to markdown; now the user sees the
+    mismatch immediately.
+    """
+    from mtg_synergy_graph.bench.cli import main
+
+    synergy = tmp_path / "synergy.db"
+    synergy.touch()
+    # Empty fixture so handle_inspect_gems doesn't get to its own
+    # error paths — parser.error fires first.
+    fixture_path = tmp_path / "baseline.json"
+    fixture_path.write_text(
+        '{"schema_version": 2, "config_hash": "x", "created_at": "t", "entries": []}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(
+            [
+                "audit",
+                "--inspect-gems",
+                "--format",
+                "csv",
+                "--db",
+                str(synergy),
+                "--fixture",
+                str(fixture_path),
+            ]
+        )
+    # argparse's parser.error exits with code 2.
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "--format csv" in err
+    assert "--trend" in err
+
+
+def test_trend_n_negative_rejected(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``--trend-n -1`` → argparse rejects with ArgumentTypeError."""
+    from mtg_synergy_graph.bench.cli import main
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["audit", "--trend", "hidden_gems", "--trend-n", "-1"])
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert ">= 0" in err or ">=0" in err
+
+
+def test_trend_n_zero_accepted(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``--trend-n 0`` → accepted (header-only is legitimate)."""
+    from mtg_synergy_graph.bench.cli import main
+
+    history_path = tmp_path / ".audit" / "history.csv"
+    bench_history.append_run(_make_report(live_config_hash="abc"), path=history_path)
+
+    rc = main(
+        [
+            "audit",
+            "--trend",
+            "hidden_gems",
+            "--trend-n",
+            "0",
+            "--history",
+            str(history_path),
+        ]
+    )
+    assert rc == 0
+
+
+def test_commander_filter_rejected_with_trend(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``--commander X`` with ``--trend`` → parser.error, exit 2."""
+    from mtg_synergy_graph.bench.cli import main
+
+    history_path = tmp_path / ".audit" / "history.csv"
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(
+            [
+                "audit",
+                "--trend",
+                "hidden_gems",
+                "--commander",
+                "Anything",
+                "--history",
+                str(history_path),
+            ]
+        )
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "--commander" in err
+    assert "--trend" in err
+
+
+# ---------------------------------------------------------------------------
 # Integration: audit then trend
 # ---------------------------------------------------------------------------
 

@@ -343,3 +343,53 @@ def test_run_audit_returns_report_on_clean_fixture(tmp_path: Path, seeded_db_pat
     report = run_audit(seeded_db_path, fixture_path)
     assert report.is_identical
     assert report.aggregate_score_delta == 0.0
+
+
+# ---------------------------------------------------------------------------
+# _write_default_output error handling (P2 fix #24)
+# ---------------------------------------------------------------------------
+
+
+def test_write_default_output_os_error_does_not_fail_audit(
+    tmp_path: Path,
+    seeded_db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A read-only ``.audit/`` (OSError on mkdir/write) must not turn a
+    PASS audit into a failure. Handler emits a stderr warning and
+    returns 0.
+
+    Simulated via monkeypatching ``Path.mkdir`` to raise OSError.
+    """
+    fixture_path = tmp_path / "baseline.json"
+    _prepin(seeded_db_path, fixture_path, ["Test Commander"])
+
+    # Sabotage mkdir so _write_default_output's mkdir call raises.
+    original_mkdir = Path.mkdir
+
+    def _boom(self: Path, *args: object, **kwargs: object) -> None:
+        # Only trigger on the ``.audit`` default-dir call, not on
+        # output-path parent dirs.
+        if self.name == ".audit":
+            raise PermissionError("read-only audit dir")
+        original_mkdir(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "mkdir", _boom)
+
+    # Run without --output so _write_default_output is the code path.
+    exit_code = bench_cli.main(
+        [
+            "audit",
+            "--db",
+            str(seeded_db_path),
+            "--fixture",
+            str(fixture_path),
+        ]
+    )
+    # Audit itself is clean → exit 0.
+    assert exit_code == 0
+    cap = capsys.readouterr()
+    # Warning surfaced to stderr (prefixed "bench.py audit: warning").
+    assert "could not write" in cap.err.lower()
+    assert ".audit" in cap.err

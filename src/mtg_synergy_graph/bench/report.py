@@ -19,7 +19,7 @@ from mtg_synergy_graph.bench.fixture import (
 
 if TYPE_CHECKING:
     from mtg_synergy_graph.bench.fixture import FixtureEntry
-from mtg_synergy_graph.bench.hidden_gems import _HIDDEN_GEM_WARN_THRESHOLD
+from mtg_synergy_graph.bench.hidden_gems import HIDDEN_GEM_WARN_THRESHOLD
 from mtg_synergy_graph.bench.histogram import (
     Bucket,
     Histogram,
@@ -93,7 +93,7 @@ class AuditReport:
     pinned_hidden_gem_hit_rate: float | None = None
     #: ``live - pinned`` when both aggregates are non-None, else None.
     hidden_gem_hit_rate_delta: float | None = None
-    #: True iff delta dropped strictly below ``-_HIDDEN_GEM_WARN_THRESHOLD``
+    #: True iff delta dropped strictly below ``-HIDDEN_GEM_WARN_THRESHOLD``
     #: (FR4). Informational only — does not affect exit code.
     hidden_gem_warning: bool = False
     #: Count of entries contributing to the live aggregate.
@@ -167,7 +167,7 @@ def build_report(
         gem_delta: float | None = live_gem_mean - pinned_gem_mean
     else:
         gem_delta = None
-    gem_warning = gem_delta is not None and gem_delta < -_HIDDEN_GEM_WARN_THRESHOLD
+    gem_warning = gem_delta is not None and gem_delta < -HIDDEN_GEM_WARN_THRESHOLD
 
     return AuditReport(
         fixture_path=fixture_path,

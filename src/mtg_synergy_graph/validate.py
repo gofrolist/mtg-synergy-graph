@@ -240,14 +240,12 @@ def _run_one(
         hi_syn_hits = len(top30 & hi_syn)
         on_page_hits = len(top30 & all_on_page)
 
-        # Top-5 hi-syn by synergy score (for reference)
-        hi_syn_rows = edhrec_conn.execute(
-            "SELECT card_name, synergy FROM edhrec_card_synergy "
-            "WHERE commander_slug = ? AND section = 'High Synergy Cards' "
-            "ORDER BY synergy DESC LIMIT 10",
-            (slug,),
-        ).fetchall()
-        edhrec_top10 = tuple(r["card_name"] for r in hi_syn_rows)
+        # Top-10 hi-syn by synergy score (for reference). Shared SQL
+        # shape lives in ``edhrec_helpers`` so the bench fixture and
+        # this tracker can't drift on the section-name literal.
+        from mtg_synergy_graph.edhrec_helpers import fetch_high_synergy_top_n_ordered
+
+        edhrec_top10 = fetch_high_synergy_top_n_ordered(edhrec_conn, commander[0], limit=10)
 
     return GoldenSetEntry(
         commander=" + ".join(commander),

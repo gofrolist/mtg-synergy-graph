@@ -29,14 +29,14 @@ from types import MappingProxyType
 
 #: Warning threshold for aggregate delta regressions (FR4). If the
 #: delta between live and pinned aggregate ``hidden_gem_hit_rate`` drops
-#: below ``-_HIDDEN_GEM_WARN_THRESHOLD``, the audit prints a stderr
+#: below ``-HIDDEN_GEM_WARN_THRESHOLD``, the audit prints a stderr
 #: warning. The commit is NOT gated on this at MVP — see plan 003 FR6
 #: escalation criteria: promotion to a commit-gate requires (1) the
 #: metric to be tracked for ≥20 commits, (2) human correlation
 #: confirming metric drops track subjectively-bad changes, and (3) a
 #: false-positive rate below 10% on recent accepted commits. Promotion
 #: is itself a separate ce-brainstorm + ce-plan cycle.
-_HIDDEN_GEM_WARN_THRESHOLD = 0.02
+HIDDEN_GEM_WARN_THRESHOLD = 0.02
 
 
 @dataclass(frozen=True)
@@ -98,8 +98,54 @@ def _aggregate_contributions(
     return dict(n_rules), dict(totals)
 
 
+def _plausibility_from_maps(
+    cand: str,
+    n_rules_map: Mapping[str, int],
+    totals_map: Mapping[str, float],
+    median: float,
+) -> bool:
+    """FR2 plausibility gate against pre-aggregated maps + median.
+
+    Internal helper so batched callers can aggregate contributions +
+    compute the median once across the whole candidate cohort, then
+    evaluate plausibility for each candidate in O(1) per call.
+
+    ``median`` is expected to be the median of strictly-positive totals
+    across the commander's cohort; callers pass ``0.0`` when the cohort
+    has no positive totals (the median-OR leg then short-circuits to
+    False, falling back to the N_rules leg only).
+    """
+    n_rules_cand = n_rules_map.get(cand, 0)
+    if n_rules_cand >= 2:
+        return True
+
+    total_cand = totals_map.get(cand, 0.0)
+    if total_cand <= 0:
+        return False
+
+    if median <= 0:
+        # Degenerate: the cohort has no positive totals OR the median
+        # collapses to zero. The median-OR leg is vacuous; fall back to
+        # the N_rules leg only (which already failed).
+        return False
+
+    return total_cand > median
+
+
+def _cohort_median(totals_map: Mapping[str, float]) -> float:
+    """Return the median of strictly-positive totals, or ``0.0`` if none.
+
+    Zero-median fallback is documented in ``plausibility``: an all-zero
+    cohort should reject every candidate via the N_rules leg only.
+    """
+    positive_totals = [v for v in totals_map.values() if v > 0]
+    if not positive_totals:
+        return 0.0
+    return statistics.median(positive_totals)
+
+
 def plausibility(
-    cmdr: str,
+    _cmdr: str,
     cand: str,
     contributions: Iterable[tuple[str, str, float]],
 ) -> bool:
@@ -115,36 +161,21 @@ def plausibility(
     non-zero candidate regardless of specificity. We short-circuit to
     the N_rules leg only in that case.
 
-    ``cmdr`` is accepted for API symmetry with future extensions
+    ``_cmdr`` is accepted for API symmetry with future extensions
     (embedding-based plausibility tightening — see plan 003 "Deferred
     to Separate Tasks") but not used by the pure-mechanical gate.
+
+    **Performance note:** this function is ``O(rows)`` per call — it
+    aggregates contributions and computes the cohort median fresh every
+    invocation. Use :func:`hidden_gem_hit_rate_for_commander` (or the
+    internal :func:`_plausibility_from_maps`) when evaluating many
+    candidates against the same commander; that path amortizes the
+    aggregation to ``O(rows)`` across the whole cohort instead of
+    ``O(rows × candidates)``.
     """
-    # ``cmdr`` is reserved for future per-commander tuning (FR6
-    # escalation path); silence unused-argument without per-line noqa.
-    del cmdr
     n_rules_map, totals_map = _aggregate_contributions(contributions)
-    n_rules_cand = n_rules_map.get(cand, 0)
-
-    if n_rules_cand >= 2:
-        return True
-
-    total_cand = totals_map.get(cand, 0.0)
-    if total_cand <= 0:
-        return False
-
-    # Median is computed across candidates with any positive total.
-    # Empty or all-zero cohort → median fallback rejects everything.
-    positive_totals = [v for v in totals_map.values() if v > 0]
-    if not positive_totals:
-        return False
-
-    median = statistics.median(positive_totals)
-    if median <= 0:
-        # Degenerate: the median of the positive set somehow collapses
-        # to zero. Fall back to N_rules leg only.
-        return False
-
-    return total_cand > median
+    median = _cohort_median(totals_map)
+    return _plausibility_from_maps(cand, n_rules_map, totals_map, median)
 
 
 def hidden_gem_hit_rate_for_commander(
@@ -170,13 +201,18 @@ def hidden_gem_hit_rate_for_commander(
     if edhrec_top_30 is None:
         return None
 
-    # Materialize once so we can iterate twice (plausibility check).
+    # Aggregate contributions + compute the cohort median ONCE so the
+    # per-candidate plausibility check is O(1). Prior versions called
+    # ``plausibility`` (which re-aggregates internally) once per hidden
+    # candidate — O(H × rows) for H hidden candidates. This is now O(rows).
     rows = list(contributions)
+    n_rules_map, totals_map = _aggregate_contributions(rows)
+    median = _cohort_median(totals_map)
 
     our_set = set(our_top_30)
     hidden = our_set - edhrec_top_30
 
-    plausible_hidden = sorted(c for c in hidden if plausibility(commander, c, rows))
+    plausible_hidden = sorted(c for c in hidden if _plausibility_from_maps(c, n_rules_map, totals_map, median))
 
     rate = len(plausible_hidden) / 30
     return HiddenGemEntry(

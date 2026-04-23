@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -414,8 +415,18 @@ def test_limit_zero_yields_empty_table(
     rc = handle_inspect_gems(_args(fixture_path, synergy, edhrec_db=str(edhrec), limit=0))
     assert rc == 0
     out = capsys.readouterr().out
-    # No data row — commander name must not appear below the header.
-    assert "A" not in out.split("|-----------|--:|")[-1] if "|-----------|--:|" in out else True
+    # Full table separator row must be present (render still emits the
+    # header + separator even with --limit 0).
+    separator = "|-----------|--:|-----------|-------------|"
+    assert separator in out
+    # No data rows follow the separator — everything after it should
+    # be whitespace. Previously the test was
+    # ``assert 'A' not in out.split(sep)[-1] if sep in out else True``
+    # which was vacuously true when the separator wasn't present (the
+    # exact bug P2 fix #23 targeted); this rewrite asserts behavior
+    # directly.
+    after_separator = out.split(separator, 1)[1].strip()
+    assert after_separator == ""
 
 
 # ---------------------------------------------------------------------------
@@ -466,6 +477,56 @@ def test_edhrec_db_missing_exits_2(
     assert rc == 2
     err = capsys.readouterr().err
     assert "edhrec" in err.lower()
+
+
+def test_edhrec_db_unusable_surfaces_actionable_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Corrupt / schema-less EDHREC DB → exit 2 with actionable stderr.
+
+    Simulates the "sqlite3.DatabaseError from build_fixture" path: a
+    real file exists at the path but build_fixture raises when it
+    tries to query it. Should surface as exit 2 with the
+    "Pass --edhrec-db PATH..." guidance (the same surface as a missing
+    path), not an unhandled traceback.
+    """
+    synergy = tmp_path / "synergy.db"
+    synergy.touch()
+    edhrec = tmp_path / "tags.db"
+    # Create a real SQLite DB so the path exists and is openable,
+    # but without the expected table — the helper raises
+    # OperationalError (subclass of DatabaseError).
+    conn = sqlite3.connect(edhrec)
+    conn.commit()
+    conn.close()
+
+    pinned = _make_fixture(
+        [
+            FixtureEntry(
+                commander="A",
+                legacy={"hidden_gem_hit_rate": 0.1, "hidden_cards": ["X"]},
+            ),
+        ]
+    )
+    fixture_path = tmp_path / "baseline.json"
+    _write_fixture(fixture_path, pinned)
+
+    # Monkeypatch build_fixture to raise DatabaseError directly — this
+    # is the error surface we need to handle.
+    def _raise(conn, commanders, existing=None, tensor_writer=None, edhrec_conn=None):  # type: ignore[no-untyped-def]
+        import sqlite3 as _sql
+
+        raise _sql.OperationalError("no such table: edhrec_card_synergy")
+
+    monkeypatch.setattr(handlers, "build_fixture", _raise)
+
+    rc = handle_inspect_gems(_args(fixture_path, synergy, edhrec_db=str(edhrec)))
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "edhrec" in err.lower()
+    assert "unusable" in err.lower() or "pass --edhrec-db" in err.lower()
 
 
 # ---------------------------------------------------------------------------

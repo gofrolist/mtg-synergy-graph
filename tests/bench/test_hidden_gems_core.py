@@ -16,7 +16,7 @@ import dataclasses
 import pytest
 
 from mtg_synergy_graph.bench.hidden_gems import (
-    _HIDDEN_GEM_WARN_THRESHOLD,
+    HIDDEN_GEM_WARN_THRESHOLD,
     HiddenGemEntry,
     HiddenGemReport,
     aggregate_hidden_gem_hit_rate,
@@ -31,7 +31,7 @@ from mtg_synergy_graph.bench.hidden_gems import (
 
 def test_threshold_constant_is_002() -> None:
     """FR4 pins the warning threshold at 0.02."""
-    assert pytest.approx(0.02) == _HIDDEN_GEM_WARN_THRESHOLD
+    assert pytest.approx(0.02) == HIDDEN_GEM_WARN_THRESHOLD
 
 
 # ---------------------------------------------------------------------------

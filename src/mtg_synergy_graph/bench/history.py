@@ -95,12 +95,31 @@ def append_run(
     the file does not exist or is empty. Any exception during write
     degrades to a stderr warning — a history write failure must never
     abort the primary audit output.
+
+    The header-write check uses the file descriptor's post-open
+    position rather than a separate ``Path.stat()`` call so two
+    concurrent audits can't race between "is the file empty?" and
+    "open for append and write header." Opening in append mode
+    positions the FD at end-of-file; ``tell() == 0`` iff the file
+    was empty (or newly created). On the rare platform where
+    append-mode ``tell`` is unreliable we fall back to ``os.fstat``.
     """
     csv_path = Path(path)
     try:
         csv_path.parent.mkdir(parents=True, exist_ok=True)
-        write_header = (not csv_path.exists()) or csv_path.stat().st_size == 0
         with csv_path.open("a", encoding="utf-8", newline="") as fh:
+            # Append-mode open positions at EOF; a zero offset means
+            # the file was empty (or just created). This replaces the
+            # prior ``path.exists() + path.stat().st_size`` check which
+            # raced with concurrent writers. If ``tell()`` returns <0
+            # on some platform (unspecified), we fall back to ``fstat``
+            # on the same FD — still atomic relative to this writer.
+            pos = fh.tell()
+            if pos < 0:
+                import os as _os
+
+                pos = _os.fstat(fh.fileno()).st_size
+            write_header = pos == 0
             writer = csv.writer(fh)
             if write_header:
                 writer.writerow(CSV_FIELDS)
@@ -124,22 +143,27 @@ def _row_from_report(report: AuditReport) -> list[str]:
         timestamp,
         _commit_sha(),
         report.live_config_hash,
-        _fmt_float(report.aggregate_score_delta),
-        _fmt_float(report.aggregate_hidden_gem_hit_rate),
-        _fmt_float(report.hidden_gem_hit_rate_delta),
+        fmt_float(report.aggregate_score_delta),
+        fmt_float(report.aggregate_hidden_gem_hit_rate),
+        fmt_float(report.hidden_gem_hit_rate_delta),
         str(report.commanders_compared),
         str(report.commanders_with_edhrec),
         report.verdict.value,
     ]
 
 
-def _fmt_float(value: float | None) -> str:
+def fmt_float(value: float | None) -> str:
     """Render a float with fixed precision; ``None`` → empty string.
 
     Six decimals is enough to preserve NDCG-level deltas on playback;
     we never need more precision for a trend chart. Empty string
     (not ``"None"``, not ``"null"``) keeps the CSV compact and numeric-
     parser friendly downstream.
+
+    Public (no leading underscore) so ``bench.handlers._row_to_cells``
+    can re-use the same renderer for the ``--trend`` markdown/CSV
+    table — keeping both call sites in lockstep on precision +
+    ``None``-handling semantics.
     """
     if value is None:
         return ""
@@ -165,6 +189,8 @@ def read_last(n: int, path: str | Path = _DEFAULT_PATH) -> list[HistoryRow]:
         return []
 
     rows: list[HistoryRow] = []
+    total_rows = 0
+    skipped_count = 0
     try:
         with csv_path.open(encoding="utf-8", newline="") as fh:
             reader = csv.reader(fh)
@@ -179,8 +205,11 @@ def read_last(n: int, path: str | Path = _DEFAULT_PATH) -> list[HistoryRow]:
                 )
                 return []
             for lineno, raw in enumerate(reader, start=2):
+                total_rows += 1
                 parsed = _parse_row(raw, lineno=lineno, path=csv_path)
-                if parsed is not None:
+                if parsed is None:
+                    skipped_count += 1
+                else:
                     rows.append(parsed)
     except OSError as exc:
         print(
@@ -188,6 +217,16 @@ def read_last(n: int, path: str | Path = _DEFAULT_PATH) -> list[HistoryRow]:
             file=sys.stderr,
         )
         return []
+
+    # Per-row warnings above are load-bearing for debugging a single
+    # bad append; this aggregate tells an operator at a glance that
+    # the history file has drift worth investigating. Emitted once,
+    # after the loop.
+    if skipped_count > 0:
+        print(
+            f"bench.py audit: warning: skipped {skipped_count} of {total_rows} malformed row(s) in {csv_path}",
+            file=sys.stderr,
+        )
 
     if n >= len(rows):
         return rows
@@ -266,5 +305,6 @@ __all__ = [
     "CSV_FIELDS",
     "HistoryRow",
     "append_run",
+    "fmt_float",
     "read_last",
 ]

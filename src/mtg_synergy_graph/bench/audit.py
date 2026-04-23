@@ -129,11 +129,24 @@ def handle_audit(args: argparse.Namespace) -> int:
 
 def _write_default_output(rendered: str, fixture_path: Path, fmt: str) -> None:
     """Also persist the rendered report to `.audit/last.{md,json}` for
-    pre-commit-hook consumption (Unit 7)."""
+    pre-commit-hook consumption (Unit 7).
+
+    A read-only ``.audit/`` (or any other OSError during mkdir / write)
+    must NOT turn a PASS audit into a failure — the primary output
+    has already been printed to stdout. Degrade to a stderr warning
+    and return.
+    """
     default_dir = Path(".audit")
-    default_dir.mkdir(exist_ok=True)
     suffix = "json" if fmt == "json" else "md"
-    (default_dir / f"last.{suffix}").write_text(rendered, encoding="utf-8")
+    target = default_dir / f"last.{suffix}"
+    try:
+        default_dir.mkdir(exist_ok=True)
+        target.write_text(rendered, encoding="utf-8")
+    except OSError as exc:
+        print(
+            f"bench.py audit: warning: could not write {target}: {exc.__class__.__name__}: {exc}",
+            file=sys.stderr,
+        )
 
 
 def _print_hidden_gem_warning(report: AuditReport) -> None:
