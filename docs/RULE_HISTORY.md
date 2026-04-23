@@ -53,6 +53,38 @@ See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 - Plan: `docs/plans/2026-04-23-001-feat-self-bridging-cascade-pathway-plan.md`.
 - Seed commits: 594873f (walker, Unit 1), Unit 2, Unit 3, Unit 4, Unit 6.
 
+**Post-review fix pass (2026-04-23, same day).** `ce-code-review` surfaced
+three P1 findings:
+1. `SynergyEngine.score_one` called `_render_explanation` without the
+   `UniversalScore` argument, so `self_bridging_cascade:` lines were
+   silently dropped via that public entry point. Fixed.
+2. `stax_excluded` was built in `find_all_complements` but never
+   threaded to `_find_self_bridging_cascade`; stax cards fired the rule
+   for affected commanders. Fixed by extending the helper signature.
+3. Plan's Unit 2 profiling step was never run. Measurement at flag=True
+   against `data/synergy.db` showed pathway overhead: Korvold 15 ms ->
+   345 ms (+2084%), Gitrog +203%, Yawgmoth +262%. The fix adds
+   `CandidateCache.ports_by_card` as the plan pre-authorised, plus a
+   shape memo on commander-port matching in Stage-3. Post-fix overhead:
+   Korvold +725%, Gitrog +112%, Yawgmoth +165%, Rafiq +97%. Absolute
+   per-page costs: Korvold 113 ms, Gitrog 30 ms, Yawgmoth 22 ms,
+   Rafiq 12 ms.
+
+Also applied: Stage-1 SQL now uses `COUNT(DISTINCT port_type || '|' ||
+event_class) >= 2` to match the plan spec (previously the single-column
+form silently dropped cards with same event_class across different
+port_types). Dead `seen` set removed. Redundant
+`_cand_port_matches_any_cmdr` calls after walker return eliminated.
+Docstring on `_port_pair_matches` corrected to describe the intentional
+M-set / internal-edge asymmetry (M accepts 3 channels, walker accepts
+2). `_render_explanation` universal_score plumbed through `score_one()`.
+Plan file Implementation Unit checkboxes updated to `- [x]`.
+
+Post-fix audit verdict stayed POSITIVE with aggregate Δ +0.74 over the
+pre-fix flag=True baseline (small positive drift from the concat-distinct
+admission fix). Zero hi_syn_loss. hidden_gem_hit_rate 0.7710 (vs 0.7287
+baseline, +0.0423 kept). Fixture re-pinned at post-fix baseline.
+
 ## 2026-04-22
 
 ### IDF reforms plan 002 (BM25F + conditional denominator — not landed)

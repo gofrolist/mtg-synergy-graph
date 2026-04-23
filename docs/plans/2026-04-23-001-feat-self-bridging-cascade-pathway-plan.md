@@ -185,7 +185,7 @@ def _walk_self_paths(M: Sequence[PortRow]) -> tuple[PortRow, PortRow, str] | Non
 
 ## Implementation Units
 
-- [ ] **Unit 1: `_walk_self_paths` pure-function walker**
+- [x] **Unit 1: `_walk_self_paths` pure-function walker**
 
 **Goal:** A pure, DB-free utility that detects a length-≤2 internal edge between two ports of the same candidate via the three canonical channels.
 
@@ -228,7 +228,7 @@ def _walk_self_paths(M: Sequence[PortRow]) -> tuple[PortRow, PortRow, str] | Non
 - No DB access in the walker or its helpers (enforced by import-only of `graph_engine.EVENT_MATCH_MAP` + `COST_FEEDS_TRIGGER` dicts).
 - `ruff` and `pyright` clean.
 
-- [ ] **Unit 2: `_find_self_bridging_cascade` helper (SQL + Python pipeline)**
+- [x] **Unit 2: `_find_self_bridging_cascade` helper (SQL + Python pipeline)**
 
 **Goal:** Wrap the walker in the two-stage bulk-load pipeline that enumerates candidates, bulk-loads their ports, and emits one `PortComplement` per firing.
 
@@ -280,7 +280,7 @@ def _walk_self_paths(M: Sequence[PortRow]) -> tuple[PortRow, PortRow, str] | Non
 - `uv run pytest tests/test_self_bridging_cascade.py` runs under 2s.
 - No `self_bridging_cascade` entry sneaks into `data/rules_seed.json` (regression guard in the registry unit).
 
-- [ ] **Unit 3: Flag gate and registry wiring**
+- [x] **Unit 3: Flag gate and registry wiring**
 
 **Goal:** Wire the new helper into the complement pipeline behind `_ENABLE_PATHWAY_RULES = False`, with registry attribution in place. **Do not** modify `ScoringConfigInputs` in this unit (see Unit 6 + Key Technical Decisions).
 
@@ -322,7 +322,7 @@ def _walk_self_paths(M: Sequence[PortRow]) -> tuple[PortRow, PortRow, str] | Non
 - With flag patched on in tests, the 4-tuple dedup key works (no double-counted contributions).
 - Registry unit tests pass.
 
-- [ ] **Unit 4: `--explain` path rendering**
+- [x] **Unit 4: `--explain` path rendering**
 
 **Goal:** `recommend.py --commander X --top N --explain` emits a legible `path:` line per `self_bridging_cascade` firing, naming the two canonical node kinds and the internal-edge channel reason.
 
@@ -363,7 +363,7 @@ def _walk_self_paths(M: Sequence[PortRow]) -> tuple[PortRow, PortRow, str] | Non
 - `--explain` output with flag on passes the integration test pattern match.
 - `_render_explanation` call-site update doesn't break other callers (`UniversalScore` threading is additive, not subtractive).
 
-- [ ] **Unit 5: Bloodghast fixture for depth-2 integration test**
+- [x] **Unit 5: Bloodghast fixture for depth-2 integration test**
 
 **Goal:** Add the minimal fixture needed for Unit 2's real-fixture happy-path integration test. Korvold already exists; Bloodghast is the only new card needed to exercise the full SQL → walker → `PortComplement` pipeline against real parsed ports.
 
@@ -392,7 +392,7 @@ def _walk_self_paths(M: Sequence[PortRow]) -> tuple[PortRow, PortRow, str] | Non
 - `uv run pytest tests/` still runs under ~2s for the non-integration suite.
 - Unit 2's Korvold + Bloodghast integration test works without any further fixture additions.
 
-- [ ] **Unit 6: `ScoringConfigInputs` plumbing + audit gate + landing decision**
+- [x] **Unit 6: `ScoringConfigInputs` plumbing + audit gate + landing decision**
 
 **Goal:** Add the flag to `ScoringConfigInputs` (so config-hash invalidation is automatic), flip `_ENABLE_PATHWAY_RULES = True` in the working tree, run `bench.py audit`, and decide whether to commit the flip or revert.
 
