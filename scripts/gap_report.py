@@ -38,6 +38,7 @@ from mtg_synergy_graph.complement_rules.core import (
     load_ports_for_set,
 )
 from mtg_synergy_graph.complement_rules.registry import RULE_GATES
+from mtg_synergy_graph.forge_oracle import gap_weight as _forge_gap_weight
 
 # Local sibling-script import for the attempt log.
 sys.path.insert(0, str(Path(__file__).parent))
@@ -131,6 +132,11 @@ class GapStat:
     activations: int
     exemplars: tuple[str, ...]
     top_rules: tuple[tuple[str, int], ...]
+    #: Forge-oracle signal in ``[1.0, 1.5]`` (plan 002 Unit 6). Multiplies
+    #: ``impact`` in the sort key. Defaults to 1.0 (neutral) when
+    #: ``data/forge_oracle.db`` is missing or has no coverage for this
+    #: subkind. See ``src/mtg_synergy_graph/forge_oracle/gap_weight.py``.
+    forge_signal: float = 1.0
 
     @property
     def activation_rate(self) -> float:
@@ -140,6 +146,11 @@ class GapStat:
     def impact(self) -> float:
         """Reach × inverse coverage. Used to rank proposals."""
         return self.commanders * (1.0 - self.activation_rate)
+
+    @property
+    def weighted_impact(self) -> float:
+        """``impact * forge_signal`` — the final rank key (Unit 6)."""
+        return self.impact * self.forge_signal
 
 
 def _commander_names(conn: sqlite3.Connection) -> list[str]:
@@ -704,7 +715,14 @@ def _format_report(proposals: list[RuleProposal], stats_total: int, eligible_tot
             f"this signature; {prop.gap.activations} get any rule "
             f"activation ({prop.gap.activation_rate:.0%})."
         )
-        lines.append(f"- **Impact**: {prop.gap.impact:.1f}")
+        if prop.gap.forge_signal != 1.0:
+            lines.append(
+                f"- **Impact**: {prop.gap.impact:.1f} * "
+                f"forge_signal {prop.gap.forge_signal:.2f} = "
+                f"{prop.gap.weighted_impact:.1f}"
+            )
+        else:
+            lines.append(f"- **Impact**: {prop.gap.impact:.1f}")
         lines.append(f"- **Template**: `{prop.template}`")
         lines.append(f"- **Rationale**: {prop.rationale}")
         if prop.gap.exemplars:
@@ -734,6 +752,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path, default=Path("data/synergy.db"))
     parser.add_argument("--out", type=Path, default=Path("docs/gap_report.md"))
+    parser.add_argument(
+        "--forge-oracle-db",
+        dest="forge_oracle_db",
+        type=Path,
+        default=Path("data/forge_oracle.db"),
+        help="Optional sidecar forge_oracle.db. Absent/empty → silent "
+        "fallback to volume-only ranking (plan 002 Unit 6).",
+    )
     parser.add_argument(
         "--limit",
         type=int,
@@ -770,8 +796,27 @@ def main() -> int:
         )
         stats = _scan_universe(conn, commanders)
 
+        # Plan 002 Unit 6: boost gaps whose subkind has a strong Forge
+        # precon-PPMI signal. Silent fallback to neutral weight (1.0)
+        # when the sidecar is missing — gap_report must always produce
+        # a report.
+        forge_signals = _forge_gap_weight.load_forge_signals(args.forge_oracle_db)
+        if not forge_signals:
+            print(
+                f"forge_oracle.db at {args.forge_oracle_db} is missing or empty — "
+                "falling back to volume-only ranking (forge_signal = 1.0 for all gaps).",
+                file=sys.stderr,
+            )
+        stats = [
+            dataclasses.replace(
+                s,
+                forge_signal=_forge_gap_weight.forge_weight_for_signature(s.signature, forge_signals),
+            )
+            for s in stats
+        ]
+
         eligible = [s for s in stats if _eligible(s, max_activation=args.max_activation)]
-        eligible.sort(key=lambda s: (-s.impact, -s.commanders, s.signature))
+        eligible.sort(key=lambda s: (-s.weighted_impact, -s.commanders, s.signature))
 
         proposals: list[RuleProposal] = []
         for gap in eligible:
