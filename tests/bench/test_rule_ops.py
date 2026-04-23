@@ -267,3 +267,246 @@ def test_cli_collinearity_outputs_report(tmp_path: Path, capsys: pytest.CaptureF
     out = capsys.readouterr().out
     assert "bench.py audit --collinearity" in out
     assert "r_a" in out and "r_b" in out
+
+
+# ---------------------------------------------------------------------------
+# CLI --format json tests (CLR-001 / CLR-002)
+# ---------------------------------------------------------------------------
+
+
+def _seed_rule_db(tmp_path: Path) -> Path:
+    """Helper: build a tiny tensor DB for rule/inspect CLI JSON tests."""
+    db_path = tmp_path / "synergy.db"
+    conn = open_db(db_path)
+    try:
+        _seed_tensor(
+            conn,
+            [
+                ("Korvold", "Bloodghast", "r1", 0.3),
+                ("Korvold", "Mayhem Devil", "r1", 0.5),
+                ("Muldrotha", "Bloodghast", "r1", 0.1),
+            ],
+        )
+    finally:
+        conn.close()
+    return db_path
+
+
+def test_cli_rule_json_returns_valid_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """``--rule RULE_ID --format json`` emits a parseable JSON object
+    with the expected top-level keys."""
+    import json
+
+    db_path = _seed_rule_db(tmp_path)
+
+    exit_code = bench_cli.main(["audit", "--rule", "r1", "--format", "json", "--db", str(db_path)])
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+    assert payload["rule_id"] == "r1"
+    assert payload["commanders_affected"] == 2
+    assert payload["candidates_affected"] == 2
+    assert "aggregate_contribution" in payload
+    assert "config_hash" in payload
+    top = payload["top_commanders"]
+    assert isinstance(top, list)
+    assert top[0]["commander"] == "Korvold"
+
+
+def test_cli_rule_json_output_path_writes_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """``--format json --output PATH`` writes to PATH with stderr
+    confirmation and empty stdout (no duplicate render)."""
+    import json
+
+    db_path = _seed_rule_db(tmp_path)
+    out_path = tmp_path / "rule.json"
+
+    exit_code = bench_cli.main(
+        [
+            "audit",
+            "--rule",
+            "r1",
+            "--format",
+            "json",
+            "--output",
+            str(out_path),
+            "--db",
+            str(db_path),
+        ]
+    )
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "report written to" in captured.err
+    assert str(out_path) in captured.err
+    payload = json.loads(out_path.read_text())
+    assert payload["rule_id"] == "r1"
+
+
+def test_cli_rule_markdown_default_unchanged(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Regression: omitting ``--format`` keeps the markdown-ish text
+    output shape (``# bench.py audit --rule r1`` + Korvold row)."""
+    db_path = _seed_rule_db(tmp_path)
+
+    exit_code = bench_cli.main(["audit", "--rule", "r1", "--db", str(db_path)])
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "# bench.py audit --rule r1" in out
+    assert "Korvold" in out
+    # Must NOT look like JSON.
+    assert not out.strip().startswith("{")
+
+
+def test_cli_inspect_json_returns_valid_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """``--inspect RULE_ID --format json`` emits a JSON object with
+    per-row contribution rows."""
+    import json
+
+    db_path = _seed_rule_db(tmp_path)
+
+    exit_code = bench_cli.main(["audit", "--inspect", "r1", "--format", "json", "--db", str(db_path)])
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+    assert payload["rule_id"] == "r1"
+    assert payload["n_rows"] == 3
+    assert isinstance(payload["rows"], list)
+    first = payload["rows"][0]
+    for key in ("commander", "candidate", "contribution", "idf_weight", "raw_count"):
+        assert key in first
+    # Largest-magnitude row sorts first: Korvold / Mayhem Devil (0.5).
+    assert first["commander"] == "Korvold"
+    assert first["candidate"] == "Mayhem Devil"
+
+
+def test_cli_inspect_json_output_path_writes_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """``--inspect --format json --output PATH`` writes to PATH with
+    stderr confirmation and empty stdout."""
+    import json
+
+    db_path = _seed_rule_db(tmp_path)
+    out_path = tmp_path / "inspect.json"
+
+    exit_code = bench_cli.main(
+        [
+            "audit",
+            "--inspect",
+            "r1",
+            "--format",
+            "json",
+            "--output",
+            str(out_path),
+            "--db",
+            str(db_path),
+        ]
+    )
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "report written to" in captured.err
+    payload = json.loads(out_path.read_text())
+    assert payload["rule_id"] == "r1"
+    assert len(payload["rows"]) == 3
+
+
+def test_cli_inspect_markdown_default_unchanged(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Regression: omitting ``--format`` keeps the table-style text
+    output shape."""
+    db_path = _seed_rule_db(tmp_path)
+
+    exit_code = bench_cli.main(["audit", "--inspect", "r1", "--db", str(db_path)])
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "# bench.py audit --inspect r1" in out
+    # The markdown path prints the column header line.
+    assert "commander" in out and "candidate" in out and "contrib" in out
+    assert not out.strip().startswith("{")
+
+
+def test_cli_collinearity_json_returns_valid_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """``--collinearity --format json`` emits a JSON object with
+    ``pairs_flagged`` + ``vif_per_rule``."""
+    import json
+
+    db_path = tmp_path / "synergy.db"
+    conn = open_db(db_path)
+    try:
+        rows: list[tuple[str, str, str, float]] = []
+        for i in range(1, 20):
+            rows.append((f"C{i}", f"cand_{i}", "r_a", 0.1 * i))
+            rows.append((f"C{i}", f"cand_{i}", "r_b", 0.1 * i))
+        _seed_tensor(conn, rows)
+    finally:
+        conn.close()
+
+    exit_code = bench_cli.main(["audit", "--collinearity", "--format", "json", "--db", str(db_path)])
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+    assert "config_hash" in payload
+    assert payload["rules_examined"] == 2
+    assert isinstance(payload["pairs_flagged"], list)
+    pair = payload["pairs_flagged"][0]
+    for key in ("rule_a", "rule_b", "pearson_r", "vif_a", "vif_b"):
+        assert key in pair
+    assert {pair["rule_a"], pair["rule_b"]} == {"r_a", "r_b"}
+    assert "vif_per_rule" in payload
+    assert set(payload["vif_per_rule"].keys()) == {"r_a", "r_b"}
+
+
+def test_cli_collinearity_json_output_path_writes_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """``--collinearity --format json --output PATH`` writes to PATH
+    with stderr confirmation and empty stdout."""
+    import json
+
+    db_path = tmp_path / "synergy.db"
+    conn = open_db(db_path)
+    try:
+        rows: list[tuple[str, str, str, float]] = []
+        for i in range(1, 20):
+            rows.append((f"C{i}", f"cand_{i}", "r_a", 0.1 * i))
+            rows.append((f"C{i}", f"cand_{i}", "r_b", 0.1 * i))
+        _seed_tensor(conn, rows)
+    finally:
+        conn.close()
+    out_path = tmp_path / "collinearity.json"
+
+    exit_code = bench_cli.main(
+        [
+            "audit",
+            "--collinearity",
+            "--format",
+            "json",
+            "--output",
+            str(out_path),
+            "--db",
+            str(db_path),
+        ]
+    )
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "report written to" in captured.err
+    payload = json.loads(out_path.read_text())
+    assert payload["rules_examined"] == 2
+
+
+def test_cli_collinearity_markdown_default_unchanged(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Regression: omitting ``--format`` keeps the text table output."""
+    db_path = tmp_path / "synergy.db"
+    conn = open_db(db_path)
+    try:
+        rows: list[tuple[str, str, str, float]] = []
+        for i in range(1, 20):
+            rows.append((f"C{i}", f"cand_{i}", "r_a", 0.1 * i))
+            rows.append((f"C{i}", f"cand_{i}", "r_b", 0.1 * i))
+        _seed_tensor(conn, rows)
+    finally:
+        conn.close()
+
+    exit_code = bench_cli.main(["audit", "--collinearity", "--db", str(db_path)])
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "# bench.py audit --collinearity" in out
+    assert "r_a" in out and "r_b" in out
+    assert not out.strip().startswith("{")
