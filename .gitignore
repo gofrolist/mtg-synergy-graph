@@ -9,6 +9,10 @@ __pycache__/
 data/*
 # …except seed JSONs — source of truth for declarative rules + event maps
 !data/*_seed.json
+# …and the forge-oracle pin directory (committed: version.txt pins the
+# Forge SHA used to build forge_oracle.db, which itself is regenerable).
+!data/forge_oracle/
+!data/forge_oracle/**
 
 # Build artifacts
 *.egg-info/

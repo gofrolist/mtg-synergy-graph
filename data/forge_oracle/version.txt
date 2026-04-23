@@ -1,0 +1,7 @@
+# Forge commit SHA pinned for the Forge-Second-Oracle feature.
+# The first non-comment, non-blank line is the SHA.
+# Bump via `scripts/forge_oracle.py upgrade` (added in a later unit).
+#
+# Upstream: https://github.com/Card-Forge/forge
+# Pinned at Forge release containing 667 .dck precon decks (quest/commanderprecons + quest/precons).
+ed97d9bb77f03d9681aba59186416bcf7923d5dd
