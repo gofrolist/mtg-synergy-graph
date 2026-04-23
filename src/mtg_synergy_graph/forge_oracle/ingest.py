@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from mtg_synergy_graph.forge_oracle import config as fo_config
 from mtg_synergy_graph.forge_oracle import dck_parser
 from mtg_synergy_graph.forge_oracle import ppmi as ppmi_math
 
@@ -229,6 +230,16 @@ def build_forge_oracle_db(
     try:
         _init_db(target_conn)
         n_rows = _write_ppmi_rows(target_conn, ppmi_table, now_iso=now_iso)
+        # Stamp the config hash so strict consumers can refuse stale DBs.
+        config_inputs = fo_config.get_oracle_config_inputs(
+            ppmi_smoothing_k=smoothing_k,
+            min_decks_count=min_decks_count,
+        )
+        fo_config.write_oracle_config(target_conn, config_inputs)
+        target_conn.execute(
+            "INSERT OR REPLACE INTO oracle_config(key, value) VALUES ('built_at', ?)",
+            (now_iso,),
+        )
         target_conn.commit()
     except Exception:
         target_conn.close()
