@@ -21,6 +21,7 @@ from mtg_synergy_graph.bench.fixture import (
     build_fixture,
     score_commander,
 )
+from mtg_synergy_graph.bench.forge_oracle_handler import handle_vs_forge_oracle
 from mtg_synergy_graph.bench.handlers import (
     handle_collinearity,
     handle_expect_identity,
@@ -54,6 +55,9 @@ _cli.register("unknowns", handle_unknowns)
 _cli.register("inspect_gems", handle_inspect_gems)
 # Hidden-gem plan Unit 5 — print last N rows of .audit/history.csv.
 _cli.register("trend", handle_trend_hidden_gems)
+# Plan 002 Unit 7 — Kendall τ sidecar: compare our top-N to Forge
+# CardRanker's ranking over the same candidate set.
+_cli.register("vs_forge_oracle", handle_vs_forge_oracle)
 
 __all__ = [
     "AuditReport",
