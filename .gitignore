@@ -4,7 +4,11 @@ __pycache__/
 .ecc/
 
 # All data files (regenerable via scripts/)
-data/
+# Use data/* (not data/) so negations below actually work — git can't
+# re-include files under an ignored directory, only under an ignored path.
+data/*
+# …except seed JSONs — source of truth for declarative rules + event maps
+!data/*_seed.json
 
 # Build artifacts
 *.egg-info/
