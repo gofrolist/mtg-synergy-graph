@@ -51,3 +51,7 @@ def inspect_gems_stub(args: argparse.Namespace) -> int:
 
 def trend_stub(args: argparse.Namespace) -> int:
     _unimplemented("bench.py audit --trend")
+
+
+def vs_forge_oracle_stub(args: argparse.Namespace) -> int:
+    _unimplemented("bench.py audit --vs-forge-oracle")

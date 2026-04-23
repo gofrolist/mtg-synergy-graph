@@ -63,6 +63,8 @@ _HANDLERS: dict[str, Callable[[Namespace], int]] = {
     # Unit 5 of hidden-gem metric plan — print last N rows of
     # .audit/history.csv.
     "trend": _stubs.trend_stub,
+    # Plan 002 Unit 7 — Forge CardRanker Kendall-τ sidecar.
+    "vs_forge_oracle": _stubs.vs_forge_oracle_stub,
 }
 
 
@@ -159,6 +161,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "METRIC=hidden_gems; argparse choices leaves room for additional "
         "metrics without breaking users.",
     )
+    mode.add_argument(
+        "--vs-forge-oracle",
+        dest="vs_forge_oracle",
+        action="store_true",
+        help="Compare our top-N ranking to Forge CardRanker's ranking over "
+        "the same candidate set. Reports aggregate Kendall τ + per-commander "
+        "breakdown + top-10 divergences. Requires data/forge_oracle.db "
+        "(plan 002 Unit 7). Tracking-only; does not gate commits.",
+    )
 
     # Shared flags.
     audit.add_argument(
@@ -221,6 +232,33 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path to the EDHREC synergy DB. Used by --inspect-gems to "
         "rebuild live hidden-gem data. Default: data/tags.db.",
     )
+    # --vs-forge-oracle sidecar (plan 002 Unit 7) — forge_oracle.db path +
+    # config knobs that must match the build's values so the stored hash
+    # verifies.
+    audit.add_argument(
+        "--forge-oracle-db",
+        dest="forge_oracle_db",
+        metavar="PATH",
+        default="data/forge_oracle.db",
+        help="Path to the forge_oracle.db sidecar. Default: data/forge_oracle.db.",
+    )
+    audit.add_argument(
+        "--smoothing-k",
+        dest="smoothing_k",
+        type=float,
+        default=0.5,
+        help="PPMI Laplace smoothing constant used when the sidecar was built. "
+        "Must match `scripts/forge_oracle.py build --smoothing-k` or the "
+        "stored config hash will not verify. Default: 0.5.",
+    )
+    audit.add_argument(
+        "--min-decks",
+        dest="min_decks",
+        type=int,
+        default=3,
+        help="Minimum-evidence threshold used when the sidecar was built. "
+        "Must match `scripts/forge_oracle.py build --min-decks`. Default: 3.",
+    )
 
     return parser
 
@@ -244,6 +282,8 @@ def _resolve_mode(args: Namespace) -> str:
         return "inspect_gems"
     if getattr(args, "trend", None) is not None:
         return "trend"
+    if getattr(args, "vs_forge_oracle", False):
+        return "vs_forge_oracle"
     return "audit"
 
 
