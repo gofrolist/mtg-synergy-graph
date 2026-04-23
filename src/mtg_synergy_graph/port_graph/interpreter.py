@@ -314,8 +314,16 @@ class RuleInterpreter:
             # migrations) might slip something past.
             gate_tree = json.loads(row.gate_predicate)
             cand_tree = json.loads(row.candidate_port_predicate)
-            validate_gate_predicate(gate_tree, path=f"rule[{row.rule_id!r}].gate_predicate")
-            validate_gate_predicate(cand_tree, path=f"rule[{row.rule_id!r}].candidate_port_predicate")
+            validate_gate_predicate(
+                gate_tree,
+                path=f"rule[{row.rule_id!r}].gate_predicate",
+                context="gate",
+            )
+            validate_gate_predicate(
+                cand_tree,
+                path=f"rule[{row.rule_id!r}].candidate_port_predicate",
+                context="candidate",
+            )
             self._compiled.append(
                 _Compiled(
                     row=row,

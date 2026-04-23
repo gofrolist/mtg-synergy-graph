@@ -33,9 +33,16 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from .vocabulary import GATE_OPS
+
+#: Contexts in which a predicate tree may appear. ``gate`` runs Python
+#: over commander ports; ``candidate`` compiles to a SQL WHERE clause
+#: against ``card_ports``. Some leaf ops (``not_in_commander_set``)
+#: are candidate-only — validating them against their context catches
+#: authoring mistakes at seed time.
+PredicateContext = Literal["gate", "candidate"]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -79,17 +86,63 @@ _LEAF_OP_REQUIRED: dict[str, frozenset[str]] = {
 }
 
 
-def validate_gate_predicate(predicate: Any, *, path: str = "$") -> None:
+def _count_not_in_commander_set(predicate: dict[str, Any]) -> int:
+    """Return the number of ``not_in_commander_set`` leaves anywhere in
+    the tree. Used by candidate-context validation to reject shapes
+    the SQL compiler can't handle.
+    """
+    op = predicate.get("op")
+    if op == "not_in_commander_set":
+        return 1
+    if op in ("and", "or"):
+        args = predicate.get("args") or []
+        return sum(_count_not_in_commander_set(a) for a in args if isinstance(a, dict))
+    if op == "not":
+        args = predicate.get("args") or []
+        if args and isinstance(args[0], dict):
+            return _count_not_in_commander_set(args[0])
+    return 0
+
+
+def _tree_has_not_in_commander_set(predicate: dict[str, Any]) -> bool:
+    """Return True if the predicate tree contains a
+    ``not_in_commander_set`` leaf anywhere."""
+    return _count_not_in_commander_set(predicate) > 0
+
+
+def validate_gate_predicate(
+    predicate: Any,
+    *,
+    path: str = "$",
+    context: PredicateContext = "candidate",
+    _under_not: bool = False,
+) -> None:
     """Walk the JSON tree and raise ``ValueError`` on any violation.
 
     ``path`` accumulates a dotted pointer to the current subtree so
-    error messages point at the offending location. Successful
-    validation returns ``None``; invalid trees raise with a message
-    containing the path and the offending subtree.
+    error messages point at the offending location. ``context``
+    selects gate- vs. candidate-specific rules:
+
+    * **gate** — ``not_in_commander_set`` is forbidden anywhere in
+      the tree (it only makes sense when compiled to a SQL IN clause
+      against candidate card_names).
+    * **candidate** — at most one ``not_in_commander_set`` leaf per
+      tree (the SQL compiler substitutes a single placeholder), and
+      the leaf may not appear inside a ``not`` combinator (double-
+      negation has no defined semantics — use a plain
+      ``card_name IN (...)`` shape instead, which isn't expressible
+      here).
+
+    Successful validation returns ``None``; invalid trees raise with
+    a message containing the path and the offending subtree.
 
     Accepts any JSON-parsable value for flexibility — strings,
     numbers, bools, and None are all allowed inside leaf-op
     arguments.
+
+    ``_under_not`` is an internal recursion flag tracking whether the
+    current subtree is inside a ``not`` combinator; callers should
+    not supply it.
     """
     if not isinstance(predicate, dict):
         raise ValueError(f"{path}: predicate must be an object, got {type(predicate).__name__}")
@@ -102,14 +155,42 @@ def validate_gate_predicate(predicate: Any, *, path: str = "$") -> None:
         if not isinstance(args, list) or not args:
             raise ValueError(f"{path}.args: {op!r} requires a non-empty list")
         for i, child in enumerate(args):
-            validate_gate_predicate(child, path=f"{path}.args[{i}]")
+            validate_gate_predicate(
+                child,
+                path=f"{path}.args[{i}]",
+                context=context,
+                _under_not=_under_not,
+            )
+        # Top-level count check for candidate context is handled after
+        # the tree walk completes in the root caller. We approximate
+        # that here by doing the count once at the topmost ``and``/``or``
+        # boundary whose parent wasn't itself one of those ops — but
+        # simpler and equivalent: the root caller is the one that ran
+        # the count (handled below in the top-level check).
+        if path == "$" and context == "candidate":
+            count = _count_not_in_commander_set(predicate)
+            if count > 1:
+                raise ValueError(
+                    f"{path}: not_in_commander_set may appear at most once per candidate predicate (found {count})"
+                )
         return
 
     if op == "not":
         args = predicate.get("args")
         if not isinstance(args, list) or len(args) != 1:
             raise ValueError(f"{path}.args: 'not' requires exactly one child")
-        validate_gate_predicate(args[0], path=f"{path}.args[0]")
+        validate_gate_predicate(
+            args[0],
+            path=f"{path}.args[0]",
+            context=context,
+            _under_not=True,
+        )
+        if path == "$" and context == "candidate":
+            count = _count_not_in_commander_set(predicate)
+            if count > 1:
+                raise ValueError(
+                    f"{path}: not_in_commander_set may appear at most once per candidate predicate (found {count})"
+                )
         return
 
     # Leaf op.
@@ -117,6 +198,29 @@ def validate_gate_predicate(predicate: Any, *, path: str = "$") -> None:
     for field in required:
         if field not in predicate:
             raise ValueError(f"{path}: op {op!r} missing required field {field!r}")
+
+    if op == "not_in_commander_set":
+        if context == "gate":
+            raise ValueError(
+                f"{path}: not_in_commander_set is candidate-only; it cannot "
+                f"appear in a gate predicate (gate predicates run Python over "
+                f"the commander's own ports — the commander set is implicit)."
+            )
+        if _under_not:
+            raise ValueError(
+                f"{path}: not_in_commander_set may not appear under a 'not' "
+                f"combinator; double-negation has no defined SQL compilation."
+            )
+
+    # Top-level check for bare-leaf candidate predicates (count is
+    # trivially 0 or 1 here, so the "> 1" branch never fires, but we
+    # still run the check for uniformity with the combinator branches).
+    if path == "$" and context == "candidate":
+        count = _count_not_in_commander_set(predicate)
+        if count > 1:
+            raise ValueError(
+                f"{path}: not_in_commander_set may appear at most once per candidate predicate (found {count})"
+            )
 
 
 def _load_seed_json(path: Path | None = None) -> dict[str, Any]:
@@ -141,11 +245,25 @@ def _validate_row(row: dict[str, Any]) -> None:
     violation — the executemany loop should never see a row that
     could raise a coercion error."""
     rule_id = row.get("rule_id", "<unknown>")
-    for column in ("gate_predicate", "commander_port_predicate", "candidate_port_predicate"):
+    # Column → predicate context. ``gate_predicate`` and
+    # ``commander_port_predicate`` both run Python over commander
+    # ports; only ``candidate_port_predicate`` compiles to SQL over
+    # the candidate card_ports table, and thus only it can use
+    # ``not_in_commander_set``.
+    column_contexts: dict[str, PredicateContext] = {
+        "gate_predicate": "gate",
+        "commander_port_predicate": "gate",
+        "candidate_port_predicate": "candidate",
+    }
+    for column, ctx in column_contexts.items():
         predicate = row.get(column)
         if predicate is None:
             raise ValueError(f"rule {rule_id!r}: missing required column {column!r}")
-        validate_gate_predicate(predicate, path=f"rule[{rule_id!r}].{column}")
+        validate_gate_predicate(
+            predicate,
+            path=f"rule[{rule_id!r}].{column}",
+            context=ctx,
+        )
     # Scalar-type pre-check so executemany never raises an uncontexted
     # TypeError on float() / int() coercion.
     try:

@@ -40,15 +40,14 @@ EventCheck = Callable[[PortRow, PortRow], bool]
 
 
 # ---------------------------------------------------------------------------
-# Event-map loaders — imported directly from port_graph.event_maps so
-# EVENT_MATCH_MAP / COST_FEEDS_TRIGGER can be populated at module-import
-# time without a runtime alias layer.
+# Event-map loaders — imported from port_graph.event_maps. The loaders
+# are NOT called at module import anymore; both maps are exposed via
+# PEP 562 ``__getattr__`` so the seed file is only read on first access
+# of ``EVENT_MATCH_MAP`` / ``COST_FEEDS_TRIGGER``. This lets consumers
+# (lint tooling, documentation generators, test harnesses) import the
+# module even when ``data/event_match_seed.json`` is absent.
 # ---------------------------------------------------------------------------
 
-from .port_graph.event_maps import (  # noqa: E402
-    load_cost_feeds_trigger_from_json,
-    load_event_match_map_from_json,
-)
 
 #: Triggers whose semantic is "the candidate card itself, when cast/played/
 #: attacking, is the event" — these are NOT matched against arbitrary effect
@@ -61,19 +60,73 @@ CATCH_ALL_TRIGGERS: frozenset[str] = frozenset(
 )
 
 
-#: Trigger event class → {effect event class | "*": predicate}.
-#:
-#: Populated at module import from ``data/event_match_seed.json`` via
-#: :func:`port_graph.event_maps.load_event_match_map_from_json`. Edit the
-#: JSON to add a new equivalence — the ``event_match_map`` SQLite table
-#: is re-seeded from the same JSON on next DB import, so both
-#: representations stay in sync.
-EVENT_MATCH_MAP: dict[str, dict[str, EventCheck]] = load_event_match_map_from_json()
+# Lazy-load caches for the two JSON-sourced maps. ``None`` means "not
+# yet populated"; any non-None value is the cached map shared across
+# callers for the lifetime of the process. Re-reads require an explicit
+# :func:`_reset_event_cache_for_tests` call.
+_EVENT_MATCH_MAP_CACHE: dict[str, dict[str, EventCheck]] | None = None
+_COST_FEEDS_TRIGGER_CACHE: dict[str, frozenset[str]] | None = None
 
-#: Cost-port event_class → set of trigger event_classes that this cost
-#: directly feeds (paying the cost causes the trigger to fire).
-#: §6.3 cost↔trigger feed. Same JSON-sourced loader as EVENT_MATCH_MAP.
-COST_FEEDS_TRIGGER: dict[str, frozenset[str]] = load_cost_feeds_trigger_from_json()
+
+def _get_event_match_map() -> dict[str, dict[str, EventCheck]]:
+    """Return the event-match map, loading the JSON seed on first call.
+
+    Populated at first access from ``data/event_match_seed.json`` via
+    :func:`port_graph.event_maps.load_event_match_map_from_json`. Edit
+    the JSON to add a new equivalence — the ``event_match_map`` SQLite
+    table is re-seeded from the same JSON on next DB import, so both
+    representations stay in sync.
+    """
+    global _EVENT_MATCH_MAP_CACHE
+    if _EVENT_MATCH_MAP_CACHE is None:
+        # Re-read the loader each call so tests that monkeypatch
+        # ``port_graph.event_maps.load_event_match_map_from_json`` observe
+        # their patched version on the first cache fill.
+        from .port_graph import event_maps as _em
+
+        _EVENT_MATCH_MAP_CACHE = _em.load_event_match_map_from_json()
+    return _EVENT_MATCH_MAP_CACHE
+
+
+def _get_cost_feeds_trigger() -> dict[str, frozenset[str]]:
+    """Return the cost→triggers map, loading the JSON seed on first call.
+
+    §6.3 cost↔trigger feed. Same JSON-sourced loader as
+    :func:`_get_event_match_map`.
+    """
+    global _COST_FEEDS_TRIGGER_CACHE
+    if _COST_FEEDS_TRIGGER_CACHE is None:
+        from .port_graph import event_maps as _em
+
+        _COST_FEEDS_TRIGGER_CACHE = _em.load_cost_feeds_trigger_from_json()
+    return _COST_FEEDS_TRIGGER_CACHE
+
+
+def _reset_event_cache_for_tests() -> None:
+    """Evict the cached event maps so the next attribute access re-loads.
+
+    Intended for tests that monkeypatch the underlying JSON loaders or
+    swap out the seed file. Not part of the public API.
+    """
+    global _EVENT_MATCH_MAP_CACHE, _COST_FEEDS_TRIGGER_CACHE
+    _EVENT_MATCH_MAP_CACHE = None
+    _COST_FEEDS_TRIGGER_CACHE = None
+
+
+def __getattr__(name: str) -> Any:
+    """PEP 562 module-level ``__getattr__`` — exposes
+    :data:`EVENT_MATCH_MAP` and :data:`COST_FEEDS_TRIGGER` lazily.
+
+    Keeping the public names as attribute lookups (rather than
+    accessor functions) preserves every existing ``from graph_engine
+    import EVENT_MATCH_MAP`` call site — but the seed file is only
+    touched when someone actually reads the map.
+    """
+    if name == "EVENT_MATCH_MAP":
+        return _get_event_match_map()
+    if name == "COST_FEEDS_TRIGGER":
+        return _get_cost_feeds_trigger()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def match_event(trigger: PortRow, effect: PortRow) -> bool:
@@ -88,7 +141,7 @@ def match_event(trigger: PortRow, effect: PortRow) -> bool:
     if not t_event or not e_event:
         return False
 
-    targets = EVENT_MATCH_MAP.get(t_event)
+    targets = _get_event_match_map().get(t_event)
     if targets is None:
         return t_event == e_event
 
@@ -456,8 +509,10 @@ def find_trigger_feeders(
     needed_cost_classes: set[str] = set()
 
     # Reverse COST_FEEDS_TRIGGER: trigger_event → {cost_class, ...}
+    _event_match_map = _get_event_match_map()
+    _cost_feeds_trigger = _get_cost_feeds_trigger()
     _trigger_fed_by_cost: dict[str, set[str]] = {}
-    for cost_ev, trig_evs in COST_FEEDS_TRIGGER.items():
+    for cost_ev, trig_evs in _cost_feeds_trigger.items():
         for te in trig_evs:
             _trigger_fed_by_cost.setdefault(te, set()).add(cost_ev)
 
@@ -475,7 +530,7 @@ def find_trigger_feeders(
         usable_triggers.append((trig, required, forbidden))
 
         # Determine which effect event_classes this trigger can match.
-        targets = EVENT_MATCH_MAP.get(t_event)
+        targets = _event_match_map.get(t_event)
         if targets is None:
             # Identity match: trigger event == effect event
             needed_effect_classes.add(t_event)
@@ -525,7 +580,7 @@ def find_trigger_feeders(
         t_event = (trig.get("event_class") or "").strip()
 
         # Effect matching: look up which effect event_classes can feed this trigger
-        targets = EVENT_MATCH_MAP.get(t_event)
+        targets = _event_match_map.get(t_event)
         # Identity match when no EVENT_MATCH_MAP entry exists
         relevant_effect_classes = [t_event] if targets is None else list(targets.keys())
 

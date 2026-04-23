@@ -29,9 +29,11 @@ covered" to "definitely covered (this port)".
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from .core import COMPLEMENT_RULES, PortRow
 
@@ -802,32 +804,53 @@ CARD_LEVEL_RULES: frozenset[str] = frozenset(
 RULE_GATES: tuple[RuleGate, ...] = tuple(_formal_rule_gates()) + _CARD_ATTR_GATES
 
 
+def _load_declarative_rule_ids() -> frozenset[str]:
+    """Derive :data:`DECLARATIVE_RULE_IDS` at import time from
+    ``data/rules_seed.json``.
+
+    Previously a hand-maintained literal, the set is now computed
+    from the seed so adding / removing a rule in the JSON cannot
+    drift from the interpreter-routing set. Only rules with
+    ``active == 1`` (or missing, treated as 1) are included —
+    inactive rows exist in the seed but should not route through
+    the interpreter.
+
+    Fails loudly if the seed is missing: without the seed the
+    interpreter has no rules to run and routing would silently
+    fall through to the (non-existent) Python-helper path for
+    every migrated rule_id.
+    """
+    from ..port_graph._paths import default_seed_path
+
+    try:
+        seed_path: Path = default_seed_path("rules_seed.json")
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            "DECLARATIVE_RULE_IDS: data/rules_seed.json not found; "
+            "interpreter routing cannot be initialised. Run the importer "
+            "or restore the seed file before importing registry."
+        ) from exc
+    data = json.loads(seed_path.read_text(encoding="utf-8"))
+    ids: set[str] = set()
+    for row in data.get("rules", []):
+        # Treat missing ``active`` as 1 (the seed schema default).
+        if int(row.get("active", 1)) != 1:
+            continue
+        rule_id = row.get("rule_id")
+        if not isinstance(rule_id, str) or not rule_id:
+            continue
+        ids.add(rule_id)
+    return frozenset(ids)
+
+
 #: Rule ids owned by the declarative interpreter (plan 003 Unit 5).
-#: Starts empty in Unit 5 so the interpreter is loaded but contributes
-#: zero complements; Units 7 & 8 add entries as Python helpers migrate
-#: to data rows. A rule_id appears in EXACTLY ONE of this set or the
-#: Python-helper dispatch — the auditor at
-#: ``find_all_complements`` call time refuses duplicates.
-DECLARATIVE_RULE_IDS: frozenset[str] = frozenset(
-    {
-        "cascade_tribal",
-        "changeling_tribal",
-        "choose_tribal",
-        "doctor_s_tribal",
-        "etbreplacement_copy_dbcopy_optional_tribal",
-        "etbreplacement_other_choosect_tribal",
-        "firebending_2_tribal",
-        "landwalk_island_tribal",
-        "melee_tribal",
-        "mentor_tribal",
-        "more_tribal",
-        "prowess_tribal",
-        "repl_damagedone_counters_stack",
-        "repl_moved_exile_stack",
-        "start_tribal",
-        "training_tribal",
-    }
-)
+#:
+#: Derived at module import from ``data/rules_seed.json`` (every
+#: ``active == 1`` row's ``rule_id``). A rule_id appears in EXACTLY
+#: ONE of this set or the Python-helper dispatch — the auditor at
+#: ``find_all_complements`` call time refuses duplicates. Adding a
+#: declarative rule is a one-step change: edit the JSON, re-import.
+DECLARATIVE_RULE_IDS: frozenset[str] = _load_declarative_rule_ids()
 
 
 def registered_rule_ids() -> frozenset[str]:
