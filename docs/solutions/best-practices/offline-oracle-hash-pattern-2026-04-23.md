@@ -1,4 +1,5 @@
 ---
+last_updated: 2026-04-23
 module: forge_oracle
 title: Offline oracle sidecar with refuse-to-run hash enforcement
 tags: [offline-invariant, sidecar-db, config-hash, rule-authoring, forge, ppmi, plan-002]
@@ -213,8 +214,17 @@ for that pattern.
 - `src/mtg_synergy_graph/forge_oracle/gap_weight.py` — soft consumer
   returning `{}` on any failure.
 
+## Test isolation
+
+`read_current_forge_sha()` shells out to `git -C data/forge rev-parse HEAD`, which makes every consumer that touches `get_oracle_config_inputs()` environment-sensitive: `data/forge/` is a gitignored vendored partial clone (set up manually in dev per `docs/FORGE_ORACLE.md`), and CI runners don't have it. A test that transitively calls any strict consumer would raise `OracleForgeCheckoutError` in CI while passing locally.
+
+The canonical mitigation: an `autouse` conftest fixture that detects missing `data/forge/.git` and stubs `read_current_forge_sha` to return the pinned SHA from `data/forge_oracle/version.txt`. Negative-path tests (explicit `forge_dir` arg) delegate to the real function so error-mode assertions still fire. See [`docs/solutions/test-failures/forge-oracle-ci-git-checkout-stub-2026-04-23.md`](../test-failures/forge-oracle-ci-git-checkout-stub-2026-04-23.md) for the full pattern and the alternatives that were rejected.
+
+When you add a new offline subsystem that shells out to a gitignored dev-only directory, establish the conftest stub in the same commit as the first test — not retroactively after CI fails.
+
 ## References
 
 - [flag-gated-multi-port-rule-pattern](flag-gated-multi-port-rule-pattern-2026-04-23.md) — the inference-path analog this pattern transfers from.
+- [CI test isolation for forge_oracle](../test-failures/forge-oracle-ci-git-checkout-stub-2026-04-23.md) — autouse fixture stubbing `read_current_forge_sha` when `data/forge/.git` is absent.
 - `docs/plans/2026-04-23-002-feat-forge-second-oracle-plan.md` — the plan that codified this.
 - `docs/brainstorms/2026-04-21-forge-second-oracle-requirements.md` — origin requirements (FR6 SHA pinning).
