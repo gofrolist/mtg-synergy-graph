@@ -16,6 +16,7 @@ from mtg_synergy_graph.bench.fixture import (
     IdentityReport,
     PinnedFixture,
 )
+from mtg_synergy_graph.bench.hidden_gems import _HIDDEN_GEM_WARN_THRESHOLD
 from mtg_synergy_graph.bench.histogram import (
     Bucket,
     Histogram,
@@ -80,6 +81,20 @@ class AuditReport:
     verdict: Verdict = Verdict.TRIVIAL
     per_commander: list[CommanderDelta] = field(default_factory=list)
     per_rule: list[RuleDelta] = field(default_factory=list)
+    #: Aggregate ``hidden_gem_hit_rate`` over live entries whose
+    #: ``legacy`` dict carries the key (i.e., the commander had EDHREC
+    #: data at fixture-build time). ``None`` when no entry has the key.
+    aggregate_hidden_gem_hit_rate: float | None = None
+    #: Same aggregate, computed against the pinned fixture. ``None`` on
+    #: an old pin that predates the metric.
+    pinned_hidden_gem_hit_rate: float | None = None
+    #: ``live - pinned`` when both aggregates are non-None, else None.
+    hidden_gem_hit_rate_delta: float | None = None
+    #: True iff delta dropped strictly below ``-_HIDDEN_GEM_WARN_THRESHOLD``
+    #: (FR4). Informational only — does not affect exit code.
+    hidden_gem_warning: bool = False
+    #: Count of entries contributing to the live aggregate.
+    commanders_with_edhrec: int = 0
 
     @property
     def is_identical(self) -> bool:
@@ -99,6 +114,27 @@ class AuditReport:
 # ---------------------------------------------------------------------------
 # Aggregation
 # ---------------------------------------------------------------------------
+
+
+def _aggregate_hidden_gem_from_fixture(
+    fixture: PinnedFixture,
+) -> tuple[float | None, int]:
+    """Compute the arithmetic-mean ``hidden_gem_hit_rate`` across entries.
+
+    Only entries whose ``legacy`` dict carries the
+    ``"hidden_gem_hit_rate"`` key contribute — missing-key entries are
+    skipped (old fixtures or commanders without EDHREC data). Returns
+    ``(None, 0)`` when no entry has the key so callers can distinguish
+    "zero rate" from "no data."
+    """
+    rates: list[float] = []
+    for entry in fixture.entries:
+        rate = entry.legacy.get("hidden_gem_hit_rate")
+        if isinstance(rate, int | float):
+            rates.append(float(rate))
+    if not rates:
+        return None, 0
+    return sum(rates) / len(rates), len(rates)
 
 
 def build_report(
@@ -122,6 +158,14 @@ def build_report(
     histogram = compute_histogram(pinned, live)
     verdict = rollup_to_verdict(histogram, aggregate_score_delta)
 
+    live_gem_mean, live_gem_count = _aggregate_hidden_gem_from_fixture(live)
+    pinned_gem_mean, _ = _aggregate_hidden_gem_from_fixture(pinned)
+    if live_gem_mean is not None and pinned_gem_mean is not None:
+        gem_delta: float | None = live_gem_mean - pinned_gem_mean
+    else:
+        gem_delta = None
+    gem_warning = gem_delta is not None and gem_delta < -_HIDDEN_GEM_WARN_THRESHOLD
+
     return AuditReport(
         fixture_path=fixture_path,
         pinned_config_hash=pinned.config_hash,
@@ -133,6 +177,11 @@ def build_report(
         verdict=verdict,
         per_commander=sorted(per_commander, key=lambda d: abs(d.score_delta_sum), reverse=True),
         per_rule=sorted(per_rule, key=lambda d: abs(d.contribution_delta_sum), reverse=True),
+        aggregate_hidden_gem_hit_rate=live_gem_mean,
+        pinned_hidden_gem_hit_rate=pinned_gem_mean,
+        hidden_gem_hit_rate_delta=gem_delta,
+        hidden_gem_warning=gem_warning,
+        commanders_with_edhrec=live_gem_count,
     )
 
 
@@ -196,7 +245,30 @@ def _as_json_dict(report: AuditReport) -> dict[str, Any]:
         "per_commander": [cd.to_dict() for cd in report.per_commander[:50]],
         "per_rule": [rd.to_dict() for rd in report.per_rule[:50]],
         "missing_commanders": report.identity_report.missing_commanders,
+        "aggregate_hidden_gem_hit_rate": report.aggregate_hidden_gem_hit_rate,
+        "hidden_gem_hit_rate_delta": report.hidden_gem_hit_rate_delta,
+        "hidden_gem_warning": report.hidden_gem_warning,
+        "commanders_with_edhrec": report.commanders_with_edhrec,
     }
+
+
+def _format_hidden_gem_line(report: AuditReport) -> str:
+    """Format the ``**hidden_gem_hit_rate:**`` markdown backtick content.
+
+    Shapes:
+    * ``0.1467 (Δ -0.0034, 97 cmdrs with EDHREC)`` when both aggregates exist.
+    * ``0.1467 (Δ —, 97 cmdrs with EDHREC)`` when one side lacks gem data.
+    * ``— (no commanders with EDHREC data)`` when neither side has data.
+    """
+    aggregate = report.aggregate_hidden_gem_hit_rate
+    if aggregate is None:
+        # No live data — fall through to em-dash sentinel.
+        if report.pinned_hidden_gem_hit_rate is None:
+            return "— (no commanders with EDHREC data)"
+        return f"— (pinned {report.pinned_hidden_gem_hit_rate:.4f}, no live data)"
+
+    delta_str = "—" if report.hidden_gem_hit_rate_delta is None else f"{report.hidden_gem_hit_rate_delta:+.4f}"
+    return f"{aggregate:.4f} (Δ {delta_str}, {report.commanders_with_edhrec} cmdrs with EDHREC)"
 
 
 def _render_markdown(report: AuditReport) -> str:
@@ -213,6 +285,7 @@ def _render_markdown(report: AuditReport) -> str:
         f"{'== live' if report.config_hash_matches else f'!= `{report.live_config_hash[:12]}...`'}"
     )
     lines.append(f"**Aggregate score Δ:** `{report.aggregate_score_delta:+.6f}`")
+    lines.append(f"**hidden_gem_hit_rate:** `{_format_hidden_gem_line(report)}`")
     lines.append(f"**Commanders compared:** {report.commanders_compared}")
     lines.append("")
 
