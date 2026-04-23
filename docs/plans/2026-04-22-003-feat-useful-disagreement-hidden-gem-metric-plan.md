@@ -1,7 +1,8 @@
 ---
 title: "feat: Useful-disagreement objective — hidden_gem_hit_rate metric + warning, tracking-only at MVP"
 type: feat
-status: active
+status: landed
+landed: 2026-04-22
 date: 2026-04-22
 origin: docs/brainstorms/2026-04-21-useful-disagreement-requirements.md
 ---
@@ -223,7 +224,7 @@ external docs or prior art needed.
 
 ## Implementation Units
 
-- [ ] **Unit 1: Hidden-gem metric core — plausibility gate + aggregate**
+- [x] **Unit 1: Hidden-gem metric core — plausibility gate + aggregate**
 
 **Goal:** Pure functions that compute `plausibility(cmdr, cand,
 contributions)` and `hidden_gem_hit_rate(our_top_30, edhrec_top_30,
@@ -300,7 +301,7 @@ each formula branch before the implementation.
   dataclass instances (deep equality).
 - Module exports and constants match what Units 2-5 import against.
 
-- [ ] **Unit 2: Fixture integration — compute metric at `build_fixture`, persist in legacy dict**
+- [x] **Unit 2: Fixture integration — compute metric at `build_fixture`, persist in legacy dict**
 
 **Goal:** `build_fixture` opens the EDHREC DB, computes per-commander
 `hidden_gem_hit_rate` + `hidden_cards` while the tensor sink is
@@ -372,7 +373,7 @@ new keys so the pinned JSON carries the baseline.
 - `bench.py audit --expect-identity` on the new fixture stays PASS
   (identity check is over `scores` dict, gem fields don't affect it).
 
-- [ ] **Unit 3: Audit report integration — aggregate, delta, warning**
+- [x] **Unit 3: Audit report integration — aggregate, delta, warning**
 
 **Goal:** `bench.py audit` computes aggregate `hidden_gem_hit_rate`
 (live) and delta vs pinned; renders one line in Markdown + JSON
@@ -448,7 +449,7 @@ output + `_print_summary`; prints an FR4 stderr warning when
 - Running with `--format json` produces valid JSON containing the
   four new keys.
 
-- [ ] **Unit 4: `--inspect-gems` CLI handler**
+- [x] **Unit 4: `--inspect-gems` CLI handler**
 
 **Goal:** New mode `bench.py audit --inspect-gems` that produces a
 per-commander table of `(commander, Δ, lost_gems, gained_gems)` by
@@ -513,7 +514,7 @@ filter, `--format md/json`, `--output`.
 - `bench.py audit --inspect-gems --commander "Korvold, Fae-Cursed King"`
   emits one row or a "no delta" line.
 
-- [ ] **Unit 5: `.audit/history.csv` persistence + `--trend hidden_gems` handler**
+- [x] **Unit 5: `.audit/history.csv` persistence + `--trend hidden_gems` handler**
 
 **Goal:** Every successful `bench.py audit` run appends one row to
 `.audit/history.csv`; new `--trend hidden_gems` mode reads the file
@@ -587,7 +588,7 @@ already be in `AuditReport`).
 - `bench.py audit --trend hidden_gems --trend-n 5` prints the last
   five rows.
 
-- [ ] **Unit 6: Documentation, escalation-path comment, CLAUDE.md**
+- [x] **Unit 6: Documentation, escalation-path comment, CLAUDE.md**
 
 **Goal:** Document the metric, the warning threshold, the escalation
 path, and the memory-note connection. No code changes beyond a

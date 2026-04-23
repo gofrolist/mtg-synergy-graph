@@ -32,6 +32,8 @@ uv run scripts/bench.py audit --collinearity                             # Pairw
 uv run scripts/bench.py audit --expect-identity                          # Assert bitwise-identical scores (for pure refactors)
 uv run scripts/bench.py audit --repin --yes                              # Rebuild pinned fixture from current working tree
 uv run scripts/bench.py audit --unknowns                                 # List port_nodes rows with node_kind='UNKNOWN' (plan 003 Unit 6)
+uv run scripts/bench.py audit --inspect-gems                             # Per-commander lost/gained hidden-gem diff (plan 003-gem)
+uv run scripts/bench.py audit --trend hidden_gems --trend-n 20           # CSV history of aggregate hidden_gem_hit_rate across audit runs
 ```
 
 The bench.py hook also runs advisorily on pre-commit when edits touch
@@ -122,6 +124,36 @@ of Python code.
   `port_nodes` rows classified as `UNKNOWN`, ranked by distinct
   cards × EDHREC rank weight. Run after each Forge cardsfolder
   refresh to see candidate shapes for vocabulary expansion.
+
+### Evaluation — `hidden_gem_hit_rate` (plan 003-gem)
+
+A second evaluation axis tracked alongside the existing histogram
+verdict: `hidden_gem_hit_rate = |plausible_hidden| / 30` per
+commander, where `plausible_hidden = (our_top_30 \ edhrec_top_30)`
+filtered by a mechanical-plausibility gate (`N_rules_firing >= 2`
+OR `total_contribution > per-commander-median`). Operationalizes
+`memory/feedback_edhrec_not_goal.md` — the stated "find hidden gems
+from mechanics" intent, now measurable.
+
+- **Tracking-only at MVP.** Commit gate stays on the histogram
+  verdict; a stderr warning fires when aggregate delta < −0.02 but
+  the audit still exits 0. Promotion to a commit-gate requires a
+  separate `ce-brainstorm` + `ce-plan` cycle per FR6 escalation.
+  See `src/mtg_synergy_graph/bench/hidden_gems.py` module docstring
+  for the criteria.
+- **Persisted in `FixtureEntry.legacy`** — no schema bump. Old pins
+  without gem keys are tolerated (aggregator filters on key
+  presence); re-pinning populates them via the new
+  `build_fixture(conn, commanders, edhrec_conn=...)` path.
+- **`.audit/history.csv`** — every `bench.py audit` run appends a
+  row (timestamp, commit_sha, config_hash, aggregate_score_delta,
+  hidden_gem_hit_rate, delta, n_commanders, verdict). Gitignored;
+  regenerable on fresh checkout.
+- **`--inspect-gems` CLI** — per-commander diff of lost/gained
+  hidden-gem sets between pin and live. Δ column shows integer
+  count out of 30 for legibility.
+- **`--trend hidden_gems`** — CSV reader over `.audit/history.csv`;
+  `--format md` + `--format json` also supported.
 
 ### Algorithm
 

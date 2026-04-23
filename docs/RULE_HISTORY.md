@@ -57,6 +57,39 @@ See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
   `card_hints` revisit, `scales_with.value` vs `scales_with.valid`
   field split for future BM25F revisits.
 
+### Useful-disagreement plan 003-gem (`hidden_gem_hit_rate`, tracking-only)
+
+- Second evaluation axis for `bench.py audit`:
+  `hidden_gem_hit_rate = |plausible_hidden| / 30` where
+  `plausible_hidden = our_top_30 \ edhrec_top_30` filtered by the
+  mechanical-plausibility gate (N_rules_firing ≥ 2 OR
+  total_contribution > per-commander-median, strict inequality).
+  Operationalizes `memory/feedback_edhrec_not_goal.md`.
+- Six implementation units landed on `feat/hidden-gem-metric`:
+  (1) pure metric core in `bench/hidden_gems.py`,
+  (2) `build_fixture` writes per-commander rate + hidden_cards into
+  `FixtureEntry.legacy` when an EDHREC DB conn is provided,
+  (3) `AuditReport` surfaces aggregate + delta + FR4 stderr warning
+  when delta drops below `-_HIDDEN_GEM_WARN_THRESHOLD` (= −0.02),
+  (4) `bench.py audit --inspect-gems` per-commander lost/gained
+  diff (Δ as integer count out of 30),
+  (5) `.audit/history.csv` append-on-every-audit + `bench.py audit
+  --trend hidden_gems` CSV reader with md/json format support,
+  (6) docs + FR6 escalation block in `hidden_gems.py` docstring.
+- **Tracking-only at MVP.** Existing histogram-based commit gate is
+  unchanged; the new warning is advisory. Promotion to a commit-
+  gate requires a separate brainstorm + plan per FR6: ≥20 commits
+  of tracking + human correlation + <10% false-positive rate.
+- **Identity-preserving.** `bench.py audit --expect-identity` PASS
+  on every unit — gem fields live in `legacy`, the `scores` dict
+  is untouched.
+- Post-landing validation plan: manually replay `hidden_gem_hit_rate`
+  against three historical reverted experiments (broad
+  `gy_retrieval`, deck-hint-match, Survivor 3 BM25F branch) to
+  confirm at least one produces a ≤0 retrospective delta. Finding
+  to be recorded as a memory note alongside
+  `memory/project_reanimator_hisyn_gap.md`.
+
 ## 2026-04-21
 
 ### creature_died_feeder
