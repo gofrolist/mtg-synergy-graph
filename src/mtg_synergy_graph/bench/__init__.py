@@ -28,6 +28,7 @@ from mtg_synergy_graph.bench.handlers import (
     handle_inspect_gems,
     handle_repin,
     handle_rule,
+    handle_trend_hidden_gems,
     handle_unknowns,
 )
 from mtg_synergy_graph.bench.histogram import Bucket, Histogram, Verdict
@@ -51,6 +52,8 @@ _cli.register("unknowns", handle_unknowns)
 # Hidden-gem plan Unit 4 — per-commander diff of hidden-gem sets
 # between pinned and live.
 _cli.register("inspect_gems", handle_inspect_gems)
+# Hidden-gem plan Unit 5 — print last N rows of .audit/history.csv.
+_cli.register("trend", handle_trend_hidden_gems)
 
 __all__ = [
     "AuditReport",

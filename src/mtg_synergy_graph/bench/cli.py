@@ -42,6 +42,9 @@ _HANDLERS: dict[str, Callable[[Namespace], int]] = {
     # Unit 4 of hidden-gem metric plan — per-commander diff of
     # hidden-gem sets between pinned and live.
     "inspect_gems": _stubs.inspect_gems_stub,
+    # Unit 5 of hidden-gem metric plan — print last N rows of
+    # .audit/history.csv.
+    "trend": _stubs.trend_stub,
 }
 
 
@@ -127,6 +130,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Per-commander diff of hidden-gem sets between pinned and live. "
         "Shows lost/gained gems. Reads pinned fixture + re-scores live.",
     )
+    mode.add_argument(
+        "--trend",
+        choices=("hidden_gems",),
+        metavar="METRIC",
+        help="Print the last N rows of .audit/history.csv. MVP supports "
+        "METRIC=hidden_gems; argparse choices leaves room for additional "
+        "metrics without breaking users.",
+    )
 
     # Shared flags.
     audit.add_argument(
@@ -142,9 +153,22 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     audit.add_argument(
         "--format",
-        choices=("md", "json"),
-        default="md",
-        help="Output format. Default: md.",
+        choices=("md", "json", "csv"),
+        default=None,
+        help="Output format. Default: md (csv for --trend).",
+    )
+    audit.add_argument(
+        "--trend-n",
+        type=int,
+        default=20,
+        metavar="N",
+        help="Number of rows to show for --trend. Default: 20. Meaningful only with --trend.",
+    )
+    audit.add_argument(
+        "--history",
+        metavar="PATH",
+        default=".audit/history.csv",
+        help="Path to the append-only history CSV. Default: .audit/history.csv.",
     )
     audit.add_argument(
         "--output",
@@ -197,6 +221,8 @@ def _resolve_mode(args: Namespace) -> str:
         return "unknowns"
     if args.inspect_gems:
         return "inspect_gems"
+    if getattr(args, "trend", None) is not None:
+        return "trend"
     return "audit"
 
 
@@ -209,6 +235,23 @@ def main(argv: list[str] | None = None) -> int:
     # subcommands later (e.g. `compare-edhrec`) is straightforward.
     if args.subcommand != "audit":
         parser.error(f"unknown subcommand: {args.subcommand!r}")
+
+    # ``--format`` is stored as ``None`` when not passed so we can
+    # apply mode-specific defaults: ``--trend`` defaults to CSV (the
+    # history file is already CSV), every other mode defaults to ``md``
+    # (matches the legacy behaviour). Users still get ``md`` / ``json``
+    # / ``csv`` explicit overrides.
+    if getattr(args, "format", None) is None:
+        args.format = "csv" if getattr(args, "trend", None) is not None else "md"
+
+    # ``--trend-n`` only makes sense with ``--trend``. A lone
+    # ``--trend-n`` is harmless — warn on stderr rather than erroring so
+    # the user sees the flag had no effect.
+    if getattr(args, "trend", None) is None and getattr(args, "trend_n", 20) != 20:
+        print(
+            "bench.py audit: warning: --trend-n has no effect without --trend.",
+            file=sys.stderr,
+        )
 
     mode = _resolve_mode(args)
     handler = _HANDLERS[mode]
