@@ -43,12 +43,13 @@ PortRow = dict[str, Any]
 #: rule.
 _ENABLE_PATHWAY_RULES: bool = True
 
-#: Channel identifiers returned by :func:`_walk_self_paths`. Ordered
-#: tightest-semantic-first; the walker returns the first matching
-#: channel per pair.
+#: Channel identifiers returned by :func:`_walk_self_paths`. The
+#: walker only emits these two channels; the dropped ``valid_filter``
+#: channel from the pre-audit design lives only in
+#: :func:`_port_pair_matches` for M-set construction and is never a
+#: walker return value.
 _CHANNEL_EVENT_MATCH = "event_match"
 _CHANNEL_COST_FEEDS = "cost_feeds"
-_CHANNEL_VALID_FILTER = "valid_filter"
 
 
 def _walk_self_paths(
