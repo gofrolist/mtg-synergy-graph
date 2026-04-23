@@ -83,6 +83,11 @@ def _load(name: str) -> dict:
 
 
 @pytest.fixture(scope="session")
+def bloodghast() -> dict:
+    return _load("bloodghast.txt")
+
+
+@pytest.fixture(scope="session")
 def cathars_crusade() -> dict:
     return _load("cathars_crusade.txt")
 

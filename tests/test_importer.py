@@ -28,8 +28,9 @@ def db(tmp_path):
 def test_imports_all_fixtures(db):
     cards, ports = import_cards_folder(db, FIXTURES, scryfall_db=None)
     # 5 Phase-1 reference cards + 4 Phase-2 Korvold-test cards
-    # + Sol Ring & Urza Lord High Artificer (resource-density fixtures).
-    assert cards == 11
+    # + Sol Ring & Urza Lord High Artificer (resource-density fixtures)
+    # + Bloodghast (self-bridging cascade pathway fixture).
+    assert cards == 12
     assert ports >= 20
 
     rows = db.execute("SELECT name FROM cards ORDER BY name").fetchall()

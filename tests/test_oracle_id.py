@@ -46,6 +46,7 @@ FIXTURE_CARDS = [
     ("09" * 16, "Wrath of God", "Sorcery"),
     ("0a" * 16, "Sol Ring", "Artifact"),
     ("0b" * 16, "Urza, Lord High Artificer", "Legendary Creature — Human Artificer"),
+    ("0d" * 16, "Bloodghast", "Creature — Vampire Spirit"),
     # Token fallback: Forge has "Spirit", Scryfall has one non-token and
     # one token row with the same name — non-token must win.
     ("10" * 16, "Spirit", "Creature — Spirit"),
@@ -194,7 +195,7 @@ def test_importer_populates_oracle_id(scryfall_db, tmp_path):
             FIXTURES,
             scryfall_db=scryfall_db,
         )
-        assert cards == 11
+        assert cards == 12
 
         # Every fixture card should have an oracle_id set via the
         # exact-name tier (they all exist in the synthetic scryfall DB).
