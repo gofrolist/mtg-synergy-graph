@@ -189,10 +189,10 @@ def test_rate_pair_needs_partially_met_scaled_penalty(db: sqlite3.Connection) ->
     assert pair_scorer.rate_pair(db, "rd1", "gz1") == pytest.approx(-21.0 / 8.0)
 
 
-def test_rate_pair_needs_threshold_met_zero_penalty(db: sqlite3.Connection) -> None:
+def test_rate_pair_needs_partially_met_name_penalty(db: sqlite3.Connection) -> None:
     """A needs Name=Goblin King (threshold=2). B is Goblin King. count=1, threshold=2.
 
-    penalty = (max(2 - 1, 0) / 2) * 10 = 5.0. Final score = -5.0.
+    shortfall = max(2 - 1, 0) = 1; penalty = (1/2) * 10 = 5.0. Final score = -5.0.
     """
     _insert_card(db, name="Goblin Summoner", oracle_id="g3", card_types="Creature", subtypes="Goblin")
     _insert_card(db, name="Goblin King", oracle_id="g2", card_types="Creature", subtypes="Goblin")

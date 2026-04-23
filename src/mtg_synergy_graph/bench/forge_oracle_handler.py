@@ -35,6 +35,7 @@ from mtg_synergy_graph.bench.fixture import FixtureEntry, PinnedFixture
 from mtg_synergy_graph.db import open_db
 from mtg_synergy_graph.forge_oracle import config as fo_config
 from mtg_synergy_graph.forge_oracle import ranking
+from mtg_synergy_graph.forge_oracle import version as fo_version
 
 
 @dataclass(frozen=True)
@@ -123,6 +124,16 @@ def _score_commander(
     )
 
 
+def _md_escape(value: str) -> str:
+    """Escape ``|`` so card names with pipe characters don't break the Markdown table.
+
+    Plan 002 code-review finding SEC-003: card names ingested from Forge
+    precon corpus theoretically may contain ``|``, which silently corrupts
+    the table layout if interpolated raw.
+    """
+    return value.replace("|", r"\|")
+
+
 def _render_markdown(reports: list[_CommanderReport], aggregate_tau: float) -> str:
     lines: list[str] = []
     lines.append("# bench.py audit --vs-forge-oracle")
@@ -140,7 +151,7 @@ def _render_markdown(reports: list[_CommanderReport], aggregate_tau: float) -> s
     lines.append("| Commander | n | τ |")
     lines.append("|---|---|---|")
     for r in sorted(reports, key=lambda x: x.tau):
-        lines.append(f"| {r.commander} | {r.n_compared} | {r.tau:+.4f} |")
+        lines.append(f"| {_md_escape(r.commander)} | {r.n_compared} | {r.tau:+.4f} |")
     lines.append("")
     lines.append("## Top-10 divergences (Forge high, we low)")
     lines.append("")
@@ -155,7 +166,7 @@ def _render_markdown(reports: list[_CommanderReport], aggregate_tau: float) -> s
     all_divs.sort(key=lambda t: -(t[2] - t[3]))
     for cmdr, cand, our_r, forge_r in all_divs[:10]:
         delta = our_r - forge_r
-        lines.append(f"| {cmdr} | {cand} | {our_r} | {forge_r} | {delta:+d} |")
+        lines.append(f"| {_md_escape(cmdr)} | {_md_escape(cand)} | {our_r} | {forge_r} | {delta:+d} |")
     lines.append("")
     return "\n".join(lines)
 
@@ -210,13 +221,18 @@ def handle_vs_forge_oracle(args: argparse.Namespace) -> int:
         # For --vs-forge-oracle we use the same defaults as the build
         # command (k=0.5, min_decks=3) — if a user built with other
         # values, the verify_current_or_raise will flag it.
-        inputs = fo_config.get_oracle_config_inputs(
-            ppmi_smoothing_k=args.smoothing_k,
-            min_decks_count=args.min_decks,
-        )
         try:
+            inputs = fo_config.get_oracle_config_inputs(
+                ppmi_smoothing_k=args.smoothing_k,
+                min_decks_count=args.min_decks,
+            )
             fo_config.verify_current_or_raise(forge_conn, inputs)
-        except (fo_config.OracleConfigStaleError, fo_config.OracleConfigMissingError) as exc:
+        except (
+            fo_config.OracleConfigStaleError,
+            fo_config.OracleConfigMissingError,
+            fo_version.OracleVersionFileError,
+            fo_version.OracleForgeCheckoutError,
+        ) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
     finally:

@@ -57,7 +57,23 @@ _SENTINEL_DIRS: tuple[Path, ...] = (_REPO_ROOT / "src" / "mtg_synergy_graph" / "
 #: regex below ignores any line that is purely a comment or docstring
 #: line mentioning the word, but flags actual imports.
 _IMPORT_PATTERN = re.compile(
-    r"^\s*(?:from\s+mtg_synergy_graph\.forge_oracle|import\s+mtg_synergy_graph\.forge_oracle|from\s+forge_oracle|import\s+forge_oracle)",
+    r"^\s*(?:"
+    # Dotted-path imports: `from mtg_synergy_graph.forge_oracle ...` or
+    # `import mtg_synergy_graph.forge_oracle`
+    r"from\s+mtg_synergy_graph\.forge_oracle"
+    r"|import\s+mtg_synergy_graph\.forge_oracle"
+    # Package-level import form: `from mtg_synergy_graph import forge_oracle[, ...]`
+    # or multi-line parenthesized `from mtg_synergy_graph import (..., forge_oracle, ...)`.
+    # Plan 002 code-review finding ADV-004: the adversarial reviewer flagged
+    # this as an evasion path through the prior regex. `[^)]*?` (non-greedy,
+    # newlines allowed) lets the parenthesized form span multiple lines
+    # without crossing the closing paren.
+    r"|from\s+mtg_synergy_graph\s+import\s+(?:\(?[^)]*?\b)?forge_oracle\b"
+    # Direct top-level import (rare, but complete the cover): `import forge_oracle`
+    # or `from forge_oracle ...`
+    r"|from\s+forge_oracle"
+    r"|import\s+forge_oracle"
+    r")",
     flags=re.MULTILINE,
 )
 
@@ -113,19 +129,25 @@ def test_expect_identity_still_passes_in_subprocess() -> None:
     set live against the pinned fixture — takes ~60s. Skipped when
     synergy.db is absent.
     """
-    result = subprocess.run(  # noqa: S603 — sys.executable + fixed script path, no user input
-        [
-            sys.executable,
-            str(_REPO_ROOT / "scripts" / "bench.py"),
-            "audit",
-            "--expect-identity",
-        ],
-        cwd=_REPO_ROOT,
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
+    try:
+        result = subprocess.run(  # noqa: S603 — sys.executable + fixed script path, no user input
+            [
+                sys.executable,
+                str(_REPO_ROOT / "scripts" / "bench.py"),
+                "audit",
+                "--expect-identity",
+            ],
+            cwd=_REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        pytest.fail(
+            f"bench.py audit --expect-identity timed out after 120s — possible "
+            f"regression in scoring-path performance. Partial output: {exc.stdout!r} / {exc.stderr!r}"
+        )
     assert result.returncode == 0, (
         "bench.py audit --expect-identity failed after this change.\n"
         f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -151,6 +173,24 @@ def test_grep_fence_detects_injected_violation(tmp_path: Path) -> None:
     text = synthetic.read_text(encoding="utf-8")
     matches = list(_IMPORT_PATTERN.finditer(text))
     assert matches, "Grep pattern must match a real forge_oracle import"
+
+
+def test_grep_fence_detects_package_level_import_violation(tmp_path: Path) -> None:
+    """Meta-test (plan 002 ADV-004): the package-level ``from mtg_synergy_graph
+    import forge_oracle`` form must trip the fence. Prior regex only matched
+    the dotted-path style and would let this pattern through silently.
+    """
+    cases = [
+        "from mtg_synergy_graph import forge_oracle\n",
+        "from mtg_synergy_graph import ports, forge_oracle\n",
+        "from mtg_synergy_graph import (\n    ports,\n    forge_oracle,\n)\n",
+    ]
+    for i, content in enumerate(cases):
+        synthetic = tmp_path / f"fake_inference_module_{i}.py"
+        synthetic.write_text(content, encoding="utf-8")
+        text = synthetic.read_text(encoding="utf-8")
+        matches = list(_IMPORT_PATTERN.finditer(text))
+        assert matches, f"Grep pattern must match package-level import: {content!r}"
 
 
 def test_grep_fence_ignores_docstring_mentions(tmp_path: Path) -> None:

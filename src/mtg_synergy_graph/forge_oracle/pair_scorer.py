@@ -200,12 +200,30 @@ def _apply_hints(
     positive=True  (``hints``): score += |matches| * factor  for each category
     positive=False (``needs``): score -= (max(threshold - |matches|, 0) / threshold) * factor
     """
-    if not hint_rows or not targets:
-        if not hint_rows:
-            return 0.0
-        # No targets but we have needs → every category is fully-short by definition
+    # Early returns — ordered for clarity, not performance (plan 002 code-review
+    # finding #10: the prior shape had a silent fallthrough that was
+    # correct-by-accident).
+    if not hint_rows:
+        return 0.0
+    if not targets:
+        # No targets: hints can't match anyone; needs are fully short on every
+        # category. The per-category loop below happens to produce the same
+        # numbers when targets is [], but we prefer an explicit short-circuit.
         if positive:
             return 0.0
+        score = 0.0
+        seen_cats: set[str] = set()
+        for cat, _val in hint_rows:
+            if cat in seen_cats:
+                continue  # Same intersection-vs-union handling as below (empty ∩ empty = empty).
+            seen_cats.add(cat)
+            factor = _TYPE_FACTORS.get(cat, 0)
+            threshold = _TYPE_THRESHOLDS.get(cat, 0)
+            if factor == 0 or threshold == 0:
+                continue
+            # shortfall = threshold - 0 = threshold; penalty = factor.
+            score -= factor
+        return score
 
     matches_by_cat: dict[str, set[int]] = {}
     for cat, val in hint_rows:

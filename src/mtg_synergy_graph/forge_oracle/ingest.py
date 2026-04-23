@@ -243,8 +243,13 @@ def build_forge_oracle_db(
         target_conn.commit()
     except Exception:
         target_conn.close()
-        if tmp_path.exists():
-            tmp_path.unlink()
+        # Clean up the temp file without letting a secondary error mask the
+        # original write failure. ``missing_ok=True`` + try/except ensures the
+        # original exception reaches the caller.
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError as unlink_exc:
+            _LOG.warning("failed to clean up tmp file %s: %s", tmp_path, unlink_exc)
         raise
     else:
         target_conn.close()

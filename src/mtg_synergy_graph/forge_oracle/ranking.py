@@ -105,13 +105,3 @@ def kendall_tau(rank_pairs: list[tuple[int, int]]) -> float:
     if denom_a == 0 or denom_b == 0:
         return 0.0
     return (concordant - discordant) / math.sqrt(denom_a * denom_b)
-
-
-def ranks_of(ordered_items: list[str]) -> dict[str, int]:
-    """Return ``{item: 0-indexed rank}`` for an ordered list.
-
-    Convenience for callers that have two ordered lists and want to
-    build ``rank_pairs`` for :func:`kendall_tau`. Ties are resolved
-    by list position — the input order is authoritative.
-    """
-    return {item: rank for rank, item in enumerate(ordered_items)}

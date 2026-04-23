@@ -73,19 +73,6 @@ def test_kendall_tau_is_deterministic() -> None:
 
 
 # ---------------------------------------------------------------------------
-# ranks_of helper
-# ---------------------------------------------------------------------------
-
-
-def test_ranks_of_returns_positional_ranks() -> None:
-    assert ranking.ranks_of(["a", "b", "c"]) == {"a": 0, "b": 1, "c": 2}
-
-
-def test_ranks_of_empty_returns_empty_dict() -> None:
-    assert ranking.ranks_of([]) == {}
-
-
-# ---------------------------------------------------------------------------
 # forge_rank_candidates — scores via pair_scorer, sorts desc
 # ---------------------------------------------------------------------------
 

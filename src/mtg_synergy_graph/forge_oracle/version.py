@@ -72,7 +72,14 @@ def read_current_forge_sha(forge_dir: Path = _FORGE_DIR) -> str:
             capture_output=True,
             text=True,
             check=True,
+            timeout=30,
         )
+    except subprocess.TimeoutExpired as exc:
+        raise OracleForgeCheckoutError(
+            f"git rev-parse HEAD timed out after 30s in {forge_dir}; "
+            "checkout may be locked (index.lock present?). "
+            "Release the lock or rerun the oracle build."
+        ) from exc
     except subprocess.CalledProcessError as exc:
         raise OracleForgeCheckoutError(f"Failed to read HEAD of {forge_dir}: {exc.stderr.strip()}") from exc
     return result.stdout.strip().lower()

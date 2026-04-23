@@ -240,24 +240,24 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="forge_oracle_db",
         metavar="PATH",
         default="data/forge_oracle.db",
-        help="Path to the forge_oracle.db sidecar. Default: data/forge_oracle.db.",
+        help="Used by --vs-forge-oracle only. Path to the forge_oracle.db sidecar. Default: data/forge_oracle.db.",
     )
     audit.add_argument(
         "--smoothing-k",
         dest="smoothing_k",
         type=float,
         default=0.5,
-        help="PPMI Laplace smoothing constant used when the sidecar was built. "
-        "Must match `scripts/forge_oracle.py build --smoothing-k` or the "
-        "stored config hash will not verify. Default: 0.5.",
+        help="Used by --vs-forge-oracle only. PPMI Laplace smoothing constant used when "
+        "the sidecar was built. Must match `scripts/forge_oracle.py build --smoothing-k` "
+        "or the stored config hash will not verify. Default: 0.5.",
     )
     audit.add_argument(
         "--min-decks",
         dest="min_decks",
         type=int,
         default=3,
-        help="Minimum-evidence threshold used when the sidecar was built. "
-        "Must match `scripts/forge_oracle.py build --min-decks`. Default: 3.",
+        help="Used by --vs-forge-oracle only. Minimum-evidence threshold used when the "
+        "sidecar was built. Must match `scripts/forge_oracle.py build --min-decks`. Default: 3.",
     )
 
     return parser

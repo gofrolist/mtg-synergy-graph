@@ -88,8 +88,10 @@ def load_forge_signals(db_path: Path) -> dict[str, float]:
         return {}
 
     # 95th percentile across the positive distribution; cap at highest value
-    # when the corpus is too small for a stable percentile.
-    p95 = positives[int(0.95 * len(positives))] if len(positives) >= 20 else positives[-1]
+    # when the corpus is too small for a stable percentile. Index with
+    # ``len-1`` so the 95th percentile of N=100 lands at index 94 (the
+    # 95th-highest value), not index 95 (which would be the 96th).
+    p95 = positives[int(0.95 * (len(positives) - 1))] if len(positives) >= 20 else positives[-1]
     if p95 <= 0:
         return {}
 
