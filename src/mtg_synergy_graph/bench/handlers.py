@@ -209,6 +209,58 @@ def _print_identity_report(report: IdentityReport, fixture_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _emit_rendered(
+    rendered: str,
+    args: argparse.Namespace,
+    *,
+    label: str,
+) -> None:
+    """Shared stdout-or-file writer for ``--rule`` / ``--inspect`` /
+    ``--collinearity``. Mirrors ``handle_audit`` / ``handle_inspect_gems``:
+    write to ``--output PATH`` with stderr confirmation, or print to
+    stdout when ``--output`` is unset / ``-``."""
+    output_target = getattr(args, "output", None)
+    if output_target is None or output_target == "-":
+        print(rendered)
+        return
+    output_path = Path(output_target)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        rendered if rendered.endswith("\n") else rendered + "\n",
+        encoding="utf-8",
+    )
+    print(
+        f"bench.py audit --{label}: report written to {output_path}",
+        file=sys.stderr,
+    )
+
+
+def _render_rule_markdown(summary: Any) -> str:
+    lines: list[str] = []
+    lines.append(f"# bench.py audit --rule {summary.rule_id}")
+    lines.append(f"config_hash: {summary.config_hash[:12]}...")
+    lines.append(f"commanders_affected: {summary.commanders_affected}")
+    lines.append(f"candidates_affected: {summary.candidates_affected}")
+    lines.append(f"aggregate_contribution (raw / pre-dampening): {summary.aggregate_contribution:+.4f}")
+    lines.append("")
+    lines.append("Top commanders by |aggregate contribution|:")
+    for cmdr, contrib in summary.per_commander:
+        lines.append(f"  {cmdr}: {contrib:+.4f}")
+    return "\n".join(lines)
+
+
+def _render_rule_json(summary: Any) -> str:
+    payload = {
+        "rule_id": summary.rule_id,
+        "config_hash": summary.config_hash,
+        "commanders_affected": summary.commanders_affected,
+        "candidates_affected": summary.candidates_affected,
+        "aggregate_contribution": summary.aggregate_contribution,
+        "top_commanders": [{"commander": cmdr, "contribution": contrib} for cmdr, contrib in summary.per_commander],
+    }
+    return _json.dumps(payload, indent=2, ensure_ascii=False)
+
+
 def handle_rule(args: argparse.Namespace) -> int:
     """Handle ``bench.py audit --rule RULE_ID`` — per-rule raw-contribution summary.
 
@@ -216,6 +268,10 @@ def handle_rule(args: argparse.Namespace) -> int:
     **Not** an ablation / score-delta estimate — the underlying
     per-(cmdr, cand) values in the tensor are pre-dampening. See
     ``bench/rule_ops.py`` module docstring for why.
+
+    Supports ``--format json`` for programmatic consumers and
+    ``--output PATH`` to redirect output to a file with a stderr
+    confirmation.
     """
     conn = open_db(args.db)
     try:
@@ -232,20 +288,55 @@ def handle_rule(args: argparse.Namespace) -> int:
         )
         return 1
 
-    print(f"# bench.py audit --rule {summary.rule_id}")
-    print(f"config_hash: {summary.config_hash[:12]}...")
-    print(f"commanders_affected: {summary.commanders_affected}")
-    print(f"candidates_affected: {summary.candidates_affected}")
-    print(f"aggregate_contribution (raw / pre-dampening): {summary.aggregate_contribution:+.4f}")
-    print()
-    print("Top commanders by |aggregate contribution|:")
-    for cmdr, contrib in summary.per_commander:
-        print(f"  {cmdr}: {contrib:+.4f}")
+    fmt = getattr(args, "format", "md")
+    rendered = _render_rule_json(summary) if fmt == "json" else _render_rule_markdown(summary)
+    _emit_rendered(rendered, args, label="rule")
     return 0
 
 
+def _render_inspect_markdown(rows: list[Any], rule_id: str, commander: str | None, limit: int) -> str:
+    lines: list[str] = []
+    lines.append(f"# bench.py audit --inspect {rule_id}")
+    if commander:
+        lines.append(f"commander filter: {commander}")
+    lines.append(f"rows: {len(rows)} (limit: {limit})")
+    lines.append("")
+    lines.append(f"{'commander':<40} {'candidate':<40} {'contrib':>10} {'idf':>8} {'cnt':>4}")
+    for row in rows:
+        lines.append(
+            f"{row.commander[:40]:<40} {row.candidate[:40]:<40} "
+            f"{row.contribution:>+10.4f} {row.idf_weight:>8.4f} {row.raw_count:>4d}"
+        )
+    return "\n".join(lines)
+
+
+def _render_inspect_json(rows: list[Any], rule_id: str, commander: str | None, limit: int) -> str:
+    payload = {
+        "rule_id": rule_id,
+        "commander_filter": commander,
+        "limit": limit,
+        "n_rows": len(rows),
+        "rows": [
+            {
+                "commander": row.commander,
+                "candidate": row.candidate,
+                "contribution": row.contribution,
+                "idf_weight": row.idf_weight,
+                "raw_count": row.raw_count,
+            }
+            for row in rows
+        ],
+    }
+    return _json.dumps(payload, indent=2, ensure_ascii=False)
+
+
 def handle_inspect(args: argparse.Namespace) -> int:
-    """Handle ``bench.py audit --inspect RULE_ID`` — per-(cmdr, cand) rows."""
+    """Handle ``bench.py audit --inspect RULE_ID`` — per-(cmdr, cand) rows.
+
+    Supports ``--format json`` for programmatic consumers and
+    ``--output PATH`` to redirect output to a file with a stderr
+    confirmation.
+    """
     conn = open_db(args.db)
     try:
         rows = inspect_rule(conn, args.inspect, limit=args.limit, commander=args.commander)
@@ -260,29 +351,76 @@ def handle_inspect(args: argparse.Namespace) -> int:
         )
         return 1
 
-    print(f"# bench.py audit --inspect {args.inspect}")
-    if args.commander:
-        print(f"commander filter: {args.commander}")
-    print(f"rows: {len(rows)} (limit: {args.limit})")
-    print()
-    print(f"{'commander':<40} {'candidate':<40} {'contrib':>10} {'idf':>8} {'cnt':>4}")
-    for row in rows:
-        print(
-            f"{row.commander[:40]:<40} {row.candidate[:40]:<40} "
-            f"{row.contribution:>+10.4f} {row.idf_weight:>8.4f} {row.raw_count:>4d}"
-        )
+    fmt = getattr(args, "format", "md")
+    if fmt == "json":
+        rendered = _render_inspect_json(rows, args.inspect, args.commander, args.limit)
+    else:
+        rendered = _render_inspect_markdown(rows, args.inspect, args.commander, args.limit)
+    _emit_rendered(rendered, args, label="inspect")
     return 0
 
 
+def _render_collinearity_markdown(report: CollinearityReport) -> str:
+    lines: list[str] = []
+    lines.append("# bench.py audit --collinearity")
+    lines.append(f"config_hash: {report.config_hash[:12]}...")
+    lines.append(f"rules_examined: {report.rules_examined}")
+    if report.rules_dropped:
+        lines.append(
+            f"rules dropped (zero variance): {len(report.rules_dropped)} — "
+            f"{', '.join(report.rules_dropped[:5])}" + (", …" if len(report.rules_dropped) > 5 else "")
+        )
+    if not report.pairs_flagged:
+        lines.append("")
+        lines.append("No collinear pairs detected (VIF > 5 AND |r| > 0.8).")
+        return "\n".join(lines)
+
+    lines.append("")
+    lines.append(f"{'rule_a':<30} {'rule_b':<30} {'r':>7} {'VIF_a':>8} {'VIF_b':>8}")
+    for pair in report.pairs_flagged[:30]:
+        lines.append(
+            f"{pair.rule_a[:30]:<30} {pair.rule_b[:30]:<30} "
+            f"{pair.pearson_r:>+7.3f} {pair.vif_a:>8.2f} {pair.vif_b:>8.2f}"
+        )
+    return "\n".join(lines)
+
+
+def _render_collinearity_json(report: CollinearityReport) -> str:
+    payload = {
+        "config_hash": report.config_hash,
+        "rules_examined": report.rules_examined,
+        "rules_dropped": list(report.rules_dropped),
+        "vif_per_rule": dict(report.vif_per_rule),
+        "pairs_flagged": [
+            {
+                "rule_a": pair.rule_a,
+                "rule_b": pair.rule_b,
+                "pearson_r": pair.pearson_r,
+                "vif_a": pair.vif_a,
+                "vif_b": pair.vif_b,
+            }
+            for pair in report.pairs_flagged
+        ],
+    }
+    return _json.dumps(payload, indent=2, ensure_ascii=False)
+
+
 def handle_collinearity(args: argparse.Namespace) -> int:
-    """Handle ``bench.py audit --collinearity`` — pairwise VIF + Pearson."""
+    """Handle ``bench.py audit --collinearity`` — pairwise VIF + Pearson.
+
+    Supports ``--format json`` for programmatic consumers and
+    ``--output PATH`` to redirect output to a file with a stderr
+    confirmation.
+    """
     conn = open_db(args.db)
     try:
         report = compute_collinearity(conn)
     finally:
         conn.close()
 
-    _print_collinearity_report(report)
+    fmt = getattr(args, "format", "md")
+    rendered = _render_collinearity_json(report) if fmt == "json" else _render_collinearity_markdown(report)
+    _emit_rendered(rendered, args, label="collinearity")
     return 0
 
 
@@ -804,26 +942,3 @@ def handle_trend_hidden_gems(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
     return 0
-
-
-def _print_collinearity_report(report: CollinearityReport) -> None:
-    print("# bench.py audit --collinearity")
-    print(f"config_hash: {report.config_hash[:12]}...")
-    print(f"rules_examined: {report.rules_examined}")
-    if report.rules_dropped:
-        print(
-            f"rules dropped (zero variance): {len(report.rules_dropped)} — "
-            f"{', '.join(report.rules_dropped[:5])}" + (", …" if len(report.rules_dropped) > 5 else "")
-        )
-    if not report.pairs_flagged:
-        print()
-        print("No collinear pairs detected (VIF > 5 AND |r| > 0.8).")
-        return
-
-    print()
-    print(f"{'rule_a':<30} {'rule_b':<30} {'r':>7} {'VIF_a':>8} {'VIF_b':>8}")
-    for pair in report.pairs_flagged[:30]:
-        print(
-            f"{pair.rule_a[:30]:<30} {pair.rule_b[:30]:<30} "
-            f"{pair.pearson_r:>+7.3f} {pair.vif_a:>8.2f} {pair.vif_b:>8.2f}"
-        )
