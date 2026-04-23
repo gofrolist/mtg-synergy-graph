@@ -13,6 +13,11 @@ For the forward-looking rule-planning workflow (gap_report → scaffold →
 audit cycle), see [docs/RULE_PLANNING.md](docs/RULE_PLANNING.md).
 For a dated log of rule additions, audit verdicts, and per-commander
 impact notes, see [docs/RULE_HISTORY.md](docs/RULE_HISTORY.md).
+For documented solutions to past problems (bugs, best practices,
+workflow patterns) — organized by category with YAML frontmatter
+(`module`, `tags`, `problem_type`) — see
+[docs/solutions/](docs/solutions/). Relevant when debugging or
+implementing in a previously documented area.
 
 ## Common Commands
 
