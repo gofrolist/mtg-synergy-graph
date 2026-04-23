@@ -25,6 +25,7 @@ from mtg_synergy_graph.bench.handlers import (
     handle_collinearity,
     handle_expect_identity,
     handle_inspect,
+    handle_inspect_gems,
     handle_repin,
     handle_rule,
     handle_unknowns,
@@ -47,6 +48,9 @@ _cli.register("inspect", handle_inspect)
 _cli.register("collinearity", handle_collinearity)
 # Plan 003 Unit 6 — UNKNOWN port_nodes reporter.
 _cli.register("unknowns", handle_unknowns)
+# Hidden-gem plan Unit 4 — per-commander diff of hidden-gem sets
+# between pinned and live.
+_cli.register("inspect_gems", handle_inspect_gems)
 
 __all__ = [
     "AuditReport",

@@ -43,3 +43,7 @@ def collinearity_stub(args: argparse.Namespace) -> int:
 
 def unknowns_stub(args: argparse.Namespace) -> int:
     _unimplemented("bench.py audit --unknowns")
+
+
+def inspect_gems_stub(args: argparse.Namespace) -> int:
+    _unimplemented("bench.py audit --inspect-gems")
