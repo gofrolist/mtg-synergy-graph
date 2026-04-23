@@ -18,6 +18,7 @@ import itertools
 import sqlite3
 from collections import defaultdict
 from collections.abc import Sequence
+from functools import cache
 from typing import TYPE_CHECKING, Any
 
 from ..graph_engine import COST_FEEDS_TRIGGER, EVENT_MATCH_MAP
@@ -158,9 +159,18 @@ def _valid_filter_edge(p1: PortRow, p2: PortRow) -> bool:
     purely runtime-bound filters do not form an edge -- an empty
     filter is not a wildcard in this channel.
     """
-    set1 = _type_token_set(p1.get("valid_filter"))
-    set2 = _type_token_set(p2.get("valid_filter"))
-    if set1 is None or set2 is None:
+    vf1 = p1.get("valid_filter")
+    vf2 = p2.get("valid_filter")
+    # Short-circuit: if either filter is empty/None, no overlap is
+    # possible. Skips two ``_type_token_set`` calls on the majority
+    # of non-valid_filter ports (cost / trigger with no filter).
+    if not vf1 or not vf2:
+        return False
+    set1 = _type_token_set(vf1)
+    if set1 is None:
+        return False
+    set2 = _type_token_set(vf2)
+    if set2 is None:
         return False
     return bool(set1 & set2)
 
@@ -194,7 +204,12 @@ def _cand_port_matches_any_cmdr(
     """Return the first commander port that matches ``cand_port``, or
     ``None`` if no commander port matches. Used to compute ``M`` and
     to derive the deterministic ``cmdr_event`` label for the emitted
-    ``PortComplement``."""
+    ``PortComplement``.
+
+    Ordering is load-bearing: the label encodes the commander event
+    of the first match in ``cmdr_ports`` order, so all call sites must
+    preserve the same iteration order to keep IDF buckets stable.
+    """
     for cp in cmdr_ports:
         if _port_pair_matches(cp, cand_port):
             return cp
@@ -420,6 +435,7 @@ def _subkind_label(port: PortRow) -> str:
     return f"{pt}.{ev}"
 
 
+@cache
 def _type_token_set(valid_filter: str | None) -> frozenset[str] | None:
     """Extract the card-type family from any ``valid_filter`` shape.
 
@@ -428,6 +444,13 @@ def _type_token_set(valid_filter: str | None) -> frozenset[str] | None:
     back to a head-token extractor for non-ChangeZone filters --
     ``Creature.YouCtrl+powerGE4`` -> ``{"Creature"}``,
     ``Artifact.YouCtrl`` -> ``{"Artifact"}``.
+
+    Cached unboundedly with ``functools.cache``. The valid_filter
+    string space in production is small (~1-2k distinct values per
+    full card_ports scan) but pre-cache we called this ~160k times
+    per Korvold page against the same filters. Pure function of a
+    hashable input, so the cache is trivially correct and never
+    needs eviction within a process lifetime.
     """
     if not valid_filter:
         return None

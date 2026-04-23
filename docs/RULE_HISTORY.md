@@ -85,6 +85,33 @@ pre-fix flag=True baseline (small positive drift from the concat-distinct
 admission fix). Zero hi_syn_loss. hidden_gem_hit_rate 0.7710 (vs 0.7287
 baseline, +0.0423 kept). Fixture re-pinned at post-fix baseline.
 
+**Performance optimization pass (2026-04-23, same day).** `cProfile` run
+on Korvold (1336 firings, ~20 cmdr_ports) showed `_valid_filter_edge ->
+_type_token_set -> _changezone_type_set` consumed 344 ms of the 1036 ms
+pathway total — 33% of cost on a pure function of ~1-2k unique filter
+strings called 158k times per page. Added `functools.cache` on
+`_type_token_set` (98% hit rate in production) plus a short-circuit in
+`_valid_filter_edge` for ports lacking a `valid_filter`. A commander
+event-class index was prototyped but rejected because it changed the
+first-match iteration order; the cmdr_event label depends on source-order
+traversal of `cmdr_ports`, so any prune that reorders them shifts the
+IDF dedup key and breaks `--expect-identity`.
+
+Final per-page overhead (vs flag=False baseline):
+  commander   raw     +cache  +cache+memo   final
+  Korvold     345 ms  275 ms   128 ms      114 ms   (67% reduction)
+  Gitrog       91 ms   76 ms    56 ms       55 ms
+  Yawgmoth     76 ms   57 ms    36 ms       36 ms
+  Rafiq         —      —        24 ms       24 ms
+  Animar        —      —        —           20 ms
+  Tergrid       —      —        —          165 ms
+  avg         ~120 ms              ~60 ms   ~69 ms
+
+Still above the plan's 10% target on broad commanders (Korvold: +600%)
+but the absolute cost is tolerable for interactive use and the
+optimization diminishing-returns ceiling has been reached without a
+semantic change. Fixture re-pinned and `--expect-identity` PASS.
+
 ## 2026-04-22
 
 ### IDF reforms plan 002 (BM25F + conditional denominator — not landed)
