@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from mtg_synergy_graph.complement_rules import find_all_complements
+from mtg_synergy_graph.complement_rules._interpreter_cache import clear_interpreter_cache
 from mtg_synergy_graph.complement_rules.registry import DECLARATIVE_RULE_IDS, RULE_GATES
 from mtg_synergy_graph.db import open_db
 from mtg_synergy_graph.graph_engine import clear_ports_cache
@@ -22,11 +23,14 @@ from mtg_synergy_graph.graph_engine import clear_ports_cache
 
 @pytest.fixture(autouse=True)
 def _reset_ports_cache() -> None:
-    """``graph_engine._ports_cache`` is keyed on ``id(conn)``; CPython
-    reuses ids after a connection is GC'd, so successive parametrized
-    tests can see a stale cached port list from a previous test's
-    commander. Always clear before each case."""
+    """``graph_engine._ports_cache`` and the
+    ``complement_rules._interpreter_cache`` are both keyed on
+    ``id(conn)``; CPython reuses ids after a connection is GC'd, so
+    successive parametrized tests can see a stale cached entry from a
+    previous test's commander / rules table. Always clear before each
+    case."""
     clear_ports_cache()
+    clear_interpreter_cache()
 
 
 #: Keyword-tribal rules migrated from ``generated/`` in Unit 8. Each

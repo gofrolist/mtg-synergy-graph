@@ -1301,9 +1301,9 @@ def find_all_complements(
         from .registry import DECLARATIVE_RULE_IDS  # local import: avoids cycle
 
         if DECLARATIVE_RULE_IDS:
-            from ..port_graph.interpreter import RuleInterpreter
+            from ._interpreter_cache import get_interpreter
 
-            interpreter = RuleInterpreter(conn)
+            interpreter = get_interpreter(conn)
             out.extend(interpreter.find_complements(conn, cmdr_ports, cmdr_set))
 
         return out
