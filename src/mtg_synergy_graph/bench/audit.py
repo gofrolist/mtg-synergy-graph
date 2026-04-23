@@ -72,6 +72,7 @@ def handle_audit(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
 
+    _print_hidden_gem_warning(report)
     _print_summary(report)
     return 0 if report.is_identical else 1
 
@@ -85,15 +86,52 @@ def _write_default_output(rendered: str, fixture_path: Path, fmt: str) -> None:
     (default_dir / f"last.{suffix}").write_text(rendered, encoding="utf-8")
 
 
+def _print_hidden_gem_warning(report: AuditReport) -> None:
+    """FR4 warning: drop in aggregate ``hidden_gem_hit_rate`` exceeded threshold.
+
+    Printed to stderr once per audit run, before the single-line summary,
+    so it is the first thing the user sees. Advisory only — does not
+    affect the audit exit code.
+    """
+    if not report.hidden_gem_warning:
+        return
+    delta = report.hidden_gem_hit_rate_delta
+    pinned = report.pinned_hidden_gem_hit_rate
+    live = report.aggregate_hidden_gem_hit_rate
+    if delta is None or pinned is None or live is None:
+        # Defensive — ``hidden_gem_warning`` is only True when all three
+        # are set, but the type system can't prove it at this call site.
+        return
+    print(
+        f"⚠ hidden_gem_hit_rate dropped {abs(delta):.3f} on this change "
+        f"(from {pinned:.3f} to {live:.3f}).\n"
+        f"  Inspect: `bench.py audit --inspect-gems` to see which gems were lost.",
+        file=sys.stderr,
+    )
+
+
 def _print_summary(report: AuditReport) -> None:
     """One-line status summary to stderr (visible in pre-commit output)."""
     status = "PASS" if report.is_identical else "DRIFT"
+    gem_summary = _format_gem_summary(report)
     print(
         f"bench.py audit: {status} [{report.verdict.value}] "
         f"(Δ={report.aggregate_score_delta:+.4f}, "
         f"{report.commanders_compared} cmdrs, "
         f"{len(report.per_commander)} changed, "
         f"no_change={report.histogram.no_change}, "
-        f"shuffle_across={report.histogram.rank_shuffle_across_top30_boundary})",
+        f"shuffle_across={report.histogram.rank_shuffle_across_top30_boundary}, "
+        f"{gem_summary})",
         file=sys.stderr,
     )
+
+
+def _format_gem_summary(report: AuditReport) -> str:
+    """Render the trailing ``gem_Δ=...`` fragment for the audit summary."""
+    delta = report.hidden_gem_hit_rate_delta
+    if delta is None:
+        return "gem_Δ=—"
+    fragment = f"gem_Δ={delta:+.4f}"
+    if report.hidden_gem_warning:
+        fragment += " WARN"
+    return fragment
