@@ -295,6 +295,58 @@ def test_append_run_never_raises_on_io_failure(
 # ---------------------------------------------------------------------------
 
 
+def test_truncated_file_between_appends_still_gets_header(tmp_path: Path) -> None:
+    """P2 fix #12: file truncated to 0 bytes between appends → second
+    append re-emits the header instead of producing a bare data row.
+
+    Not true concurrency but exercises the "empty file after first
+    write" edge the TOCTOU fix must handle. With the old
+    ``Path.stat().st_size == 0`` branch outside the ``open`` call the
+    behavior was still correct for serial truncation; the new
+    ``tell()``-based check must preserve it.
+    """
+    path = tmp_path / ".audit" / "history.csv"
+    bench_history.append_run(_make_report(live_config_hash="first"), path=path)
+    # Truncate the file to 0 bytes (simulates a concurrent writer that
+    # observed an empty state between our check and write).
+    path.write_text("", encoding="utf-8")
+    bench_history.append_run(_make_report(live_config_hash="second"), path=path)
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    # After truncation + re-append: header + exactly one data row.
+    assert len(lines) == 2
+    assert lines[0].startswith("timestamp,")
+    assert "second" in lines[1]
+
+
+def test_read_last_emits_aggregate_skip_summary_for_malformed_rows(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """P2 fix #17: read_last emits one consolidated summary warning
+    alongside per-row warnings when malformed rows are skipped."""
+    path = tmp_path / ".audit" / "history.csv"
+    # Start with a valid header via append_run.
+    bench_history.append_run(_make_report(live_config_hash="good_1"), path=path)
+    # Inject 3 malformed rows interleaved with valid ones.
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write("malformed,too,few\n")
+        fh.write("malformed,two,fields\n")
+    bench_history.append_run(_make_report(live_config_hash="good_2"), path=path)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write("one_field_row\n")
+    bench_history.append_run(_make_report(live_config_hash="good_3"), path=path)
+
+    # 3 malformed + 3 valid = 6 data rows; 3 skipped.
+    rows = bench_history.read_last(10, path=path)
+    err = capsys.readouterr().err
+    assert len(rows) == 3
+    # Summary line present.
+    assert "skipped 3" in err
+    assert "of 6" in err
+    assert "malformed" in err.lower()
+
+
 def test_round_trip_preserves_fields(tmp_path: Path) -> None:
     """Write then read: every numeric field round-trips as expected."""
     path = tmp_path / ".audit" / "history.csv"

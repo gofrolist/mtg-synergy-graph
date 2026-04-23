@@ -30,7 +30,7 @@ from mtg_synergy_graph.bench.fixture import (
     PinnedFixture,
     build_fixture,
 )
-from mtg_synergy_graph.bench.history import CSV_FIELDS, HistoryRow
+from mtg_synergy_graph.bench.history import CSV_FIELDS, HistoryRow, fmt_float
 from mtg_synergy_graph.bench.rule_ops import (
     inspect_rule,
     summarize_rule_contributions,
@@ -617,18 +617,33 @@ def handle_inspect_gems(args: argparse.Namespace) -> int:
 
     commanders = [e.commander for e in pinned.entries]
     conn = open_db(args.db)
-    edhrec_conn = sqlite3.connect(edhrec_db_path)
-    edhrec_conn.row_factory = sqlite3.Row
     try:
-        live = build_fixture(
-            conn,
-            commanders,
-            existing=pinned,
-            tensor_writer=None,
-            edhrec_conn=edhrec_conn,
-        )
+        edhrec_conn = sqlite3.connect(edhrec_db_path)
+        edhrec_conn.row_factory = sqlite3.Row
+        try:
+            live = build_fixture(
+                conn,
+                commanders,
+                existing=pinned,
+                tensor_writer=None,
+                edhrec_conn=edhrec_conn,
+            )
+        except sqlite3.DatabaseError as exc:
+            # Corrupt or schema-less EDHREC DB surfaces as a
+            # DatabaseError (OperationalError is a subclass). Map to
+            # the same "missing/unusable DB" exit code + actionable
+            # hint as the non-existent-path branch above so the user
+            # sees a consistent error surface.
+            print(
+                f"error: EDHREC DB {edhrec_db_path!r} is unusable: {exc}. "
+                "Pass --edhrec-db PATH to a valid EDHREC synergy DB, "
+                "or re-import the EDHREC data.",
+                file=sys.stderr,
+            )
+            return 2
+        finally:
+            edhrec_conn.close()
     finally:
-        edhrec_conn.close()
         conn.close()
 
     rows, skipped_count = _build_deltas(pinned, live)
@@ -679,18 +694,18 @@ def handle_inspect_gems(args: argparse.Namespace) -> int:
 
 
 def _row_to_cells(row: HistoryRow) -> tuple[str, ...]:
-    """Render one ``HistoryRow`` as string cells in the trend column order."""
+    """Render one ``HistoryRow`` as string cells in the trend column order.
 
-    def _f(value: float | None) -> str:
-        return "" if value is None else f"{value:.6f}"
-
+    Uses ``history.fmt_float`` so the trend renderer and the history
+    writer stay in lockstep on precision + ``None``-handling.
+    """
     return (
         row.timestamp,
         row.commit_sha,
         row.config_hash,
-        _f(row.aggregate_score_delta),
-        _f(row.hidden_gem_hit_rate),
-        _f(row.hidden_gem_hit_rate_delta),
+        fmt_float(row.aggregate_score_delta),
+        fmt_float(row.hidden_gem_hit_rate),
+        fmt_float(row.hidden_gem_hit_rate_delta),
         str(row.commanders_compared),
         str(row.commanders_with_edhrec),
         row.verdict,

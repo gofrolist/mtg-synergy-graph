@@ -401,3 +401,44 @@ def test_hidden_cards_with_commas_survive_json(
     hidden_cards = loaded.entries[0].legacy.get("hidden_cards", [])
     for name in hidden_cards:
         assert isinstance(name, str)
+
+
+# ---------------------------------------------------------------------------
+# Corrupt EDHREC DB error handling (P2 fix #10)
+# ---------------------------------------------------------------------------
+
+
+def test_build_fixture_skips_commander_on_corrupt_edhrec_query(
+    seeded_db: sqlite3.Connection,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Corrupt/missing edhrec table → stderr warning + commander skipped.
+
+    The build continues for other commanders instead of aborting the
+    whole audit when a single commander's EDHREC lookup raises
+    ``sqlite3.DatabaseError`` (e.g. missing ``edhrec_card_synergy``
+    table or corrupt rows).
+    """
+    # Create an EDHREC DB without the expected table so the query
+    # raises OperationalError (a subclass of DatabaseError).
+    bad_edhrec_path = tmp_path / "bad_edhrec.db"
+    conn = sqlite3.connect(bad_edhrec_path)
+    conn.row_factory = sqlite3.Row
+    # Intentionally DO NOT create edhrec_card_synergy.
+    conn.commit()
+
+    try:
+        fresh = build_fixture(seeded_db, ["Test Commander"], edhrec_conn=conn)
+    finally:
+        conn.close()
+
+    # Commander row is still in the fixture; gem keys absent.
+    assert len(fresh.entries) == 1
+    entry = fresh.entries[0]
+    assert "hidden_gem_hit_rate" not in entry.legacy
+    assert "hidden_cards" not in entry.legacy
+    # Stderr carries the warning.
+    err = capsys.readouterr().err
+    assert "edhrec query failed" in err.lower()
+    assert "test commander" in err.lower()

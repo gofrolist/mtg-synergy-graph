@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,13 +36,13 @@ from typing import Any
 
 from mtg_synergy_graph.bench.hidden_gems import hidden_gem_hit_rate_for_commander
 from mtg_synergy_graph.bench.tensor import TensorWriter, compute_config_hash
+from mtg_synergy_graph.edhrec_helpers import fetch_high_synergy_top_n
 from mtg_synergy_graph.universal_scorer import (
     TensorRow,
     TensorSink,
     UniversalScore,
     score_all_universal,
 )
-from mtg_synergy_graph.validate import commander_to_slug
 
 #: Current fixture schema version. Bumped when the JSON layout changes
 #: in a non-backward-compatible way. Load refuses to read a newer
@@ -257,19 +258,24 @@ def _edhrec_top_30(
     the metric toward 1.0 on that commander and desensitizing the
     warning threshold.
 
-    Mirrors the SQL shape in ``validate.py:_run_one`` but widens the
-    window from 10 to 30.
+    Delegates to :func:`mtg_synergy_graph.edhrec_helpers.fetch_high_synergy_top_n`
+    for the shared SQL shape + section-name constant.
+
+    A corrupt/missing EDHREC DB or a dropped table surfaces as
+    ``sqlite3.DatabaseError`` (``sqlite3.OperationalError`` is a
+    subclass). We degrade to a stderr warning + ``None`` for the
+    affected commander so ``build_fixture`` can still process the
+    rest of the golden set — losing gem data for one commander must
+    not abort the whole audit.
     """
-    slug = commander_to_slug(commander)
-    rows = edhrec_conn.execute(
-        "SELECT card_name FROM edhrec_card_synergy "
-        "WHERE commander_slug = ? AND section = 'High Synergy Cards' "
-        "ORDER BY synergy DESC LIMIT 30",
-        (slug,),
-    ).fetchall()
-    if not rows:
+    try:
+        return fetch_high_synergy_top_n(edhrec_conn, commander, limit=30)
+    except sqlite3.DatabaseError as exc:
+        print(
+            f"bench.py audit: warning: edhrec query failed for commander {commander!r}: {exc}",
+            file=sys.stderr,
+        )
         return None
-    return {r[0] for r in rows}
 
 
 def build_fixture(

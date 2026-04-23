@@ -28,6 +28,24 @@ from mtg_synergy_graph.bench import _stubs
 if TYPE_CHECKING:
     from argparse import Namespace
 
+
+def _nonneg_int(s: str) -> int:
+    """argparse type callable: parse non-negative ``int``, else raise.
+
+    Used for ``--trend-n`` so negative values (which silently produce
+    empty output) are rejected at the CLI boundary with an actionable
+    ``argparse.ArgumentTypeError``. Zero is accepted — a legitimate
+    "render the header only" request.
+    """
+    try:
+        value = int(s)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected an integer, got {s!r}") from exc
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"must be >= 0, got {value}")
+    return value
+
+
 #: Handler table. Unit 2+ reassign these to real implementations.
 _HANDLERS: dict[str, Callable[[Namespace], int]] = {
     "audit": _stubs.audit_stub,
@@ -162,10 +180,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     audit.add_argument(
         "--trend-n",
-        type=int,
+        type=_nonneg_int,
         default=20,
         metavar="N",
-        help="Number of rows to show for --trend. Default: 20. Meaningful only with --trend.",
+        help="Number of rows to show for --trend. Default: 20. Must be >= 0. Meaningful only with --trend.",
     )
     audit.add_argument(
         "--history",
@@ -239,24 +257,39 @@ def main(argv: list[str] | None = None) -> int:
     if args.subcommand != "audit":
         parser.error(f"unknown subcommand: {args.subcommand!r}")
 
+    mode = _resolve_mode(args)
+
+    # ``--format csv`` is only meaningful for ``--trend`` (the history
+    # file itself is CSV). Silently falling back to markdown for every
+    # other mode hid user typos; reject it at the CLI boundary so the
+    # user sees the mismatch instead of wondering why the flag did
+    # nothing.
+    if getattr(args, "format", None) == "csv" and mode != "trend":
+        parser.error("--format csv is only supported with --trend")
+
+    # ``--commander`` filters a per-commander audit; it is meaningless
+    # for ``--trend`` (which renders raw history rows without a
+    # commander concept). Fail loudly instead of silently ignoring.
+    if getattr(args, "commander", None) is not None and mode == "trend":
+        parser.error("--commander is not supported with --trend")
+
     # ``--format`` is stored as ``None`` when not passed so we can
     # apply mode-specific defaults: ``--trend`` defaults to CSV (the
     # history file is already CSV), every other mode defaults to ``md``
     # (matches the legacy behaviour). Users still get ``md`` / ``json``
     # / ``csv`` explicit overrides.
     if getattr(args, "format", None) is None:
-        args.format = "csv" if getattr(args, "trend", None) is not None else "md"
+        args.format = "csv" if mode == "trend" else "md"
 
     # ``--trend-n`` only makes sense with ``--trend``. A lone
     # ``--trend-n`` is harmless — warn on stderr rather than erroring so
     # the user sees the flag had no effect.
-    if getattr(args, "trend", None) is None and getattr(args, "trend_n", 20) != 20:
+    if mode != "trend" and getattr(args, "trend_n", 20) != 20:
         print(
             "bench.py audit: warning: --trend-n has no effect without --trend.",
             file=sys.stderr,
         )
 
-    mode = _resolve_mode(args)
     handler = _HANDLERS[mode]
     return handler(args)
 
