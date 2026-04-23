@@ -39,6 +39,9 @@ _HANDLERS: dict[str, Callable[[Namespace], int]] = {
     # Unit 6 of plan 003 — report UNKNOWN-kind port_nodes rows
     # ranked by distinct cards × EDHREC rank weight.
     "unknowns": _stubs.unknowns_stub,
+    # Unit 4 of hidden-gem metric plan — per-commander diff of
+    # hidden-gem sets between pinned and live.
+    "inspect_gems": _stubs.inspect_gems_stub,
 }
 
 
@@ -118,6 +121,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "distinct_cards x EDHREC rank weight. Surfaces novel Forge "
         "port shapes that need canonical-vocabulary coverage.",
     )
+    mode.add_argument(
+        "--inspect-gems",
+        action="store_true",
+        help="Per-commander diff of hidden-gem sets between pinned and live. "
+        "Shows lost/gained gems. Reads pinned fixture + re-scores live.",
+    )
 
     # Shared flags.
     audit.add_argument(
@@ -160,6 +169,13 @@ def _build_parser() -> argparse.ArgumentParser:
         default="tests/fixtures/golden_set_run.json",
         help="Path to the pinned reference fixture. Default: tests/fixtures/golden_set_run.json.",
     )
+    audit.add_argument(
+        "--edhrec-db",
+        metavar="PATH",
+        default="data/tags.db",
+        help="Path to the EDHREC synergy DB. Used by --inspect-gems to "
+        "rebuild live hidden-gem data. Default: data/tags.db.",
+    )
 
     return parser
 
@@ -179,6 +195,8 @@ def _resolve_mode(args: Namespace) -> str:
         return "expect_identity"
     if args.unknowns:
         return "unknowns"
+    if args.inspect_gems:
+        return "inspect_gems"
     return "audit"
 
 

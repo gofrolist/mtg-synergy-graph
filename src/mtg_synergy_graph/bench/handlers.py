@@ -12,15 +12,19 @@ formats a human-readable or JSON report. The functions here are what
 from __future__ import annotations
 
 import argparse
+import json as _json
 import sqlite3
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from mtg_synergy_graph.bench.collinearity import (
     CollinearityReport,
     compute_collinearity,
 )
 from mtg_synergy_graph.bench.fixture import (
+    FixtureEntry,
     IdentityReport,
     PinnedFixture,
     build_fixture,
@@ -369,6 +373,297 @@ def handle_unknowns(args: argparse.Namespace) -> int:
     print("-" * 71)
     for r in rows:
         print(f"{r['subkind'][:40]:<40} {r['distinct_cards']:>15} {int(r['rank_weight']):>14}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Unit 4 (hidden-gem plan): --inspect-gems
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class HiddenGemDelta:
+    """One commander's hidden-gem delta: rate change + lost/gained sets.
+
+    Immutable record rendered into either a markdown table row or a
+    JSON object. Sorting key is ``abs(rate_delta)`` descending with
+    ``None`` entries pushed to the end; commander name is the stable
+    tiebreaker so identical magnitudes render reproducibly.
+    """
+
+    commander: str
+    pinned_rate: float | None
+    live_rate: float | None
+    rate_delta: float | None
+    lost: tuple[str, ...]
+    gained: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "commander": self.commander,
+            "pinned_rate": self.pinned_rate,
+            "live_rate": self.live_rate,
+            "rate_delta": self.rate_delta,
+            "lost": list(self.lost),
+            "gained": list(self.gained),
+        }
+
+
+def _gem_rate(entry: FixtureEntry) -> float | None:
+    """Extract ``hidden_gem_hit_rate`` from ``legacy``, returning None
+    when absent or non-numeric."""
+    value = entry.legacy.get("hidden_gem_hit_rate")
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return float(value)
+    return None
+
+
+def _gem_cards(entry: FixtureEntry) -> frozenset[str]:
+    """Extract the ``hidden_cards`` list from ``legacy`` as a frozenset."""
+    raw = entry.legacy.get("hidden_cards")
+    if not isinstance(raw, list):
+        return frozenset()
+    return frozenset(str(c) for c in raw)
+
+
+def _has_gem_data(fixture: PinnedFixture) -> bool:
+    """True iff any entry in the fixture carries ``hidden_gem_hit_rate``
+    or a non-empty ``hidden_cards`` list."""
+    for entry in fixture.entries:
+        if _gem_rate(entry) is not None:
+            return True
+        if _gem_cards(entry):
+            return True
+    return False
+
+
+def _build_deltas(
+    pinned: PinnedFixture,
+    live: PinnedFixture,
+) -> tuple[list[HiddenGemDelta], int]:
+    """Diff pinned vs live, returning (rows, skipped_count).
+
+    Skipped = commanders present in pinned but absent from live. Rows
+    cover the intersection of commanders in both fixtures.
+    """
+    live_by_cmdr = {e.commander: e for e in live.entries}
+    rows: list[HiddenGemDelta] = []
+    skipped = 0
+
+    for pinned_entry in pinned.entries:
+        live_entry = live_by_cmdr.get(pinned_entry.commander)
+        if live_entry is None:
+            skipped += 1
+            continue
+
+        pinned_cards = _gem_cards(pinned_entry)
+        live_cards = _gem_cards(live_entry)
+        pinned_rate = _gem_rate(pinned_entry)
+        live_rate = _gem_rate(live_entry)
+
+        rate_delta: float | None = (
+            live_rate - pinned_rate if pinned_rate is not None and live_rate is not None else None
+        )
+
+        rows.append(
+            HiddenGemDelta(
+                commander=pinned_entry.commander,
+                pinned_rate=pinned_rate,
+                live_rate=live_rate,
+                rate_delta=rate_delta,
+                lost=tuple(sorted(pinned_cards - live_cards)),
+                gained=tuple(sorted(live_cards - pinned_cards)),
+            )
+        )
+
+    return rows, skipped
+
+
+def _sort_deltas(rows: list[HiddenGemDelta]) -> list[HiddenGemDelta]:
+    """Sort rows by ``|rate_delta|`` desc with None last, name as
+    tiebreaker."""
+
+    def key(row: HiddenGemDelta) -> tuple[int, float, str]:
+        if row.rate_delta is None:
+            return (1, 0.0, row.commander)
+        return (0, -abs(row.rate_delta), row.commander)
+
+    return sorted(rows, key=key)
+
+
+def _format_delta_count(rate_delta: float | None) -> str:
+    """Render Δ as rounded-integer count out of 30 (more intuitive than
+    a float since the metric is a ratio of cards in a 30-card window)."""
+    if rate_delta is None:
+        return "—"
+    count = round(rate_delta * 30)
+    # Normalize -0 to 0 so the rendered output doesn't flap on tiny
+    # floating-point noise near zero.
+    if count == 0:
+        return "0"
+    return f"{count:+d}"
+
+
+def _format_card_list(names: tuple[str, ...]) -> str:
+    """Render a tuple of card names as a compact, comma-separated cell."""
+    if not names:
+        return "—"
+    preview = ", ".join(names[:3])
+    if len(names) > 3:
+        preview += f" … +{len(names) - 3} more"
+    return preview
+
+
+def _render_gems_markdown(
+    rows: list[HiddenGemDelta],
+    aggregate_rate_delta: float | None,
+    skipped_count: int,
+) -> str:
+    lines: list[str] = []
+    lines.append("# bench.py audit --inspect-gems")
+    lines.append("")
+    if aggregate_rate_delta is None:
+        lines.append("**Aggregate Δ:** `—`")
+    else:
+        lines.append(f"**Aggregate Δ:** `{aggregate_rate_delta:+.4f}`")
+    lines.append(f"**Commanders:** {len(rows)}")
+    if skipped_count:
+        lines.append(f"**Skipped (missing from live):** {skipped_count}")
+    lines.append("")
+    lines.append("| commander | Δ | lost gems | gained gems |")
+    lines.append("|-----------|--:|-----------|-------------|")
+    for row in rows:
+        lines.append(
+            f"| {row.commander} | {_format_delta_count(row.rate_delta)} "
+            f"| {_format_card_list(row.lost)} | {_format_card_list(row.gained)} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _render_gems_json(
+    rows: list[HiddenGemDelta],
+    aggregate_rate_delta: float | None,
+    skipped_count: int,
+) -> str:
+    payload = {
+        "aggregate_rate_delta": aggregate_rate_delta,
+        "n_commanders": len(rows),
+        "skipped_from_live": skipped_count,
+        "rows": [row.to_dict() for row in rows],
+    }
+    return _json.dumps(payload, indent=2, ensure_ascii=False)
+
+
+def _aggregate_rate_delta(rows: list[HiddenGemDelta]) -> float | None:
+    deltas = [r.rate_delta for r in rows if r.rate_delta is not None]
+    if not deltas:
+        return None
+    return sum(deltas) / len(deltas)
+
+
+def handle_inspect_gems(args: argparse.Namespace) -> int:
+    """Handle ``bench.py audit --inspect-gems``.
+
+    Per-commander diff of hidden-gem sets between pinned and live.
+    Reads the pinned fixture, re-scores the same commander list using
+    the current DB + EDHREC DB via ``build_fixture``, and emits a table
+    (markdown or JSON) of per-commander ``(Δ, lost_gems, gained_gems)``
+    sorted by ``|rate_delta|`` desc.
+
+    Exit codes:
+    * ``0`` — normal (even when there is no baseline gem data to compare).
+    * ``2`` — missing fixture, missing EDHREC DB, or ``--commander NAME``
+      does not match any fixture entry.
+    """
+    fixture_path = Path(args.fixture)
+    if not fixture_path.exists():
+        print(
+            f"error: pinned fixture {fixture_path} not found. Run `bench.py audit --repin --yes` to create one.",
+            file=sys.stderr,
+        )
+        return 2
+
+    pinned = PinnedFixture.load(fixture_path)
+
+    # --commander filter: reject unknown names before doing any work.
+    commander_filter: str | None = getattr(args, "commander", None)
+    if commander_filter is not None and not any(e.commander == commander_filter for e in pinned.entries):
+        print(
+            f"error: commander {commander_filter!r} not in fixture {fixture_path}. "
+            "Check spelling or run `bench.py audit --repin --yes` to refresh.",
+            file=sys.stderr,
+        )
+        return 2
+
+    # Short-circuit when the pinned fixture carries no gem data — no
+    # useful diff is possible. Predates Unit 2 plumbing of edhrec_conn
+    # into handle_repin; once that lands, pins will carry gem data by
+    # default and this branch becomes a rare edge case.
+    if not _has_gem_data(pinned):
+        print("no baseline gems to compare", file=sys.stderr)
+        return 0
+
+    # EDHREC DB is mandatory for a live gem rebuild. Missing here is a
+    # usage error, not an empty-diff condition.
+    edhrec_db_path = getattr(args, "edhrec_db", None)
+    if edhrec_db_path is None or not Path(edhrec_db_path).exists():
+        print(
+            f"error: EDHREC DB {edhrec_db_path!r} not found. Pass --edhrec-db PATH or import the EDHREC data first.",
+            file=sys.stderr,
+        )
+        return 2
+
+    commanders = [e.commander for e in pinned.entries]
+    conn = open_db(args.db)
+    edhrec_conn = sqlite3.connect(edhrec_db_path)
+    edhrec_conn.row_factory = sqlite3.Row
+    try:
+        live = build_fixture(
+            conn,
+            commanders,
+            existing=pinned,
+            tensor_writer=None,
+            edhrec_conn=edhrec_conn,
+        )
+    finally:
+        edhrec_conn.close()
+        conn.close()
+
+    rows, skipped_count = _build_deltas(pinned, live)
+    if commander_filter is not None:
+        rows = [r for r in rows if r.commander == commander_filter]
+    rows = _sort_deltas(rows)
+
+    limit = getattr(args, "limit", 100)
+    if limit is not None and limit >= 0:
+        rows = rows[:limit]
+
+    aggregate = _aggregate_rate_delta(rows)
+
+    fmt = getattr(args, "format", "md")
+    if fmt == "json":
+        rendered = _render_gems_json(rows, aggregate, skipped_count)
+    else:
+        rendered = _render_gems_markdown(rows, aggregate, skipped_count)
+
+    output_target = getattr(args, "output", None)
+    if output_target is None or output_target == "-":
+        print(rendered)
+    else:
+        output_path = Path(output_target)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(rendered, encoding="utf-8")
+        print(
+            f"bench.py audit --inspect-gems: report written to {output_path}",
+            file=sys.stderr,
+        )
+
+    if skipped_count:
+        print(
+            f"skipped {skipped_count} commander(s) missing from live",
+            file=sys.stderr,
+        )
+
     return 0
 
 
