@@ -151,6 +151,8 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "training_tribal": "port_match",
     "repl_damagedone_counters_stack": "port_match",
     "cascade_tribal": "port_match",
+    # Plan 2026-04-23-001 depth-2 self-bridging pathway.
+    "self_bridging_cascade": "port_match",
 }
 
 # ---------------------------------------------------------------------------
@@ -234,19 +236,31 @@ class ScoringConfigInputs(NamedTuple):
     rule_quality_multiplier: dict[str, float]
     flat_weight_overrides: dict[str, float]
     synergy_pairs: dict[frozenset[str], float]
+    #: Plan 2026-04-23-001 Unit 6: flipping
+    #: ``complement_rules.pathway._ENABLE_PATHWAY_RULES`` invalidates
+    #: the persisted audit tensor. Exposing it here means
+    #: ``compute_config_hash`` catches the flip without a second
+    #: check-site.
+    enable_pathway_rules: bool
 
 
 def get_scoring_config_inputs() -> ScoringConfigInputs:
-    """Return the three scoring-config dicts that affect ``score()`` output.
+    """Return the scoring-config inputs that affect ``score()`` output.
 
     Intended consumer: ``bench.tensor.compute_config_hash``. If you
-    tune ``score()`` with a new module-global dict, add it here too —
-    otherwise tensor staleness will go undetected.
+    tune ``score()`` with a new module-global dict or flag, add it
+    here too — otherwise tensor staleness will go undetected.
     """
+    # Local import: complement_rules imports universal_scorer for
+    # _RULE_TO_BUCKET at module import time, so pulling pathway here
+    # at function-call time avoids the cycle.
+    from .complement_rules import pathway
+
     return ScoringConfigInputs(
         rule_quality_multiplier=_RULE_QUALITY_MULTIPLIER,
         flat_weight_overrides=_FLAT_WEIGHT_OVERRIDES,
         synergy_pairs=_SYNERGY_PAIRS,
+        enable_pathway_rules=pathway._ENABLE_PATHWAY_RULES,
     )
 
 

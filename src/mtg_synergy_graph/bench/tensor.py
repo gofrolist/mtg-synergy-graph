@@ -69,6 +69,11 @@ def compute_config_hash() -> str:
     # when per-rule IDF weights are unchanged.
     h.update(b"|pairs:")
     h.update(repr(sorted((sorted(pair), weight) for pair, weight in cfg.synergy_pairs.items())).encode("utf-8"))
+    # Plan 2026-04-23-001 Unit 6: pathway feature flag must flip the
+    # hash so flag=True vs flag=False runs cannot compare against
+    # each other's pinned tensor.
+    h.update(b"|pathway:")
+    h.update(repr(cfg.enable_pathway_rules).encode("utf-8"))
     return h.hexdigest()
 
 

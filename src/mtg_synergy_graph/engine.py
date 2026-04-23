@@ -29,7 +29,7 @@ from .penalties import (
     build_candidate_cache,
     build_penalty_context,
 )
-from .universal_scorer import score_all_universal
+from .universal_scorer import UniversalScore, score_all_universal
 
 SPEC_VERSION = "1.2.2"
 ENGINE_VERSION = "0.1.0"
@@ -377,12 +377,15 @@ class SynergyEngine:
                 candidate_cache=self._candidate_cache,
             )
             self._score_cache[cache_key] = universal
-        ranked: list[tuple[str, dict[str, float]]] = []
+        # Carry UniversalScore alongside buckets so _render_explanation
+        # can surface rule-specific metadata (e.g., self_bridging_cascade
+        # path_info) beyond what the legacy bucket dict exposes.
+        ranked: list[tuple[str, dict[str, float], UniversalScore]] = []
         for cand in legal:
             us = universal.get(cand)
             if us is None:
                 continue
-            ranked.append((cand, us.to_legacy_buckets()))
+            ranked.append((cand, us.to_legacy_buckets(), us))
         ranked.sort(
             key=lambda r: (
                 -r[1]["total"],
@@ -396,8 +399,8 @@ class SynergyEngine:
         window = ranked[offset : offset + limit]
 
         items: list[Recommendation] = []
-        for i, (cand, buckets) in enumerate(window):
-            explanation = self._render_explanation(cand, buckets) if include_explanations else None
+        for i, (cand, buckets, us) in enumerate(window):
+            explanation = self._render_explanation(cand, buckets, us) if include_explanations else None
             items.append(
                 Recommendation(
                     rank=offset + i + 1,
@@ -443,8 +446,15 @@ class SynergyEngine:
         self,
         card: str,
         scores: dict[str, float],
+        universal_score: UniversalScore | None = None,
     ) -> list[str]:
-        """Plain-English narrator (§8) — optional, for debug surfaces."""
+        """Plain-English narrator (§8) — optional, for debug surfaces.
+
+        When ``universal_score`` is provided, surfaces rule-specific
+        metadata from ``PortComplement.path_info`` alongside the
+        bucket-summary prose (currently: one ``self_bridging_cascade:``
+        line per firing).
+        """
         lines: list[str] = []
         if scores.get("port_match", 0):
             lines.append(f"{card} feeds the commander's triggers (+{scores['port_match']:.0f}).")
@@ -462,4 +472,13 @@ class SynergyEngine:
             lines.append(f"{card} feeds the partner-pair engine (+{scores['internal_synergy']:.0f}).")
         if scores.get("replacement", 0):
             lines.append(f"{card} blocks a commander trigger ({scores['replacement']:.0f}).")
+        if universal_score is not None:
+            seen_paths: set[str] = set()
+            for c in universal_score.complements:
+                if c.rule_id != "self_bridging_cascade" or not c.path_info:
+                    continue
+                if c.path_info in seen_paths:
+                    continue
+                seen_paths.add(c.path_info)
+                lines.append(f"self_bridging_cascade: {c.path_info}")
         return lines or [f"No mechanical synergy detected for {card}."]

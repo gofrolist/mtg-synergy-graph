@@ -2,17 +2,20 @@
 
 The walker is a pure DB-free function: given a list of candidate ports
 M that each match at least one commander port, it detects whether any
-pair of ports in M has an internal length-<=2 edge via one of three
-channels:
+pair of ports in M has an internal length-<=2 edge via one of two
+canonical cascade substrates:
 
 1. ``event_match`` — ``EVENT_MATCH_MAP`` predicate fires in either
    orientation (trigger/effect pair).
 2. ``cost_feeds`` — ``COST_FEEDS_TRIGGER`` links a cost event_class to
    a trigger event_class.
-3. ``valid_filter`` — both ports' ``valid_filter`` strings reference
-   overlapping card-type families.
 
-First-match wins; channel ordering is tightest-semantic-first.
+The ``valid_filter`` channel was evaluated in the 2026-04-23 audit and
+removed: it fired too broadly on voltron / proliferate / monarch
+commanders whose typed triggers matched equipment/aura cascade shapes
+that weren't genuine internal edges. See ``docs/RULE_HISTORY.md``.
+
+First-match wins; event_match is tried before cost_feeds.
 """
 
 from __future__ import annotations
@@ -82,22 +85,23 @@ def test_cost_feeds_channel_sacrifice_dies_shape() -> None:
     assert channel == "cost_feeds"
 
 
-def test_valid_filter_channel_shared_creature_family() -> None:
-    """Two ports whose ``valid_filter`` both name ``Creature.YouCtrl``
-    share a card-type family and form a valid_filter edge, even
-    without event_match or cost_feeds coverage.
+def test_valid_filter_alone_does_not_form_internal_edge() -> None:
+    """Two ports sharing a ``valid_filter`` type family but lacking
+    an event_match or cost_feeds link do NOT form an internal edge.
+
+    Regression guard: the 2026-04-23 audit removed ``valid_filter`` as
+    an internal-edge channel because it fired on voltron / proliferate
+    equipment + static pairs that weren't genuine cascade shapes.
     """
     damage_trigger = _port("trigger", "DamageDone", valid_filter="Creature.YouCtrl+powerGE4")
     static_buff = _port("static", "Continuous", valid_filter="Creature.YouCtrl")
-    result = _walk_self_paths([damage_trigger, static_buff])
-    assert result is not None
-    _, _, channel = result
-    assert channel == "valid_filter"
+    assert _walk_self_paths([damage_trigger, static_buff]) is None
 
 
-def test_event_match_prefers_first_over_valid_filter() -> None:
-    """When a pair matches via both event_match and valid_filter, the
-    walker returns event_match (tightest channel first)."""
+def test_event_match_channel_returned_when_both_event_match_and_filter_intersect() -> None:
+    """When a pair matches via event_match AND shares a valid_filter,
+    the walker returns event_match (the canonical cascade channel).
+    The shared filter is incidental."""
     cz_trigger = _port("trigger", "ChangesZone", valid_filter="Creature.YouCtrl", zone_destination="Battlefield")
     cz_effect = _port(
         "effect",
@@ -168,6 +172,25 @@ def test_empty_valid_filter_not_treated_as_wildcard() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_wildcard_trigger_does_not_form_internal_edge() -> None:
+    """``Attacks``, ``SpellCast``, and ``LandPlayed`` are wildcard
+    FROM-keys in ``EVENT_MATCH_MAP`` (``to == "*"``). The walker must
+    NOT treat those as internal edges -- the 2026-04-23 audit showed
+    wildcard matches fire spuriously on equipment where
+    (trigger.Attacks, effect.Pump) is really a single ability split
+    into two ports, not a cascade.
+    """
+    attacks_trigger = _port("trigger", "Attacks")
+    pump_effect = _port("effect", "Pump")
+    assert _walk_self_paths([attacks_trigger, pump_effect]) is None
+    spell_trigger = _port("trigger", "SpellCast")
+    draw_effect = _port("effect", "Draw")
+    assert _walk_self_paths([spell_trigger, draw_effect]) is None
+    land_trigger = _port("trigger", "LandPlayed")
+    token_effect = _port("effect", "Token", zone_destination="Battlefield")
+    assert _walk_self_paths([land_trigger, token_effect]) is None
+
+
 def test_event_match_reverse_orientation() -> None:
     """If list order puts the effect port first, the walker still
     detects the trigger->effect match by calling match_event in both
@@ -195,28 +218,16 @@ def test_cost_feeds_reverse_orientation() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_valid_filter_handles_changezone_card_dot_type_form() -> None:
-    """``Card.Creature+YouCtrl`` (Ajani-style) should extract as
-    ``Creature`` and intersect with a plain ``Creature.YouCtrl`` port.
-    """
+def test_changezone_effect_plus_static_no_longer_bridges() -> None:
+    """Ajani-like ChangeZone effect + Creature.YouCtrl static no
+    longer forms an internal edge now that valid_filter is dropped.
+    ChangeZone is not a trigger FROM-key in EVENT_MATCH_MAP, so
+    event_match won't fire either. Regression guard against a
+    future re-introduction of the valid_filter channel without the
+    audit to support it."""
     ajani_like = _port("effect", "ChangeZone", valid_filter="Card.Creature+YouCtrl")
     creature_buff = _port("static", "Continuous", valid_filter="Creature.YouCtrl")
-    # Both parse via _changezone_type_set to {"Creature"}; edge found.
-    # event_match won't fire (ChangeZone not a trigger event class in
-    # EVENT_MATCH_MAP as a FROM key), so valid_filter is the channel.
-    result = _walk_self_paths([ajani_like, creature_buff])
-    assert result is not None
-    _, _, channel = result
-    assert channel == "valid_filter"
-
-
-def test_runtime_bound_filter_does_not_form_edge() -> None:
-    """Tergrid-style ``TriggeredCard`` filters have no static type
-    family — must not generate a shared-filter edge with an arbitrary
-    other port."""
-    tergrid_like = _port("effect", "ChangeZone", valid_filter="TriggeredCard")
-    creature_port = _port("static", "Continuous", valid_filter="Creature.YouCtrl")
-    assert _walk_self_paths([tergrid_like, creature_port]) is None
+    assert _walk_self_paths([ajani_like, creature_buff]) is None
 
 
 # ---------------------------------------------------------------------------
@@ -240,9 +251,9 @@ def test_returned_tuple_contains_the_two_original_ports() -> None:
 
 @pytest.mark.parametrize(
     "channel",
-    ["event_match", "cost_feeds", "valid_filter"],
+    ["event_match", "cost_feeds"],
 )
 def test_channel_identifier_is_one_of_expected_set(channel: str) -> None:
-    """Sanity: the walker's channel strings are the three documented
+    """Sanity: the walker's channel strings are the two documented
     identifiers. Guards against typos drifting the public contract."""
-    assert channel in {"event_match", "cost_feeds", "valid_filter"}
+    assert channel in {"event_match", "cost_feeds"}
