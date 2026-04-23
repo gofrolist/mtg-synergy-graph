@@ -33,6 +33,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from mtg_synergy_graph.bench.hidden_gems import hidden_gem_hit_rate_for_commander
 from mtg_synergy_graph.bench.tensor import TensorWriter, compute_config_hash
 from mtg_synergy_graph.universal_scorer import (
     TensorRow,
@@ -40,6 +41,7 @@ from mtg_synergy_graph.universal_scorer import (
     UniversalScore,
     score_all_universal,
 )
+from mtg_synergy_graph.validate import commander_to_slug
 
 #: Current fixture schema version. Bumped when the JSON layout changes
 #: in a non-backward-compatible way. Load refuses to read a newer
@@ -210,29 +212,69 @@ def score_commander(
     commander: str,
     tensor_sink: TensorSink | None = None,
     top_n: int = TOP_N_PINNED,
+    *,
+    capture_rows: bool = False,
 ) -> tuple[dict[str, float], list[TensorRow]]:
     """Score one commander, returning (top-N scores, tensor_rows).
 
     When a downstream ``tensor_sink`` is wired (typically a
     ``TensorWriter`` during ``--repin``) the returned row list is
-    empty — the sink is the single persistence path and the local
-    list would be redundant memory pressure on a ~5k-row per-commander
-    result. Tests that exercise the return list call without a sink.
+    empty by default — the sink is the single persistence path and the
+    local list would be redundant memory pressure on a ~5k-row per-
+    commander result. Tests that exercise the return list call without
+    a sink.
+
+    Set ``capture_rows=True`` to force local capture even when a sink
+    is provided. The dual-sink path is used by ``build_fixture`` when
+    it needs rows in memory for the hidden-gem metric while also
+    forwarding them to the tensor writer.
     """
     rows: list[TensorRow] = []
-    capture_locally = tensor_sink is None
+    capture_locally = tensor_sink is None or capture_rows
 
     def sink(row: TensorRow) -> None:
         if capture_locally:
             rows.append(row)
-        else:
-            # tensor_sink is not None — pyright narrows on the outer
-            # closure capture.
-            assert tensor_sink is not None
+        if tensor_sink is not None:
             tensor_sink(row)
 
     scores = score_all_universal(conn, [commander], tensor_sink=sink)
     return _top_n_scores(scores, top_n), rows
+
+
+def _edhrec_top_30(
+    edhrec_conn: sqlite3.Connection,
+    commander: str,
+) -> set[str] | None:
+    """Fetch EDHREC's top-30 ``High Synergy Cards`` for a commander.
+
+    Returns ``None`` when the commander has NO rows in
+    ``edhrec_card_synergy`` at all (treated as "no EDHREC data →
+    skip" downstream). Returns an empty set when the commander has
+    rows but none in the ``High Synergy Cards`` section — in that
+    case the metric is still computed (every one of our top-30 is a
+    candidate hidden gem, subject to plausibility).
+
+    Mirrors the SQL shape in ``validate.py:_run_one`` but widens the
+    window from 10 to 30.
+    """
+    slug = commander_to_slug(commander)
+    # First check: does this commander have ANY EDHREC rows? If not,
+    # the caller treats this as "skip."
+    any_row = edhrec_conn.execute(
+        "SELECT 1 FROM edhrec_card_synergy WHERE commander_slug = ? LIMIT 1",
+        (slug,),
+    ).fetchone()
+    if any_row is None:
+        return None
+
+    rows = edhrec_conn.execute(
+        "SELECT card_name FROM edhrec_card_synergy "
+        "WHERE commander_slug = ? AND section = 'High Synergy Cards' "
+        "ORDER BY synergy DESC LIMIT 30",
+        (slug,),
+    ).fetchall()
+    return {r[0] for r in rows}
 
 
 def build_fixture(
@@ -240,6 +282,7 @@ def build_fixture(
     commanders: list[str],
     existing: PinnedFixture | None = None,
     tensor_writer: TensorWriter | None = None,
+    edhrec_conn: sqlite3.Connection | None = None,
 ) -> PinnedFixture:
     """Score all commanders and produce a fresh fixture.
 
@@ -248,19 +291,41 @@ def build_fixture(
     Unit 6's ``--rule`` / ``--inspect`` / ``--collinearity`` queries
     have data to read afterward. ``--expect-identity`` omits the writer
     so it does not mutate DB state while auditing.
+
+    When ``edhrec_conn`` is provided, per-commander
+    ``hidden_gem_hit_rate`` + ``hidden_cards`` are computed at fixture
+    build time (Unit 2 of plan 003) and stored in
+    ``FixtureEntry.legacy`` under those two keys. Commanders with no
+    EDHREC rows have the keys ABSENT (not ``None``), so Unit 3's
+    aggregator filters on key presence. Callers without an
+    ``edhrec_conn`` get the old behavior — no gem fields written.
     """
     existing_by_cmdr = {e.commander: e for e in existing.entries} if existing is not None else {}
 
     entries: list[FixtureEntry] = []
     sink = tensor_writer.sink if tensor_writer is not None else None
+    capture_rows = edhrec_conn is not None
     for cmdr in commanders:
-        top_scores, _rows = score_commander(conn, cmdr, tensor_sink=sink)
-        legacy = existing_by_cmdr.get(cmdr)
+        top_scores, rows = score_commander(conn, cmdr, tensor_sink=sink, capture_rows=capture_rows)
+        legacy_source = existing_by_cmdr.get(cmdr)
+        legacy: dict[str, Any] = dict(legacy_source.legacy) if legacy_source is not None else {}
+
+        if edhrec_conn is not None:
+            edhrec_top_30 = _edhrec_top_30(edhrec_conn, cmdr)
+            # Our top-30 by score desc (ties broken by name) — take
+            # the leading slice of the already-sorted ``top_scores`` dict.
+            our_top_30 = list(top_scores.keys())[:30]
+            contributions = [(row.candidate, row.rule_id, row.contribution) for row in rows]
+            entry = hidden_gem_hit_rate_for_commander(cmdr, our_top_30, edhrec_top_30, contributions)
+            if entry is not None:
+                legacy["hidden_gem_hit_rate"] = entry.rate
+                legacy["hidden_cards"] = list(entry.hidden_cards)
+
         entries.append(
             FixtureEntry(
                 commander=cmdr,
                 scores=top_scores,
-                legacy=dict(legacy.legacy) if legacy is not None else {},
+                legacy=legacy,
             )
         )
 
