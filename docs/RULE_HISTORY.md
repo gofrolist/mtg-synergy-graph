@@ -7,6 +7,68 @@ See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
 ## 2026-04-23
 
+### Forge-Second-Oracle design-time pipeline (LANDED, plan 2026-04-23-002)
+
+**No complement rules added.** This is pure rule-authoring tooling —
+the scoring path is bitwise-unchanged (`bench.py audit
+--expect-identity` PASS before and after every unit).
+
+- New `src/mtg_synergy_graph/forge_oracle/` package: offline-only,
+  grep-fenced from the inference path (see
+  `tests/test_forge_oracle_isolation.py`).
+- **`pair_scorer.rate_pair(conn, a, b)`** — Python port of Forge
+  `CardRanker.getScoreForDeckHints` at SHA
+  `ed97d9bb77f03d9681aba59186416bcf7923d5dd`, 273 LOC (hard cap
+  500). Reads the normalized `card_hints(kind, category, value)`
+  rows the importer already populates from Forge's
+  `DeckHints`/`DeckNeeds` SVars, so the port never re-parses the
+  raw `TYPE$param` format.
+- **`scripts/forge_oracle.py build`** — walks
+  `data/forge/forge-gui/res/quest/{commanderprecons,precons}/` (667
+  `.dck` files), aggregates pair co-occurrence over
+  `port_nodes.subkind` pairs, computes RAPM-lineup-adjusted +
+  Laplace-smoothed PPMI, writes to `data/forge_oracle.db`
+  (`forge_precon_ppmi` + `oracle_config`).
+- **`OracleConfigInputs` + `compute_oracle_hash`** — mirrors the
+  inference-path `ScoringConfigInputs` pattern but applied offline.
+  Strict consumers (`bench.py audit --vs-forge-oracle`,
+  `forge_oracle.py propose-rules`) exit 2 on stale hash; soft
+  consumer (`gap_report.py`) silently falls back to
+  `forge_signal = 1.0` so the rule-authoring tool always produces a
+  report.
+- **`gap_report.py` re-ranks by `impact * forge_signal`** — gaps
+  whose subkind has a strong Forge PPMI signal rise in the queue.
+  Sort-key change is monotonic under `forge_signal = 1.0`, so
+  missing sidecar preserves pre-change order bitwise.
+- **`bench.py audit --vs-forge-oracle`** — Kendall-τ sidecar. For
+  each commander, scores the same top-N candidates both ways and
+  reports aggregate mean τ + per-commander breakdown + top-10
+  divergences (seeds for future rule proposals). Tracking-only at
+  MVP — gate stays on NDCG histogram.
+- **`forge_oracle.py propose-rules --top N`** — iterates top-N
+  forge-signal-ranked gaps, delegates to `scaffold_rule._GENERATORS`
+  per-template, emits scaffold previews ready for the existing
+  scaffold → audit → human-review loop.
+- **Sparse-checkout extended** to pull `forge-gui/src/...` +
+  `forge-ai/` + `quest/{commanderprecons,precons}/`. SHA pinned in
+  committed `data/forge_oracle/version.txt`.
+- **Spike verdict** (`docs/spikes/2026-04-23-boosterdraft-port-feasibility.md`):
+  the brainstorm hypothesized `BoosterDraftAI.rateCard` or
+  `CardSynergy.getSynergy` as the port target. Spike found
+  `CardRanker.getScoreForDeckHints` is the actual pair-scoring
+  surface (~30 LOC of math over `DeckHints`/`DeckNeeds`
+  annotations) — `CardSynergy` does not exist;
+  `BoosterDraftAI.java` is a 110-LOC thin wrapper delegating to
+  `CardRanker`. Port delivered at ~100-150 LOC core, well under the
+  500-LOC FR5 cap.
+- **Testing**: 100+ new test cases across 10 test files. Full
+  suite: 1573 passed (pre-plan-002: 1435), coverage 87%+.
+- **Institutional pattern** extracted as
+  `docs/solutions/best-practices/offline-oracle-hash-pattern-2026-04-23.md`
+  for future offline subsystems.
+
+---
+
 ### `self_bridging_cascade` depth-2 pathway rule (LANDED, plan 2026-04-23-001)
 
 - New complement-rule family `self_bridging_cascade` ships

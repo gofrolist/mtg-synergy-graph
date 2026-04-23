@@ -39,6 +39,11 @@ uv run scripts/bench.py audit --repin --yes                              # Rebui
 uv run scripts/bench.py audit --unknowns                                 # List port_nodes rows with node_kind='UNKNOWN' (plan 003 Unit 6)
 uv run scripts/bench.py audit --inspect-gems                             # Per-commander lost/gained hidden-gem diff (plan 003-gem)
 uv run scripts/bench.py audit --trend hidden_gems --trend-n 20           # CSV history of aggregate hidden_gem_hit_rate across audit runs
+uv run scripts/bench.py audit --vs-forge-oracle                          # Kendall-τ sidecar comparing our top-N vs Forge CardRanker (plan 002)
+
+# Forge-Second-Oracle pipeline (plan 2026-04-23-002) — design-time only, never at inference.
+uv run scripts/forge_oracle.py build                                     # Build data/forge_oracle.db from Forge precon .dck corpus (~670 decks)
+uv run scripts/forge_oracle.py propose-rules --top 20                    # N rule scaffolds ranked by impact * forge_signal
 ```
 
 The bench.py hook also runs advisorily on pre-commit when edits touch
