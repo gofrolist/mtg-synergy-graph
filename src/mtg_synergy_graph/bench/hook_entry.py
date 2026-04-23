@@ -14,7 +14,10 @@ Environment:
 * ``BENCH_DB``     — override the DB path (default: ``synergy.db``).
 * ``BENCH_FIXTURE``— override the fixture path (default:
                     ``tests/fixtures/golden_set_run.json``).
-* ``BENCH_FORMAT`` — ``md`` (default) or ``json``.
+* ``BENCH_FORMAT`` — ``md`` (default), ``json``, or ``csv``. ``csv`` is
+                    only meaningful for ``bench.py audit --trend``; the
+                    hook skips the ``.audit/last.*`` write when csv is
+                    selected and emits a stderr warning.
 """
 
 from __future__ import annotations
@@ -59,12 +62,22 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     # Write the report to .audit/last.{md,json} for consumption by the
-    # developer after the commit.
-    audit_dir = Path(".audit")
-    audit_dir.mkdir(exist_ok=True)
-    suffix = "json" if fmt == "json" else "md"
-    rendered = report.to_json() if fmt == "json" else report.to_markdown()
-    (audit_dir / f"last.{suffix}").write_text(rendered, encoding="utf-8")
+    # developer after the commit. ``csv`` is meaningful only for
+    # ``bench.py audit --trend`` — for the hook there is no sensible CSV
+    # rendering of a one-shot audit report, so we skip the write and
+    # warn instead of silently falling back to markdown.
+    if fmt == "csv":
+        print(
+            "bench-audit: warning: BENCH_FORMAT=csv is meaningful only for "
+            "`bench.py audit --trend`; skipping .audit/last.* write for this hook run.",
+            file=sys.stderr,
+        )
+    else:
+        audit_dir = Path(".audit")
+        audit_dir.mkdir(exist_ok=True)
+        suffix = "json" if fmt == "json" else "md"
+        rendered = report.to_json() if fmt == "json" else report.to_markdown()
+        (audit_dir / f"last.{suffix}").write_text(rendered, encoding="utf-8")
 
     # Emit a single summary line per policy — HARMFUL prints a banner.
     tag = "PASS" if report.is_identical else report.verdict.value

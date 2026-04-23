@@ -100,6 +100,38 @@ def test_hook_pass_after_repin(isolated_cwd: Path, capsys: pytest.CaptureFixture
     assert (isolated_cwd / ".audit" / "last.md").exists()
 
 
+def test_hook_csv_format_warns_and_skips_write(
+    isolated_cwd: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """BENCH_FORMAT=csv is only meaningful for ``--trend``. The hook
+    should NOT silently fall back to markdown (the historical bug) and
+    should NOT crash; it should emit a stderr warning and skip the
+    ``.audit/last.*`` write.
+    """
+    db_path = isolated_cwd / "synergy.db"
+    fixture_path = isolated_cwd / "baseline.json"
+    _seed(db_path)
+    _prepin(db_path, fixture_path)
+
+    with patch.dict(
+        "os.environ",
+        {
+            "BENCH_DB": str(db_path),
+            "BENCH_FIXTURE": str(fixture_path),
+            "BENCH_FORMAT": "csv",
+        },
+    ):
+        exit_code = hook_entry.main()
+
+    assert exit_code == 0
+    err = capsys.readouterr().err
+    assert "csv" in err.lower()
+    # No last.md or last.json should be written on csv format.
+    assert not (isolated_cwd / ".audit" / "last.md").exists()
+    assert not (isolated_cwd / ".audit" / "last.json").exists()
+
+
 def test_hook_json_format_writes_json(isolated_cwd: Path) -> None:
     """BENCH_FORMAT=json produces parseable JSON at .audit/last.json."""
     db_path = isolated_cwd / "synergy.db"

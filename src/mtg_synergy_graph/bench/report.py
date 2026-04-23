@@ -10,12 +10,15 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mtg_synergy_graph.bench.fixture import (
     IdentityReport,
     PinnedFixture,
 )
+
+if TYPE_CHECKING:
+    from mtg_synergy_graph.bench.fixture import FixtureEntry
 from mtg_synergy_graph.bench.hidden_gems import _HIDDEN_GEM_WARN_THRESHOLD
 from mtg_synergy_graph.bench.histogram import (
     Bucket,
@@ -185,7 +188,7 @@ def build_report(
     )
 
 
-def _commander_delta(pinned: Any, live: Any) -> CommanderDelta:  # FixtureEntry; annotated Any to avoid circular import
+def _commander_delta(pinned: FixtureEntry, live: FixtureEntry | None) -> CommanderDelta:
     pinned_scores = pinned.scores
     live_scores = live.scores if live is not None else {}
 
@@ -213,8 +216,8 @@ def _commander_delta(pinned: Any, live: Any) -> CommanderDelta:  # FixtureEntry;
 
 
 def _build_rule_deltas(
-    pinned_by_cmdr: dict[str, Any],
-    live_by_cmdr: dict[str, Any],
+    pinned_by_cmdr: dict[str, FixtureEntry],
+    live_by_cmdr: dict[str, FixtureEntry],
 ) -> list[RuleDelta]:
     """Per-rule rollup lives in SQLite now (see ``bench.rule_ops``).
 

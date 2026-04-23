@@ -30,7 +30,7 @@ from mtg_synergy_graph.bench.fixture import (
     PinnedFixture,
     build_fixture,
 )
-from mtg_synergy_graph.bench.history import HistoryRow
+from mtg_synergy_graph.bench.history import CSV_FIELDS, HistoryRow
 from mtg_synergy_graph.bench.rule_ops import (
     inspect_rule,
     summarize_rule_contributions,
@@ -636,11 +636,15 @@ def handle_inspect_gems(args: argparse.Namespace) -> int:
         rows = [r for r in rows if r.commander == commander_filter]
     rows = _sort_deltas(rows)
 
+    # Compute the aggregate across the FULL matching set before
+    # truncation. If we truncated first, ``--limit 5`` would render an
+    # aggregate reflecting only the 5 most extreme movers, hiding the
+    # true direction of the change.
+    aggregate = _aggregate_rate_delta(rows)
+
     limit = getattr(args, "limit", 100)
     if limit is not None and limit >= 0:
         rows = rows[:limit]
-
-    aggregate = _aggregate_rate_delta(rows)
 
     fmt = getattr(args, "format", "md")
     if fmt == "json":
@@ -674,19 +678,6 @@ def handle_inspect_gems(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
-_TREND_HEADER: tuple[str, ...] = (
-    "timestamp",
-    "commit_sha",
-    "config_hash",
-    "aggregate_score_delta",
-    "hidden_gem_hit_rate",
-    "hidden_gem_hit_rate_delta",
-    "commanders_compared",
-    "commanders_with_edhrec",
-    "verdict",
-)
-
-
 def _row_to_cells(row: HistoryRow) -> tuple[str, ...]:
     """Render one ``HistoryRow`` as string cells in the trend column order."""
 
@@ -712,7 +703,7 @@ def _render_trend_csv(rows: list[HistoryRow]) -> str:
 
     buf = _io.StringIO()
     writer = _csv.writer(buf)
-    writer.writerow(_TREND_HEADER)
+    writer.writerow(CSV_FIELDS)
     for row in rows:
         writer.writerow(_row_to_cells(row))
     return buf.getvalue()
@@ -720,8 +711,8 @@ def _render_trend_csv(rows: list[HistoryRow]) -> str:
 
 def _render_trend_md(rows: list[HistoryRow]) -> str:
     lines: list[str] = []
-    lines.append("| " + " | ".join(_TREND_HEADER) + " |")
-    lines.append("|" + "|".join(["---"] * len(_TREND_HEADER)) + "|")
+    lines.append("| " + " | ".join(CSV_FIELDS) + " |")
+    lines.append("|" + "|".join(["---"] * len(CSV_FIELDS)) + "|")
     for row in rows:
         cells = _row_to_cells(row)
         lines.append("| " + " | ".join(cells) + " |")

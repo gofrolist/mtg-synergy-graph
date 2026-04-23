@@ -248,32 +248,27 @@ def _edhrec_top_30(
 ) -> set[str] | None:
     """Fetch EDHREC's top-30 ``High Synergy Cards`` for a commander.
 
-    Returns ``None`` when the commander has NO rows in
-    ``edhrec_card_synergy`` at all (treated as "no EDHREC data →
-    skip" downstream). Returns an empty set when the commander has
-    rows but none in the ``High Synergy Cards`` section — in that
-    case the metric is still computed (every one of our top-30 is a
-    candidate hidden gem, subject to plausibility).
+    Returns ``None`` when the commander has no rows in the
+    ``'High Synergy Cards'`` section of ``edhrec_card_synergy``
+    (either because no rows exist for the commander at all, or because
+    rows exist only in other sections). Both cases are treated as "no
+    reference data → skip" downstream — returning an empty set instead
+    would make every one of our top-30 "hidden," spuriously inflating
+    the metric toward 1.0 on that commander and desensitizing the
+    warning threshold.
 
     Mirrors the SQL shape in ``validate.py:_run_one`` but widens the
     window from 10 to 30.
     """
     slug = commander_to_slug(commander)
-    # First check: does this commander have ANY EDHREC rows? If not,
-    # the caller treats this as "skip."
-    any_row = edhrec_conn.execute(
-        "SELECT 1 FROM edhrec_card_synergy WHERE commander_slug = ? LIMIT 1",
-        (slug,),
-    ).fetchone()
-    if any_row is None:
-        return None
-
     rows = edhrec_conn.execute(
         "SELECT card_name FROM edhrec_card_synergy "
         "WHERE commander_slug = ? AND section = 'High Synergy Cards' "
         "ORDER BY synergy DESC LIMIT 30",
         (slug,),
     ).fetchall()
+    if not rows:
+        return None
     return {r[0] for r in rows}
 
 

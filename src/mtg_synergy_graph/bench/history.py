@@ -42,7 +42,7 @@ from mtg_synergy_graph.bench.report import AuditReport
 
 #: CSV column order. Must match ``HistoryRow`` field order. Touch both
 #: together or the round-trip tests will catch the drift.
-_CSV_FIELDS: tuple[str, ...] = (
+CSV_FIELDS: tuple[str, ...] = (
     "timestamp",
     "commit_sha",
     "config_hash",
@@ -103,11 +103,16 @@ def append_run(
         with csv_path.open("a", encoding="utf-8", newline="") as fh:
             writer = csv.writer(fh)
             if write_header:
-                writer.writerow(_CSV_FIELDS)
+                writer.writerow(CSV_FIELDS)
             writer.writerow(_row_from_report(report))
-    except OSError as exc:
+    except (OSError, csv.Error) as exc:
+        # csv.Error covers NUL bytes / non-encodable characters in the
+        # rendered cells; OSError covers disk failures, permission
+        # errors, etc. Either way, the history write must never turn a
+        # PASS audit into a failure — we degrade to a stderr warning
+        # that includes the exception class for triage.
         print(
-            f"bench.py audit: warning: failed to append history row to {csv_path}: {exc}",
+            f"bench.py audit: warning: failed to append history row to {csv_path}: {exc.__class__.__name__}: {exc}",
             file=sys.stderr,
         )
 
@@ -167,9 +172,9 @@ def read_last(n: int, path: str | Path = _DEFAULT_PATH) -> list[HistoryRow]:
                 header = next(reader)
             except StopIteration:
                 return []
-            if tuple(header) != _CSV_FIELDS:
+            if tuple(header) != CSV_FIELDS:
                 print(
-                    f"bench.py audit: warning: {csv_path} header mismatch; expected {_CSV_FIELDS}, got {tuple(header)}",
+                    f"bench.py audit: warning: {csv_path} header mismatch; expected {CSV_FIELDS}, got {tuple(header)}",
                     file=sys.stderr,
                 )
                 return []
@@ -191,10 +196,10 @@ def read_last(n: int, path: str | Path = _DEFAULT_PATH) -> list[HistoryRow]:
 
 def _parse_row(raw: list[str], *, lineno: int, path: Path) -> HistoryRow | None:
     """Convert one raw CSV row to a ``HistoryRow``; skip + warn on error."""
-    if len(raw) != len(_CSV_FIELDS):
+    if len(raw) != len(CSV_FIELDS):
         print(
             f"bench.py audit: warning: skipping malformed row {lineno} in "
-            f"{path}: expected {len(_CSV_FIELDS)} fields, got {len(raw)}",
+            f"{path}: expected {len(CSV_FIELDS)} fields, got {len(raw)}",
             file=sys.stderr,
         )
         return None
@@ -258,6 +263,7 @@ def _commit_sha() -> str:
 
 
 __all__ = [
+    "CSV_FIELDS",
     "HistoryRow",
     "append_run",
     "read_last",
