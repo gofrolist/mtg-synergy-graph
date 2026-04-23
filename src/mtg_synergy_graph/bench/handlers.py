@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from mtg_synergy_graph.bench import history as bench_history
 from mtg_synergy_graph.bench.collinearity import (
     CollinearityReport,
     compute_collinearity,
@@ -29,6 +30,7 @@ from mtg_synergy_graph.bench.fixture import (
     PinnedFixture,
     build_fixture,
 )
+from mtg_synergy_graph.bench.history import HistoryRow
 from mtg_synergy_graph.bench.rule_ops import (
     inspect_rule,
     summarize_rule_contributions,
@@ -664,6 +666,137 @@ def handle_inspect_gems(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
 
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Unit 5 (hidden-gem plan): --trend hidden_gems
+# ---------------------------------------------------------------------------
+
+
+_TREND_HEADER: tuple[str, ...] = (
+    "timestamp",
+    "commit_sha",
+    "config_hash",
+    "aggregate_score_delta",
+    "hidden_gem_hit_rate",
+    "hidden_gem_hit_rate_delta",
+    "commanders_compared",
+    "commanders_with_edhrec",
+    "verdict",
+)
+
+
+def _row_to_cells(row: HistoryRow) -> tuple[str, ...]:
+    """Render one ``HistoryRow`` as string cells in the trend column order."""
+
+    def _f(value: float | None) -> str:
+        return "" if value is None else f"{value:.6f}"
+
+    return (
+        row.timestamp,
+        row.commit_sha,
+        row.config_hash,
+        _f(row.aggregate_score_delta),
+        _f(row.hidden_gem_hit_rate),
+        _f(row.hidden_gem_hit_rate_delta),
+        str(row.commanders_compared),
+        str(row.commanders_with_edhrec),
+        row.verdict,
+    )
+
+
+def _render_trend_csv(rows: list[HistoryRow]) -> str:
+    import csv as _csv
+    import io as _io
+
+    buf = _io.StringIO()
+    writer = _csv.writer(buf)
+    writer.writerow(_TREND_HEADER)
+    for row in rows:
+        writer.writerow(_row_to_cells(row))
+    return buf.getvalue()
+
+
+def _render_trend_md(rows: list[HistoryRow]) -> str:
+    lines: list[str] = []
+    lines.append("| " + " | ".join(_TREND_HEADER) + " |")
+    lines.append("|" + "|".join(["---"] * len(_TREND_HEADER)) + "|")
+    for row in rows:
+        cells = _row_to_cells(row)
+        lines.append("| " + " | ".join(cells) + " |")
+    return "\n".join(lines) + "\n"
+
+
+def _render_trend_json(rows: list[HistoryRow]) -> str:
+    payload = [
+        {
+            "timestamp": r.timestamp,
+            "commit_sha": r.commit_sha,
+            "config_hash": r.config_hash,
+            "aggregate_score_delta": r.aggregate_score_delta,
+            "hidden_gem_hit_rate": r.hidden_gem_hit_rate,
+            "hidden_gem_hit_rate_delta": r.hidden_gem_hit_rate_delta,
+            "commanders_compared": r.commanders_compared,
+            "commanders_with_edhrec": r.commanders_with_edhrec,
+            "verdict": r.verdict,
+        }
+        for r in rows
+    ]
+    return _json.dumps(payload, indent=2, ensure_ascii=False)
+
+
+def handle_trend_hidden_gems(args: argparse.Namespace) -> int:
+    """Handle ``bench.py audit --trend hidden_gems``.
+
+    Reads the last ``args.trend_n`` rows (default 20) from the append-only
+    ``.audit/history.csv`` log and renders them as CSV (default),
+    Markdown, or JSON. Missing history is not an error — prints an
+    actionable stderr message and exits 0.
+
+    Exit codes:
+    * ``0`` — normal (including fresh-checkout / no history).
+    """
+    history_path = Path(getattr(args, "history", ".audit/history.csv"))
+    trend_n = int(getattr(args, "trend_n", 20))
+
+    # Missing file: advisory stderr, empty stdout, success exit. A fresh
+    # checkout without ``bench.py audit`` runs is a normal state, not an
+    # error.
+    if not history_path.exists():
+        print(
+            "no history yet — run `bench.py audit` first",
+            file=sys.stderr,
+        )
+        return 0
+
+    rows = bench_history.read_last(trend_n, path=history_path) if trend_n > 0 else []
+
+    # Per the plan, CSV is the natural default for ``--trend`` — the
+    # history file itself is CSV. We honour an explicit ``--format csv``
+    # as well as the audit-wide default of ``md`` (which is meaningless
+    # here because we're reading raw rows, not rendering an audit
+    # report). ``--format md`` and ``--format json`` are explicit
+    # opt-ins for pretty-printed / structured output.
+    fmt = getattr(args, "format", "md")
+    if fmt == "json":
+        rendered = _render_trend_json(rows)
+    elif fmt == "md":
+        rendered = _render_trend_md(rows)
+    else:
+        rendered = _render_trend_csv(rows)
+
+    output_target = getattr(args, "output", None)
+    if output_target is None or output_target == "-":
+        print(rendered, end="" if rendered.endswith("\n") else "\n")
+    else:
+        output_path = Path(output_target)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(rendered, encoding="utf-8")
+        print(
+            f"bench.py audit --trend: report written to {output_path}",
+            file=sys.stderr,
+        )
     return 0
 
 

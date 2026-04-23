@@ -47,3 +47,7 @@ def unknowns_stub(args: argparse.Namespace) -> int:
 
 def inspect_gems_stub(args: argparse.Namespace) -> int:
     _unimplemented("bench.py audit --inspect-gems")
+
+
+def trend_stub(args: argparse.Namespace) -> int:
+    _unimplemented("bench.py audit --trend")

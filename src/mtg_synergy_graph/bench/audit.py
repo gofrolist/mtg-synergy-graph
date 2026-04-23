@@ -13,6 +13,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from mtg_synergy_graph.bench import history as bench_history
 from mtg_synergy_graph.bench.fixture import (
     PinnedFixture,
     build_fixture,
@@ -74,6 +75,21 @@ def handle_audit(args: argparse.Namespace) -> int:
 
     _print_hidden_gem_warning(report)
     _print_summary(report)
+
+    # Append a row to ``.audit/history.csv`` so ``bench.py audit --trend
+    # hidden_gems`` can replay deltas over time. ``append_run`` swallows
+    # I/O errors internally; the outer try/except is belt-and-suspenders
+    # in case a future refactor lets an exception leak — a history-write
+    # failure must never turn a PASS audit into a failure.
+    history_path = getattr(args, "history", ".audit/history.csv")
+    try:
+        bench_history.append_run(report, path=history_path)
+    except Exception as exc:  # pragma: no cover — defensive
+        print(
+            f"bench.py audit: warning: unexpected error appending history row: {exc}",
+            file=sys.stderr,
+        )
+
     return 0 if report.is_identical else 1
 
 
