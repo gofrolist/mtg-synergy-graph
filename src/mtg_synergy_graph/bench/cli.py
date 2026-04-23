@@ -61,7 +61,10 @@ Environment variables (hook mode):
   BENCH_DB       Override --db for the pre-commit hook. Default: data/synergy.db.
   BENCH_FIXTURE  Override --fixture for the pre-commit hook.
                  Default: tests/fixtures/golden_set_run.json.
-  BENCH_FORMAT   Override --format for the pre-commit hook. md | json. Default: md.
+  BENCH_FORMAT   Override --format for the pre-commit hook. md | json | csv.
+                 Default: md. The csv value is only meaningful for
+                 `--trend`; the pre-commit hook treats csv as "skip
+                 writing .audit/last.*" and emits a stderr warning.
 
 Exit codes:
   0  Clean / identical to pinned baseline.

@@ -10,6 +10,7 @@ ProcessPoolExecutor without changing the reporting contract.
 from __future__ import annotations
 
 import argparse
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -22,16 +23,49 @@ from mtg_synergy_graph.bench.report import AuditReport, build_report
 from mtg_synergy_graph.db import open_db
 
 
-def run_audit(db_path: str | Path, fixture_path: str | Path) -> AuditReport:
-    """Load fixture, re-score, return an aggregated AuditReport."""
+def run_audit(
+    db_path: str | Path,
+    fixture_path: str | Path,
+    edhrec_db: str | Path | None = None,
+) -> AuditReport:
+    """Load fixture, re-score, return an aggregated AuditReport.
+
+    When ``edhrec_db`` is provided and exists, the EDHREC DB is opened
+    and passed to ``build_fixture`` so per-commander
+    ``hidden_gem_hit_rate`` gets computed on the live side. This makes
+    the aggregate hidden-gem metric and its FR3/FR4 delta+warning
+    functional in the normal audit path — without it, the legacy path
+    produces gem-less live entries and the delta is always ``—``.
+
+    If ``edhrec_db`` is ``None`` or the path doesn't exist, we skip the
+    open silently (for ``None``) or emit a stderr warning (for a
+    non-existent explicit path) and build the fixture without an
+    ``edhrec_conn`` — the metric is then unavailable but the audit
+    still completes normally.
+    """
     fixture_path = Path(fixture_path)
     pinned = PinnedFixture.load(fixture_path)
     commanders = [e.commander for e in pinned.entries]
+
+    edhrec_conn: sqlite3.Connection | None = None
+    if edhrec_db is not None:
+        edhrec_path = Path(edhrec_db)
+        if edhrec_path.exists():
+            edhrec_conn = sqlite3.connect(edhrec_path)
+            edhrec_conn.row_factory = sqlite3.Row
+        else:
+            print(
+                f"bench.py audit: warning: edhrec_db {edhrec_path} not found — hidden_gem_hit_rate will be unavailable",
+                file=sys.stderr,
+            )
+
     conn = open_db(db_path)
     try:
-        live = build_fixture(conn, commanders)
+        live = build_fixture(conn, commanders, edhrec_conn=edhrec_conn)
     finally:
         conn.close()
+        if edhrec_conn is not None:
+            edhrec_conn.close()
     return build_report(str(fixture_path), pinned, live)
 
 
@@ -56,7 +90,7 @@ def handle_audit(args: argparse.Namespace) -> int:
         print(f"error: fixture {fixture_path} has no entries.", file=sys.stderr)
         return 2
 
-    report = run_audit(args.db, fixture_path)
+    report = run_audit(args.db, fixture_path, edhrec_db=getattr(args, "edhrec_db", None))
 
     rendered = report.to_json() if args.format == "json" else report.to_markdown()
 

@@ -23,8 +23,9 @@ from __future__ import annotations
 
 import statistics
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 
 #: Warning threshold for aggregate delta regressions (FR4). If the
 #: delta between live and pinned aggregate ``hidden_gem_hit_rate`` drops
@@ -55,11 +56,29 @@ class HiddenGemReport:
     was skipped). ``skipped_commanders`` carries the names of
     commanders whose per-commander computation returned ``None``
     (``edhrec_top_30 is None``).
+
+    ``per_commander`` is exposed as a ``Mapping`` and wrapped in a
+    ``MappingProxyType`` at construction so the ``frozen=True``
+    contract isn't silently violated by callers mutating the dict in
+    place. Equality comparisons against plain ``dict`` instances still
+    work (``MappingProxyType`` compares equal to a dict with the same
+    items).
     """
 
     aggregate: float | None
-    per_commander: dict[str, HiddenGemEntry]
+    per_commander: Mapping[str, HiddenGemEntry]
     skipped_commanders: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        # Freeze the mapping so callers can't mutate ``per_commander``
+        # even though the dataclass itself is frozen. We rebuild from a
+        # dict so the proxy wraps an independent, caller-unreachable
+        # backing dict.
+        object.__setattr__(
+            self,
+            "per_commander",
+            MappingProxyType(dict(self.per_commander)),
+        )
 
 
 def _aggregate_contributions(

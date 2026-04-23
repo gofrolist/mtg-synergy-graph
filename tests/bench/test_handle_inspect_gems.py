@@ -322,6 +322,69 @@ def test_commander_not_in_fixture_exits_2(
 # ---------------------------------------------------------------------------
 
 
+def test_aggregate_computed_over_full_set_not_truncated_by_limit(
+    tmp_path: Path,
+    _stub_dbs: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``--limit`` truncates the rendered table but MUST NOT shrink the
+    input to the aggregate-Δ calculation.
+
+    With 10 commanders whose rate_deltas span a wide range, rendering
+    ``--limit 3`` should still report the aggregate over all 10. If
+    the aggregate is computed post-limit, only the three extreme
+    movers drive it — hiding whether the broader set moved positively
+    or negatively.
+    """
+    synergy, edhrec = _stub_dbs
+
+    # Build 10 commanders with known deltas. Pinned rate is constant so
+    # the delta on each equals live - pinned.
+    #   - 7 commanders drop by 0.01 (well below the extreme)
+    #   - 3 commanders drop by 0.30 (the extreme movers)
+    # Aggregate over all 10: (7 * -0.01 + 3 * -0.30) / 10 = -0.097
+    # Aggregate over top 3 (|Δ|=0.30 each): -0.30
+    pinned_entries: list[FixtureEntry] = []
+    live_entries: list[FixtureEntry] = []
+    for idx in range(10):
+        pinned_rate = 0.5
+        # Δ = -0.30 for the 3 extreme movers, -0.01 for the rest.
+        live_rate = 0.20 if idx < 3 else 0.49
+        name = f"Cmdr{idx:02d}"
+        pinned_entries.append(
+            FixtureEntry(
+                commander=name,
+                legacy={"hidden_gem_hit_rate": pinned_rate, "hidden_cards": ["P"]},
+            )
+        )
+        live_entries.append(
+            FixtureEntry(
+                commander=name,
+                legacy={"hidden_gem_hit_rate": live_rate, "hidden_cards": ["L"]},
+            )
+        )
+
+    pinned = _make_fixture(pinned_entries)
+    fixture_path = tmp_path / "baseline.json"
+    _write_fixture(fixture_path, pinned)
+
+    live = _make_fixture(live_entries)
+    _patch_build_fixture(monkeypatch, live)
+
+    rc = handle_inspect_gems(_args(fixture_path, synergy, edhrec_db=str(edhrec), limit=3))
+    assert rc == 0
+    out = capsys.readouterr().out
+
+    # Aggregate over all 10 = -0.0970. Over the truncated top-3 it
+    # would be -0.3000. Accept either sign formatting but require the
+    # 10-row aggregate, not the 3-row one.
+    assert "-0.0970" in out, (
+        f"Aggregate should reflect all 10 commanders, not just the top-3 by magnitude. Output was:\n{out}"
+    )
+    assert "-0.3000" not in out
+
+
 def test_limit_zero_yields_empty_table(
     tmp_path: Path,
     _stub_dbs: tuple[Path, Path],

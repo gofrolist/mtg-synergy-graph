@@ -86,7 +86,7 @@ def test_warning_prints_to_stderr_when_delta_below_threshold(
         aggregate_pinned=0.138,
         warning=True,
     )
-    monkeypatch.setattr(audit_module, "run_audit", lambda _db, _fx: report)
+    monkeypatch.setattr(audit_module, "run_audit", lambda _db, _fx, edhrec_db=None: report)
 
     import os
 
@@ -122,7 +122,7 @@ def test_warning_format_uses_abs_delta_and_3_decimals(
         aggregate_pinned=0.147,
         warning=True,
     )
-    monkeypatch.setattr(audit_module, "run_audit", lambda _db, _fx: report)
+    monkeypatch.setattr(audit_module, "run_audit", lambda _db, _fx, edhrec_db=None: report)
 
     import os
 
@@ -161,7 +161,7 @@ def test_no_warning_when_delta_zero(
         aggregate_pinned=0.15,
         warning=False,
     )
-    monkeypatch.setattr(audit_module, "run_audit", lambda _db, _fx: report)
+    monkeypatch.setattr(audit_module, "run_audit", lambda _db, _fx, edhrec_db=None: report)
 
     import os
 
@@ -195,7 +195,7 @@ def test_no_warning_when_aggregate_none(
         aggregate_pinned=None,
         warning=False,
     )
-    monkeypatch.setattr(audit_module, "run_audit", lambda _db, _fx: report)
+    monkeypatch.setattr(audit_module, "run_audit", lambda _db, _fx, edhrec_db=None: report)
 
     import os
 
@@ -231,7 +231,7 @@ def test_warning_printed_exactly_once_per_run(
         aggregate_pinned=0.150,
         warning=True,
     )
-    monkeypatch.setattr(audit_module, "run_audit", lambda _db, _fx: report)
+    monkeypatch.setattr(audit_module, "run_audit", lambda _db, _fx, edhrec_db=None: report)
 
     import os
 

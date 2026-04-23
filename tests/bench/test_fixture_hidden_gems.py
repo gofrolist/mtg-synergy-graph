@@ -174,15 +174,17 @@ def test_commander_with_no_edhrec_rows_gets_no_gem_keys(
     assert "hidden_cards" not in entry.legacy
 
 
-def test_commander_with_empty_high_synergy_section_still_computes(
+def test_commander_with_empty_high_synergy_section_is_skipped(
     seeded_db: sqlite3.Connection,
     tmp_path: Path,
 ) -> None:
     """Rows exist under another section but 0 'High Synergy Cards' rows.
 
-    EDHREC top-30 is an empty set (not None) → every one of our top-30
-    is "hidden"; plausibility gate filters. The metric is computed (it
-    is NOT a skip).
+    Treated as "no reference data → skip": ``_edhrec_top_30`` returns
+    ``None``, so ``hidden_gem_hit_rate_for_commander`` returns ``None``,
+    and the legacy dict carries no gem keys. Returning an empty set
+    instead would inflate the metric toward 1.0 (every top-30 card
+    becomes "hidden"), desensitizing the warning threshold.
     """
     edhrec = _make_edhrec_db(
         tmp_path / "edhrec.db",
@@ -194,10 +196,10 @@ def test_commander_with_empty_high_synergy_section_still_computes(
         edhrec.close()
 
     entry = fresh.entries[0]
-    # There ARE rows for this slug, just not in the High Synergy section.
-    # So edhrec_top_30 is the empty set, and the metric IS computed.
-    assert "hidden_gem_hit_rate" in entry.legacy
-    assert "hidden_cards" in entry.legacy
+    # Empty 'High Synergy Cards' section is equivalent to no EDHREC
+    # data for our purposes — the commander is skipped.
+    assert "hidden_gem_hit_rate" not in entry.legacy
+    assert "hidden_cards" not in entry.legacy
 
 
 # ---------------------------------------------------------------------------
