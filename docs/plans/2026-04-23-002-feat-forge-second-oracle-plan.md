@@ -1,7 +1,7 @@
 ---
 title: Forge-Second-Oracle — Design-Time BoosterDraftAI + Precon PPMI Signals
 type: feat
-status: active
+status: completed
 date: 2026-04-23
 origin: docs/brainstorms/2026-04-21-forge-second-oracle-requirements.md
 ---
@@ -163,7 +163,7 @@ Every horizontal arrow into the inference path is prohibited by Unit 9's regress
 
 ## Implementation Units
 
-- [ ] **Unit 1: Forge sparse-checkout extension + SHA pin**
+- [x] **Unit 1: Forge sparse-checkout extension + SHA pin**
 
 **Goal:** Make `forge-ai/` and precon deck subtrees available in `data/forge/` via sparse-checkout; pin the Forge SHA in a committed `data/forge_oracle/version.txt`; extend `.gitignore` + `tests/test_seed_files_tracked.py` for the new tracked artifact.
 
@@ -202,7 +202,7 @@ Every horizontal arrow into the inference path is prohibited by Unit 9's regress
 
 ---
 
-- [ ] **Unit 2: BoosterDraftAI reconnaissance spike (time-boxed, gate)**
+- [x] **Unit 2: BoosterDraftAI reconnaissance spike (time-boxed, gate)**
 
 **Goal:** Read the Forge Java AI source on the pinned SHA, identify the single method that best matches "two cards → float synergy score" with minimal `GameState`/`PlayerAI` context, estimate the Python-equivalent LOC, and emit a GO/NO-GO verdict. **All subsequent units (3, 7, 8) gate on this.**
 
@@ -232,7 +232,7 @@ Every horizontal arrow into the inference path is prohibited by Unit 9's regress
 
 ---
 
-- [ ] **Unit 3: Python port of the chosen Java pair-scorer** *(gated by Unit 2 GO verdict)*
+- [x] **Unit 3: Python port of the chosen Java pair-scorer** *(gated by Unit 2 GO verdict)*
 
 **Goal:** Port the chosen Java method to pure-Python `forge_oracle.pair_scorer.rate_pair(a_oracle_id, b_oracle_id, conn) -> float`. No JVM, no game state. Deterministic. ≤ 500 LOC (hard cap per origin Success Criterion 5).
 
@@ -274,7 +274,7 @@ Every horizontal arrow into the inference path is prohibited by Unit 9's regress
 
 ---
 
-- [ ] **Unit 4: Precon `.dck` parser + `forge_precon_ppmi` table ingest**
+- [x] **Unit 4: Precon `.dck` parser + `forge_precon_ppmi` table ingest**
 
 **Goal:** One-time build of `data/forge_oracle.db`'s `forge_precon_ppmi` table from Forge's bundled precon decks. Drives `scripts/forge_oracle.py build` subcommand.
 
@@ -331,7 +331,7 @@ Every horizontal arrow into the inference path is prohibited by Unit 9's regress
 
 ---
 
-- [ ] **Unit 5: `OracleConfigInputs` + `compute_oracle_hash` + refuse-to-run wiring**
+- [x] **Unit 5: `OracleConfigInputs` + `compute_oracle_hash` + refuse-to-run wiring**
 
 **Goal:** Mirror the inference-path `ScoringConfigInputs` / `compute_config_hash` pattern for the offline oracle. Write the hash into `oracle_config` on build; verify the hash on read in strict consumers.
 
@@ -369,7 +369,7 @@ Every horizontal arrow into the inference path is prohibited by Unit 9's regress
 
 ---
 
-- [ ] **Unit 6: `gap_report.py` re-ranking via `forge_signal` column**
+- [x] **Unit 6: `gap_report.py` re-ranking via `forge_signal` column**
 
 **Goal:** Extend `gap_report.py` to optionally multiply each gap's impact by a Forge oracle signal sourced from `data/forge_oracle.db`. Silent fallback to `1.0` when sidecar is missing or stale.
 
@@ -409,7 +409,7 @@ Every horizontal arrow into the inference path is prohibited by Unit 9's regress
 
 ---
 
-- [ ] **Unit 7: `bench.py audit --vs-forge-oracle` Kendall-τ sidecar** *(gated by Unit 3 GO verdict)*
+- [x] **Unit 7: `bench.py audit --vs-forge-oracle` Kendall-τ sidecar** *(gated by Unit 3 GO verdict)*
 
 **Goal:** Add subcommand reporting Kendall-τ agreement between our live top-30 and BoosterDraftAI's top-30 over the same candidate pool, per commander + aggregate. Top-10 divergence pairs surfaced as rule-proposal seeds.
 
@@ -457,7 +457,7 @@ Every horizontal arrow into the inference path is prohibited by Unit 9's regress
 
 ---
 
-- [ ] **Unit 8: `scripts/forge_oracle.py propose-rules --top N`**
+- [x] **Unit 8: `scripts/forge_oracle.py propose-rules --top N`**
 
 **Goal:** Iterate the gap report's top-N Forge-signal-ranked gaps, delegate each to `scaffold_rule._GENERATORS`, emit a Markdown proposal document listing proposed rule scaffolds pre-filled with the gap's port shape + sample commanders + sample Forge-flagged synergistic candidates.
 
@@ -496,7 +496,7 @@ Every horizontal arrow into the inference path is prohibited by Unit 9's regress
 
 ---
 
-- [ ] **Unit 9: Inference-path isolation regression test (grep fence + --expect-identity)**
+- [x] **Unit 9: Inference-path isolation regression test (grep fence + --expect-identity)**
 
 **Goal:** Mechanically enforce that no inference-path module imports from `forge_oracle/`, and that the inference path is bitwise-identical before and after the feature lands.
 
@@ -527,7 +527,7 @@ Every horizontal arrow into the inference path is prohibited by Unit 9's regress
 
 ---
 
-- [ ] **Unit 10: Docs + solution writeup + RULE_HISTORY / RULE_PLANNING / CLAUDE.md updates**
+- [x] **Unit 10: Docs + solution writeup + RULE_HISTORY / RULE_PLANNING / CLAUDE.md updates**
 
 **Goal:** Capture the new pipeline step in rule-authoring docs; date-log the landing in `docs/RULE_HISTORY.md`; extend CLAUDE.md's Common Commands; write a new `docs/solutions/` best-practice doc on the offline-oracle hash-enforcement pattern.
 
