@@ -244,9 +244,12 @@ class ScoringConfigInputs(NamedTuple):
     enable_pathway_rules: bool
     #: Plan 2026-04-23-003 Unit 7: the embedding-contribution gate
     #: (``embeddings.contribution._ENABLE_EMBEDDING_CONTRIBUTION``).
-    #: Flipping this changes every candidate's ``score`` (even with
-    #: ``embedding_w=0.0`` because the field is summed unconditionally
-    #: once the gate is open), so it must invalidate the pinned tensor.
+    #: Flipping this field invalidates the pinned tensor via
+    #: ``compute_config_hash`` because the hash input set changes.
+    #: Scores are only affected when ``embedding_w`` is also non-zero
+    #: — with ``_EMBEDDING_W=0.0`` (current default), the short-circuit
+    #: in ``embedding_contribution()`` returns ``0.0`` regardless of
+    #: this flag.
     enable_embedding_contribution: bool
     #: Plan 2026-04-23-003 Unit 7: the embedding-contribution weight
     #: ``_EMBEDDING_W``. Tuning it changes scores — catch drift here.
@@ -411,6 +414,11 @@ class UniversalScore:
         total += _compute_pair_bonus(self.distinct_rules)
         total += self.circuit_bonus + self.cmc_bonus + self.rank_bonus
         total += self.embedding_contribution
+        # Expose embedding contribution under a named bucket key so the
+        # ``sum(named_bucket_values) == total`` invariant holds when the
+        # flag is on. Alongside ``circuit_bonus``/``cmc_bonus``/
+        # ``rank_bonus`` — these are additive non-rule terms.
+        buckets["embedding"] = self.embedding_contribution
         buckets["total"] = total
         return buckets
 

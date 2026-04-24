@@ -221,6 +221,13 @@ def test_embedding_contribution_field_defaults_to_zero_when_flag_off(
     """
     from mtg_synergy_graph.embeddings import contribution as emb_contribution
 
+    # Lock both safety layers: if ``_EMBEDDING_W`` drifts from 0.0 while
+    # the flag stays False the short-circuit masks it and the flag-off
+    # assertion becomes vacuous. Pin ``_EMBEDDING_K`` too against its
+    # documented default (0.8) so any tune drift is caught here as well.
+    assert emb_contribution._EMBEDDING_W == 0.0
+    assert emb_contribution._EMBEDDING_K == 0.8
+
     # Belt-and-suspenders: the plan forbids flipping the default in this
     # unit. If a future edit sets True as the default here the audit
     # sweep owns that flip, not this test — fail loud if it drifts.

@@ -364,6 +364,18 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
 
+    # ``--threshold`` / ``--min-activation`` only make sense with
+    # ``--embedding-dedup``. Mirror the ``--trend-n`` pattern: warn on
+    # stderr rather than erroring so the user sees the flag had no
+    # effect.
+    if mode != "embedding_dedup" and (
+        getattr(args, "threshold", 0.95) != 0.95 or getattr(args, "min_activation", 20) != 20
+    ):
+        print(
+            "bench.py audit: warning: --threshold and --min-activation have no effect without --embedding-dedup.",
+            file=sys.stderr,
+        )
+
     handler = _HANDLERS[mode]
     return handler(args)
 

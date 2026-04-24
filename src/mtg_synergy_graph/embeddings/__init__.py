@@ -23,7 +23,6 @@ from mtg_synergy_graph.embeddings.config import (
     verify_current_or_raise,
 )
 from mtg_synergy_graph.embeddings.contribution import (
-    _ENABLE_EMBEDDING_CONTRIBUTION,
     embedding_contribution,
     load_card_embeddings_verified,
 )
@@ -42,7 +41,6 @@ from mtg_synergy_graph.embeddings.vectorizer import (
 
 __all__ = [
     "TOKEN_FORMAT_VERSION",
-    "_ENABLE_EMBEDDING_CONTRIBUTION",
     "EmbeddingConfigError",
     "EmbeddingConfigInputs",
     "EmbeddingConfigMissingError",

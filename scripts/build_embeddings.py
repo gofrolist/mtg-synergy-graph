@@ -45,6 +45,10 @@ from mtg_synergy_graph.embeddings import (  # noqa: E402 — after sys.path shim
     truncated_svd,
     write_vectors,
 )
+from mtg_synergy_graph.embeddings.config import (  # noqa: E402 — after sys.path shim
+    _DEFAULT_MIN_DF,
+    _DEFAULT_SVD_DIMS,
+)
 
 
 def _build_argparser() -> argparse.ArgumentParser:
@@ -58,14 +62,14 @@ def _build_argparser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--min-df",
         type=int,
-        default=2,
-        help="Minimum document frequency for TF-IDF pruning. Default: 2",
+        default=_DEFAULT_MIN_DF,
+        help=f"Minimum document frequency for TF-IDF pruning. Default: {_DEFAULT_MIN_DF}",
     )
     parser.add_argument(
         "--svd-dims",
         type=int,
-        default=128,
-        help="Target dimensionality after truncated SVD. Default: 128",
+        default=_DEFAULT_SVD_DIMS,
+        help=f"Target dimensionality after truncated SVD. Default: {_DEFAULT_SVD_DIMS}",
     )
     return parser
 

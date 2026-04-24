@@ -29,6 +29,17 @@ import hashlib
 import sqlite3
 from typing import NamedTuple
 
+#: Default target dimensionality after truncated SVD. Single source of
+#: truth for both ``get_embedding_config_inputs()`` and the
+#: ``scripts/build_embeddings.py`` argparse ``default=``. Leading
+#: underscore indicates module-internal, but the build script imports
+#: it directly so the two defaults cannot drift.
+_DEFAULT_SVD_DIMS: int = 128
+
+#: Default minimum document frequency for TF-IDF pruning. Same
+#: single-source-of-truth rationale as ``_DEFAULT_SVD_DIMS``.
+_DEFAULT_MIN_DF: int = 2
+
 
 class EmbeddingConfigInputs(NamedTuple):
     """All inputs whose change must invalidate a rebuilt ``card_embeddings``.
@@ -112,8 +123,8 @@ def get_embedding_config_inputs() -> EmbeddingConfigInputs:
 
     return EmbeddingConfigInputs(
         token_format_version=emb_vectorizer.TOKEN_FORMAT_VERSION,
-        svd_dims=128,
-        min_df=2,
+        svd_dims=_DEFAULT_SVD_DIMS,
+        min_df=_DEFAULT_MIN_DF,
         vectorizer_version=1,
         port_signature_version="v1",
     )
