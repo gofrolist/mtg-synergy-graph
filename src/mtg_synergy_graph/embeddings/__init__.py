@@ -9,6 +9,10 @@ scoring term.
 
 from __future__ import annotations
 
+from mtg_synergy_graph.embeddings.commander_target import (
+    build_commander_target_vector,
+    clear_cache,
+)
 from mtg_synergy_graph.embeddings.config import (
     EmbeddingConfigError,
     EmbeddingConfigInputs,
@@ -38,6 +42,8 @@ __all__ = [
     "EmbeddingConfigMissingError",
     "EmbeddingConfigStaleError",
     "TfidfResult",
+    "build_commander_target_vector",
+    "clear_cache",
     "compute_embedding_hash",
     "compute_tfidf",
     "extract_card_tokens",
