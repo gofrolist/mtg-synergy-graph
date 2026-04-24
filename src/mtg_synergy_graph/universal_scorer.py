@@ -453,11 +453,19 @@ _FLAT_COUNT_RULES: frozenset[str] = frozenset(
 #: than a flat override: large Creature groups (N=17k) are dampened so
 #: synergy rules can compete, while small groups (Land N=1.1k) keep
 #: full weight of 1.0.
+#:
+#: token_producer: 0.25 → 0.15 on 2026-04-24 audit run. At 0.25 the
+#: rule was CONTENTIOUS (-0.511 NDCG across 28 touched, -1 hit net,
+#: Purphoros golden-anchored at +0.069). Dampening to 0.15 recovers
+#: +0.266 NDCG, preserves Purphoros at +0.016 (still protected), and
+#: holds hit loss at -1. Lower values (0.10, 0.05) widened hit loss
+#: to -3 without meaningful NDCG gain — diminishing returns elbow at
+#: 0.15.
 _FLAT_WEIGHT_OVERRIDES: dict[str, float] = {
     "spell_density": 0.3,
     "scaling": 0.3,
     "tribal_density": 0.5,
-    "token_producer": 0.25,
+    "token_producer": 0.15,
     "evasion": 0.15,
     "etb_self": 0.01,
 }
