@@ -211,6 +211,39 @@ shape and report aggregate Hi-Syn / OnPage delta. Don't refactor the
 gate to chase a single commander's curated picks — EDHREC is a
 sanity check, not the target.
 
+### 6.5. Redundancy check (adds-signal-not-just-overlap gate)
+
+Before committing, confirm the new rule adds independent mechanical
+signal rather than duplicating an existing rule's contributions:
+
+```bash
+uv run scripts/bench.py audit --embedding-dedup          # content-space overlap
+uv run scripts/bench.py audit --collinearity             # score-space correlation
+```
+
+The two diagnostics answer different questions:
+
+- **`--embedding-dedup`** (cosine similarity of candidate-activation
+  sets in content space) — finds rules that *fire on similar cards*.
+  Content overlap is expected: multiple rules legitimately fire on
+  the same card when it satisfies multiple mechanical axes.
+- **`--collinearity`** (Pearson correlation + VIF on per-candidate
+  score contributions) — finds rules whose score contributions are
+  *statistically redundant*. Two rules scoring the same dimension of
+  synergy collapse here even if their activation sets diverge.
+
+A new rule that flags on `--embedding-dedup` but not `--collinearity`
+is healthy: it fires on overlapping cards for different mechanical
+reasons. A rule that flags on `--collinearity` (|r| > 0.8 AND VIF > 5)
+is duplicating existing signal — refine the gate, narrow the
+activation set, or drop the rule.
+
+**Reference baseline (2026-04-24, 62-rule catalogue):** zero collinear
+pairs even at relaxed thresholds (r > 0.5, VIF > 2.0). If a new
+rule introduces a collinear pair, investigate before committing. See
+`docs/solutions/best-practices/rule-consolidation-null-result-2026-04-24.md`
+for the background.
+
 ### 7. Commit
 
 One commit per rule:
