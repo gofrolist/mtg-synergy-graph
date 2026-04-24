@@ -244,6 +244,25 @@ rule introduces a collinear pair, investigate before committing. See
 `docs/solutions/best-practices/rule-consolidation-null-result-2026-04-24.md`
 for the background.
 
+### 6.6. Know the queue state before running the walker
+
+`scripts/scaffold_rule.py --walk N --apply` is the automation seam for
+draining the forge-signal-weighted proposal queue. Before running it,
+always check the generator-catalog state:
+
+```bash
+uv run python scripts/scaffold_rule.py --show-template-stats
+```
+
+If every template shows `BLOCKED` status, the walker will silently
+return zero attempts. That's generator-catalog exhaustion, not a
+pipeline bug. The fix is not `--force` — it's extending the catalog
+(new `_AXIS_FEEDER_TIERS` qualifiers, a new generator for a
+currently-`needs_template` proposal, or refining a BLOCKED template
+to filter the sub-class of proposals that reverted against it). See
+`docs/solutions/best-practices/scaffold-queue-generator-exhaustion-2026-04-24.md`
+for the full rubric, Options A/B/C/D, and re-check triggers.
+
 ### 7. Commit
 
 One commit per rule:
