@@ -143,6 +143,19 @@ handler. Callers that want silent fallback never call it — they just
 read the sidecar and handle a missing / empty table by returning a
 sentinel (empty dict, 1.0 weight, etc.).
 
+**Important — inputs provenance.** The `inputs` argument above must
+be sourced from the same provenance as the build, not reconstructed
+from current-code defaults. forge_oracle gets away with a
+`get_oracle_config_inputs()` that reads code-level constants because
+its inputs are *environmental* (Forge HEAD SHA, pinned file) — builder
+and verifier naturally agree as long as the checkout is stable. Any
+subsystem that adds user-facing CLI flags to the build hits a
+different failure mode: the verifier recomputes from defaults, the
+stored hash was built from flag values, and the two never match.
+See [verify-from-stored-config-not-code-defaults-2026-04-23.md](verify-from-stored-config-not-code-defaults-2026-04-23.md)
+for the generalized discipline (the embedding subsystem hit this exact
+failure mode with `--min-df` / `--svd-dims` flags).
+
 ### 7. Actionable error messages
 
 `OracleConfigStaleError` message must include the rebuild command:
