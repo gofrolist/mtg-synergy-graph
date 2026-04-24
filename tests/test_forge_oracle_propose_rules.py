@@ -31,7 +31,7 @@ def _make_forge_oracle_db(tmp_path: Path) -> Path:
         "  PRIMARY KEY (port_signature_a, port_signature_b));"
         "CREATE TABLE oracle_config (key TEXT PRIMARY KEY, value TEXT NOT NULL);"
     )
-    inputs = fo_config.get_oracle_config_inputs(ppmi_smoothing_k=0.5, min_decks_count=3)
+    inputs = fo_config.get_oracle_config_inputs(ppmi_smoothing_k=0.0, min_decks_count=3)
     fo_config.write_oracle_config(conn, inputs)
     conn.commit()
     conn.close()
@@ -183,7 +183,7 @@ def test_cli_stale_hash_returns_2(tmp_path: Path, capsys: pytest.CaptureFixture[
         "  PRIMARY KEY (port_signature_a, port_signature_b));"
         "CREATE TABLE oracle_config (key TEXT PRIMARY KEY, value TEXT NOT NULL);"
     )
-    # Store hash built under k=2.0, then call CLI with default k=0.5 → mismatch.
+    # Store hash built under k=2.0, then call CLI with default k=0.0 → mismatch.
     fo_config.write_oracle_config(
         conn,
         fo_config.get_oracle_config_inputs(ppmi_smoothing_k=2.0, min_decks_count=3),

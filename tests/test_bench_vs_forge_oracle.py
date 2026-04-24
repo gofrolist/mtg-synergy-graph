@@ -62,7 +62,7 @@ def _make_forge_oracle_db(tmp_path: Path) -> Path:
         "  PRIMARY KEY (port_signature_a, port_signature_b));"
         "CREATE TABLE oracle_config (key TEXT PRIMARY KEY, value TEXT NOT NULL);"
     )
-    inputs = fo_config.get_oracle_config_inputs(ppmi_smoothing_k=0.5, min_decks_count=3)
+    inputs = fo_config.get_oracle_config_inputs(ppmi_smoothing_k=0.0, min_decks_count=3)
     fo_config.write_oracle_config(conn, inputs)
     conn.commit()
     conn.close()
@@ -83,7 +83,7 @@ def _args(
         fixture=str(fixture),
         db=str(db),
         forge_oracle_db=str(forge_oracle_db),
-        smoothing_k=0.5,
+        smoothing_k=0.0,
         min_decks=3,
         limit=limit,
         output=output,
@@ -203,8 +203,8 @@ def test_stale_config_hash_returns_2(tmp_path: Path, capsys: pytest.CaptureFixtu
         "  PRIMARY KEY (port_signature_a, port_signature_b));"
         "CREATE TABLE oracle_config (key TEXT PRIMARY KEY, value TEXT NOT NULL);"
     )
-    # Write a hash computed from k=2.0 (different from the 0.5 default args
-    # we'll pass in). Handler will compute current with 0.5 and find mismatch.
+    # Write a hash computed from k=2.0 (different from the 0.0 default args
+    # we'll pass in). Handler will compute current with 0.0 and find mismatch.
     stale_inputs = fo_config.get_oracle_config_inputs(ppmi_smoothing_k=2.0, min_decks_count=3)
     fo_config.write_oracle_config(conn, stale_inputs)
     conn.commit()

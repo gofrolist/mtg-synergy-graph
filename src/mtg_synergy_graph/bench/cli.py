@@ -259,10 +259,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--smoothing-k",
         dest="smoothing_k",
         type=float,
-        default=0.5,
+        default=0.0,
         help="Used by --vs-forge-oracle only. PPMI Laplace smoothing constant used when "
         "the sidecar was built. Must match `scripts/forge_oracle.py build --smoothing-k` "
-        "or the stored config hash will not verify. Default: 0.5.",
+        "or the stored config hash will not verify. Default: 0.0.",
     )
     audit.add_argument(
         "--min-decks",

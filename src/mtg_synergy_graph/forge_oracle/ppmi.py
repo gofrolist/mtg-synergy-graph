@@ -79,9 +79,23 @@ def compute_ppmi_table(
     Returns ``{(a, b): PpmiEntry}`` with ``a < b`` and only entries
     whose raw ``decks_count >= min_decks_count``.
 
-    ``smoothing_k`` is the Laplace/add-k smoothing constant. Typical
-    values: ``0.0`` (no smoothing, raw PMI) to ``1.0`` (aggressive
-    smoothing). ``0.5`` is a reasonable default for ~1000-deck corpora.
+    ``smoothing_k`` is the Laplace/add-k smoothing constant, applied in
+    **probability space** (see :func:`_pmi`): ``numerator = p_joint +
+    k`` and ``denominator = (p_a + k*V)(p_b + k*V)``. The default is
+    ``0.0`` — every positive ``k`` drives ``k*V`` to dominate the
+    marginal probabilities on sparse corpora (V ≈ 1400 subkinds × p_a ≈
+    1e-5 → adding k=0.5 makes every marginal look like 25, and the
+    denominator ≈ 62500 forces PMI negative for every pair).
+
+    Zero-division risk when ``k=0`` is bounded by the
+    ``min_decks_count >= 3`` filter (callers that lower this parameter
+    below 1 must also raise ``k``) and by ``max(pmi, 0.0)`` clamping
+    negative infinities to PPMI = 0.
+
+    A positive ``k`` is only useful when the vocabulary is small enough
+    (roughly ``V * k ≪ typical_marginal_probability``) or the corpus is
+    large enough to overwhelm the smoothing pull. The Forge precon
+    corpus (667 decks, ~1400 subkinds) satisfies neither condition.
     """
     deck_list: list[frozenset[str]] = list(decks)
 

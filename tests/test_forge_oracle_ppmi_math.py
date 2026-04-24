@@ -116,6 +116,57 @@ def test_compute_ppmi_empty_corpus_returns_empty_table() -> None:
     assert table == {}
 
 
+def test_compute_ppmi_sparse_corpus_default_smoothing_emits_positive_signal() -> None:
+    """Regression guard: on a sparse-vocabulary corpus, smoothing_k=0.0 must
+    produce positive PPMI for pairs that genuinely co-occur above chance.
+
+    Reproduces the real-world failure mode: before 2026-04-24 the default
+    smoothing_k was 0.5, which with ``V ≈ 1400`` made ``k * V = 700``
+    dominate every marginal (typical p_a ≈ 1e-5), driving every pair's
+    PMI negative and collapsing PPMI to 0.0 across the whole table.
+    With smoothing_k=0.0 the correlated-pair signal survives.
+
+    Construction: 50-deck synthetic corpus over a 200-signature vocabulary
+    where pair ``(CORR_A, CORR_B)`` co-occurs in 30 of 50 decks but each
+    has base rate 30/50 = 0.6 across the corpus — their joint rate
+    (~0.6) is much higher than independent (0.6 * 0.6 = 0.36), so a
+    functioning PMI should return a positive value.
+    """
+    import random
+
+    rng = random.Random(42)  # noqa: S311 — deterministic seed, not security-sensitive
+
+    decks: list[frozenset[str]] = []
+    vocab = [f"SIG_{i:03d}" for i in range(200)]
+    for d_i in range(50):
+        # Each deck: 30-50 random signatures from the shared vocab.
+        deck_size = rng.randint(30, 50)
+        deck = set(rng.sample(vocab, deck_size))
+        # Correlated pair appears in 30 of 50 decks.
+        if d_i < 30:
+            deck.add("CORR_A")
+            deck.add("CORR_B")
+        decks.append(frozenset(deck))
+
+    table = ppmi.compute_ppmi_table(decks, min_decks_count=3, smoothing_k=0.0)
+
+    key = tuple(sorted(("CORR_A", "CORR_B")))
+    assert key in table, "correlated pair should pass decks_count>=3 threshold"
+    assert table[key].ppmi > 0.0, (
+        f"smoothing_k=0.0 should yield positive PPMI for a correlated pair; "
+        f"got {table[key].ppmi!r}. This regression guard protects against the "
+        f"pre-2026-04-24 all-zeros failure mode — see "
+        f"docs/solutions/best-practices/ppmi-smoothing-on-sparse-vocabulary-2026-04-24.md."
+    )
+
+    # At least half of all computed rows should be positive on a genuinely
+    # correlated corpus. The pre-fix failure mode would produce ~0.
+    positive_rows = sum(1 for e in table.values() if e.ppmi > 0)
+    assert positive_rows >= len(table) // 2, (
+        f"expected >=50% positive-PPMI rows with correlated corpus + k=0.0; got {positive_rows} / {len(table)}"
+    )
+
+
 def test_compute_ppmi_deck_with_single_signature_contributes_marginal_only() -> None:
     """A deck with one signature has no pairs to contribute.
 

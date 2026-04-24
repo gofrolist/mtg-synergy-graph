@@ -238,8 +238,15 @@ def _build_parser() -> argparse.ArgumentParser:
     build.add_argument(
         "--smoothing-k",
         type=float,
-        default=0.5,
-        help="Laplace add-k smoothing constant (default 0.5)",
+        default=0.0,
+        help=(
+            "Laplace add-k smoothing constant (default 0.0). "
+            "The default was 0.5 through 2026-04-23 but produced all-zero PPMI on "
+            "the ~1400-subkind, 667-deck corpus because k * vocab_size swamped "
+            "the marginal probabilities. k=0.0 is safe because min_decks_count>=3 "
+            "already excludes rare-pair zero-division and max(pmi, 0) handles "
+            "remaining negatives."
+        ),
     )
     build.set_defaults(func=_cmd_build)
 
@@ -269,8 +276,8 @@ def _build_parser() -> argparse.ArgumentParser:
     propose.add_argument(
         "--smoothing-k",
         type=float,
-        default=0.5,
-        help="Must match the --smoothing-k used at build time (default 0.5)",
+        default=0.0,
+        help="Must match the --smoothing-k used at build time (default 0.0)",
     )
     propose.add_argument(
         "--output",
