@@ -669,12 +669,21 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # scale their abilities with their own power. Two deduped tiers —
     # cardpower_big_attachment (~220 Equipment/Aura with AddPower>=3 or
     # AddPower=X/Y/Z) > cardpower_p1p1_producer (~400 after dropping
-    # self-sac-only). 2.5× (vs counter/modified's 3.0×) because the
-    # attachment tier overlaps with any commander's voltron pool — the
-    # more conservative multiplier guards against flooding the top-30
-    # of existing voltron commanders that happen to share the gate.
-    # Audit may bump to 3.0× if CardPower NDCG rises without regression.
-    "cardpower_axis_feeder": 2.5,
+    # self-sac-only). The attachment tier overlaps with any commander's
+    # voltron pool so we originally capped the multiplier at 2.5× to
+    # avoid flooding existing voltron commanders' top-30.
+    #
+    # 2026-04-24 sweep (audit per-rule at 2.5/3.0/3.5/4.0):
+    #   2.5: +5 hits / +0.796 NDCG / MARGINAL (ratio 0.085)
+    #   3.0: +7 hits / +0.757 NDCG / positive (ratio 0.119)
+    #   3.5: +8 hits / +0.752 NDCG / positive (ratio 0.136)  ← peak
+    #   4.0: +4 hits / +0.496 NDCG / MARGINAL (Lena displacement
+    #        widens -0.153 → -0.210, Raubahn's tier collapses)
+    # 3.5 is the hit-count peak without widening the Lena Selfless
+    # Champion regression; NDCG dropped 0.044 vs 2.5 but with 3 more
+    # EDHREC Hi-Syn matches surfaced. Voltron-overlap concern from the
+    # original 2.5 cap did not materialise — no new golden drops.
+    "cardpower_axis_feeder": 3.5,
     # tap_type_feeder: commanders with a ``cost.tap_type`` port
     # (``tapXType<N/SUBJECT>``) tap N permanents of a subject as activation
     # cost. Two deduped tiers — tap_type_sustained_untap (~10 cards per
