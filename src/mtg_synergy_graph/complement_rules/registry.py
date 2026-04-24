@@ -280,12 +280,6 @@ def _mana_doubler_gate(port: PortRow) -> bool:
     return (port.get("event_class") or "").strip() == "TapsForMana"
 
 
-def _extra_land_plays_gate(port: PortRow) -> bool:
-    if (port.get("port_type") or "").strip() != "static":
-        return False
-    return (port.get("event_class") or "").strip() == "AdjustLandPlays"
-
-
 def _cost_payoff_gate(port: PortRow) -> bool:
     if (port.get("port_type") or "").strip() != "cost":
         return False
@@ -669,7 +663,17 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("opponent_forcing", _opponent_forcing_gate),
     RuleGate("wheel_synergy", _wheel_synergy_gate),
     RuleGate("mana_doubler", _mana_doubler_gate),
-    RuleGate("extra_land_plays", _extra_land_plays_gate),
+    # Note: no RuleGate for `extra_land_plays`. The helper
+    # `_find_extra_land_plays` (landfall.py) gates on commander ports whose
+    # raw_line contains `AdjustLandPlays` and emits complements labelled with
+    # `rule_id="effect_feeds_trigger"` and `cmdr_event="extra_land_plays"`.
+    # It is a specializer that contributes to `effect_feeds_trigger`, not a
+    # standalone rule. Registering a RuleGate with `rule_id="extra_land_plays"`
+    # would be a registration ghost — no emission ever uses that rule_id.
+    # The previous `_extra_land_plays_gate` was also structurally wrong
+    # (looked for event_class='AdjustLandPlays', but that token is a
+    # sub-attribute of `static.Continuous`, not its own event_class) and
+    # matched zero ports in the entire DB.
     RuleGate("cost_payoff", _cost_payoff_gate),
     RuleGate("etb_self", _etb_self_gate),
     RuleGate("combat_enhancer", _combat_enhancer_gate),
