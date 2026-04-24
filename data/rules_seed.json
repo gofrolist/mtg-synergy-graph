@@ -328,6 +328,24 @@
       "cand_event": "Defender",
       "weight_hint": 1.0,
       "active": 1
+    },
+    {
+      "rule_id": "party_feeder",
+      "family": "scaling",
+      "gate_predicate": {"op": "has_port", "port_type": "scales_with", "event_class": "Party"},
+      "commander_port_predicate": {"op": "has_port", "port_type": "scales_with", "event_class": "Party"},
+      "candidate_port_predicate": {
+        "op": "and",
+        "args": [
+          {"op": "has_port", "port_type": "scales_with", "event_class": "Party"},
+          {"op": "not_in_commander_set"}
+        ]
+      },
+      "filter_group": "",
+      "cmdr_event": "party_axis",
+      "cand_event": "party_peer",
+      "weight_hint": 2.5,
+      "active": 1
     }
   ]
 }

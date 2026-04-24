@@ -1107,7 +1107,6 @@ from .utility import (  # noqa: E402
     _find_modified_axis_feeders,
     _find_multicolor_untap,
     _find_opponent_forcing,
-    _find_party_feeders,
     _find_tap_type_feeders,
     _find_untap_combo,
     _find_untap_synergy,
@@ -1288,7 +1287,6 @@ def find_all_complements(
         out.extend(_find_life_total_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_land_bounce_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_etb_tapped_stax_feeders(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_party_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_creature_died_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_damage_doubler_synergy(conn, cmdr_ports, cmdr_set))
         # Plan 2026-04-23-001: depth-2 self-bridging pathway rule

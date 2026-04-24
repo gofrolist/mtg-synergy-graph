@@ -135,7 +135,6 @@ _RULE_HELPER_OVERRIDES: dict[str, str] = {
     "modified_axis_feeder": "_find_modified_axis_feeders",
     "pan_density": "_find_panharmonicon_density",
     "panharmonicon": "_find_panharmonicon_complements",
-    "party_feeder": "_find_party_feeders",
     "pinger": "_find_pinger_synergy",
     "populate_stack": "_find_copy_synergy",
     "power_matters": "_find_power_matters_density",

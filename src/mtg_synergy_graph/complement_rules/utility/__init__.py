@@ -51,7 +51,6 @@ from .resource_feeders import (
     _find_land_bounce_feeders,
     _find_life_total_feeders,
     _find_lifegain_feeders,
-    _find_party_feeders,
 )
 from .untap import (
     _find_multicolor_untap,
@@ -84,7 +83,6 @@ __all__ = [
     "_find_modified_axis_feeders",
     "_find_multicolor_untap",
     "_find_opponent_forcing",
-    "_find_party_feeders",
     "_find_tap_type_feeders",
     "_find_untap_combo",
     "_find_untap_synergy",

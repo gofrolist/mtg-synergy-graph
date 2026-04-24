@@ -508,74 +508,8 @@ def _find_creature_died_feeders(
     return results
 
 
-def _find_party_feeders(
-    conn: sqlite3.Connection,
-    cmdr_ports: list[PortRow],
-    cmdr_set: set[str],
-) -> list[PortComplement]:
-    """Rule for Party-count commanders (Zendikar Rising / Baldur's Gate /
-    Final Fantasy Party mechanic).
-
-    Forge's ``Count$Party`` SVar returns 1–4 = distinct count of
-    Cleric / Rogue / Warrior / Wizard creatures you control, capped at
-    one of each. A full party scales every Party-keyed effect to 4×.
-    Commanders on this axis play a hard-locked tribal-adjacent deck
-    whose core is: recruit one of each of the 4 party types, then
-    resolve Party-scaled payoffs.
-
-    Target cmdrs: Burakos Party Leader, Linvala Shield of Sea Gate,
-    Nalia de'Arnise, Tazri Beacon of Unity, The Destined Black Mage /
-    Thief / Warrior / White Mage, Zagras Thief of Heartbeats — 9
-    legendary cmdrs, 0% prior coverage.
-
-    Single tier:
-
-    - ``party_peer``: other cards with ``scales_with.Party`` port.
-      ~34 cards — Acquisitions Expert, Allied Assault, Archpriest of
-      Iona, Ardent Electromancer, Cascade Seer, Coveted Prize,
-      Deadly Alliance, Drana's Silencer, Emeria Captain, Grotag
-      Bug-Catcher, Journey to Oblivion, Kabira Outrider, Malakir
-      Blood-Priest, Multiclass Baldric, Nimble Trapfinder, Ravager's
-      Mace, Sea Gate Colossus, Seafloor Stalker, Shatterskull
-      Minotaur, Spoils of Adventure, Squad Commander, Strength of
-      Solidarity, Synchronized Spellcraft, Thundering Sparkmage,
-      Thwart the Grave, Veteran Adventurer — Zendikar Rising /
-      Commander Legends Baldur's Gate / Final Fantasy Party staples.
-      Every one of these cards literally defines the archetype's
-      payoff set.
-
-    The axis is mechanically uniform (all 35 cards use the identical
-    ``SVar:X:Count$Party`` / ``SVar:Y:Count$Party`` pattern) so a
-    peer-only rule is the correct shape.
-    """
-    has_party_axis = any(
-        (p.get("port_type") or "").strip() == "scales_with" and (p.get("event_class") or "").strip() == "Party"
-        for p in cmdr_ports
-    )
-    if not has_party_axis:
-        return []
-
-    peer_set: set[str] = {
-        row["card_name"]
-        for row in conn.execute(
-            "SELECT DISTINCT card_name FROM card_ports WHERE port_type = 'scales_with' AND event_class = 'Party'"
-        )
-    }
-
-    results: list[PortComplement] = []
-    for name in peer_set:
-        if name in cmdr_set:
-            continue
-        results.append(
-            PortComplement(
-                rule_id="party_feeder",
-                direction="synergy",
-                candidate=name,
-                cmdr_event="party_axis",
-                cand_event="party_peer",
-            )
-        )
-    return results
+# party_feeder migrated to data/rules_seed.json on 2026-04-24 (declarative path).
+# Canonical peer-match shape: scales_with.Party on both commander and candidate.
 
 
 def _find_etb_tapped_stax_feeders(

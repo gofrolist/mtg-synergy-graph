@@ -138,7 +138,6 @@ def test_core_legacy_import_still_works() -> None:
         _find_modified_axis_feeders,
         _find_multicolor_untap,
         _find_opponent_forcing,
-        _find_party_feeders,
         _find_tap_type_feeders,
         _find_untap_combo,
         _find_untap_synergy,

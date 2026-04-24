@@ -31,7 +31,6 @@ from mtg_synergy_graph.complement_rules.utility import (
     _find_mana_doubler_synergy,
     _find_modified_axis_feeders,
     _find_opponent_forcing,
-    _find_party_feeders,
     _find_tap_type_feeders,
     _find_wheel_synergy,
     _is_big_hand_commander,
@@ -3290,115 +3289,8 @@ class TestFindCreatureDiedFeeders:
         assert all(r.cmdr_event == "creature_died_axis" for r in results)
 
 
-class TestFindPartyFeeders:
-    """Rule for Party-count commanders (Burakos, Linvala Shield of Sea
-    Gate, Nalia de'Arnise, Tazri Beacon of Unity, The Destined FF
-    cycle, Zagras). Single peer tier pulls all other cards with
-    ``scales_with.Party``."""
-
-    def _tazri_ports(self):
-        """Tazri: scales_with.Party port."""
-        return [
-            _port_row(
-                port_type="scales_with",
-                event_class="Party",
-                raw_line="SVar:X:Count$Party",
-            )
-        ]
-
-    def test_no_party_axis_skips(self, conn):
-        ports = [_port_row(port_type="trigger", event_class="Attacks")]
-        assert _find_party_feeders(conn, ports, set()) == []
-
-    def test_wrong_scales_axis_rejected(self, conn):
-        """A commander with scales_with but on a different axis (e.g.
-        Valid / YourLifeTotal / xPaid) must not trigger the rule."""
-        ports = [
-            _port_row(
-                port_type="scales_with",
-                event_class="YourLifeTotal",
-                raw_line="SVar:X:Count$YourLifeTotal",
-            )
-        ]
-        assert _find_party_feeders(conn, ports, set()) == []
-
-    def test_peer_tier_fires(self, conn):
-        """Tazri + Coveted Prize (scales_with.Party) peer match."""
-        _add_port(
-            conn,
-            "Coveted Prize",
-            port_type="scales_with",
-            event_class="Party",
-            raw_line="SVar:X:Count$Party",
-        )
-        results = _find_party_feeders(conn, self._tazri_ports(), set())
-        events = {r.candidate: r.cand_event for r in results}
-        assert events.get("Coveted Prize") == "party_peer"
-
-    def test_multi_peer_fires(self, conn):
-        """Rule scales to multiple party-scaled peers."""
-        for name in ("Coveted Prize", "Spoils of Adventure", "Kabira Outrider"):
-            _add_port(
-                conn,
-                name,
-                port_type="scales_with",
-                event_class="Party",
-                raw_line="SVar:X:Count$Party",
-            )
-        results = _find_party_feeders(conn, self._tazri_ports(), set())
-        names = _candidates(results)
-        assert {"Coveted Prize", "Spoils of Adventure", "Kabira Outrider"} <= names
-
-    def test_excludes_commander(self, conn):
-        """Tazri shouldn't recommend herself."""
-        _add_port(
-            conn,
-            "Tazri, Beacon of Unity",
-            port_type="scales_with",
-            event_class="Party",
-            raw_line="SVar:X:Count$Party",
-        )
-        _add_port(
-            conn,
-            "Coveted Prize",
-            port_type="scales_with",
-            event_class="Party",
-            raw_line="SVar:X:Count$Party",
-        )
-        results = _find_party_feeders(
-            conn,
-            self._tazri_ports(),
-            {"Tazri, Beacon of Unity"},
-        )
-        assert "Tazri, Beacon of Unity" not in _candidates(results)
-        assert "Coveted Prize" in _candidates(results)
-
-    def test_non_party_scaled_card_rejected(self, conn):
-        """A Cleric/Rogue/Warrior/Wizard creature that does NOT carry
-        scales_with.Party is not a peer — Forge's Party SVar is the
-        discriminator, not subtype. The peer pool is tight by design."""
-        _add_port(
-            conn,
-            "Plain Wizard",
-            port_type="trigger",
-            event_class="Attacks",
-            raw_line="T:Event$ Attacks",
-        )
-        results = _find_party_feeders(conn, self._tazri_ports(), set())
-        assert "Plain Wizard" not in _candidates(results)
-
-    def test_rule_id(self, conn):
-        _add_port(
-            conn,
-            "Coveted Prize",
-            port_type="scales_with",
-            event_class="Party",
-            raw_line="SVar:X:Count$Party",
-        )
-        results = _find_party_feeders(conn, self._tazri_ports(), set())
-        assert results
-        assert all(r.rule_id == "party_feeder" for r in results)
-        assert all(r.cmdr_event == "party_axis" for r in results)
+# party_feeder migrated to data/rules_seed.json (declarative) on 2026-04-24;
+# regression coverage is bench.py audit --expect-identity.
 
 
 class TestFindEtbTappedStaxFeeders:

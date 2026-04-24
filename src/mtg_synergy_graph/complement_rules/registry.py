@@ -214,19 +214,6 @@ def _creature_died_feeder_gate(port: PortRow) -> bool:
     return ec.startswith("ThisTurnEntered_Graveyard_from_Battlefield_Creature")
 
 
-def _party_feeder_gate(port: PortRow) -> bool:
-    """Mirror the runtime gate of ``_find_party_feeders``.
-
-    Fires on ``scales_with.Party`` ports — commanders whose payoff
-    scales with the distinct count of Cleric / Rogue / Warrior /
-    Wizard creatures you control (Zendikar Rising / Baldur's Gate /
-    Final Fantasy Party mechanic).
-    """
-    if (port.get("port_type") or "").strip() != "scales_with":
-        return False
-    return (port.get("event_class") or "").strip() == "Party"
-
-
 def _etb_tapped_stax_feeder_gate(port: PortRow) -> bool:
     """Mirror the runtime gate of ``_find_etb_tapped_stax_feeders``.
 
@@ -699,7 +686,6 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("life_total_feeder", _life_total_feeder_gate),
     RuleGate("land_bounce_feeder", _land_bounce_feeder_gate),
     RuleGate("etb_tapped_stax_feeder", _etb_tapped_stax_feeder_gate),
-    RuleGate("party_feeder", _party_feeder_gate),
     RuleGate("creature_died_feeder", _creature_died_feeder_gate),
     RuleGate("opponent_forcing", _opponent_forcing_gate),
     RuleGate("wheel_synergy", _wheel_synergy_gate),
