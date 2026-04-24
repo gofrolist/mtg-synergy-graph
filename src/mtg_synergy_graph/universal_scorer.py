@@ -477,6 +477,21 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # another card that triggers on the same event (enabler for enabler)
     # is less valuable than finding a payoff that feeds the trigger.
     "trigger_resonance": 0.7,
+    # cost_reducer: 108 touched commanders sharing the cost-reduction
+    # gate. Audit 2026-04-24 at default 1.0× flagged MARGINAL — +5 hits
+    # / +0.342 NDCG / ratio 0.046 (just below the 0.1 positive
+    # threshold), golden drop only +0.016. Sweep at 1.2 / 1.3 / 1.5:
+    #   1.2: +3 hits / +0.578 NDCG / positive / ndcgmin -0.056  ← peak
+    #   1.3: +3 hits / +0.592 NDCG / positive / ndcgmin -0.106
+    #   1.5: +1 hits / +0.313 NDCG / positive / ndcgmin -0.122
+    # 1.2 surfaces Melek, Izzet Paragon as a golden anchor
+    # (-0.115 NDCG if removed) and lifts Mishra Artificer Prodigy +2
+    # hits / Jin-Gitaxias +2 hits. Higher multipliers widen the
+    # Momir Vig / Endrek Sahr displacement (both lose 2 hits) without
+    # gaining NDCG. Hit count drops from +5 to +3 vs baseline, but
+    # remaining hits land at deeper ranks (NDCG +0.236 higher),
+    # tradeoff favouring the golden anchor verdict upgrade.
+    "cost_reducer": 1.2,
     # Value engine matches many cards of a type (Angel, Artifact, etc.).
     # IDF already dampens based on N, but the signal is inherently weaker
     # than mechanical synergy — "be the right type" is a density signal.
