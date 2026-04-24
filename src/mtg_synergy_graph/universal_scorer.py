@@ -461,12 +461,27 @@ _FLAT_COUNT_RULES: frozenset[str] = frozenset(
 #: holds hit loss at -1. Lower values (0.10, 0.05) widened hit loss
 #: to -3 without meaningful NDCG gain — diminishing returns elbow at
 #: 0.15.
+#:
+#: evasion: 0.15 → 0.10 on 2026-04-24 audit run. At 0.15 the rule
+#: was MARGINAL (+3 hits / +0.079 NDCG / ratio 0.016 / 188 touched
+#: cmdrs — evasion signals span a broad pool of Flying/Menace/
+#: Trample/Unblockable creatures, which makes the rule's positive
+#: picks (Gix, Gonti) compete against archetype-specific winners on
+#: neighbouring commanders). Sweep at 0.05 / 0.10 / 0.25:
+#:   0.05: +0 hits / +0.035 NDCG / TRIVIAL (wins lost)
+#:   0.10: +3 hits / +0.173 NDCG / MARGINAL  ← peak
+#:   0.15: +3 hits / +0.079 NDCG / MARGINAL  (prior state)
+#:   0.25: -3 hits / -0.227 NDCG / HARMFUL (Ikra -3, Marcus -2)
+#: 0.10× keeps the +3 hit wins (Gix +2, Ultimecia Temporal Threat
+#: +1) while shrinking the displacement tail on Ikra Shidiqi from
+#: -0.212 to -0.056. The narrow preserve of wins at lower weight is
+#: why dropping all the way to 0.05 collapses the rule.
 _FLAT_WEIGHT_OVERRIDES: dict[str, float] = {
     "spell_density": 0.3,
     "scaling": 0.3,
     "tribal_density": 0.5,
     "token_producer": 0.15,
-    "evasion": 0.15,
+    "evasion": 0.10,
     "etb_self": 0.01,
 }
 

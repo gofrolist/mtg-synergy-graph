@@ -316,7 +316,7 @@ def test_computeidf_flat_rules():
     weights = _compute_idf_weights([c_spell, c_tribal, c_evasion])
     assert weights[("spell_density", c_spell.cmdr_event, c_spell.cand_event, c_spell.filter_group)] == 0.3
     assert weights[("tribal_density", c_tribal.cmdr_event, c_tribal.cand_event, c_tribal.filter_group)] == 0.5
-    assert weights[("evasion", c_evasion.cmdr_event, c_evasion.cand_event, c_evasion.filter_group)] == 0.15
+    assert weights[("evasion", c_evasion.cmdr_event, c_evasion.cand_event, c_evasion.filter_group)] == 0.10
 
 
 def test_computeidf_normal_rule():
