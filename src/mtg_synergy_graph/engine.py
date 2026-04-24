@@ -17,6 +17,7 @@ returns every legal card; ``offset=500, limit=100`` returns rank 501-600.
 from __future__ import annotations
 
 import datetime as _dt
+import math
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -220,7 +221,22 @@ class SynergyEngine:
         else:
             scores = us.to_legacy_buckets()
 
-        explanation = self._render_explanation(card, scores, us) if include_explanation else None
+        # Rule-covered names derived from the cached universal scores;
+        # cheap because the score dict is already in-memory.
+        rule_covered_names: set[str] = {
+            name for name, u in universal.items() if u is not None and len(u.distinct_rules) >= 1
+        }
+        explanation = (
+            self._render_explanation(
+                card,
+                scores,
+                us,
+                commander_set=cmdr_set,
+                rule_covered_names=rule_covered_names,
+            )
+            if include_explanation
+            else None
+        )
 
         return Recommendation(
             rank=0,
@@ -398,9 +414,25 @@ class SynergyEngine:
         total = len(ranked)
         window = ranked[offset : offset + limit]
 
+        # Plan 2026-04-23-003 Unit 7 — rule-covered candidate set fed
+        # to _render_explanation so the embedding-nearest-neighbor
+        # lookup filters to structurally-meaningful peers only. Built
+        # once per page(), not per candidate.
+        rule_covered_names: set[str] = {cand for cand, _buckets, us in ranked if len(us.distinct_rules) >= 1}
+
         items: list[Recommendation] = []
         for i, (cand, buckets, us) in enumerate(window):
-            explanation = self._render_explanation(cand, buckets, us) if include_explanations else None
+            explanation = (
+                self._render_explanation(
+                    cand,
+                    buckets,
+                    us,
+                    commander_set=cmdr_set,
+                    rule_covered_names=rule_covered_names,
+                )
+                if include_explanations
+                else None
+            )
             items.append(
                 Recommendation(
                     rank=offset + i + 1,
@@ -447,6 +479,9 @@ class SynergyEngine:
         card: str,
         scores: dict[str, float],
         universal_score: UniversalScore | None = None,
+        *,
+        commander_set: Sequence[str] | None = None,
+        rule_covered_names: set[str] | None = None,
     ) -> list[str]:
         """Plain-English narrator (§8) — optional, for debug surfaces.
 
@@ -454,6 +489,13 @@ class SynergyEngine:
         metadata from ``PortComplement.path_info`` alongside the
         bucket-summary prose (currently: one ``self_bridging_cascade:``
         line per firing).
+
+        When ``universal_score.embedding_contribution > 0`` and both
+        ``commander_set`` + ``rule_covered_names`` are supplied, renders
+        an extra ``embedding_contribution:`` line decomposed into
+        ``decay × cosine``, plus a ``nearest covered neighbors:`` line
+        with the top-3 rule-covered cards by cosine similarity. Plan
+        2026-04-23-003 Unit 7 / FR6.
         """
         lines: list[str] = []
         if scores.get("port_match", 0):
@@ -481,4 +523,105 @@ class SynergyEngine:
                     continue
                 seen_paths.add(c.path_info)
                 lines.append(f"self_bridging_cascade: {c.path_info}")
+            # Plan 2026-04-23-003 Unit 7 — render the embedding
+            # contribution decomposition + nearest covered neighbors
+            # when the term fired. Silently skip if vectors /
+            # commander target cannot be rebuilt at render time
+            # (graceful-fallback per plan D6).
+            if universal_score.embedding_contribution > 0 and commander_set is not None:
+                lines.extend(
+                    self._render_embedding_block(
+                        card=card,
+                        universal_score=universal_score,
+                        commander_set=commander_set,
+                        rule_covered_names=rule_covered_names or set(),
+                    )
+                )
         return lines or [f"No mechanical synergy detected for {card}."]
+
+    def _render_embedding_block(
+        self,
+        *,
+        card: str,
+        universal_score: UniversalScore,
+        commander_set: Sequence[str],
+        rule_covered_names: set[str],
+    ) -> list[str]:
+        """Render the ``embedding_contribution:`` + neighbors lines.
+
+        Re-loads vectors + commander-target lazily here instead of
+        threading them through ``page()`` (plan design decision:
+        Option 2 re-load, not Option 1 pass-through — keeps the
+        scoring path data-free of render concerns). Silently returns
+        ``[]`` if vectors or target are unavailable — the scorer has
+        already computed the contribution value, so the score line
+        never surprises the user even when the decomposition can't
+        be rendered.
+        """
+        # Local imports — embeddings subpackage is cold on the import
+        # path unless actually rendering an embedding explanation.
+        from .embeddings.commander_target import build_commander_target_vector
+        from .embeddings.contribution import (
+            _EMBEDDING_K,
+            load_card_embeddings_verified,
+        )
+
+        try:
+            vectors = load_card_embeddings_verified(self._conn)
+        except Exception:
+            # Never raise from --explain: the scorer has already computed
+            # the contribution value, so the score line never surprises
+            # the user even when the decomposition cannot be rendered.
+            return []
+        cand_vec = vectors.get(card)
+        if cand_vec is None:
+            return []
+        cmdr_target = build_commander_target_vector(
+            tuple(commander_set),
+            vectors,
+            edhrec_conn=None,
+        )
+        if cmdr_target is None:
+            return []
+
+        cosine = float(cand_vec @ cmdr_target)
+        decay = math.exp(-_EMBEDDING_K * len(universal_score.distinct_rules))
+        out: list[str] = [
+            f"  embedding_contribution: +{universal_score.embedding_contribution:.3f} "
+            f"(decay × cosine = {decay:.2f} × {cosine:.3f})"  # noqa: RUF001 — multiplication-sign glyph is the user-facing explain format.
+        ]
+        neighbors = _nearest_covered_neighbors(
+            cand_vec,
+            vectors,
+            rule_covered_names=rule_covered_names - {card},
+            k=3,
+        )
+        if neighbors:
+            rendered = ", ".join(f"{n} (cosine {s:.2f})" for n, s in neighbors)
+            out.append(f"    nearest covered neighbors: {rendered}")
+        return out
+
+
+def _nearest_covered_neighbors(
+    vec: Any,
+    vectors: dict[str, Any],
+    *,
+    rule_covered_names: set[str],
+    k: int = 3,
+) -> list[tuple[str, float]]:
+    """Return the top-``k`` ``(name, cosine)`` pairs from ``vectors``
+    filtered to ``rule_covered_names``.
+
+    All vectors are L2-normalized by construction (plan R1 + Unit 4),
+    so cosine == dot product. When ``rule_covered_names`` is empty or
+    no name in it has a vector, returns ``[]``.
+    """
+    scored: list[tuple[str, float]] = []
+    for name in rule_covered_names:
+        v = vectors.get(name)
+        if v is None:
+            continue
+        cosine = float(v @ vec)
+        scored.append((name, cosine))
+    scored.sort(key=lambda t: -t[1])
+    return scored[:k]

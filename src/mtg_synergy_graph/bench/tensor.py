@@ -74,6 +74,18 @@ def compute_config_hash() -> str:
     # each other's pinned tensor.
     h.update(b"|pathway:")
     h.update(repr(cfg.enable_pathway_rules).encode("utf-8"))
+    # Plan 2026-04-23-003 Unit 7: embedding-contribution flip flag,
+    # scaling weight, decay rate, and vectorizer version — each of
+    # these changes every candidate's ``score`` when the gate is
+    # open, so each must invalidate the pinned tensor.
+    h.update(b"|embedding_enable:")
+    h.update(repr(cfg.enable_embedding_contribution).encode("utf-8"))
+    h.update(b"|embedding_w:")
+    h.update(repr(cfg.embedding_w).encode("utf-8"))
+    h.update(b"|embedding_k:")
+    h.update(repr(cfg.embedding_k).encode("utf-8"))
+    h.update(b"|vectorizer_version:")
+    h.update(repr(cfg.vectorizer_version).encode("utf-8"))
     return h.hexdigest()
 
 

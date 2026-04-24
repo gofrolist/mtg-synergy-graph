@@ -143,6 +143,12 @@ def test_scoring_config_inputs_exposes_pathway_flag() -> None:
     flips. The first three fields stay at their legacy positions for
     backward compatibility with any callsite that constructs the
     tuple positionally.
+
+    Plan 2026-04-23-003 Unit 7 appends four additional fields
+    (``enable_embedding_contribution``, ``embedding_w``, ``embedding_k``,
+    ``vectorizer_version``) so the embedding flip + weight knobs also
+    invalidate the pinned tensor. The leading four fields stay at their
+    legacy positions.
     """
     from mtg_synergy_graph.universal_scorer import ScoringConfigInputs
 
@@ -151,6 +157,10 @@ def test_scoring_config_inputs_exposes_pathway_flag() -> None:
         "flat_weight_overrides",
         "synergy_pairs",
         "enable_pathway_rules",
+        "enable_embedding_contribution",
+        "embedding_w",
+        "embedding_k",
+        "vectorizer_version",
     )
 
 

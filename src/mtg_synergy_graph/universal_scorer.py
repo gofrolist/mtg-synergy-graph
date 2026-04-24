@@ -242,6 +242,24 @@ class ScoringConfigInputs(NamedTuple):
     #: ``compute_config_hash`` catches the flip without a second
     #: check-site.
     enable_pathway_rules: bool
+    #: Plan 2026-04-23-003 Unit 7: the embedding-contribution gate
+    #: (``embeddings.contribution._ENABLE_EMBEDDING_CONTRIBUTION``).
+    #: Flipping this changes every candidate's ``score`` (even with
+    #: ``embedding_w=0.0`` because the field is summed unconditionally
+    #: once the gate is open), so it must invalidate the pinned tensor.
+    enable_embedding_contribution: bool
+    #: Plan 2026-04-23-003 Unit 7: the embedding-contribution weight
+    #: ``_EMBEDDING_W``. Tuning it changes scores — catch drift here.
+    embedding_w: float
+    #: Plan 2026-04-23-003 Unit 7: the embedding-contribution decay
+    #: rate ``_EMBEDDING_K``. Tuning it changes scores — catch drift
+    #: here.
+    embedding_k: float
+    #: Plan 2026-04-23-003 Unit 7: vectorizer version read from
+    #: ``embeddings.config.get_embedding_config_inputs()``. A rebuild
+    #: under a new token grammar bumps this and invalidates the tensor
+    #: even when the flip flag + w + k are unchanged.
+    vectorizer_version: int
 
 
 def get_scoring_config_inputs() -> ScoringConfigInputs:
@@ -253,14 +271,22 @@ def get_scoring_config_inputs() -> ScoringConfigInputs:
     """
     # Local import: complement_rules imports universal_scorer for
     # _RULE_TO_BUCKET at module import time, so pulling pathway here
-    # at function-call time avoids the cycle.
+    # at function-call time avoids the cycle. Same rationale for the
+    # embeddings modules — they import numpy + sqlite3 and have no
+    # reason to be pulled in at scorer-module import.
     from .complement_rules import pathway
+    from .embeddings import contribution as emb_contribution
+    from .embeddings.config import get_embedding_config_inputs as _get_emb_cfg
 
     return ScoringConfigInputs(
         rule_quality_multiplier=_RULE_QUALITY_MULTIPLIER,
         flat_weight_overrides=_FLAT_WEIGHT_OVERRIDES,
         synergy_pairs=_SYNERGY_PAIRS,
         enable_pathway_rules=pathway._ENABLE_PATHWAY_RULES,
+        enable_embedding_contribution=emb_contribution._ENABLE_EMBEDDING_CONTRIBUTION,
+        embedding_w=emb_contribution._EMBEDDING_W,
+        embedding_k=emb_contribution._EMBEDDING_K,
+        vectorizer_version=_get_emb_cfg().vectorizer_version,
     )
 
 
@@ -284,6 +310,13 @@ class UniversalScore:
     circuit_bonus: float = 0.0
     cmc_bonus: float = 0.0
     rank_bonus: float = 0.0
+    #: Plan 2026-04-23-003 Unit 7: deterministic content-embedding
+    #: contribution. When ``_ENABLE_EMBEDDING_CONTRIBUTION`` is False
+    #: (module default), this stays ``0.0`` for every candidate —
+    #: ``score`` is bitwise-identical to pre-plan baseline. When the
+    #: audit-gated flip lands, this carries
+    #: ``w * exp(-k * n_rules) * cosine(v_cand, v_cmdr)``.
+    embedding_contribution: float = 0.0
 
     @cached_property
     def score(self) -> float:
@@ -334,6 +367,7 @@ class UniversalScore:
             base += 0.02 * min(n_rules - 1, 4)
         base += _compute_pair_bonus(self.distinct_rules)
         base += self.circuit_bonus + self.cmc_bonus + self.rank_bonus
+        base += self.embedding_contribution
         return base
 
     @cached_property
@@ -376,6 +410,7 @@ class UniversalScore:
             total += 0.02 * min(n_rules - 1, 4)
         total += _compute_pair_bonus(self.distinct_rules)
         total += self.circuit_bonus + self.cmc_bonus + self.rank_bonus
+        total += self.embedding_contribution
         buckets["total"] = total
         return buckets
 
@@ -901,6 +936,35 @@ def score_all_universal(
     for c in complements:
         by_candidate[c.candidate].append(c)
 
+    # Plan 2026-04-23-003 Unit 7 — embedding contribution wire.
+    # Resolve the commander target + per-card vector lookup ONCE per
+    # scoring call. When the flag is off (module default), both land on
+    # empty / None and the per-candidate call in the results loop below
+    # short-circuits to 0.0 — the scorer remains bitwise-identical to
+    # pre-plan baseline. Local imports keep the embeddings subpackage
+    # off the scorer's hot import path.
+    from .embeddings.commander_target import build_commander_target_vector
+    from .embeddings.contribution import (
+        _ENABLE_EMBEDDING_CONTRIBUTION,
+        embedding_contribution,
+        load_card_embeddings_verified,
+    )
+
+    if _ENABLE_EMBEDDING_CONTRIBUTION:
+        _emb_vectors = load_card_embeddings_verified(conn)
+        _emb_cmdr_target = (
+            build_commander_target_vector(
+                tuple(commander_set),
+                _emb_vectors,
+                edhrec_conn=None,
+            )
+            if _emb_vectors
+            else None
+        )
+    else:
+        _emb_vectors = {}
+        _emb_cmdr_target = None
+
     # Compute staple bonuses
     cmdr_row = conn.execute(
         "SELECT color_identity FROM cards WHERE name = ?",
@@ -940,6 +1004,18 @@ def score_all_universal(
         bonus = 0.01 if name in staple_names else 0.0
         cmc = cmc_data.get(name, 99.0)
         rank = rank_data.get(name, 99999)
+        # Plan 2026-04-23-003 Unit 7 — n_rules is the count of distinct
+        # rules firing positively for this candidate. Matches
+        # ``UniversalScore.distinct_rules`` by construction, but
+        # inlined here because ``distinct_rules`` is a
+        # ``@cached_property`` on the object we're about to build.
+        n_rules_syn = len({c.rule_id for c in comps if c.direction == "synergy"})
+        emb_contrib = embedding_contribution(
+            candidate_name=name,
+            n_rules=n_rules_syn,
+            v_cmdr=_emb_cmdr_target,
+            vectors=_emb_vectors,
+        )
         results[name] = UniversalScore(
             complements=comps,
             staple_bonus=bonus,
@@ -947,16 +1023,29 @@ def score_all_universal(
             circuit_bonus=0.05 if name in circuit_candidates else 0.0,
             cmc_bonus=0.01 * max(0.0, (7.0 - cmc)) / 7.0,
             rank_bonus=0.005 * max(0.0, 1.0 - rank / 30000.0),
+            embedding_contribution=emb_contrib,
         )
     for name in staple_names:
         if name not in results and name not in set(commander_set):
             cmc = cmc_data.get(name, 99.0)
             rank = rank_data.get(name, 99999)
+            # Staple-only candidates never accumulate complements, so
+            # ``n_rules=0`` — the embedding term (if flag on) is the
+            # undampened ``w_emb * cosine``. This is the intended
+            # behavior: cold-start / unrepresented-rule candidates are
+            # exactly where the embedding fallback is supposed to fire.
+            emb_contrib = embedding_contribution(
+                candidate_name=name,
+                n_rules=0,
+                v_cmdr=_emb_cmdr_target,
+                vectors=_emb_vectors,
+            )
             results[name] = UniversalScore(
                 staple_bonus=0.01,
                 idf_weights=idf,
                 cmc_bonus=0.01 * max(0.0, (7.0 - cmc)) / 7.0,
                 rank_bonus=0.005 * max(0.0, 1.0 - rank / 30000.0),
+                embedding_contribution=emb_contrib,
             )
 
     if tensor_sink is not None:
