@@ -280,7 +280,11 @@ def _find_affinity_archetype(
 #: Jaws (``Artifact.nonCreature``), Astrid (``Food``/``Clue``).
 #: Generic edicts produce deaths of plain creatures without these
 #: modifiers, so the triggers don't actually fire.
-_EDICT_GATE_REJECTING_FRAGMENTS: tuple[str, ...] = (
+#:
+#: Imported by ``complement_rules.registry._edict_feeder_gate`` so
+#: the audit touched-set and runtime helper share one source of
+#: truth.
+EDICT_GATE_REJECTING_FRAGMENTS: tuple[str, ...] = (
     "counters_GE",
     "counters_EQ",
     "counters_LE",
@@ -303,7 +307,7 @@ def _edict_benefits_from_trigger(vf: str) -> bool:
     don't produce (specific counters, attached auras/equipment,
     non-creature artifact subtypes).
     """
-    if any(frag in vf for frag in _EDICT_GATE_REJECTING_FRAGMENTS):
+    if any(frag in vf for frag in EDICT_GATE_REJECTING_FRAGMENTS):
         return False
     # Edicts target creatures — reject filters whose main type is
     # Artifact / Enchantment *without* Creature as a separate type.
@@ -314,7 +318,9 @@ def _edict_benefits_from_trigger(vf: str) -> bool:
     has_creature_type = "Creature" in vf and "nonCreature" not in vf
     if vf.startswith("Artifact") and not has_creature_type:
         return False
-    return not (vf.startswith("Enchantment") and not has_creature_type)
+    if vf.startswith("Enchantment") and not has_creature_type:  # noqa: SIM103
+        return False
+    return True
 
 
 def _find_edict_feeders(

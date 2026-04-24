@@ -14,6 +14,7 @@ import sqlite3
 import pytest
 
 from mtg_synergy_graph.complement_rules.tokens import (
+    TOKEN_PRODUCER_REJECTING_FRAGMENTS,
     _find_effect_feeds_etb,
     _find_static_strategy,
     _find_token_producers_for_trigger,
@@ -832,3 +833,93 @@ class TestAuraEquipmentSupport:
 
         results = _find_static_strategy(conn, ports, {"Self"})
         assert "Self" not in {r.candidate for r in results}
+
+
+# ---------------------------------------------------------------------------
+# Gate narrowing — TOKEN_PRODUCER_REJECTING_FRAGMENTS regression tests.
+# Each parametrized case maps to a real commander whose audit
+# displacement motivated adding the corresponding rejecting fragment
+# in the 2026-04-24 gate refactor.
+# ---------------------------------------------------------------------------
+
+
+class TestTokenProducerRejectingFragments:
+    @pytest.mark.parametrize(
+        "vf,reason",
+        [
+            ("Creature.Legendary+YouCtrl+cmcGE4", "Faramir — Legendary + cmcGE"),
+            ("Creature.Legendary+Other+YouCtrl", "Gimli / Legolas — Legendary"),
+            ("Creature.withDefender+YouCtrl", "Arcades — withDefender"),
+            ("Creature.YouCtrl+attacking", "Arni Metalbrow — attacking"),
+            ("Creature.faceDown+YouCtrl", "Kadena — faceDown"),
+            ("Creature.YouCtrl+cmcEQ0", "cmcEQ requirement"),
+        ],
+    )
+    def test_excludes_narrow_filter_commanders(self, conn: sqlite3.Connection, vf: str, reason: str) -> None:
+        """Trigger filters with a rejecting fragment must produce no
+        token-producer matches even when a token producer is in the DB.
+        """
+        cmdr_ports = [
+            _port(
+                "Cmdr",
+                "trigger",
+                "ChangesZone",
+                valid_filter=vf,
+                zone_destination="Battlefield",
+            )
+        ]
+        _insert_port(conn, "Krenko", "effect", "Token")
+        results = _find_token_producers_for_trigger(conn, cmdr_ports, {"Cmdr"})
+        assert results == [], f"Should reject ({reason})"
+
+    def test_accepts_plain_creature_filter(self, conn: sqlite3.Connection) -> None:
+        """Generic Creature.Other+YouCtrl trigger (Purphoros pattern)
+        accepts token producers.
+        """
+        cmdr_ports = [
+            _port(
+                "Purphoros",
+                "trigger",
+                "ChangesZone",
+                valid_filter="Creature.Other+YouCtrl",
+                zone_destination="Battlefield",
+            )
+        ]
+        _insert_port(conn, "Krenko", "effect", "Token")
+        results = _find_token_producers_for_trigger(conn, cmdr_ports, {"Purphoros"})
+        assert len(results) == 1
+        assert results[0].candidate == "Krenko"
+
+    def test_fragment_list_immutable(self) -> None:
+        """Defensive: rejecting-fragment list is a tuple (immutable
+        constant) and contains the named cases the audit identified.
+        """
+        assert isinstance(TOKEN_PRODUCER_REJECTING_FRAGMENTS, tuple)
+        for fragment in ("Legendary", "withDefender", "faceDown", "attacking", "cmcGE", "cmcEQ"):
+            assert fragment in TOKEN_PRODUCER_REJECTING_FRAGMENTS
+
+
+class TestGateHelperFragmentSync:
+    """Cross-module sync: the registry gates and the runtime helpers
+    must reference identical rejecting-fragment lists. Now structurally
+    enforced by the imports — this test pins the contract so any
+    future copy-paste regression is caught immediately.
+    """
+
+    def test_token_fragments_are_one_source(self) -> None:
+        from mtg_synergy_graph.complement_rules import registry, tokens
+
+        # registry imports the constant directly; identity assertion
+        # confirms there's no second copy.
+        assert registry.TOKEN_PRODUCER_REJECTING_FRAGMENTS is tokens.TOKEN_PRODUCER_REJECTING_FRAGMENTS
+
+    def test_edict_predicate_is_imported(self) -> None:
+        """``_edict_feeder_gate`` calls ``_edict_benefits_from_trigger``
+        from statics — no inline duplication. The shared predicate
+        encapsulates ``EDICT_GATE_REJECTING_FRAGMENTS`` internally, so
+        this identity check transitively pins the rejection-list
+        contract too.
+        """
+        from mtg_synergy_graph.complement_rules import registry, statics
+
+        assert registry._edict_benefits_from_trigger is statics._edict_benefits_from_trigger

@@ -7,6 +7,8 @@ import sqlite3
 import pytest
 
 from mtg_synergy_graph.complement_rules.statics import (
+    EDICT_GATE_REJECTING_FRAGMENTS,
+    _edict_benefits_from_trigger,
     _find_cost_reduction_synergy,
     _find_edict_feeders,
     _find_graveyard_play_synergy,
@@ -352,3 +354,67 @@ class TestEdictFeeders:
         _insert_port(conn, "Cmdr", "effect", "Sacrifice", valid_filter="Player")
         results = _find_edict_feeders(conn, cmdr_ports, {"Cmdr"})
         assert results == []
+
+
+class TestEdictBenefitsFromTrigger:
+    """Unit tests for the gate predicate shared by registry + helper.
+
+    Each named case maps to a real commander whose audit displacement
+    motivated adding the corresponding rejecting fragment in the
+    2026-04-24 gate refactor.
+    """
+
+    @pytest.mark.parametrize(
+        "vf,expected",
+        [
+            # Plain creature filters — pass.
+            ("Creature.Other+YouCtrl", True),
+            ("Creature.OppCtrl", True),
+            ("Permanent.!token+OppCtrl", True),
+            ("Creature.Other+YouCtrl,Vehicle.YouCtrl", True),
+            # Counter-gated triggers — Toxrill (slime), Donatello (HasCounters).
+            ("Creature.YouDontCtrl+counters_GE1_SLIME", False),
+            ("Artifact.YouCtrl+HasCounters", False),
+            ("Creature+counters_EQ0_P1P1", False),
+            # Equipment / aura gating — Koll the Forgemaster.
+            ("Creature.Other+!token+enchanted+YouCtrl", False),
+            ("Creature.Other+!token+equipped", False),
+            # Token-subtype filters — Astrid Peth (Food/Clue) etc.
+            ("Food.YouCtrl,Clue.YouCtrl", False),
+            ("Treasure.OppCtrl", False),
+            # Non-creature artifact / enchantment subtypes — Jaws.
+            ("Artifact.nonCreature", False),
+            # But artifact creatures DO satisfy.
+            ("Artifact.Creature+OppCtrl", True),
+            # Enchantment without Creature -> reject; with Creature -> accept.
+            ("Enchantment", False),
+            ("Enchantment.Creature+OppCtrl", True),
+        ],
+    )
+    def test_predicate_cases(self, vf: str, expected: bool) -> None:
+        assert _edict_benefits_from_trigger(vf) is expected
+
+    def test_substring_creature_in_noncreature_does_not_count(self) -> None:
+        """Regression: 'Creature' inside 'nonCreature' must not satisfy
+        the creature-type requirement (the 2026-04-24 bugfix).
+        """
+        assert _edict_benefits_from_trigger("Artifact.nonCreature") is False
+
+    def test_fragment_list_immutable(self) -> None:
+        """Defensive: rejecting-fragment list is a tuple (immutable
+        constant) and contains the named cases the audit identified.
+        """
+        assert isinstance(EDICT_GATE_REJECTING_FRAGMENTS, tuple)
+        for fragment in (
+            "counters_GE",
+            "counters_EQ",
+            "counters_LE",
+            "+enchanted",
+            "+equipped",
+            "HasCounters",
+            "Food",
+            "Clue",
+            "Treasure",
+            "Blood",
+        ):
+            assert fragment in EDICT_GATE_REJECTING_FRAGMENTS

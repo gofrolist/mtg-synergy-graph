@@ -338,10 +338,9 @@ def _patched_helper(eng: SynergyEngine, helper_name: str, original: Callable[...
     The audit relies on ``SynergyEngine._score_cache`` being the cache
     keyed by commander tuple consulted by ``page_by_oracle_id``.
     Reaching into a private attribute is fragile — if the engine
-    renames the cache, ``setattr`` would silently create a new
-    attribute rather than failing, and the audit would start returning
-    stale (cached) WITH-rule scores for the WITHOUT-rule pass. Update
-    here whenever ``SynergyEngine`` internals change.
+    renames the cache, ``eng._score_cache.clear()`` raises
+    AttributeError loudly and the audit fails fast. Update here
+    whenever ``SynergyEngine`` internals change.
     """
     setattr(core, helper_name, lambda *a, **k: [])
     eng._score_cache.clear()
@@ -471,29 +470,32 @@ def _audit_rule_single(
     # Lazy golden baseline: if the caller left golden entries out of
     # the shared ``baseline`` dict (single-rule mode optimisation in
     # ``_audit_many``), score them here WITH the original helper
-    # active, so the safety-net diff still works. The dict is mutated
-    # in place — safe because this function runs serially within its
-    # calling process (parallel workers only run in multi-rule mode,
-    # where golden is pre-baselined upfront and shared).
+    # active so the safety-net diff still works. We score into a
+    # local ``lazy_baseline`` dict instead of mutating the shared
+    # baseline argument — keeping inputs immutable from this
+    # function's perspective avoids the unchecked single-worker
+    # invariant the earlier in-place mutation relied on.
     golden_max_drop = 0.0
     golden_max_cmdr = ""
     if verdict != "positive" and golden_targets:
         missing_golden = [(gn, go) for gn, go in golden_targets if go not in baseline]
+        lazy_baseline: dict[str, tuple[int, float] | None] = {}
         if missing_golden:
             for gname, goid in missing_golden:
-                baseline[goid] = hi_syn_and_ndcg(eng, edhrec_conn, goid, gname)
+                lazy_baseline[goid] = hi_syn_and_ndcg(eng, edhrec_conn, goid, gname)
         golden_extra = [(gname, goid) for gname, goid in golden_targets if goid not in target_oid_set]
         with _patched_helper(eng, helper_name, original):
             golden_patched: dict[str, tuple[int, float] | None] = {
                 goid: hi_syn_and_ndcg(eng, edhrec_conn, goid, gname) for gname, goid in golden_extra
             }
         for gname, goid in golden_targets:
-            if goid not in baseline or baseline[goid] is None:
+            base_entry = baseline.get(goid) or lazy_baseline.get(goid)
+            if base_entry is None:
                 continue
             patched = without_scores.get(goid) if goid in target_oid_set else golden_patched.get(goid)
             if patched is None:
                 continue
-            _, base_ndcg = baseline[goid]
+            _, base_ndcg = base_entry
             _, p_ndcg = patched
             d = base_ndcg - p_ndcg
             if d > golden_max_drop:

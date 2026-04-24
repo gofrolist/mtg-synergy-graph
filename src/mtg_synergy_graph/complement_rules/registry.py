@@ -36,6 +36,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .core import COMPLEMENT_RULES, PortRow
+from .statics import _edict_benefits_from_trigger
+from .tokens import TOKEN_PRODUCER_REJECTING_FRAGMENTS
 
 # All 15 generated tribal + replacement-stack rules migrated to
 # declarative rows in data/rules_seed.json (plan 003 Unit 8).
@@ -477,34 +479,14 @@ def _cost_reducer_gate(port: PortRow) -> bool:
 
 
 def _edict_feeder_gate(port: PortRow) -> bool:
-    # Must stay in sync with ``complement_rules.statics._find_edict_feeders``
-    # — the audit touched-set query uses this gate, the runtime rule
-    # applies its own inline predicate. Drift causes "touched but not
-    # scored" rows (or vice versa) in per-rule audits.
+    # Filter-string predicate is shared with the runtime helper via
+    # ``_edict_benefits_from_trigger``. Structural port-type / event /
+    # zone-destination checks live here.
     if (port.get("port_type") or "").strip() != "trigger":
         return False
     ev = (port.get("event_class") or "").strip()
     vf = port.get("valid_filter") or ""
-    # Narrow mechanical filters that edicts don't satisfy — keep in
-    # sync with ``_EDICT_GATE_REJECTING_FRAGMENTS`` in statics.py.
-    for frag in (
-        "counters_GE",
-        "counters_EQ",
-        "counters_LE",
-        "+enchanted",
-        "+equipped",
-        "HasCounters",
-        "Food",
-        "Clue",
-        "Treasure",
-        "Blood",
-    ):
-        if frag in vf:
-            return False
-    has_creature_type = "Creature" in vf and "nonCreature" not in vf
-    if vf.startswith("Artifact") and not has_creature_type:
-        return False
-    if vf.startswith("Enchantment") and not has_creature_type:
+    if not _edict_benefits_from_trigger(vf):
         return False
     if ev == "Sacrificed":
         return True
@@ -556,8 +538,10 @@ def _cascade_value_gate(port: PortRow) -> bool:
 
 
 def _token_producer_gate(port: PortRow) -> bool:
-    # Must stay in sync with ``complement_rules.tokens._find_token_producers_for_trigger``.
-    # Drift causes "touched but not scored" rows in audits.
+    # Rejection fragments imported from ``complement_rules.tokens`` —
+    # one source of truth shared with the runtime helper. Structural
+    # port-type / event / zone-destination / Self / non-Creature
+    # filtering lives here.
     if (port.get("port_type") or "").strip() != "trigger":
         return False
     if (port.get("event_class") or "").strip() != "ChangesZone":
@@ -574,28 +558,10 @@ def _token_producer_gate(port: PortRow) -> bool:
     main = first_alt.split(".")[0].split("+")[0].strip()
     if main != "Creature":
         return False
-    # Narrow filters that generic token effects don't satisfy. Tokens
-    # are non-Legendary, no Defender, face-up, enter as non-attacking,
-    # and typically 1-2 CMC — triggers gated on these properties don't
-    # reliably fire when an opponent's edict (or your own token effect)
-    # creates one. Audit 2026-04-24 showed Faramir (Legendary+cmcGE4),
-    # Gimli/Legolas (Legendary), Arcades (withDefender), Arni
-    # (attacking), Kadena (faceDown) all in the displacement tail.
-    return not any(frag in first_alt for frag in _TOKEN_PRODUCER_REJECTING_FRAGMENTS)
-
-
-#: Trigger-filter fragments that generic token effects can't satisfy.
-#: Shared between ``_token_producer_gate`` and the runtime helper
-#: ``_find_token_producers_for_trigger`` so the touched set stays
-#: aligned with what actually fires.
-_TOKEN_PRODUCER_REJECTING_FRAGMENTS: tuple[str, ...] = (
-    "Legendary",
-    "withDefender",
-    "faceDown",
-    "attacking",
-    "cmcGE",
-    "cmcEQ",
-)
+    # Narrow filters that generic token effects don't satisfy — see
+    # ``TOKEN_PRODUCER_REJECTING_FRAGMENTS`` for rationale and named
+    # commander examples.
+    return not any(frag in first_alt for frag in TOKEN_PRODUCER_REJECTING_FRAGMENTS)
 
 
 def _scaling_gate(port: PortRow) -> bool:

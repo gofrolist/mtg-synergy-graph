@@ -182,9 +182,11 @@ def _find_effect_feeds_etb(
 #: as non-attacking, and are typically 1-2 CMC. Triggers gated on
 #: these properties don't reliably fire from token creation.
 #:
-#: Must stay in sync with ``_TOKEN_PRODUCER_REJECTING_FRAGMENTS`` in
-#: ``complement_rules.registry``.
-_TOKEN_INCOMPATIBLE_FILTER_FRAGMENTS: tuple[str, ...] = (
+#: Imported by ``complement_rules.registry._token_producer_gate`` so
+#: the audit touched-set query and the runtime helper share one
+#: source of truth — adding a fragment in one place takes effect in
+#: both gates without manual sync.
+TOKEN_PRODUCER_REJECTING_FRAGMENTS: tuple[str, ...] = (
     "Legendary",
     "withDefender",
     "faceDown",
@@ -246,7 +248,7 @@ def _find_token_producers_for_trigger(
         # withDefender, attacking, cmcGE, …) on the first alt — same
         # check the registry gate runs.
         first_alt = vf.split(",")[0]
-        if any(frag in first_alt for frag in _TOKEN_INCOMPATIBLE_FILTER_FRAGMENTS):
+        if any(frag in first_alt for frag in TOKEN_PRODUCER_REJECTING_FRAGMENTS):
             continue
         # Extract type from filter
         for alt in vf.split(","):
