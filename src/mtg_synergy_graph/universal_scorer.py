@@ -492,6 +492,7 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # another card that triggers on the same event (enabler for enabler)
     # is less valuable than finding a payoff that feeds the trigger.
     "trigger_resonance": 0.7,
+    "edict_feeder": 2.0,
     # panharmonicon: 18 touched cmdrs (Isshin, Teysa, Yarok, Drivnod,
     # Veyran, Krang…). Prior to this session at default 1.0× the
     # audit was +10 hits / +0.489 NDCG. After the token_producer

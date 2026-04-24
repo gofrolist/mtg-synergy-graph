@@ -271,6 +271,52 @@ def _find_affinity_archetype(
     return results
 
 
+#: Trigger-filter fragments that narrow the firing population enough
+#: that edict effects (forcing opponents to sacrifice creatures) no
+#: longer reliably feed the trigger. Audit 2026-04-24 showed rules
+#: with these filters hitting edict_feeder's 153-touched set but ALL
+#: in the displacement tail — Toxrill (``counters_GE1_SLIME``),
+#: Koll (``+enchanted``/``+equipped``), Donatello (``HasCounters``),
+#: Jaws (``Artifact.nonCreature``), Astrid (``Food``/``Clue``).
+#: Generic edicts produce deaths of plain creatures without these
+#: modifiers, so the triggers don't actually fire.
+_EDICT_GATE_REJECTING_FRAGMENTS: tuple[str, ...] = (
+    "counters_GE",
+    "counters_EQ",
+    "counters_LE",
+    "+enchanted",
+    "+equipped",
+    "HasCounters",
+    "Food",
+    "Clue",
+    "Treasure",
+    "Blood",
+)
+
+
+def _edict_benefits_from_trigger(vf: str) -> bool:
+    """Return True if a trigger with valid_filter ``vf`` would plausibly
+    fire when an opponent is forced to sacrifice a creature by an
+    edict effect.
+
+    Rejects narrow mechanical filters that depend on conditions edicts
+    don't produce (specific counters, attached auras/equipment,
+    non-creature artifact subtypes).
+    """
+    if any(frag in vf for frag in _EDICT_GATE_REJECTING_FRAGMENTS):
+        return False
+    # Edicts target creatures — reject filters whose main type is
+    # Artifact / Enchantment *without* Creature as a separate type.
+    # Substring "Creature" inside "nonCreature" doesn't count as the
+    # type being present (Jaws, Relentless Predator has
+    # ``Artifact.nonCreature`` — edicts don't sac non-creature
+    # artifacts).
+    has_creature_type = "Creature" in vf and "nonCreature" not in vf
+    if vf.startswith("Artifact") and not has_creature_type:
+        return False
+    return not (vf.startswith("Enchantment") and not has_creature_type)
+
+
 def _find_edict_feeders(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
@@ -280,13 +326,20 @@ def _find_edict_feeders(
 
     Meren triggers on creatures dying -> Plaguecrafter's ETB forces
     each player to sacrifice a creature, feeding Meren's trigger.
-    Korvold triggers on Sacrificed -> Grave Pact forces opponents
-    to sacrifice when your creatures die.
+    Tergrid triggers on opponent Sacrificed -> edicts force opponents
+    to sacrifice, handing Tergrid permanents from the graveyard.
 
     Edicts are Sacrifice/SacrificeAll effects targeting Player/Opponent/Each.
     N ≈ 100-200 (edict effects in Magic).
+
+    Gate narrowing (2026-04-24): the trigger filter must plausibly
+    fire from an opponent-creature sacrifice. Excludes narrow
+    mechanical filters that edicts don't satisfy — counter-gated
+    triggers (Toxrill/Donatello), enchanted/equipped-only filters
+    (Koll), and non-creature artifact subtypes (Jaws/Astrid).
+    See ``_edict_benefits_from_trigger`` for the full predicate.
     """
-    # Detect death-trigger commanders
+    # Detect death-trigger commanders with edict-compatible filters
     has_death_trigger = False
     has_sacrificed_trigger = False
     for p in cmdr_ports:
@@ -294,12 +347,12 @@ def _find_edict_feeders(
         ev = (p.get("event_class") or "").strip()
         if pt != "trigger":
             continue
+        vf = p.get("valid_filter") or ""
         if ev == "ChangesZone":
             zd = (p.get("zone_destination") or "").strip()
-            vf = p.get("valid_filter") or ""
-            if zd == "Graveyard" and not _trigger_only_matches_self(vf):
+            if zd == "Graveyard" and not _trigger_only_matches_self(vf) and _edict_benefits_from_trigger(vf):
                 has_death_trigger = True
-        if ev == "Sacrificed":
+        if ev == "Sacrificed" and _edict_benefits_from_trigger(vf):
             has_sacrificed_trigger = True
 
     if not has_death_trigger and not has_sacrificed_trigger:

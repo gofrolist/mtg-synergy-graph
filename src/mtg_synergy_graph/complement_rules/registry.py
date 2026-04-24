@@ -477,16 +477,41 @@ def _cost_reducer_gate(port: PortRow) -> bool:
 
 
 def _edict_feeder_gate(port: PortRow) -> bool:
+    # Must stay in sync with ``complement_rules.statics._find_edict_feeders``
+    # — the audit touched-set query uses this gate, the runtime rule
+    # applies its own inline predicate. Drift causes "touched but not
+    # scored" rows (or vice versa) in per-rule audits.
     if (port.get("port_type") or "").strip() != "trigger":
         return False
     ev = (port.get("event_class") or "").strip()
+    vf = port.get("valid_filter") or ""
+    # Narrow mechanical filters that edicts don't satisfy — keep in
+    # sync with ``_EDICT_GATE_REJECTING_FRAGMENTS`` in statics.py.
+    for frag in (
+        "counters_GE",
+        "counters_EQ",
+        "counters_LE",
+        "+enchanted",
+        "+equipped",
+        "HasCounters",
+        "Food",
+        "Clue",
+        "Treasure",
+        "Blood",
+    ):
+        if frag in vf:
+            return False
+    has_creature_type = "Creature" in vf and "nonCreature" not in vf
+    if vf.startswith("Artifact") and not has_creature_type:
+        return False
+    if vf.startswith("Enchantment") and not has_creature_type:
+        return False
     if ev == "Sacrificed":
         return True
     if ev != "ChangesZone":
         return False
     if (port.get("zone_destination") or "").strip() != "Graveyard":
         return False
-    vf = port.get("valid_filter") or ""
     # Approximate _trigger_only_matches_self: reject Card.Self main token.
     first_alt = vf.split(",")[0]
     alt_tokens = first_alt.replace("+", ".").split(".")
