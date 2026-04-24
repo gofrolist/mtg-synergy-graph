@@ -527,14 +527,25 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # / Evolve / Fabricate / Riot creatures) feeding all +1/+1-counter-
     # interested commanders. Audit 2026-04-20: -0.876 NDCG across 53
     # touched, -1 hits, saved only by Ezuri's golden anchor at +0.053
-    # (right on the override threshold). Shalai and Hallar -3 hits /
-    # -0.345 NDCG, Blaster -1 / -0.193 — their EDHREC decks run
-    # specific keyword creatures but the broad pool displaced correct
-    # picks. Ezuri has redundant anchors (counter_doubler, counter_-
-    # target_payoff at +0.068) so dampening here is safe. 0.5×
-    # dampens the IDF pressure while leaving the +1 wins (Ezuri,
-    # Marchesa) intact.
-    "counter_keyword": 0.5,
+    # (right on the override threshold). Original 1.0 → 0.5 dampen
+    # dropped Shalai/Hallar/Blaster regressions but also eliminated
+    # Ezuri's +1 wins (hit count went to 0), so 0.5 was trivially net
+    # neutral.
+    #
+    # 2026-04-24 re-sweep at 0.1 / 0.3 / 0.5 / 0.7 / 1.0:
+    #   0.1: -1 hits / -0.154 NDCG / HARMFUL (Marchesa win lost)
+    #   0.3: +0 hits / -0.126 NDCG / TRIVIAL
+    #   0.5: +0 hits / -0.124 NDCG / TRIVIAL                  ← prior state
+    #   0.7: +2 hits / -0.106 NDCG / positive (Ezuri +0.064)  ← peak
+    #   1.0: +2 hits / -0.201 NDCG / positive (Casey Jones -0.064)
+    # 0.7 regains Ezuri as a golden anchor (+0.064 > 0.05 override
+    # threshold) and surfaces Marchesa's +1 without widening the
+    # displacement tail — Reyhan's -0.094 is the same as at 0.5, and
+    # 1.0 makes Casey Jones regress by -0.064. The 0.5 setting was
+    # over-dampened after the broader counter-axis feeders landed in
+    # the April rule-set rework; 0.7 is where the rule starts pulling
+    # its weight again.
+    "counter_keyword": 0.7,
     # counter_doubler: ~30-50 card pool (Hardened Scales, Doubling
     # Season, Winding Constrictor, Branching Evolution, etc.) feeding
     # 53 touched +1/+1 commanders. At 1.0× the audit was already
