@@ -55,3 +55,7 @@ def trend_stub(args: argparse.Namespace) -> int:
 
 def vs_forge_oracle_stub(args: argparse.Namespace) -> int:
     _unimplemented("bench.py audit --vs-forge-oracle")
+
+
+def embedding_dedup_stub(args: argparse.Namespace) -> int:
+    _unimplemented("bench.py audit --embedding-dedup")

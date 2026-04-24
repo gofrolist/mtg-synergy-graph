@@ -65,6 +65,10 @@ _HANDLERS: dict[str, Callable[[Namespace], int]] = {
     "trend": _stubs.trend_stub,
     # Plan 002 Unit 7 — Forge CardRanker Kendall-τ sidecar.
     "vs_forge_oracle": _stubs.vs_forge_oracle_stub,
+    # Plan 003 (content-embeddings) Unit 6 — rule-pair embedding dedup
+    # diagnostic. Flags rule pairs whose candidate-activation sets are
+    # near-parallel in embedding space. Read-only; never mutates the DB.
+    "embedding_dedup": _stubs.embedding_dedup_stub,
 }
 
 
@@ -170,6 +174,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "breakdown + top-10 divergences. Requires data/forge_oracle.db "
         "(plan 002 Unit 7). Tracking-only; does not gate commits.",
     )
+    mode.add_argument(
+        "--embedding-dedup",
+        dest="embedding_dedup",
+        action="store_true",
+        help="Flag rule pairs whose candidate-activation sets are near-"
+        "parallel in embedding space (read-only diagnostic). Requires "
+        "card_embeddings to be populated — run `scripts/build_embeddings.py` "
+        "first. See plan 2026-04-23-003 FR5.",
+    )
 
     # Shared flags.
     audit.add_argument(
@@ -259,6 +272,25 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Used by --vs-forge-oracle only. Minimum-evidence threshold used when the "
         "sidecar was built. Must match `scripts/forge_oracle.py build --min-decks`. Default: 3.",
     )
+    # --embedding-dedup flags (plan 003 Unit 6). Scoped by mode, not by
+    # argparse — argparse doesn't natively gate flags by mutex-group
+    # selection, matching how --limit / --inspect coexist today.
+    audit.add_argument(
+        "--threshold",
+        dest="threshold",
+        type=float,
+        default=0.95,
+        help="Used by --embedding-dedup only. Cosine-similarity cutoff for flagged rule pairs. Default: 0.95.",
+    )
+    audit.add_argument(
+        "--min-activation",
+        dest="min_activation",
+        type=int,
+        default=20,
+        help="Used by --embedding-dedup only. Rules with fewer than this many "
+        "distinct candidates in their activation set are dropped before "
+        "pair comparison. Default: 20.",
+    )
 
     return parser
 
@@ -284,6 +316,8 @@ def _resolve_mode(args: Namespace) -> str:
         return "trend"
     if getattr(args, "vs_forge_oracle", False):
         return "vs_forge_oracle"
+    if getattr(args, "embedding_dedup", False):
+        return "embedding_dedup"
     return "audit"
 
 
