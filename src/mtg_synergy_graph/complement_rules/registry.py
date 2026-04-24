@@ -313,12 +313,6 @@ def _mana_doubler_gate(port: PortRow) -> bool:
     return (port.get("event_class") or "").strip() == "TapsForMana"
 
 
-def _monarch_gate(port: PortRow) -> bool:
-    if (port.get("port_type") or "").strip() != "effect":
-        return False
-    return (port.get("event_class") or "").strip() == "BecomeMonarch"
-
-
 def _extra_land_plays_gate(port: PortRow) -> bool:
     if (port.get("port_type") or "").strip() != "static":
         return False
@@ -716,7 +710,6 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("opponent_forcing", _opponent_forcing_gate),
     RuleGate("wheel_synergy", _wheel_synergy_gate),
     RuleGate("mana_doubler", _mana_doubler_gate),
-    RuleGate("monarch_synergy", _monarch_gate),
     RuleGate("extra_land_plays", _extra_land_plays_gate),
     RuleGate("cost_payoff", _cost_payoff_gate),
     RuleGate("etb_self", _etb_self_gate),

@@ -80,11 +80,21 @@ def test_no_migrated_rule_in_python_rule_gates() -> None:
 
 
 def test_declarative_set_size_matches_seed() -> None:
-    """All 16 rules (15 in Unit 8 + cascade_tribal from Unit 7)
-    live in DECLARATIVE_RULE_IDS. Catches a seed edit that forgot
-    to update the set constant."""
-    assert len(DECLARATIVE_RULE_IDS) == 16
+    """Every rule_id in DECLARATIVE_RULE_IDS corresponds to a row in
+    data/rules_seed.json. Catches a seed edit that forgot to update the
+    set constant (or vice versa). The count grows as migrations land —
+    historical milestones: 16 after Units 7+8 (peer_tribal_keyword +
+    cascade_tribal); 17 after 2026-04-24 (monarch_synergy)."""
+    import json
+    from pathlib import Path
+
+    seed = json.loads(Path("data/rules_seed.json").read_text())
+    seed_ids = {r["rule_id"] for r in seed["rules"]}
+    assert seed_ids == DECLARATIVE_RULE_IDS
+    # Sentinel check: every historical migration target is still declarative
+    # so a bad revert gets caught.
     assert "cascade_tribal" in DECLARATIVE_RULE_IDS
+    assert "monarch_synergy" in DECLARATIVE_RULE_IDS
 
 
 # ---------------------------------------------------------------------------

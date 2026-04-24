@@ -184,47 +184,6 @@ def _find_wheel_synergy(
     return results
 
 
-def _find_monarch_synergy(
-    conn: sqlite3.Connection,
-    cmdr_ports: list[PortRow],
-    cmdr_set: set[str],
-) -> list[PortComplement]:
-    """Find monarch-related cards for monarch-granting commanders.
-
-    Queen Marchesa's ETB makes her monarch. The archetype pairs with:
-    - Other cards that also make you monarch (Courts, Thorn of the
-      Black Rose, Archon of Coronation) — stack monarch triggers.
-    - Pillowfort statics (``CantAttackUnless``: Ghostly Prison,
-      Windborn Muse, Propaganda) — protect the monarch so the upkeep
-      card draw keeps firing.
-
-    Pool ~60 cards, IDF ≈ 0.17. The archetype is narrow (Q. Marchesa
-    is the canonical commander in the golden set) so collisions with
-    other commanders are rare.
-    """
-    has_monarch = any(
-        (p.get("port_type") or "").strip() == "effect" and (p.get("event_class") or "").strip() == "BecomeMonarch"
-        for p in cmdr_ports
-    )
-    if not has_monarch:
-        return []
-
-    cur = conn.execute(
-        "SELECT DISTINCT card_name FROM card_ports "
-        "WHERE (port_type = 'effect' AND event_class = 'BecomeMonarch') "
-        "   OR (port_type = 'static' AND event_class = 'CantAttackUnless')"
-    )
-    results: list[PortComplement] = []
-    for r in cur.fetchall():
-        name = r["card_name"]
-        if name not in cmdr_set:
-            results.append(
-                PortComplement(
-                    rule_id="monarch_synergy",
-                    direction="synergy",
-                    candidate=name,
-                    cmdr_event="BecomeMonarch",
-                    cand_event="monarch_or_pillowfort",
-                )
-            )
-    return results
+# monarch_synergy migrated to data/rules_seed.json on 2026-04-24 (declarative path).
+# See docs/solutions/best-practices/ for the general migration discipline and
+# port_graph/interpreter.py for the runtime.

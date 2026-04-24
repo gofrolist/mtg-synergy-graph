@@ -289,6 +289,27 @@
       "cand_event": "same_shape_replacement",
       "weight_hint": 2.0,
       "active": 1
+    },
+    {
+      "rule_id": "monarch_synergy",
+      "family": "political",
+      "gate_predicate": {"op": "has_port", "port_type": "effect", "event_class": "BecomeMonarch"},
+      "commander_port_predicate": {"op": "has_port", "port_type": "effect", "event_class": "BecomeMonarch"},
+      "candidate_port_predicate": {
+        "op": "and",
+        "args": [
+          {"op": "or", "args": [
+            {"op": "has_port", "port_type": "effect", "event_class": "BecomeMonarch"},
+            {"op": "has_port", "port_type": "static", "event_class": "CantAttackUnless"}
+          ]},
+          {"op": "not_in_commander_set"}
+        ]
+      },
+      "filter_group": "",
+      "cmdr_event": "BecomeMonarch",
+      "cand_event": "monarch_or_pillowfort",
+      "weight_hint": 2.5,
+      "active": 1
     }
   ]
 }

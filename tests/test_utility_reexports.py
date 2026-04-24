@@ -136,7 +136,6 @@ def test_core_legacy_import_still_works() -> None:
         _find_lifegain_feeders,
         _find_mana_doubler_synergy,
         _find_modified_axis_feeders,
-        _find_monarch_synergy,
         _find_multicolor_untap,
         _find_opponent_forcing,
         _find_party_feeders,

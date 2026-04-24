@@ -1106,7 +1106,6 @@ from .utility import (  # noqa: E402
     _find_lifegain_feeders,
     _find_mana_doubler_synergy,
     _find_modified_axis_feeders,
-    _find_monarch_synergy,
     _find_multicolor_untap,
     _find_opponent_forcing,
     _find_party_feeders,
@@ -1279,7 +1278,6 @@ def find_all_complements(
         out.extend(_find_toughness_matters(conn, cmdr_ports, cmdr_set))
         out.extend(_find_cascade_value(conn, cmdr_ports, cmdr_set))
         out.extend(_find_flicker_payoffs(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_monarch_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_counter_target_payoff(conn, cmdr_ports, cmdr_set))
         out.extend(_find_creature_untap_engine(conn, cmdr_ports, cmdr_set))
         out.extend(_find_counter_axis_feeders(conn, cmdr_ports, cmdr_set))

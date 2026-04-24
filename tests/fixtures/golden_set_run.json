@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "config_hash": "03c355181c2089c5eaa9fd38af2f970e4e5885b754d82e3778870e4317735b92",
-  "created_at": "2026-04-24T02:22:33+00:00",
+  "created_at": "2026-04-24T06:03:51+00:00",
   "entries": [
     {
       "edhrec_top10": [
@@ -5817,7 +5817,7 @@
         "Ramses, Assassin Lord": 0.9146454013937364,
         "Arno Dorian": 0.9145284013937365,
         "Achilles Davenport": 0.9144334013937364,
-        "Faramir, Steward of Gondor": 0.7647146506297912,
+        "Faramir, Steward of Gondor": 0.764714650629791,
         "Coin of Fate": 0.7300589227296689,
         "Court of Grace": 0.7293201132058593,
         "Court of Vantress": 0.7291239465391927,

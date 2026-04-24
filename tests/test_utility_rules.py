@@ -30,7 +30,6 @@ from mtg_synergy_graph.complement_rules.utility import (
     _find_lifegain_feeders,
     _find_mana_doubler_synergy,
     _find_modified_axis_feeders,
-    _find_monarch_synergy,
     _find_opponent_forcing,
     _find_party_feeders,
     _find_tap_type_feeders,
@@ -1205,53 +1204,10 @@ class TestManaDoublerSynergy:
 
 
 # ===========================================================================
-# _find_monarch_synergy
+# monarch_synergy — migrated to data/rules_seed.json (declarative) on
+# 2026-04-24; regression coverage is bench.py audit --expect-identity and
+# the rule-interpreter integration tests in tests/test_rule_interpreter.py.
 # ===========================================================================
-
-
-class TestFindMonarchSynergy:
-    """Queen Marchesa: her ETB makes her monarch. Cards with the same
-    BecomeMonarch effect and pillowfort statics (CantAttackUnless) are
-    the archetype's core."""
-
-    def _monarch_cmdr_ports(self):
-        return [_port_row(port_type="effect", event_class="BecomeMonarch")]
-
-    def test_no_monarch_effect_returns_empty(self, conn):
-        cmdr_ports = [_port_row(port_type="effect", event_class="Token")]
-        assert _find_monarch_synergy(conn, cmdr_ports, set()) == []
-
-    def test_finds_other_monarch_givers(self, conn):
-        """Courts (Court of Grace, Ambition) also give monarch — core picks."""
-        _add_port(conn, "Court of Grace", port_type="effect", event_class="BecomeMonarch")
-        _add_port(conn, "Thorn of the Black Rose", port_type="effect", event_class="BecomeMonarch")
-
-        results = _find_monarch_synergy(conn, self._monarch_cmdr_ports(), set())
-        names = _candidates(results)
-        assert "Court of Grace" in names
-        assert "Thorn of the Black Rose" in names
-
-    def test_finds_pillowfort(self, conn):
-        """Ghostly Prison / Windborn Muse (CantAttackUnless) protect the monarch."""
-        _add_port(conn, "Ghostly Prison", port_type="static", event_class="CantAttackUnless")
-        _add_port(conn, "Windborn Muse", port_type="static", event_class="CantAttackUnless")
-        _add_port(conn, "Unrelated Static", port_type="static", event_class="Continuous")
-
-        results = _find_monarch_synergy(conn, self._monarch_cmdr_ports(), set())
-        names = _candidates(results)
-        assert "Ghostly Prison" in names
-        assert "Windborn Muse" in names
-        assert "Unrelated Static" not in names
-
-    def test_excludes_commander(self, conn):
-        _add_port(conn, "Queen Marchesa", port_type="effect", event_class="BecomeMonarch")
-        results = _find_monarch_synergy(conn, self._monarch_cmdr_ports(), {"Queen Marchesa"})
-        assert "Queen Marchesa" not in _candidates(results)
-
-    def test_rule_id(self, conn):
-        _add_port(conn, "Court of Grace", port_type="effect", event_class="BecomeMonarch")
-        results = _find_monarch_synergy(conn, self._monarch_cmdr_ports(), set())
-        assert all(r.rule_id == "monarch_synergy" for r in results)
 
 
 # ===========================================================================

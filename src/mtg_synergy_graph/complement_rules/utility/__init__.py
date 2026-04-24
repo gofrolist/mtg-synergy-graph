@@ -41,7 +41,6 @@ from .landfall import (
     _port_cares_about_lands,
 )
 from .political import (
-    _find_monarch_synergy,
     _find_opponent_forcing,
     _find_wheel_synergy,
 )
@@ -83,7 +82,6 @@ __all__ = [
     "_find_lifegain_feeders",
     "_find_mana_doubler_synergy",
     "_find_modified_axis_feeders",
-    "_find_monarch_synergy",
     "_find_multicolor_untap",
     "_find_opponent_forcing",
     "_find_party_feeders",
