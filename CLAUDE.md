@@ -26,6 +26,8 @@ uv run python scripts/import_cardsfolder.py                              # Impor
 uv run python scripts/recommend.py --commander "Korvold, Fae-Cursed King" --top 30 --explain
 uv run pytest tests/                                                     # ~1230 tests, ~1-2s
 uv run python scripts/gap_report.py                                      # Ranked list of coverage gaps — next rule to add
+uv run python scripts/rule_quality_gate.py --rule RULE_ID                # Pre-commit quality gate for new rules (catches vacuum-fill / flat-noise pathology; see docs/solutions/best-practices/rule-quality-gates-2026-04-24.md)
+uv run python scripts/rule_quality_gate.py --all-declarative --sample 20 # Batch gate across current declarative set
 
 # Unified eval harness (bench.py) — replaces _audit_rule_impact /
 # golden_set_track / compare_edhrec / weight_grid_search / broad_set_track.

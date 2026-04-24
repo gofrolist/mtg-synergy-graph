@@ -377,24 +377,6 @@
       "cand_event": "etb_tapped_stax_peer",
       "weight_hint": 2.5,
       "active": 1
-    },
-    {
-      "rule_id": "ward_2_tribal",
-      "family": "tribal",
-      "gate_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Ward:2"},
-      "commander_port_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Ward:2"},
-      "candidate_port_predicate": {
-        "op": "and",
-        "args": [
-          {"op": "has_port", "port_type": "keyword", "event_class": "Ward:2"},
-          {"op": "not_in_commander_set"}
-        ]
-      },
-      "filter_group": "",
-      "cmdr_event": "ward_2_tribal",
-      "cand_event": "same_keyword_partner",
-      "weight_hint": 2.0,
-      "active": 1
     }
   ]
 }
