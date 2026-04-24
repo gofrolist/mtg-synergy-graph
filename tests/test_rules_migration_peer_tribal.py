@@ -33,9 +33,10 @@ def _reset_ports_cache() -> None:
     clear_interpreter_cache()
 
 
-#: Keyword-tribal rules migrated from ``generated/`` in Unit 8. Each
-#: tuple is ``(rule_id, keyword)`` — the keyword value seeds a port
-#: row and gates the rule.
+#: Keyword-tribal rules migrated from ``generated/`` in Unit 8 plus
+#: new declarative keyword-tribals added later. Each tuple is
+#: ``(rule_id, keyword)`` — the keyword value seeds a port row and
+#: gates the rule.
 _KEYWORD_TRIBAL_RULES: tuple[tuple[str, str], ...] = (
     ("changeling_tribal", "Changeling"),
     ("choose_tribal", "Choose"),
@@ -50,6 +51,7 @@ _KEYWORD_TRIBAL_RULES: tuple[tuple[str, str], ...] = (
     ("prowess_tribal", "Prowess"),
     ("start_tribal", "Start"),
     ("training_tribal", "Training"),
+    ("ward_2_tribal", "Ward:2"),
 )
 
 #: Replacement-stack rules — different shape: three-tuple

@@ -17,11 +17,11 @@ conn = <sqlite3.Connection object at 0x109102110>
     def test_dedup_anthem_wins(self, conn):
         # A card matching multiple tiers gets ONE complem_
 - **Reach**: 175 commanders carrying this signature; 60 get any rule activation (34%).
-- **Impact**: 115.0
+- **Impact**: 115.0 * forge_signal 1.16 = 132.9
 - **Template**: `creature_count_scaler`
 - **Rationale**: Commander scales_with creature count (valid_filter references Creature). Wants token producers, anthems, wide payoffs. 115 of 175 currently uncovered.
 - **Exemplar commanders** (no rule activation): Adeline, Resplendent Cathar, Ajani, Nacatl Pariah, Alena, Kessig Trapper, Alistair, the Brigadier, Arabella, Abandoned Doll, Aragorn and Arwen, Wed, Ashcoat of the Shadow Swarm, Barret Wallace
-- **Existing rule activations**: scaling(60), aura_equipment_support(10), proliferate_synergy(1), counter_keyword(1), counter_doubler(1)
+- **Existing rule activations**: scaling(60), aura_equipment_support(10), counter_doubler(1), proliferate_synergy(1), counter_keyword(1)
 - **Gate sketch**: `p.port_type='scales_with' AND p.event_class='Valid' AND 'Creature' IN valid_filter AND no type token from {Aura, Equipment, Enchantment, Artifact, Land, ...}`
 - **Tier sketches**:
   - token_producer: effect=Token with TokenScript (creature tokens)
@@ -38,7 +38,7 @@ check: 100 commanders
   baseline agg NDCG: 0.246137
   rank_
 - **Reach**: 94 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 94.0
+- **Impact**: 94.0 * forge_signal 1.17 = 110.4
 - **Template**: `x_cost_scaler`
 - **Rationale**: Commander scales_with X paid — X-cost abilities want more mana. Matches existing mana_doubler and cost_reducer rules but needs its own gate to attribute xPaid-specific commanders. 94 commanders on this axis.
 - **Exemplar commanders** (no rule activation): Alexi, Zephyr Mage, Alquist Proft, Master Sleuth, Apothecary White, Arashi, the Sky Asunder, Aryel, Knight of Windgrace, Atalya, Samite Master, Auntie Blyte, Bad Influence, Azor, the Lawbringer
@@ -52,7 +52,7 @@ check: 100 commanders
 ### #3: `cost.remove_counter[*]`
 - ⚠️ **Template caution**: 4 revert(s) elsewhere on this template — most recent 2026-04-19T03:46:21+00:00: _Golden NDCG regression: drop +0.0011 (baseline 0.2461 -> fresh 0.2451, tolerance 0.005). rank_shifts=0 ndcg_drops=1_
 - **Reach**: 42 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 42.0
+- **Impact**: 42.0 * forge_signal 1.22 = 51.1
 - **Template**: `counter_removal_payoff`
 - **Rationale**: Commander removes counters as a cost — synergizes with anything that ADDS counters. Cross-pollinates with counter_axis_feeder and modified_axis_feeder axes but keyed from the cost side. 42 commanders.
 - **Exemplar commanders** (no rule activation): Ajani, Nacatl Pariah, Arcee, Sharpshooter, Arwen, Mortal Queen, Auntie Blyte, Bad Influence, Brigone, Soldier of Meletis, Catti-brie of Mithral Hall, Chandra, Fire of Kaladesh, Ghave, Guru of Spores
@@ -67,7 +67,7 @@ check: 100 commanders
 - ⚠️ **Signature reverted**: 2 prior revert(s) on this exact signature — most recent 2026-04-19T16:34:26+00:00: _Backfill: deleted in fd81c7b -- per-rule impact audit found HARMFUL._
 - ✅ **Signature already shipped**: 1 passing apply(s) on this exact signature — rule should be in the registry; investigate runtime mismatch.
 - **Reach**: 28 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 28.0
+- **Impact**: 28.0 * forge_signal 1.32 = 36.9
 - **Template**: `peer_tribal_keyword`
 - **Rationale**: Keyword 'Ward:2' has a small card pool (95). Commanders carrying it want the rest of the pool as natural partners.
 - **Exemplar commanders** (no rule activation): Abuelo, Ancestral Echo, Adrix and Nev, Twincasters, Captain Howler, Sea Scourge, Edea, Possessed Sorceress, Elenda and Azor, Fblthp, Lost on the Range, Felix Five-Boots, Ghyrson Starn, Kelermorph
@@ -79,7 +79,7 @@ check: 100 commanders
 ### #5: `effect.Pump[Other]`
 - ⚠️ **Signature reverted**: 1 prior revert(s) on this exact signature — most recent 2026-04-19T17:35:48+00:00: _HARMFUL (-62 sum_Δ across 266 cmdrs). Other qualifier is too common — overlaps with established lord / scaling / token_producer rules and displaces their picks. Removed Other from _AXIS_FEEDER_TIERS._
 - **Reach**: 23 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 23.0
+- **Impact**: 23.0 * forge_signal 1.14 = 26.2
 - **Template**: `axis_feeder`
 - **Rationale**: Qualifier 'Other' is a payoff axis — surface cards that produce or scale on that axis.
 - **Exemplar commanders** (no rule activation): Arahbo, Roar of the World, Arwen, Mortal Queen, Balthor the Stout, Bre of Clan Stoutarm, Duke Ulder Ravengard, Fang, Roku's Companion, Gladiolus Amicitia, Halfdane
@@ -91,7 +91,7 @@ check: 100 commanders
 ### #6: `effect.PumpAll[attacking]`
 - ⚠️ **Signature reverted**: 1 prior revert(s) on this exact signature — most recent 2026-04-19T16:52:56+00:00: _Full pytest suite failed (exit 1)._
 - **Reach**: 18 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 18.0
+- **Impact**: 18.0 * forge_signal 1.18 = 21.2
 - **Template**: `axis_feeder`
 - **Rationale**: Qualifier 'attacking' is a payoff axis — surface cards that produce or scale on that axis.
 - **Exemplar commanders** (no rule activation): Agrus Kos, Wojek Veteran, Cecil, Dark Knight, Inniaz, the Gale Force, Iroh, Firebending Instructor, Jazal Goldmane, Kangee, Sky Warden, Karlach, Fury of Avernus, Kate Stewart
@@ -104,7 +104,7 @@ check: 100 commanders
 - ⚠️ **Template caution**: 7 revert(s) elsewhere on this template — most recent 2026-04-21T10:00:00+00:00: _TRIVIAL per audit: 8 touched, net hi_syn Δ=0 (+3/-3), +0.203 NDCG aggregate but Bladewing regressed -0.128 (Zombie Knight token deck displaced by generic GY peers). Shared-axis-different-archetype tra_
 - ✅ **Signature already shipped**: 1 passing apply(s) on this exact signature — rule should be in the registry; investigate runtime mismatch.
 - **Reach**: 17 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 17.0
+- **Impact**: 17.0 * forge_signal 1.16 = 19.7
 - **Template**: `axis_feeder`
 - **Rationale**: Qualifier 'attacking' is a payoff axis — surface cards that produce or scale on that axis.
 - **Exemplar commanders** (no rule activation): Chief Jim Hopper, Cloud, Ex-SOLDIER, Commissar Severina Raine, Dwynen, Gilt-Leaf Daen, ED-E, Lonesome Eyebot, Fumiko the Lowblood, Ghalta and Mavren, Ghost-Spider, Gwen Stacy
@@ -113,10 +113,43 @@ check: 100 commanders
   - axis_payoff: port valid_filter contains 'attacking'
   - axis_producer: effect that produces the attacking state
 
-### #8: `scales_with.Valid[Other]`
+### #8: `cost.add_counter[*]`
+- **Reach**: 15 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 15.0 * forge_signal 1.28 = 19.2
+- **Template**: `needs_template`
+- **Rationale**: No template in the catalog matches `cost.add_counter[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
+- **Exemplar commanders** (no rule activation): Ajani, Nacatl Pariah, Chandra, Fire of Kaladesh, Grist, Voracious Larva, Jace, Vryn's Prodigy, Kytheon, Hero of Akros, Liliana, Heretical Healer, Mila, Crafty Companion, Nicol Bolas, the Ravager
+- **Gate sketch**: `port_type='cost' AND event_class='add_counter'`
+
+### #9: `keyword.Horsemanship[*]`
+- ⚠️ **Template caution**: 11 revert(s) elsewhere on this template — most recent 2026-04-19T16:34:26+00:00: _Backfill: deleted in 5e2711e -- 0/2737 commanders activate gate._
+- **Reach**: 14 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 14.0 * forge_signal 1.31 = 18.3
+- **Template**: `peer_tribal_keyword`
+- **Rationale**: Keyword 'Horsemanship' has a small card pool (29). Commanders carrying it want the rest of the pool as natural partners.
+- **Exemplar commanders** (no rule activation): Cao Ren, Wei Commander, Guan Yu, Sainted Warrior, Lady Zhurong, Warrior Queen, Liu Bei, Lord of Shu, Lu Bu, Master-at-Arms, Lu Meng, Wu General, Lu Xun, Scholar General, Ma Chao, Western Warrior
+- **Gate sketch**: `p.port_type='keyword' AND p.event_class='Horsemanship'`
+- **Tier sketches**:
+  - same-keyword pool: card_ports.event_class='Horsemanship'
+- **Estimated pool sizes**: same_keyword=29
+
+### #10: `keyword.Living[*]`
+- ⚠️ **Signature reverted**: 1 prior revert(s) on this exact signature — most recent 2026-04-19T16:34:26+00:00: _Backfill: deleted in 6d3f8ea -- trivial (sum Delta = 0 across 13 touched cmdrs)._
+- ✅ **Signature already shipped**: 1 passing apply(s) on this exact signature — rule should be in the registry; investigate runtime mismatch.
+- **Reach**: 13 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 13.0 * forge_signal 1.40 = 18.2
+- **Template**: `peer_tribal_keyword`
+- **Rationale**: Keyword 'Living' has a small card pool (32). Commanders carrying it want the rest of the pool as natural partners.
+- **Exemplar commanders** (no rule activation): Arcee, Sharpshooter, Blitzwing, Cruel Tormentor, Cyclonus, the Saboteur, Flamewar, Brash Veteran, Goldbug, Humanity's Ally, Jetfire, Ingenious Scientist, Megatron, Tyrant, Optimus Prime, Hero
+- **Gate sketch**: `p.port_type='keyword' AND p.event_class='Living'`
+- **Tier sketches**:
+  - same-keyword pool: card_ports.event_class='Living'
+- **Estimated pool sizes**: same_keyword=32
+
+### #11: `scales_with.Valid[Other]`
 - ⚠️ **Template caution**: 7 revert(s) elsewhere on this template — most recent 2026-04-21T10:00:00+00:00: _TRIVIAL per audit: 8 touched, net hi_syn Δ=0 (+3/-3), +0.203 NDCG aggregate but Bladewing regressed -0.128 (Zombie Knight token deck displaced by generic GY peers). Shared-axis-different-archetype tra_
 - **Reach**: 20 commanders carrying this signature; 5 get any rule activation (25%).
-- **Impact**: 15.0
+- **Impact**: 15.0 * forge_signal 1.16 = 17.3
 - **Template**: `axis_feeder`
 - **Rationale**: Qualifier 'Other' is a payoff axis — surface cards that produce or scale on that axis.
 - **Exemplar commanders** (no rule activation): Arni Brokenbrow, Brigid, Clachan's Heart, Butch DeLoria, Tunnel Snake, Ghalta and Mavren, God-Eternal Bontu, Imaryll, Elfhame Elite, Kylox, Visionary Inventor, Leonardo, Big Brother
@@ -126,51 +159,34 @@ check: 100 commanders
   - axis_payoff: port valid_filter contains 'Other'
   - axis_producer: effect that produces the Other state
 
-### #9: `cost.add_counter[*]`
-- **Reach**: 15 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 15.0
-- **Template**: `needs_template`
-- **Rationale**: No template in the catalog matches `cost.add_counter[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
-- **Exemplar commanders** (no rule activation): Ajani, Nacatl Pariah, Chandra, Fire of Kaladesh, Grist, Voracious Larva, Jace, Vryn's Prodigy, Kytheon, Hero of Akros, Liliana, Heretical Healer, Mila, Crafty Companion, Nicol Bolas, the Ravager
-- **Gate sketch**: `port_type='cost' AND event_class='add_counter'`
-
-### #10: `keyword.Horsemanship[*]`
-- ⚠️ **Template caution**: 11 revert(s) elsewhere on this template — most recent 2026-04-19T16:34:26+00:00: _Backfill: deleted in 5e2711e -- 0/2737 commanders activate gate._
-- **Reach**: 14 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 14.0
-- **Template**: `peer_tribal_keyword`
-- **Rationale**: Keyword 'Horsemanship' has a small card pool (29). Commanders carrying it want the rest of the pool as natural partners.
-- **Exemplar commanders** (no rule activation): Cao Ren, Wei Commander, Guan Yu, Sainted Warrior, Lady Zhurong, Warrior Queen, Liu Bei, Lord of Shu, Lu Bu, Master-at-Arms, Lu Meng, Wu General, Lu Xun, Scholar General, Ma Chao, Western Warrior
-- **Gate sketch**: `p.port_type='keyword' AND p.event_class='Horsemanship'`
-- **Tier sketches**:
-  - same-keyword pool: card_ports.event_class='Horsemanship'
-- **Estimated pool sizes**: same_keyword=29
-
-### #11: `keyword.Living[*]`
-- ⚠️ **Signature reverted**: 1 prior revert(s) on this exact signature — most recent 2026-04-19T16:34:26+00:00: _Backfill: deleted in 6d3f8ea -- trivial (sum Delta = 0 across 13 touched cmdrs)._
-- ✅ **Signature already shipped**: 1 passing apply(s) on this exact signature — rule should be in the registry; investigate runtime mismatch.
-- **Reach**: 13 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 13.0
-- **Template**: `peer_tribal_keyword`
-- **Rationale**: Keyword 'Living' has a small card pool (32). Commanders carrying it want the rest of the pool as natural partners.
-- **Exemplar commanders** (no rule activation): Arcee, Sharpshooter, Blitzwing, Cruel Tormentor, Cyclonus, the Saboteur, Flamewar, Brash Veteran, Goldbug, Humanity's Ally, Jetfire, Ingenious Scientist, Megatron, Tyrant, Optimus Prime, Hero
-- **Gate sketch**: `p.port_type='keyword' AND p.event_class='Living'`
-- **Tier sketches**:
-  - same-keyword pool: card_ports.event_class='Living'
-- **Estimated pool sizes**: same_keyword=32
-
 ### #12: `scales_with.ResolvedThisTurn[*]`
 - **Reach**: 13 commanders carrying this signature; 1 get any rule activation (8%).
-- **Impact**: 12.0
+- **Impact**: 12.0 * forge_signal 1.22 = 14.7
 - **Template**: `needs_template`
 - **Rationale**: No template in the catalog matches `scales_with.ResolvedThisTurn[*]`. Some registered rules already partially cover it: scaling(1). Investigate whether broadening one of those gates is enough, or whether a new template is warranted.
 - **Exemplar commanders** (no rule activation): Ashling the Pilgrim, Ashling, Flame Dancer, Elrond, Lord of Rivendell, Gimli, Mournful Avenger, Ms. Bumbleflower, Nissa, Resurgent Animist, Prowl, Stoic Strategist, Saint Traft and Rem Karolus
 - **Existing rule activations**: scaling(1)
 - **Gate sketch**: `port_type='scales_with' AND event_class='ResolvedThisTurn'`
 
-### #13: `replacement.DamageDone[Prevent]`
+### #13: `scales_with.RememberedNumber[*]`
+- **Reach**: 9 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 9.0 * forge_signal 1.37 = 12.3
+- **Template**: `needs_template`
+- **Rationale**: No template in the catalog matches `scales_with.RememberedNumber[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
+- **Exemplar commanders** (no rule activation): Black Panther, Wakandan King, Cosima, God of the Voyage, Dyadrine, Synthesis Amalgam, Garnet, Princess of Alexandria, Kathril, Aspect Warper, Mister Negative, Sarulf, Realm Eater, Sensational Spider-Man
+- **Gate sketch**: `port_type='scales_with' AND event_class='RememberedNumber'`
+
+### #14: `scales_with.CastTotalManaSpent[*]`
+- **Reach**: 9 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 9.0 * forge_signal 1.37 = 12.3
+- **Template**: `needs_template`
+- **Rationale**: No template in the catalog matches `scales_with.CastTotalManaSpent[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
+- **Exemplar commanders** (no rule activation): Abby, Merciless Soldier, Dyadrine, Synthesis Amalgam, Gyrus, Waker of Corpses, Jeleva, Nephalia's Scourge, Kurbis, Harvest Celebrant, Marath, Will of the Wild, Prossh, Skyraider of Kher, Toph, Greatest Earthbender
+- **Gate sketch**: `port_type='scales_with' AND event_class='CastTotalManaSpent'`
+
+### #15: `replacement.DamageDone[Prevent]`
 - **Reach**: 10 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 10.0
+- **Impact**: 10.0 * forge_signal 1.22 = 12.2
 - **Template**: `damage_prevention_voltron`
 - **Rationale**: Prevention statics let attackers ignore retaliation — the payoff is high-power creatures with combat keywords.
 - **Exemplar commanders** (no rule activation): Diamond Weapon, Emmara Tandris, Frodo, Determined Hero, Goldbug, Humanity's Ally, Iroas, God of Victory, Losheel, Clockwork Scholar, Rem Karolus, Stalwart Slayer, Rune-Tail, Kitsune Ascendant
@@ -180,46 +196,26 @@ check: 100 commanders
   - evasion_keyword: keyword in (Menace, Trample, Flying, First Strike, Double Strike)
 - **Estimated pool sizes**: aggressive_creatures=3612, evasion_keyword=4296
 
-### #14: `scales_with.wasCastFromYourHandByYou.1.0[*]`
-- **Reach**: 10 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 10.0
+### #16: `trigger.ChangesZoneAll[->Battlefield]`
+- **Reach**: 8 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 8.0 * forge_signal 1.33 = 10.7
 - **Template**: `needs_template`
-- **Rationale**: No template in the catalog matches `scales_with.wasCastFromYourHandByYou.1.0[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
-- **Exemplar commanders** (no rule activation): Myojin of Blooming Dawn, Myojin of Cleansing Fire, Myojin of Cryptic Dreams, Myojin of Grim Betrayal, Myojin of Infinite Rage, Myojin of Life's Web, Myojin of Night's Reach, Myojin of Roaring Blades
-- **Gate sketch**: `port_type='scales_with' AND event_class='wasCastFromYourHandByYou.1.0'`
+- **Rationale**: No template in the catalog matches `trigger.ChangesZoneAll[->Battlefield]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
+- **Exemplar commanders** (no rule activation): Anje, Maid of Dishonor, Baron Bertram Graywater, Bess, Soul Nourisher, Celes, Rune Knight, Kotis, Sibsig Champion, Losheel, Clockwork Scholar, Marneus Calgar, Merry, Warden of Isengard
+- **Gate sketch**: `port_type='trigger' AND event_class='ChangesZoneAll' AND sub_discriminator='->Battlefield'`
 
-### #15: `effect.Pump[attacking]`
-- ⚠️ **Template caution**: 7 revert(s) elsewhere on this template — most recent 2026-04-21T10:00:00+00:00: _TRIVIAL per audit: 8 touched, net hi_syn Δ=0 (+3/-3), +0.203 NDCG aggregate but Bladewing regressed -0.128 (Zombie Knight token deck displaced by generic GY peers). Shared-axis-different-archetype tra_
-- **Reach**: 9 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 9.0
-- **Template**: `axis_feeder`
-- **Rationale**: Qualifier 'attacking' is a payoff axis — surface cards that produce or scale on that axis.
-- **Exemplar commanders** (no rule activation): Amy Rose, Appa, Aang's Companion, Gwaihir, Greatest of the Eagles, Landroval, Horizon Witness, Old Hob, Alleycat Blues, Rilsa Rael, Kingpin, Syr Faren, the Hengehammer, Tegan Jovanka
-- **Gate sketch**: `any cmdr port with valid_filter containing 'attacking' on a non-Self scope`
-- **Tier sketches**:
-  - axis_payoff: port valid_filter contains 'attacking'
-  - axis_producer: effect that produces the attacking state
-
-### #16: `scales_with.CastTotalManaSpent[*]`
-- **Reach**: 9 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 9.0
+### #17: `scales_with.ValidGraveyard Creature.YouOwn[*]`
+- **Reach**: 8 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 8.0 * forge_signal 1.32 = 10.6
 - **Template**: `needs_template`
-- **Rationale**: No template in the catalog matches `scales_with.CastTotalManaSpent[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
-- **Exemplar commanders** (no rule activation): Abby, Merciless Soldier, Dyadrine, Synthesis Amalgam, Gyrus, Waker of Corpses, Jeleva, Nephalia's Scourge, Kurbis, Harvest Celebrant, Marath, Will of the Wild, Prossh, Skyraider of Kher, Toph, Greatest Earthbender
-- **Gate sketch**: `port_type='scales_with' AND event_class='CastTotalManaSpent'`
-
-### #17: `scales_with.RememberedNumber[*]`
-- **Reach**: 9 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 9.0
-- **Template**: `needs_template`
-- **Rationale**: No template in the catalog matches `scales_with.RememberedNumber[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
-- **Exemplar commanders** (no rule activation): Black Panther, Wakandan King, Cosima, God of the Voyage, Dyadrine, Synthesis Amalgam, Garnet, Princess of Alexandria, Kathril, Aspect Warper, Mister Negative, Sarulf, Realm Eater, Sensational Spider-Man
-- **Gate sketch**: `port_type='scales_with' AND event_class='RememberedNumber'`
+- **Rationale**: No template in the catalog matches `scales_with.ValidGraveyard Creature.YouOwn[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
+- **Exemplar commanders** (no rule activation): Bladewing, Deathless Tyrant, Cyan, Vengeful Samurai, Dion, Bahamut's Dominant, Izoni, Thousand-Eyed, Jarad, Golgari Lich Lord, Joshua, Phoenix's Dominant, Nethroi, Apex of Death, Old Stickfingers
+- **Gate sketch**: `port_type='scales_with' AND event_class='ValidGraveyard Creature.YouOwn'`
 
 ### #18: `scales_with.Valid[token]`
 - ⚠️ **Template caution**: 7 revert(s) elsewhere on this template — most recent 2026-04-21T10:00:00+00:00: _TRIVIAL per audit: 8 touched, net hi_syn Δ=0 (+3/-3), +0.203 NDCG aggregate but Bladewing regressed -0.128 (Zombie Knight token deck displaced by generic GY peers). Shared-axis-different-archetype tra_
 - **Reach**: 9 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 9.0
+- **Impact**: 9.0 * forge_signal 1.16 = 10.4
 - **Template**: `axis_feeder`
 - **Rationale**: Qualifier 'token' is a payoff axis — surface cards that produce or scale on that axis.
 - **Exemplar commanders** (no rule activation): Ashaya, Soul of the Wild, Cadira, Caller of the Small, Caesar, Legion's Emperor, Lena, Selfless Champion, Magnus the Red, Mysterio, Master of Illusion, Sally Pride, Lioness Leader, The Third Doctor
@@ -228,7 +224,108 @@ check: 100 commanders
   - axis_payoff: port valid_filter contains 'token'
   - axis_producer: effect that produces the token state
 
-### #19: `keyword.Ward:1[*]`
+### #19: `effect.Pump[attacking]`
+- ⚠️ **Template caution**: 7 revert(s) elsewhere on this template — most recent 2026-04-21T10:00:00+00:00: _TRIVIAL per audit: 8 touched, net hi_syn Δ=0 (+3/-3), +0.203 NDCG aggregate but Bladewing regressed -0.128 (Zombie Knight token deck displaced by generic GY peers). Shared-axis-different-archetype tra_
+- **Reach**: 9 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 9.0 * forge_signal 1.14 = 10.2
+- **Template**: `axis_feeder`
+- **Rationale**: Qualifier 'attacking' is a payoff axis — surface cards that produce or scale on that axis.
+- **Exemplar commanders** (no rule activation): Amy Rose, Appa, Aang's Companion, Gwaihir, Greatest of the Eagles, Landroval, Horizon Witness, Old Hob, Alleycat Blues, Rilsa Rael, Kingpin, Syr Faren, the Hengehammer, Tegan Jovanka
+- **Gate sketch**: `any cmdr port with valid_filter containing 'attacking' on a non-Self scope`
+- **Tier sketches**:
+  - axis_payoff: port valid_filter contains 'attacking'
+  - axis_producer: effect that produces the attacking state
+
+### #20: `scales_with.wasCastFromYourHandByYou.1.0[*]`
+- **Reach**: 10 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 10.0
+- **Template**: `needs_template`
+- **Rationale**: No template in the catalog matches `scales_with.wasCastFromYourHandByYou.1.0[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
+- **Exemplar commanders** (no rule activation): Myojin of Blooming Dawn, Myojin of Cleansing Fire, Myojin of Cryptic Dreams, Myojin of Grim Betrayal, Myojin of Infinite Rage, Myojin of Life's Web, Myojin of Night's Reach, Myojin of Roaring Blades
+- **Gate sketch**: `port_type='scales_with' AND event_class='wasCastFromYourHandByYou.1.0'`
+
+### #21: `scales_with.CardCounters.ALL[*]`
+- **Reach**: 7 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 7.0 * forge_signal 1.36 = 9.5
+- **Template**: `needs_template`
+- **Rationale**: No template in the catalog matches `scales_with.CardCounters.ALL[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
+- **Exemplar commanders** (no rule activation): Bebop, Skull & Crossbones, Ezio, Brash Novice, Hancock, Ghoulish Mayor, Kyler, Sigardian Emissary, Nardole, Resourceful Cyborg, Qala, Ajani's Pridemate, Savanti Romero, Time's Exile
+- **Gate sketch**: `port_type='scales_with' AND event_class='CardCounters.ALL'`
+
+### #22: `trigger.ChangesZoneAll[Graveyard->Any]`
+- **Reach**: 7 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 7.0 * forge_signal 1.33 = 9.3
+- **Template**: `needs_template`
+- **Rationale**: No template in the catalog matches `trigger.ChangesZoneAll[Graveyard->Any]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
+- **Exemplar commanders** (no rule activation): Amzu, Swarm's Hunger, Cyan, Vengeful Samurai, Fang, Fearless l'Cie, Imotekh the Stormlord, Quintorius, Field Historian, Teval, the Balanced Scale, Tormod, the Desecrator
+- **Gate sketch**: `port_type='trigger' AND event_class='ChangesZoneAll' AND sub_discriminator='Graveyard->Any'`
+
+### #23: `keyword.etbCounter:P1P1:X[*]`
+- ⚠️ **Signature reverted**: 1 prior revert(s) on this exact signature — most recent 2026-04-19T04:27:34+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', '  The Goose Mother                                    0.200 -> 0.000  (-0.200)']_
+- **Reach**: 7 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 7.0 * forge_signal 1.31 = 9.1
+- **Template**: `peer_tribal_keyword`
+- **Rationale**: Keyword 'etbCounter:P1P1:X' has a small card pool (49). Commanders carrying it want the rest of the pool as natural partners.
+- **Exemplar commanders** (no rule activation): Grenzo, Dungeon Warden, Haldir, Lórien Lieutenant, Maga, Traitor to Mortals, Mikaeus, the Lunarch, Omarthis, Ghostfire Initiate, The Goose Mother, Vrestin, Menoptra Leader
+- **Gate sketch**: `p.port_type='keyword' AND p.event_class='etbCounter:P1P1:X'`
+- **Tier sketches**:
+  - same-keyword pool: card_ports.event_class='etbCounter:P1P1:X'
+- **Estimated pool sizes**: same_keyword=49
+
+### #24: `keyword.etbCounter:P1P1:X:no[*]`
+- 🟡 **Signature trivial**: 1 prior trivial attempt(s) on this exact signature — most recent 2026-04-19T04:27:39+00:00: _rule fires on 6 commander(s) but never lands in top-30 (max|Δhi_syn|=0)_
+- **Reach**: 7 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 7.0 * forge_signal 1.29 = 9.0
+- **Template**: `peer_tribal_keyword`
+- **Rationale**: Keyword 'etbCounter:P1P1:X:no' has a small card pool (55). Commanders carrying it want the rest of the pool as natural partners.
+- **Exemplar commanders** (no rule activation): Aeve, Progenitor Ooze, Michelangelo, On the Scene, Morlun, Devourer of Spiders, Polukranos, Unchained, Prime Speaker Zegana, Ulasht, the Hate Seed, Éomer, King of Rohan
+- **Gate sketch**: `p.port_type='keyword' AND p.event_class='etbCounter:P1P1:X:no'`
+- **Tier sketches**:
+  - same-keyword pool: card_ports.event_class='etbCounter:P1P1:X:no'
+- **Estimated pool sizes**: same_keyword=55
+
+### #25: `keyword.Bushido:1[*]`
+- 🟡 **Signature trivial**: 1 prior trivial attempt(s) on this exact signature — most recent 2026-04-19T04:27:45+00:00: _rule fires on 6 commander(s) but never lands in top-30 (max|Δhi_syn|=0)_
+- **Reach**: 6 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 6.0 * forge_signal 1.50 = 9.0
+- **Template**: `peer_tribal_keyword`
+- **Rationale**: Keyword 'Bushido:1' has a small card pool (25). Commanders carrying it want the rest of the pool as natural partners.
+- **Exemplar commanders** (no rule activation): Brothers Yamazaki, Kentaro, the Smiling Cat, Nagao, Bound by Honor, Opal-Eye, Konda's Yojimbo, Sensei Golden-Tail, Toshiro Umezawa
+- **Gate sketch**: `p.port_type='keyword' AND p.event_class='Bushido:1'`
+- **Tier sketches**:
+  - same-keyword pool: card_ports.event_class='Bushido:1'
+- **Estimated pool sizes**: same_keyword=25
+
+### #26: `keyword.etbCounter:P1P1:Y:no[*]`
+- 🟡 **Signature trivial**: 1 prior trivial attempt(s) on this exact signature — most recent 2026-04-19T04:30:38+00:00: _rule fires on 6 commander(s) but never lands in top-30 (max|Δhi_syn|=0)_
+- **Reach**: 6 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 6.0 * forge_signal 1.37 = 8.2
+- **Template**: `peer_tribal_keyword`
+- **Rationale**: Keyword 'etbCounter:P1P1:Y:no' has a small card pool (14). Commanders carrying it want the rest of the pool as natural partners.
+- **Exemplar commanders** (no rule activation): Dyadrine, Synthesis Amalgam, Gyrus, Waker of Corpses, Kurbis, Harvest Celebrant, Marath, Will of the Wild, Ulamog, the Defiler, Verazol, the Split Current
+- **Gate sketch**: `p.port_type='keyword' AND p.event_class='etbCounter:P1P1:Y:no'`
+- **Tier sketches**:
+  - same-keyword pool: card_ports.event_class='etbCounter:P1P1:Y:no'
+- **Estimated pool sizes**: same_keyword=14
+
+### #27: `replacement.Moved[ETBTapped]`
+- **Reach**: 14 commanders carrying this signature; 7 get any rule activation (50%).
+- **Impact**: 7.0 * forge_signal 1.16 = 8.1
+- **Template**: `needs_template`
+- **Rationale**: No template in the catalog matches `replacement.Moved[ETBTapped]`. Some registered rules already partially cover it: etb_tapped_stax_feeder(7). Investigate whether broadening one of those gates is enough, or whether a new template is warranted.
+- **Exemplar commanders** (no rule activation): Alirios, Enraptured, Ebondeath, Dracolich, Grimgrin, Corpse-Born, Taeko, the Patient Avalanche, The Beast, Deathless Prince, The Watcher in the Water, Traxos, Scourge of Kroog
+- **Existing rule activations**: etb_tapped_stax_feeder(7)
+- **Gate sketch**: `port_type='replacement' AND event_class='Moved' AND sub_discriminator='ETBTapped'`
+
+### #28: `trigger.ChangesZoneAll[Battlefield->Graveyard]`
+- **Reach**: 6 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 6.0 * forge_signal 1.33 = 8.0
+- **Template**: `needs_template`
+- **Rationale**: No template in the catalog matches `trigger.ChangesZoneAll[Battlefield->Graveyard]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
+- **Exemplar commanders** (no rule activation): Ajani, Nacatl Pariah, G'raha Tia, Ratchet, Field Medic, Rinoa, Angel Wing, Vraan, Executioner Thane, Éomer, Marshal of Rohan
+- **Gate sketch**: `port_type='trigger' AND event_class='ChangesZoneAll' AND sub_discriminator='Battlefield->Graveyard'`
+
+### #29: `keyword.Ward:1[*]`
 - ⚠️ **Signature reverted**: 1 prior revert(s) on this exact signature — most recent 2026-04-19T16:34:26+00:00: _Backfill: deleted in fd81c7b -- per-rule impact audit found trivial._
 - ✅ **Signature already shipped**: 1 passing apply(s) on this exact signature — rule should be in the registry; investigate runtime mismatch.
 - **Reach**: 8 commanders carrying this signature; 0 get any rule activation (0%).
@@ -241,32 +338,61 @@ check: 100 commanders
   - same-keyword pool: card_ports.event_class='Ward:1'
 - **Estimated pool sizes**: same_keyword=22
 
-### #20: `scales_with.ValidGraveyard Creature.YouOwn[*]`
-- **Reach**: 8 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 8.0
+### #30: `scales_with.AttackersDeclared[*]`
+- **Reach**: 6 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 6.0 * forge_signal 1.32 = 7.9
 - **Template**: `needs_template`
-- **Rationale**: No template in the catalog matches `scales_with.ValidGraveyard Creature.YouOwn[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
-- **Exemplar commanders** (no rule activation): Bladewing, Deathless Tyrant, Cyan, Vengeful Samurai, Dion, Bahamut's Dominant, Izoni, Thousand-Eyed, Jarad, Golgari Lich Lord, Joshua, Phoenix's Dominant, Nethroi, Apex of Death, Old Stickfingers
-- **Gate sketch**: `port_type='scales_with' AND event_class='ValidGraveyard Creature.YouOwn'`
+- **Rationale**: No template in the catalog matches `scales_with.AttackersDeclared[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
+- **Exemplar commanders** (no rule activation): Alesha, Who Laughs at Fate, Lara Croft, Tomb Raider, Michelangelo, the Heart, Ojer Taq, Deepest Foundation, Rose, Cutthroat Raider, Trynn, Champion of Freedom
+- **Gate sketch**: `port_type='scales_with' AND event_class='AttackersDeclared'`
 
-### #21: `trigger.ChangesZoneAll[->Battlefield]`
-- **Reach**: 8 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 8.0
+### #31: `keyword.Ward:3[*]`
+- ⚠️ **Signature reverted**: 1 prior revert(s) on this exact signature — most recent 2026-04-19T04:27:54+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', '  Storvald, Frost Giant Jarl                          0.100 -> 0.000  (-0.100)']_
+- **Reach**: 6 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 6.0 * forge_signal 1.31 = 7.8
+- **Template**: `peer_tribal_keyword`
+- **Rationale**: Keyword 'Ward:3' has a small card pool (20). Commanders carrying it want the rest of the pool as natural partners.
+- **Exemplar commanders** (no rule activation): Kairi, the Swirling Sky, Kiora, Sovereign of the Deep, Ovika, Enigma Goliath, Storvald, Frost Giant Jarl, Tivit, Seller of Secrets, Voja, Jaws of the Conclave
+- **Gate sketch**: `p.port_type='keyword' AND p.event_class='Ward:3'`
+- **Tier sketches**:
+  - same-keyword pool: card_ports.event_class='Ward:3'
+- **Estimated pool sizes**: same_keyword=20
+
+### #32: `scales_with.ChosenNumber[*]`
+- **Reach**: 6 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 6.0 * forge_signal 1.30 = 7.8
 - **Template**: `needs_template`
-- **Rationale**: No template in the catalog matches `trigger.ChangesZoneAll[->Battlefield]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
-- **Exemplar commanders** (no rule activation): Anje, Maid of Dishonor, Baron Bertram Graywater, Bess, Soul Nourisher, Celes, Rune Knight, Kotis, Sibsig Champion, Losheel, Clockwork Scholar, Marneus Calgar, Merry, Warden of Isengard
-- **Gate sketch**: `port_type='trigger' AND event_class='ChangesZoneAll' AND sub_discriminator='->Battlefield'`
+- **Rationale**: No template in the catalog matches `scales_with.ChosenNumber[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
+- **Exemplar commanders** (no rule activation): A-Baba Lysaga, Night Witch, Pia Nalaar, Chief Mechanic, Rowan, Scion of War, Taii Wakeen, Perfect Shot, Will, Scion of Peace, Yusri, Fortune's Flame
+- **Gate sketch**: `port_type='scales_with' AND event_class='ChosenNumber'`
 
-### #22: `replacement.Moved[ETBTapped]`
-- **Reach**: 14 commanders carrying this signature; 7 get any rule activation (50%).
-- **Impact**: 7.0
+### #33: `scales_with.RememberedSize[*]`
+- **Reach**: 6 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 6.0 * forge_signal 1.27 = 7.6
 - **Template**: `needs_template`
-- **Rationale**: No template in the catalog matches `replacement.Moved[ETBTapped]`. Some registered rules already partially cover it: etb_tapped_stax_feeder(7). Investigate whether broadening one of those gates is enough, or whether a new template is warranted.
-- **Exemplar commanders** (no rule activation): Alirios, Enraptured, Ebondeath, Dracolich, Grimgrin, Corpse-Born, Taeko, the Patient Avalanche, The Beast, Deathless Prince, The Watcher in the Water, Traxos, Scourge of Kroog
-- **Existing rule activations**: etb_tapped_stax_feeder(7)
-- **Gate sketch**: `port_type='replacement' AND event_class='Moved' AND sub_discriminator='ETBTapped'`
+- **Rationale**: No template in the catalog matches `scales_with.RememberedSize[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
+- **Exemplar commanders** (no rule activation): Ashling the Pilgrim, Edgar, Charmed Groom, Lily Bowen, Raging Grandma, Mari, the Killing Quill, Thromok the Insatiable, Verazol, the Split Current
+- **Gate sketch**: `port_type='scales_with' AND event_class='RememberedSize'`
 
-### #23: `keyword.Partner:Friends[*]`
+### #34: `cost.exile_from_grave[*]`
+- **Reach**: 25 commanders carrying this signature; 19 get any rule activation (76%).
+- **Impact**: 6.0 * forge_signal 1.24 = 7.4
+- **Template**: `needs_template`
+- **Rationale**: No template in the catalog matches `cost.exile_from_grave[*]`. Some registered rules already partially cover it: gy_fuel_feeder(19). Investigate whether broadening one of those gates is enough, or whether a new template is warranted.
+- **Exemplar commanders** (no rule activation): Beetle, Legacy Criminal, Morbius the Living Vampire, Spider-Slayer, Hatred Honed, Symbiote Spider-Man, Tocasia, Dig Site Mentor, Venom, Evil Unleashed
+- **Existing rule activations**: gy_fuel_feeder(19)
+- **Gate sketch**: `port_type='cost' AND event_class='exile_from_grave'`
+
+### #35: `replacement.DamageDone[DmgTwice]`
+- **Reach**: 8 commanders carrying this signature; 2 get any rule activation (25%).
+- **Impact**: 6.0 * forge_signal 1.22 = 7.3
+- **Template**: `damage_amp_doubler [IMPLEMENTED]`
+- **Rationale**: Already covered by damage_doubler_synergy.
+- **Exemplar commanders** (no rule activation): Absorbing Man and Titania, Kuja, Genome Sorcerer, Neriv, Heart of the Storm, Obosh, the Preypiercer, Raphael, the Muscle, Wolverine, Best There Is
+- **Existing rule activations**: damage_doubler_synergy(2)
+- **Gate sketch**: `(see complement_rules/utility.py:_find_damage_doubler_synergy)`
+
+### #36: `keyword.Partner:Friends[*]`
 - ⚠️ **Signature reverted**: 1 prior revert(s) on this exact signature — most recent 2026-04-19T16:34:26+00:00: _Backfill: deleted in 5e2711e -- 0/2737 commanders activate gate._
 - ✅ **Signature already shipped**: 1 passing apply(s) on this exact signature — rule should be in the registry; investigate runtime mismatch.
 - **Reach**: 7 commanders carrying this signature; 0 get any rule activation (0%).
@@ -279,77 +405,35 @@ check: 100 commanders
   - same-keyword pool: card_ports.event_class='Partner:Friends'
 - **Estimated pool sizes**: same_keyword=7
 
-### #24: `keyword.etbCounter:P1P1:X[*]`
-- ⚠️ **Signature reverted**: 1 prior revert(s) on this exact signature — most recent 2026-04-19T04:27:34+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', '  The Goose Mother                                    0.200 -> 0.000  (-0.200)']_
-- **Reach**: 7 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 7.0
-- **Template**: `peer_tribal_keyword`
-- **Rationale**: Keyword 'etbCounter:P1P1:X' has a small card pool (49). Commanders carrying it want the rest of the pool as natural partners.
-- **Exemplar commanders** (no rule activation): Grenzo, Dungeon Warden, Haldir, Lórien Lieutenant, Maga, Traitor to Mortals, Mikaeus, the Lunarch, Omarthis, Ghostfire Initiate, The Goose Mother, Vrestin, Menoptra Leader
-- **Gate sketch**: `p.port_type='keyword' AND p.event_class='etbCounter:P1P1:X'`
-- **Tier sketches**:
-  - same-keyword pool: card_ports.event_class='etbCounter:P1P1:X'
-- **Estimated pool sizes**: same_keyword=49
-
-### #25: `keyword.etbCounter:P1P1:X:no[*]`
-- 🟡 **Signature trivial**: 1 prior trivial attempt(s) on this exact signature — most recent 2026-04-19T04:27:39+00:00: _rule fires on 6 commander(s) but never lands in top-30 (max|Δhi_syn|=0)_
-- **Reach**: 7 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 7.0
-- **Template**: `peer_tribal_keyword`
-- **Rationale**: Keyword 'etbCounter:P1P1:X:no' has a small card pool (55). Commanders carrying it want the rest of the pool as natural partners.
-- **Exemplar commanders** (no rule activation): Aeve, Progenitor Ooze, Michelangelo, On the Scene, Morlun, Devourer of Spiders, Polukranos, Unchained, Prime Speaker Zegana, Ulasht, the Hate Seed, Éomer, King of Rohan
-- **Gate sketch**: `p.port_type='keyword' AND p.event_class='etbCounter:P1P1:X:no'`
-- **Tier sketches**:
-  - same-keyword pool: card_ports.event_class='etbCounter:P1P1:X:no'
-- **Estimated pool sizes**: same_keyword=55
-
-### #26: `scales_with.CardCounters.ALL[*]`
-- **Reach**: 7 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 7.0
+### #37: `cost.exile_any_grave[*]`
+- **Reach**: 5 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 5.0 * forge_signal 1.38 = 6.9
 - **Template**: `needs_template`
-- **Rationale**: No template in the catalog matches `scales_with.CardCounters.ALL[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
-- **Exemplar commanders** (no rule activation): Bebop, Skull & Crossbones, Ezio, Brash Novice, Hancock, Ghoulish Mayor, Kyler, Sigardian Emissary, Nardole, Resourceful Cyborg, Qala, Ajani's Pridemate, Savanti Romero, Time's Exile
-- **Gate sketch**: `port_type='scales_with' AND event_class='CardCounters.ALL'`
+- **Rationale**: No template in the catalog matches `cost.exile_any_grave[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
+- **Exemplar commanders** (no rule activation): Iname as One, Kinzu of the Bleak Coven, The Balrog of Moria, Thelon of Havenwood, Timothar, Baron of Bats
+- **Gate sketch**: `port_type='cost' AND event_class='exile_any_grave'`
 
-### #27: `trigger.ChangesZoneAll[Graveyard->Any]`
-- **Reach**: 7 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 7.0
+### #38: `scales_with.LifeYouLostThisTurn[*]`
+- **Reach**: 5 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 5.0 * forge_signal 1.25 = 6.3
 - **Template**: `needs_template`
-- **Rationale**: No template in the catalog matches `trigger.ChangesZoneAll[Graveyard->Any]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
-- **Exemplar commanders** (no rule activation): Amzu, Swarm's Hunger, Cyan, Vengeful Samurai, Fang, Fearless l'Cie, Imotekh the Stormlord, Quintorius, Field Historian, Teval, the Balanced Scale, Tormod, the Desecrator
-- **Gate sketch**: `port_type='trigger' AND event_class='ChangesZoneAll' AND sub_discriminator='Graveyard->Any'`
+- **Rationale**: No template in the catalog matches `scales_with.LifeYouLostThisTurn[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
+- **Exemplar commanders** (no rule activation): Betor, Ancestor's Voice, Greven, Predator Captain, Mortarion, Daemon Primarch, Rowan, Scion of War, Willowdusk, Essence Seer
+- **Gate sketch**: `port_type='scales_with' AND event_class='LifeYouLostThisTurn'`
 
-### #28: `cost.exile_from_grave[*]`
-- **Reach**: 25 commanders carrying this signature; 19 get any rule activation (76%).
-- **Impact**: 6.0
-- **Template**: `needs_template`
-- **Rationale**: No template in the catalog matches `cost.exile_from_grave[*]`. Some registered rules already partially cover it: gy_fuel_feeder(19). Investigate whether broadening one of those gates is enough, or whether a new template is warranted.
-- **Exemplar commanders** (no rule activation): Beetle, Legacy Criminal, Morbius the Living Vampire, Spider-Slayer, Hatred Honed, Symbiote Spider-Man, Tocasia, Dig Site Mentor, Venom, Evil Unleashed
-- **Existing rule activations**: gy_fuel_feeder(19)
-- **Gate sketch**: `port_type='cost' AND event_class='exile_from_grave'`
-
-### #29: `replacement.DamageDone[DmgTwice]`
-- **Reach**: 8 commanders carrying this signature; 2 get any rule activation (25%).
-- **Impact**: 6.0
-- **Template**: `damage_amp_doubler [IMPLEMENTED]`
-- **Rationale**: Already covered by damage_doubler_synergy.
-- **Exemplar commanders** (no rule activation): Absorbing Man and Titania, Kuja, Genome Sorcerer, Neriv, Heart of the Storm, Obosh, the Preypiercer, Raphael, the Muscle, Wolverine, Best There Is
-- **Existing rule activations**: damage_doubler_synergy(2)
-- **Gate sketch**: `(see complement_rules/utility.py:_find_damage_doubler_synergy)`
-
-### #30: `keyword.Bushido:1[*]`
-- 🟡 **Signature trivial**: 1 prior trivial attempt(s) on this exact signature — most recent 2026-04-19T04:27:45+00:00: _rule fires on 6 commander(s) but never lands in top-30 (max|Δhi_syn|=0)_
-- **Reach**: 6 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 6.0
+### #39: `keyword.CARDNAME[*]`
+- 🟡 **Signature trivial**: 1 prior trivial attempt(s) on this exact signature — most recent 2026-04-19T04:30:45+00:00: _rule fires on 3 commander(s) but never lands in top-30 (max|Δhi_syn|=0)_
+- **Reach**: 5 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 5.0 * forge_signal 1.24 = 6.2
 - **Template**: `peer_tribal_keyword`
-- **Rationale**: Keyword 'Bushido:1' has a small card pool (25). Commanders carrying it want the rest of the pool as natural partners.
-- **Exemplar commanders** (no rule activation): Brothers Yamazaki, Kentaro, the Smiling Cat, Nagao, Bound by Honor, Opal-Eye, Konda's Yojimbo, Sensei Golden-Tail, Toshiro Umezawa
-- **Gate sketch**: `p.port_type='keyword' AND p.event_class='Bushido:1'`
+- **Rationale**: Keyword 'CARDNAME' has a small card pool (43). Commanders carrying it want the rest of the pool as natural partners.
+- **Exemplar commanders** (no rule activation): Gorm the Great, Holga, Relentless Rager, Madame Vastra, Raphael, Ninja Destroyer, Zangief, the Red Cyclone
+- **Gate sketch**: `p.port_type='keyword' AND p.event_class='CARDNAME'`
 - **Tier sketches**:
-  - same-keyword pool: card_ports.event_class='Bushido:1'
-- **Estimated pool sizes**: same_keyword=25
+  - same-keyword pool: card_ports.event_class='CARDNAME'
+- **Estimated pool sizes**: same_keyword=43
 
-### #31: `keyword.Partner:Character[*]`
+### #40: `keyword.Partner:Character[*]`
 - 🟡 **Signature trivial**: 1 prior trivial attempt(s) on this exact signature — most recent 2026-04-19T04:27:51+00:00: _rule fires on 5 commander(s) but never lands in top-30 (max|Δhi_syn|=0)_
 - **Reach**: 6 commanders carrying this signature; 0 get any rule activation (0%).
 - **Impact**: 6.0
@@ -361,74 +445,18 @@ check: 100 commanders
   - same-keyword pool: card_ports.event_class='Partner:Character'
 - **Estimated pool sizes**: same_keyword=6
 
-### #32: `keyword.Ward:3[*]`
-- ⚠️ **Signature reverted**: 1 prior revert(s) on this exact signature — most recent 2026-04-19T04:27:54+00:00: _Broad NDCG regression (exit 1). Last lines: ['', 'FAIL: 1 commander(s) dropped more than 0.05:', '  Storvald, Frost Giant Jarl                          0.100 -> 0.000  (-0.100)']_
-- **Reach**: 6 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 6.0
-- **Template**: `peer_tribal_keyword`
-- **Rationale**: Keyword 'Ward:3' has a small card pool (20). Commanders carrying it want the rest of the pool as natural partners.
-- **Exemplar commanders** (no rule activation): Kairi, the Swirling Sky, Kiora, Sovereign of the Deep, Ovika, Enigma Goliath, Storvald, Frost Giant Jarl, Tivit, Seller of Secrets, Voja, Jaws of the Conclave
-- **Gate sketch**: `p.port_type='keyword' AND p.event_class='Ward:3'`
-- **Tier sketches**:
-  - same-keyword pool: card_ports.event_class='Ward:3'
-- **Estimated pool sizes**: same_keyword=20
-
-### #33: `keyword.etbCounter:P1P1:Y:no[*]`
-- 🟡 **Signature trivial**: 1 prior trivial attempt(s) on this exact signature — most recent 2026-04-19T04:30:38+00:00: _rule fires on 6 commander(s) but never lands in top-30 (max|Δhi_syn|=0)_
-- **Reach**: 6 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 6.0
-- **Template**: `peer_tribal_keyword`
-- **Rationale**: Keyword 'etbCounter:P1P1:Y:no' has a small card pool (14). Commanders carrying it want the rest of the pool as natural partners.
-- **Exemplar commanders** (no rule activation): Dyadrine, Synthesis Amalgam, Gyrus, Waker of Corpses, Kurbis, Harvest Celebrant, Marath, Will of the Wild, Ulamog, the Defiler, Verazol, the Split Current
-- **Gate sketch**: `p.port_type='keyword' AND p.event_class='etbCounter:P1P1:Y:no'`
-- **Tier sketches**:
-  - same-keyword pool: card_ports.event_class='etbCounter:P1P1:Y:no'
-- **Estimated pool sizes**: same_keyword=14
-
-### #34: `scales_with.AttackersDeclared[*]`
-- **Reach**: 6 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 6.0
+### #41: `scales_with.LifeOppsLostThisTurn[*]`
+- **Reach**: 4 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 4.0 * forge_signal 1.48 = 5.9
 - **Template**: `needs_template`
-- **Rationale**: No template in the catalog matches `scales_with.AttackersDeclared[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
-- **Exemplar commanders** (no rule activation): Alesha, Who Laughs at Fate, Lara Croft, Tomb Raider, Michelangelo, the Heart, Ojer Taq, Deepest Foundation, Rose, Cutthroat Raider, Trynn, Champion of Freedom
-- **Gate sketch**: `port_type='scales_with' AND event_class='AttackersDeclared'`
+- **Rationale**: No template in the catalog matches `scales_with.LifeOppsLostThisTurn[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
+- **Exemplar commanders** (no rule activation): Abaddon the Despoiler, Florian, Voldaren Scion, Neheb, the Eternal, Rakdos, Lord of Riots
+- **Gate sketch**: `port_type='scales_with' AND event_class='LifeOppsLostThisTurn'`
 
-### #35: `scales_with.ChosenNumber[*]`
-- **Reach**: 6 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 6.0
-- **Template**: `needs_template`
-- **Rationale**: No template in the catalog matches `scales_with.ChosenNumber[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
-- **Exemplar commanders** (no rule activation): A-Baba Lysaga, Night Witch, Pia Nalaar, Chief Mechanic, Rowan, Scion of War, Taii Wakeen, Perfect Shot, Will, Scion of Peace, Yusri, Fortune's Flame
-- **Gate sketch**: `port_type='scales_with' AND event_class='ChosenNumber'`
-
-### #36: `scales_with.RememberedSize[*]`
-- **Reach**: 6 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 6.0
-- **Template**: `needs_template`
-- **Rationale**: No template in the catalog matches `scales_with.RememberedSize[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
-- **Exemplar commanders** (no rule activation): Ashling the Pilgrim, Edgar, Charmed Groom, Lily Bowen, Raging Grandma, Mari, the Killing Quill, Thromok the Insatiable, Verazol, the Split Current
-- **Gate sketch**: `port_type='scales_with' AND event_class='RememberedSize'`
-
-### #37: `trigger.ChangesZoneAll[Battlefield->Graveyard]`
-- **Reach**: 6 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 6.0
-- **Template**: `needs_template`
-- **Rationale**: No template in the catalog matches `trigger.ChangesZoneAll[Battlefield->Graveyard]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
-- **Exemplar commanders** (no rule activation): Ajani, Nacatl Pariah, G'raha Tia, Ratchet, Field Medic, Rinoa, Angel Wing, Vraan, Executioner Thane, Éomer, Marshal of Rohan
-- **Gate sketch**: `port_type='trigger' AND event_class='ChangesZoneAll' AND sub_discriminator='Battlefield->Graveyard'`
-
-### #38: `cost.exile_any_grave[*]`
-- **Reach**: 5 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 5.0
-- **Template**: `needs_template`
-- **Rationale**: No template in the catalog matches `cost.exile_any_grave[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
-- **Exemplar commanders** (no rule activation): Iname as One, Kinzu of the Bleak Coven, The Balrog of Moria, Thelon of Havenwood, Timothar, Baron of Bats
-- **Gate sketch**: `port_type='cost' AND event_class='exile_any_grave'`
-
-### #39: `effect.PumpAll[Other]`
+### #42: `effect.PumpAll[Other]`
 - ⚠️ **Template caution**: 7 revert(s) elsewhere on this template — most recent 2026-04-21T10:00:00+00:00: _TRIVIAL per audit: 8 touched, net hi_syn Δ=0 (+3/-3), +0.203 NDCG aggregate but Bladewing regressed -0.128 (Zombie Knight token deck displaced by generic GY peers). Shared-axis-different-archetype tra_
 - **Reach**: 5 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 5.0
+- **Impact**: 5.0 * forge_signal 1.18 = 5.9
 - **Template**: `axis_feeder`
 - **Rationale**: Qualifier 'Other' is a payoff axis — surface cards that produce or scale on that axis.
 - **Exemplar commanders** (no rule activation): Akroma, Vision of Ixidor, Bess, Soul Nourisher, Cosmic Spider-Man, Winter, Cursed Rider, Zenos yae Galvus
@@ -437,86 +465,18 @@ check: 100 commanders
   - axis_payoff: port valid_filter contains 'Other'
   - axis_producer: effect that produces the Other state
 
-### #40: `keyword.CARDNAME[*]`
-- 🟡 **Signature trivial**: 1 prior trivial attempt(s) on this exact signature — most recent 2026-04-19T04:30:45+00:00: _rule fires on 3 commander(s) but never lands in top-30 (max|Δhi_syn|=0)_
-- **Reach**: 5 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 5.0
-- **Template**: `peer_tribal_keyword`
-- **Rationale**: Keyword 'CARDNAME' has a small card pool (43). Commanders carrying it want the rest of the pool as natural partners.
-- **Exemplar commanders** (no rule activation): Gorm the Great, Holga, Relentless Rager, Madame Vastra, Raphael, Ninja Destroyer, Zangief, the Red Cyclone
-- **Gate sketch**: `p.port_type='keyword' AND p.event_class='CARDNAME'`
-- **Tier sketches**:
-  - same-keyword pool: card_ports.event_class='CARDNAME'
-- **Estimated pool sizes**: same_keyword=43
-
-### #41: `keyword.etbCounter:DIVINITY:1:CheckSVar$[*]`
-- 🟡 **Signature trivial**: 1 prior trivial attempt(s) on this exact signature — most recent 2026-04-19T04:31:02+00:00: _rule fires on 5 commander(s) but never lands in top-30 (max|Δhi_syn|=0)_
-- **Reach**: 5 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 5.0
-- **Template**: `peer_tribal_keyword`
-- **Rationale**: Keyword 'etbCounter:DIVINITY:1:CheckSVar$' has a small card pool (5). Commanders carrying it want the rest of the pool as natural partners.
-- **Exemplar commanders** (no rule activation): Myojin of Cleansing Fire, Myojin of Infinite Rage, Myojin of Life's Web, Myojin of Night's Reach, Myojin of Seeing Winds
-- **Gate sketch**: `p.port_type='keyword' AND p.event_class='etbCounter:DIVINITY:1:CheckSVar$'`
-- **Tier sketches**:
-  - same-keyword pool: card_ports.event_class='etbCounter:DIVINITY:1:CheckSVar$'
-- **Estimated pool sizes**: same_keyword=5
-
-### #42: `keyword.etbCounter:Indestructible:1:CheckSVar$[*]`
-- 🟡 **Signature trivial**: 1 prior trivial attempt(s) on this exact signature — most recent 2026-04-19T04:32:59+00:00: _rule fires on 5 commander(s) but never lands in top-30 (max|Δhi_syn|=0)_
-- **Reach**: 5 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 5.0
-- **Template**: `peer_tribal_keyword`
-- **Rationale**: Keyword 'etbCounter:Indestructible:1:CheckSVar$' has a small card pool (6). Commanders carrying it want the rest of the pool as natural partners.
-- **Exemplar commanders** (no rule activation): Myojin of Blooming Dawn, Myojin of Cryptic Dreams, Myojin of Grim Betrayal, Myojin of Roaring Blades, Myojin of Towering Might
-- **Gate sketch**: `p.port_type='keyword' AND p.event_class='etbCounter:Indestructible:1:CheckSVar$'`
-- **Tier sketches**:
-  - same-keyword pool: card_ports.event_class='etbCounter:Indestructible:1:CheckSVar$'
-- **Estimated pool sizes**: same_keyword=6
-
-### #43: `scales_with.LifeYouLostThisTurn[*]`
-- **Reach**: 5 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 5.0
-- **Template**: `needs_template`
-- **Rationale**: No template in the catalog matches `scales_with.LifeYouLostThisTurn[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
-- **Exemplar commanders** (no rule activation): Betor, Ancestor's Voice, Greven, Predator Captain, Mortarion, Daemon Primarch, Rowan, Scion of War, Willowdusk, Essence Seer
-- **Gate sketch**: `port_type='scales_with' AND event_class='LifeYouLostThisTurn'`
-
-### #44: `cost.pay_energy[*]`
+### #43: `cost.pay_energy[*]`
 - **Reach**: 4 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 4.0
+- **Impact**: 4.0 * forge_signal 1.41 = 5.6
 - **Template**: `needs_template`
 - **Rationale**: No template in the catalog matches `cost.pay_energy[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
 - **Exemplar commanders** (no rule activation): Dr. Madison Li, Rex, Cyber-Hound, Saheeli, Radiant Creator, The Motherlode, Excavator
 - **Gate sketch**: `port_type='cost' AND event_class='pay_energy'`
 
-### #45: `effect.Airbend[Other]`
-- ⚠️ **Template caution**: 7 revert(s) elsewhere on this template — most recent 2026-04-21T10:00:00+00:00: _TRIVIAL per audit: 8 touched, net hi_syn Δ=0 (+3/-3), +0.203 NDCG aggregate but Bladewing regressed -0.128 (Zombie Knight token deck displaced by generic GY peers). Shared-axis-different-archetype tra_
-- **Reach**: 4 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 4.0
-- **Template**: `axis_feeder`
-- **Rationale**: Qualifier 'Other' is a payoff axis — surface cards that produce or scale on that axis.
-- **Exemplar commanders** (no rule activation): Aang, Airbending Master, Aang, Swift Savior, Aang, the Last Airbender, Appa, Steadfast Guardian
-- **Gate sketch**: `any cmdr port with valid_filter containing 'Other' on a non-Self scope`
-- **Tier sketches**:
-  - axis_payoff: port valid_filter contains 'Other'
-  - axis_producer: effect that produces the Other state
-
-### #46: `effect.DealDamage[attacking]`
-- ⚠️ **Template caution**: 7 revert(s) elsewhere on this template — most recent 2026-04-21T10:00:00+00:00: _TRIVIAL per audit: 8 touched, net hi_syn Δ=0 (+3/-3), +0.203 NDCG aggregate but Bladewing regressed -0.128 (Zombie Knight token deck displaced by generic GY peers). Shared-axis-different-archetype tra_
-- **Reach**: 4 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 4.0
-- **Template**: `axis_feeder`
-- **Rationale**: Qualifier 'attacking' is a payoff axis — surface cards that produce or scale on that axis.
-- **Exemplar commanders** (no rule activation): Ben-Ben, Akki Hermit, Catti-brie of Mithral Hall, Lady Caleria, Tor Wauki
-- **Gate sketch**: `any cmdr port with valid_filter containing 'attacking' on a non-Self scope`
-- **Tier sketches**:
-  - axis_payoff: port valid_filter contains 'attacking'
-  - axis_producer: effect that produces the attacking state
-
-### #47: `keyword.Affinity:Artifact[*]`
+### #44: `keyword.Affinity:Artifact[*]`
 - ⚠️ **Signature reverted**: 1 prior revert(s) on this exact signature — most recent 2026-04-19T04:33:01+00:00: _Golden NDCG regression: drop +0.0000 (baseline 0.2461 -> fresh 0.2461, tolerance 0.0). rank_shifts=1 ndcg_drops=1_
 - **Reach**: 4 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 4.0
+- **Impact**: 4.0 * forge_signal 1.34 = 5.4
 - **Template**: `peer_tribal_keyword`
 - **Rationale**: Keyword 'Affinity:Artifact' has a small card pool (37). Commanders carrying it want the rest of the pool as natural partners.
 - **Exemplar commanders** (no rule activation): Chiss-Goria, Forge Tyrant, Emry, Lurker of the Loch, Imskir Iron-Eater, Krang, Master Mind
@@ -525,30 +485,10 @@ check: 100 commanders
   - same-keyword pool: card_ports.event_class='Affinity:Artifact'
 - **Estimated pool sizes**: same_keyword=37
 
-### #48: `keyword.Convoke[*]`
-- **Reach**: 4 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 4.0
-- **Template**: `needs_template`
-- **Rationale**: No template in the catalog matches `keyword.Convoke[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
-- **Exemplar commanders** (no rule activation): Bennie Bracks, Zoologist, Hogaak, Arisen Necropolis, Kasla, the Broken Halo, The Wandering Rescuer
-- **Gate sketch**: `port_type='keyword' AND event_class='Convoke'`
-
-### #49: `keyword.Firebending:1[*]`
-- 🟡 **Signature trivial**: 1 prior trivial attempt(s) on this exact signature — most recent 2026-04-19T04:33:07+00:00: _rule fires on 4 commander(s) but never lands in top-30 (max|Δhi_syn|=0)_
-- **Reach**: 4 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 4.0
-- **Template**: `peer_tribal_keyword`
-- **Rationale**: Keyword 'Firebending:1' has a small card pool (9). Commanders carrying it want the rest of the pool as natural partners.
-- **Exemplar commanders** (no rule activation): Azula, Ruthless Firebender, Jeong Jeong, the Deserter, Uncle Iroh, Zuko, Seeking Honor
-- **Gate sketch**: `p.port_type='keyword' AND p.event_class='Firebending:1'`
-- **Tier sketches**:
-  - same-keyword pool: card_ports.event_class='Firebending:1'
-- **Estimated pool sizes**: same_keyword=9
-
-### #50: `keyword.Landwalk:Forest[*]`
+### #45: `keyword.Landwalk:Forest[*]`
 - ⚠️ **Signature reverted**: 1 prior revert(s) on this exact signature — most recent 2026-04-19T04:33:09+00:00: _Golden NDCG regression: drop +0.0004 (baseline 0.2461 -> fresh 0.2458, tolerance 0.0). rank_shifts=0 ndcg_drops=1_
 - **Reach**: 4 commanders carrying this signature; 0 get any rule activation (0%).
-- **Impact**: 4.0
+- **Impact**: 4.0 * forge_signal 1.32 = 5.3
 - **Template**: `peer_tribal_keyword`
 - **Rationale**: Keyword 'Landwalk:Forest' has a small card pool (28). Commanders carrying it want the rest of the pool as natural partners.
 - **Exemplar commanders** (no rule activation): Chatterfang, Squirrel General, Chorus of the Conclave, Jedit Ojanen of Efrava, Mirri, Cat Warrior
@@ -556,3 +496,43 @@ check: 100 commanders
 - **Tier sketches**:
   - same-keyword pool: card_ports.event_class='Landwalk:Forest'
 - **Estimated pool sizes**: same_keyword=28
+
+### #46: `scales_with.TotalCommanderCastFromCommandZone[*]`
+- **Reach**: 4 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 4.0 * forge_signal 1.31 = 5.2
+- **Template**: `needs_template`
+- **Rationale**: No template in the catalog matches `scales_with.TotalCommanderCastFromCommandZone[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
+- **Exemplar commanders** (no rule activation): Captain Vargus Wrath, Henzie "Toolbox" Torre, Jirina Kudro, Jyoti, Moag Ancient
+- **Gate sketch**: `port_type='scales_with' AND event_class='TotalCommanderCastFromCommandZone'`
+
+### #47: `scales_with.ThisTurnCast_Card.YouCtrl[*]`
+- **Reach**: 4 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 4.0 * forge_signal 1.29 = 5.2
+- **Template**: `needs_template`
+- **Rationale**: No template in the catalog matches `scales_with.ThisTurnCast_Card.YouCtrl[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
+- **Exemplar commanders** (no rule activation): Alisaie Leveilleur, Blanka, Ferocious Friend, Gnostro, Voice of the Crags, Narset, Jeskai Waymaster
+- **Gate sketch**: `port_type='scales_with' AND event_class='ThisTurnCast_Card.YouCtrl'`
+
+### #48: `keyword.Convoke[*]`
+- **Reach**: 4 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 4.0 * forge_signal 1.29 = 5.2
+- **Template**: `needs_template`
+- **Rationale**: No template in the catalog matches `keyword.Convoke[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
+- **Exemplar commanders** (no rule activation): Bennie Bracks, Zoologist, Hogaak, Arisen Necropolis, Kasla, the Broken Halo, The Wandering Rescuer
+- **Gate sketch**: `port_type='keyword' AND event_class='Convoke'`
+
+### #49: `scales_with.Domain[*]`
+- **Reach**: 4 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 4.0 * forge_signal 1.27 = 5.1
+- **Template**: `needs_template`
+- **Rationale**: No template in the catalog matches `scales_with.Domain[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
+- **Exemplar commanders** (no rule activation): Bortuk Bonerattle, Nael, Avizoa Aeronaut, Radha, Coalition Warlord, Zar Ojanen, Scion of Efrava
+- **Gate sketch**: `port_type='scales_with' AND event_class='Domain'`
+
+### #50: `scales_with.YouDrewThisTurn[*]`
+- **Reach**: 4 commanders carrying this signature; 0 get any rule activation (0%).
+- **Impact**: 4.0 * forge_signal 1.27 = 5.1
+- **Template**: `needs_template`
+- **Rationale**: No template in the catalog matches `scales_with.YouDrewThisTurn[*]` and no registered rule covers any commander carrying this signature. Pure gap — needs both a new rule and (probably) a new template entry.
+- **Exemplar commanders** (no rule activation): Elenda and Azor, Gwaihir the Windlord, June, Bounty Hunter, Kydele, Chosen of Kruphix
+- **Gate sketch**: `port_type='scales_with' AND event_class='YouDrewThisTurn'`
