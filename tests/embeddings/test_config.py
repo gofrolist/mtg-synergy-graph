@@ -49,6 +49,33 @@ def _make_kv_db(tmp_path: Path) -> sqlite3.Connection:
     return conn
 
 
+def _populate_kv(
+    conn: sqlite3.Connection,
+    inputs: emb_config.EmbeddingConfigInputs,
+    *,
+    override_hash: str | None = None,
+) -> None:
+    """Write all required KV rows for ``inputs`` into ``card_embeddings_config``.
+
+    When ``override_hash`` is given, stores that value instead of the
+    correct computed hash — the seam for corruption-test setup.
+    """
+    hash_value = override_hash if override_hash is not None else emb_config.compute_embedding_hash(inputs)
+    kv_rows = [
+        ("config_hash", hash_value),
+        ("token_format_version", inputs.token_format_version),
+        ("svd_dims", str(inputs.svd_dims)),
+        ("min_df", str(inputs.min_df)),
+        ("vectorizer_version", str(inputs.vectorizer_version)),
+        ("port_signature_version", inputs.port_signature_version),
+    ]
+    conn.executemany(
+        "INSERT INTO card_embeddings_config(key, value) VALUES (?, ?)",
+        kv_rows,
+    )
+    conn.commit()
+
+
 # ---------------------------------------------------------------------------
 # compute_embedding_hash — determinism + sensitivity
 # ---------------------------------------------------------------------------
@@ -123,41 +150,60 @@ def test_hash_stable_across_positional_vs_kwargs_construction() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_verify_passes_when_hash_matches(tmp_path: Path) -> None:
+def test_verify_passes_when_stored_matches_current(tmp_path: Path) -> None:
+    """Happy path: full KV rows + correct hash + matching inputs → no raise."""
     conn = _make_kv_db(tmp_path)
     try:
         inputs = _make_inputs()
-        expected = emb_config.compute_embedding_hash(inputs)
-        conn.execute(
-            "INSERT INTO card_embeddings_config(key, value) VALUES ('config_hash', ?)",
-            (expected,),
-        )
-        conn.commit()
-        # Must not raise.
+        _populate_kv(conn, inputs)
         emb_config.verify_current_or_raise(conn, inputs)
     finally:
         conn.close()
 
 
-def test_verify_raises_stale_on_hash_mismatch(tmp_path: Path) -> None:
+def test_verify_raises_stale_when_stored_inputs_diverge_from_code(tmp_path: Path) -> None:
+    """FU-1 regression guard: non-default build flags must not be silently stale.
+
+    Build wrote ``min_df=3`` and stored the correct hash for that. Code
+    defaults expect ``min_df=2``. Staleness check must fire with a
+    field-naming message — not return ``{}`` silently, not raise Corrupt.
+    """
     conn = _make_kv_db(tmp_path)
     try:
-        conn.execute("INSERT INTO card_embeddings_config(key, value) VALUES ('config_hash', 'stale_value_xxxx')")
-        conn.commit()
-        inputs = _make_inputs()
+        stored_inputs = _make_inputs(min_df=3)  # simulate --min-df 3 build
+        _populate_kv(conn, stored_inputs)
+        current_code_inputs = _make_inputs(min_df=2)  # current code default
         with pytest.raises(emb_config.EmbeddingConfigStaleError) as exc_info:
-            emb_config.verify_current_or_raise(conn, inputs)
+            emb_config.verify_current_or_raise(conn, current_code_inputs)
         message = str(exc_info.value)
-        # Message must include both stored and current hashes + rebuild cmd.
-        assert "stale_value" in message
-        current_hash = emb_config.compute_embedding_hash(inputs)
-        assert current_hash[:12] in message
+        # Message names the diverging field so a developer sees it immediately.
+        assert "min_df" in message
+        assert "stored=3" in message
+        assert "current=2" in message
         assert "uv run scripts/build_embeddings.py" in message
     finally:
         conn.close()
 
 
-def test_verify_raises_missing_when_hash_row_absent(tmp_path: Path) -> None:
+def test_verify_raises_corrupt_when_stored_hash_contradicts_rows(tmp_path: Path) -> None:
+    """Partial-write simulation: rows were written but hash wasn't updated."""
+    conn = _make_kv_db(tmp_path)
+    try:
+        inputs = _make_inputs()
+        _populate_kv(conn, inputs, override_hash="a" * 64)  # wrong but well-formed hash
+        with pytest.raises(emb_config.EmbeddingConfigCorruptError) as exc_info:
+            emb_config.verify_current_or_raise(conn, inputs)
+        message = str(exc_info.value)
+        correct_hash = emb_config.compute_embedding_hash(inputs)
+        assert "aaaaaaaaaaaa" in message  # stored hash truncated prefix
+        assert correct_hash[:12] in message  # recomputed hash truncated prefix
+        assert "uv run scripts/build_embeddings.py" in message
+    finally:
+        conn.close()
+
+
+def test_verify_raises_missing_when_kv_table_empty(tmp_path: Path) -> None:
+    """Empty KV table → Missing, not Corrupt or Stale."""
     conn = _make_kv_db(tmp_path)
     try:
         inputs = _make_inputs()
@@ -167,14 +213,79 @@ def test_verify_raises_missing_when_hash_row_absent(tmp_path: Path) -> None:
         conn.close()
 
 
-def test_stale_and_missing_inherit_from_common_base() -> None:
-    """Catching the base class subsumes both failure modes.
+def test_verify_raises_missing_when_required_key_absent(tmp_path: Path) -> None:
+    """Only ``config_hash`` present (pre-Unit-2 style DB) → Missing."""
+    conn = _make_kv_db(tmp_path)
+    try:
+        inputs = _make_inputs()
+        expected = emb_config.compute_embedding_hash(inputs)
+        conn.execute(
+            "INSERT INTO card_embeddings_config(key, value) VALUES ('config_hash', ?)",
+            (expected,),
+        )
+        conn.commit()
+        with pytest.raises(emb_config.EmbeddingConfigMissingError) as exc_info:
+            emb_config.verify_current_or_raise(conn, inputs)
+        assert "missing required keys" in str(exc_info.value)
+    finally:
+        conn.close()
 
-    Inference-path callers rely on this to degrade gracefully without
-    type-matching every subclass.
+
+def test_verify_raises_missing_when_svd_dims_malformed(tmp_path: Path) -> None:
+    """Non-integer svd_dims KV value → Missing (malformed) with clear message."""
+    conn = _make_kv_db(tmp_path)
+    try:
+        inputs = _make_inputs()
+        _populate_kv(conn, inputs)
+        # Corrupt the int field after populating valid rows.
+        conn.execute("UPDATE card_embeddings_config SET value = 'not_an_int' WHERE key = 'svd_dims'")
+        conn.commit()
+        with pytest.raises(emb_config.EmbeddingConfigMissingError) as exc_info:
+            emb_config.verify_current_or_raise(conn, inputs)
+        assert "malformed" in str(exc_info.value)
+    finally:
+        conn.close()
+
+
+def test_verify_raises_missing_when_kv_table_does_not_exist(tmp_path: Path) -> None:
+    """No ``card_embeddings_config`` table at all → Missing (graceful)."""
+    db_path = tmp_path / "bare.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        inputs = _make_inputs()
+        with pytest.raises(emb_config.EmbeddingConfigMissingError) as exc_info:
+            emb_config.verify_current_or_raise(conn, inputs)
+        assert "table is missing" in str(exc_info.value)
+    finally:
+        conn.close()
+
+
+def test_all_error_classes_inherit_from_common_base() -> None:
+    """Catching the base class subsumes all three failure modes.
+
+    Inference-path callers (``load_card_embeddings_verified``) rely on
+    this to degrade gracefully without type-matching every subclass.
     """
     assert issubclass(emb_config.EmbeddingConfigStaleError, emb_config.EmbeddingConfigError)
     assert issubclass(emb_config.EmbeddingConfigMissingError, emb_config.EmbeddingConfigError)
+    assert issubclass(emb_config.EmbeddingConfigCorruptError, emb_config.EmbeddingConfigError)
+
+
+def test_read_stored_config_returns_stored_not_current(tmp_path: Path) -> None:
+    """``read_stored_config`` must return the artifact's build-time inputs.
+
+    Provenance guarantee: the helper reflects what was written, not
+    what ``get_embedding_config_inputs()`` returns right now.
+    """
+    conn = _make_kv_db(tmp_path)
+    try:
+        stored_inputs = _make_inputs(min_df=3, svd_dims=64, vectorizer_version=2)
+        _populate_kv(conn, stored_inputs)
+        read_inputs, read_hash = emb_config.read_stored_config(conn)
+        assert read_inputs == stored_inputs
+        assert read_hash == emb_config.compute_embedding_hash(stored_inputs)
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------

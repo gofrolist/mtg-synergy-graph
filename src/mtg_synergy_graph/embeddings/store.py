@@ -30,16 +30,37 @@ from datetime import UTC, datetime
 import numpy as np
 
 from mtg_synergy_graph.embeddings.config import (
+    _DEFAULT_SVD_DIMS,
     EmbeddingConfigInputs,
     compute_embedding_hash,
 )
 
 logger = logging.getLogger(__name__)
 
-#: Fixed dimensionality of every persisted vector. Matches
-#: ``EmbeddingConfigInputs.svd_dims``. A rebuild that changes this must
-#: also bump ``vectorizer_version`` so the hash invalidates.
-_EMBEDDING_DIM: int = 128
+
+def _read_expected_dim(conn: sqlite3.Connection) -> int:
+    """Return the ``svd_dims`` that stored rows should match.
+
+    Reads from ``card_embeddings_config`` so a non-default build (e.g.,
+    ``--svd-dims 64``) doesn't get silently filtered out by a hardcoded
+    128. Falls back to :data:`_DEFAULT_SVD_DIMS` when the KV row is
+    absent (pre-Unit-2 DB) — matches the historical behavior.
+
+    Never raises: table-missing, key-missing, and malformed-int all
+    degrade to the default. The caller (``load_card_embeddings``) is a
+    graceful-fallback function and must not crash on a partially-built
+    DB.
+    """
+    try:
+        row = conn.execute("SELECT value FROM card_embeddings_config WHERE key = 'svd_dims'").fetchone()
+    except sqlite3.OperationalError:
+        return _DEFAULT_SVD_DIMS
+    if row is None:
+        return _DEFAULT_SVD_DIMS
+    try:
+        return int(row[0])
+    except (TypeError, ValueError):
+        return _DEFAULT_SVD_DIMS
 
 
 def write_vectors(
@@ -147,6 +168,8 @@ def load_card_embeddings(conn: sqlite3.Connection) -> dict[str, np.ndarray]:
         logger.warning("card_embeddings table is empty; returning empty dict")
         return {}
 
+    expected_dim = _read_expected_dim(conn)
+
     out: dict[str, np.ndarray] = {}
     for name, blob in rows:
         try:
@@ -155,12 +178,12 @@ def load_card_embeddings(conn: sqlite3.Connection) -> dict[str, np.ndarray]:
         except (ValueError, TypeError) as exc:
             logger.warning("skipping %s: blob decode failed: %s", name, exc)
             continue
-        if len(vector) != _EMBEDDING_DIM:
+        if len(vector) != expected_dim:
             logger.warning(
                 "skipping %s: vector length %d != expected %d",
                 name,
                 len(vector),
-                _EMBEDDING_DIM,
+                expected_dim,
             )
             continue
         if not vector.any():

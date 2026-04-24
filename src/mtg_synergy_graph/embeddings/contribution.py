@@ -124,6 +124,13 @@ def embedding_contribution(
     # other floats, so keeping numpy scalars would leak dtype
     # sensitivity into downstream arithmetic.
     cosine = float(v_cand @ v_cmdr)
+    # FU-4 guard: a degenerate input (all-zero vector that slipped past
+    # the store filter, or an inf from an upstream bug) can produce
+    # NaN/inf here. Propagating either contaminates the final score
+    # and breaks Python sort ordering. Short-circuit to 0.0 — the
+    # graceful-fallback contract for this function.
+    if not math.isfinite(cosine):
+        return 0.0
     decay = math.exp(-_EMBEDDING_K * n_rules)
     return _EMBEDDING_W * decay * cosine
 

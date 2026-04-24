@@ -79,18 +79,49 @@ class EmbeddingConfigInputs(NamedTuple):
 class EmbeddingConfigError(RuntimeError):
     """Base class for ``card_embeddings_config`` contract failures.
 
-    Catching this subsumes both the "missing hash row" and "stale hash"
+    Catching this subsumes the missing-rows, corruption, and stale
     cases. Inference-path callers (per plan D6) catch this and degrade
     to ``{}``; strict offline consumers re-raise.
     """
 
 
 class EmbeddingConfigMissingError(EmbeddingConfigError):
-    """Raised when ``card_embeddings_config`` has no ``config_hash`` row."""
+    """Raised when required ``card_embeddings_config`` KV rows are absent."""
+
+
+class EmbeddingConfigCorruptError(EmbeddingConfigError):
+    """Raised when stored KV rows do not hash back to the stored ``config_hash``.
+
+    Indicates a partial write (rows updated without hash, or vice versa).
+    Distinct from ``Stale`` — a corrupt artifact is internally
+    inconsistent, while a stale artifact is internally consistent but
+    built under a different version of the code than the reader.
+    """
 
 
 class EmbeddingConfigStaleError(EmbeddingConfigError):
-    """Raised when the DB's stored hash does not match the current config."""
+    """Raised when the stored config diverges from what the current code expects.
+
+    The stored artifact is internally consistent (corruption check
+    passes), but was built under different ``EmbeddingConfigInputs`` —
+    e.g., the builder used ``--min-df 3`` while the current code
+    defaults to ``min_df=2``. Rebuild with matching flags, or update
+    the defaults to match the build.
+    """
+
+
+#: KV keys that must all be present for ``read_stored_config`` to
+#: reconstruct a complete ``EmbeddingConfigInputs``. Excludes
+#: ``built_at`` (diagnostic only) but includes ``config_hash`` (the
+#: corruption check's expected value).
+_REQUIRED_CONFIG_KEYS: tuple[str, ...] = (
+    "config_hash",
+    "token_format_version",
+    "svd_dims",
+    "min_df",
+    "vectorizer_version",
+    "port_signature_version",
+)
 
 
 def compute_embedding_hash(inputs: EmbeddingConfigInputs) -> str:
@@ -130,29 +161,112 @@ def get_embedding_config_inputs() -> EmbeddingConfigInputs:
     )
 
 
+def read_stored_config(
+    conn: sqlite3.Connection,
+) -> tuple[EmbeddingConfigInputs, str]:
+    """Reconstruct ``EmbeddingConfigInputs`` + stored hash from KV rows.
+
+    Returns ``(stored_inputs, stored_hash)`` where ``stored_inputs``
+    reflects the parameters actually used at build time — not the
+    current module-level defaults. This is the provenance-correct input
+    to both the corruption check and the staleness check in
+    :func:`verify_current_or_raise`.
+
+    Raises ``EmbeddingConfigMissingError`` if any required KV key is
+    absent (pre-Unit-2 DB, failed build, or foreign write path). Wraps
+    ``sqlite3.OperationalError`` (missing table) and malformed int
+    values in the same exception so callers see one failure class.
+
+    See ``docs/solutions/best-practices/verify-from-stored-config-not-code-defaults-2026-04-23.md``
+    for the generalized discipline this enforces.
+    """
+    try:
+        rows = dict(conn.execute("SELECT key, value FROM card_embeddings_config").fetchall())
+    except sqlite3.OperationalError as exc:
+        raise EmbeddingConfigMissingError(
+            "card_embeddings_config table is missing. Rebuild with `uv run scripts/build_embeddings.py` to populate it."
+        ) from exc
+
+    missing = [k for k in _REQUIRED_CONFIG_KEYS if k not in rows]
+    if missing:
+        raise EmbeddingConfigMissingError(
+            f"card_embeddings_config is missing required keys: {missing}. "
+            f"Rebuild with `uv run scripts/build_embeddings.py` to populate."
+        )
+
+    try:
+        stored_inputs = EmbeddingConfigInputs(
+            token_format_version=rows["token_format_version"],
+            svd_dims=int(rows["svd_dims"]),
+            min_df=int(rows["min_df"]),
+            vectorizer_version=int(rows["vectorizer_version"]),
+            port_signature_version=rows["port_signature_version"],
+        )
+    except (TypeError, ValueError) as exc:
+        raise EmbeddingConfigMissingError(
+            f"card_embeddings_config has malformed integer value: {exc}. "
+            f"Rebuild with `uv run scripts/build_embeddings.py` to refresh."
+        ) from exc
+
+    return stored_inputs, rows["config_hash"]
+
+
+def _format_input_differences(
+    stored: EmbeddingConfigInputs,
+    current: EmbeddingConfigInputs,
+) -> str:
+    """Return a human-readable list of diverging fields between two inputs."""
+    diffs = [
+        f"{key}: stored={getattr(stored, key)!r} != current={getattr(current, key)!r}"
+        for key in stored._asdict()
+        if getattr(stored, key) != getattr(current, key)
+    ]
+    return "; ".join(diffs) if diffs else "(no field-level differences — unreachable)"
+
+
 def verify_current_or_raise(
     conn: sqlite3.Connection,
-    inputs: EmbeddingConfigInputs,
+    current_code_inputs: EmbeddingConfigInputs,
 ) -> None:
-    """Assert the DB's stored hash matches the current config.
+    """Two-step verification against stored KV rows (not code defaults).
 
-    Raises ``EmbeddingConfigMissingError`` if no ``config_hash`` row is
-    present (DB was built before Unit 2 landed, or the
-    ``card_embeddings_config`` table is empty). Raises
-    ``EmbeddingConfigStaleError`` if the hash differs — message
-    includes both hashes (truncated) plus the rebuild command.
+    Step 1 — **corruption check**: reconstruct ``EmbeddingConfigInputs``
+    from the stored KV rows and confirm its hash matches the stored
+    ``config_hash``. A mismatch means the rows were partially written
+    (hash out of sync with values) — raises
+    ``EmbeddingConfigCorruptError``.
+
+    Step 2 — **staleness check**: the reconstructed stored inputs must
+    equal ``current_code_inputs`` (what the consuming code expects). A
+    divergence means the artifact was built with a different set of
+    parameters (e.g., ``--min-df 3`` vs current default ``min_df=2``)
+    — raises ``EmbeddingConfigStaleError`` naming the diverging fields.
+
+    The caller supplies ``current_code_inputs`` so tests can compare
+    against synthetic expectations. Production callers pass
+    :func:`get_embedding_config_inputs`.
+
+    See ``docs/solutions/best-practices/verify-from-stored-config-not-code-defaults-2026-04-23.md``
+    for why this must read from stored KV rather than recomputing from
+    current-code defaults.
     """
-    row = conn.execute("SELECT value FROM card_embeddings_config WHERE key = 'config_hash'").fetchone()
-    if row is None:
-        raise EmbeddingConfigMissingError(
-            "card_embeddings_config has no config_hash row. "
-            "Rebuild with `uv run scripts/build_embeddings.py` to populate it."
-        )
-    stored = row[0]
-    current = compute_embedding_hash(inputs)
-    if stored != current:
-        raise EmbeddingConfigStaleError(
-            f"card_embeddings was built under a different config "
-            f"(stored hash {stored[:12]}..., current {current[:12]}...). "
+    stored_inputs, stored_hash = read_stored_config(conn)
+
+    recomputed = compute_embedding_hash(stored_inputs)
+    if recomputed != stored_hash:
+        raise EmbeddingConfigCorruptError(
+            f"card_embeddings_config stored hash {stored_hash[:12]}... does not "
+            f"match hash recomputed from stored KV rows ({recomputed[:12]}...). "
+            f"DB is partially written. "
             f"Rebuild with `uv run scripts/build_embeddings.py` to refresh."
+        )
+
+    if stored_inputs != current_code_inputs:
+        diffs = _format_input_differences(stored_inputs, current_code_inputs)
+        raise EmbeddingConfigStaleError(
+            f"card_embeddings was built with different parameters than the "
+            f"current code expects. Diverging fields: {diffs}. "
+            f"Either rebuild with `uv run scripts/build_embeddings.py` using "
+            f"matching flags, or update the defaults in "
+            f"mtg_synergy_graph.embeddings.config to match the build."
         )

@@ -226,6 +226,53 @@ def test_contribution_candidate_not_in_vectors_returns_zero(monkeypatch: pytest.
     assert result == 0.0
 
 
+def test_contribution_nan_cosine_returns_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    """FU-4 guard: NaN cosine must not propagate into the score.
+
+    Constructs a degenerate vector pair that yields NaN via
+    ``v_cand @ v_cmdr`` (NaN in ``v_cand`` fans out through the dot).
+    Without the guard, ``0.5 * decay * NaN == NaN`` would contaminate
+    the final score and break Python's sort ordering.
+    """
+    monkeypatch.setattr(emb_contribution, "_ENABLE_EMBEDDING_CONTRIBUTION", True)
+    monkeypatch.setattr(emb_contribution, "_EMBEDDING_W", 0.5)
+    monkeypatch.setattr(emb_contribution, "_EMBEDDING_K", 0.8)
+
+    v_cmdr = _make_unit_vector(seed=30)
+    # Inject a NaN component — this can happen if an upstream bug emits
+    # a degenerate vector (zero-norm division, inf from a bad TF-IDF
+    # row, etc.). The guard must short-circuit to 0.0.
+    v_cand_bad = np.ones(128, dtype=np.float32)
+    v_cand_bad[0] = float("nan")
+
+    result = emb_contribution.embedding_contribution(
+        candidate_name="X",
+        n_rules=0,
+        v_cmdr=v_cmdr,
+        vectors={"X": v_cand_bad},
+    )
+    assert result == 0.0
+
+
+def test_contribution_inf_cosine_returns_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    """FU-4 guard: ±inf cosine must also short-circuit to 0.0."""
+    monkeypatch.setattr(emb_contribution, "_ENABLE_EMBEDDING_CONTRIBUTION", True)
+    monkeypatch.setattr(emb_contribution, "_EMBEDDING_W", 0.5)
+    monkeypatch.setattr(emb_contribution, "_EMBEDDING_K", 0.8)
+
+    v_cmdr = _make_unit_vector(seed=31)
+    v_cand_bad = np.zeros(128, dtype=np.float32)
+    v_cand_bad[0] = float("inf")
+
+    result = emb_contribution.embedding_contribution(
+        candidate_name="X",
+        n_rules=0,
+        v_cmdr=v_cmdr,
+        vectors={"X": v_cand_bad},
+    )
+    assert result == 0.0
+
+
 def test_contribution_n_rules_large_dampens_to_near_zero(monkeypatch: pytest.MonkeyPatch) -> None:
     """N_rules=20 → exp(-0.8*20) ~ 1.1e-7 → near-zero contribution."""
     monkeypatch.setattr(emb_contribution, "_ENABLE_EMBEDDING_CONTRIBUTION", True)

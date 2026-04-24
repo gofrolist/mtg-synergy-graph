@@ -225,6 +225,59 @@ def test_load_skips_wrong_length_row_and_keeps_valid_rows(tmp_path: Path, caplog
         conn.close()
 
 
+def test_load_reads_expected_dim_from_stored_config(tmp_path: Path) -> None:
+    """FU-1 regression: dim filter must come from stored config, not hardcode.
+
+    If a future build uses ``--svd-dims 64`` and populates 64-float rows,
+    ``load_card_embeddings`` should keep those rows, not silently skip
+    them because of a hardcoded 128. This test simulates that scenario
+    by populating a stored ``svd_dims=64`` KV row with matching 64-float
+    blobs.
+    """
+    conn = _make_store_db(tmp_path)
+    try:
+        # Populate KV table claiming svd_dims=64 was the build target.
+        conn.execute("INSERT INTO card_embeddings_config(key, value) VALUES ('svd_dims', '64')")
+        # Write a 64-float vector (non-zero so the load filter keeps it).
+        vec_64 = np.ones(64, dtype=np.float32).tobytes()
+        conn.execute(
+            "INSERT INTO card_embeddings(card_name, vector, vectorizer_version, built_at) VALUES (?, ?, ?, ?)",
+            ("SixtyFour", vec_64, 1, "2026-04-23T00:00:00+00:00"),
+        )
+        conn.commit()
+
+        result = emb_store.load_card_embeddings(conn)
+
+        assert "SixtyFour" in result
+        assert len(result["SixtyFour"]) == 64
+    finally:
+        conn.close()
+
+
+def test_load_falls_back_to_default_dim_when_no_config(tmp_path: Path) -> None:
+    """No stored config → fall back to _DEFAULT_SVD_DIMS (128).
+
+    Matches historical behavior so a DB that pre-dates Unit 2's
+    config-hash discipline still loads correctly.
+    """
+    conn = _make_store_db(tmp_path)
+    try:
+        # Valid 128-float vector, no KV config row.
+        valid_vec = _make_vector(99)
+        conn.execute(
+            "INSERT INTO card_embeddings(card_name, vector, vectorizer_version, built_at) VALUES (?, ?, ?, ?)",
+            ("Legacy", valid_vec.tobytes(), 1, "2026-04-23T00:00:00+00:00"),
+        )
+        conn.commit()
+
+        result = emb_store.load_card_embeddings(conn)
+
+        assert "Legacy" in result
+        assert len(result["Legacy"]) == 128
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Atomicity + replace-all semantics
 # ---------------------------------------------------------------------------

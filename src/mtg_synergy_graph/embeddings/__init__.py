@@ -14,12 +14,14 @@ from mtg_synergy_graph.embeddings.commander_target import (
     clear_cache,
 )
 from mtg_synergy_graph.embeddings.config import (
+    EmbeddingConfigCorruptError,
     EmbeddingConfigError,
     EmbeddingConfigInputs,
     EmbeddingConfigMissingError,
     EmbeddingConfigStaleError,
     compute_embedding_hash,
     get_embedding_config_inputs,
+    read_stored_config,
     verify_current_or_raise,
 )
 from mtg_synergy_graph.embeddings.contribution import (
@@ -41,6 +43,7 @@ from mtg_synergy_graph.embeddings.vectorizer import (
 
 __all__ = [
     "TOKEN_FORMAT_VERSION",
+    "EmbeddingConfigCorruptError",
     "EmbeddingConfigError",
     "EmbeddingConfigInputs",
     "EmbeddingConfigMissingError",
@@ -55,6 +58,7 @@ __all__ = [
     "get_embedding_config_inputs",
     "load_card_embeddings",
     "load_card_embeddings_verified",
+    "read_stored_config",
     "read_vector",
     "truncated_svd",
     "verify_current_or_raise",
