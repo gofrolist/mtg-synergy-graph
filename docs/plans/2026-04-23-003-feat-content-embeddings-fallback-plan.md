@@ -1,7 +1,7 @@
 ---
 title: "feat: Content embeddings as zero-shot fallback"
 type: feat
-status: active
+status: landed
 date: 2026-04-23
 origin: docs/brainstorms/2026-04-21-content-embeddings-requirements.md
 ---
@@ -392,7 +392,7 @@ Output is a sorted markdown table; JSON mode mirrors
 
 ## Implementation Units
 
-- [ ] **Unit 1: Feature vectorizer (pure function)**
+- [x] **Unit 1: Feature vectorizer (pure function)**
 
 **Goal:** Hand-rolled TF-IDF + truncated-SVD vectorizer over structured
 inputs. No DB writes yet — pure function from `{card_name: feature_tokens}`
@@ -449,7 +449,7 @@ to `{card_name: ndarray(128,)}`.
 
 ---
 
-- [ ] **Unit 2: Schema, config hash, and blob store**
+- [x] **Unit 2: Schema, config hash, and blob store**
 
 **Goal:** Add the `card_embeddings` and `card_embeddings_config` tables;
 define `EmbeddingConfigInputs` NamedTuple + `compute_embedding_hash` +
@@ -528,7 +528,7 @@ define `EmbeddingConfigInputs` NamedTuple + `compute_embedding_hash` +
 
 ---
 
-- [ ] **Unit 3: Build script + CI conftest stub**
+- [x] **Unit 3: Build script + CI conftest stub**
 
 **Goal:** User-invoked `scripts/build_embeddings.py` that wires
 Unit 1 (vectorizer) + Unit 2 (store) end-to-end. Autouse conftest stub so
@@ -594,7 +594,7 @@ rebuilt.
 
 ---
 
-- [ ] **Unit 4: Commander target vector (lazy + cached)**
+- [x] **Unit 4: Commander target vector (lazy + cached)**
 
 **Goal:** `build_commander_target_vector(commander_set, vectors,
 golden_hi_syn)` that returns the L2-normalized mean of the commander's own
@@ -649,7 +649,7 @@ Module-level `functools.cache` keyed by `tuple(commander_set)`.
 
 ---
 
-- [ ] **Unit 5: Inference-path reader with graceful-fallback contract**
+- [x] **Unit 5: Inference-path reader with graceful-fallback contract**
 
 **Goal:** `load_card_embeddings(conn) -> dict[str, np.ndarray]` and
 `embedding_contribution(score, v_cmdr, vectors) -> float` that the scorer
@@ -714,7 +714,7 @@ graceful-fallback return paths before writing the function body.
 
 ---
 
-- [ ] **Unit 6: `bench.py audit --embedding-dedup` diagnostic**
+- [x] **Unit 6: `bench.py audit --embedding-dedup` diagnostic**
 
 **Goal:** New audit mode that consumes the `rule_contributions` tensor +
 `card_embeddings` and flags rule pairs whose candidate-activation sets
@@ -792,7 +792,7 @@ Survivor 1 `rule_contributions` tensor (already landed).
 
 ---
 
-- [ ] **Unit 7: The flip — plumb flag, wire scorer, render `--explain`**
+- [x] **Unit 7: The flip — plumb flag, wire scorer, render `--explain`**
 
 **Goal:** Add the three constants to `ScoringConfigInputs`, wire the
 `embedding_contribution` term into `score_all_universal`'s results loop,
