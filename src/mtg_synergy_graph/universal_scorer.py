@@ -736,13 +736,26 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # axis, static.UntapOtherPlayer: Seedborn Muse, Prophet of Kruphix,
     # Murkfiend Liege) > tap_type_phase_untap (~10 cards per axis,
     # Phase-trigger + UntapAll: Awakening, White Plume Adventurer).
-    # 2.0× multiplier (vs counter/modified's 3.0×) because the pool is
-    # very narrow (~20 cards per axis) so each match's IDF is already
-    # high (~0.29). 3.0× flooded Aryel/Kumena's top-30 with untap
-    # cards and displaced their tribal EDHREC Hi-Syn picks (-0.16 /
-    # -0.07 NDCG); 2.0× keeps the tier visible (6 untaps in Aryel's
-    # top 15) without dominating Knight-lords / Merfolk-lords.
-    "tap_type_feeder": 2.0,
+    #
+    # 3.0× flooded Aryel/Kumena's top-30 with untap cards in an
+    # early audit; 2.0× was chosen as a conservative backoff. After
+    # this session's rebalance (especially gy_fuel_feeder dampen and
+    # cost_reducer boost) the audit flagged tap_type_feeder HARMFUL
+    # — -1 hits / +0.155 NDCG / Aryel -2 hits / Raff -1 hit — the
+    # 2.0× was still over-boosting narrow untap cards against
+    # archetype-correct picks on neighbouring commanders.
+    #
+    # 2026-04-24 sweep at 0.8 / 1.0 / 1.3 / 1.5 / 2.0:
+    #   0.8: +3 hits / +0.281 NDCG / positive
+    #   1.0: +3 hits / +0.329 NDCG / positive       ← peak
+    #   1.3: +2 hits / +0.245 NDCG / MARGINAL
+    #   1.5: +2 hits / +0.226 NDCG / MARGINAL
+    #   2.0: -1 hits / +0.155 NDCG / HARMFUL        (prior state)
+    # At 1.0× (no boost) the rule recovers Kirol +1 hit / +0.138,
+    # Belisarius Cawl +1 / +0.080, Shao Jun +1 / +0.018 — the narrow
+    # pool already has high IDF (~0.29 per match) and didn't need
+    # amplification once the neighbouring IDF noise was cleaned up.
+    "tap_type_feeder": 1.0,
     # hand_size_feeder: big-hand commanders (scales_with ValidHand
     # Card.YouOwn, rejecting small-hand signals LE0/LE1/EQ0/GE2/GE3
     # on the hand-binding SVar — Hazoret/Neheb/Djeru-and-Hazoret/Flubs).
