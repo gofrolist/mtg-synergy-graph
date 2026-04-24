@@ -13,6 +13,7 @@ from __future__ import annotations
 from mtg_synergy_graph.bench import cli as _cli
 from mtg_synergy_graph.bench.audit import handle_audit, run_audit
 from mtg_synergy_graph.bench.cli import main
+from mtg_synergy_graph.bench.embedding_dedup_handler import handle_embedding_dedup
 from mtg_synergy_graph.bench.fixture import (
     FixtureEntry,
     PinnedFixture,
@@ -58,6 +59,10 @@ _cli.register("trend", handle_trend_hidden_gems)
 # Plan 002 Unit 7 — Kendall τ sidecar: compare our top-N to Forge
 # CardRanker's ranking over the same candidate set.
 _cli.register("vs_forge_oracle", handle_vs_forge_oracle)
+# Plan 003 (content-embeddings) Unit 6 — rule-pair embedding dedup
+# diagnostic. Flags rule pairs whose candidate-activation sets are
+# near-parallel in embedding space.
+_cli.register("embedding_dedup", handle_embedding_dedup)
 
 __all__ = [
     "AuditReport",

@@ -17,6 +17,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from mtg_synergy_graph.db import open_db
@@ -197,3 +198,95 @@ def test_sink_matches_legacy_buckets(scoring_fixture: sqlite3.Connection) -> Non
         assert sink_contrib == pytest.approx(expected, abs=1e-12), (
             f"sink contribution for ({cand}, {rule_id}) = {sink_contrib}, but legacy computation = {expected}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Plan 003 Unit 7 — embedding contribution flag-off identity invariant.
+# ---------------------------------------------------------------------------
+
+
+def test_embedding_contribution_field_defaults_to_zero_when_flag_off(
+    scoring_fixture: sqlite3.Connection,
+) -> None:
+    """R7/Unit7: ``_ENABLE_EMBEDDING_CONTRIBUTION=False`` (module default)
+    → every ``UniversalScore`` carries ``embedding_contribution == 0.0``
+    exactly, so ``score`` totals are bitwise-identical to the pre-plan
+    path (no embedding term contributes).
+
+    This is the flag-off identity guardrail required by the plan's
+    Execution note for Unit 7: before field plumbing landed this test
+    failed with ``AttributeError`` (no such field); after plumbing it
+    must pass trivially because every short-circuit in the scorer wire
+    lands on 0.0 when the flag is off.
+    """
+    from mtg_synergy_graph.embeddings import contribution as emb_contribution
+
+    # Lock both safety layers: if ``_EMBEDDING_W`` drifts from 0.0 while
+    # the flag stays False the short-circuit masks it and the flag-off
+    # assertion becomes vacuous. Pin ``_EMBEDDING_K`` too against its
+    # documented default (0.8) so any tune drift is caught here as well.
+    assert emb_contribution._EMBEDDING_W == 0.0
+    assert emb_contribution._EMBEDDING_K == 0.8
+
+    # Belt-and-suspenders: the plan forbids flipping the default in this
+    # unit. If a future edit sets True as the default here the audit
+    # sweep owns that flip, not this test — fail loud if it drifts.
+    assert emb_contribution._ENABLE_EMBEDDING_CONTRIBUTION is False
+
+    scores = score_all_universal(scoring_fixture, ["Test Commander"])
+
+    for name, score_obj in scores.items():
+        assert score_obj.embedding_contribution == 0.0, (
+            f"{name}: embedding_contribution must be exactly 0.0 when flag "
+            f"is off, got {score_obj.embedding_contribution}"
+        )
+
+
+def test_embedding_contribution_nonzero_when_flag_on(
+    scoring_fixture: sqlite3.Connection,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flag on + w_emb=0.5 + populated ``card_embeddings`` → at least one
+    candidate has a nonzero embedding contribution.
+
+    Complements the flag-off identity test: proves the wire is actually
+    live (not a dead branch) when the gate opens. Uses a synthetic
+    deterministic vector per candidate so the cosine math is testable.
+    """
+    from mtg_synergy_graph.embeddings import commander_target as ct
+    from mtg_synergy_graph.embeddings import config as emb_config
+    from mtg_synergy_graph.embeddings import contribution as emb_contribution
+    from mtg_synergy_graph.embeddings import store as emb_store
+
+    # Flip the flag + enable a nonzero weight. Module-level defaults are
+    # restored at teardown by pytest's monkeypatch.
+    monkeypatch.setattr(emb_contribution, "_ENABLE_EMBEDDING_CONTRIBUTION", True)
+    monkeypatch.setattr(emb_contribution, "_EMBEDDING_W", 0.5)
+    # Ensure commander-target cache is cold for this scenario.
+    ct.clear_cache()
+
+    # Populate card_embeddings on the same connection the scorer uses.
+    # Every card in the fixture gets a deterministic L2-normalized vector.
+    def _seeded(seed: int) -> np.ndarray:
+        rng = np.random.default_rng(seed)
+        v = rng.standard_normal(128).astype(np.float32)
+        return (v / np.linalg.norm(v)).astype(np.float32)
+
+    vectors = {
+        "Test Commander": _seeded(1),
+        "Token Maker": _seeded(2),
+        "Counter Doubler": _seeded(3),
+        "Generic Creature": _seeded(4),
+    }
+    emb_store.write_vectors(
+        scoring_fixture,
+        vectors,
+        emb_config.get_embedding_config_inputs(),
+    )
+
+    scores = score_all_universal(scoring_fixture, ["Test Commander"])
+
+    assert any(s.embedding_contribution != 0.0 for s in scores.values()), (
+        "With flag on + populated vectors, at least one candidate should have a nonzero embedding contribution"
+    )

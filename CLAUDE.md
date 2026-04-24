@@ -40,6 +40,9 @@ uv run scripts/bench.py audit --unknowns                                 # List 
 uv run scripts/bench.py audit --inspect-gems                             # Per-commander lost/gained hidden-gem diff (plan 003-gem)
 uv run scripts/bench.py audit --trend hidden_gems --trend-n 20           # CSV history of aggregate hidden_gem_hit_rate across audit runs
 uv run scripts/bench.py audit --vs-forge-oracle                          # Kendall-τ sidecar comparing our top-N vs Forge CardRanker (plan 002)
+uv run scripts/build_embeddings.py                                       # Build card_embeddings after cardsfolder refresh (plan 2026-04-23-003)
+uv run scripts/bench.py audit --embedding-dedup                          # Rule-pair redundancy diagnostic in embedding space
+uv run scripts/bench.py audit --embedding-dedup --threshold 0.90         # Looser threshold for exploration
 
 # Forge-Second-Oracle pipeline (plan 2026-04-23-002) — design-time only, never at inference.
 uv run scripts/forge_oracle.py build                                     # Build data/forge_oracle.db from Forge precon .dck corpus (~670 decks)
@@ -47,8 +50,9 @@ uv run scripts/forge_oracle.py propose-rules --top 20                    # N rul
 ```
 
 The bench.py hook also runs advisorily on pre-commit when edits touch
-`complement_rules/`, `universal_scorer.py`, or `graph_engine.py`; see
-`memory/feedback_audit_every_change.md` for the guardrail.
+`complement_rules/`, `universal_scorer.py`, `graph_engine.py`, or
+`embeddings/`; see `memory/feedback_audit_every_change.md` for the
+guardrail.
 
 ## Data Model
 
@@ -188,6 +192,33 @@ from mechanics" intent, now measurable.
 5. Compute IDF weights from candidate frequency
 6. Score each candidate = sum of IDF-weighted synergy - anti-synergy + staple bonus
 7. Sort by (-score, cmc, edhrec_rank, name)
+
+### Content embeddings (plan 003, flag-gated)
+
+128-dim deterministic TF-IDF + truncated-SVD vectors per card (hand-rolled,
+numpy only — no scipy/sklearn). Features: `port_type`, `event_class`,
+`zone_origin`/`zone_destination`, `counter_type`, `branch_kind`,
+exploded `port_attributes` rows, Scryfall keywords. No oracle-text,
+no popularity.
+
+- **Storage**: `card_embeddings` + `card_embeddings_config` tables in
+  `data/synergy.db`. Built by `scripts/build_embeddings.py`; rebuilt
+  after each `import_cardsfolder.py` refresh. Hybrid hash discipline
+  (plan 2026-04-23-003 D3): `EmbeddingConfigInputs` + KV table +
+  `ScoringConfigInputs.vectorizer_version`.
+- **Scoring**: `embedding_contribution = w_emb · exp(-k · N_rules) ·
+  cosine(v_cand, v_cmdr_target)`. Exponential decay so well-rule-
+  covered candidates see near-zero contribution.
+- **Flag**: `_ENABLE_EMBEDDING_CONTRIBUTION = False` default-off
+  (`src/mtg_synergy_graph/embeddings/contribution.py`). Audit-gated
+  weight sweep + re-pin required before flipping to True.
+- **Diagnostic**: `bench.py audit --embedding-dedup` flags rule
+  pairs with near-parallel candidate-activation sets in embedding
+  space. Complements `--collinearity` (different mechanism, same
+  intent).
+- **Commander target**: lazy + `functools.cache` keyed by
+  `(commander_set, hi_syn_limit)`. EDHREC hi-syn used OFFLINE
+  ONLY at target-vector build; inference path is EDHREC-clean.
 
 ### Key Files
 

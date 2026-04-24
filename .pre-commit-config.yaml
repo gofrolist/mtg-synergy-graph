@@ -33,6 +33,6 @@ repos:
         entry: uv run python -m mtg_synergy_graph.bench.hook_entry
         language: system
         pass_filenames: false
-        files: ^src/mtg_synergy_graph/(complement_rules/.*\.py|universal_scorer\.py|graph_engine\.py)$
+        files: ^src/mtg_synergy_graph/(complement_rules/.*\.py|universal_scorer\.py|graph_engine\.py|embeddings/.*\.py)$
         stages: [pre-commit]
         verbose: true
