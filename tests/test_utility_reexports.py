@@ -124,7 +124,6 @@ def test_core_legacy_import_still_works() -> None:
         _find_creature_untap_engine,
         _find_creatures_as_lands_landfall,
         _find_damage_doubler_synergy,
-        _find_etb_tapped_stax_feeders,
         _find_extra_land_plays,
         _find_flicker_payoffs,
         _find_flicker_synergy,

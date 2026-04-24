@@ -119,7 +119,6 @@ _RULE_HELPER_OVERRIDES: dict[str, str] = {
     "damage_synergy": "_find_damage_effect_synergy",
     "edict_feeder": "_find_edict_feeders",
     "etb_self": "_find_etb_self_complements",
-    "etb_tapped_stax_feeder": "_find_etb_tapped_stax_feeders",
     "evasion": "_find_evasion_complements",
     "exalted_density": "_find_static_strategy",
     "flicker_payoff": "_find_flicker_payoffs",

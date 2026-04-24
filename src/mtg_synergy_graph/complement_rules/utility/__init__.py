@@ -46,7 +46,6 @@ from .political import (
 )
 from .resource_feeders import (
     _find_creature_died_feeders,
-    _find_etb_tapped_stax_feeders,
     _find_gy_fuel_feeders,
     _find_land_bounce_feeders,
     _find_life_total_feeders,
@@ -69,7 +68,6 @@ __all__ = [
     "_find_creature_untap_engine",
     "_find_creatures_as_lands_landfall",
     "_find_damage_doubler_synergy",
-    "_find_etb_tapped_stax_feeders",
     "_find_extra_land_plays",
     "_find_flicker_payoffs",
     "_find_flicker_synergy",

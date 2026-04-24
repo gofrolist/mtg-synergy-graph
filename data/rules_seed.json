@@ -346,6 +346,37 @@
       "cand_event": "party_peer",
       "weight_hint": 2.5,
       "active": 1
+    },
+    {
+      "rule_id": "etb_tapped_stax_feeder",
+      "family": "stax",
+      "gate_predicate": {
+        "op": "and",
+        "args": [
+          {"op": "has_port", "port_type": "replacement", "event_class": "Moved", "replacement_result": "ETBTapped"},
+          {"op": "not", "args": [{"op": "filter_tag", "tag": "Self"}]}
+        ]
+      },
+      "commander_port_predicate": {
+        "op": "and",
+        "args": [
+          {"op": "has_port", "port_type": "replacement", "event_class": "Moved", "replacement_result": "ETBTapped"},
+          {"op": "not", "args": [{"op": "filter_tag", "tag": "Self"}]}
+        ]
+      },
+      "candidate_port_predicate": {
+        "op": "and",
+        "args": [
+          {"op": "has_port", "port_type": "replacement", "event_class": "Moved", "replacement_result": "ETBTapped"},
+          {"op": "not", "args": [{"op": "filter_tag", "tag": "Self"}]},
+          {"op": "not_in_commander_set"}
+        ]
+      },
+      "filter_group": "",
+      "cmdr_event": "etb_tapped_stax_axis",
+      "cand_event": "etb_tapped_stax_peer",
+      "weight_hint": 2.5,
+      "active": 1
     }
   ]
 }

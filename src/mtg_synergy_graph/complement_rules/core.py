@@ -1093,7 +1093,6 @@ from .utility import (  # noqa: E402
     _find_creature_untap_engine,
     _find_creatures_as_lands_landfall,
     _find_damage_doubler_synergy,
-    _find_etb_tapped_stax_feeders,
     _find_extra_land_plays,
     _find_flicker_payoffs,
     _find_flicker_synergy,
@@ -1286,7 +1285,6 @@ def find_all_complements(
         out.extend(_find_lifegain_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_life_total_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_land_bounce_feeders(conn, cmdr_ports, cmdr_set))
-        out.extend(_find_etb_tapped_stax_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_creature_died_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_damage_doubler_synergy(conn, cmdr_ports, cmdr_set))
         # Plan 2026-04-23-001: depth-2 self-bridging pathway rule

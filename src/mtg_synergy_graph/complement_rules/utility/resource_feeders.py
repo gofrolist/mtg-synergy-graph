@@ -512,77 +512,10 @@ def _find_creature_died_feeders(
 # Canonical peer-match shape: scales_with.Party on both commander and candidate.
 
 
-def _find_etb_tapped_stax_feeders(
-    conn: sqlite3.Connection,
-    cmdr_ports: list[PortRow],
-    cmdr_set: set[str],
-) -> list[PortComplement]:
-    """Rule for stax / pillowfort commanders whose ``replacement.Moved``
-    port forces **external** permanents to enter the battlefield tapped.
-
-    Target archetype: tempo-denial hatebear commanders — Reidane (snow
-    lands ETB tapped), Spider-Woman (opp artifacts + creatures),
-    Thalia and The Gitrog Monster and Thalia, Heretic Cathar (opp
-    creatures + non-basic lands), Urabrask the Hidden (opp creatures),
-    Zhao, the Moon Slayer (non-basic lands), Archelos, Lagoon Mystic
-    (all permanents while Self tapped).
-
-    The gate explicitly excludes the Card.Self flavor (~542 cards —
-    every tapped land plus creatures like Grimgrin / Ebondeath /
-    Alirios / Taeko whose "ETBs tapped" is a drawback, not a stax
-    tool). Those cmdrs have their own archetype coverage via
-    sacrifice_outlets / graveyard_filler / etb_self.
-
-    Single tier:
-
-    - ``etb_tapped_stax_peer``: other cards with
-      ``replacement.Moved`` + ``replacement_result='ETBTapped'`` whose
-      ``valid_filter`` does NOT reference ``Card.Self``. ~24 cards —
-      Authority of the Consuls, Kismet, Blind Obedience, Loxodon
-      Gatekeeper, Kinjalli's Sunwing, Imposing Sovereign, Manglehorn,
-      Dauntless Dismantler, Archon of Emeria, Phyrexian Censor, Frozen
-      Aether, Orb of Dreams, Root Maze, False Floor, Uphill Battle,
-      Ashling's Prerogative, Radiant Grace. Tight pool, high IDF, all
-      EDHREC stax staples.
-    """
-    has_external_etb_tapped = False
-    for p in cmdr_ports:
-        if (p.get("port_type") or "").strip() != "replacement":
-            continue
-        if (p.get("event_class") or "").strip() != "Moved":
-            continue
-        if (p.get("replacement_result") or "").strip() != "ETBTapped":
-            continue
-        vf = p.get("valid_filter") or ""
-        if "Self" in vf:
-            continue
-        has_external_etb_tapped = True
-        break
-    if not has_external_etb_tapped:
-        return []
-
-    peer_set: set[str] = {
-        row["card_name"]
-        for row in conn.execute(
-            "SELECT DISTINCT card_name FROM card_ports "
-            "WHERE port_type = 'replacement' "
-            "AND event_class = 'Moved' "
-            "AND replacement_result = 'ETBTapped' "
-            "AND (valid_filter IS NULL OR valid_filter NOT LIKE '%Self%')"
-        )
-    }
-
-    results: list[PortComplement] = []
-    for name in peer_set:
-        if name in cmdr_set:
-            continue
-        results.append(
-            PortComplement(
-                rule_id="etb_tapped_stax_feeder",
-                direction="synergy",
-                candidate=name,
-                cmdr_event="etb_tapped_stax_axis",
-                cand_event="etb_tapped_stax_peer",
-            )
-        )
-    return results
+# etb_tapped_stax_feeder migrated to data/rules_seed.json on 2026-04-24
+# (declarative path). Stax-shape peer match: replacement.Moved + ETBTapped
+# with NOT filter_tag('Self') on both commander and candidate. DB scan
+# confirmed zero NULL valid_filter rows in this port shape, so the
+# SQLite NULL-handling difference between Python's
+# "valid_filter IS NULL OR valid_filter NOT LIKE '%Self%'" and the grammar's
+# "NOT (valid_filter LIKE '%Self%')" does not affect real data.
