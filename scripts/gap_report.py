@@ -17,10 +17,18 @@ Replaces the manual "read coverage, pick a cell, propose a rule" loop
 with a single command. The next rule to write is whatever sits at the
 top of the report, with no human prioritization required.
 
-Rules without a registered gate are invisible to the auditor — by
-design. The contract for new rules is "register a gate alongside the
-helper". Without registration, the rule still works at runtime but
-the auditor can't attribute its activations.
+The auditor walks both coverage substrates:
+  * Python helpers registered in ``complement_rules.registry.RULE_GATES``
+    (each gate is a ``(rule_id, predicate)`` pair).
+  * Declarative rules in ``data/rules_seed.json`` — the ``RuleInterpreter``
+    compiles their ``gate_predicate`` JSON into equivalent port-level
+    predicates so this scan treats them the same way as Python helpers.
+
+Either substrate is sufficient for attribution; the contract is just
+"somewhere a gate exists" (2026-04-24 update). Without gate registration
+on EITHER side the rule still runs but the auditor cannot attribute
+its activations — the old blindspot was real and produced spurious
+0%-coverage reports for declarative-only rules.
 """
 
 from __future__ import annotations
@@ -40,6 +48,7 @@ from mtg_synergy_graph.complement_rules.core import (
 )
 from mtg_synergy_graph.complement_rules.registry import RULE_GATES
 from mtg_synergy_graph.forge_oracle import gap_weight as _forge_gap_weight
+from mtg_synergy_graph.port_graph.interpreter import RuleInterpreter
 
 # Local sibling-script import for the attempt log.
 sys.path.insert(0, str(Path(__file__).parent))
@@ -172,20 +181,29 @@ def _scan_universe(conn: sqlite3.Connection, commanders: list[str]) -> list[GapS
 
     For each commander, load their ports and bucket by sub-cell
     signature. For each (commander, signature) bucket, walk the
-    registered gates and check which match any port in the bucket. A
-    signature is "covered" for the commander iff at least one
-    registered rule's gate matches.
+    registered gates (Python *and* declarative) and check which match
+    any port in the bucket. A signature is "covered" for the commander
+    iff at least one registered rule's gate matches.
 
     Pure static analysis — O(commanders * ports * gates), runs in
     seconds vs minutes for the simulation-based scan. The trade-off:
-    rules without a registered gate are invisible. The contract for
-    new rules is "register a gate alongside the helper" so the
-    auditor stays accurate as the rule set grows.
+    rules without a registered gate on either substrate are invisible
+    (no Python ``RuleGate`` entry AND no row in ``data/rules_seed.json``).
     """
     commanders_per_sig: collections.Counter[tuple[str, str, str]] = collections.Counter()
     activations_per_sig: collections.Counter[tuple[str, str, str]] = collections.Counter()
     exemplars_per_sig: dict[tuple[str, str, str], list[str]] = collections.defaultdict(list)
     rules_per_sig: dict[tuple[str, str, str], collections.Counter[str]] = collections.defaultdict(collections.Counter)
+
+    # Declarative rules: compile each ``gate_predicate`` into a
+    # port-level callable so this scan matches them the same way it
+    # matches Python ``RULE_GATES``. The interpreter normally runs
+    # per-commander SQL, but its compiled gate predicates are pure
+    # Python callables we can reuse without any DB queries.
+    interpreter = RuleInterpreter(conn)
+    declarative_gates: list[tuple[str, Callable[[PortRow], bool]]] = [
+        (c.row.rule_id, c.gate) for c in interpreter._compiled
+    ]
 
     for name in commanders:
         ports = load_ports_for_set(conn, [name])
@@ -200,6 +218,9 @@ def _scan_universe(conn: sqlite3.Connection, commanders: list[str]) -> list[GapS
                 for gate in RULE_GATES:
                     if gate.predicate(port):
                         matched_rules.add(gate.rule_id)
+                for rule_id, gate_pred in declarative_gates:
+                    if gate_pred(port):
+                        matched_rules.add(rule_id)
             if matched_rules:
                 activations_per_sig[sig] += 1
                 for rid in matched_rules:
