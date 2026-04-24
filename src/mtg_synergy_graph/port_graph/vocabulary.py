@@ -32,7 +32,13 @@ from __future__ import annotations
 #:        preserve the exact semantics of the inline lambdas in
 #:        ``graph_engine.EVENT_MATCH_MAP`` for Token /
 #:        CopyPermanent / Animate entries.
-VOCAB_VERSION: str = "2"
+#:   v3 — 2026-04-24 — projection.py added classifications for the
+#:        highest-weight UNKNOWN subkinds: ``effect.Pump`` +
+#:        ``effect.PumpAll`` → STATIC_BUFF, ``effect.LoseLife`` →
+#:        LIFE_CHANGE (extending the existing ``effect.GainLife``
+#:        branch), ``cost.remove_counter`` → COUNTER_REMOVED. Reduces
+#:        ``--unknowns`` rank_weight by ~80M across ~6,400 cards.
+VOCAB_VERSION: str = "3"
 
 #: Canonical event-node kinds. Projection (Unit 2) maps every
 #: ``card_ports`` row to exactly one of these (or to ``"UNKNOWN"``).

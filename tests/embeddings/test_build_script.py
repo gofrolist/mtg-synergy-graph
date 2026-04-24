@@ -138,11 +138,15 @@ def test_build_writes_config_hash_and_per_field_rows(tmp_path: Path) -> None:
         assert "config_hash" in rows
         assert len(rows["config_hash"]) == 64
         # Per-field diagnostics present.
+        from mtg_synergy_graph.port_graph import vocabulary as port_vocab
+
         assert rows["token_format_version"] == "v1"  # noqa: S105 — version tag
         assert rows["svd_dims"] == "128"
         assert rows["min_df"] == "2"
         assert rows["vectorizer_version"] == "1"
-        assert rows["port_signature_version"] == "v1"
+        # port_signature_version tracks VOCAB_VERSION (FU follow-on) so a
+        # vocabulary bump invalidates stored embeddings.
+        assert rows["port_signature_version"] == port_vocab.VOCAB_VERSION
         assert "built_at" in rows
     finally:
         conn.close()

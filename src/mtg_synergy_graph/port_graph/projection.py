@@ -93,8 +93,12 @@ SELECT
             THEN 'PAYMANA'
         WHEN port_type = 'effect' AND event_class IN ('DealDamage', 'DamageAll')
             THEN 'DAMAGE'
-        WHEN port_type = 'effect' AND event_class = 'GainLife'
+        WHEN port_type = 'effect' AND event_class IN ('GainLife', 'LoseLife')
             THEN 'LIFE_CHANGE'
+        -- v3: effect.Pump / effect.PumpAll are +N/+N buff effects,
+        -- semantically identical to keyword pump + static.Continuous buffs.
+        WHEN port_type = 'effect' AND event_class IN ('Pump', 'PumpAll')
+            THEN 'STATIC_BUFF'
         WHEN port_type = 'effect' AND event_class IN ('Sacrifice', 'SacrificeAll')
             THEN 'SACRIFICE'
         WHEN port_type = 'effect' AND event_class = 'Discard'
@@ -120,6 +124,9 @@ SELECT
             THEN 'LIFE_CHANGE'
         WHEN port_type = 'cost' AND event_class IN ('tap', 'tap_type')
             THEN 'TAP'
+        -- v3: cost.remove_counter is symmetric with trigger.CounterRemoved.
+        WHEN port_type = 'cost' AND event_class = 'remove_counter'
+            THEN 'COUNTER_REMOVED'
         -- Statics / replacements / scales_with / keyword
         WHEN port_type = 'static' AND event_class = 'Continuous'
             THEN 'STATIC_BUFF'

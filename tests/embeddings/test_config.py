@@ -294,10 +294,14 @@ def test_read_stored_config_returns_stored_not_current(tmp_path: Path) -> None:
 
 
 def test_get_embedding_config_inputs_matches_vectorizer_version() -> None:
+    from mtg_synergy_graph.port_graph import vocabulary as port_vocab
+
     inputs = emb_config.get_embedding_config_inputs()
     assert inputs.token_format_version == emb_vectorizer.TOKEN_FORMAT_VERSION
     # Defaults from plan D1 + Unit 1.
     assert inputs.svd_dims == 128
     assert inputs.min_df == 2
     assert inputs.vectorizer_version == 1
-    assert inputs.port_signature_version == "v1"
+    # port_signature_version now tracks VOCAB_VERSION so a vocabulary bump
+    # invalidates stored embeddings (FU-follow-on from Phase A).
+    assert inputs.port_signature_version == port_vocab.VOCAB_VERSION

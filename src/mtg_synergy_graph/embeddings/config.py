@@ -140,24 +140,27 @@ def get_embedding_config_inputs() -> EmbeddingConfigInputs:
 
     ``token_format_version`` comes from
     ``embeddings.vectorizer.TOKEN_FORMAT_VERSION`` (single source of
-    truth for the emitted grammar). ``svd_dims`` / ``min_df`` /
-    ``vectorizer_version`` / ``port_signature_version`` are fixed at
-    the current defaults chosen in plan D1 and Unit 1.
+    truth for the emitted grammar). ``port_signature_version`` comes
+    from ``port_graph.vocabulary.VOCAB_VERSION`` (so a vocabulary bump
+    invalidates stored embeddings). ``svd_dims`` / ``min_df`` /
+    ``vectorizer_version`` are fixed at the current defaults chosen in
+    plan D1 and Unit 1.
 
     Callers that want to compute a hypothetical hash (for dry-run
     "would this require rebuild?" tests) can construct an
     ``EmbeddingConfigInputs`` directly.
     """
-    # Local import to avoid circular-import risk: vectorizer imports
+    # Local imports to avoid circular-import risk: vectorizer imports
     # numpy + sqlite3 and may grow more consumers over time.
     from mtg_synergy_graph.embeddings import vectorizer as emb_vectorizer
+    from mtg_synergy_graph.port_graph import vocabulary as port_vocab
 
     return EmbeddingConfigInputs(
         token_format_version=emb_vectorizer.TOKEN_FORMAT_VERSION,
         svd_dims=_DEFAULT_SVD_DIMS,
         min_df=_DEFAULT_MIN_DF,
         vectorizer_version=1,
-        port_signature_version="v1",
+        port_signature_version=port_vocab.VOCAB_VERSION,
     )
 
 
