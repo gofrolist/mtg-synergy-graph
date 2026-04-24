@@ -740,10 +740,30 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # tier — gy_fuel_self_mill (~100 effect.Mill cards with
     # Defined: 'You' and NumCards >= 3 or scaling X/Y/Z; threshold
     # tightened from 2 to 3 after initial audit flagged cantrip-mill
-    # flooding on Osgir / Ultimecia). 2.5× to match hand_size_feeder
-    # — narrow-axis-gate + single-tier archetype feeder with IDF
-    # ~0.16 per match.
-    "gy_fuel_feeder": 2.5,
+    # flooding on Osgir / Ultimecia).
+    #
+    # Original 2.5× set to match hand_size_feeder as a narrow-axis
+    # single-tier archetype feeder. Audit 2026-04-24 showed the
+    # "narrow" gate was misdiagnosed — 18 touched cmdrs but the pool
+    # behaves like a broader displacement rule. At 2.5× the rule
+    # surfaced +3 hits but at -0.246 NDCG (net negative) with
+    # Ultimecia losing 5 hits / -0.309 NDCG as the self-mill tier
+    # displaced her tribal/combo top-30.
+    #
+    # Sweep 2026-04-24 at 0.8 / 1.0 / 1.2 / 1.5 / 2.0 / 2.5:
+    #   0.8: +5 hits / +0.224 NDCG
+    #   1.0: +6 hits / +0.291 NDCG                             ← peak
+    #   1.2: +6 hits / +0.289 NDCG / Egon +0.183               ← peak
+    #   1.5: +7 hits / +0.175 NDCG / more displacement
+    #   2.0: +3 hits / -0.166 NDCG / Ultimecia still -0.303
+    #   2.5: +3 hits / -0.246 NDCG / prior state
+    # 1.2× chosen over bare 1.0: identical hit/NDCG profile but
+    # keeps an explicit override recording the tuning decision. The
+    # self-mill tier needs roughly normal IDF weight, not amplified
+    # — the archetype-feeder boost pattern doesn't apply here
+    # because the self-mill pool overlaps heavily with graveyard_play
+    # candidates on neighbouring commanders.
+    "gy_fuel_feeder": 1.2,
     # lifegain_feeder: commanders with scales_with LifeYouGainedThisTurn
     # scale their mechanic by life gained this turn (Astarion draw,
     # Bre power/toughness, Willowdusk counters, Licia pump). Two
