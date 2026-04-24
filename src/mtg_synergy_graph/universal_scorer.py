@@ -477,6 +477,26 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = {
     # another card that triggers on the same event (enabler for enabler)
     # is less valuable than finding a payoff that feeds the trigger.
     "trigger_resonance": 0.7,
+    # panharmonicon: 18 touched cmdrs (Isshin, Teysa, Yarok, Drivnod,
+    # Veyran, Krang…). Prior to this session at default 1.0× the
+    # audit was +10 hits / +0.489 NDCG. After the token_producer
+    # 0.25 → 0.15 dampen + the gy_fuel_feeder 2.5 → 1.2 rebalance,
+    # panharmonicon's relative IDF pressure dropped — same ETB-
+    # trigger gate, same pool, but neighbour rules leaned harder
+    # on the same cards. Round-2 audit showed collapse to +3 hits
+    # / +0.197 NDCG.
+    #
+    # 2026-04-24 boost sweep at 1.3 / 1.5 / 2.0 / 2.5:
+    #   1.3: +3 hits / +0.266 NDCG
+    #   1.5: +3 hits / +0.256 NDCG
+    #   2.0: +4 hits / +0.299 NDCG  ← peak (Krang +2, Veyran +2)
+    #   2.5: +1 hits / +0.132 NDCG  (Teysa -4, collapse)
+    # 2.0× recovers Krang the All-Powerful as a +2 hit gainer (was
+    # neutral at 1.0×) and deepens Veyran's wins. Does not fully
+    # reach the pre-session +10 hits / +0.489 NDCG level — the
+    # rebalanced IDF landscape genuinely shrunk panharmonicon's
+    # reachable payoff set — but reclaims most of the ground.
+    "panharmonicon": 2.0,
     # cost_reducer: 108 touched commanders sharing the cost-reduction
     # gate. Audit 2026-04-24 at default 1.0× flagged MARGINAL — +5 hits
     # / +0.342 NDCG / ratio 0.046 (just below the 0.1 positive
