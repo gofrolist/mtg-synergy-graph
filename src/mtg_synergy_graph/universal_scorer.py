@@ -459,8 +459,26 @@ _FLAT_COUNT_RULES: frozenset[str] = frozenset(
 #: Purphoros golden-anchored at +0.069). Dampening to 0.15 recovers
 #: +0.266 NDCG, preserves Purphoros at +0.016 (still protected), and
 #: holds hit loss at -1. Lower values (0.10, 0.05) widened hit loss
-#: to -3 without meaningful NDCG gain — diminishing returns elbow at
-#: 0.15.
+#: to -3 without meaningful NDCG gain.
+#:
+#: 2026-04-24 follow-up: 0.15 → 0.18 after gate narrowing in
+#: ``_token_producer_gate`` and ``_find_token_producers_for_trigger``
+#: removed 6 structural false-positives (Faramir / Gimli / Legolas
+#: with Legendary, Arcades withDefender, Arni attacking, Kadena
+#: faceDown — narrow filters tokens can't satisfy). Touched set:
+#: 28 → 22. Sweep at 0.10 / 0.15 / 0.17 / 0.18 / 0.20:
+#:   0.10: -2 hits / -0.161 NDCG / HARMFUL
+#:   0.15: +0 hits / -0.203 NDCG / TRIVIAL  (cleanly neutral)
+#:   0.17: +2 hits / -0.345 NDCG / MARGINAL
+#:   0.18: +3 hits / -0.307 NDCG / positive  ← peak
+#:   0.20: +3 hits / -0.395 NDCG / positive (more displacement)
+#: 0.18× surfaces General Kreat +3 hits, Purphoros +1 / +0.060,
+#: Emiel +1. Verdict positive via ratio 0.136. NDCG cost of -0.104
+#: vs 0.15 baseline is concentrated on Olivia / Emiel / Shelinda
+#: rank-shuffling — those are archetype mismatches (discard /
+#: blink / spell-mastery — token producers aren't their main
+#: pillar) that the gate can't filter without commander-archetype
+#: detection.
 #:
 #: evasion: 0.15 → 0.10 on 2026-04-24 audit run. At 0.15 the rule
 #: was MARGINAL (+3 hits / +0.079 NDCG / ratio 0.016 / 188 touched
@@ -480,7 +498,7 @@ _FLAT_WEIGHT_OVERRIDES: dict[str, float] = {
     "spell_density": 0.3,
     "scaling": 0.3,
     "tribal_density": 0.5,
-    "token_producer": 0.15,
+    "token_producer": 0.18,
     "evasion": 0.10,
     "etb_self": 0.01,
 }

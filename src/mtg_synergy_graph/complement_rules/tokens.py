@@ -177,6 +177,23 @@ def _find_effect_feeds_etb(
     return results
 
 
+#: Trigger-filter fragments that generic token effects can't satisfy.
+#: Tokens are non-Legendary, no Defender by default, face-up, enter
+#: as non-attacking, and are typically 1-2 CMC. Triggers gated on
+#: these properties don't reliably fire from token creation.
+#:
+#: Must stay in sync with ``_TOKEN_PRODUCER_REJECTING_FRAGMENTS`` in
+#: ``complement_rules.registry``.
+_TOKEN_INCOMPATIBLE_FILTER_FRAGMENTS: tuple[str, ...] = (
+    "Legendary",
+    "withDefender",
+    "faceDown",
+    "attacking",
+    "cmcGE",
+    "cmcEQ",
+)
+
+
 def _find_token_producers_for_trigger(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
@@ -188,6 +205,15 @@ def _find_token_producers_for_trigger(
     token producers (Krenko, Siege-Gang Commander). But _find_effect_feeds_etb
     only looks for commander EFFECTS, not triggers. This function fills
     that gap for trigger-based ETB commanders.
+
+    Gate narrowing (2026-04-24): excludes triggers whose first valid_filter
+    alternative carries a property generic tokens don't have — Legendary,
+    withDefender, faceDown, attacking, or high-CMC requirements. Audit
+    showed Faramir (Legendary+cmcGE4), Gimli/Legolas (Legendary),
+    Arcades (withDefender), Arni (attacking), and Kadena (faceDown) all
+    sitting in the displacement tail of this rule despite the gate
+    "matching" their port. Tokens never satisfy those conditions, so
+    excluding them is a strict win.
     """
     _PRIMARY_TYPES = frozenset(
         {
@@ -215,6 +241,12 @@ def _find_token_producers_for_trigger(
         if zd != "Battlefield":
             continue
         if "!token" in vf.lower():
+            continue
+        # Reject narrow filters tokens can't satisfy (Legendary,
+        # withDefender, attacking, cmcGE, …) on the first alt — same
+        # check the registry gate runs.
+        first_alt = vf.split(",")[0]
+        if any(frag in first_alt for frag in _TOKEN_INCOMPATIBLE_FILTER_FRAGMENTS):
             continue
         # Extract type from filter
         for alt in vf.split(","):

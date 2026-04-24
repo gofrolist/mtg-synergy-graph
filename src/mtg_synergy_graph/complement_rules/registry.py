@@ -556,6 +556,8 @@ def _cascade_value_gate(port: PortRow) -> bool:
 
 
 def _token_producer_gate(port: PortRow) -> bool:
+    # Must stay in sync with ``complement_rules.tokens._find_token_producers_for_trigger``.
+    # Drift causes "touched but not scored" rows in audits.
     if (port.get("port_type") or "").strip() != "trigger":
         return False
     if (port.get("event_class") or "").strip() != "ChangesZone":
@@ -569,8 +571,31 @@ def _token_producer_gate(port: PortRow) -> bool:
     alt_tokens = first_alt.replace("+", ".").split(".")
     if any(tok.lstrip("!").strip() == "Self" for tok in alt_tokens):
         return False
-    main = vf.split(",")[0].split(".")[0].split("+")[0].strip()
-    return main == "Creature"
+    main = first_alt.split(".")[0].split("+")[0].strip()
+    if main != "Creature":
+        return False
+    # Narrow filters that generic token effects don't satisfy. Tokens
+    # are non-Legendary, no Defender, face-up, enter as non-attacking,
+    # and typically 1-2 CMC — triggers gated on these properties don't
+    # reliably fire when an opponent's edict (or your own token effect)
+    # creates one. Audit 2026-04-24 showed Faramir (Legendary+cmcGE4),
+    # Gimli/Legolas (Legendary), Arcades (withDefender), Arni
+    # (attacking), Kadena (faceDown) all in the displacement tail.
+    return not any(frag in first_alt for frag in _TOKEN_PRODUCER_REJECTING_FRAGMENTS)
+
+
+#: Trigger-filter fragments that generic token effects can't satisfy.
+#: Shared between ``_token_producer_gate`` and the runtime helper
+#: ``_find_token_producers_for_trigger`` so the touched set stays
+#: aligned with what actually fires.
+_TOKEN_PRODUCER_REJECTING_FRAGMENTS: tuple[str, ...] = (
+    "Legendary",
+    "withDefender",
+    "faceDown",
+    "attacking",
+    "cmcGE",
+    "cmcEQ",
+)
 
 
 def _scaling_gate(port: PortRow) -> bool:
