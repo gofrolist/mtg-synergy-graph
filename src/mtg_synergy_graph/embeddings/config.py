@@ -206,7 +206,7 @@ def read_stored_config(
             port_signature_version=rows["port_signature_version"],
         )
     except (TypeError, ValueError) as exc:
-        raise EmbeddingConfigMissingError(
+        raise EmbeddingConfigCorruptError(
             f"card_embeddings_config has malformed integer value: {exc}. "
             f"Rebuild with `uv run scripts/build_embeddings.py` to refresh."
         ) from exc

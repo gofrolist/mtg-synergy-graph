@@ -36,6 +36,14 @@ import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+#: Canonical default for add-k Laplace smoothing. Kept at zero because the
+#: Forge precon corpus is too sparse (~1400 subkinds × ~667 decks) for a
+#: positive ``k`` to do anything except overwhelm marginals and zero out
+#: every PMI. See ``compute_ppmi_table`` docstring for the derivation.
+#: Imported by the CLI / ingest / bench layers so a future adjustment
+#: touches exactly one site.
+DEFAULT_SMOOTHING_K: float = 0.0
+
 
 @dataclass(frozen=True, slots=True)
 class PpmiEntry:
@@ -57,9 +65,13 @@ def _pmi(
 ) -> float:
     """Laplace-smoothed pointwise mutual information.
 
-    Returns ``-inf`` when ``p_joint == 0`` and ``smoothing_k == 0`` —
-    the caller (``compute_ppmi_table``) clamps via ``max(pmi, 0)`` so
-    negative infinity degrades gracefully to PPMI = 0.
+    With ``smoothing_k = 0.0`` (the default), division-by-zero is
+    structurally impossible inside ``compute_ppmi_table``: only pairs
+    that co-occur at least once enter this function, so ``p_joint > 0``
+    and each participating signature has ``marginal_weighted > 0``. The
+    ``numerator <= 0`` / ``denominator <= 0`` guard below is a defensive
+    fallback for direct callers, not a load-bearing invariant of the
+    batch computation.
     """
     numerator = p_joint + smoothing_k
     denominator = (p_a + smoothing_k * vocab_size) * (p_b + smoothing_k * vocab_size)
@@ -87,10 +99,12 @@ def compute_ppmi_table(
     1e-5 → adding k=0.5 makes every marginal look like 25, and the
     denominator ≈ 62500 forces PMI negative for every pair).
 
-    Zero-division risk when ``k=0`` is bounded by the
-    ``min_decks_count >= 3`` filter (callers that lower this parameter
-    below 1 must also raise ``k``) and by ``max(pmi, 0.0)`` clamping
-    negative infinities to PPMI = 0.
+    Zero-division when ``k=0`` is structurally impossible here: only
+    pairs that co-occur at least once enter the accumulator, so every
+    retained pair has ``p_joint > 0`` and both signatures have
+    ``marginal_weighted > 0``. The ``max(pmi, 0.0)`` clamp below
+    handles the separate case of negative PMI (rarely co-occurring
+    pairs) rather than zero-division.
 
     A positive ``k`` is only useful when the vocabulary is small enough
     (roughly ``V * k ≪ typical_marginal_probability``) or the corpus is

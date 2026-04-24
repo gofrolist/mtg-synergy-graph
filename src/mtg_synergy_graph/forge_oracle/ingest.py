@@ -169,7 +169,7 @@ def build_forge_oracle_db(
     target_db_path: Path,
     deck_dirs: Iterable[Path] | None = None,
     min_decks_count: int = 3,
-    smoothing_k: float = 0.0,
+    smoothing_k: float = ppmi_math.DEFAULT_SMOOTHING_K,
 ) -> IngestStats:
     """Build ``forge_oracle.db`` from Forge precon decks.
 

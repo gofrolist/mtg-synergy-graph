@@ -182,8 +182,3 @@ def _find_wheel_synergy(
             )
 
     return results
-
-
-# monarch_synergy migrated to data/rules_seed.json on 2026-04-24 (declarative path).
-# See docs/solutions/best-practices/ for the general migration discipline and
-# port_graph/interpreter.py for the runtime.

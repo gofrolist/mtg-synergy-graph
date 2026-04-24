@@ -33,6 +33,7 @@ from pathlib import Path
 from mtg_synergy_graph.bench.tensor import compute_config_hash
 from mtg_synergy_graph.db import open_db
 from mtg_synergy_graph.embeddings.config import (
+    EmbeddingConfigCorruptError,
     EmbeddingConfigMissingError,
     EmbeddingConfigStaleError,
     get_embedding_config_inputs,
@@ -159,7 +160,11 @@ def handle_embedding_dedup(args: argparse.Namespace) -> int:
             # Precondition 3: embedding config hash matches current.
             try:
                 verify_current_or_raise(conn, get_embedding_config_inputs())
-            except (EmbeddingConfigStaleError, EmbeddingConfigMissingError) as exc:
+            except (
+                EmbeddingConfigStaleError,
+                EmbeddingConfigMissingError,
+                EmbeddingConfigCorruptError,
+            ) as exc:
                 # Both error messages already contain the rebuild
                 # command; printing them verbatim keeps the CLI hint
                 # in one place (the config module).

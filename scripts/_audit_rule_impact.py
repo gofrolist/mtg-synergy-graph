@@ -1,5 +1,14 @@
 """Per-rule impact audit: measure each rule's actual NDCG contribution.
 
+Status (2026-04-24): **partially superseded** by ``bench.py audit
+--rule`` for per-rule ablation on the persisted tensor. Kept alive
+because ``_MARGINAL_RATIO``, ``classify_impact``, and ``hi_syn_hits``
+defined here are still imported by ``scripts/_validate_rule.py`` —
+the live classifier for ``/rule-validate`` runs. Declarative rules
+(those in ``DECLARATIVE_RULE_IDS``) cannot be audited by this script
+(no Python helper to monkey-patch); they emit a ``SKIPPED(declarative)``
+row and must be audited via ``bench.py audit --rule`` instead.
+
 The trivial-detection check in ``_validate_rule.py`` only catches
 rules that activate on **zero** commanders. It misses rules that
 activate but produce no measurable score change in any touched
@@ -73,6 +82,7 @@ from _touched_commanders import find_touched_card_names  # noqa: E402
 
 from mtg_synergy_graph import SynergyEngine, compare_to_edhrec  # noqa: E402
 from mtg_synergy_graph.complement_rules import core  # noqa: E402
+from mtg_synergy_graph.complement_rules.registry import DECLARATIVE_RULE_IDS  # noqa: E402
 from mtg_synergy_graph.validate import compute_ndcg, edhrec_labels_for_commander  # noqa: E402
 
 GENERATED_DIR = REPO_ROOT / "src" / "mtg_synergy_graph" / "complement_rules" / "generated"
@@ -519,6 +529,24 @@ def _audit_many(
     plans: list[tuple[str, str, list[tuple[str, str]]]] = []
     skipped: list[dict] = []
     for rule_id in rule_ids:
+        if rule_id in DECLARATIVE_RULE_IDS:
+            # Declarative rules run through the interpreter, not a Python
+            # helper — the monkey-patch-to-return-empty-list trick this
+            # script uses does not apply. Emit an explicit skip row so
+            # the audit log is complete; use bench.py audit --rule for
+            # per-rule ablation of these.
+            skipped.append(
+                {
+                    "rule_id": rule_id,
+                    "touched": 0,
+                    "scored": 0,
+                    "sum_delta": 0,
+                    "max_abs_delta": 0,
+                    "movers": (),
+                    "verdict": "SKIPPED(declarative)",
+                }
+            )
+            continue
         helper_name = _resolve_helper(rule_id)
         if not hasattr(core, helper_name):
             continue  # silent skip, same as _audit_one
@@ -645,7 +673,19 @@ def _audit_one(
     edhrec_db: Path,
     name_to_oid: dict[str, str],
 ) -> dict | None:
-    """Return a verdict dict for one rule, or ``None`` if helper missing."""
+    """Return a verdict dict for one rule, or ``None`` if helper missing
+    (non-declarative). Declarative rules get an explicit SKIPPED row —
+    this script cannot audit them (use ``bench.py audit --rule`` instead)."""
+    if rule_id in DECLARATIVE_RULE_IDS:
+        return {
+            "rule_id": rule_id,
+            "touched": 0,
+            "scored": 0,
+            "sum_delta": 0,
+            "max_abs_delta": 0,
+            "movers": (),
+            "verdict": "SKIPPED(declarative)",
+        }
     helper_name = _resolve_helper(rule_id)
     if not hasattr(core, helper_name):
         return None

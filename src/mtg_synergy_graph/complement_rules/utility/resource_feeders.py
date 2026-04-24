@@ -467,14 +467,14 @@ def _find_creature_died_feeders(
       Blood, Body Count, Spymaster's Vault, Séance Board, Diregraf
       Rebirth, Season of Loss, Gravelighter, Compy Swarm, Canopy
       Stalker, Bone Devourer, Death-Priest of Myrkul. Pool IS the
-      aristocrats staple set — same mechanical-shape discriminator as
-      party_feeder.
+      aristocrats staple set — same peer-match mechanical shape used
+      by the declarative feeders in ``data/rules_seed.json``.
 
-    Follows the party_feeder pattern: uniform mechanical archetype,
-    peer pool mechanically identical to the cmdrs, no tribal
-    overlays to displace (unlike gy_creature_count_feeder reverted
-    2026-04-21). Gate uses a LIKE prefix-match so all filter variants
-    are covered (YouCtrl / YouOwn / !token / !namedX).
+    Uniform mechanical archetype, peer pool mechanically identical to
+    the cmdrs, no tribal overlays to displace (unlike
+    gy_creature_count_feeder reverted 2026-04-21). Gate uses a LIKE
+    prefix-match so all filter variants are covered (YouCtrl / YouOwn /
+    !token / !namedX).
     """
     prefix = _CREATURE_DIED_AXIS_PREFIX
     has_axis = any(
@@ -506,16 +506,3 @@ def _find_creature_died_feeders(
             )
         )
     return results
-
-
-# party_feeder migrated to data/rules_seed.json on 2026-04-24 (declarative path).
-# Canonical peer-match shape: scales_with.Party on both commander and candidate.
-
-
-# etb_tapped_stax_feeder migrated to data/rules_seed.json on 2026-04-24
-# (declarative path). Stax-shape peer match: replacement.Moved + ETBTapped
-# with NOT filter_tag('Self') on both commander and candidate. DB scan
-# confirmed zero NULL valid_filter rows in this port shape, so the
-# SQLite NULL-handling difference between Python's
-# "valid_filter IS NULL OR valid_filter NOT LIKE '%Self%'" and the grammar's
-# "NOT (valid_filter LIKE '%Self%')" does not affect real data.

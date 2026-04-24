@@ -45,8 +45,13 @@ uv run scripts/bench.py audit --embedding-dedup                          # Rule-
 uv run scripts/bench.py audit --embedding-dedup --threshold 0.90         # Looser threshold for exploration
 
 # Forge-Second-Oracle pipeline (plan 2026-04-23-002) — design-time only, never at inference.
-uv run scripts/forge_oracle.py build                                     # Build data/forge_oracle.db from Forge precon .dck corpus (~670 decks)
-uv run scripts/forge_oracle.py propose-rules --top 20                    # N rule scaffolds ranked by impact * forge_signal
+# --smoothing-k defaults to 0.0 since 2026-04-24 (ac38957). The build-time and
+# query-time flags must agree or the config-hash check on --vs-forge-oracle rejects the DB.
+uv run scripts/forge_oracle.py build --smoothing-k 0.0                   # Build data/forge_oracle.db from Forge precon .dck corpus (~670 decks)
+uv run scripts/forge_oracle.py propose-rules --top 20 --smoothing-k 0.0  # N rule scaffolds ranked by impact * forge_signal
+
+# Embedding weight sweep (plan 003 Phase C) — design-time diagnostic, does not mutate state.
+uv run scripts/sweep_embedding_weights.py                                # Grid-search (w_emb, k) cells, print hit_rate + score_delta per cell
 ```
 
 The bench.py hook also runs advisorily on pre-commit when edits touch

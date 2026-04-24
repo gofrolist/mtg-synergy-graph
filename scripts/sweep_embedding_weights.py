@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """Grid-search ``(w_emb, k)`` for the embedding-contribution flip decision.
 
+**Lifecycle note:** This is a design-time diagnostic script bound to
+plan 003 Phase C. The flag-flip decision was declined on 2026-04-24 —
+see ``docs/solutions/best-practices/infrastructure-without-scoring-activation-2026-04-24.md``
+for the null-result writeup and the conditions that would justify a
+re-sweep (TOKEN_FORMAT_VERSION bump, commander-target composition
+change, golden-set schema change). If none of those change, this
+script does not need to run again.
+
 Phase C of the activate-content-embeddings rollout. Scores the 100
 golden-set commanders under each ``(w, k)`` cell and reports two
 signals:
@@ -36,6 +44,7 @@ import argparse
 import sqlite3
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -51,16 +60,36 @@ from mtg_synergy_graph.embeddings import contribution as emb_contribution  # noq
 
 
 def _parse_grid(value: str) -> list[float]:
-    """Parse ``'0.05,0.1,0.2'`` → ``[0.05, 0.1, 0.2]``."""
-    return [float(x.strip()) for x in value.split(",") if x.strip()]
+    """Parse ``'0.05,0.1,0.2'`` → ``[0.05, 0.1, 0.2]``. Raises
+    ``argparse.ArgumentTypeError`` with the offending input on any
+    non-numeric token so the user sees *what* they typed, not a raw
+    ``ValueError: could not convert string to float: 'x'`` traceback."""
+    try:
+        return [float(x.strip()) for x in value.split(",") if x.strip()]
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"--w-grid / --k-grid must be a comma-separated list of floats; got {value!r} ({exc})"
+        ) from exc
 
 
 def _parse_cells(value: str) -> list[tuple[float, float]]:
-    """Parse ``'0.1:0.8,0.2:0.8'`` → ``[(0.1, 0.8), (0.2, 0.8)]``."""
+    """Parse ``'0.1:0.8,0.2:0.8'`` → ``[(0.1, 0.8), (0.2, 0.8)]``. Raises
+    ``argparse.ArgumentTypeError`` with the offending pair on malformed
+    input (missing ``:`` separator, non-numeric token, empty segment)."""
     cells: list[tuple[float, float]] = []
     for pair in value.split(","):
-        w, k = pair.split(":")
-        cells.append((float(w.strip()), float(k.strip())))
+        pair = pair.strip()
+        if not pair:
+            continue
+        if ":" not in pair:
+            raise argparse.ArgumentTypeError(
+                f"--cells entry {pair!r} missing ':' separator (expected 'w:k', e.g. '0.1:0.8')"
+            )
+        w_raw, _, k_raw = pair.partition(":")
+        try:
+            cells.append((float(w_raw.strip()), float(k_raw.strip())))
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(f"--cells entry {pair!r} has non-numeric token ({exc})") from exc
     return cells
 
 
@@ -96,14 +125,17 @@ def _aggregate_hit_rate(live: PinnedFixture) -> tuple[float, int]:
     return sum(rates) / len(rates), len(rates)
 
 
-def _install_vector_cache(vectors: dict[str, np.ndarray]) -> None:
+def _install_vector_cache(vectors: dict[str, np.ndarray]) -> Callable[[sqlite3.Connection], dict[str, np.ndarray]]:
     """Monkey-patch ``load_card_embeddings_verified`` to return a pre-loaded dict.
 
     Avoids re-reading the ``card_embeddings`` table once per commander
     per cell (100 × N_cells full-table scans otherwise). The replacement
     function ignores its ``conn`` argument and returns the pre-loaded
-    dict. Caller responsibility: restore the original before exit.
+    dict. Returns the original callable so the caller can restore it
+    in a ``try / finally``.
     """
+
+    original = emb_contribution.load_card_embeddings_verified
 
     def _cached_load(_conn: sqlite3.Connection) -> dict[str, np.ndarray]:
         return vectors
@@ -115,6 +147,7 @@ def _install_vector_cache(vectors: dict[str, np.ndarray]) -> None:
     # load_card_embeddings_verified``. Since each call re-executes that
     # binding at function scope, the monkeypatch on the module attribute
     # is picked up on every invocation.
+    return original
 
 
 def _score_one_cell(
@@ -128,30 +161,41 @@ def _score_one_cell(
     """Score all ``commanders`` under ``(w_emb, k)``; return metrics.
 
     Returns ``(aggregate_hit_rate, aggregate_score_delta, n_measured,
-    wall_time_seconds)``.
+    wall_time_seconds)``. Restores the mutated module-level globals on
+    the way out so a raising ``build_fixture`` call does not leak a
+    partially-configured state into subsequent consumers in the same
+    process.
     """
-    emb_contribution._ENABLE_EMBEDDING_CONTRIBUTION = True
-    emb_contribution._EMBEDDING_W = w_emb
-    emb_contribution._EMBEDDING_K = k
+    prev_enable = emb_contribution._ENABLE_EMBEDDING_CONTRIBUTION
+    prev_w = emb_contribution._EMBEDDING_W
+    prev_k = emb_contribution._EMBEDDING_K
+    try:
+        emb_contribution._ENABLE_EMBEDDING_CONTRIBUTION = True
+        emb_contribution._EMBEDDING_W = w_emb
+        emb_contribution._EMBEDDING_K = k
 
-    # Clear the commander-target cache between cells so ``build_commander_target_vector``
-    # re-composes under the new constants. Vectors themselves are stable across cells
-    # (same DB), so the vector cache installed earlier stays valid.
-    emb_cmdr_target.clear_cache()
+        # Clear the commander-target cache between cells so ``build_commander_target_vector``
+        # re-composes under the new constants. Vectors themselves are stable across cells
+        # (same DB), so the vector cache installed earlier stays valid.
+        emb_cmdr_target.clear_cache()
 
-    t0 = time.perf_counter()
-    live = build_fixture(
-        conn,
-        commanders,
-        existing=pinned,
-        tensor_writer=None,
-        edhrec_conn=edhrec_conn,
-    )
-    wall = time.perf_counter() - t0
+        t0 = time.perf_counter()
+        live = build_fixture(
+            conn,
+            commanders,
+            existing=pinned,
+            tensor_writer=None,
+            edhrec_conn=edhrec_conn,
+        )
+        wall = time.perf_counter() - t0
 
-    hit_rate, n_measured = _aggregate_hit_rate(live)
-    score_delta = _aggregate_score_delta(live, pinned)
-    return hit_rate, score_delta, n_measured, wall
+        hit_rate, n_measured = _aggregate_hit_rate(live)
+        score_delta = _aggregate_score_delta(live, pinned)
+        return hit_rate, score_delta, n_measured, wall
+    finally:
+        emb_contribution._ENABLE_EMBEDDING_CONTRIBUTION = prev_enable
+        emb_contribution._EMBEDDING_W = prev_w
+        emb_contribution._EMBEDDING_K = prev_k
 
 
 def _build_argparser() -> argparse.ArgumentParser:
@@ -246,59 +290,58 @@ def main(argv: list[str] | None = None) -> int:
     load_wall = time.perf_counter() - t_load
     print(f"[sweep] loaded {len(vectors)} vectors in {load_wall:.1f}s", flush=True)
 
-    _install_vector_cache(vectors)
-
-    cells: list[tuple[float, float]] = (
-        args.cells if args.cells is not None else [(w, k) for w in args.w_grid for k in args.k_grid]
-    )
-
-    if args.include_baseline:
-        baseline_k = args.k_grid[0] if args.k_grid else 0.8
-        cells = [(0.0, baseline_k), *cells]
-
-    print(f"[sweep] {len(commanders)} commanders x {len(cells)} cells", flush=True)
-    print(f"[sweep] fixture config_hash: {pinned.config_hash[:12]}...", flush=True)
-    print()
-    print(f"{'w_emb':>8}  {'k':>6}  {'hit_rate':>10}  {'n':>4}  {'score_delta':>14}  {'wall(s)':>8}")
-    print(f"{'-' * 8:>8}  {'-' * 6:>6}  {'-' * 10:>10}  {'-' * 4:>4}  {'-' * 14:>14}  {'-' * 8:>8}")
-
-    results: list[tuple[float, float, float, int, float, float]] = []
-    for w_emb, k in cells:
-        if w_emb == 0.0:
-            # Baseline: flag-off-equivalent.
-            emb_contribution._ENABLE_EMBEDDING_CONTRIBUTION = False
-        hit_rate, score_delta, n_measured, wall = _score_one_cell(
-            conn,
-            edhrec_conn,
-            commanders,
-            pinned,
-            w_emb,
-            k,
-        )
-        # Restore flag-on for subsequent cells (if baseline was first).
-        emb_contribution._ENABLE_EMBEDDING_CONTRIBUTION = True
-        results.append((w_emb, k, hit_rate, n_measured, score_delta, wall))
-        print(
-            f"{w_emb:>8.3f}  {k:>6.2f}  {hit_rate:>10.4f}  {n_measured:>4d}  {score_delta:>14.4f}  {wall:>8.1f}",
-            flush=True,
+    original_loader = _install_vector_cache(vectors)
+    try:
+        cells: list[tuple[float, float]] = (
+            args.cells if args.cells is not None else [(w, k) for w in args.w_grid for k in args.k_grid]
         )
 
-    print()
-    pin_hit_rate, pin_n = _aggregate_hit_rate(pinned)
-    print(f"[sweep] pinned fixture (flag-off): hit_rate={pin_hit_rate:.4f} n={pin_n}")
+        if args.include_baseline:
+            baseline_k = args.k_grid[0] if args.k_grid else 0.8
+            cells = [(0.0, baseline_k), *cells]
 
-    flag_on_results = [r for r in results if r[0] != 0.0]
-    if flag_on_results:
-        # Advisory winner: highest hit_rate; ties broken by smallest score_delta.
-        best = max(flag_on_results, key=lambda r: (r[2], -r[4]))
-        print(
-            f"[sweep] advisory winner: w={best[0]:.3f} k={best[1]:.2f} "
-            f"hit_rate={best[2]:.4f} (pinned={pin_hit_rate:.4f}, "
-            f"delta={best[2] - pin_hit_rate:+.4f}), score_delta={best[4]:.4f}"
-        )
+        print(f"[sweep] {len(commanders)} commanders x {len(cells)} cells", flush=True)
+        print(f"[sweep] fixture config_hash: {pinned.config_hash[:12]}...", flush=True)
+        print()
+        print(f"{'w_emb':>8}  {'k':>6}  {'hit_rate':>10}  {'n':>4}  {'score_delta':>14}  {'wall(s)':>8}")
+        print(f"{'-' * 8:>8}  {'-' * 6:>6}  {'-' * 10:>10}  {'-' * 4:>4}  {'-' * 14:>14}  {'-' * 8:>8}")
 
-    conn.close()
-    edhrec_conn.close()
+        results: list[tuple[float, float, float, int, float, float]] = []
+        for w_emb, k in cells:
+            if w_emb == 0.0:
+                # Baseline: flag-off-equivalent.
+                emb_contribution._ENABLE_EMBEDDING_CONTRIBUTION = False
+            hit_rate, score_delta, n_measured, wall = _score_one_cell(
+                conn,
+                edhrec_conn,
+                commanders,
+                pinned,
+                w_emb,
+                k,
+            )
+            results.append((w_emb, k, hit_rate, n_measured, score_delta, wall))
+            print(
+                f"{w_emb:>8.3f}  {k:>6.2f}  {hit_rate:>10.4f}  {n_measured:>4d}  {score_delta:>14.4f}  {wall:>8.1f}",
+                flush=True,
+            )
+
+        print()
+        pin_hit_rate, pin_n = _aggregate_hit_rate(pinned)
+        print(f"[sweep] pinned fixture (flag-off): hit_rate={pin_hit_rate:.4f} n={pin_n}")
+
+        flag_on_results = [r for r in results if r[0] != 0.0]
+        if flag_on_results:
+            # Advisory winner: highest hit_rate; ties broken by smallest score_delta.
+            best = max(flag_on_results, key=lambda r: (r[2], -r[4]))
+            print(
+                f"[sweep] advisory winner: w={best[0]:.3f} k={best[1]:.2f} "
+                f"hit_rate={best[2]:.4f} (pinned={pin_hit_rate:.4f}, "
+                f"delta={best[2] - pin_hit_rate:+.4f}), score_delta={best[4]:.4f}"
+            )
+    finally:
+        emb_contribution.load_card_embeddings_verified = original_loader  # type: ignore[assignment]
+        conn.close()
+        edhrec_conn.close()
     return 0
 
 

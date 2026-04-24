@@ -1582,9 +1582,3 @@ def _find_land_to_gy_synergy(
         )
 
     return results
-
-
-# toughness_synergy migrated to data/rules_seed.json on 2026-04-24 (declarative path).
-# Exact match on scales_with.CardToughness (the only event_class variant that
-# matched the pre-migration Python substring check on real data — the
-# ValidGraveyard...toughnessGT4 variant has lowercase 't' and didn't match).

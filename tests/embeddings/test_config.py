@@ -231,8 +231,11 @@ def test_verify_raises_missing_when_required_key_absent(tmp_path: Path) -> None:
         conn.close()
 
 
-def test_verify_raises_missing_when_svd_dims_malformed(tmp_path: Path) -> None:
-    """Non-integer svd_dims KV value → Missing (malformed) with clear message."""
+def test_verify_raises_corrupt_when_svd_dims_malformed(tmp_path: Path) -> None:
+    """Non-integer svd_dims KV value → Corrupt. The row *exists* (so
+    Missing is wrong) but its stored value is structurally broken —
+    the exact failure class ``EmbeddingConfigCorruptError`` is designed
+    to signal."""
     conn = _make_kv_db(tmp_path)
     try:
         inputs = _make_inputs()
@@ -240,7 +243,7 @@ def test_verify_raises_missing_when_svd_dims_malformed(tmp_path: Path) -> None:
         # Corrupt the int field after populating valid rows.
         conn.execute("UPDATE card_embeddings_config SET value = 'not_an_int' WHERE key = 'svd_dims'")
         conn.commit()
-        with pytest.raises(emb_config.EmbeddingConfigMissingError) as exc_info:
+        with pytest.raises(emb_config.EmbeddingConfigCorruptError) as exc_info:
             emb_config.verify_current_or_raise(conn, inputs)
         assert "malformed" in str(exc_info.value)
     finally:

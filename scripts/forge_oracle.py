@@ -23,6 +23,7 @@ from pathlib import Path
 
 from mtg_synergy_graph.forge_oracle import config as fo_config
 from mtg_synergy_graph.forge_oracle import ingest
+from mtg_synergy_graph.forge_oracle import ppmi as ppmi_math
 from mtg_synergy_graph.forge_oracle import version as fo_version
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -238,9 +239,9 @@ def _build_parser() -> argparse.ArgumentParser:
     build.add_argument(
         "--smoothing-k",
         type=float,
-        default=0.0,
+        default=ppmi_math.DEFAULT_SMOOTHING_K,
         help=(
-            "Laplace add-k smoothing constant (default 0.0). "
+            f"Laplace add-k smoothing constant (default {ppmi_math.DEFAULT_SMOOTHING_K}). "
             "The default was 0.5 through 2026-04-23 but produced all-zero PPMI on "
             "the ~1400-subkind, 667-deck corpus because k * vocab_size swamped "
             "the marginal probabilities. k=0.0 is safe because min_decks_count>=3 "
@@ -276,8 +277,8 @@ def _build_parser() -> argparse.ArgumentParser:
     propose.add_argument(
         "--smoothing-k",
         type=float,
-        default=0.0,
-        help="Must match the --smoothing-k used at build time (default 0.0)",
+        default=ppmi_math.DEFAULT_SMOOTHING_K,
+        help=f"Must match the --smoothing-k used at build time (default {ppmi_math.DEFAULT_SMOOTHING_K})",
     )
     propose.add_argument(
         "--output",
