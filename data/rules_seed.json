@@ -310,6 +310,24 @@
       "cand_event": "monarch_or_pillowfort",
       "weight_hint": 2.5,
       "active": 1
+    },
+    {
+      "rule_id": "toughness_synergy",
+      "family": "scaling",
+      "gate_predicate": {"op": "has_port", "port_type": "scales_with", "event_class": "CardToughness"},
+      "commander_port_predicate": {"op": "has_port", "port_type": "scales_with", "event_class": "CardToughness"},
+      "candidate_port_predicate": {
+        "op": "and",
+        "args": [
+          {"op": "has_port", "port_type": "keyword", "event_class": "Defender"},
+          {"op": "not_in_commander_set"}
+        ]
+      },
+      "filter_group": "",
+      "cmdr_event": "toughness_scaling",
+      "cand_event": "Defender",
+      "weight_hint": 1.0,
+      "active": 1
     }
   ]
 }

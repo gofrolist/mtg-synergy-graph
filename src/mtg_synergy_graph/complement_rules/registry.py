@@ -433,12 +433,6 @@ def _spellcast_density_gate(port: PortRow) -> bool:
     return (port.get("event_class") or "").strip() == "SpellCast"
 
 
-def _toughness_gate(port: PortRow) -> bool:
-    if (port.get("port_type") or "").strip() != "scales_with":
-        return False
-    return "CardToughness" in (port.get("event_class") or "")
-
-
 # ---------------------------------------------------------------------------
 # Batch 2: registry sweep (2026-04-18) — one-line gates per helper
 # ---------------------------------------------------------------------------
@@ -725,7 +719,6 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("land_to_gy_synergy", _land_to_gy_gate),
     RuleGate("spell_density", _spellcast_density_gate),
     RuleGate("spellcast_resonance", _spellcast_density_gate),
-    RuleGate("toughness_synergy", _toughness_gate),
     # Batch 2 — registry sweep
     RuleGate("artifact_recursion", _artifact_recursion_gate),
     RuleGate("copy_synergy", _copy_synergy_gate),

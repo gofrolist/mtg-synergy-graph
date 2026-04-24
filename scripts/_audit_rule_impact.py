@@ -144,7 +144,6 @@ _RULE_HELPER_OVERRIDES: dict[str, str] = {
     "subject_zone_feeder": "_find_subject_zone_feeders",
     "tap_type_feeder": "_find_tap_type_feeders",
     "token_producer": "_find_token_producers_for_trigger",
-    "toughness_synergy": "_find_toughness_matters",
     "tribal_density": "_find_tribal_density_complements",
     "value_engine": "_find_value_engine_density",
     "voltron": "_find_static_strategy",

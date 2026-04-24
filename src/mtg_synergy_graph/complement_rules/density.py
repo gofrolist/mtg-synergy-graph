@@ -1584,38 +1584,7 @@ def _find_land_to_gy_synergy(
     return results
 
 
-def _find_toughness_matters(
-    conn: sqlite3.Connection,
-    cmdr_ports: list[PortRow],
-    cmdr_set: set[str],
-) -> list[PortComplement]:
-    """Defender creatures for toughness-scaling commanders.
-
-    Phenax taps creatures to mill equal to toughness → Defenders
-    (high toughness, can't attack anyway) are ideal. N ≈ 307,
-    IDF ≈ 0.12.
-    """
-    has_toughness_scaling = any(
-        (p.get("port_type") or "").strip() == "scales_with" and "Toughness" in ((p.get("event_class") or "").strip())
-        for p in cmdr_ports
-    )
-    if not has_toughness_scaling:
-        return []
-
-    cur = conn.execute(
-        "SELECT DISTINCT card_name FROM card_ports WHERE port_type = 'keyword' AND event_class = 'Defender'"
-    )
-    results: list[PortComplement] = []
-    for r in cur.fetchall():
-        name = r["card_name"]
-        if name not in cmdr_set:
-            results.append(
-                PortComplement(
-                    rule_id="toughness_synergy",
-                    direction="synergy",
-                    candidate=name,
-                    cmdr_event="toughness_scaling",
-                    cand_event="Defender",
-                )
-            )
-    return results
+# toughness_synergy migrated to data/rules_seed.json on 2026-04-24 (declarative path).
+# Exact match on scales_with.CardToughness (the only event_class variant that
+# matched the pre-migration Python substring check on real data — the
+# ValidGraveyard...toughnessGT4 variant has lowercase 't' and didn't match).
