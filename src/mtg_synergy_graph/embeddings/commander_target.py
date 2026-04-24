@@ -60,10 +60,10 @@ def _fetch_hi_syn_names_cached(
     """Cached wrapper over ``fetch_high_synergy_top_n_ordered``.
 
     Errors from the underlying query (missing table, schema drift,
-    corrupt row) degrade to an empty tuple plus a ``DEBUG`` log, so
-    callers always get a tuple they can zip with ``vectors``. The
-    warning about *why* hi-syn is empty is the caller's responsibility
-    — this helper only owns the fetch.
+    corrupt row, disk-corruption) degrade to an empty tuple plus a
+    ``DEBUG`` log, so callers always get a tuple they can zip with
+    ``vectors``. The warning about *why* hi-syn is empty is the
+    caller's responsibility — this helper only owns the fetch.
     """
     try:
         return fetch_high_synergy_top_n_ordered(
@@ -71,9 +71,11 @@ def _fetch_hi_syn_names_cached(
             commander_name,
             limit=hi_syn_limit,
         )
-    except sqlite3.OperationalError as exc:
+    except sqlite3.DatabaseError as exc:
+        # Parent of OperationalError; also covers DatabaseError (disk
+        # corruption) and its siblings — same degradation intent.
         logger.debug(
-            "hi-syn fetch failed for %r (likely missing table or schema drift): %s",
+            "hi-syn fetch failed for %r (likely missing table, schema drift, or corruption): %s",
             commander_name,
             exc,
         )

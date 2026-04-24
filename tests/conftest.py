@@ -115,6 +115,15 @@ def _seed_card_embeddings_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
     real function — the per-call guard inside the stub delegates to the
     real ``load_card_embeddings`` whenever the connection's
     ``card_embeddings`` table has rows.
+
+    Stub contract: consumers that bind ``load_card_embeddings`` at the
+    module top (``from mtg_synergy_graph.embeddings.store import
+    load_card_embeddings``) will NOT see this stub — the monkeypatch
+    replaces the attribute on ``embeddings.store`` and on the
+    ``embeddings`` package re-export, but a third top-level binding
+    captures the original function at import time. Any new consumer
+    must either import via attribute access (``emb_store.load_card_embeddings(...)``)
+    OR add a manual ``monkeypatch.setattr`` in its own test.
     """
     real_db = Path(__file__).resolve().parent.parent / "data" / "synergy.db"
     should_stub = True

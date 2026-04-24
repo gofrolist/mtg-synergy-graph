@@ -8,6 +8,7 @@ candidates satisfy is worth more than one 2000 candidates satisfy.
 
 from __future__ import annotations
 
+import logging
 import math
 import sqlite3
 from collections import defaultdict
@@ -25,6 +26,8 @@ from .scoring import BUCKETS
 
 if TYPE_CHECKING:
     from .penalties import CandidateCache
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -960,15 +963,26 @@ def score_all_universal(
 
     if _ENABLE_EMBEDDING_CONTRIBUTION:
         _emb_vectors = load_card_embeddings_verified(conn)
-        _emb_cmdr_target = (
-            build_commander_target_vector(
-                tuple(commander_set),
-                _emb_vectors,
-                edhrec_conn=None,
+        try:
+            _emb_cmdr_target = (
+                build_commander_target_vector(
+                    tuple(commander_set),
+                    _emb_vectors,
+                    edhrec_conn=None,
+                )
+                if _emb_vectors
+                else None
             )
-            if _emb_vectors
-            else None
-        )
+        except Exception as exc:
+            # Reliability R-004: the scoring init path must never raise.
+            # Any failure in commander-target composition degrades to
+            # "no embedding contribution for this run" so the rule-based
+            # scorer continues unaffected.
+            logger.warning(
+                "build_commander_target_vector failed; disabling embedding contribution for this run: %s",
+                exc,
+            )
+            _emb_cmdr_target = None
     else:
         _emb_vectors = {}
         _emb_cmdr_target = None

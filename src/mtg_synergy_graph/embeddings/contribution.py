@@ -174,6 +174,13 @@ def load_card_embeddings_verified(conn: sqlite3.Connection) -> dict[str, np.ndar
     except sqlite3.DatabaseError as exc:
         logger.warning("card_embeddings config read failed: %s", exc)
         return {}
+    except Exception as exc:
+        # Catch-all safety net: ``get_embedding_config_inputs`` has
+        # transitive imports that could raise ImportError/AttributeError
+        # on partial environments. The module docstring guarantees
+        # "never raises from the inference path" — honor that.
+        logger.warning("unexpected error verifying embedding config: %s", exc)
+        return {}
 
     return vectors
 

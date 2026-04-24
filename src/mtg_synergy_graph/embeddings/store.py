@@ -71,7 +71,8 @@ def write_vectors(
         rows = [
             (
                 name,
-                np.asarray(vector, dtype=np.float32).tobytes(),
+                # '<f4' = little-endian float32 for cross-arch portability (plan 003 DM-001)
+                np.asarray(vector, dtype="<f4").tobytes(),
                 int(inputs.vectorizer_version),
                 now_iso,
             )
@@ -113,7 +114,8 @@ def read_vector(conn: sqlite3.Connection, name: str) -> np.ndarray | None:
     if row is None:
         return None
     blob = row[0]
-    return np.frombuffer(blob, dtype=np.float32).copy()
+    # '<f4' = little-endian float32 for cross-arch portability (plan 003 DM-001)
+    return np.frombuffer(blob, dtype="<f4").copy()
 
 
 def load_card_embeddings(conn: sqlite3.Connection) -> dict[str, np.ndarray]:
@@ -147,7 +149,12 @@ def load_card_embeddings(conn: sqlite3.Connection) -> dict[str, np.ndarray]:
 
     out: dict[str, np.ndarray] = {}
     for name, blob in rows:
-        vector = np.frombuffer(blob, dtype=np.float32).copy()
+        try:
+            # '<f4' = little-endian float32 for cross-arch portability (plan 003 DM-001)
+            vector = np.frombuffer(blob, dtype="<f4").copy()
+        except (ValueError, TypeError) as exc:
+            logger.warning("skipping %s: blob decode failed: %s", name, exc)
+            continue
         if len(vector) != _EMBEDDING_DIM:
             logger.warning(
                 "skipping %s: vector length %d != expected %d",

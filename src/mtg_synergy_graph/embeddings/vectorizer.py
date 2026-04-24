@@ -46,10 +46,10 @@ TOKEN_FORMAT_VERSION: str = "v1"  # noqa: S105 — not a secret; version tag
 
 
 #: Columns from ``card_ports`` that are emitted as ``<column>:<value>``
-#: tokens when non-null. ``port_type`` is always non-null (``NOT NULL``)
-#: so is handled separately; the rest are optional.
+#: tokens when non-null. ``port_type`` and ``event_class`` are both
+#: ``NOT NULL`` per ``schema.sql`` §4.2 and are handled separately
+#: (guaranteed emitted); the columns below are nullable.
 _OPTIONAL_PORT_TOKEN_COLUMNS: tuple[str, ...] = (
-    "event_class",
     "zone_origin",
     "zone_destination",
     "counter_type",
@@ -116,8 +116,11 @@ def extract_card_tokens(conn: sqlite3.Connection) -> dict[str, tuple[str, ...]]:
         bag = tokens[card_name]
         port_type = row[2]
         bag.append(f"port_type:{port_type}")
-        # ``event_class`` is NOT NULL per schema, but guard anyway.
-        values = (row[3], row[4], row[5], row[6], row[7])
+        # ``event_class`` is NOT NULL per schema.sql §4.2 — always emit.
+        event_class = row[3]
+        bag.append(f"event_class:{event_class}")
+        # Remaining columns are nullable; skip when NULL / empty.
+        values = (row[4], row[5], row[6], row[7])
         for col, val in zip(_OPTIONAL_PORT_TOKEN_COLUMNS, values, strict=True):
             if val is not None and val != "":
                 bag.append(f"{col}:{val}")
