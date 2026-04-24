@@ -4,14 +4,28 @@ Deferred findings from `/ce-code-review` on branch
 `feat/content-embeddings-fallback` (run ID 20260423-213012-17f8d1eb,
 plan `docs/plans/2026-04-23-003-feat-content-embeddings-fallback-plan.md`).
 
-Current branch ships `_ENABLE_EMBEDDING_CONTRIBUTION = False`. The
-items below are pre-flag-flip work — safe to merge the current branch
-without resolving them, but they must be resolved before the audit
-sweep that flips the flag. Grouped by urgency.
+**Flip-gate status (2026-04-24): DECLINED.** The Phase C audit sweep
+across 3×3 ``(w_emb, k)`` cells on 30 commanders produced a
+best-case `hidden_gem_hit_rate` delta of `+0.0067` (0.7600 at
+`w=0.2, k=0.6` vs 0.7533 baseline) with an aggregate score_delta of
+386.8 on top-100 pinned candidates. The +0.67% hit-rate improvement
+does not clear the `HIDDEN_GEM_WARN_THRESHOLD = 0.02` bar used
+elsewhere in the codebase for a meaningful effect size. The flag
+stays off; the infrastructure remains valuable for
+`bench.py audit --embedding-dedup` and `--explain` rendering. See
+[`docs/solutions/best-practices/infrastructure-without-scoring-activation-2026-04-24.md`](../solutions/best-practices/infrastructure-without-scoring-activation-2026-04-24.md)
+for the full write-up and re-sweep criteria.
+
+Current branch ships `_ENABLE_EMBEDDING_CONTRIBUTION = False`. FU-1
+and FU-4 (gate-blocking correctness fixes) landed in commit
+`1a61ad0` independently of the flip decision — they fix latent bugs
+that matter for any future re-sweep as well. The remaining items
+below (FU-2, FU-3, FU-5) are deferred; they are only relevant if a
+future re-sweep justifies flipping the flag.
 
 ## Gate-blocking for the flag flip
 
-### FU-1. CLI flags `--min-df` / `--svd-dims` are broken end-to-end
+### FU-1. CLI flags `--min-df` / `--svd-dims` are broken end-to-end  ✅ RESOLVED (commit 1a61ad0)
 
 **Reviewer:** correctness CORR-001 (HIGH, 0.90) + CORR-002 (HIGH, 0.88),
 adversarial ADV-003 (0.85), maintainability M-003 (0.82).
@@ -76,7 +90,7 @@ commander_name, hi_syn_limit)`, with explicit size bound (e.g.,
 
 **Files:** `src/mtg_synergy_graph/embeddings/commander_target.py:54`.
 
-### FU-4. NaN propagation breaks flag-off identity guarantee
+### FU-4. NaN propagation breaks flag-off identity guarantee  ✅ RESOLVED (commit 1a61ad0)
 
 **Reviewer:** adversarial ADV-002 (0.92).
 
