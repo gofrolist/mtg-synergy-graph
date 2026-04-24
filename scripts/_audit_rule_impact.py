@@ -465,10 +465,23 @@ def _audit_rule_single(
     verdict = cls.verdict.upper() if cls.verdict != "positive" else "positive"
 
     # Golden-set safety net. Skipped for "positive" verdicts since
-    # those can't be further upgraded.
+    # those can't be further upgraded — this is the hot fast-path
+    # during weight-tuning sweeps where most rules come back positive.
+    #
+    # Lazy golden baseline: if the caller left golden entries out of
+    # the shared ``baseline`` dict (single-rule mode optimisation in
+    # ``_audit_many``), score them here WITH the original helper
+    # active, so the safety-net diff still works. The dict is mutated
+    # in place — safe because this function runs serially within its
+    # calling process (parallel workers only run in multi-rule mode,
+    # where golden is pre-baselined upfront and shared).
     golden_max_drop = 0.0
     golden_max_cmdr = ""
     if verdict != "positive" and golden_targets:
+        missing_golden = [(gn, go) for gn, go in golden_targets if go not in baseline]
+        if missing_golden:
+            for gname, goid in missing_golden:
+                baseline[goid] = hi_syn_and_ndcg(eng, edhrec_conn, goid, gname)
         golden_extra = [(gname, goid) for gname, goid in golden_targets if goid not in target_oid_set]
         with _patched_helper(eng, helper_name, original):
             golden_patched: dict[str, tuple[int, float] | None] = {
@@ -582,7 +595,19 @@ def _audit_many(
     # Gate-miss safety net: include golden-set oids in the baseline so
     # we can re-score them per rule and detect commanders whose helper
     # actually fires even though the registered gate misses them.
-    extended_union = sorted(union_oids | goid_to_name.keys())
+    #
+    # Single-rule + serial optimisation: when auditing one rule with
+    # ``--workers 1``, defer golden baseline scoring into
+    # ``_audit_rule_single``'s safety-net branch. The common weight-
+    # tuning case (single rule, verdict=positive) then skips ~100
+    # golden baseline scores entirely — measured ~44% wall-clock
+    # savings (26.5s → 14.8s on cardpower_axis_feeder). We keep the
+    # golden upfront whenever a parallel baseline pass would amortise
+    # it: multi-rule audits (shared across workers) and single-rule
+    # with workers>1 (parallel baseline over the extended set is
+    # cheaper than serial lazy golden in the safety-net branch).
+    include_golden_upfront = len(plans) > 1 or workers > 1
+    extended_union = sorted(union_oids | goid_to_name.keys()) if include_golden_upfront else sorted(union_oids)
     results: list[dict] = list(skipped)
 
     baseline: dict[str, tuple[int, float] | None] = {}
