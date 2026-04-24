@@ -285,3 +285,32 @@ CREATE INDEX IF NOT EXISTS idx_rules_active ON rules(active);
 -- schema.sql executescript — applying the DDL in two places risked
 -- silent drift when rule migrations add CASE branches.
 -- ---------------------------------------------------------------------------
+
+-- ---------------------------------------------------------------------------
+-- card_embeddings: per-card 128-dim content embedding blob (plan
+-- 2026-04-23-003 Unit 2). Populated by scripts/build_embeddings.py from
+-- TF-IDF + truncated-SVD over structured port/keyword features. Blob is a
+-- numpy float32 array of fixed shape (128,). Read at inference time by
+-- embeddings.store.load_card_embeddings; graceful fallback on missing /
+-- empty / corrupt rows. Vector rebuild is wholesale (replace-all
+-- semantics) whenever the cardsfolder or vectorizer_version changes.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS card_embeddings (
+    card_name          TEXT PRIMARY KEY REFERENCES cards(name),
+    vector             BLOB NOT NULL,
+    vectorizer_version INTEGER NOT NULL,
+    built_at           TEXT NOT NULL
+);
+
+-- ---------------------------------------------------------------------------
+-- card_embeddings_config: KV store for EmbeddingConfigInputs + derived
+-- config_hash (plan 2026-04-23-003 Unit 2). Keys include
+-- token_format_version, svd_dims, min_df, vectorizer_version,
+-- port_signature_version, config_hash. The config_hash row gates
+-- verify_current_or_raise in embeddings.config; individual input rows
+-- are written for human diagnostics.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS card_embeddings_config (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
