@@ -57,9 +57,9 @@ uv run scripts/sweep_embedding_weights.py                                # Grid-
 ```
 
 The bench.py hook also runs advisorily on pre-commit when edits touch
-`complement_rules/`, `universal_scorer.py`, `graph_engine.py`, or
-`embeddings/`; see `memory/feedback_audit_every_change.md` for the
-guardrail.
+`complement_rules/`, `universal_scorer.py`, `graph_engine.py`,
+`embeddings/`, or `data/scoring_weights.json`; see
+`memory/feedback_audit_every_change.md` for the guardrail.
 
 ## Data Model
 
@@ -239,6 +239,14 @@ no popularity.
 - `data/event_match_seed.json`, `data/rules_seed.json` — committed
   seed artifacts. Edit these instead of code for equivalence /
   declarative-rule changes
+- `data/scoring_weights.json` — source-of-truth for
+  `_RULE_QUALITY_MULTIPLIER` (per-rule IDF multipliers) and
+  `_FLAT_WEIGHT_OVERRIDES` (per-rule density-bucket overrides),
+  loaded by `universal_scorer` at module import. Edit a `value` to
+  retune (flips `compute_config_hash` → re-pin via `bench.py audit
+  --repin --yes`); edit a `comment` for context (does not flip the
+  hash). Per-key sweep history lives in commit messages and
+  `docs/RULE_HISTORY.md`.
 
 ## Conventions
 

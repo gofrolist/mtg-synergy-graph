@@ -451,57 +451,107 @@ _FLAT_COUNT_RULES: frozenset[str] = frozenset(
 #: as a sibling of ``src/`` (``data/`` lives at the repo root); the
 #: project is run via ``uv run`` from the repo root and is never
 #: installed as a wheel.
-_SCORING_WEIGHTS_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "scoring_weights.json"
+_SCORING_WEIGHTS_PATH = Path(__file__).resolve().parents[2] / "data" / "scoring_weights.json"
 
-_SCORING_WEIGHTS_TOP_LEVEL_KEYS = frozenset({"rule_quality_multiplier", "flat_weight_overrides"})
-_SCORING_WEIGHTS_ENTRY_KEYS = frozenset({"value", "comment"})
+_VALID_SECTIONS = frozenset({"rule_quality_multiplier", "flat_weight_overrides"})
+_VALID_ENTRY_FIELDS = frozenset({"value", "comment"})
 
 
-def _load_scoring_weights() -> dict[str, dict[str, float]]:
+class ScoringWeights(NamedTuple):
+    """Structured return for ``_load_scoring_weights``.
+
+    The two dicts are bound at module scope to ``_RULE_QUALITY_MULTIPLIER``
+    and ``_FLAT_WEIGHT_OVERRIDES`` immediately after load. Test fixtures
+    that mutate these module-level dicts in place (via ``.clear()`` +
+    ``.update()``) preserve the dict identity that ``get_scoring_config_inputs()``
+    returns — a property the hash-invariant tests rely on.
+    """
+
+    rule_quality_multiplier: dict[str, float]
+    flat_weight_overrides: dict[str, float]
+
+
+def _is_numeric_non_bool(x: object) -> bool:
+    """True for int / float, False for bool (which is an int subclass)."""
+    return not isinstance(x, bool) and isinstance(x, (int, float))
+
+
+def _load_scoring_weights() -> ScoringWeights:
     """Read ``data/scoring_weights.json`` into the two scoring-weight dicts.
 
-    Returns a mapping ``{section_name: {key: float_value}}`` covering
-    both ``rule_quality_multiplier`` and ``flat_weight_overrides``.
+    Returns a ``ScoringWeights`` NamedTuple with both sections.
 
-    Strict shape validation: unknown top-level keys, unknown per-entry
-    fields, missing ``value``/``comment``, non-numeric ``value``, or
-    non-string ``comment`` all raise ``ValueError`` at module import.
-    Registry-membership (no dead rule_ids) is checked separately by
-    ``tests/test_scoring_weights.py`` to avoid coupling the production
-    import path to plugin load order.
+    Strict shape validation: missing JSON file, malformed JSON, unknown
+    top-level keys, missing required top-level sections, unknown per-entry
+    fields, missing ``value``/``comment``, non-numeric ``value`` (bool
+    explicitly rejected since it is an ``int`` subclass), or non-string
+    ``comment`` all raise ``ValueError`` at module import. Every error
+    message names the JSON file path so the failure is actionable
+    without grep. Registry-membership (no dead rule_ids) is checked
+    separately by ``tests/test_scoring_weights.py`` to avoid coupling
+    the production import path to plugin load order.
 
     The ``comment`` field is intentionally consumed only for shape
     validation — it is not exposed at runtime, not folded into
     ``compute_config_hash``, and exists only on disk for human readers
     and ``jq``/grep queries.
     """
-    with _SCORING_WEIGHTS_PATH.open(encoding="utf-8") as f:
-        raw = json.load(f)
-    extra_sections = set(raw) - _SCORING_WEIGHTS_TOP_LEVEL_KEYS
+    try:
+        with _SCORING_WEIGHTS_PATH.open(encoding="utf-8") as f:
+            raw = json.load(f)
+    except FileNotFoundError as exc:
+        raise ValueError(
+            f"scoring_weights.json missing at {_SCORING_WEIGHTS_PATH}; "
+            "this file is the source-of-truth for _RULE_QUALITY_MULTIPLIER + "
+            "_FLAT_WEIGHT_OVERRIDES and must exist for scoring to function. "
+            "Restore from git or check the .gitignore allowlist."
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{_SCORING_WEIGHTS_PATH}: malformed JSON ({exc})") from exc
+
+    extra_sections = set(raw) - _VALID_SECTIONS
     if extra_sections:
-        raise ValueError(f"unknown top-level sections in scoring_weights.json: {sorted(extra_sections)}")
+        raise ValueError(
+            f"{_SCORING_WEIGHTS_PATH}: unknown top-level sections "
+            f"{sorted(extra_sections)} (valid: {sorted(_VALID_SECTIONS)})"
+        )
+    missing_sections = _VALID_SECTIONS - set(raw)
+    if missing_sections:
+        raise ValueError(f"{_SCORING_WEIGHTS_PATH}: missing required top-level sections {sorted(missing_sections)}")
+
     sections: dict[str, dict[str, float]] = {}
-    for section in _SCORING_WEIGHTS_TOP_LEVEL_KEYS:
-        section_raw = raw.get(section, {})
+    for section in _VALID_SECTIONS:
+        section_raw = raw[section]
         out: dict[str, float] = {}
         for key, entry in section_raw.items():
             if not isinstance(entry, dict):
-                raise ValueError(f"{section}.{key}: entry must be an object, got {type(entry).__name__}")
-            extra_fields = set(entry) - _SCORING_WEIGHTS_ENTRY_KEYS
+                raise ValueError(
+                    f"{_SCORING_WEIGHTS_PATH}: {section}.{key}: entry must be an object, got {type(entry).__name__}"
+                )
+            extra_fields = set(entry) - _VALID_ENTRY_FIELDS
             if extra_fields:
-                raise ValueError(f"{section}.{key}: unknown fields {sorted(extra_fields)}")
+                raise ValueError(f"{_SCORING_WEIGHTS_PATH}: {section}.{key}: unknown fields {sorted(extra_fields)}")
             if "value" not in entry:
-                raise ValueError(f"{section}.{key}: missing required 'value'")
+                raise ValueError(f"{_SCORING_WEIGHTS_PATH}: {section}.{key}: missing required 'value'")
             if "comment" not in entry:
-                raise ValueError(f"{section}.{key}: missing required 'comment'")
+                raise ValueError(f"{_SCORING_WEIGHTS_PATH}: {section}.{key}: missing required 'comment'")
             value = entry["value"]
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise ValueError(f"{section}.{key}: 'value' must be a number, got {type(value).__name__}")
+            if not _is_numeric_non_bool(value):
+                raise ValueError(
+                    f"{_SCORING_WEIGHTS_PATH}: {section}.{key}: 'value' must be a number, got {type(value).__name__}"
+                )
             if not isinstance(entry["comment"], str):
-                raise ValueError(f"{section}.{key}: 'comment' must be a string, got {type(entry['comment']).__name__}")
+                raise ValueError(
+                    f"{_SCORING_WEIGHTS_PATH}: {section}.{key}: 'comment' must be a "
+                    f"string, got {type(entry['comment']).__name__}"
+                )
             out[key] = float(value)
         sections[section] = out
-    return sections
+
+    return ScoringWeights(
+        rule_quality_multiplier=sections["rule_quality_multiplier"],
+        flat_weight_overrides=sections["flat_weight_overrides"],
+    )
 
 
 _LOADED_SCORING_WEIGHTS = _load_scoring_weights()
@@ -519,14 +569,14 @@ _LOADED_SCORING_WEIGHTS = _load_scoring_weights()
 #:
 #: Source-of-truth: ``data/scoring_weights.json``. Per-key tuning
 #: history lives in commit messages and ``docs/RULE_HISTORY.md``.
-_FLAT_WEIGHT_OVERRIDES: dict[str, float] = _LOADED_SCORING_WEIGHTS["flat_weight_overrides"]
+_FLAT_WEIGHT_OVERRIDES: dict[str, float] = _LOADED_SCORING_WEIGHTS.flat_weight_overrides
 
 #: Quality multiplier applied to IDF weights. Dampens broad effect-only
 #: rules and enabler-on-enabler trigger-trigger matches.
 #:
 #: Source-of-truth: ``data/scoring_weights.json``. Per-key tuning
 #: history lives in commit messages and ``docs/RULE_HISTORY.md``.
-_RULE_QUALITY_MULTIPLIER: dict[str, float] = _LOADED_SCORING_WEIGHTS["rule_quality_multiplier"]
+_RULE_QUALITY_MULTIPLIER: dict[str, float] = _LOADED_SCORING_WEIGHTS.rule_quality_multiplier
 
 
 def _compute_idf_weights(
