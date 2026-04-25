@@ -263,6 +263,21 @@ to filter the sub-class of proposals that reverted against it). See
 `docs/solutions/best-practices/scaffold-queue-generator-exhaustion-2026-04-24.md`
 for the full rubric, Options A/B/C/D, and re-check triggers.
 
+**Also pre-check golden-set coverage.** Even when a template has
+a generator, the proposal may be untestable: zero of the 100
+golden-set commanders may carry the gate, in which case
+`bench.py audit --rule` returns no signal and shipping the rule
+violates `memory/feedback_audit_every_change.md`. Run the per-rule
+pre-check (one SQL query — see
+`docs/solutions/best-practices/gap-report-impact-vs-golden-set-coverage-2026-04-25.md`)
+before scaffolding. As of 2026-04-25 the queue is **structurally
+exhausted on the current 100-cmdr fixture** — every untried
+proposal targets archetypes the golden set wasn't designed to
+cover. See
+`docs/solutions/best-practices/gap-report-queue-dry-on-golden-set-2026-04-25.md`
+for the empirical state and the two real next steps (expand the
+golden set, or pivot to existing-rule tuning).
+
 ### 7. Commit
 
 One commit per rule:
