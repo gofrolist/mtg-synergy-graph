@@ -61,6 +61,7 @@ TESTS_DIR = REPO_ROOT / "tests"
 CORE_PATH = REPO_ROOT / "src" / "mtg_synergy_graph" / "complement_rules" / "core.py"
 REGISTRY_PATH = REPO_ROOT / "src" / "mtg_synergy_graph" / "complement_rules" / "registry.py"
 SCORER_PATH = REPO_ROOT / "src" / "mtg_synergy_graph" / "universal_scorer.py"
+SCORING_WEIGHTS_PATH = REPO_ROOT / "data" / "scoring_weights.json"
 
 
 @dataclass(frozen=True)
@@ -1868,18 +1869,42 @@ def _patch_registry(art: ScaffoldArtifacts) -> bool:
 
 
 def _patch_scorer(art: ScaffoldArtifacts) -> bool:
+    """Insert ``rule_id`` into ``_RULE_TO_BUCKET`` (still a Python literal)
+    and add the multiplier entry to ``data/scoring_weights.json`` (the
+    new source-of-truth since the 2026-04-25 externalization). Returns
+    True when both writes happened, False if the rule is already
+    registered in either store.
+    """
     src = SCORER_PATH.read_text()
-    if f'"{art.rule_id}":' in src:
-        return False
+    bucket_already_present = f'"{art.rule_id}":' in src
+    if not bucket_already_present:
+        new_src = _insert_before_container_close(src, "_RULE_TO_BUCKET", art.scorer_bucket_entry, "{", "}")
+        if new_src is None:
+            return False
+        SCORER_PATH.write_text(new_src)
 
-    # Same brace-walking insertion for both dicts.
-    new_src = _insert_before_container_close(src, "_RULE_TO_BUCKET", art.scorer_bucket_entry, "{", "}")
-    if new_src is None:
+    return _patch_scoring_weights_json(art)
+
+
+def _patch_scoring_weights_json(art: ScaffoldArtifacts) -> bool:
+    """Insert ``art.rule_id`` into ``data/scoring_weights.json`` under
+    ``rule_quality_multiplier`` with the generator's chosen multiplier.
+
+    The ``comment`` field is left empty per the migration convention —
+    the next contributor that touches this rule's value writes a
+    one-line context note then.
+    """
+    weights = json.loads(SCORING_WEIGHTS_PATH.read_text(encoding="utf-8"))
+    if art.rule_id in weights["rule_quality_multiplier"]:
         return False
-    new_src = _insert_before_container_close(new_src, "_RULE_QUALITY_MULTIPLIER", art.scorer_multiplier_entry, "{", "}")
-    if new_src is None:
-        return False
-    SCORER_PATH.write_text(new_src)
+    weights["rule_quality_multiplier"][art.rule_id] = {
+        "value": art.multiplier,
+        "comment": "",
+    }
+    SCORING_WEIGHTS_PATH.write_text(
+        json.dumps(weights, indent=2, sort_keys=False) + "\n",
+        encoding="utf-8",
+    )
     return True
 
 
@@ -1912,6 +1937,7 @@ def _affected_paths(art: ScaffoldArtifacts) -> list[Path]:
         CORE_PATH,
         REGISTRY_PATH,
         SCORER_PATH,
+        SCORING_WEIGHTS_PATH,
         GENERATED_DIR / "__init__.py",
     ]
 
