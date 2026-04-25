@@ -43,6 +43,12 @@ def compute_config_hash() -> str:
     Stale tensor rows retain the old hash, so queries can filter by the
     current hash and refuse to read a pre-change tensor.
 
+    ``_RULE_QUALITY_MULTIPLIER`` and ``_FLAT_WEIGHT_OVERRIDES`` are
+    loaded from ``data/scoring_weights.json`` at module import. Editing
+    a ``value`` in that file flips the hash; editing a ``comment``
+    does not (the comment field is metadata for human readers and is
+    intentionally excluded from the hash input set).
+
     NOT in the hash (because either constant-in-function or captured
     elsewhere): the IDF formula shape, the 70% concentration-dampening
     threshold, multi-rule-bonus coefficients, circuit/cmc/rank bonus

@@ -1,0 +1,242 @@
+{
+  "rule_quality_multiplier": {
+    "attack_payoffs": {
+      "value": 1.5,
+      "comment": ""
+    },
+    "aura_equipment_support": {
+      "value": 2.5,
+      "comment": ""
+    },
+    "cardpower_axis_feeder": {
+      "value": 3.5,
+      "comment": ""
+    },
+    "cascade_tribal": {
+      "value": 2.0,
+      "comment": ""
+    },
+    "changeling_tribal": {
+      "value": 2.0,
+      "comment": ""
+    },
+    "choose_tribal": {
+      "value": 2.0,
+      "comment": ""
+    },
+    "combat_enhancer": {
+      "value": 0.7,
+      "comment": ""
+    },
+    "cost_reducer": {
+      "value": 1.2,
+      "comment": ""
+    },
+    "cost_reduction_target": {
+      "value": 1.0,
+      "comment": ""
+    },
+    "counter_axis_feeder": {
+      "value": 3.0,
+      "comment": ""
+    },
+    "counter_doubler": {
+      "value": 1.5,
+      "comment": ""
+    },
+    "counter_keyword": {
+      "value": 0.7,
+      "comment": ""
+    },
+    "counter_target_payoff": {
+      "value": 2.0,
+      "comment": ""
+    },
+    "creature_died_feeder": {
+      "value": 2.5,
+      "comment": ""
+    },
+    "creature_untap_engine": {
+      "value": 3.0,
+      "comment": ""
+    },
+    "creatures_as_lands_landfall": {
+      "value": 2.5,
+      "comment": ""
+    },
+    "damage_doubler_synergy": {
+      "value": 2.5,
+      "comment": ""
+    },
+    "dies_drain": {
+      "value": 1.5,
+      "comment": ""
+    },
+    "doctor_s_tribal": {
+      "value": 2.0,
+      "comment": ""
+    },
+    "edict_feeder": {
+      "value": 2.0,
+      "comment": ""
+    },
+    "etb_tapped_stax_feeder": {
+      "value": 2.5,
+      "comment": ""
+    },
+    "etbreplacement_copy_dbcopy_optional_tribal": {
+      "value": 2.0,
+      "comment": ""
+    },
+    "etbreplacement_other_choosect_tribal": {
+      "value": 2.0,
+      "comment": ""
+    },
+    "firebending_2_tribal": {
+      "value": 2.0,
+      "comment": ""
+    },
+    "gy_fuel_feeder": {
+      "value": 1.2,
+      "comment": ""
+    },
+    "gy_loader": {
+      "value": 1.5,
+      "comment": ""
+    },
+    "hand_size_feeder": {
+      "value": 2.5,
+      "comment": ""
+    },
+    "land_bounce_feeder": {
+      "value": 2.5,
+      "comment": ""
+    },
+    "landfall_enabler": {
+      "value": 2.0,
+      "comment": ""
+    },
+    "landwalk_island_tribal": {
+      "value": 2.0,
+      "comment": ""
+    },
+    "life_total_feeder": {
+      "value": 2.5,
+      "comment": ""
+    },
+    "lifegain_feeder": {
+      "value": 2.5,
+      "comment": ""
+    },
+    "melee_tribal": {
+      "value": 2.0,
+      "comment": ""
+    },
+    "mentor_tribal": {
+      "value": 2.0,
+      "comment": ""
+    },
+    "modified_axis_feeder": {
+      "value": 3.0,
+      "comment": ""
+    },
+    "monarch_synergy": {
+      "value": 2.5,
+      "comment": ""
+    },
+    "more_tribal": {
+      "value": 2.0,
+      "comment": ""
+    },
+    "panharmonicon": {
+      "value": 2.0,
+      "comment": ""
+    },
+    "party_feeder": {
+      "value": 2.5,
+      "comment": ""
+    },
+    "populate_stack": {
+      "value": 2.5,
+      "comment": ""
+    },
+    "prowess_tribal": {
+      "value": 2.0,
+      "comment": ""
+    },
+    "repl_damagedone_counters_stack": {
+      "value": 2.0,
+      "comment": ""
+    },
+    "repl_moved_exile_stack": {
+      "value": 2.0,
+      "comment": ""
+    },
+    "start_tribal": {
+      "value": 2.0,
+      "comment": ""
+    },
+    "subject_zone_feeder": {
+      "value": 2.5,
+      "comment": ""
+    },
+    "tap_type_feeder": {
+      "value": 1.0,
+      "comment": ""
+    },
+    "token_etb_damage": {
+      "value": 0.3,
+      "comment": ""
+    },
+    "training_tribal": {
+      "value": 2.0,
+      "comment": ""
+    },
+    "trigger_resonance": {
+      "value": 0.7,
+      "comment": ""
+    },
+    "untap_combo": {
+      "value": 3.0,
+      "comment": ""
+    },
+    "value_engine": {
+      "value": 0.5,
+      "comment": ""
+    },
+    "wheel_synergy": {
+      "value": 2.0,
+      "comment": ""
+    },
+    "zone_resonance": {
+      "value": 1.3,
+      "comment": ""
+    }
+  },
+  "flat_weight_overrides": {
+    "etb_self": {
+      "value": 0.01,
+      "comment": ""
+    },
+    "evasion": {
+      "value": 0.1,
+      "comment": ""
+    },
+    "scaling": {
+      "value": 0.3,
+      "comment": ""
+    },
+    "spell_density": {
+      "value": 0.3,
+      "comment": ""
+    },
+    "token_producer": {
+      "value": 0.18,
+      "comment": ""
+    },
+    "tribal_density": {
+      "value": 0.5,
+      "comment": ""
+    }
+  }
+}

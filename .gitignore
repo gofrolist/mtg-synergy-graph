@@ -9,6 +9,9 @@ __pycache__/
 data/*
 # …except seed JSONs — source of truth for declarative rules + event maps
 !data/*_seed.json
+# …and scoring_weights.json — source of truth for _RULE_QUALITY_MULTIPLIER
+# and _FLAT_WEIGHT_OVERRIDES, loaded by universal_scorer at import time.
+!data/scoring_weights.json
 # …and the forge-oracle pin directory (committed: version.txt pins the
 # Forge SHA used to build forge_oracle.db, which itself is regenerable).
 !data/forge_oracle/
