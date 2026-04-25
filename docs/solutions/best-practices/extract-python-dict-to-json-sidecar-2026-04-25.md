@@ -130,9 +130,25 @@ the file path) before committing.
   instead of the loaded value**: same class of bug as the embeddings
   pipeline incident (`docs/solutions/best-practices/verify-from-stored-config-not-code-defaults-2026-04-23.md`).
   The hash MUST read what was loaded, not what the source code says.
+- **Auditing only readers, not writers, during code review.** This
+  refactor's `ce-code-review` covered every reader of
+  `_RULE_QUALITY_MULTIPLIER` (8 reviewer personas, 25 findings) but
+  missed `scripts/scaffold_rule.py:_patch_scorer`'s regex insertion
+  into the now-deleted Python literal. Surfaced one day later on the
+  next scaffold attempt; would have shipped a new rule with default
+  multiplier 1.0 instead of the generator's chosen value, with no
+  audit signal. Same blind spot bit plan 003 three days earlier
+  (`EVENT_MATCH_MAP` / `complement_rules/generated/*.py` migrations
+  deferred the scaffolder rewrite as untracked follow-up). See
+  `docs/solutions/best-practices/sweep-writers-not-just-readers-on-source-of-truth-refactor-2026-04-25.md`
+  for the full checklist.
 
 ## Related
 
+- **`docs/solutions/best-practices/sweep-writers-not-just-readers-on-source-of-truth-refactor-2026-04-25.md`**
+  — the meta-lesson distilled from this refactor's blind spot:
+  enumerate writers, not just readers, when externalizing a
+  source-of-truth. Adopt its checklist for any future externalization.
 - `docs/solutions/best-practices/offline-oracle-hash-pattern-2026-04-23.md`
   — sidecar-with-hash-enforcement pattern (different mechanism: built
   SQLite vs hand-edited JSON; same principle).
