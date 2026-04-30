@@ -14,13 +14,18 @@ from pathlib import Path
 import pytest
 
 from mtg_synergy_graph.bench.optimize import (
+    OPTIMIZE_HISTORY_FIELDS,
     OptimizerConfig,
+    OptimizerResult,
     OptimizerSelfTestFailed,
+    OptimizerStep,
+    append_optimize_history_rows,
     composite_objective,
     load_edhrec_labels,
     random_split,
     run_optimizer,
     score_commander_from_complements,
+    write_proposal_json,
 )
 
 # ---------------------------------------------------------------------------
@@ -886,3 +891,298 @@ class TestRunOptimizerSmoke:
         # result type is well-formed.
         assert isinstance(result.history, tuple)
         assert isinstance(result.dead_keys, tuple)
+
+
+# ---------------------------------------------------------------------------
+# Output artifacts (Unit 5)
+# ---------------------------------------------------------------------------
+
+
+def _make_result(
+    *,
+    baseline_weights: dict[str, float],
+    final_weights: dict[str, float],
+    history: tuple[OptimizerStep, ...] = (),
+    n_steps_accepted: int = 0,
+    n_steps_rejected: int = 0,
+    partial_sweep: bool = False,
+    dead_keys: tuple[str, ...] = (),
+) -> OptimizerResult:
+    """Build a synthetic OptimizerResult for artifact tests."""
+    from types import MappingProxyType
+
+    return OptimizerResult(
+        baseline_weights=MappingProxyType(baseline_weights),
+        final_weights=MappingProxyType(final_weights),
+        history=history,
+        n_iterations=1,
+        n_steps_accepted=n_steps_accepted,
+        n_steps_rejected=n_steps_rejected,
+        partial_sweep=partial_sweep,
+        dead_keys=dead_keys,
+        train_split=("a", "b"),
+        held_split=("c",),
+        color_buckets={"mono": {"train": 2, "held": 1}},
+        train_composite_baseline=0.5,
+        held_composite_baseline=0.5,
+        train_ndcg_baseline=0.4,
+        held_ndcg_baseline=0.4,
+        train_gem_baseline=0.84,
+        held_gem_baseline=0.84,
+        train_composite_final=0.55,
+        held_composite_final=0.52,
+        train_ndcg_final=0.42,
+        held_ndcg_final=0.41,
+        train_gem_final=0.86,
+        held_gem_final=0.85,
+    )
+
+
+class TestWriteProposalJson:
+    def test_writes_valid_json_with_full_schema(
+        self,
+        patched_baseline_weights: dict[str, float],
+        tmp_path: Path,
+    ) -> None:
+        import json
+
+        result = _make_result(
+            baseline_weights={"alpha_rule": 1.0, "beta_rule": 1.0},
+            final_weights={"alpha_rule": 1.5, "beta_rule": 1.0},
+            n_steps_accepted=1,
+        )
+        target = tmp_path / "optimize_proposal.json"
+        payload = write_proposal_json(result, path=target)
+
+        # File exists and is valid JSON.
+        assert target.exists()
+        loaded = json.loads(target.read_text())
+        assert loaded == payload
+
+        # Schema fields per FR6.
+        for field in (
+            "baseline_config_hash",
+            "proposed_config_hash",
+            "per_rule_diffs",
+            "aggregate_train_composite_delta",
+            "aggregate_held_composite_delta",
+            "n_iterations",
+            "n_steps_accepted",
+            "n_steps_rejected",
+            "partial_sweep",
+            "dead_keys",
+        ):
+            assert field in loaded
+
+    def test_per_rule_diffs_only_changed(
+        self,
+        patched_baseline_weights: dict[str, float],
+        tmp_path: Path,
+    ) -> None:
+        result = _make_result(
+            baseline_weights={"alpha_rule": 1.0, "beta_rule": 1.0, "gamma_rule": 1.0},
+            final_weights={"alpha_rule": 1.5, "beta_rule": 1.0, "gamma_rule": 0.75},
+            n_steps_accepted=2,
+        )
+        target = tmp_path / "optimize_proposal.json"
+        payload = write_proposal_json(result, path=target)
+
+        diff_rules = {d["rule_id"] for d in payload["per_rule_diffs"]}
+        # Only rules whose final differs from baseline.
+        assert diff_rules == {"alpha_rule", "gamma_rule"}
+
+    def test_proposed_config_hash_flips_on_change(
+        self,
+        patched_baseline_weights: dict[str, float],
+        tmp_path: Path,
+    ) -> None:
+        # Final differs from baseline → proposed_config_hash != baseline_config_hash.
+        result = _make_result(
+            baseline_weights={"alpha_rule": 1.0, "beta_rule": 1.0, "gamma_rule": 1.0},
+            final_weights={"alpha_rule": 1.5, "beta_rule": 1.0, "gamma_rule": 1.0},
+            n_steps_accepted=1,
+        )
+        target = tmp_path / "optimize_proposal.json"
+        payload = write_proposal_json(result, path=target)
+        assert payload["proposed_config_hash"] != payload["baseline_config_hash"]
+
+    def test_proposed_config_hash_equal_when_no_change(
+        self,
+        patched_baseline_weights: dict[str, float],
+        tmp_path: Path,
+    ) -> None:
+        # Final == baseline → both hashes equal.
+        identical = {"alpha_rule": 1.0, "beta_rule": 1.0, "gamma_rule": 1.0}
+        result = _make_result(
+            baseline_weights=identical,
+            final_weights=dict(identical),
+        )
+        target = tmp_path / "optimize_proposal.json"
+        payload = write_proposal_json(result, path=target)
+        assert payload["proposed_config_hash"] == payload["baseline_config_hash"]
+        assert payload["per_rule_diffs"] == []
+
+    def test_no_comment_in_diff_entries(
+        self,
+        patched_baseline_weights: dict[str, float],
+        tmp_path: Path,
+    ) -> None:
+        """The proposal must not contain `comment` keys (FR6 contract)."""
+        result = _make_result(
+            baseline_weights={"alpha_rule": 1.0, "beta_rule": 1.0},
+            final_weights={"alpha_rule": 1.5, "beta_rule": 1.0},
+            n_steps_accepted=1,
+        )
+        target = tmp_path / "optimize_proposal.json"
+        payload = write_proposal_json(result, path=target)
+        for diff in payload["per_rule_diffs"]:
+            assert "comment" not in diff
+
+    def test_dead_keys_field_populated(
+        self,
+        patched_baseline_weights: dict[str, float],
+        tmp_path: Path,
+    ) -> None:
+        result = _make_result(
+            baseline_weights={"alpha_rule": 1.0, "ghost_rule": 0.5},
+            final_weights={"alpha_rule": 1.0, "ghost_rule": 0.5},
+            dead_keys=("ghost_rule",),
+        )
+        target = tmp_path / "optimize_proposal.json"
+        payload = write_proposal_json(result, path=target)
+        assert payload["dead_keys"] == ["ghost_rule"]
+
+    def test_patch_restore_on_proposed_hash_compute(
+        self,
+        patched_baseline_weights: dict[str, float],
+        tmp_path: Path,
+    ) -> None:
+        """proposed_config_hash patch+restore preserves dict identity."""
+        from mtg_synergy_graph import universal_scorer
+
+        original_id = id(universal_scorer._RULE_QUALITY_MULTIPLIER)
+        baseline_snapshot = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
+        result = _make_result(
+            baseline_weights=baseline_snapshot,
+            final_weights={k: v * 1.5 for k, v in baseline_snapshot.items()},
+            n_steps_accepted=len(baseline_snapshot),
+        )
+        target = tmp_path / "optimize_proposal.json"
+        write_proposal_json(result, path=target)
+
+        # Dict identity preserved + contents bitwise-restored.
+        assert id(universal_scorer._RULE_QUALITY_MULTIPLIER) == original_id
+        assert dict(universal_scorer._RULE_QUALITY_MULTIPLIER) == baseline_snapshot
+
+
+class TestAppendOptimizeHistoryRows:
+    def test_writes_header_on_first_call(self, tmp_path: Path) -> None:
+        target = tmp_path / ".audit" / "optimize_history.csv"
+        result = _make_result(
+            baseline_weights={"alpha_rule": 1.0},
+            final_weights={"alpha_rule": 1.5},
+            history=(
+                OptimizerStep(
+                    sweep_n=1,
+                    rule_id="alpha_rule",
+                    old_value=1.0,
+                    new_value=1.5,
+                    train_composite=0.55,
+                    held_composite=0.52,
+                    train_ndcg=0.42,
+                    held_ndcg=0.41,
+                    train_gem=0.86,
+                    held_gem=0.85,
+                    accepted=True,
+                    reject_reason="",
+                ),
+            ),
+            n_steps_accepted=1,
+        )
+
+        append_optimize_history_rows(result, run_id="test-run-1", path=target)
+        assert target.exists()
+        contents = target.read_text().splitlines()
+        assert contents[0] == ",".join(OPTIMIZE_HISTORY_FIELDS)  # header
+        assert len(contents) == 2  # header + 1 row
+
+    def test_subsequent_calls_do_not_re_write_header(self, tmp_path: Path) -> None:
+        target = tmp_path / ".audit" / "optimize_history.csv"
+        result = _make_result(
+            baseline_weights={"alpha_rule": 1.0},
+            final_weights={"alpha_rule": 1.5},
+            history=(
+                OptimizerStep(
+                    sweep_n=1,
+                    rule_id="alpha_rule",
+                    old_value=1.0,
+                    new_value=1.5,
+                    train_composite=0.55,
+                    held_composite=0.52,
+                    train_ndcg=0.42,
+                    held_ndcg=0.41,
+                    train_gem=0.86,
+                    held_gem=0.85,
+                    accepted=True,
+                    reject_reason="",
+                ),
+            ),
+            n_steps_accepted=1,
+        )
+        append_optimize_history_rows(result, run_id="run-1", path=target)
+        append_optimize_history_rows(result, run_id="run-2", path=target)
+        contents = target.read_text().splitlines()
+        # Header should appear exactly once.
+        header_count = sum(1 for line in contents if line == ",".join(OPTIMIZE_HISTORY_FIELDS))
+        assert header_count == 1
+        # 1 header + 2 rows
+        assert len(contents) == 3
+
+    def test_none_gem_renders_empty_cell(self, tmp_path: Path) -> None:
+        target = tmp_path / "optimize_history.csv"
+        result = _make_result(
+            baseline_weights={"alpha_rule": 1.0},
+            final_weights={"alpha_rule": 1.0},
+            history=(
+                OptimizerStep(
+                    sweep_n=1,
+                    rule_id="alpha_rule",
+                    old_value=1.0,
+                    new_value=1.0,
+                    train_composite=0.5,
+                    held_composite=0.5,
+                    train_ndcg=0.4,
+                    held_ndcg=0.4,
+                    train_gem=None,
+                    held_gem=None,
+                    accepted=False,
+                    reject_reason="held_out_eps",
+                ),
+            ),
+        )
+        append_optimize_history_rows(result, run_id="r", path=target)
+        # Read back via csv module to get the data row.
+        import csv
+
+        with target.open() as fh:
+            reader = csv.DictReader(fh)
+            rows = list(reader)
+        assert len(rows) == 1
+        assert rows[0]["train_gem"] == ""
+        assert rows[0]["held_gem"] == ""
+        assert rows[0]["accepted"] == "false"
+        assert rows[0]["reject_reason"] == "held_out_eps"
+
+    def test_io_failure_degrades_to_stderr_warning(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        # Path that cannot be created (parent is a file, not a directory).
+        bad_parent = tmp_path / "blocking_file"
+        bad_parent.write_text("just a file")
+        target = bad_parent / "optimize_history.csv"  # parent is not a directory
+        result = _make_result(
+            baseline_weights={"alpha_rule": 1.0},
+            final_weights={"alpha_rule": 1.0},
+        )
+        # Should NOT raise.
+        append_optimize_history_rows(result, run_id="r", path=target)
+        captured = capsys.readouterr()
+        assert "warning" in captured.err.lower() or "warning" in captured.out.lower()

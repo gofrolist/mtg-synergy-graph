@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
     from mtg_synergy_graph.complement_rules import PortComplement
     from mtg_synergy_graph.universal_scorer import CandidateCache
@@ -926,3 +927,196 @@ def run_optimizer(
         train_gem_final=current_train_gem,
         held_gem_final=current_held_gem,
     )
+
+
+# ---------------------------------------------------------------------------
+# Unit 5: Output artifacts (proposal JSON + history CSV)
+# ---------------------------------------------------------------------------
+
+
+_PROPOSAL_DEFAULT_PATH = ".audit/optimize_proposal.json"
+_HISTORY_DEFAULT_PATH = ".audit/optimize_history.csv"
+
+#: CSV column order for ``optimize_history.csv``. Bumping or reordering
+#: requires updating the reader symmetrically.
+OPTIMIZE_HISTORY_FIELDS: tuple[str, ...] = (
+    "timestamp",
+    "run_id",
+    "sweep_n",
+    "rule_id",
+    "old_value",
+    "new_value",
+    "train_composite",
+    "held_composite",
+    "train_ndcg",
+    "held_ndcg",
+    "train_gem",
+    "held_gem",
+    "accepted",
+    "reject_reason",
+)
+
+
+def _proposed_config_hash(proposed_weights: Mapping[str, float]) -> str:
+    """Compute the config hash that the proposed weights would produce.
+
+    Patches ``_RULE_QUALITY_MULTIPLIER`` to the proposed values, calls
+    ``compute_config_hash``, restores, and returns the hash. The
+    patch+hash+restore happens in a single ``try/finally`` so dict
+    identity is preserved on every exit path. Mirrors the established
+    test-fixture pattern (``tests/test_scoring_weights.py:309-324``).
+    """
+    from mtg_synergy_graph import universal_scorer
+    from mtg_synergy_graph.bench.tensor import compute_config_hash
+
+    saved = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
+    try:
+        universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
+        universal_scorer._RULE_QUALITY_MULTIPLIER.update(proposed_weights)
+        return compute_config_hash()
+    finally:
+        universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
+        universal_scorer._RULE_QUALITY_MULTIPLIER.update(saved)
+
+
+def _diff_value(baseline: float, final: float) -> bool:
+    """Return True iff baseline and final differ (bitwise float comparison)."""
+    return baseline != final
+
+
+def write_proposal_json(
+    result: OptimizerResult,
+    path: str | Path | None = None,
+) -> dict:
+    """Write the optimizer's proposal artifact to ``.audit/optimize_proposal.json``.
+
+    Returns the dict that was serialized (useful for tests / inspection).
+    Per FR6: ``per_rule_diffs`` includes only rules whose value actually
+    changed; ``proposed_config_hash`` flips relative to baseline iff any
+    weight changed; ``dead_keys`` non-empty signals a stale
+    ``data/scoring_weights.json`` entry.
+
+    The ``comment`` fields in ``data/scoring_weights.json`` are never
+    read or emitted by this function — humans applying the diff cannot
+    accidentally clobber them.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    target_path = _Path(path) if path is not None else _Path(_PROPOSAL_DEFAULT_PATH)
+
+    from mtg_synergy_graph.bench.tensor import compute_config_hash
+
+    baseline_hash = compute_config_hash()
+    proposed_hash = _proposed_config_hash(result.final_weights)
+
+    per_rule_diffs: list[dict] = []
+    for rule_id, baseline_value in result.baseline_weights.items():
+        final_value = result.final_weights[rule_id]
+        if not _diff_value(baseline_value, final_value):
+            continue
+        # Find the accepted-iteration step that produced the final value (if any).
+        accepted_iter: int | None = None
+        for step in result.history:
+            if step.rule_id == rule_id and step.accepted and step.new_value == final_value:
+                accepted_iter = step.sweep_n
+                break
+        per_rule_diffs.append(
+            {
+                "rule_id": rule_id,
+                "old_value": baseline_value,
+                "new_value": final_value,
+                "accepted_iteration": accepted_iter,
+            }
+        )
+
+    payload: dict = {
+        "baseline_config_hash": baseline_hash,
+        "proposed_config_hash": proposed_hash,
+        "per_rule_diffs": per_rule_diffs,
+        "aggregate_train_composite_delta": (result.train_composite_final - result.train_composite_baseline),
+        "aggregate_held_composite_delta": (result.held_composite_final - result.held_composite_baseline),
+        "train_ndcg_baseline": result.train_ndcg_baseline,
+        "train_ndcg_final": result.train_ndcg_final,
+        "held_ndcg_baseline": result.held_ndcg_baseline,
+        "held_ndcg_final": result.held_ndcg_final,
+        "gem_rate_train_baseline": result.train_gem_baseline,
+        "gem_rate_train_final": result.train_gem_final,
+        "gem_rate_held_baseline": result.held_gem_baseline,
+        "gem_rate_held_final": result.held_gem_final,
+        "n_iterations": result.n_iterations,
+        "n_steps_accepted": result.n_steps_accepted,
+        "n_steps_rejected": result.n_steps_rejected,
+        "partial_sweep": result.partial_sweep,
+        "dead_keys": list(result.dead_keys),
+        "train_split_size": len(result.train_split),
+        "held_split_size": len(result.held_split),
+        "color_buckets": dict(result.color_buckets),
+    }
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(_json.dumps(payload, indent=2, sort_keys=False), encoding="utf-8")
+    return payload
+
+
+def append_optimize_history_rows(
+    result: OptimizerResult,
+    run_id: str,
+    path: str | Path | None = None,
+) -> None:
+    """Append one CSV row per attempted step to ``.audit/optimize_history.csv``.
+
+    Mirrors :func:`bench.history.append_run` exactly:
+    ``mkdir parents=True, exist_ok=True``, open ``"a" newline=""``, write
+    the header on ``tell() == 0``, wrap in try/except OSError/csv.Error
+    with a stderr-warn-and-continue degradation. Exceptions during write
+    must never abort the optimizer's primary output.
+    """
+    import csv as _csv
+    import sys as _sys
+    from datetime import UTC, datetime
+    from pathlib import Path as _Path
+
+    target_path = _Path(path) if path is not None else _Path(_HISTORY_DEFAULT_PATH)
+    timestamp = datetime.now(UTC).isoformat(timespec="seconds")
+
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        with target_path.open("a", encoding="utf-8", newline="") as fh:
+            pos = fh.tell()
+            if pos < 0:
+                import os as _os
+
+                pos = _os.fstat(fh.fileno()).st_size
+            write_header = pos == 0
+            writer = _csv.writer(fh)
+            if write_header:
+                writer.writerow(OPTIMIZE_HISTORY_FIELDS)
+            for step in result.history:
+                writer.writerow(_history_row_for_step(step, timestamp, run_id))
+    except (OSError, _csv.Error) as exc:
+        print(
+            f"bench.py audit --optimize: warning: failed to append history rows "
+            f"to {target_path}: {exc.__class__.__name__}: {exc}",
+            file=_sys.stderr,
+        )
+
+
+def _history_row_for_step(step: OptimizerStep, timestamp: str, run_id: str) -> list[str]:
+    """Render one ``OptimizerStep`` into the CSV's 14 string cells."""
+    return [
+        timestamp,
+        run_id,
+        str(step.sweep_n),
+        step.rule_id,
+        f"{step.old_value:.6f}",
+        f"{step.new_value:.6f}",
+        f"{step.train_composite:.6f}",
+        f"{step.held_composite:.6f}",
+        f"{step.train_ndcg:.6f}",
+        f"{step.held_ndcg:.6f}",
+        "" if step.train_gem is None else f"{step.train_gem:.6f}",
+        "" if step.held_gem is None else f"{step.held_gem:.6f}",
+        "true" if step.accepted else "false",
+        step.reject_reason,
+    ]
