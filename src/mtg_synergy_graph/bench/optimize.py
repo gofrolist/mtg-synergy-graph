@@ -37,7 +37,16 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from mtg_synergy_graph.complement_rules import find_all_complements
+from mtg_synergy_graph.engine import UNRANKED_EDHREC_SENTINEL
 from mtg_synergy_graph.penalties import build_candidate_cache
+from mtg_synergy_graph.universal_scorer import (
+    _compute_idf_basis,
+    _compute_pair_bonus,
+    patched_rule_quality_multiplier,
+    score_from_complements,
+)
+from mtg_synergy_graph.validate import compute_ndcg
 
 _logger = logging.getLogger(__name__)
 
@@ -352,8 +361,6 @@ def _fast_total_and_contribs(
           deduped exactly once. Zero-net entries are NOT dropped here —
           the caller filters them when assembling the contributions tuple.
     """
-    from mtg_synergy_graph.universal_scorer import _compute_pair_bonus
-
     total = 0.0
     seen: set[tuple[str, str, str, str, str]] = set()
     distinct_rules: set[str] = set()
@@ -409,7 +416,7 @@ def score_commander_from_complements(
     Reads the live ``_RULE_QUALITY_MULTIPLIER`` and ``_FLAT_WEIGHT_OVERRIDES``
     globals — the caller is responsible for patching them via
     ``.clear() + .update(weights)`` in a ``try/finally`` BEFORE this call
-    if grid-cell weights differ from baseline. ``_score_from_complements``
+    if grid-cell weights differ from baseline. ``score_from_complements``
     handles the staple/circuit/cmc/rank/embedding side-channels exactly
     as ``score_all_universal`` does.
 
@@ -424,10 +431,7 @@ def score_commander_from_complements(
     ``engine.SynergyEngine.page()`` — so the optimizer's view matches
     what ``recommend.py`` displays.
     """
-    from mtg_synergy_graph.engine import UNRANKED_EDHREC_SENTINEL
-    from mtg_synergy_graph.universal_scorer import _score_from_complements
-
-    results = _score_from_complements(
+    results = score_from_complements(
         conn,
         [commander],
         complements,
@@ -618,19 +622,11 @@ def _score_split(
     inner ``_compute_idf_weights`` walk is replaced by a per-key
     ``_RULE_QUALITY_MULTIPLIER`` lookup.
     """
-    from mtg_synergy_graph import universal_scorer
     from mtg_synergy_graph.bench.hidden_gems import (
         hidden_gem_hit_rate_for_commander,
     )
-    from mtg_synergy_graph.complement_rules import find_all_complements
-    from mtg_synergy_graph.universal_scorer import _compute_idf_basis
-    from mtg_synergy_graph.validate import compute_ndcg
 
-    baseline = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
-    try:
-        universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
-        universal_scorer._RULE_QUALITY_MULTIPLIER.update(weights)
-
+    with patched_rule_quality_multiplier(weights):
         per_ndcg: dict[str, float] = {}
         per_gem: dict[str, float | None] = {}
         for cmdr in commanders:
@@ -666,9 +662,6 @@ def _score_split(
                 per_gem[cmdr] = gem_entry.rate if gem_entry is not None else None
             else:
                 per_gem[cmdr] = None
-    finally:
-        universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
-        universal_scorer._RULE_QUALITY_MULTIPLIER.update(baseline)
 
     return composite_objective(per_ndcg, per_gem, alpha)
 
@@ -881,7 +874,7 @@ def run_optimizer(
     # Build the commander-independent candidate cache ONCE per run. Without this,
     # every grid-cell evaluation re-issues `SELECT name, cmc, edhrec_rank FROM
     # cards` (full ~32k-row scan) inside score_commander_from_complements +
-    # _score_from_complements. With ~26k grid evaluations per sweep, that's
+    # score_from_complements. With ~26k grid evaluations per sweep, that's
     # ~850M row reads → the bottleneck. The cache is reused across the full run.
     candidate_cache = build_candidate_cache(conn)
 
@@ -1212,22 +1205,15 @@ def _proposed_config_hash(proposed_weights: Mapping[str, float]) -> str:
     """Compute the config hash that the proposed weights would produce.
 
     Patches ``_RULE_QUALITY_MULTIPLIER`` to the proposed values, calls
-    ``compute_config_hash``, restores, and returns the hash. The
-    patch+hash+restore happens in a single ``try/finally`` so dict
-    identity is preserved on every exit path. Mirrors the established
-    test-fixture pattern (``tests/test_scoring_weights.py:309-324``).
+    ``compute_config_hash``, and restores via the
+    :func:`~mtg_synergy_graph.universal_scorer.patched_rule_quality_multiplier`
+    context manager. Dict identity preserved on every exit path
+    (including exceptions raised inside ``compute_config_hash``).
     """
-    from mtg_synergy_graph import universal_scorer
     from mtg_synergy_graph.bench.tensor import compute_config_hash
 
-    saved = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
-    try:
-        universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
-        universal_scorer._RULE_QUALITY_MULTIPLIER.update(proposed_weights)
+    with patched_rule_quality_multiplier(proposed_weights):
         return compute_config_hash()
-    finally:
-        universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
-        universal_scorer._RULE_QUALITY_MULTIPLIER.update(saved)
 
 
 def write_proposal_json(
