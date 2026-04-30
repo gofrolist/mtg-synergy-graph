@@ -704,8 +704,20 @@ def fake_conns(monkeypatch: pytest.MonkeyPatch) -> tuple[object, object]:
     # cache value is never dereferenced.
     monkeypatch.setattr(opt_mod, "build_candidate_cache", lambda _conn: None)
 
-    # Pre-populate complement caches so the optimizer's "dead key" detection
-    # sees all firing rules and never tries to call find_all_complements.
+    # Stub find_all_complements: the self-test pre-warms its train-split
+    # cache via this call before _score_split runs, and a fake conn can't
+    # execute SQL. Return a per-commander complement list that exercises
+    # every weight key (read from _RULE_QUALITY_MULTIPLIER at CALL TIME so
+    # patched_baseline_weights' patch is visible) so dead-key detection
+    # sees all rules as firing — tests of control logic should not
+    # accidentally trip the dead-key filter.
+    def _fake_find_all_complements(_conn, _commanders, **_kwargs):
+        from mtg_synergy_graph.universal_scorer import _RULE_QUALITY_MULTIPLIER
+
+        return _make_complements_for_rules(list(_RULE_QUALITY_MULTIPLIER.keys()))
+
+    monkeypatch.setattr(opt_mod, "find_all_complements", _fake_find_all_complements)
+
     return fake_conn, fake_edhrec_conn
 
 
@@ -1257,6 +1269,48 @@ class TestPlantedPerturbationSelfTest:
             assert planted_value != baseline[rule_id]
             # Plant must be at the configured ×2.0 (UP) since these rules have room.
             assert planted_value == pytest.approx(2.0)
+
+    def test_select_plant_skips_excluded_dead_keys(self) -> None:
+        """Excluded rule_ids never get picked, even if they appear early in the shuffled order.
+
+        Regression test for the false-positive self-test failure observed on
+        the production fixture: ``_select_self_test_plant`` was happily picking
+        rules that fired on zero train commanders, then the grid search produced
+        identical composite scores at every cell and raised ``OptimizerSelfTestFailed``
+        on a structural property of the catalogue rather than a real calibration bug.
+        """
+        from mtg_synergy_graph.bench.optimize import _select_self_test_plant
+
+        # All three rules have full planting room. Without the filter, the
+        # seed-shuffled selector would pick whichever lands first. With the
+        # filter, alpha_rule and beta_rule are off-limits.
+        baseline = {"alpha_rule": 1.0, "beta_rule": 1.0, "gamma_rule": 1.0}
+        rule_id, planted_value = _select_self_test_plant(
+            baseline,
+            seed=0,
+            planted_mult=2.0,
+            clamp_min=0.01,
+            clamp_max=5.0,
+            excluded={"alpha_rule", "beta_rule"},
+        )
+        assert rule_id == "gamma_rule"
+        assert planted_value == pytest.approx(2.0)
+
+    def test_select_plant_raises_when_only_dead_keys_remain(self) -> None:
+        """When every non-excluded rule has zero planting room, raise with a dead-key-aware message."""
+        from mtg_synergy_graph.bench.optimize import _select_self_test_plant
+
+        # alpha_rule has full room but is excluded; beta_rule has zero room.
+        baseline = {"alpha_rule": 1.0, "beta_rule": 1.0}
+        with pytest.raises(OptimizerSelfTestFailed, match="dead-keys"):
+            _select_self_test_plant(
+                baseline,
+                seed=0,
+                planted_mult=2.0,
+                clamp_min=1.0,
+                clamp_max=1.0,
+                excluded={"alpha_rule"},
+            )
 
     def test_select_plant_raises_when_every_rule_pinned(self) -> None:
         """When every rule is structurally pinned (clamp_min == clamp_max == baseline), raise."""
