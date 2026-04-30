@@ -70,6 +70,12 @@ _HANDLERS: dict[str, Callable[[Namespace], int]] = {
     # diagnostic. Flags rule pairs whose candidate-activation sets are
     # near-parallel in embedding space. Read-only; never mutates the DB.
     "embedding_dedup": _stubs.embedding_dedup_stub,
+    # Plan 2026-04-26-001 Unit 4 — Coordinate Ascent weight optimizer.
+    # The stub here is overridden at runtime by ``bench/__init__.py`` via
+    # ``register("optimize", handle_optimize)`` — same lazy-wiring pattern as
+    # every other mode above. The real handler lives in
+    # ``mtg_synergy_graph.bench.optimize.handle_optimize``.
+    "optimize": _stubs.optimize_stub,
 }
 
 
@@ -94,7 +100,11 @@ Environment variables (hook mode):
 Exit codes:
   0  Clean / identical to pinned baseline.
   1  Drift detected, or --repin dry-run (use --yes to confirm).
-  2  Usage / config error (missing DB, missing fixture, empty fixture).
+     For --optimize: driver-internal exception (DB I/O, JSON write failure).
+  2  Usage / config error (missing DB, missing fixture, empty fixture,
+     stale tensor under --optimize, fixture below minimum split size).
+  3  --optimize only: planted-perturbation self-test failed (calibration
+     issue — fix and rerun before trusting any future proposal).
 """
 
 
@@ -151,6 +161,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Report port_nodes rows with node_kind='UNKNOWN', ranked by "
         "distinct_cards x EDHREC rank weight. Surfaces novel Forge "
         "port shapes that need canonical-vocabulary coverage.",
+    )
+    mode.add_argument(
+        "--optimize",
+        action="store_true",
+        help="Run the Coordinate Ascent weight optimizer over "
+        "_RULE_QUALITY_MULTIPLIER. Emits a candidate diff to "
+        ".audit/optimize_proposal.json for human review. Never mutates "
+        "data/scoring_weights.json — apply via --repin manually after "
+        "reviewing the proposal.",
     )
     mode.add_argument(
         "--inspect-gems",
@@ -292,6 +311,45 @@ def _build_parser() -> argparse.ArgumentParser:
         "distinct candidates in their activation set are dropped before "
         "pair comparison. Default: 20.",
     )
+    # Plan 2026-04-26-001 Unit 4 — --optimize flag plumbing.
+    audit.add_argument(
+        "--max-sweeps",
+        dest="max_sweeps",
+        type=_nonneg_int,
+        default=5,
+        help="Used by --optimize only. Maximum number of full sweeps over _RULE_QUALITY_MULTIPLIER. Default: 5.",
+    )
+    audit.add_argument(
+        "--seed",
+        dest="seed",
+        type=int,
+        default=42,
+        help="Used by --optimize only. Random seed for the train/held split. "
+        "Non-default values are experimental — the proposal artifact loses "
+        "comparability across runs with different seeds. Default: 42.",
+    )
+    audit.add_argument(
+        "--no-self-test",
+        dest="no_self_test",
+        action="store_true",
+        help="Used by --optimize only. Skip the FR10 planted-perturbation "
+        "self-test. Use only when calibration was just validated; "
+        "otherwise 'no improvement found' becomes unfalsifiable.",
+    )
+    audit.add_argument(
+        "--proposal-path",
+        dest="proposal_path",
+        metavar="PATH",
+        default=".audit/optimize_proposal.json",
+        help="Used by --optimize only. Where to write the candidate diff. Default: .audit/optimize_proposal.json.",
+    )
+    audit.add_argument(
+        "--optimize-history",
+        dest="optimize_history",
+        metavar="PATH",
+        default=".audit/optimize_history.csv",
+        help="Used by --optimize only. Append-only convergence log path. Default: .audit/optimize_history.csv.",
+    )
 
     return parser
 
@@ -319,6 +377,8 @@ def _resolve_mode(args: Namespace) -> str:
         return "vs_forge_oracle"
     if getattr(args, "embedding_dedup", False):
         return "embedding_dedup"
+    if getattr(args, "optimize", False):
+        return "optimize"
     return "audit"
 
 
@@ -376,6 +436,29 @@ def main(argv: list[str] | None = None) -> int:
             "bench.py audit: warning: --threshold and --min-activation have no effect without --embedding-dedup.",
             file=sys.stderr,
         )
+
+    # ``--max-sweeps`` / ``--seed`` / ``--no-self-test`` / ``--proposal-path`` /
+    # ``--optimize-history`` are companions to ``--optimize``. Warn on stderr
+    # rather than erroring so the user sees the flag had no effect — same
+    # pattern as ``--trend-n`` and ``--threshold`` above.
+    if mode != "optimize":
+        ignored = []
+        if getattr(args, "max_sweeps", 5) != 5:
+            ignored.append("--max-sweeps")
+        if getattr(args, "seed", 42) != 42:
+            ignored.append("--seed")
+        if getattr(args, "no_self_test", False):
+            ignored.append("--no-self-test")
+        if getattr(args, "proposal_path", ".audit/optimize_proposal.json") != ".audit/optimize_proposal.json":
+            ignored.append("--proposal-path")
+        if getattr(args, "optimize_history", ".audit/optimize_history.csv") != ".audit/optimize_history.csv":
+            ignored.append("--optimize-history")
+        if ignored:
+            print(
+                f"bench.py audit: warning: {', '.join(ignored)} "
+                f"{'has' if len(ignored) == 1 else 'have'} no effect without --optimize.",
+                file=sys.stderr,
+            )
 
     handler = _HANDLERS[mode]
     return handler(args)

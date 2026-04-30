@@ -59,3 +59,7 @@ def vs_forge_oracle_stub(args: argparse.Namespace) -> int:
 
 def embedding_dedup_stub(args: argparse.Namespace) -> int:
     _unimplemented("bench.py audit --embedding-dedup")
+
+
+def optimize_stub(args: argparse.Namespace) -> int:
+    _unimplemented("bench.py audit --optimize")

@@ -34,6 +34,7 @@ from mtg_synergy_graph.bench.handlers import (
     handle_unknowns,
 )
 from mtg_synergy_graph.bench.histogram import Bucket, Histogram, Verdict
+from mtg_synergy_graph.bench.optimize import handle_optimize
 from mtg_synergy_graph.bench.report import AuditReport, build_report
 from mtg_synergy_graph.bench.tensor import (
     TensorWriter,
@@ -63,6 +64,8 @@ _cli.register("vs_forge_oracle", handle_vs_forge_oracle)
 # diagnostic. Flags rule pairs whose candidate-activation sets are
 # near-parallel in embedding space.
 _cli.register("embedding_dedup", handle_embedding_dedup)
+# Plan 2026-04-26-001 Unit 4 — Coordinate Ascent weight optimizer.
+_cli.register("optimize", handle_optimize)
 
 __all__ = [
     "AuditReport",
