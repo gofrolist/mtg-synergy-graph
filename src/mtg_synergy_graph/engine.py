@@ -52,6 +52,12 @@ NON_EDH_CARD_TYPES: frozenset[str] = frozenset(
     }
 )
 
+#: Sentinel rank for cards/commanders without an EDHREC rank. Sorted last
+#: in the production sort key so ranked cards appear before unranked ones.
+#: Shared between :func:`SynergyEngine.page` and the bench optimizer's
+#: production-faithful sort path (``bench.optimize.score_commander_from_complements``).
+UNRANKED_EDHREC_SENTINEL: int = 10**9
+
 # ---------------------------------------------------------------------------
 # Data classes (§8 + §9)
 # ---------------------------------------------------------------------------
@@ -375,7 +381,7 @@ class SynergyEngine:
                 legal.add(name)
 
         # -- Universal port-complement scoring --------------------------------
-        _UNRANKED = 10**9
+        _UNRANKED = UNRANKED_EDHREC_SENTINEL
         cmc_lookup: dict[str, float] = {}
         rank_lookup: dict[str, int] = {}
         for name, row in penalty_ctx.candidate_rows.items():

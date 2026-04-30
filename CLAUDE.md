@@ -54,6 +54,15 @@ uv run scripts/forge_oracle.py propose-rules --top 20 --smoothing-k 0.0  # N rul
 
 # Embedding weight sweep (plan 003 Phase C) — design-time diagnostic, does not mutate state.
 uv run scripts/sweep_embedding_weights.py                                # Grid-search (w_emb, k) cells, print hit_rate + score_delta per cell
+
+# Tensor-driven weight optimizer (plan 2026-04-26-001 M1) — Coordinate Ascent over
+# _RULE_QUALITY_MULTIPLIER. Emits .audit/optimize_proposal.json for human review;
+# never auto-mutates data/scoring_weights.json. Append-only history at
+# .audit/optimize_history.csv. Exit codes: 0 success, 1 driver exception,
+# 2 stale tensor / fixture too small, 3 self-test failed (calibration issue).
+uv run scripts/bench.py audit --optimize                                 # Run full sweep on the pinned 100-commander fixture
+uv run scripts/bench.py audit --optimize --no-self-test --max-sweeps 1   # Quick exploratory pass (skip planted-perturbation check)
+uv run scripts/bench.py audit --optimize --seed 17                       # Different train/held split for cross-validation
 ```
 
 The bench.py hook also runs advisorily on pre-commit when edits touch

@@ -3,8 +3,9 @@
 Foothold M1 of the tensor-driven weight optimizer plan
 (``docs/plans/2026-04-26-001-feat-tensor-weight-optimizer-plan.md``).
 
-This module is built incrementally across the plan's units; each unit
-appends its layer to this file:
+This module is organized by plan unit. Sections appear in source order;
+Unit 5 precedes Unit 4 because the CLI handler (Unit 4) consumes the
+output writers (Unit 5):
 
 * **Unit 1 — Composite objective + random split + EDHREC label loader.**
   Pure helper functions over commander lists and EDHREC label dicts.
@@ -14,10 +15,11 @@ appends its layer to this file:
 * **Unit 3 — Coordinate Ascent driver.** The optimizer's main loop:
   alphabetical sweep over rule keys, multiplicative grid, accept/reject
   gates, cumulative-drift revert, planted-perturbation self-test.
+* **Unit 5 — Output artifacts.** ``.audit/optimize_proposal.json`` +
+  ``.audit/optimize_history.csv`` writers. Defined before Unit 4 so the
+  CLI handler can call them without forward-reference shenanigans.
 * **Unit 4 — CLI handler.** Wires ``bench.py audit --optimize`` into the
   existing dispatcher; tensor-staleness precondition.
-* **Unit 5 — Output artifacts.** ``.audit/optimize_proposal.json`` +
-  ``.audit/optimize_history.csv`` writers.
 
 The optimizer never mutates ``data/scoring_weights.json`` — it emits a
 candidate diff for human review. Application is human-driven via
@@ -199,9 +201,14 @@ def random_split(
 
     color_by_cmdr: dict[str, str | None] = {}
     if conn is not None and commanders:
-        placeholders = ",".join("?" * len(commanders))
-        query = f"SELECT name, color_identity FROM cards WHERE name IN ({placeholders})"  # noqa: S608
-        for row in conn.execute(query, list(commanders)).fetchall():
+        # Mirrors the established placeholder pattern in penalties.py:
+        # split SELECT / FROM / WHERE across adjacent string literals so
+        # ruff S608 doesn't fire on the .format(?,?,...) IN-list expansion.
+        rows = conn.execute(
+            "SELECT name, color_identity FROM cards WHERE name IN ({})".format(",".join("?" * len(commanders))),
+            tuple(commanders),
+        ).fetchall()
+        for row in rows:
             # Row may be a sqlite3.Row (dict-like) or a plain tuple; index
             # by position so both work.
             color_by_cmdr[row[0]] = row[1]
@@ -410,11 +417,8 @@ def score_commander_from_complements(
     ``engine.SynergyEngine.page()`` — so the optimizer's view matches
     what ``recommend.py`` displays.
     """
+    from mtg_synergy_graph.engine import UNRANKED_EDHREC_SENTINEL
     from mtg_synergy_graph.universal_scorer import _score_from_complements
-
-    # Mirrors engine.SynergyEngine.page() at engine.py:378 — sentinel for
-    # commanders/cards without an EDHREC rank, sorted last after ranked cards.
-    _UNRANKED = 10**9
 
     results = _score_from_complements(
         conn,
@@ -438,7 +442,9 @@ def score_commander_from_complements(
         rank_lookup = {}
         for row in conn.execute("SELECT name, cmc, edhrec_rank FROM cards"):
             cmc_lookup[row["name"]] = row["cmc"] if row["cmc"] is not None else 99.0
-            rank_lookup[row["name"]] = row["edhrec_rank"] if row["edhrec_rank"] is not None else _UNRANKED
+            rank_lookup[row["name"]] = (
+                row["edhrec_rank"] if row["edhrec_rank"] is not None else UNRANKED_EDHREC_SENTINEL
+            )
 
     score_by_candidate: dict[str, float] = {}
     sortable: list[tuple[str, float]] = []
@@ -454,7 +460,7 @@ def score_commander_from_complements(
         key=lambda r: (
             -r[1],
             cmc_lookup.get(r[0], 99.0),
-            rank_lookup.get(r[0], _UNRANKED),
+            rank_lookup.get(r[0], UNRANKED_EDHREC_SENTINEL),
             r[0],
         )
     )

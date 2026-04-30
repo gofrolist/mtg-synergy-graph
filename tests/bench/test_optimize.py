@@ -375,19 +375,23 @@ class TestScoreCommanderFromComplements:
         # Production reference: full path through score_all_universal,
         # sorted by to_legacy_buckets()["total"] like engine.SynergyEngine.page().
         live = score_all_universal(scoring_fixture, ["Test Commander"])
+        from mtg_synergy_graph.engine import UNRANKED_EDHREC_SENTINEL
+
         live_sortable = []
         cmc_lookup = {}
         rank_lookup = {}
         for row in scoring_fixture.execute("SELECT name, cmc, edhrec_rank FROM cards"):
             cmc_lookup[row["name"]] = row["cmc"] if row["cmc"] is not None else 99.0
-            rank_lookup[row["name"]] = row["edhrec_rank"] if row["edhrec_rank"] is not None else 10**9
+            rank_lookup[row["name"]] = (
+                row["edhrec_rank"] if row["edhrec_rank"] is not None else UNRANKED_EDHREC_SENTINEL
+            )
         for name, us in live.items():
             live_sortable.append((name, us.to_legacy_buckets()["total"]))
         live_sortable.sort(
             key=lambda r: (
                 -r[1],
                 cmc_lookup.get(r[0], 99.0),
-                rank_lookup.get(r[0], 10**9),
+                rank_lookup.get(r[0], UNRANKED_EDHREC_SENTINEL),
                 r[0],
             )
         )
