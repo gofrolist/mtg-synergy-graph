@@ -15,7 +15,7 @@ import sqlite3
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from functools import cached_property
+from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, Protocol
 
@@ -209,8 +209,21 @@ _SYNERGY_PAIRS: dict[frozenset[str], float] = {
 }
 
 
+@lru_cache(maxsize=4096)
 def _compute_pair_bonus(rules: frozenset[str]) -> float:
-    """Sum bonuses for all synergy pairs present in a card's rule set."""
+    """Sum bonuses for all synergy pairs present in a card's rule set.
+
+    Cached because the bench optimizer calls this 43.85M+ times per sweep
+    (once per candidate per grid cell) — see the 2026-04-30 cProfile run
+    in ``docs/solutions/best-practices/optimizer-perf-profile-2026-04-30.md``.
+    The function is pure and the input is hashable, so caching is safe.
+
+    Cache invalidation contract: if a test or migration mutates
+    ``_SYNERGY_PAIRS`` at runtime, call ``_compute_pair_bonus.cache_clear()``
+    in test setup/teardown. The module-level dict is not currently mutated
+    by any non-test code path; callers that monkeypatch ``_SYNERGY_PAIRS``
+    must clear the cache explicitly.
+    """
     bonus = 0.0
     for pair, value in _SYNERGY_PAIRS.items():
         if pair <= rules:
