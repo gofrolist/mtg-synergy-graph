@@ -809,6 +809,87 @@ class TestRunOptimizerControlLogic:
         run_optimizer(*fake_conns, ["a", "b", "c", "d", "e"], config=config)
         assert id(universal_scorer._RULE_QUALITY_MULTIPLIER) == original_id
 
+    def test_cumulative_drift_revert_restores_baseline_and_marks_all_accepts(
+        self,
+        patched_baseline_weights: dict[str, float],
+        fake_conns: tuple[object, object],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Cumulative-drift trip restores baseline_weights AND marks every prior accept as reverted.
+
+        Scenario: train composite monotonically improves so the optimizer
+        accepts. Held composite drifts down by 0.003 per call — within
+        ``eps_step`` (0.005), so individual accepts pass — but after 3
+        accepts the cumulative drift (0.009) exceeds ``eps_cumulative``
+        (0.005) and the gate trips. The fix being verified: code MUST roll
+        back to ``baseline_weights`` (not ``sweep_start_weights``) and mark
+        ALL accepts across all sweeps as reverted, so
+        ``final_weights == baseline_weights`` and
+        ``n_steps_accepted == 0`` after the trip.
+        """
+        from mtg_synergy_graph.bench import optimize as opt_mod
+
+        train_calls = {"n": 0}
+        held_calls = {"n": 0}
+
+        def _custom_score_split(
+            conn,
+            edhrec_conn,
+            commanders,
+            weights,
+            *,
+            complements_cache,
+            labels_cache,
+            alpha,
+            candidate_cache=None,
+        ):
+            from mtg_synergy_graph.bench.optimize import CompositeObjective, EdhrecLabels
+
+            # Populate caches so dead-key detection sees firing rules.
+            for cmdr in commanders:
+                if cmdr not in complements_cache:
+                    complements_cache[cmdr] = _make_complements_for_rules(list(weights.keys()))
+                if cmdr not in labels_cache:
+                    labels_cache[cmdr] = EdhrecLabels({}, None)
+
+            commanders_tuple = tuple(commanders)
+            is_held = len(commanders_tuple) == 1
+            if is_held:
+                held_calls["n"] += 1
+                # Baseline (call #1) = 0.5; subsequent held calls drop by 0.003.
+                # 0.003 ≤ eps_step=0.005 → individual step passes.
+                # After 2+ accepts, cumulative drift > eps_cumulative=0.005 → trip.
+                composite = 0.5 - 0.003 * (held_calls["n"] - 1)
+            else:
+                train_calls["n"] += 1
+                # Train monotonically climbs → grid always finds an improvement.
+                composite = 0.5 + 0.001 * train_calls["n"]
+            return CompositeObjective(
+                composite=composite,
+                mean_ndcg=composite,
+                gem_rate=composite,
+                n_commanders=len(commanders_tuple),
+                n_commanders_with_gem=len(commanders_tuple),
+            )
+
+        monkeypatch.setattr(opt_mod, "_score_split", _custom_score_split)
+
+        config = OptimizerConfig(run_self_test=False, max_sweeps=3, eps_cumulative=0.005)
+        result = run_optimizer(*fake_conns, ["a", "b", "c", "d", "e"], config=config)
+
+        # After revert: weights match baseline, no accepts survive.
+        assert dict(result.final_weights) == patched_baseline_weights, (
+            "Drift revert must restore baseline_weights, not just sweep_start_weights"
+        )
+        assert result.n_steps_accepted == 0, "Every prior accept must be marked reverted"
+        assert result.partial_sweep is True
+        # Reverted accepts carry the canonical reason.
+        revert_reasons = {h.reject_reason for h in result.history}
+        assert "cumulative_drift_revert" in revert_reasons
+        # Metrics-vs-weights invariant: final composites match baseline composites.
+        assert result.train_composite_final == result.train_composite_baseline
+        assert result.held_composite_final == result.held_composite_baseline
+
 
 def _make_complements_for_rules(rule_ids):
     """Construct synthetic PortComplement rows for monkeypatching find_all_complements."""
@@ -883,19 +964,19 @@ class TestRunOptimizerSmoke:
     ) -> None:
         # The synthetic fixture only fires flat-count rules, so the multiplier
         # optimizer can't move scores. We just verify the wiring runs end-to-end
-        # without crashing — the convergence path triggers immediately.
+        # without crashing — the convergence path triggers immediately. Use 5
+        # commanders so the train/held split is non-degenerate (4 train, 1
+        # held); a single-commander split would round held to 0 and silently
+        # nullify the held-eps gate.
         config = OptimizerConfig(run_self_test=False, max_sweeps=1)
-        # Provide test commander as the one of one — split.held will be empty
-        # which is a degenerate but valid input. Use multiple synthetic
-        # commanders for a less degenerate case.
-        commanders = ["Test Commander"]
+        commanders = ["Test Commander"] * 5
         result = run_optimizer(scoring_fixture, edhrec_conn, commanders, config=config)
         assert result.n_iterations >= 1
-        # On a single-commander split with train_ratio=0.8, train is empty
-        # OR contains 1 commander depending on rounding. Either way, the
-        # result type is well-formed.
         assert isinstance(result.history, tuple)
         assert isinstance(result.dead_keys, tuple)
+        # Held split is non-empty: held composite metric is finite (not the
+        # degenerate 0.0 that composite_objective returns for an empty input).
+        assert len(result.held_split) >= 1
 
 
 # ---------------------------------------------------------------------------
@@ -1225,17 +1306,52 @@ class TestHandleOptimize:
         captured = capsys.readouterr()
         assert "empty" in captured.err
 
+    def test_returns_2_on_too_few_commanders(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """Fixture below ``_MIN_COMMANDERS_FOR_SPLIT`` is rejected to avoid degenerate held=0 split."""
+        import argparse
+
+        from mtg_synergy_graph.bench.fixture import FixtureEntry, PinnedFixture
+        from mtg_synergy_graph.bench.optimize import handle_optimize
+
+        # 3 commanders < 5 minimum. Use a fake config_hash so we'd hit the
+        # stale-tensor check next; but the size check must fire FIRST.
+        fixture = PinnedFixture(
+            config_hash="0" * 64,
+            created_at="2026-01-01T00:00:00+00:00",
+            entries=[FixtureEntry(commander=f"Cmdr {i}", scores={"a": 1.0}) for i in range(3)],
+        )
+        fixture_path = tmp_path / "fixture.json"
+        fixture.write(fixture_path)
+
+        args = argparse.Namespace(
+            fixture=str(fixture_path),
+            db="data/synergy.db",
+            edhrec_db="data/tags.db",
+            max_sweeps=1,
+            seed=42,
+            no_self_test=True,
+            proposal_path=str(tmp_path / "p.json"),
+            optimize_history=str(tmp_path / "h.csv"),
+        )
+        rc = handle_optimize(args)
+        assert rc == 2
+        captured = capsys.readouterr()
+        assert "3 commanders" in captured.err
+        assert "at least 5" in captured.err
+
     def test_returns_2_on_stale_tensor(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         import argparse
 
         from mtg_synergy_graph.bench.fixture import FixtureEntry, PinnedFixture
         from mtg_synergy_graph.bench.optimize import handle_optimize
 
-        # Fixture with a fake config_hash that won't match the live one.
+        # Fixture with a fake config_hash that won't match the live one. Must
+        # have at least _MIN_COMMANDERS_FOR_SPLIT entries so the stale-tensor
+        # check fires before the size check.
         fixture = PinnedFixture(
             config_hash="0" * 64,
             created_at="2026-01-01T00:00:00+00:00",
-            entries=[FixtureEntry(commander="Some Commander", scores={"a": 1.0})],
+            entries=[FixtureEntry(commander=f"Cmdr {i}", scores={"a": 1.0}) for i in range(5)],
         )
         fixture_path = tmp_path / "fixture.json"
         fixture.write(fixture_path)

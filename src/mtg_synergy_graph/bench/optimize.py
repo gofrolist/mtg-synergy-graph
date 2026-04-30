@@ -26,6 +26,8 @@ candidate diff for human review. Application is human-driven via
 
 from __future__ import annotations
 
+import argparse
+import logging
 import random
 import sqlite3
 from collections.abc import Mapping, Sequence
@@ -35,12 +37,14 @@ from typing import TYPE_CHECKING
 
 from mtg_synergy_graph.penalties import build_candidate_cache
 
+_logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
     from mtg_synergy_graph.complement_rules import PortComplement
-    from mtg_synergy_graph.universal_scorer import CandidateCache
+    from mtg_synergy_graph.universal_scorer import CandidateCache, UniversalScore
 
 # ---------------------------------------------------------------------------
 # Unit 1: Composite α-blended objective
@@ -306,7 +310,7 @@ class CommanderScoreResult:
     contributions: tuple[tuple[str, str, float], ...]
 
 
-def _fast_total(score_obj: object) -> float:
+def _fast_total(score_obj: UniversalScore) -> float:
     """Compute ``UniversalScore.to_legacy_buckets()["total"]`` without the bucket dict.
 
     Hot path: the production engine sorts by this same value, but allocates a
@@ -325,8 +329,8 @@ def _fast_total(score_obj: object) -> float:
     total = 0.0
     seen: set[tuple[str, str, str, str, str]] = set()
     distinct_rules: set[str] = set()
-    idf_weights = score_obj.idf_weights  # type: ignore[attr-defined]
-    for c in score_obj.complements:  # type: ignore[attr-defined]
+    idf_weights = score_obj.idf_weights
+    for c in score_obj.complements:
         key = (c.rule_id, c.cmdr_event, c.cand_event, c.filter_group, c.direction)
         if key in seen:
             continue
@@ -338,18 +342,18 @@ def _fast_total(score_obj: object) -> float:
             total += weight
             distinct_rules.add(c.rule_id)
 
-    total += score_obj.staple_bonus  # type: ignore[attr-defined]
+    total += score_obj.staple_bonus
     n_rules = len(distinct_rules)
     if n_rules >= 2:
         total += 0.02 * min(n_rules - 1, 4)
     total += _compute_pair_bonus(frozenset(distinct_rules))
-    total += score_obj.circuit_bonus + score_obj.cmc_bonus + score_obj.rank_bonus  # type: ignore[attr-defined]
-    total += score_obj.embedding_contribution  # type: ignore[attr-defined]
+    total += score_obj.circuit_bonus + score_obj.cmc_bonus + score_obj.rank_bonus
+    total += score_obj.embedding_contribution
     return total
 
 
 def _build_contributions(
-    results: Mapping[str, object],
+    results: Mapping[str, UniversalScore],
 ) -> tuple[tuple[str, str, float], ...]:
     """Fold per-candidate ``UniversalScore`` results into per-(cand, rule) contributions.
 
@@ -364,9 +368,9 @@ def _build_contributions(
         per_rule: dict[str, float] = {}
         seen_syn: set[tuple[str, str, str, str]] = set()
         seen_anti: set[tuple[str, str, str, str]] = set()
-        for c in us.complements:  # type: ignore[attr-defined]
+        for c in us.complements:
             key = (c.rule_id, c.cmdr_event, c.cand_event, c.filter_group)
-            w = us.idf_weights.get(key, 1.0)  # type: ignore[attr-defined]
+            w = us.idf_weights.get(key, 1.0)
             if c.direction == "synergy":
                 if key in seen_syn:
                     continue
@@ -818,6 +822,7 @@ def run_optimizer(
     current_held_gem = baseline_held.gem_rate
 
     history: list[OptimizerStep] = []
+    accepted_step_indices: list[int] = []
     n_steps_accepted = 0
     n_steps_rejected = 0
     partial_sweep = False
@@ -827,8 +832,6 @@ def run_optimizer(
 
     for sweep_n in range(1, config.max_sweeps + 1):
         n_iterations = sweep_n
-        sweep_start_weights = dict(current_weights)
-        sweep_accepted_steps: list[int] = []
         sweep_had_accept = False
 
         for rule_id in rule_keys:
@@ -839,7 +842,6 @@ def run_optimizer(
             old_value = current_weights[rule_id]
             best_train: CompositeObjective | None = None
             best_value = old_value
-            best_mult = 1.0
 
             for mult in config.grid:
                 new_value = _clamp(old_value * mult, config.clamp_min, config.clamp_max)
@@ -859,7 +861,6 @@ def run_optimizer(
                 if best_train is None or train_obj.composite > best_train.composite:
                     best_train = train_obj
                     best_value = new_value
-                    best_mult = mult
 
             # If no perturbation strictly beat the current train composite, skip.
             if best_train is None or best_train.composite <= current_train_composite:
@@ -906,12 +907,10 @@ def run_optimizer(
                     and current_train_gem is not None
                     and current_train_gem - best_train.gem_rate > 0.005
                 ):
-                    import sys
-
-                    print(
-                        f"[optimize] warning: accepted step on {rule_id} dropped train gem_rate "
-                        f"by {current_train_gem - best_train.gem_rate:.4f} (composite improved)",
-                        file=sys.stderr,
+                    _logger.warning(
+                        "accepted step on %s dropped train gem_rate by %.4f (composite improved)",
+                        rule_id,
+                        current_train_gem - best_train.gem_rate,
                     )
 
                 current_weights[rule_id] = best_value
@@ -922,11 +921,10 @@ def run_optimizer(
                 current_train_gem = best_train.gem_rate
                 current_held_gem = held_obj.gem_rate
                 n_steps_accepted += 1
-                sweep_accepted_steps.append(len(history) - 1)
+                accepted_step_indices.append(len(history) - 1)
                 sweep_had_accept = True
             else:
                 n_steps_rejected += 1
-            _ = best_mult  # retained in case future telemetry wants it
 
         # End of sweep: cumulative-drift check (only if we didn't already abort).
         if partial_sweep:
@@ -934,13 +932,13 @@ def run_optimizer(
 
         held_drift = current_held_composite - baseline_held.composite
         if held_drift < -config.eps_cumulative:
-            # Revert this sweep's accepts and terminate.
-            current_weights = sweep_start_weights
-            # Mark the sweep's accepted steps as reverted in history. We append
-            # a synthetic "revert" step so the history CSV records the rollback.
-            for idx in sweep_accepted_steps:
+            # Cumulative drift trip: roll back to baseline weights AND mark every
+            # accept across all sweeps as reverted. The metrics-vs-weights
+            # invariant (final_weights describes the state that produced the
+            # final composite values) is preserved by resetting both together.
+            current_weights = dict(baseline_weights)
+            for idx in accepted_step_indices:
                 step = history[idx]
-                # Replace with a copy that's now "rejected" with reason cumulative_drift_revert.
                 history[idx] = OptimizerStep(
                     sweep_n=step.sweep_n,
                     rule_id=step.rule_id,
@@ -957,8 +955,8 @@ def run_optimizer(
                 )
                 n_steps_accepted -= 1
                 n_steps_rejected += 1
+            accepted_step_indices.clear()
             partial_sweep = True
-            # Reset current metrics to baseline since we reverted.
             current_train_composite = baseline_train.composite
             current_held_composite = baseline_held.composite
             current_train_ndcg = baseline_train.mean_ndcg
@@ -1048,11 +1046,6 @@ def _proposed_config_hash(proposed_weights: Mapping[str, float]) -> str:
         universal_scorer._RULE_QUALITY_MULTIPLIER.update(saved)
 
 
-def _diff_value(baseline: float, final: float) -> bool:
-    """Return True iff baseline and final differ (bitwise float comparison)."""
-    return baseline != final
-
-
 def write_proposal_json(
     result: OptimizerResult,
     path: str | Path | None = None,
@@ -1065,24 +1058,32 @@ def write_proposal_json(
     weight changed; ``dead_keys`` non-empty signals a stale
     ``data/scoring_weights.json`` entry.
 
+    If ``target_path`` already exists, a stderr warning is emitted before
+    overwriting — the file is still overwritten (non-blocking) so CI runs
+    don't stall, but the human reviewer sees that a prior proposal was
+    replaced.
+
     The ``comment`` fields in ``data/scoring_weights.json`` are never
     read or emitted by this function — humans applying the diff cannot
     accidentally clobber them.
     """
     import json as _json
+    import sys as _sys
     from pathlib import Path as _Path
 
     target_path = _Path(path) if path is not None else _Path(_PROPOSAL_DEFAULT_PATH)
 
-    from mtg_synergy_graph.bench.tensor import compute_config_hash
-
-    baseline_hash = compute_config_hash()
+    # Hash the baseline_weights snapshot symmetrically with proposed_hash so
+    # both fields describe the same source-of-truth dict. Using live
+    # compute_config_hash() here would silently drift if the global was
+    # mutated between run_optimizer() return and write_proposal_json() entry.
+    baseline_hash = _proposed_config_hash(result.baseline_weights)
     proposed_hash = _proposed_config_hash(result.final_weights)
 
     per_rule_diffs: list[dict] = []
     for rule_id, baseline_value in result.baseline_weights.items():
         final_value = result.final_weights[rule_id]
-        if not _diff_value(baseline_value, final_value):
+        if baseline_value == final_value:
             continue
         # Find the accepted-iteration step that produced the final value (if any).
         accepted_iter: int | None = None
@@ -1124,6 +1125,11 @@ def write_proposal_json(
     }
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
+    if target_path.exists():
+        print(
+            f"bench.py audit --optimize: warning: overwriting existing proposal at {target_path}",
+            file=_sys.stderr,
+        )
     target_path.write_text(_json.dumps(payload, indent=2, sort_keys=False), encoding="utf-8")
     return payload
 
@@ -1196,7 +1202,15 @@ def _history_row_for_step(step: OptimizerStep, timestamp: str, run_id: str) -> l
 # ---------------------------------------------------------------------------
 
 
-def handle_optimize(args: object) -> int:
+#: Minimum commander count for a meaningful train/held split. Below this,
+#: ``round(n * 0.8)`` may produce ``held=0``, which makes the held-eps gate
+#: trivially pass and silently nullifies cross-validation. The pinned golden
+#: set has 100 commanders; this floor is a usability guardrail for
+#: CLI invocations against a synthetic or hand-built fixture.
+_MIN_COMMANDERS_FOR_SPLIT = 5
+
+
+def handle_optimize(args: argparse.Namespace) -> int:
     """Handle ``bench.py audit --optimize``.
 
     Reads commanders from the pinned fixture, opens both DBs, runs the
@@ -1205,21 +1219,18 @@ def handle_optimize(args: object) -> int:
 
     - 0: success — proposal written (may be empty if no improvement found).
     - 1: driver-internal exception (DB I/O, JSON write failure, etc).
-    - 2: usage / config error — missing fixture, stale tensor.
+    - 2: usage / config error — missing fixture, stale tensor, fixture too small.
     - 3: planted-perturbation self-test failed (calibration issue).
 
     The split between 1 and 3 lets CI consumers distinguish "optimizer
     untrustworthy on this catalogue" from "infra problem."
     """
-    import argparse as _argparse
     import sys as _sys
     import uuid
 
     from mtg_synergy_graph.bench.fixture import PinnedFixture
     from mtg_synergy_graph.bench.tensor import compute_config_hash
     from mtg_synergy_graph.db import open_db
-
-    assert isinstance(args, _argparse.Namespace)
 
     fixture_path = args.fixture
     db_path = args.db
@@ -1229,6 +1240,15 @@ def handle_optimize(args: object) -> int:
     if not fixture.entries:
         print(
             f"error: fixture at {fixture_path} is empty; --optimize needs at least one commander to score.",
+            file=_sys.stderr,
+        )
+        return 2
+
+    if len(fixture.entries) < _MIN_COMMANDERS_FOR_SPLIT:
+        print(
+            f"error: fixture at {fixture_path} has {len(fixture.entries)} commanders; "
+            f"--optimize requires at least {_MIN_COMMANDERS_FOR_SPLIT} to produce a "
+            "non-degenerate train/held split.",
             file=_sys.stderr,
         )
         return 2
