@@ -904,11 +904,23 @@ class TestRunOptimizerControlLogic:
         ALL accepts across all sweeps as reverted, so
         ``final_weights == baseline_weights`` and
         ``n_steps_accepted == 0`` after the trip.
+
+        Robustness: train and held are distinguished by commander identity
+        (``HELD_*`` prefix) instead of ``len(commanders) == 1``. The previous
+        test was fragile to fixture-size changes — if the test were updated
+        to a 10-commander fixture (held=2), the length check would
+        misclassify held calls as train, the drift scenario would never
+        trigger, and the test would silently pass.
         """
         from mtg_synergy_graph.bench import optimize as opt_mod
 
         train_calls = {"n": 0}
         held_calls = {"n": 0}
+
+        # Use a single named held commander; train commanders share no name
+        # with held. Distinguishing by identity is fixture-size-invariant.
+        held_name = "HELD_cmdr"
+        train_names = ["train_a", "train_b", "train_c", "train_d"]
 
         def _custom_score_split(
             conn,
@@ -931,8 +943,10 @@ class TestRunOptimizerControlLogic:
                 if cmdr not in labels_cache:
                     labels_cache[cmdr] = EdhrecLabels({}, None)
 
-            commanders_tuple = tuple(commanders)
-            is_held = len(commanders_tuple) == 1
+            # Identity-based train-vs-held detection: the held call passes
+            # the held commander; train calls don't include it. Robust
+            # against future fixture-size changes.
+            is_held = held_name in commanders
             if is_held:
                 held_calls["n"] += 1
                 # Baseline (call #1) = 0.5; subsequent held calls drop by 0.003.
@@ -947,14 +961,14 @@ class TestRunOptimizerControlLogic:
                 composite=composite,
                 mean_ndcg=composite,
                 gem_rate=composite,
-                n_commanders=len(commanders_tuple),
-                n_commanders_with_gem=len(commanders_tuple),
+                n_commanders=len(commanders),
+                n_commanders_with_gem=len(commanders),
             )
 
         monkeypatch.setattr(opt_mod, "_score_split", _custom_score_split)
 
         config = OptimizerConfig(run_self_test=False, max_sweeps=3, eps_cumulative=0.005)
-        result = run_optimizer(*fake_conns, ["a", "b", "c", "d", "e"], config=config)
+        result = run_optimizer(*fake_conns, [*train_names, held_name], config=config)
 
         # After revert: weights match baseline, no accepts survive.
         assert dict(result.final_weights) == patched_baseline_weights, (
@@ -968,6 +982,190 @@ class TestRunOptimizerControlLogic:
         # Metrics-vs-weights invariant: final composites match baseline composites.
         assert result.train_composite_final == result.train_composite_baseline
         assert result.held_composite_final == result.held_composite_baseline
+
+    def test_held_out_eps_rejects_step_when_held_drops_more_than_eps(
+        self,
+        patched_baseline_weights: dict[str, float],
+        fake_conns: tuple[object, object],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A step that improves train but drops held by > eps_step is rejected.
+
+        Coverage gap from the post-merge code-review (#23): all prior
+        control-logic tests used constant or always-improving composites,
+        so the ``held_delta < -eps_step`` branch (producing
+        ``reject_reason="held_out_eps"``) was never exercised end-to-end.
+        """
+        from mtg_synergy_graph.bench import optimize as opt_mod
+        from mtg_synergy_graph.bench.optimize import CompositeObjective, EdhrecLabels
+
+        held_name = "HELD_cmdr"
+        train_names = ["train_a", "train_b", "train_c", "train_d"]
+
+        def _custom_score_split(
+            conn,
+            edhrec_conn,
+            commanders,
+            weights,
+            *,
+            complements_cache,
+            labels_cache,
+            alpha,
+            candidate_cache=None,
+            idf_basis_cache=None,
+        ) -> CompositeObjective:
+            for cmdr in commanders:
+                if cmdr not in complements_cache:
+                    complements_cache[cmdr] = _make_complements_for_rules(list(weights.keys()))
+                if cmdr not in labels_cache:
+                    labels_cache[cmdr] = EdhrecLabels({}, None)
+            is_held = held_name in commanders
+            # Identify whether the call is for the BASELINE state (all weights
+            # at default 1.0) or a perturbed state. composite_for_weights-style
+            # check: if any weight differs from baseline 1.0, it's a perturbation.
+            is_perturbed = any(v != 1.0 for v in weights.values())
+            # Held: 0.5 at baseline; drops by 0.02 (>>eps_step=0.005) on perturbations.
+            # Train: monotonically improves on perturbation so a step IS
+            # proposed (gets to the held re-eval).
+            if not is_perturbed:
+                composite = 0.5  # baseline; both train and held start here
+            elif is_held:
+                composite = 0.48  # held drops on perturbation
+            else:
+                composite = 0.55  # train climbs on perturbation
+            return CompositeObjective(
+                composite=composite,
+                mean_ndcg=composite,
+                gem_rate=composite,
+                n_commanders=len(commanders),
+                n_commanders_with_gem=len(commanders),
+            )
+
+        monkeypatch.setattr(opt_mod, "_score_split", _custom_score_split)
+
+        config = OptimizerConfig(run_self_test=False, max_sweeps=1, eps_step=0.005)
+        result = run_optimizer(*fake_conns, [*train_names, held_name], config=config)
+
+        # No step accepted (every grid cell rejected at the held-eps gate).
+        assert result.n_steps_accepted == 0
+        assert result.n_steps_rejected > 0
+        # Every history entry was rejected with reason "held_out_eps".
+        assert all(not s.accepted for s in result.history)
+        assert {s.reject_reason for s in result.history} == {"held_out_eps"}, (
+            f"Expected only held_out_eps rejects, got: { {s.reject_reason for s in result.history} }"
+        )
+
+    def test_per_axis_gem_rate_regression_warning_fires_on_accept(
+        self,
+        patched_baseline_weights: dict[str, float],
+        fake_conns: tuple[object, object],
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """``run_optimizer`` warns when an accepted step drops train gem_rate by > 0.005.
+
+        Coverage gap from the post-merge code-review (#24): the per-axis
+        regression warning at ``optimize.py:909`` had no test. Here we
+        construct a step where composite improves AND the held-eps gate
+        passes BUT train gem_rate drops — the warning must fire and name
+        the rule.
+        """
+        from mtg_synergy_graph.bench import optimize as opt_mod
+        from mtg_synergy_graph.bench.optimize import CompositeObjective, EdhrecLabels
+
+        held_name = "HELD_cmdr"
+        train_names = ["train_a", "train_b", "train_c", "train_d"]
+
+        def _custom_score_split(
+            conn,
+            edhrec_conn,
+            commanders,
+            weights,
+            *,
+            complements_cache,
+            labels_cache,
+            alpha,
+            candidate_cache=None,
+            idf_basis_cache=None,
+        ) -> CompositeObjective:
+            for cmdr in commanders:
+                if cmdr not in complements_cache:
+                    complements_cache[cmdr] = _make_complements_for_rules(list(weights.keys()))
+                if cmdr not in labels_cache:
+                    labels_cache[cmdr] = EdhrecLabels({}, None)
+            is_held = held_name in commanders
+            is_perturbed = any(v != 1.0 for v in weights.values())
+            # Train: composite improves but gem_rate DROPS by > 0.005 on
+            # perturbation. The warning fires only when an accepted step
+            # has best_train.gem_rate < current_train_gem - 0.005.
+            if not is_held and is_perturbed:
+                composite = 0.6  # strictly better → accept
+                gem_rate = 0.7  # dropped from baseline 0.8 by 0.1 (> 0.005)
+            elif not is_held:
+                composite = 0.5  # baseline
+                gem_rate = 0.8
+            else:
+                # Held passes the eps gate either way.
+                composite = 0.5 if not is_perturbed else 0.499
+                gem_rate = 0.8
+            return CompositeObjective(
+                composite=composite,
+                mean_ndcg=composite,
+                gem_rate=gem_rate,
+                n_commanders=len(commanders),
+                n_commanders_with_gem=len(commanders),
+            )
+
+        monkeypatch.setattr(opt_mod, "_score_split", _custom_score_split)
+
+        config = OptimizerConfig(run_self_test=False, max_sweeps=1)
+        with caplog.at_level("WARNING", logger="mtg_synergy_graph.bench.optimize"):
+            result = run_optimizer(*fake_conns, [*train_names, held_name], config=config)
+
+        # At least one step accepted (composite strictly improved).
+        assert result.n_steps_accepted >= 1
+        # The warning fired at least once and names the gem_rate drop.
+        warnings = [r for r in caplog.records if "gem_rate" in r.getMessage()]
+        assert warnings, (
+            f"Expected at least one gem_rate-regression WARNING; got messages: "
+            f"{[r.getMessage() for r in caplog.records]}"
+        )
+
+    def test_proposed_config_hash_restores_global_on_compute_hash_exception(
+        self,
+        patched_baseline_weights: dict[str, float],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``_proposed_config_hash`` restores ``_RULE_QUALITY_MULTIPLIER`` even if compute raises.
+
+        Coverage gap from the post-merge code-review (#26): the existing
+        ``test_patch_restore_on_proposed_hash_compute`` only tested the
+        happy path. The try/finally exists precisely so a raise inside
+        ``compute_config_hash`` doesn't leave the global mutated. This
+        test forces that exception path.
+        """
+        from mtg_synergy_graph import universal_scorer
+        from mtg_synergy_graph.bench import optimize as opt_mod
+
+        baseline_snapshot = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
+        original_id = id(universal_scorer._RULE_QUALITY_MULTIPLIER)
+
+        # Force compute_config_hash to raise from inside _proposed_config_hash.
+        def _raising_compute_hash() -> str:
+            raise RuntimeError("simulated config-hash failure")
+
+        monkeypatch.setattr(
+            "mtg_synergy_graph.bench.tensor.compute_config_hash",
+            _raising_compute_hash,
+        )
+
+        proposed = {"alpha_rule": 99.0, "beta_rule": 99.0, "gamma_rule": 99.0}
+        with pytest.raises(RuntimeError, match="simulated config-hash failure"):
+            opt_mod._proposed_config_hash(proposed)
+
+        # Dict identity preserved AND values restored to baseline.
+        assert id(universal_scorer._RULE_QUALITY_MULTIPLIER) == original_id
+        assert dict(universal_scorer._RULE_QUALITY_MULTIPLIER) == baseline_snapshot
 
 
 def _make_complements_for_rules(rule_ids):

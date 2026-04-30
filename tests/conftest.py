@@ -44,6 +44,42 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 # exercise the real behavior.
 
 
+# ---------------------------------------------------------------------------
+# RuleInterpreter cache reset (per-test isolation)
+# ---------------------------------------------------------------------------
+#
+# ``complement_rules._interpreter_cache`` keys cached ``RuleInterpreter``
+# instances by ``id(conn)`` (CPython object address). The docstring there
+# warns: "id(conn) can be reused after a connection is closed and
+# garbage-collected. Always call clear_interpreter_cache before replacing
+# a connection object to avoid stale results."
+#
+# Without this autouse reset, test isolation across files breaks: when
+# ``tests/bench/test_audit_*.py`` opens a conn, builds a cached
+# interpreter, and then closes that conn, CPython can recycle the same
+# memory address for a fresh tmp_path conn opened by
+# ``tests/test_rules_migration_cascade.py``. The cascade test then gets
+# the OLD interpreter bound to the CLOSED conn and ``find_all_complements``
+# silently returns no rows. The cascade test was historically flaky for
+# exactly this reason — see the post-PR-#27 ce-code-review session notes.
+#
+# Clearing per-test is cheap (one ``dict.clear()``); the interpreter is
+# re-built lazily on the first ``find_all_complements`` call inside a
+# given test. This eliminates the address-recycling failure mode for all
+# future tests.
+
+
+@pytest.fixture(autouse=True)
+def _reset_interpreter_cache_between_tests() -> None:
+    from mtg_synergy_graph.complement_rules._interpreter_cache import (
+        clear_interpreter_cache,
+    )
+
+    clear_interpreter_cache()
+    yield
+    clear_interpreter_cache()
+
+
 @pytest.fixture(autouse=True)
 def _stub_forge_sha_when_checkout_absent(monkeypatch: pytest.MonkeyPatch) -> None:
     from mtg_synergy_graph.forge_oracle import version as fo_version
