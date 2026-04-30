@@ -1297,7 +1297,10 @@ def write_proposal_json(
         "dead_keys": list(result.dead_keys),
         "train_split_size": len(result.train_split),
         "held_split_size": len(result.held_split),
-        "color_buckets": dict(result.color_buckets),
+        # color_buckets has nested MappingProxyType (outer + inner) for
+        # frozen-dataclass immutability. json.dumps doesn't know how to
+        # encode mappingproxy — flatten both layers to plain dicts.
+        "color_buckets": {k: dict(v) for k, v in result.color_buckets.items()},
     }
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
