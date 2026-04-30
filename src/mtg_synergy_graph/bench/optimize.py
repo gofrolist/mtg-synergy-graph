@@ -666,6 +666,50 @@ def _score_split(
     return composite_objective(per_ndcg, per_gem, alpha)
 
 
+def _warn_missing_edhrec_labels(labels_cache: Mapping[str, EdhrecLabels]) -> None:
+    """Emit one aggregate warning if any commanders lack EDHREC top-30 data.
+
+    Slug-mismatch / EDHREC-empty diagnostic. After both baseline scoring
+    calls populate ``labels_cache`` for every commander, count those whose
+    ``top_30_set`` is None (no high-synergy data — typically a slug mismatch
+    or a brand-new commander not yet on EDHREC). If a meaningful fraction
+    of the catalogue lacks data, the gem axis silently degrades to zero
+    contribution. Warn once with the aggregate count instead of spamming
+    per-commander.
+    """
+    missing_gem = [c for c, lbls in labels_cache.items() if lbls.top_30_set is None]
+    if not missing_gem:
+        return
+    n_total = len(labels_cache)
+    pct = (len(missing_gem) / n_total) * 100 if n_total else 0.0
+    _logger.warning(
+        "EDHREC labels missing for %d/%d commanders (%.1f%%) — gem axis will contribute nothing for these. Sample: %s",
+        len(missing_gem),
+        n_total,
+        pct,
+        ", ".join(sorted(missing_gem)[:5]) + ("..." if len(missing_gem) > 5 else ""),
+    )
+
+
+def _detect_dead_keys(
+    complements_cache: Mapping[str, list[PortComplement]],
+    baseline_weights: Mapping[str, float],
+) -> list[str]:
+    """Return rule_ids in baseline_weights that fire on zero commanders.
+
+    Iterates the complements_cache populated by baseline scoring and
+    collects every rule_id that appeared. Any baseline-weights key NOT in
+    that set is "dead" (no candidate matched it across the entire input
+    catalogue). Reported in the proposal artifact so reviewers can prune
+    truly-unused entries from ``data/scoring_weights.json``.
+    """
+    firing_rules: set[str] = set()
+    for comps in complements_cache.values():
+        for c in comps:
+            firing_rules.add(c.rule_id)
+    return [rule_id for rule_id in baseline_weights if rule_id not in firing_rules]
+
+
 def _apply_drift_revert(
     *,
     history: list[OptimizerStep],
@@ -705,6 +749,62 @@ def _apply_drift_revert(
         n_steps_rejected += 1
     accepted_step_indices.clear()
     return n_steps_accepted, n_steps_rejected
+
+
+def _grid_search_best_perturbation(
+    rule_id: str,
+    current_weights: Mapping[str, float],
+    *,
+    conn: sqlite3.Connection,
+    edhrec_conn: sqlite3.Connection,
+    train: Sequence[str],
+    config: OptimizerConfig,
+    complements_cache: dict[str, list[PortComplement]],
+    labels_cache: dict[str, EdhrecLabels],
+    candidate_cache: CandidateCache | None,
+    idf_basis_cache: dict[str, IdfBasis],
+    current_train_composite: float,
+) -> tuple[CompositeObjective, float] | None:
+    """Sweep ``config.grid`` for one rule; return ``(best_train_obj, best_value)`` or None.
+
+    Inner step of the Coordinate Ascent driver: for a fixed rule_id and
+    the current weights vector, evaluate every grid multiplier on the
+    train split and return the perturbation with the highest train
+    composite — but only if it strictly improves on
+    ``current_train_composite``. Returns ``None`` if no perturbation
+    beat the current state (the optimizer should skip to the next rule).
+
+    Pure with respect to optimizer state — does not mutate
+    ``current_weights`` or any cache; the caller decides whether to
+    accept the returned perturbation based on the held-out re-eval.
+    """
+    old_value = current_weights[rule_id]
+    best_train: CompositeObjective | None = None
+    best_value = old_value
+
+    for mult in config.grid:
+        new_value = _clamp(old_value * mult, config.clamp_min, config.clamp_max)
+        if new_value == old_value:
+            continue
+        candidate_weights = {**current_weights, rule_id: new_value}
+        train_obj = _score_split(
+            conn,
+            edhrec_conn,
+            train,
+            candidate_weights,
+            complements_cache=complements_cache,
+            labels_cache=labels_cache,
+            alpha=config.alpha,
+            candidate_cache=candidate_cache,
+            idf_basis_cache=idf_basis_cache,
+        )
+        if best_train is None or train_obj.composite > best_train.composite:
+            best_train = train_obj
+            best_value = new_value
+
+    if best_train is None or best_train.composite <= current_train_composite:
+        return None
+    return best_train, best_value
 
 
 def _select_self_test_plant(
@@ -878,13 +978,6 @@ def run_optimizer(
     # ~850M row reads → the bottleneck. The cache is reused across the full run.
     candidate_cache = build_candidate_cache(conn)
 
-    # Identify dead keys: entries in the JSON config whose rule_id isn't reachable
-    # via any helper / declarative rule. We can't introspect the registries here
-    # without circular imports; instead, we treat any rule that produces zero
-    # complements across ALL commanders as "dead" and report it. This is a strict
-    # subset of true dead keys but doesn't crash the optimizer.
-    dead_keys: list[str] = []
-
     # Build the split. Random_split returns frozen tuples; we keep them.
     split = random_split(
         commanders,
@@ -941,33 +1034,9 @@ def run_optimizer(
         idf_basis_cache=idf_basis_cache,
     )
 
-    # Slug-mismatch / EDHREC-empty warning. After both baseline calls populate
-    # labels_cache for every commander, count those whose top_30_set is None
-    # (no high-synergy data — typically a slug mismatch or a brand-new commander
-    # not yet on EDHREC). If a meaningful fraction of the catalogue lacks data,
-    # the gem axis silently degrades to zero contribution. Warn once with the
-    # aggregate count instead of spamming per-commander.
-    missing_gem = [c for c, lbls in labels_cache.items() if lbls.top_30_set is None]
-    if missing_gem:
-        n_total = len(labels_cache)
-        pct = (len(missing_gem) / n_total) * 100 if n_total else 0.0
-        _logger.warning(
-            "EDHREC labels missing for %d/%d commanders (%.1f%%) — gem axis will "
-            "contribute nothing for these. Sample: %s",
-            len(missing_gem),
-            n_total,
-            pct,
-            ", ".join(sorted(missing_gem)[:5]) + ("..." if len(missing_gem) > 5 else ""),
-        )
-
-    # Identify dead keys after baseline scoring populates the complements cache.
-    firing_rules: set[str] = set()
-    for comps in complements_cache.values():
-        for c in comps:
-            firing_rules.add(c.rule_id)
-    for rule_id in baseline_weights:
-        if rule_id not in firing_rules:
-            dead_keys.append(rule_id)
+    # Slug-mismatch / EDHREC-empty diagnostic + dead-key detection.
+    _warn_missing_edhrec_labels(labels_cache)
+    dead_keys = _detect_dead_keys(complements_cache, baseline_weights)
 
     current_weights = dict(baseline_weights)
     current_train_composite = baseline_train.composite
@@ -996,32 +1065,23 @@ def run_optimizer(
                 break
 
             old_value = current_weights[rule_id]
-            best_train: CompositeObjective | None = None
-            best_value = old_value
-
-            for mult in config.grid:
-                new_value = _clamp(old_value * mult, config.clamp_min, config.clamp_max)
-                if new_value == old_value:
-                    continue
-                candidate_weights = {**current_weights, rule_id: new_value}
-                train_obj = _score_split(
-                    conn,
-                    edhrec_conn,
-                    split.train,
-                    candidate_weights,
-                    complements_cache=complements_cache,
-                    labels_cache=labels_cache,
-                    alpha=config.alpha,
-                    candidate_cache=candidate_cache,
-                    idf_basis_cache=idf_basis_cache,
-                )
-                if best_train is None or train_obj.composite > best_train.composite:
-                    best_train = train_obj
-                    best_value = new_value
-
-            # If no perturbation strictly beat the current train composite, skip.
-            if best_train is None or best_train.composite <= current_train_composite:
+            grid_result = _grid_search_best_perturbation(
+                rule_id,
+                current_weights,
+                conn=conn,
+                edhrec_conn=edhrec_conn,
+                train=split.train,
+                config=config,
+                complements_cache=complements_cache,
+                labels_cache=labels_cache,
+                candidate_cache=candidate_cache,
+                idf_basis_cache=idf_basis_cache,
+                current_train_composite=current_train_composite,
+            )
+            if grid_result is None:
+                # No grid cell beat the current train composite — skip this rule.
                 continue
+            best_train, best_value = grid_result
 
             # Re-evaluate held with the candidate weights (the best perturbation).
             candidate_weights = {**current_weights, rule_id: best_value}
