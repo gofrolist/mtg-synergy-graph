@@ -655,24 +655,23 @@ def _scripted_score_split(
 
 
 @pytest.fixture()
-def patched_baseline_weights(monkeypatch: pytest.MonkeyPatch) -> dict[str, float]:
+def patched_baseline_weights() -> Iterator[dict[str, float]]:
     """Replace ``_RULE_QUALITY_MULTIPLIER`` with a tiny, predictable dict for tests.
 
-    Restored at fixture teardown by monkeypatch.
+    Uses the production
+    :func:`~mtg_synergy_graph.universal_scorer.patched_rule_quality_multiplier`
+    context manager so tests exercise the same patch+restore path as the
+    bench optimizer. Restoration is automatic on yield/exception.
     """
-    from mtg_synergy_graph import universal_scorer
+    from mtg_synergy_graph.universal_scorer import patched_rule_quality_multiplier
 
     test_weights = {
         "alpha_rule": 1.0,
         "beta_rule": 1.0,
         "gamma_rule": 1.0,
     }
-    saved = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
-    universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
-    universal_scorer._RULE_QUALITY_MULTIPLIER.update(test_weights)
-    yield dict(test_weights)
-    universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
-    universal_scorer._RULE_QUALITY_MULTIPLIER.update(saved)
+    with patched_rule_quality_multiplier(test_weights):
+        yield dict(test_weights)
 
 
 @pytest.fixture()
@@ -729,11 +728,12 @@ class TestRunOptimizerControlLogic:
             _scripted_score_split(composite_for_weights=lambda w: 0.5),
         )
         # Pretend every rule fires, so no dead keys.
+        # find_all_complements is hoisted to module-level in optimize.py
+        # post-#34 — no need for raising=False anymore.
         monkeypatch.setattr(
             opt_mod,
             "find_all_complements",
             lambda conn, cmdrs: _make_complements_for_rules(list(patched_baseline_weights.keys())),
-            raising=False,
         )
         # Stub label loader.
         monkeypatch.setattr(opt_mod, "load_edhrec_labels", lambda c, n: opt_mod.EdhrecLabels({}, None))

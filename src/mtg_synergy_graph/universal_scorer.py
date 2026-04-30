@@ -13,7 +13,8 @@ import logging
 import math
 import sqlite3
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from functools import cached_property, lru_cache
 from pathlib import Path
@@ -592,6 +593,48 @@ _FLAT_WEIGHT_OVERRIDES: dict[str, float] = _LOADED_SCORING_WEIGHTS.flat_weight_o
 _RULE_QUALITY_MULTIPLIER: dict[str, float] = _LOADED_SCORING_WEIGHTS.rule_quality_multiplier
 
 
+@contextmanager
+def patched_rule_quality_multiplier(weights: Mapping[str, float]) -> Iterator[None]:
+    """Temporarily replace ``_RULE_QUALITY_MULTIPLIER`` with ``weights``; restore on exit.
+
+    The bench optimizer scores grid cells by patching the global
+    ``_RULE_QUALITY_MULTIPLIER`` dict, calling
+    :func:`score_from_complements`, and restoring the baseline. The
+    ``.clear() + .update()`` pattern preserves the dict's identity (so
+    callers holding a reference to the global keep seeing live values).
+
+    Identity preservation matters because:
+
+    * ``compute_config_hash`` and ``ScoringConfigInputs`` read the
+      module-level global by attribute access; rebinding to a new dict
+      would silently break observers.
+    * Test fixtures patch the global to install synthetic weights and
+      rely on the same dict object surviving across the fixture's yield.
+
+    The context manager consolidates the four-line ``baseline = dict(...);
+    try: clear+update; finally: clear+update`` pattern previously
+    duplicated across ``_score_split``, ``_proposed_config_hash``, the
+    ``patched_baseline_weights`` test fixture, and several individual
+    tests. One source of truth means future refactors (e.g., a future
+    atomic single-key swap) only touch this function.
+
+    Usage::
+
+        with patched_rule_quality_multiplier(weights):
+            score_from_complements(conn, [cmdr], complements)
+
+    Restores even if the body raises (try/finally semantics).
+    """
+    baseline = dict(_RULE_QUALITY_MULTIPLIER)
+    try:
+        _RULE_QUALITY_MULTIPLIER.clear()
+        _RULE_QUALITY_MULTIPLIER.update(weights)
+        yield
+    finally:
+        _RULE_QUALITY_MULTIPLIER.clear()
+        _RULE_QUALITY_MULTIPLIER.update(baseline)
+
+
 @dataclass(frozen=True)
 class IdfBasis:
     """Per-commander IDF basis: weight-independent components of ``_compute_idf_weights``.
@@ -733,7 +776,7 @@ def score_all_universal(
     identity invariant in the plan.
     """
     complements = find_all_complements(conn, commander_set, candidate_cache=candidate_cache)
-    return _score_from_complements(
+    return score_from_complements(
         conn,
         commander_set,
         complements,
@@ -742,7 +785,7 @@ def score_all_universal(
     )
 
 
-def _score_from_complements(
+def score_from_complements(
     conn: sqlite3.Connection,
     commander_set: Sequence[str],
     complements: Sequence[PortComplement],
@@ -753,12 +796,15 @@ def _score_from_complements(
 ) -> dict[str, UniversalScore]:
     """Build per-candidate ``UniversalScore`` results from precomputed complements.
 
-    Extracted from :func:`score_all_universal` so the weight optimizer
-    (``bench/optimize.py``) can score with patched ``_RULE_QUALITY_MULTIPLIER``
-    against cached complements without paying the ``find_all_complements`` cost
-    on every grid cell. Reads ``_RULE_QUALITY_MULTIPLIER``,
-    ``_FLAT_WEIGHT_OVERRIDES``, and the embedding/staple/circuit/cmc/rank
-    side-channels exactly as ``score_all_universal`` does.
+    Public counterpart to :func:`score_all_universal`: skip the
+    ``find_all_complements`` step when the caller already has the
+    complements list in hand. The bench optimizer
+    (``bench/optimize.py``) caches complements per commander and calls
+    this directly per grid cell with patched ``_RULE_QUALITY_MULTIPLIER``.
+
+    Reads ``_RULE_QUALITY_MULTIPLIER``, ``_FLAT_WEIGHT_OVERRIDES``, and
+    the embedding/staple/circuit/cmc/rank side-channels exactly as
+    ``score_all_universal`` does.
 
     When ``idf_basis`` is supplied, skip the per-call frequency-counting walk
     and apply the current ``_RULE_QUALITY_MULTIPLIER`` to the cached basis
