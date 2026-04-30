@@ -974,6 +974,80 @@ class TestPlantedPerturbationSelfTest:
         assert "baseline=" in str(exc.value)
         assert "recovered=" in str(exc.value)
 
+    def test_select_plant_rotates_when_picked_rule_at_clamp_max(self) -> None:
+        """If the seed-picked rule is at clamp_max, _select_self_test_plant rotates to a rule with room.
+
+        Regression test for the false-positive where applying a proposal that
+        pushes any rule to clamp_max=5.0 would cause the next run's self-test
+        to raise OptimizerSelfTestFailed("plant collapsed to baseline").
+        """
+        from mtg_synergy_graph.bench.optimize import _select_self_test_plant
+
+        # alpha_rule pinned at clamp_max → ×2.0 collapses; ÷2.0 should be picked
+        # (or the function should rotate to beta_rule which has full room).
+        baseline = {"alpha_rule": 5.0, "beta_rule": 1.0, "gamma_rule": 1.0}
+        rule_id, planted_value = _select_self_test_plant(
+            baseline, seed=0, planted_mult=2.0, clamp_min=0.01, clamp_max=5.0
+        )
+        # Either rotated to a different rule, or stayed on alpha_rule with the
+        # DOWN direction (5.0 / 2.0 = 2.5).
+        if rule_id == "alpha_rule":
+            assert planted_value == pytest.approx(2.5)
+        else:
+            # Rotated to beta_rule or gamma_rule; both have full room either direction.
+            assert rule_id in {"beta_rule", "gamma_rule"}
+            assert planted_value != baseline[rule_id]
+            # Plant must be at the configured ×2.0 (UP) since these rules have room.
+            assert planted_value == pytest.approx(2.0)
+
+    def test_select_plant_raises_when_every_rule_pinned(self) -> None:
+        """When every rule is structurally pinned (clamp_min == clamp_max == baseline), raise."""
+        from mtg_synergy_graph.bench.optimize import _select_self_test_plant
+
+        baseline = {"alpha_rule": 1.0}
+        # Every rule's baseline is pinned at the only allowed value.
+        with pytest.raises(OptimizerSelfTestFailed, match="planting room"):
+            _select_self_test_plant(baseline, seed=0, planted_mult=2.0, clamp_min=1.0, clamp_max=1.0)
+
+    def test_self_test_passes_with_rule_at_clamp_max(
+        self,
+        fake_conns: tuple[object, object],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """End-to-end: a baseline at clamp_max no longer trips the self-test.
+
+        Pre-fix: this scenario raised ``OptimizerSelfTestFailed("collapsed to
+        baseline")`` immediately and the whole run aborted with rc=3.
+        Post-fix: the self-test rotates direction (or rule) and passes.
+        """
+        from mtg_synergy_graph import universal_scorer
+        from mtg_synergy_graph.bench import optimize as opt_mod
+
+        # Set alpha_rule to clamp_max so its UP-direction plant collapses.
+        # beta_rule and gamma_rule are at the default 1.0 (full room).
+        saved = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
+        universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
+        universal_scorer._RULE_QUALITY_MULTIPLIER.update({"alpha_rule": 5.0, "beta_rule": 1.0, "gamma_rule": 1.0})
+        try:
+            baseline = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
+
+            def _composite_all_rules(weights: Mapping[str, float]) -> float:
+                total_delta = sum(abs(weights[k] - baseline[k]) for k in baseline)
+                return 1.0 - total_delta
+
+            monkeypatch.setattr(
+                opt_mod,
+                "_score_split",
+                _scripted_score_split(composite_for_weights=_composite_all_rules),
+            )
+
+            config = OptimizerConfig(run_self_test=True, max_sweeps=0, self_test_seed=0)
+            # Should NOT raise.
+            run_optimizer(*fake_conns, ["a", "b", "c", "d", "e"], config=config)
+        finally:
+            universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
+            universal_scorer._RULE_QUALITY_MULTIPLIER.update(saved)
+
 
 class TestRunOptimizerSmoke:
     """End-to-end smoke run against the real-DB scoring fixture."""
@@ -1326,18 +1400,24 @@ class TestHandleOptimize:
         assert "empty" in captured.err
 
     def test_returns_2_on_too_few_commanders(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-        """Fixture below ``_MIN_COMMANDERS_FOR_SPLIT`` is rejected to avoid degenerate held=0 split."""
+        """Fixture below ``_MIN_COMMANDERS_FOR_SPLIT`` (3) is rejected to avoid degenerate held=0 split.
+
+        The threshold is 3: at ``train_ratio=0.8``, ``round(n * 0.8)``
+        produces ``held=0`` only when ``n <= 2``. At ``n=3`` the split is
+        2 train + 1 held — minimal but non-degenerate.
+        """
         import argparse
 
         from mtg_synergy_graph.bench.fixture import FixtureEntry, PinnedFixture
         from mtg_synergy_graph.bench.optimize import handle_optimize
 
-        # 3 commanders < 5 minimum. Use a fake config_hash so we'd hit the
-        # stale-tensor check next; but the size check must fire FIRST.
+        # 2 commanders < 3 minimum (round(2 * 0.8) = 2 → held=0). Use a fake
+        # config_hash so we'd hit the stale-tensor check next; the size check
+        # must fire FIRST.
         fixture = PinnedFixture(
             config_hash="0" * 64,
             created_at="2026-01-01T00:00:00+00:00",
-            entries=[FixtureEntry(commander=f"Cmdr {i}", scores={"a": 1.0}) for i in range(3)],
+            entries=[FixtureEntry(commander=f"Cmdr {i}", scores={"a": 1.0}) for i in range(2)],
         )
         fixture_path = tmp_path / "fixture.json"
         fixture.write(fixture_path)
@@ -1355,8 +1435,8 @@ class TestHandleOptimize:
         rc = handle_optimize(args)
         assert rc == 2
         captured = capsys.readouterr()
-        assert "3 commanders" in captured.err
-        assert "at least 5" in captured.err
+        assert "2 commanders" in captured.err
+        assert "at least 3" in captured.err
 
     def test_returns_2_on_stale_tensor(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         import argparse
@@ -1365,12 +1445,12 @@ class TestHandleOptimize:
         from mtg_synergy_graph.bench.optimize import handle_optimize
 
         # Fixture with a fake config_hash that won't match the live one. Must
-        # have at least _MIN_COMMANDERS_FOR_SPLIT entries so the stale-tensor
+        # have at least _MIN_COMMANDERS_FOR_SPLIT (3) entries so the stale-tensor
         # check fires before the size check.
         fixture = PinnedFixture(
             config_hash="0" * 64,
             created_at="2026-01-01T00:00:00+00:00",
-            entries=[FixtureEntry(commander=f"Cmdr {i}", scores={"a": 1.0}) for i in range(5)],
+            entries=[FixtureEntry(commander=f"Cmdr {i}", scores={"a": 1.0}) for i in range(3)],
         )
         fixture_path = tmp_path / "fixture.json"
         fixture.write(fixture_path)

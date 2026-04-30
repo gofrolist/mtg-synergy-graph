@@ -641,6 +641,97 @@ def _score_split(
     return composite_objective(per_ndcg, per_gem, alpha)
 
 
+def _apply_drift_revert(
+    *,
+    history: list[OptimizerStep],
+    accepted_step_indices: list[int],
+    n_steps_accepted: int,
+    n_steps_rejected: int,
+) -> tuple[int, int]:
+    """Cumulative-drift revert: mark every accepted step as reverted, return updated counters.
+
+    Mutates ``history`` (replaces each accepted ``OptimizerStep`` with a copy
+    flagged ``accepted=False, reject_reason="cumulative_drift_revert"``) and
+    clears ``accepted_step_indices``. Returns the corrected
+    ``(n_steps_accepted, n_steps_rejected)`` so the caller can update its own
+    counters and reset metrics atomically.
+
+    Used at two trip points: mid-sweep (after every accept) and sweep-boundary
+    backstop. Both call sites must reset metrics to baseline values themselves —
+    this helper only owns the history bookkeeping.
+    """
+    for idx in accepted_step_indices:
+        step = history[idx]
+        history[idx] = OptimizerStep(
+            sweep_n=step.sweep_n,
+            rule_id=step.rule_id,
+            old_value=step.old_value,
+            new_value=step.new_value,
+            train_composite=step.train_composite,
+            held_composite=step.held_composite,
+            train_ndcg=step.train_ndcg,
+            held_ndcg=step.held_ndcg,
+            train_gem=step.train_gem,
+            held_gem=step.held_gem,
+            accepted=False,
+            reject_reason="cumulative_drift_revert",
+        )
+        n_steps_accepted -= 1
+        n_steps_rejected += 1
+    accepted_step_indices.clear()
+    return n_steps_accepted, n_steps_rejected
+
+
+def _select_self_test_plant(
+    baseline_weights: Mapping[str, float],
+    *,
+    seed: int,
+    planted_mult: float,
+    clamp_min: float,
+    clamp_max: float,
+) -> tuple[str, float]:
+    """Pick a (rule_id, planted_value) pair that doesn't collapse to baseline under clamp.
+
+    Tries rules in deterministic seed-shuffled order. For each rule, tries the
+    UP direction first (``baseline × planted_mult``); if that clamps back to
+    baseline (rule already at ``clamp_max``), tries the DOWN direction
+    (``baseline / planted_mult``). The 0.5×/2.0× grid recovers either way —
+    a 2× plant lands exactly back on baseline at grid 0.5×, and a 0.5× plant
+    lands exactly on baseline at grid 2.0×.
+
+    Returns the first rule with non-trivial planting room. Raises only if EVERY
+    rule has zero room in both directions (only possible when every rule's
+    baseline is simultaneously pinned at clamp_min == clamp_max, which is
+    structurally unreachable for the default config and would mean the
+    catalogue is unusable anyway).
+
+    Raises:
+        OptimizerSelfTestFailed: no rule has planting room.
+    """
+    rng = random.Random(seed)  # noqa: S311 — determinism, not crypto
+    candidates = list(baseline_weights.keys())
+    rng.shuffle(candidates)
+
+    for rule_id in candidates:
+        baseline_value = baseline_weights[rule_id]
+        # Try UP direction first (the original 2.0× plant).
+        up_value = _clamp(baseline_value * planted_mult, clamp_min, clamp_max)
+        if up_value != baseline_value:
+            return rule_id, up_value
+        # UP collapsed (baseline at clamp_max). Try DOWN: baseline / planted_mult.
+        # The grid recovers symmetrically — 0.5× plant + 2.0× grid step = baseline.
+        down_value = _clamp(baseline_value / planted_mult, clamp_min, clamp_max)
+        if down_value != baseline_value:
+            return rule_id, down_value
+
+    raise OptimizerSelfTestFailed(
+        f"self-test could not find ANY rule with planting room: every rule's "
+        f"baseline collapses under both x{planted_mult} (UP) and /{planted_mult} (DOWN) "
+        f"clamping (clamp_min={clamp_min}, clamp_max={clamp_max}). "
+        "The catalogue may be misconfigured."
+    )
+
+
 def _planted_perturbation_self_test(
     conn: sqlite3.Connection,
     edhrec_conn: sqlite3.Connection,
@@ -652,34 +743,30 @@ def _planted_perturbation_self_test(
     labels_cache: dict[str, EdhrecLabels],
     candidate_cache: CandidateCache | None = None,
 ) -> None:
-    """Plant a 2.0x perturbation on a random rule; assert recovery on the grid.
+    """Plant a 2.0x perturbation on a rule; assert recovery on the grid.
+
+    Picks the rule via :func:`_select_self_test_plant`, which rotates through
+    rules in deterministic shuffled order until one has planting room (handles
+    the case where the seed-picked rule's baseline is already at ``clamp_max``).
 
     Sweeps ``config.grid`` from the planted state and verifies the optimizer's
     chosen multiplier lands within ``self_test_recovery_tolerance`` of the
-    baseline value. The grid step ``0.5x`` against a ``2.0x`` plant lands
-    exactly on baseline; ±5% tolerance accommodates float noise but rejects
-    "couldn't recover at all" failures.
+    baseline value. The grid step ``0.5x`` against a ``2.0x`` plant (or
+    ``2.0x`` against a ``0.5x`` plant) lands exactly on baseline; ±5% tolerance
+    accommodates float noise but rejects "couldn't recover at all" failures.
 
     Raises:
-        OptimizerSelfTestFailed: optimizer could not recover the baseline.
+        OptimizerSelfTestFailed: optimizer could not recover the baseline,
+            or no rule has planting room.
     """
-    rule_id = random.Random(config.self_test_seed).choice(list(baseline_weights.keys()))  # noqa: S311
-    baseline_value = baseline_weights[rule_id]
-    planted_value = _clamp(
-        baseline_value * config.self_test_planted_mult,
-        config.clamp_min,
-        config.clamp_max,
+    rule_id, planted_value = _select_self_test_plant(
+        baseline_weights,
+        seed=config.self_test_seed,
+        planted_mult=config.self_test_planted_mult,
+        clamp_min=config.clamp_min,
+        clamp_max=config.clamp_max,
     )
-
-    if planted_value == baseline_value:
-        # Plant collapsed to baseline due to clamp — pick a different rule.
-        # Practically impossible at default config; bail with a clear message.
-        raise OptimizerSelfTestFailed(
-            f"self-test plant for {rule_id!r} collapsed to baseline under clamp; "
-            f"baseline={baseline_value}, planted_target={baseline_value * config.self_test_planted_mult}, "
-            f"clamp=({config.clamp_min}, {config.clamp_max})"
-        )
-
+    baseline_value = baseline_weights[rule_id]
     planted_weights = {**baseline_weights, rule_id: planted_value}
 
     # Sweep the grid from the planted state; track the best train composite.
@@ -818,6 +905,25 @@ def run_optimizer(
         candidate_cache=candidate_cache,
     )
 
+    # Slug-mismatch / EDHREC-empty warning. After both baseline calls populate
+    # labels_cache for every commander, count those whose top_30_set is None
+    # (no high-synergy data — typically a slug mismatch or a brand-new commander
+    # not yet on EDHREC). If a meaningful fraction of the catalogue lacks data,
+    # the gem axis silently degrades to zero contribution. Warn once with the
+    # aggregate count instead of spamming per-commander.
+    missing_gem = [c for c, lbls in labels_cache.items() if lbls.top_30_set is None]
+    if missing_gem:
+        n_total = len(labels_cache)
+        pct = (len(missing_gem) / n_total) * 100 if n_total else 0.0
+        _logger.warning(
+            "EDHREC labels missing for %d/%d commanders (%.1f%%) — gem axis will "
+            "contribute nothing for these. Sample: %s",
+            len(missing_gem),
+            n_total,
+            pct,
+            ", ".join(sorted(missing_gem)[:5]) + ("..." if len(missing_gem) > 5 else ""),
+        )
+
     # Identify dead keys after baseline scoring populates the complements cache.
     firing_rules: set[str] = set()
     for comps in complements_cache.values():
@@ -937,46 +1043,53 @@ def run_optimizer(
                 n_steps_accepted += 1
                 accepted_step_indices.append(len(history) - 1)
                 sweep_had_accept = True
+
+                # Mid-sweep cumulative-drift check. Trip earlier if accepts have
+                # already drifted held below the cumulative gate. Without this,
+                # a wall-clock-aborted sweep would skip the drift check entirely
+                # (the boundary check at the end of sweep_n only fires when the
+                # sweep completes), and intra-sweep drift escapes detection.
+                if current_held_composite - baseline_held.composite < -config.eps_cumulative:
+                    n_steps_accepted, n_steps_rejected = _apply_drift_revert(
+                        history=history,
+                        accepted_step_indices=accepted_step_indices,
+                        n_steps_accepted=n_steps_accepted,
+                        n_steps_rejected=n_steps_rejected,
+                    )
+                    current_weights = dict(baseline_weights)
+                    current_train_composite = baseline_train.composite
+                    current_held_composite = baseline_held.composite
+                    current_train_ndcg = baseline_train.mean_ndcg
+                    current_held_ndcg = baseline_held.mean_ndcg
+                    current_train_gem = baseline_train.gem_rate
+                    current_held_gem = baseline_held.gem_rate
+                    partial_sweep = True
+                    break
             else:
                 n_steps_rejected += 1
 
-        # End of sweep: cumulative-drift check (only if we didn't already abort).
+        # End of sweep. If wall-clock or mid-sweep drift already aborted, exit.
         if partial_sweep:
             break
 
-        held_drift = current_held_composite - baseline_held.composite
-        if held_drift < -config.eps_cumulative:
-            # Cumulative drift trip: roll back to baseline weights AND mark every
-            # accept across all sweeps as reverted. The metrics-vs-weights
-            # invariant (final_weights describes the state that produced the
-            # final composite values) is preserved by resetting both together.
+        # Sweep-boundary drift check is now a backstop — most drift trips will
+        # fire mid-sweep above. Kept here for defense-in-depth and so the trip
+        # condition is identical at both call sites.
+        if current_held_composite - baseline_held.composite < -config.eps_cumulative:
+            n_steps_accepted, n_steps_rejected = _apply_drift_revert(
+                history=history,
+                accepted_step_indices=accepted_step_indices,
+                n_steps_accepted=n_steps_accepted,
+                n_steps_rejected=n_steps_rejected,
+            )
             current_weights = dict(baseline_weights)
-            for idx in accepted_step_indices:
-                step = history[idx]
-                history[idx] = OptimizerStep(
-                    sweep_n=step.sweep_n,
-                    rule_id=step.rule_id,
-                    old_value=step.old_value,
-                    new_value=step.new_value,
-                    train_composite=step.train_composite,
-                    held_composite=step.held_composite,
-                    train_ndcg=step.train_ndcg,
-                    held_ndcg=step.held_ndcg,
-                    train_gem=step.train_gem,
-                    held_gem=step.held_gem,
-                    accepted=False,
-                    reject_reason="cumulative_drift_revert",
-                )
-                n_steps_accepted -= 1
-                n_steps_rejected += 1
-            accepted_step_indices.clear()
-            partial_sweep = True
             current_train_composite = baseline_train.composite
             current_held_composite = baseline_held.composite
             current_train_ndcg = baseline_train.mean_ndcg
             current_held_ndcg = baseline_held.mean_ndcg
             current_train_gem = baseline_train.gem_rate
             current_held_gem = baseline_held.gem_rate
+            partial_sweep = True
             break
 
         # Convergence: no perturbation accepted this sweep.
@@ -1216,12 +1329,14 @@ def _history_row_for_step(step: OptimizerStep, timestamp: str, run_id: str) -> l
 # ---------------------------------------------------------------------------
 
 
-#: Minimum commander count for a meaningful train/held split. Below this,
-#: ``round(n * 0.8)`` may produce ``held=0``, which makes the held-eps gate
-#: trivially pass and silently nullifies cross-validation. The pinned golden
-#: set has 100 commanders; this floor is a usability guardrail for
-#: CLI invocations against a synthetic or hand-built fixture.
-_MIN_COMMANDERS_FOR_SPLIT = 5
+#: Minimum commander count for a non-degenerate train/held split.
+#: At ``train_ratio=0.8`` (default), ``round(n * 0.8)`` produces ``held=0``
+#: when ``n <= 2`` (round(0.8)=1, round(1.6)=2). At ``n=3`` the split is
+#: 2 train + 1 held — the smallest input that doesn't trivially pass the
+#: held-eps gate. Below this, cross-validation is silently nullified.
+#: The pinned golden set has 100 commanders; this floor is a usability
+#: guardrail for CLI invocations against a synthetic or hand-built fixture.
+_MIN_COMMANDERS_FOR_SPLIT = 3
 
 
 def handle_optimize(args: argparse.Namespace) -> int:
