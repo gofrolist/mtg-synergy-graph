@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
+
 from mtg_synergy_graph.complement_rules.core import PortComplement, _extract_filter_group
-from mtg_synergy_graph.universal_scorer import UniversalScore, _compute_idf_weights
+from mtg_synergy_graph.universal_scorer import (
+    UniversalScore,
+    _compute_idf_weights,
+    _compute_pair_bonus,
+)
 
 
 def _comp(
@@ -378,3 +384,51 @@ def test_score_uses_filter_group_for_idf_lookup():
     idf = {("trigger_effect", "ChangesZone", "Token", "Artifact"): 0.42}
     us = UniversalScore(complements=[c], staple_bonus=0.0, idf_weights=idf)
     assert abs(us.score - 0.42) < 1e-9
+
+
+# ---------------------------------------------------------------------------
+# _compute_pair_bonus — lru_cache behavior
+# ---------------------------------------------------------------------------
+
+
+def test_compute_pair_bonus_cache_returns_consistent_values():
+    """Repeated calls with the same input return the same value (cache hit
+    path agrees with cache miss path).
+
+    The bench optimizer calls this 43.85M+ times per sweep with frequent
+    repeats; the cache must not return stale or modified results.
+    """
+    rules = frozenset({"trigger_effect", "cost_feeds_trigger"})
+    a = _compute_pair_bonus(rules)
+    b = _compute_pair_bonus(rules)
+    c = _compute_pair_bonus(frozenset(rules))  # fresh frozenset, same elements
+    assert a == b == c
+
+
+def test_compute_pair_bonus_cache_clear_picks_up_pairs_table_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Tests that monkeypatch ``_SYNERGY_PAIRS`` MUST call cache_clear afterwards
+    or risk seeing stale cached results.
+
+    This test documents the cache invariant: the cache key is the input
+    frozenset only, NOT the underlying ``_SYNERGY_PAIRS`` dict. If a test
+    forgets to clear, subsequent assertions inside the same test could see
+    pre-monkeypatch values.
+    """
+    from mtg_synergy_graph import universal_scorer
+
+    rules = frozenset({"trigger_effect", "cost_feeds_trigger"})
+    # Prime the cache with the real-table value.
+    pre = _compute_pair_bonus(rules)
+
+    # Monkeypatch _SYNERGY_PAIRS to give this pair a NEW value not in the table.
+    monkeypatch.setitem(universal_scorer._SYNERGY_PAIRS, rules, 999.0)
+    # Without cache_clear, we'd get the stale cached pre-monkeypatch value.
+    assert _compute_pair_bonus(rules) == pre, "cache should still return pre-patch value"
+    # After cache_clear, the new value is observable.
+    _compute_pair_bonus.cache_clear()
+    assert _compute_pair_bonus(rules) == pre + 999.0
+    # Restore: monkeypatch teardown removes the entry, but cache may now hold
+    # the patched value. Clear so the next test sees the real table.
+    _compute_pair_bonus.cache_clear()
