@@ -33,6 +33,8 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from mtg_synergy_graph.penalties import build_candidate_cache
+
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
@@ -304,6 +306,48 @@ class CommanderScoreResult:
     contributions: tuple[tuple[str, str, float], ...]
 
 
+def _fast_total(score_obj: object) -> float:
+    """Compute ``UniversalScore.to_legacy_buckets()["total"]`` without the bucket dict.
+
+    Hot path: the production engine sorts by this same value, but allocates a
+    28-key bucket dict per call. The optimizer scores ~thousands of candidates
+    per grid evaluation × thousands of grid evaluations per sweep, so the dict
+    allocation dominates. This helper produces bitwise-identical totals while
+    skipping the bucket-keyed accumulator AND the second-pass ``distinct_rules``
+    cached_property walk over complements.
+
+    Result must match ``to_legacy_buckets()["total"]`` to the bit; the optimizer's
+    fidelity test in ``test_optimize.py::test_production_faithful_top_30_at_baseline``
+    verifies this invariant against ``score_all_universal``.
+    """
+    from mtg_synergy_graph.universal_scorer import _compute_pair_bonus
+
+    total = 0.0
+    seen: set[tuple[str, str, str, str, str]] = set()
+    distinct_rules: set[str] = set()
+    idf_weights = score_obj.idf_weights  # type: ignore[attr-defined]
+    for c in score_obj.complements:  # type: ignore[attr-defined]
+        key = (c.rule_id, c.cmdr_event, c.cand_event, c.filter_group, c.direction)
+        if key in seen:
+            continue
+        seen.add(key)
+        weight = idf_weights.get((c.rule_id, c.cmdr_event, c.cand_event, c.filter_group), 1.0)
+        if c.direction == "anti_synergy":
+            total -= weight
+        else:
+            total += weight
+            distinct_rules.add(c.rule_id)
+
+    total += score_obj.staple_bonus  # type: ignore[attr-defined]
+    n_rules = len(distinct_rules)
+    if n_rules >= 2:
+        total += 0.02 * min(n_rules - 1, 4)
+    total += _compute_pair_bonus(frozenset(distinct_rules))
+    total += score_obj.circuit_bonus + score_obj.cmc_bonus + score_obj.rank_bonus  # type: ignore[attr-defined]
+    total += score_obj.embedding_contribution  # type: ignore[attr-defined]
+    return total
+
+
 def _build_contributions(
     results: Mapping[str, object],
 ) -> tuple[tuple[str, str, float], ...]:
@@ -393,7 +437,10 @@ def score_commander_from_complements(
     score_by_candidate: dict[str, float] = {}
     sortable: list[tuple[str, float]] = []
     for name, us in results.items():
-        total = us.to_legacy_buckets()["total"]
+        # Hot path: use _fast_total instead of us.to_legacy_buckets()["total"]
+        # to skip the 28-key bucket dict allocation. Bitwise-identical to the
+        # `total` field that engine.SynergyEngine.page() sorts by.
+        total = _fast_total(us)
         score_by_candidate[name] = total
         sortable.append((name, total))
 
@@ -519,6 +566,7 @@ def _score_split(
     complements_cache: dict[str, list[PortComplement]],
     labels_cache: dict[str, EdhrecLabels],
     alpha: float,
+    candidate_cache: CandidateCache | None = None,
 ) -> CompositeObjective:
     """Score a commander split with the given weights; return composite objective.
 
@@ -526,6 +574,12 @@ def _score_split(
     arguments are populated lazily on first miss; subsequent calls reuse them
     so ``find_all_complements`` and ``load_edhrec_labels`` each run once per
     commander per optimizer run.
+
+    ``candidate_cache`` is the commander-independent cmc/edhrec_rank cache
+    from :func:`penalties.build_candidate_cache`. Built once at run_optimizer
+    entry and threaded through; without it, each grid-cell evaluation re-issues
+    a full ``SELECT name, cmc, edhrec_rank FROM cards`` table scan, costing
+    ~5x wall-clock on a 100-commander × 53-key × 5-grid sweep.
     """
     from mtg_synergy_graph import universal_scorer
     from mtg_synergy_graph.bench.hidden_gems import (
@@ -543,13 +597,13 @@ def _score_split(
         per_gem: dict[str, float | None] = {}
         for cmdr in commanders:
             if cmdr not in complements_cache:
-                complements_cache[cmdr] = find_all_complements(conn, [cmdr])
+                complements_cache[cmdr] = find_all_complements(conn, [cmdr], candidate_cache=candidate_cache)
             comps = complements_cache[cmdr]
             if cmdr not in labels_cache:
                 labels_cache[cmdr] = load_edhrec_labels(edhrec_conn, cmdr)
             labels = labels_cache[cmdr]
 
-            result = score_commander_from_complements(conn, cmdr, comps)
+            result = score_commander_from_complements(conn, cmdr, comps, candidate_cache=candidate_cache)
             ndcg = compute_ndcg(list(result.top_30), dict(labels.graded_labels))
             per_ndcg[cmdr] = ndcg
 
@@ -579,6 +633,7 @@ def _planted_perturbation_self_test(
     config: OptimizerConfig,
     complements_cache: dict[str, list[PortComplement]],
     labels_cache: dict[str, EdhrecLabels],
+    candidate_cache: CandidateCache | None = None,
 ) -> None:
     """Plant a 2.0x perturbation on a random rule; assert recovery on the grid.
 
@@ -620,6 +675,7 @@ def _planted_perturbation_self_test(
         complements_cache=complements_cache,
         labels_cache=labels_cache,
         alpha=config.alpha,
+        candidate_cache=candidate_cache,
     ).composite
 
     for mult in config.grid:
@@ -635,6 +691,7 @@ def _planted_perturbation_self_test(
             complements_cache=complements_cache,
             labels_cache=labels_cache,
             alpha=config.alpha,
+            candidate_cache=candidate_cache,
         )
         if obj.composite > best_composite:
             best_composite = obj.composite
@@ -681,6 +738,13 @@ def run_optimizer(
 
     baseline_weights = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
 
+    # Build the commander-independent candidate cache ONCE per run. Without this,
+    # every grid-cell evaluation re-issues `SELECT name, cmc, edhrec_rank FROM
+    # cards` (full ~32k-row scan) inside score_commander_from_complements +
+    # _score_from_complements. With ~26k grid evaluations per sweep, that's
+    # ~850M row reads → the bottleneck. The cache is reused across the full run.
+    candidate_cache = build_candidate_cache(conn)
+
     # Identify dead keys: entries in the JSON config whose rule_id isn't reachable
     # via any helper / declarative rule. We can't introspect the registries here
     # without circular imports; instead, we treat any rule that produces zero
@@ -710,6 +774,7 @@ def run_optimizer(
             config=config,
             complements_cache=complements_cache,
             labels_cache=labels_cache,
+            candidate_cache=candidate_cache,
         )
 
     # Baseline objectives. After this call, complements/labels caches are warm
@@ -722,6 +787,7 @@ def run_optimizer(
         complements_cache=complements_cache,
         labels_cache=labels_cache,
         alpha=config.alpha,
+        candidate_cache=candidate_cache,
     )
     baseline_held = _score_split(
         conn,
@@ -731,6 +797,7 @@ def run_optimizer(
         complements_cache=complements_cache,
         labels_cache=labels_cache,
         alpha=config.alpha,
+        candidate_cache=candidate_cache,
     )
 
     # Identify dead keys after baseline scoring populates the complements cache.
@@ -787,6 +854,7 @@ def run_optimizer(
                     complements_cache=complements_cache,
                     labels_cache=labels_cache,
                     alpha=config.alpha,
+                    candidate_cache=candidate_cache,
                 )
                 if best_train is None or train_obj.composite > best_train.composite:
                     best_train = train_obj
@@ -807,6 +875,7 @@ def run_optimizer(
                 complements_cache=complements_cache,
                 labels_cache=labels_cache,
                 alpha=config.alpha,
+                candidate_cache=candidate_cache,
             )
 
             held_delta = held_obj.composite - current_held_composite

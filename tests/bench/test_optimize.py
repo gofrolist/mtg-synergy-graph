@@ -556,7 +556,7 @@ def _scripted_score_split(
 
     from mtg_synergy_graph.bench.optimize import CompositeObjective, EdhrecLabels
 
-    def _impl(conn, edhrec_conn, commanders, weights, *, complements_cache, labels_cache, alpha):
+    def _impl(conn, edhrec_conn, commanders, weights, *, complements_cache, labels_cache, alpha, candidate_cache=None):
         rules_to_use = firing_rules if firing_rules is not None else list(weights.keys())
         for cmdr in commanders:
             if cmdr not in complements_cache:
@@ -621,6 +621,11 @@ def fake_conns(monkeypatch: pytest.MonkeyPatch) -> tuple[object, object]:
         )
 
     monkeypatch.setattr(opt_mod, "random_split", _fake_split)
+
+    # build_candidate_cache normally executes SQL on the conn — with a mock
+    # conn it would crash. Stub to None; _score_split is mocked too so the
+    # cache value is never dereferenced.
+    monkeypatch.setattr(opt_mod, "build_candidate_cache", lambda _conn: None)
 
     # Pre-populate complement caches so the optimizer's "dead key" detection
     # sees all firing rules and never tries to call find_all_complements.
