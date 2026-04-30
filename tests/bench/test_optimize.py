@@ -1147,7 +1147,15 @@ def _make_result(
     partial_sweep: bool = False,
     dead_keys: tuple[str, ...] = (),
 ) -> OptimizerResult:
-    """Build a synthetic OptimizerResult for artifact tests."""
+    """Build a synthetic OptimizerResult for artifact tests.
+
+    ``color_buckets`` mirrors the production type from ``random_split``:
+    ``MappingProxyType`` at BOTH layers (outer dict + inner per-bucket dict).
+    Tests that omitted the inner ``MappingProxyType`` masked a real bug —
+    ``json.dumps`` doesn't know how to encode ``mappingproxy``, so
+    ``write_proposal_json`` would crash on production input until the
+    mappingproxy values were flattened to plain dicts.
+    """
     from types import MappingProxyType
 
     return OptimizerResult(
@@ -1161,7 +1169,7 @@ def _make_result(
         dead_keys=dead_keys,
         train_split=("a", "b"),
         held_split=("c",),
-        color_buckets={"mono": {"train": 2, "held": 1}},
+        color_buckets=MappingProxyType({"mono": MappingProxyType({"train": 2, "held": 1})}),
         train_composite_baseline=0.5,
         held_composite_baseline=0.5,
         train_ndcg_baseline=0.4,
