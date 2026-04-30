@@ -1186,3 +1186,101 @@ class TestAppendOptimizeHistoryRows:
         append_optimize_history_rows(result, run_id="r", path=target)
         captured = capsys.readouterr()
         assert "warning" in captured.err.lower() or "warning" in captured.out.lower()
+
+
+# ---------------------------------------------------------------------------
+# CLI handler (Unit 4)
+# ---------------------------------------------------------------------------
+
+
+class TestHandleOptimize:
+    def test_returns_2_on_empty_fixture(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        import argparse
+
+        from mtg_synergy_graph.bench.fixture import PinnedFixture
+        from mtg_synergy_graph.bench.optimize import handle_optimize
+
+        # Build an empty fixture.
+        empty = PinnedFixture(config_hash="abc", created_at="2026-01-01T00:00:00+00:00")
+        fixture_path = tmp_path / "fixture.json"
+        empty.write(fixture_path)
+
+        args = argparse.Namespace(
+            fixture=str(fixture_path),
+            db="data/synergy.db",
+            edhrec_db="data/tags.db",
+            max_sweeps=1,
+            seed=42,
+            no_self_test=True,
+            proposal_path=str(tmp_path / "p.json"),
+            optimize_history=str(tmp_path / "h.csv"),
+        )
+        rc = handle_optimize(args)
+        assert rc == 2
+        captured = capsys.readouterr()
+        assert "empty" in captured.err
+
+    def test_returns_2_on_stale_tensor(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        import argparse
+
+        from mtg_synergy_graph.bench.fixture import FixtureEntry, PinnedFixture
+        from mtg_synergy_graph.bench.optimize import handle_optimize
+
+        # Fixture with a fake config_hash that won't match the live one.
+        fixture = PinnedFixture(
+            config_hash="0" * 64,
+            created_at="2026-01-01T00:00:00+00:00",
+            entries=[FixtureEntry(commander="Some Commander", scores={"a": 1.0})],
+        )
+        fixture_path = tmp_path / "fixture.json"
+        fixture.write(fixture_path)
+
+        args = argparse.Namespace(
+            fixture=str(fixture_path),
+            db="data/synergy.db",
+            edhrec_db="data/tags.db",
+            max_sweeps=1,
+            seed=42,
+            no_self_test=True,
+            proposal_path=str(tmp_path / "p.json"),
+            optimize_history=str(tmp_path / "h.csv"),
+        )
+        rc = handle_optimize(args)
+        assert rc == 2
+        captured = capsys.readouterr()
+        assert "stale" in captured.err.lower()
+
+    def test_resolve_mode_picks_optimize(self) -> None:
+        import argparse
+
+        from mtg_synergy_graph.bench.cli import _resolve_mode
+
+        ns = argparse.Namespace(
+            rule=None,
+            inspect=None,
+            collinearity=False,
+            repin=False,
+            expect_identity=False,
+            unknowns=False,
+            inspect_gems=False,
+            trend=None,
+            vs_forge_oracle=False,
+            embedding_dedup=False,
+            optimize=True,
+        )
+        assert _resolve_mode(ns) == "optimize"
+
+    def test_handler_registered_in_cli(self) -> None:
+        import mtg_synergy_graph.bench  # noqa: F401 — triggers register() side effect
+        from mtg_synergy_graph.bench.cli import _HANDLERS
+        from mtg_synergy_graph.bench.optimize import handle_optimize
+
+        assert _HANDLERS["optimize"] is handle_optimize
+
+    def test_argparse_rejects_optimize_with_repin(self) -> None:
+        """--optimize and --repin are mutually exclusive at the argparse level."""
+        from mtg_synergy_graph.bench.cli import _build_parser
+
+        parser = _build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["audit", "--optimize", "--repin"])

@@ -1120,3 +1120,102 @@ def _history_row_for_step(step: OptimizerStep, timestamp: str, run_id: str) -> l
         "true" if step.accepted else "false",
         step.reject_reason,
     ]
+
+
+# ---------------------------------------------------------------------------
+# Unit 4: CLI handler
+# ---------------------------------------------------------------------------
+
+
+def handle_optimize(args: object) -> int:
+    """Handle ``bench.py audit --optimize``.
+
+    Reads commanders from the pinned fixture, opens both DBs, runs the
+    Coordinate Ascent driver (Unit 3), emits the proposal artifact + history
+    rows (Unit 5), and returns an exit code:
+
+    - 0: success — proposal written (may be empty if no improvement found).
+    - 1: driver-internal exception (DB I/O, JSON write failure, etc).
+    - 2: usage / config error — missing fixture, stale tensor.
+    - 3: planted-perturbation self-test failed (calibration issue).
+
+    The split between 1 and 3 lets CI consumers distinguish "optimizer
+    untrustworthy on this catalogue" from "infra problem."
+    """
+    import argparse as _argparse
+    import sys as _sys
+    import uuid
+
+    from mtg_synergy_graph.bench.fixture import PinnedFixture
+    from mtg_synergy_graph.bench.tensor import compute_config_hash
+    from mtg_synergy_graph.db import open_db
+
+    assert isinstance(args, _argparse.Namespace)
+
+    fixture_path = args.fixture
+    db_path = args.db
+    edhrec_db_path = args.edhrec_db
+
+    fixture = PinnedFixture.load(fixture_path)
+    if not fixture.entries:
+        print(
+            f"error: fixture at {fixture_path} is empty; --optimize needs at least one commander to score.",
+            file=_sys.stderr,
+        )
+        return 2
+
+    # Tensor-staleness precondition (FR4c): refuse to run if the persisted
+    # tensor was built under a different config than the current code state.
+    # The pinned fixture's config_hash is the authoritative reference.
+    current_hash = compute_config_hash()
+    if fixture.config_hash and current_hash != fixture.config_hash:
+        print(
+            f"error: tensor stale (current config_hash={current_hash[:12]}... "
+            f"vs fixture {fixture.config_hash[:12]}...). Run "
+            "`bench.py audit --repin --yes` first.",
+            file=_sys.stderr,
+        )
+        return 2
+
+    config = OptimizerConfig(
+        max_sweeps=args.max_sweeps,
+        split_seed=args.seed,
+        run_self_test=not args.no_self_test,
+    )
+    commanders = [entry.commander for entry in fixture.entries]
+    run_id = uuid.uuid4().hex[:12]
+
+    conn = open_db(db_path)
+    edhrec_conn = open_db(edhrec_db_path)
+    try:
+        try:
+            result = run_optimizer(conn, edhrec_conn, commanders, config=config)
+        except OptimizerSelfTestFailed as exc:
+            print(f"error: optimizer self-test failed: {exc}", file=_sys.stderr)
+            return 3
+    finally:
+        conn.close()
+        edhrec_conn.close()
+
+    write_proposal_json(result, path=args.proposal_path)
+    append_optimize_history_rows(result, run_id=run_id, path=args.optimize_history)
+
+    if result.n_steps_accepted == 0:
+        print(
+            f"no improvement found (n_iterations={result.n_iterations}, "
+            f"partial_sweep={result.partial_sweep}). Proposal written to "
+            f"{args.proposal_path} for inspection.",
+            file=_sys.stderr,
+        )
+    else:
+        train_delta = result.train_composite_final - result.train_composite_baseline
+        held_delta = result.held_composite_final - result.held_composite_baseline
+        print(
+            f"optimizer accepted {result.n_steps_accepted} step(s) over "
+            f"{result.n_iterations} sweep(s). "
+            f"train composite Δ={train_delta:+.4f}, held Δ={held_delta:+.4f}. "
+            f"Proposal written to {args.proposal_path}.",
+            file=_sys.stderr,
+        )
+
+    return 0
