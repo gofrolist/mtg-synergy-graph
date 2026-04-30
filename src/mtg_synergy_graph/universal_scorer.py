@@ -670,6 +670,38 @@ def score_all_universal(
     identity invariant in the plan.
     """
     complements = find_all_complements(conn, commander_set, candidate_cache=candidate_cache)
+    return _score_from_complements(
+        conn,
+        commander_set,
+        complements,
+        candidate_cache=candidate_cache,
+        tensor_sink=tensor_sink,
+    )
+
+
+def _score_from_complements(
+    conn: sqlite3.Connection,
+    commander_set: Sequence[str],
+    complements: list[PortComplement],
+    *,
+    candidate_cache: CandidateCache | None = None,
+    tensor_sink: TensorSink | None = None,
+) -> dict[str, UniversalScore]:
+    """Build per-candidate ``UniversalScore`` results from precomputed complements.
+
+    Extracted from :func:`score_all_universal` so the weight optimizer
+    (``bench/optimize.py``) can score with patched ``_RULE_QUALITY_MULTIPLIER``
+    against cached complements without paying the ``find_all_complements`` cost
+    on every grid cell. Reads ``_RULE_QUALITY_MULTIPLIER``,
+    ``_FLAT_WEIGHT_OVERRIDES``, and the embedding/staple/circuit/cmc/rank
+    side-channels exactly as ``score_all_universal`` does.
+
+    Refactor invariant: ``score_all_universal`` is a thin wrapper that calls
+    ``find_all_complements`` then this helper; behavior is bitwise-identical
+    to pre-extraction. Verified by the existing
+    ``tests/bench/test_universal_scorer_identity.py`` suite and
+    ``bench.py audit --expect-identity``.
+    """
     idf = _compute_idf_weights(complements)
 
     # Group complements by candidate

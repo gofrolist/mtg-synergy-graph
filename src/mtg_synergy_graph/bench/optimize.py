@@ -31,6 +31,11 @@ import sqlite3
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from mtg_synergy_graph.complement_rules import PortComplement
+    from mtg_synergy_graph.universal_scorer import CandidateCache
 
 # ---------------------------------------------------------------------------
 # Unit 1: Composite α-blended objective
@@ -262,4 +267,147 @@ def load_edhrec_labels(
     return EdhrecLabels(
         graded_labels=MappingProxyType(graded),
         top_30_set=frozenset(top_30) if top_30 is not None else None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Unit 2: Cached-complements scorer (re-IDF + production-faithful re-score)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CommanderScoreResult:
+    """Top-30 ranking + auxiliary outputs for one commander under specific weights.
+
+    Produced by :func:`score_commander_from_complements`. The score values
+    in ``score_by_candidate`` are ``UniversalScore.to_legacy_buckets()["total"]``
+    — the same field ``engine.SynergyEngine.page()`` sorts by in production,
+    so optimizer rankings match what ``recommend.py`` returns.
+
+    Attributes:
+        top_30: Top-30 candidate names in production sort order
+            ``(-total, cmc, edhrec_rank, name)``.
+        score_by_candidate: Frozen mapping of every reached candidate to
+            its production-faithful score.
+        contributions: Tuple of ``(candidate, rule_id, contribution)``
+            tuples in the shape that ``hidden_gem_hit_rate_for_commander``
+            expects. One entry per ``(candidate, rule_id)`` pair with a
+            non-zero net IDF-weighted contribution. Mirrors the dedup
+            rules in ``UniversalScore.score`` and ``_emit_tensor_rows``.
+    """
+
+    top_30: tuple[str, ...]
+    score_by_candidate: Mapping[str, float]
+    contributions: tuple[tuple[str, str, float], ...]
+
+
+def _build_contributions(
+    results: Mapping[str, object],
+) -> tuple[tuple[str, str, float], ...]:
+    """Fold per-candidate ``UniversalScore`` results into per-(cand, rule) contributions.
+
+    Mirrors the dedup logic in ``universal_scorer._emit_tensor_rows``:
+    each ``(rule_id, cmdr_event, cand_event, filter_group)`` key
+    contributes at most once per direction. Anti-synergy contributes
+    negatively. Zero-contribution rows (synergy fully cancelled by anti)
+    are dropped.
+    """
+    out: list[tuple[str, str, float]] = []
+    for cand_name, us in results.items():
+        per_rule: dict[str, float] = {}
+        seen_syn: set[tuple[str, str, str, str]] = set()
+        seen_anti: set[tuple[str, str, str, str]] = set()
+        for c in us.complements:  # type: ignore[attr-defined]
+            key = (c.rule_id, c.cmdr_event, c.cand_event, c.filter_group)
+            w = us.idf_weights.get(key, 1.0)  # type: ignore[attr-defined]
+            if c.direction == "synergy":
+                if key in seen_syn:
+                    continue
+                seen_syn.add(key)
+                per_rule[c.rule_id] = per_rule.get(c.rule_id, 0.0) + w
+            else:
+                if key in seen_anti:
+                    continue
+                seen_anti.add(key)
+                per_rule[c.rule_id] = per_rule.get(c.rule_id, 0.0) - w
+        for rid, contrib in per_rule.items():
+            if contrib != 0.0:
+                out.append((cand_name, rid, contrib))
+    return tuple(out)
+
+
+def score_commander_from_complements(
+    conn: sqlite3.Connection,
+    commander: str,
+    complements: list[PortComplement],
+    *,
+    candidate_cache: CandidateCache | None = None,
+) -> CommanderScoreResult:
+    """Score one commander given precomputed complements.
+
+    Reads the live ``_RULE_QUALITY_MULTIPLIER`` and ``_FLAT_WEIGHT_OVERRIDES``
+    globals — the caller is responsible for patching them via
+    ``.clear() + .update(weights)`` in a ``try/finally`` BEFORE this call
+    if grid-cell weights differ from baseline. ``_score_from_complements``
+    handles the staple/circuit/cmc/rank/embedding side-channels exactly
+    as ``score_all_universal`` does.
+
+    The returned ``score_by_candidate`` and ``top_30`` use
+    ``to_legacy_buckets()["total"]`` — the production sort key from
+    ``engine.SynergyEngine.page()`` — so the optimizer's view matches
+    what ``recommend.py`` displays.
+    """
+    from mtg_synergy_graph.universal_scorer import _score_from_complements
+
+    # Mirrors engine.SynergyEngine.page() at engine.py:378 — sentinel for
+    # commanders/cards without an EDHREC rank, sorted last after ranked cards.
+    _UNRANKED = 10**9
+
+    results = _score_from_complements(
+        conn,
+        [commander],
+        complements,
+        candidate_cache=candidate_cache,
+    )
+
+    # Production sort key: (-total, cmc_bonus_inverse_proxy, edhrec_rank, name).
+    # cmc_bonus and rank_bonus are already folded into total via to_legacy_buckets,
+    # so we recover the underlying cmc and rank from the bonus fields. Since the
+    # bonus formulas are deterministic (cmc_bonus = 0.01 * max(0, (7 - cmc)/7)),
+    # the inverse map is unique up to ties — and ties tie-break to name anyway.
+    # For clean fidelity we read cmc/rank from the conn or candidate_cache
+    # directly, mirroring engine.SynergyEngine.page().
+    if candidate_cache is not None:
+        cmc_lookup = {n: cmc for n, (cmc, _) in candidate_cache.cmc_rank_map.items()}
+        rank_lookup = {n: rank for n, (_, rank) in candidate_cache.cmc_rank_map.items()}
+    else:
+        cmc_lookup = {}
+        rank_lookup = {}
+        for row in conn.execute("SELECT name, cmc, edhrec_rank FROM cards"):
+            cmc_lookup[row["name"]] = row["cmc"] if row["cmc"] is not None else 99.0
+            rank_lookup[row["name"]] = row["edhrec_rank"] if row["edhrec_rank"] is not None else _UNRANKED
+
+    score_by_candidate: dict[str, float] = {}
+    sortable: list[tuple[str, float]] = []
+    for name, us in results.items():
+        total = us.to_legacy_buckets()["total"]
+        score_by_candidate[name] = total
+        sortable.append((name, total))
+
+    sortable.sort(
+        key=lambda r: (
+            -r[1],
+            cmc_lookup.get(r[0], 99.0),
+            rank_lookup.get(r[0], _UNRANKED),
+            r[0],
+        )
+    )
+    top_30 = tuple(name for name, _ in sortable[:30])
+
+    contributions = _build_contributions(results)
+
+    return CommanderScoreResult(
+        top_30=top_30,
+        score_by_candidate=MappingProxyType(score_by_candidate),
+        contributions=contributions,
     )
