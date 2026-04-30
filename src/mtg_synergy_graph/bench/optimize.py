@@ -324,24 +324,40 @@ class CommanderScoreResult:
     contributions: tuple[tuple[str, str, float], ...]
 
 
-def _fast_total(score_obj: UniversalScore) -> float:
-    """Compute ``UniversalScore.to_legacy_buckets()["total"]`` without the bucket dict.
+def _fast_total_and_contribs(
+    score_obj: UniversalScore,
+) -> tuple[float, dict[str, float]]:
+    """Compute total + per-rule contributions in a single walk over complements.
 
-    Hot path: the production engine sorts by this same value, but allocates a
-    28-key bucket dict per call. The optimizer scores ~thousands of candidates
-    per grid evaluation × thousands of grid evaluations per sweep, so the dict
-    allocation dominates. This helper produces bitwise-identical totals while
-    skipping the bucket-keyed accumulator.
+    Fused version of the previous two-pass pattern (``_fast_total`` followed
+    by ``_build_contributions``). Both passes deduped the same complements
+    against the same key tuple — this fuses them so the per-candidate work
+    is O(complements) once instead of twice.
 
-    Result must match ``to_legacy_buckets()["total"]`` to the bit; the optimizer's
-    fidelity test in ``test_optimize.py::test_production_faithful_top_30_at_baseline``
-    verifies this invariant against ``score_all_universal``.
+    Per the 2026-04-30 cProfile run
+    (``docs/solutions/best-practices/optimizer-perf-profile-2026-04-30.md``),
+    ``_build_contributions`` was 9.9% of total run time on its own walk;
+    fusing eliminates the redundant pass. Bitwise-identical to the legacy
+    ``_fast_total`` + ``_build_contributions`` pair, verified by the
+    ``test_production_faithful_top_30_at_baseline`` fidelity test plus
+    ``bench.py audit --expect-identity`` over the 100-commander golden set.
+
+    Returns:
+        ``(total, per_rule)``:
+        * ``total``: the sort key produced by
+          ``UniversalScore.to_legacy_buckets()["total"]``.
+        * ``per_rule``: ``rule_id -> net IDF-weighted contribution``,
+          synergy positive and anti-synergy negative, each
+          ``(rule_id, cmdr_event, cand_event, filter_group, direction)``
+          deduped exactly once. Zero-net entries are NOT dropped here —
+          the caller filters them when assembling the contributions tuple.
     """
     from mtg_synergy_graph.universal_scorer import _compute_pair_bonus
 
     total = 0.0
     seen: set[tuple[str, str, str, str, str]] = set()
     distinct_rules: set[str] = set()
+    per_rule: dict[str, float] = {}
     idf_weights = score_obj.idf_weights
     for c in score_obj.complements:
         key = (c.rule_id, c.cmdr_event, c.cand_event, c.filter_group, c.direction)
@@ -351,9 +367,11 @@ def _fast_total(score_obj: UniversalScore) -> float:
         weight = idf_weights.get((c.rule_id, c.cmdr_event, c.cand_event, c.filter_group), 1.0)
         if c.direction == "anti_synergy":
             total -= weight
+            per_rule[c.rule_id] = per_rule.get(c.rule_id, 0.0) - weight
         else:
             total += weight
             distinct_rules.add(c.rule_id)
+            per_rule[c.rule_id] = per_rule.get(c.rule_id, 0.0) + weight
 
     total += score_obj.staple_bonus
     n_rules = len(distinct_rules)
@@ -362,42 +380,20 @@ def _fast_total(score_obj: UniversalScore) -> float:
     total += _compute_pair_bonus(frozenset(distinct_rules))
     total += score_obj.circuit_bonus + score_obj.cmc_bonus + score_obj.rank_bonus
     total += score_obj.embedding_contribution
-    return total
+    return total, per_rule
 
 
-def _build_contributions(
-    results: Mapping[str, UniversalScore],
-) -> tuple[tuple[str, str, float], ...]:
-    """Fold per-candidate ``UniversalScore`` results into per-(cand, rule) contributions.
+def _fast_total(score_obj: UniversalScore) -> float:
+    """Compute ``UniversalScore.to_legacy_buckets()["total"]`` without the bucket dict.
 
-    Mirrors the dedup logic in ``universal_scorer._emit_tensor_rows``:
-    each ``(rule_id, cmdr_event, cand_event, filter_group)`` key
-    contributes at most once per direction. Anti-synergy contributes
-    negatively. Zero-contribution rows (synergy fully cancelled by anti)
-    are dropped.
+    Thin wrapper kept for the bitwise-fidelity test
+    (``test_production_faithful_top_30_at_baseline``) and any future caller
+    that needs only the scalar total. The hot path inside
+    ``score_commander_from_complements`` calls
+    :func:`_fast_total_and_contribs` directly to fuse the per-rule
+    contribution walk into the same pass.
     """
-    out: list[tuple[str, str, float]] = []
-    for cand_name, us in results.items():
-        per_rule: dict[str, float] = {}
-        seen_syn: set[tuple[str, str, str, str]] = set()
-        seen_anti: set[tuple[str, str, str, str]] = set()
-        for c in us.complements:
-            key = (c.rule_id, c.cmdr_event, c.cand_event, c.filter_group)
-            w = us.idf_weights.get(key, 1.0)
-            if c.direction == "synergy":
-                if key in seen_syn:
-                    continue
-                seen_syn.add(key)
-                per_rule[c.rule_id] = per_rule.get(c.rule_id, 0.0) + w
-            else:
-                if key in seen_anti:
-                    continue
-                seen_anti.add(key)
-                per_rule[c.rule_id] = per_rule.get(c.rule_id, 0.0) - w
-        for rid, contrib in per_rule.items():
-            if contrib != 0.0:
-                out.append((cand_name, rid, contrib))
-    return tuple(out)
+    return _fast_total_and_contribs(score_obj)[0]
 
 
 def score_commander_from_complements(
@@ -460,13 +456,18 @@ def score_commander_from_complements(
 
     score_by_candidate: dict[str, float] = {}
     sortable: list[tuple[str, float]] = []
+    contributions_list: list[tuple[str, str, float]] = []
     for name, us in results.items():
-        # Hot path: use _fast_total instead of us.to_legacy_buckets()["total"]
-        # to skip the 28-key bucket dict allocation. Bitwise-identical to the
-        # `total` field that engine.SynergyEngine.page() sorts by.
-        total = _fast_total(us)
+        # Hot path: fused walk produces both the production-faithful total
+        # AND the per-rule contributions in one pass over complements (was
+        # two: _fast_total + _build_contributions). 9.9% of pre-fuse total
+        # run time was the second walk per the 2026-04-30 cProfile run.
+        total, per_rule = _fast_total_and_contribs(us)
         score_by_candidate[name] = total
         sortable.append((name, total))
+        for rule_id, contrib in per_rule.items():
+            if contrib != 0.0:
+                contributions_list.append((name, rule_id, contrib))
 
     sortable.sort(
         key=lambda r: (
@@ -478,7 +479,7 @@ def score_commander_from_complements(
     )
     top_30 = tuple(name for name, _ in sortable[:30])
 
-    contributions = _build_contributions(results)
+    contributions = tuple(contributions_list)
 
     return CommanderScoreResult(
         top_30=top_30,
