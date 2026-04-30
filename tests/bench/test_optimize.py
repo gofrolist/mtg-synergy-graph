@@ -1572,3 +1572,135 @@ class TestHandleOptimize:
         parser = _build_parser()
         with pytest.raises(SystemExit):
             parser.parse_args(["audit", "--optimize", "--repin"])
+
+    def test_argparse_validates_alpha_range(self) -> None:
+        """--alpha must be in [0, 1]; out-of-range raises SystemExit."""
+        from mtg_synergy_graph.bench.cli import _build_parser
+
+        parser = _build_parser()
+        # Valid endpoints accepted.
+        parser.parse_args(["audit", "--optimize", "--alpha", "0.0"])
+        parser.parse_args(["audit", "--optimize", "--alpha", "1.0"])
+        # Out of range rejected.
+        with pytest.raises(SystemExit):
+            parser.parse_args(["audit", "--optimize", "--alpha", "1.5"])
+        with pytest.raises(SystemExit):
+            parser.parse_args(["audit", "--optimize", "--alpha", "-0.1"])
+
+    def test_argparse_validates_train_ratio_open_interval(self) -> None:
+        """--train-ratio must be in (0, 1) — both endpoints rejected."""
+        from mtg_synergy_graph.bench.cli import _build_parser
+
+        parser = _build_parser()
+        parser.parse_args(["audit", "--optimize", "--train-ratio", "0.5"])
+        with pytest.raises(SystemExit):
+            parser.parse_args(["audit", "--optimize", "--train-ratio", "0.0"])
+        with pytest.raises(SystemExit):
+            parser.parse_args(["audit", "--optimize", "--train-ratio", "1.0"])
+
+    def test_argparse_grid_accepts_multiple_values(self) -> None:
+        """--grid accepts a space-separated list of positive floats."""
+        from mtg_synergy_graph.bench.cli import _build_parser
+
+        parser = _build_parser()
+        ns = parser.parse_args(["audit", "--optimize", "--grid", "0.5", "0.75", "1.5", "2.0"])
+        assert ns.grid == [0.5, 0.75, 1.5, 2.0]
+        # Non-positive grid value rejected.
+        with pytest.raises(SystemExit):
+            parser.parse_args(["audit", "--optimize", "--grid", "0.5", "0.0"])
+        with pytest.raises(SystemExit):
+            parser.parse_args(["audit", "--optimize", "--grid", "0.5", "-1.0"])
+
+    def test_companion_flag_warning_includes_new_flags(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Passing --alpha/--grid/etc. without --optimize warns on stderr."""
+        import contextlib
+
+        from mtg_synergy_graph.bench.cli import main
+
+        # Use --expect-identity (the cheapest mode that doesn't need a fixture
+        # rebuild) and pass --alpha. Should error somewhere because no DB
+        # exists, but the warning fires before that.
+        with contextlib.suppress(SystemExit):
+            main(["audit", "--expect-identity", "--alpha", "0.7"])
+        captured = capsys.readouterr()
+        assert "--alpha" in captured.err
+        assert "no effect without --optimize" in captured.err
+
+    def test_format_json_emits_summary_to_stdout(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``--optimize --format json`` writes a single JSON object to stdout.
+
+        Mocks `run_optimizer` to return a synthetic OptimizerResult so the test
+        is fast and deterministic; the goal is to verify the SUMMARY shape, not
+        the optimizer logic.
+        """
+        import argparse
+        import json
+
+        from mtg_synergy_graph.bench import optimize as opt_mod
+        from mtg_synergy_graph.bench.fixture import FixtureEntry, PinnedFixture
+        from mtg_synergy_graph.bench.optimize import OPTIMIZE_SUMMARY_SCHEMA_VERSION
+
+        # Build a fixture with 5 commanders + the live config_hash so the
+        # stale-tensor check passes.
+        from mtg_synergy_graph.bench.tensor import compute_config_hash
+
+        live_hash = compute_config_hash()
+        fixture = PinnedFixture(
+            config_hash=live_hash,
+            created_at="2026-01-01T00:00:00+00:00",
+            entries=[FixtureEntry(commander=f"Cmdr {i}", scores={"a": 1.0}) for i in range(5)],
+        )
+        fixture_path = tmp_path / "fixture.json"
+        fixture.write(fixture_path)
+
+        # Mock run_optimizer to return a minimal valid OptimizerResult.
+        def _fake_run(conn, edhrec_conn, commanders, *, config=None, time_now=None):
+            return _make_result(
+                baseline_weights={"alpha_rule": 1.0},
+                final_weights={"alpha_rule": 1.5},
+                n_steps_accepted=1,
+            )
+
+        monkeypatch.setattr(opt_mod, "run_optimizer", _fake_run)
+        # Skip the actual write_proposal_json (it tries to compute_config_hash
+        # against patched globals). We just want the JSON summary on stdout.
+        monkeypatch.setattr(opt_mod, "write_proposal_json", lambda r, path=None: {})
+        monkeypatch.setattr(opt_mod, "append_optimize_history_rows", lambda r, run_id, path=None: None)
+
+        args = argparse.Namespace(
+            fixture=str(fixture_path),
+            db="data/synergy.db",
+            edhrec_db="data/tags.db",
+            max_sweeps=1,
+            seed=42,
+            no_self_test=True,
+            proposal_path=str(tmp_path / "p.json"),
+            optimize_history=str(tmp_path / "h.csv"),
+            alpha=0.5,
+            grid=[0.5, 0.75, 1.25, 1.5, 2.0],
+            eps_step=0.005,
+            eps_cumulative=0.005,
+            clamp_min=0.01,
+            clamp_max=5.0,
+            train_ratio=0.8,
+            wall_clock_seconds=300.0,
+            self_test_seed=7,
+            format="json",
+        )
+        rc = opt_mod.handle_optimize(args)
+        assert rc == 0
+        captured = capsys.readouterr()
+        # Stdout has exactly one JSON line; stderr has no human prose.
+        summary = json.loads(captured.out.strip())
+        assert summary["schema_version"] == OPTIMIZE_SUMMARY_SCHEMA_VERSION
+        assert summary["n_steps_accepted"] == 1
+        assert summary["n_iterations"] == 1
+        assert summary["partial_sweep"] is False
+        assert summary["proposal_path"] == str(tmp_path / "p.json")
+        assert summary["history_path"] == str(tmp_path / "h.csv")
+        assert "run_id" in summary
+        # No human-readable summary on stderr in JSON mode.
+        assert "optimizer accepted" not in captured.err
+        assert "no improvement found" not in captured.err

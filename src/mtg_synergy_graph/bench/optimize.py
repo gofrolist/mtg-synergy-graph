@@ -1181,6 +1181,13 @@ _HISTORY_DEFAULT_PATH = ".audit/optimize_history.csv"
 #: so agents diffing proposals across code versions can detect drift.
 PROPOSAL_SCHEMA_VERSION = 1
 
+#: Schema version for the ``--format json`` run-summary printed to stdout
+#: by ``handle_optimize``. Independent from PROPOSAL_SCHEMA_VERSION because
+#: the summary covers run-level metadata (rc context, paths, deltas) while
+#: the proposal covers the candidate-diff payload. Bump on any breaking
+#: change to the summary shape.
+OPTIMIZE_SUMMARY_SCHEMA_VERSION = 1
+
 #: CSV column order for ``optimize_history.csv``. Bumping or reordering
 #: requires updating the reader symmetrically.
 OPTIMIZE_HISTORY_FIELDS: tuple[str, ...] = (
@@ -1443,9 +1450,21 @@ def handle_optimize(args: argparse.Namespace) -> int:
         )
         return 2
 
+    # All OptimizerConfig fields exposed as CLI flags. Defaults come from
+    # OptimizerConfig itself (this is just a forwarding constructor); change
+    # defaults THERE not in cli.py, otherwise the two drift.
     config = OptimizerConfig(
+        alpha=args.alpha,
+        grid=tuple(args.grid),
+        clamp_min=args.clamp_min,
+        clamp_max=args.clamp_max,
         max_sweeps=args.max_sweeps,
+        wall_clock_seconds=args.wall_clock_seconds,
+        eps_step=args.eps_step,
+        eps_cumulative=args.eps_cumulative,
+        train_ratio=args.train_ratio,
         split_seed=args.seed,
+        self_test_seed=args.self_test_seed,
         run_self_test=not args.no_self_test,
     )
     commanders = [entry.commander for entry in fixture.entries]
@@ -1482,22 +1501,50 @@ def handle_optimize(args: argparse.Namespace) -> int:
         )
         return 1
 
-    if result.n_steps_accepted == 0:
-        print(
-            f"no improvement found (n_iterations={result.n_iterations}, "
-            f"partial_sweep={result.partial_sweep}). Proposal written to "
-            f"{args.proposal_path} for inspection.",
-            file=_sys.stderr,
-        )
+    train_delta = result.train_composite_final - result.train_composite_baseline
+    held_delta = result.held_composite_final - result.held_composite_baseline
+
+    if getattr(args, "format", "md") == "json":
+        # Machine-readable summary on stdout for agent-driven sweep pipelines.
+        # The proposal JSON itself is at args.proposal_path; this is the
+        # run-summary so an agent can branch on rc + summary without re-reading
+        # the proposal file just to know "did anything change."
+        import json as _json
+
+        summary = {
+            "schema_version": OPTIMIZE_SUMMARY_SCHEMA_VERSION,
+            "run_id": run_id,
+            "n_iterations": result.n_iterations,
+            "n_steps_accepted": result.n_steps_accepted,
+            "n_steps_rejected": result.n_steps_rejected,
+            "partial_sweep": result.partial_sweep,
+            "train_composite_baseline": result.train_composite_baseline,
+            "train_composite_final": result.train_composite_final,
+            "train_composite_delta": train_delta,
+            "held_composite_baseline": result.held_composite_baseline,
+            "held_composite_final": result.held_composite_final,
+            "held_composite_delta": held_delta,
+            "proposal_path": str(args.proposal_path),
+            "history_path": str(args.optimize_history),
+            "dead_keys_count": len(result.dead_keys),
+        }
+        print(_json.dumps(summary))
     else:
-        train_delta = result.train_composite_final - result.train_composite_baseline
-        held_delta = result.held_composite_final - result.held_composite_baseline
-        print(
-            f"optimizer accepted {result.n_steps_accepted} step(s) over "
-            f"{result.n_iterations} sweep(s). "
-            f"train composite Δ={train_delta:+.4f}, held Δ={held_delta:+.4f}. "
-            f"Proposal written to {args.proposal_path}.",
-            file=_sys.stderr,
-        )
+        # Default human-readable summary on stderr, unchanged from prior behavior.
+        if result.n_steps_accepted == 0:
+            print(
+                f"no improvement found (n_iterations={result.n_iterations}, "
+                f"partial_sweep={result.partial_sweep}). Proposal written to "
+                f"{args.proposal_path} for inspection.",
+                file=_sys.stderr,
+            )
+        else:
+            print(
+                f"optimizer accepted {result.n_steps_accepted} step(s) over "
+                f"{result.n_iterations} sweep(s). "
+                f"train composite Δ={train_delta:+.4f}, held Δ={held_delta:+.4f}. "
+                f"Proposal written to {args.proposal_path}.",
+                file=_sys.stderr,
+            )
 
     return 0
