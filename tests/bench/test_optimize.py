@@ -14,9 +14,12 @@ from pathlib import Path
 import pytest
 
 from mtg_synergy_graph.bench.optimize import (
+    OptimizerConfig,
+    OptimizerSelfTestFailed,
     composite_objective,
     load_edhrec_labels,
     random_split,
+    run_optimizer,
     score_commander_from_complements,
 )
 
@@ -519,3 +522,367 @@ class TestScoreCommanderFromComplements:
         assert len(result.top_30) <= 30  # may be < 30 — pool is small
         # And whatever's in top_30 is a subset of score_by_candidate.
         assert set(result.top_30).issubset(set(result.score_by_candidate.keys()))
+
+
+# ---------------------------------------------------------------------------
+# run_optimizer (Unit 3)
+# ---------------------------------------------------------------------------
+
+# These tests heavily monkeypatch ``_score_split`` so the control logic
+# (accept/reject, termination, drift, dead-key, self-test) is testable in
+# isolation from real-DB scoring complexity. One end-to-end smoke test
+# against the fixture confirms the wiring works without crashing.
+
+
+def _scripted_score_split(
+    *,
+    composite_for_weights,
+    ndcg: float = 0.4,
+    gem: float | None = 0.84,
+    firing_rules: list[str] | None = None,
+):
+    """Build a callable that mimics ``_score_split`` and populates the caches.
+
+    Mirrors the real function's side effect of calling ``find_all_complements``
+    + ``load_edhrec_labels`` and stashing in the cache dicts. ``firing_rules``
+    controls which rule_ids appear in the synthetic complements (drives the
+    dead-key detection path); defaults to all weight keys.
+    """
+
+    from mtg_synergy_graph.bench.optimize import CompositeObjective, EdhrecLabels
+
+    def _impl(conn, edhrec_conn, commanders, weights, *, complements_cache, labels_cache, alpha):
+        rules_to_use = firing_rules if firing_rules is not None else list(weights.keys())
+        for cmdr in commanders:
+            if cmdr not in complements_cache:
+                complements_cache[cmdr] = _make_complements_for_rules(rules_to_use)
+            if cmdr not in labels_cache:
+                labels_cache[cmdr] = EdhrecLabels({}, None)
+        composite = composite_for_weights(dict(weights))
+        n_with_gem = len(commanders) if gem is not None else 0
+        return CompositeObjective(
+            composite=composite,
+            mean_ndcg=ndcg,
+            gem_rate=gem,
+            n_commanders=len(commanders),
+            n_commanders_with_gem=n_with_gem,
+        )
+
+    return _impl
+
+
+@pytest.fixture()
+def patched_baseline_weights(monkeypatch: pytest.MonkeyPatch) -> dict[str, float]:
+    """Replace ``_RULE_QUALITY_MULTIPLIER`` with a tiny, predictable dict for tests.
+
+    Restored at fixture teardown by monkeypatch.
+    """
+    from mtg_synergy_graph import universal_scorer
+
+    test_weights = {
+        "alpha_rule": 1.0,
+        "beta_rule": 1.0,
+        "gamma_rule": 1.0,
+    }
+    saved = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
+    universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
+    universal_scorer._RULE_QUALITY_MULTIPLIER.update(test_weights)
+    yield dict(test_weights)
+    universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
+    universal_scorer._RULE_QUALITY_MULTIPLIER.update(saved)
+
+
+@pytest.fixture()
+def fake_conns(monkeypatch: pytest.MonkeyPatch) -> tuple[object, object]:
+    """Stub conn objects + monkeypatch find_all_complements / load_edhrec_labels.
+
+    Tests that monkeypatch ``_score_split`` need conn objects but do not
+    actually exercise the SQL paths. We stub ``random_split`` too so the
+    bucket query doesn't require a real cards table.
+    """
+    from mtg_synergy_graph.bench import optimize as opt_mod
+
+    fake_conn = object()
+    fake_edhrec_conn = object()
+
+    # Replace random_split with a deterministic helper that doesn't need a DB.
+    def _fake_split(commanders, conn, *, train_ratio, seed):
+        n = len(commanders)
+        cut = round(n * train_ratio)
+        return opt_mod.SplitResult(
+            train=tuple(commanders[:cut]),
+            held=tuple(commanders[cut:]),
+            color_buckets={"mono": {"train": cut, "held": n - cut}},
+        )
+
+    monkeypatch.setattr(opt_mod, "random_split", _fake_split)
+
+    # Pre-populate complement caches so the optimizer's "dead key" detection
+    # sees all firing rules and never tries to call find_all_complements.
+    return fake_conn, fake_edhrec_conn
+
+
+class TestRunOptimizerControlLogic:
+    """Control-logic tests that use mocked _score_split."""
+
+    def test_convergence_first_sweep_zero_accepts(
+        self,
+        patched_baseline_weights: dict[str, float],
+        fake_conns: tuple[object, object],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """No perturbation beats baseline → optimizer stops after sweep 1."""
+        from mtg_synergy_graph.bench import optimize as opt_mod
+
+        # Constant composite — nothing improves baseline, so no accepts.
+        monkeypatch.setattr(
+            opt_mod,
+            "_score_split",
+            _scripted_score_split(composite_for_weights=lambda w: 0.5),
+        )
+        # Pretend every rule fires, so no dead keys.
+        monkeypatch.setattr(
+            opt_mod,
+            "find_all_complements",
+            lambda conn, cmdrs: _make_complements_for_rules(list(patched_baseline_weights.keys())),
+            raising=False,
+        )
+        # Stub label loader.
+        monkeypatch.setattr(opt_mod, "load_edhrec_labels", lambda c, n: opt_mod.EdhrecLabels({}, None))
+
+        config = OptimizerConfig(run_self_test=False, max_sweeps=5)
+        result = run_optimizer(*fake_conns, ["a", "b", "c", "d", "e"], config=config)
+
+        assert result.n_iterations == 1
+        assert result.n_steps_accepted == 0
+        assert not result.partial_sweep
+        # Final weights == baseline (nothing accepted).
+        assert dict(result.final_weights) == patched_baseline_weights
+
+    def test_sweep_cap_honored(
+        self,
+        patched_baseline_weights: dict[str, float],
+        fake_conns: tuple[object, object],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Optimizer always accepts a tiny improvement → caps at max_sweeps."""
+        from mtg_synergy_graph.bench import optimize as opt_mod
+
+        # Composite that's a tiny bit higher when ANY weight is shifted.
+        # Use a sticky counter so each call returns slightly higher than the last.
+        counter = {"n": 0}
+
+        def _composite_for(weights):
+            counter["n"] += 1
+            return 0.5 + 0.0001 * counter["n"]
+
+        monkeypatch.setattr(
+            opt_mod,
+            "_score_split",
+            _scripted_score_split(composite_for_weights=_composite_for),
+        )
+
+        config = OptimizerConfig(run_self_test=False, max_sweeps=2, eps_step=10.0)
+        result = run_optimizer(*fake_conns, ["a", "b", "c", "d", "e"], config=config)
+
+        assert result.n_iterations == 2  # capped at 2
+
+    def test_wall_clock_termination(
+        self,
+        patched_baseline_weights: dict[str, float],
+        fake_conns: tuple[object, object],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Mocked time_now advances past budget mid-sweep; optimizer aborts."""
+        from mtg_synergy_graph.bench import optimize as opt_mod
+
+        monkeypatch.setattr(opt_mod, "_score_split", _scripted_score_split(composite_for_weights=lambda w: 0.5))
+
+        # First call returns 0; then jumps past budget (300s) on the next call.
+        ticks = iter([0.0, 0.0, 0.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0])
+        config = OptimizerConfig(run_self_test=False, max_sweeps=5, wall_clock_seconds=10.0)
+        result = run_optimizer(
+            *fake_conns,
+            ["a", "b", "c", "d", "e"],
+            config=config,
+            time_now=lambda: next(ticks),
+        )
+        assert result.partial_sweep is True
+
+    def test_weight_clamp_enforced(
+        self,
+        patched_baseline_weights: dict[str, float],
+        fake_conns: tuple[object, object],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Clamp range [0.01, 5.0] holds even when grid would push beyond."""
+        from mtg_synergy_graph.bench import optimize as opt_mod
+
+        # Always-improving composite so optimizer keeps accepting.
+        counter = {"n": 0}
+
+        def _composite_for(weights):
+            counter["n"] += 1
+            return 0.5 + 0.001 * counter["n"]
+
+        monkeypatch.setattr(opt_mod, "_score_split", _scripted_score_split(composite_for_weights=_composite_for))
+
+        # Set baseline near clamp_max so clamp matters.
+        from mtg_synergy_graph import universal_scorer
+
+        universal_scorer._RULE_QUALITY_MULTIPLIER["alpha_rule"] = 4.5
+        config = OptimizerConfig(run_self_test=False, max_sweeps=5, eps_step=10.0)
+        result = run_optimizer(*fake_conns, ["a", "b", "c", "d", "e"], config=config)
+        # No final value should exceed clamp_max=5.0.
+        for v in result.final_weights.values():
+            assert v <= 5.0
+            assert v >= 0.01
+
+    def test_dead_key_detection(
+        self,
+        patched_baseline_weights: dict[str, float],
+        fake_conns: tuple[object, object],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A rule in weights but not firing in any complement → in dead_keys."""
+        from mtg_synergy_graph.bench import optimize as opt_mod
+
+        # Only alpha_rule fires; beta_rule and gamma_rule are dead.
+        monkeypatch.setattr(
+            opt_mod,
+            "_score_split",
+            _scripted_score_split(
+                composite_for_weights=lambda w: 0.5,
+                firing_rules=["alpha_rule"],
+            ),
+        )
+
+        config = OptimizerConfig(run_self_test=False, max_sweeps=1)
+        result = run_optimizer(*fake_conns, ["a", "b", "c", "d", "e"], config=config)
+        assert set(result.dead_keys) == {"beta_rule", "gamma_rule"}
+
+    def test_run_self_test_false_skips(
+        self,
+        patched_baseline_weights: dict[str, float],
+        fake_conns: tuple[object, object],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``run_self_test=False`` bypasses the self-test even if it would fail."""
+        from mtg_synergy_graph.bench import optimize as opt_mod
+
+        # Make the would-be self-test fail catastrophically.
+        def _self_test_blow_up(*args, **kwargs):
+            raise OptimizerSelfTestFailed("would fail if run")
+
+        monkeypatch.setattr(opt_mod, "_planted_perturbation_self_test", _self_test_blow_up)
+        monkeypatch.setattr(opt_mod, "_score_split", _scripted_score_split(composite_for_weights=lambda w: 0.5))
+
+        config = OptimizerConfig(run_self_test=False, max_sweeps=1)
+        # Should NOT raise.
+        result = run_optimizer(*fake_conns, ["a", "b", "c", "d", "e"], config=config)
+        assert result.n_iterations == 1
+
+    def test_dict_identity_preserved_after_run(
+        self,
+        patched_baseline_weights: dict[str, float],
+        fake_conns: tuple[object, object],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """After optimizer returns, _RULE_QUALITY_MULTIPLIER dict identity intact."""
+        from mtg_synergy_graph import universal_scorer
+        from mtg_synergy_graph.bench import optimize as opt_mod
+
+        original_id = id(universal_scorer._RULE_QUALITY_MULTIPLIER)
+        monkeypatch.setattr(opt_mod, "_score_split", _scripted_score_split(composite_for_weights=lambda w: 0.5))
+
+        config = OptimizerConfig(run_self_test=False, max_sweeps=1)
+        run_optimizer(*fake_conns, ["a", "b", "c", "d", "e"], config=config)
+        assert id(universal_scorer._RULE_QUALITY_MULTIPLIER) == original_id
+
+
+def _make_complements_for_rules(rule_ids):
+    """Construct synthetic PortComplement rows for monkeypatching find_all_complements."""
+    from mtg_synergy_graph.complement_rules import PortComplement
+
+    return [
+        PortComplement(
+            rule_id=r,
+            direction="synergy",
+            candidate=f"cand_{i}",
+            cmdr_event="x",
+            cand_event="y",
+            filter_group="",
+        )
+        for i, r in enumerate(rule_ids)
+    ]
+
+
+class TestPlantedPerturbationSelfTest:
+    def test_recovers_when_grid_can_reach_baseline(
+        self,
+        patched_baseline_weights: dict[str, float],
+        fake_conns: tuple[object, object],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Plant 2.0x; the 0.5x grid step recovers exactly. Self-test passes."""
+        from mtg_synergy_graph.bench import optimize as opt_mod
+
+        # We don't know which rule the self-test will pick (seed-dependent),
+        # so reward proximity-to-baseline across ALL rules.
+        baseline = patched_baseline_weights
+
+        def _composite_all_rules(weights):
+            total_delta = sum(abs(weights[k] - baseline[k]) for k in baseline)
+            return 1.0 - total_delta
+
+        monkeypatch.setattr(
+            opt_mod,
+            "_score_split",
+            _scripted_score_split(composite_for_weights=_composite_all_rules),
+        )
+
+        config = OptimizerConfig(run_self_test=True, max_sweeps=0, self_test_seed=0)
+        # max_sweeps=0 → main loop skipped; only the self-test executes.
+        run_optimizer(*fake_conns, ["a", "b", "c", "d", "e"], config=config)
+
+    def test_fails_when_grid_cannot_reach_baseline(
+        self,
+        patched_baseline_weights: dict[str, float],
+        fake_conns: tuple[object, object],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """If composite NEVER improves over the planted state, self-test fails."""
+        from mtg_synergy_graph.bench import optimize as opt_mod
+
+        # Pathological: composite is always a constant; no recovery is possible.
+        monkeypatch.setattr(opt_mod, "_score_split", _scripted_score_split(composite_for_weights=lambda w: 0.5))
+
+        config = OptimizerConfig(run_self_test=True, max_sweeps=0)
+        with pytest.raises(OptimizerSelfTestFailed) as exc:
+            run_optimizer(*fake_conns, ["a", "b", "c", "d", "e"], config=config)
+        # Diagnostic message should name the rule and the values involved.
+        assert "baseline=" in str(exc.value)
+        assert "recovered=" in str(exc.value)
+
+
+class TestRunOptimizerSmoke:
+    """End-to-end smoke run against the real-DB scoring fixture."""
+
+    def test_runs_without_crash_on_synthetic_fixture(
+        self, scoring_fixture: sqlite3.Connection, edhrec_conn: sqlite3.Connection
+    ) -> None:
+        # The synthetic fixture only fires flat-count rules, so the multiplier
+        # optimizer can't move scores. We just verify the wiring runs end-to-end
+        # without crashing — the convergence path triggers immediately.
+        config = OptimizerConfig(run_self_test=False, max_sweeps=1)
+        # Provide test commander as the one of one — split.held will be empty
+        # which is a degenerate but valid input. Use multiple synthetic
+        # commanders for a less degenerate case.
+        commanders = ["Test Commander"]
+        result = run_optimizer(scoring_fixture, edhrec_conn, commanders, config=config)
+        assert result.n_iterations >= 1
+        # On a single-commander split with train_ratio=0.8, train is empty
+        # OR contains 1 commander depending on rounding. Either way, the
+        # result type is well-formed.
+        assert isinstance(result.history, tuple)
+        assert isinstance(result.dead_keys, tuple)

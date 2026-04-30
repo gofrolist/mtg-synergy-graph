@@ -34,6 +34,8 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from mtg_synergy_graph.complement_rules import PortComplement
     from mtg_synergy_graph.universal_scorer import CandidateCache
 
@@ -410,4 +412,517 @@ def score_commander_from_complements(
         top_30=top_30,
         score_by_candidate=MappingProxyType(score_by_candidate),
         contributions=contributions,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Unit 3: Coordinate Ascent driver
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class OptimizerConfig:
+    """Configuration for ``run_optimizer``.
+
+    All fields are keyword-only via the dataclass + the call sites that
+    construct it. Defaults are the brainstorm/plan-revisions M1 values.
+    """
+
+    alpha: float = 0.5
+    grid: tuple[float, ...] = (0.5, 0.75, 1.25, 1.5, 2.0)
+    clamp_min: float = 0.01
+    clamp_max: float = 5.0
+    max_sweeps: int = 5
+    wall_clock_seconds: float = 300.0
+    eps_step: float = 0.005
+    eps_cumulative: float = 0.005
+    train_ratio: float = 0.8
+    split_seed: int = 42
+    self_test_seed: int = 7
+    run_self_test: bool = True
+    self_test_planted_mult: float = 2.0
+    self_test_recovery_tolerance: float = 0.05  # ±5% of baseline value
+
+
+@dataclass(frozen=True)
+class OptimizerStep:
+    """One attempted ``(rule_id, perturbation)`` step.
+
+    Logged for every grid evaluation (best-perturbation-per-rule), accepted
+    or rejected. ``reject_reason`` is empty when ``accepted`` is True.
+    """
+
+    sweep_n: int
+    rule_id: str
+    old_value: float
+    new_value: float
+    train_composite: float
+    held_composite: float
+    train_ndcg: float
+    held_ndcg: float
+    train_gem: float | None
+    held_gem: float | None
+    accepted: bool
+    reject_reason: str
+
+
+@dataclass(frozen=True)
+class OptimizerResult:
+    """Outcome of ``run_optimizer`` — feeds Unit 5's proposal artifact."""
+
+    baseline_weights: Mapping[str, float]
+    final_weights: Mapping[str, float]
+    history: tuple[OptimizerStep, ...]
+    n_iterations: int
+    n_steps_accepted: int
+    n_steps_rejected: int
+    partial_sweep: bool
+    dead_keys: tuple[str, ...]
+    train_split: tuple[str, ...]
+    held_split: tuple[str, ...]
+    color_buckets: Mapping[str, dict[str, int]]
+    train_composite_baseline: float
+    held_composite_baseline: float
+    train_ndcg_baseline: float
+    held_ndcg_baseline: float
+    train_gem_baseline: float | None
+    held_gem_baseline: float | None
+    train_composite_final: float
+    held_composite_final: float
+    train_ndcg_final: float
+    held_ndcg_final: float
+    train_gem_final: float | None
+    held_gem_final: float | None
+
+
+class OptimizerSelfTestFailed(RuntimeError):
+    """Planted-perturbation self-test could not recover the baseline weight.
+
+    The diagnostic message names the rule, the planted value, the recovered
+    value, and the gate that prevented recovery (train, held-out, or
+    convergence). When raised, the optimizer aborts before producing a
+    proposal — calibration must be fixed before trusting any output.
+    """
+
+
+def _clamp(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, value))
+
+
+def _score_split(
+    conn: sqlite3.Connection,
+    edhrec_conn: sqlite3.Connection,
+    commanders: Sequence[str],
+    weights: Mapping[str, float],
+    *,
+    complements_cache: dict[str, list[PortComplement]],
+    labels_cache: dict[str, EdhrecLabels],
+    alpha: float,
+) -> CompositeObjective:
+    """Score a commander split with the given weights; return composite objective.
+
+    Patches ``_RULE_QUALITY_MULTIPLIER`` for the duration of the call. The cache
+    arguments are populated lazily on first miss; subsequent calls reuse them
+    so ``find_all_complements`` and ``load_edhrec_labels`` each run once per
+    commander per optimizer run.
+    """
+    from mtg_synergy_graph import universal_scorer
+    from mtg_synergy_graph.bench.hidden_gems import (
+        hidden_gem_hit_rate_for_commander,
+    )
+    from mtg_synergy_graph.complement_rules import find_all_complements
+    from mtg_synergy_graph.validate import compute_ndcg
+
+    baseline = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
+    try:
+        universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
+        universal_scorer._RULE_QUALITY_MULTIPLIER.update(weights)
+
+        per_ndcg: dict[str, float] = {}
+        per_gem: dict[str, float | None] = {}
+        for cmdr in commanders:
+            if cmdr not in complements_cache:
+                complements_cache[cmdr] = find_all_complements(conn, [cmdr])
+            comps = complements_cache[cmdr]
+            if cmdr not in labels_cache:
+                labels_cache[cmdr] = load_edhrec_labels(edhrec_conn, cmdr)
+            labels = labels_cache[cmdr]
+
+            result = score_commander_from_complements(conn, cmdr, comps)
+            ndcg = compute_ndcg(list(result.top_30), dict(labels.graded_labels))
+            per_ndcg[cmdr] = ndcg
+
+            if labels.top_30_set is not None:
+                gem_entry = hidden_gem_hit_rate_for_commander(
+                    cmdr,
+                    list(result.top_30),
+                    set(labels.top_30_set),
+                    list(result.contributions),
+                )
+                per_gem[cmdr] = gem_entry.rate if gem_entry is not None else None
+            else:
+                per_gem[cmdr] = None
+    finally:
+        universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
+        universal_scorer._RULE_QUALITY_MULTIPLIER.update(baseline)
+
+    return composite_objective(per_ndcg, per_gem, alpha)
+
+
+def _planted_perturbation_self_test(
+    conn: sqlite3.Connection,
+    edhrec_conn: sqlite3.Connection,
+    baseline_weights: Mapping[str, float],
+    train: Sequence[str],
+    *,
+    config: OptimizerConfig,
+    complements_cache: dict[str, list[PortComplement]],
+    labels_cache: dict[str, EdhrecLabels],
+) -> None:
+    """Plant a 2.0x perturbation on a random rule; assert recovery on the grid.
+
+    Sweeps ``config.grid`` from the planted state and verifies the optimizer's
+    chosen multiplier lands within ``self_test_recovery_tolerance`` of the
+    baseline value. The grid step ``0.5x`` against a ``2.0x`` plant lands
+    exactly on baseline; ±5% tolerance accommodates float noise but rejects
+    "couldn't recover at all" failures.
+
+    Raises:
+        OptimizerSelfTestFailed: optimizer could not recover the baseline.
+    """
+    rule_id = random.Random(config.self_test_seed).choice(list(baseline_weights.keys()))  # noqa: S311
+    baseline_value = baseline_weights[rule_id]
+    planted_value = _clamp(
+        baseline_value * config.self_test_planted_mult,
+        config.clamp_min,
+        config.clamp_max,
+    )
+
+    if planted_value == baseline_value:
+        # Plant collapsed to baseline due to clamp — pick a different rule.
+        # Practically impossible at default config; bail with a clear message.
+        raise OptimizerSelfTestFailed(
+            f"self-test plant for {rule_id!r} collapsed to baseline under clamp; "
+            f"baseline={baseline_value}, planted_target={baseline_value * config.self_test_planted_mult}, "
+            f"clamp=({config.clamp_min}, {config.clamp_max})"
+        )
+
+    planted_weights = {**baseline_weights, rule_id: planted_value}
+
+    # Sweep the grid from the planted state; track the best train composite.
+    best_value = planted_value
+    best_composite = _score_split(
+        conn,
+        edhrec_conn,
+        train,
+        planted_weights,
+        complements_cache=complements_cache,
+        labels_cache=labels_cache,
+        alpha=config.alpha,
+    ).composite
+
+    for mult in config.grid:
+        candidate_value = _clamp(planted_value * mult, config.clamp_min, config.clamp_max)
+        if candidate_value == planted_value:
+            continue
+        candidate_weights = {**planted_weights, rule_id: candidate_value}
+        obj = _score_split(
+            conn,
+            edhrec_conn,
+            train,
+            candidate_weights,
+            complements_cache=complements_cache,
+            labels_cache=labels_cache,
+            alpha=config.alpha,
+        )
+        if obj.composite > best_composite:
+            best_composite = obj.composite
+            best_value = candidate_value
+
+    tolerance = max(baseline_value * config.self_test_recovery_tolerance, 1e-9)
+    if abs(best_value - baseline_value) > tolerance:
+        raise OptimizerSelfTestFailed(
+            f"self-test could not recover baseline for {rule_id!r}: "
+            f"baseline={baseline_value:.6f}, planted={planted_value:.6f}, "
+            f"recovered={best_value:.6f}, tolerance=±{tolerance:.6f}. "
+            "Either the gates are mis-calibrated (eps_step too tight, alpha skew) "
+            "or the rule's contribution is too small for the train split to detect "
+            "a 2x perturbation."
+        )
+
+
+def run_optimizer(
+    conn: sqlite3.Connection,
+    edhrec_conn: sqlite3.Connection,
+    commanders: Sequence[str],
+    *,
+    config: OptimizerConfig | None = None,
+    time_now: Callable[[], float] | None = None,
+) -> OptimizerResult:
+    """Coordinate Ascent driver. Returns the optimization result + history.
+
+    Reads ``_RULE_QUALITY_MULTIPLIER`` at entry to snapshot the baseline.
+    Patches the global within ``_score_split`` per evaluation; restores
+    via try/finally on every exit path so dict identity is preserved.
+
+    The ``time_now`` argument is a test seam: pass a callable returning
+    monotonically advancing seconds (e.g., ``itertools.count(start, step).__next__``)
+    to deterministically test wall-clock termination. Default ``None`` uses
+    ``time.time``.
+    """
+    import time as time_module
+
+    from mtg_synergy_graph import universal_scorer
+
+    config = config or OptimizerConfig()
+    clock: Callable[[], float] = time_now if time_now is not None else time_module.time
+    start_time = clock()
+
+    baseline_weights = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
+
+    # Identify dead keys: entries in the JSON config whose rule_id isn't reachable
+    # via any helper / declarative rule. We can't introspect the registries here
+    # without circular imports; instead, we treat any rule that produces zero
+    # complements across ALL commanders as "dead" and report it. This is a strict
+    # subset of true dead keys but doesn't crash the optimizer.
+    dead_keys: list[str] = []
+
+    # Build the split. Random_split returns frozen tuples; we keep them.
+    split = random_split(
+        commanders,
+        conn,
+        train_ratio=config.train_ratio,
+        seed=config.split_seed,
+    )
+
+    complements_cache: dict[str, list[PortComplement]] = {}
+    labels_cache: dict[str, EdhrecLabels] = {}
+
+    # Run self-test BEFORE measuring baseline — both for sequencing clarity and
+    # because the self-test mutates only its own internal state via try/finally.
+    if config.run_self_test:
+        _planted_perturbation_self_test(
+            conn,
+            edhrec_conn,
+            baseline_weights,
+            split.train,
+            config=config,
+            complements_cache=complements_cache,
+            labels_cache=labels_cache,
+        )
+
+    # Baseline objectives. After this call, complements/labels caches are warm
+    # for every train + held commander.
+    baseline_train = _score_split(
+        conn,
+        edhrec_conn,
+        split.train,
+        baseline_weights,
+        complements_cache=complements_cache,
+        labels_cache=labels_cache,
+        alpha=config.alpha,
+    )
+    baseline_held = _score_split(
+        conn,
+        edhrec_conn,
+        split.held,
+        baseline_weights,
+        complements_cache=complements_cache,
+        labels_cache=labels_cache,
+        alpha=config.alpha,
+    )
+
+    # Identify dead keys after baseline scoring populates the complements cache.
+    firing_rules: set[str] = set()
+    for comps in complements_cache.values():
+        for c in comps:
+            firing_rules.add(c.rule_id)
+    for rule_id in baseline_weights:
+        if rule_id not in firing_rules:
+            dead_keys.append(rule_id)
+
+    current_weights = dict(baseline_weights)
+    current_train_composite = baseline_train.composite
+    current_held_composite = baseline_held.composite
+    current_train_ndcg = baseline_train.mean_ndcg
+    current_held_ndcg = baseline_held.mean_ndcg
+    current_train_gem = baseline_train.gem_rate
+    current_held_gem = baseline_held.gem_rate
+
+    history: list[OptimizerStep] = []
+    n_steps_accepted = 0
+    n_steps_rejected = 0
+    partial_sweep = False
+    n_iterations = 0
+
+    rule_keys = sorted(k for k in baseline_weights if k not in dead_keys)
+
+    for sweep_n in range(1, config.max_sweeps + 1):
+        n_iterations = sweep_n
+        sweep_start_weights = dict(current_weights)
+        sweep_accepted_steps: list[int] = []
+        sweep_had_accept = False
+
+        for rule_id in rule_keys:
+            if clock() - start_time > config.wall_clock_seconds:
+                partial_sweep = True
+                break
+
+            old_value = current_weights[rule_id]
+            best_train: CompositeObjective | None = None
+            best_value = old_value
+            best_mult = 1.0
+
+            for mult in config.grid:
+                new_value = _clamp(old_value * mult, config.clamp_min, config.clamp_max)
+                if new_value == old_value:
+                    continue
+                candidate_weights = {**current_weights, rule_id: new_value}
+                train_obj = _score_split(
+                    conn,
+                    edhrec_conn,
+                    split.train,
+                    candidate_weights,
+                    complements_cache=complements_cache,
+                    labels_cache=labels_cache,
+                    alpha=config.alpha,
+                )
+                if best_train is None or train_obj.composite > best_train.composite:
+                    best_train = train_obj
+                    best_value = new_value
+                    best_mult = mult
+
+            # If no perturbation strictly beat the current train composite, skip.
+            if best_train is None or best_train.composite <= current_train_composite:
+                continue
+
+            # Re-evaluate held with the candidate weights (the best perturbation).
+            candidate_weights = {**current_weights, rule_id: best_value}
+            held_obj = _score_split(
+                conn,
+                edhrec_conn,
+                split.held,
+                candidate_weights,
+                complements_cache=complements_cache,
+                labels_cache=labels_cache,
+                alpha=config.alpha,
+            )
+
+            held_delta = held_obj.composite - current_held_composite
+            accepted = held_delta >= -config.eps_step
+            reject_reason = "" if accepted else "held_out_eps"
+
+            step = OptimizerStep(
+                sweep_n=sweep_n,
+                rule_id=rule_id,
+                old_value=old_value,
+                new_value=best_value,
+                train_composite=best_train.composite,
+                held_composite=held_obj.composite,
+                train_ndcg=best_train.mean_ndcg,
+                held_ndcg=held_obj.mean_ndcg,
+                train_gem=best_train.gem_rate,
+                held_gem=held_obj.gem_rate,
+                accepted=accepted,
+                reject_reason=reject_reason,
+            )
+            history.append(step)
+
+            if accepted:
+                # Per-axis regression warning (FR3): emit stderr if either
+                # axis dropped > 0.005 even though composite passed.
+                if (
+                    best_train.gem_rate is not None
+                    and current_train_gem is not None
+                    and current_train_gem - best_train.gem_rate > 0.005
+                ):
+                    import sys
+
+                    print(
+                        f"[optimize] warning: accepted step on {rule_id} dropped train gem_rate "
+                        f"by {current_train_gem - best_train.gem_rate:.4f} (composite improved)",
+                        file=sys.stderr,
+                    )
+
+                current_weights[rule_id] = best_value
+                current_train_composite = best_train.composite
+                current_held_composite = held_obj.composite
+                current_train_ndcg = best_train.mean_ndcg
+                current_held_ndcg = held_obj.mean_ndcg
+                current_train_gem = best_train.gem_rate
+                current_held_gem = held_obj.gem_rate
+                n_steps_accepted += 1
+                sweep_accepted_steps.append(len(history) - 1)
+                sweep_had_accept = True
+            else:
+                n_steps_rejected += 1
+            _ = best_mult  # retained in case future telemetry wants it
+
+        # End of sweep: cumulative-drift check (only if we didn't already abort).
+        if partial_sweep:
+            break
+
+        held_drift = current_held_composite - baseline_held.composite
+        if held_drift < -config.eps_cumulative:
+            # Revert this sweep's accepts and terminate.
+            current_weights = sweep_start_weights
+            # Mark the sweep's accepted steps as reverted in history. We append
+            # a synthetic "revert" step so the history CSV records the rollback.
+            for idx in sweep_accepted_steps:
+                step = history[idx]
+                # Replace with a copy that's now "rejected" with reason cumulative_drift_revert.
+                history[idx] = OptimizerStep(
+                    sweep_n=step.sweep_n,
+                    rule_id=step.rule_id,
+                    old_value=step.old_value,
+                    new_value=step.new_value,
+                    train_composite=step.train_composite,
+                    held_composite=step.held_composite,
+                    train_ndcg=step.train_ndcg,
+                    held_ndcg=step.held_ndcg,
+                    train_gem=step.train_gem,
+                    held_gem=step.held_gem,
+                    accepted=False,
+                    reject_reason="cumulative_drift_revert",
+                )
+                n_steps_accepted -= 1
+                n_steps_rejected += 1
+            partial_sweep = True
+            # Reset current metrics to baseline since we reverted.
+            current_train_composite = baseline_train.composite
+            current_held_composite = baseline_held.composite
+            current_train_ndcg = baseline_train.mean_ndcg
+            current_held_ndcg = baseline_held.mean_ndcg
+            current_train_gem = baseline_train.gem_rate
+            current_held_gem = baseline_held.gem_rate
+            break
+
+        # Convergence: no perturbation accepted this sweep.
+        if not sweep_had_accept:
+            break
+
+    return OptimizerResult(
+        baseline_weights=MappingProxyType(baseline_weights),
+        final_weights=MappingProxyType(current_weights),
+        history=tuple(history),
+        n_iterations=n_iterations,
+        n_steps_accepted=n_steps_accepted,
+        n_steps_rejected=n_steps_rejected,
+        partial_sweep=partial_sweep,
+        dead_keys=tuple(dead_keys),
+        train_split=split.train,
+        held_split=split.held,
+        color_buckets=split.color_buckets,
+        train_composite_baseline=baseline_train.composite,
+        held_composite_baseline=baseline_held.composite,
+        train_ndcg_baseline=baseline_train.mean_ndcg,
+        held_ndcg_baseline=baseline_held.mean_ndcg,
+        train_gem_baseline=baseline_train.gem_rate,
+        held_gem_baseline=baseline_held.gem_rate,
+        train_composite_final=current_train_composite,
+        held_composite_final=current_held_composite,
+        train_ndcg_final=current_train_ndcg,
+        held_ndcg_final=current_held_ndcg,
+        train_gem_final=current_train_gem,
+        held_gem_final=current_held_gem,
     )
