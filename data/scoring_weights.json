@@ -29,12 +29,12 @@
       "comment": ""
     },
     "cost_reducer": {
-      "value": 1.2,
-      "comment": ""
+      "value": 2.4,
+      "comment": "Bumped 1.2→2.4 by tensor-weight optimizer (probe_alpha_calibration.py: α-invariant across α∈{0.3,0.5,0.7}, 2026-04-30)."
     },
     "cost_reduction_target": {
-      "value": 1.0,
-      "comment": ""
+      "value": 0.5,
+      "comment": "Bumped 1.0→0.5 by tensor-weight optimizer (probe_alpha_calibration.py: α-invariant across α∈{0.3,0.5,0.7}, 2026-04-30)."
     },
     "counter_axis_feeder": {
       "value": 3.0,
