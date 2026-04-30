@@ -46,7 +46,11 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from mtg_synergy_graph.complement_rules import PortComplement
-    from mtg_synergy_graph.universal_scorer import CandidateCache, UniversalScore
+    from mtg_synergy_graph.universal_scorer import (
+        CandidateCache,
+        IdfBasis,
+        UniversalScore,
+    )
 
 # ---------------------------------------------------------------------------
 # Unit 1: Composite α-blended objective
@@ -402,6 +406,7 @@ def score_commander_from_complements(
     complements: Sequence[PortComplement],
     *,
     candidate_cache: CandidateCache | None = None,
+    idf_basis: IdfBasis | None = None,
 ) -> CommanderScoreResult:
     """Score one commander given precomputed complements.
 
@@ -411,6 +416,12 @@ def score_commander_from_complements(
     if grid-cell weights differ from baseline. ``_score_from_complements``
     handles the staple/circuit/cmc/rank/embedding side-channels exactly
     as ``score_all_universal`` does.
+
+    When ``idf_basis`` is supplied, the inner ``_compute_idf_weights`` walk
+    is replaced with a cheap ``_RULE_QUALITY_MULTIPLIER`` lookup over the
+    cached basis. The basis is weight-independent (see :class:`IdfBasis`),
+    so the optimizer can build it once per commander and reuse across
+    every grid cell.
 
     The returned ``score_by_candidate`` and ``top_30`` use
     ``to_legacy_buckets()["total"]`` — the production sort key from
@@ -425,6 +436,7 @@ def score_commander_from_complements(
         [commander],
         complements,
         candidate_cache=candidate_cache,
+        idf_basis=idf_basis,
     )
 
     # Production sort key: (-total, cmc_bonus_inverse_proxy, edhrec_rank, name).
@@ -584,6 +596,7 @@ def _score_split(
     labels_cache: dict[str, EdhrecLabels],
     alpha: float,
     candidate_cache: CandidateCache | None = None,
+    idf_basis_cache: dict[str, IdfBasis] | None = None,
 ) -> CompositeObjective:
     """Score a commander split with the given weights; return composite objective.
 
@@ -597,12 +610,19 @@ def _score_split(
     entry and threaded through; without it, each grid-cell evaluation re-issues
     a full ``SELECT name, cmc, edhrec_rank FROM cards`` table scan, costing
     ~5x wall-clock on a 100-commander × 53-key × 5-grid sweep.
+
+    ``idf_basis_cache`` is the per-commander IDF basis (frequency counts +
+    log2 + cond_mult, all weight-independent). Populated lazily on first miss
+    alongside ``complements_cache``; reused across every grid cell so the
+    inner ``_compute_idf_weights`` walk is replaced by a per-key
+    ``_RULE_QUALITY_MULTIPLIER`` lookup.
     """
     from mtg_synergy_graph import universal_scorer
     from mtg_synergy_graph.bench.hidden_gems import (
         hidden_gem_hit_rate_for_commander,
     )
     from mtg_synergy_graph.complement_rules import find_all_complements
+    from mtg_synergy_graph.universal_scorer import _compute_idf_basis
     from mtg_synergy_graph.validate import compute_ndcg
 
     baseline = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
@@ -620,7 +640,18 @@ def _score_split(
                 labels_cache[cmdr] = load_edhrec_labels(edhrec_conn, cmdr)
             labels = labels_cache[cmdr]
 
-            result = score_commander_from_complements(conn, cmdr, comps, candidate_cache=candidate_cache)
+            # Lazy-fill the IDF basis for this commander on first miss. The
+            # basis is weight-independent, so subsequent grid cells skip the
+            # frequency-counting walk entirely.
+            cmdr_basis: IdfBasis | None = None
+            if idf_basis_cache is not None:
+                if cmdr not in idf_basis_cache:
+                    idf_basis_cache[cmdr] = _compute_idf_basis(comps)
+                cmdr_basis = idf_basis_cache[cmdr]
+
+            result = score_commander_from_complements(
+                conn, cmdr, comps, candidate_cache=candidate_cache, idf_basis=cmdr_basis
+            )
             ndcg = compute_ndcg(list(result.top_30), dict(labels.graded_labels))
             per_ndcg[cmdr] = ndcg
 
@@ -742,6 +773,7 @@ def _planted_perturbation_self_test(
     complements_cache: dict[str, list[PortComplement]],
     labels_cache: dict[str, EdhrecLabels],
     candidate_cache: CandidateCache | None = None,
+    idf_basis_cache: dict[str, IdfBasis] | None = None,
 ) -> None:
     """Plant a 2.0x perturbation on a rule; assert recovery on the grid.
 
@@ -780,6 +812,7 @@ def _planted_perturbation_self_test(
         labels_cache=labels_cache,
         alpha=config.alpha,
         candidate_cache=candidate_cache,
+        idf_basis_cache=idf_basis_cache,
     ).composite
 
     for mult in config.grid:
@@ -796,6 +829,7 @@ def _planted_perturbation_self_test(
             labels_cache=labels_cache,
             alpha=config.alpha,
             candidate_cache=candidate_cache,
+            idf_basis_cache=idf_basis_cache,
         )
         if obj.composite > best_composite:
             best_composite = obj.composite
@@ -867,6 +901,11 @@ def run_optimizer(
 
     complements_cache: dict[str, list[PortComplement]] = {}
     labels_cache: dict[str, EdhrecLabels] = {}
+    # Per-commander IDF basis cache. Lazily filled on first miss inside
+    # _score_split. Reused across every grid cell to skip the O(complements)
+    # frequency-counting walk in _compute_idf_weights — only the per-key
+    # _RULE_QUALITY_MULTIPLIER lookup runs per cell.
+    idf_basis_cache: dict[str, IdfBasis] = {}
 
     # Run self-test BEFORE measuring baseline — both for sequencing clarity and
     # because the self-test mutates only its own internal state via try/finally.
@@ -880,6 +919,7 @@ def run_optimizer(
             complements_cache=complements_cache,
             labels_cache=labels_cache,
             candidate_cache=candidate_cache,
+            idf_basis_cache=idf_basis_cache,
         )
 
     # Baseline objectives. After this call, complements/labels caches are warm
@@ -893,6 +933,7 @@ def run_optimizer(
         labels_cache=labels_cache,
         alpha=config.alpha,
         candidate_cache=candidate_cache,
+        idf_basis_cache=idf_basis_cache,
     )
     baseline_held = _score_split(
         conn,
@@ -903,6 +944,7 @@ def run_optimizer(
         labels_cache=labels_cache,
         alpha=config.alpha,
         candidate_cache=candidate_cache,
+        idf_basis_cache=idf_basis_cache,
     )
 
     # Slug-mismatch / EDHREC-empty warning. After both baseline calls populate
@@ -977,6 +1019,7 @@ def run_optimizer(
                     labels_cache=labels_cache,
                     alpha=config.alpha,
                     candidate_cache=candidate_cache,
+                    idf_basis_cache=idf_basis_cache,
                 )
                 if best_train is None or train_obj.composite > best_train.composite:
                     best_train = train_obj
@@ -997,6 +1040,7 @@ def run_optimizer(
                 labels_cache=labels_cache,
                 alpha=config.alpha,
                 candidate_cache=candidate_cache,
+                idf_basis_cache=idf_basis_cache,
             )
 
             held_delta = held_obj.composite - current_held_composite
