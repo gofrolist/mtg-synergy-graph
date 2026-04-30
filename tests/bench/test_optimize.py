@@ -536,6 +536,64 @@ class TestScoreCommanderFromComplements:
         # And whatever's in top_30 is a subset of score_by_candidate.
         assert set(result.top_30).issubset(set(result.score_by_candidate.keys()))
 
+    def test_idf_basis_cached_path_matches_legacy(self, scoring_fixture: sqlite3.Connection) -> None:
+        """``score_commander_from_complements(idf_basis=...)`` must match the legacy path bitwise.
+
+        The cached basis is the perf optimization in Batch B (#7). This test
+        is the fidelity invariant: any future change to ``_compute_idf_basis``
+        / ``_idf_weights_from_basis`` that diverges from ``_compute_idf_weights``
+        must break this test.
+        """
+        from mtg_synergy_graph.complement_rules import find_all_complements
+        from mtg_synergy_graph.universal_scorer import _compute_idf_basis
+
+        complements = find_all_complements(scoring_fixture, ["Test Commander"])
+        # Legacy path: no basis, _compute_idf_weights runs per call.
+        legacy = score_commander_from_complements(scoring_fixture, "Test Commander", complements)
+        # Cached path: basis built once, applied per call.
+        basis = _compute_idf_basis(complements)
+        cached = score_commander_from_complements(scoring_fixture, "Test Commander", complements, idf_basis=basis)
+        assert legacy.top_30 == cached.top_30
+        assert dict(legacy.score_by_candidate) == dict(cached.score_by_candidate)
+        assert legacy.contributions == cached.contributions
+
+    def test_idf_basis_cached_path_matches_legacy_under_weight_shift(self, scoring_fixture: sqlite3.Connection) -> None:
+        """Cached basis must produce identical results to legacy path AFTER weight patching.
+
+        Verifies that ``_idf_weights_from_basis`` correctly applies the live
+        ``_RULE_QUALITY_MULTIPLIER`` — the basis is weight-INDEPENDENT, but
+        the final IDF weights it produces MUST track every multiplier change.
+        """
+        from mtg_synergy_graph import universal_scorer
+        from mtg_synergy_graph.complement_rules import find_all_complements
+        from mtg_synergy_graph.universal_scorer import _compute_idf_basis
+
+        complements = find_all_complements(scoring_fixture, ["Test Commander"])
+        # Build basis at baseline weights — basis itself is weight-independent.
+        basis = _compute_idf_basis(complements)
+
+        # Pick a non-flat rule that fires in the fixture; double its multiplier.
+        baseline = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
+        firing_rule_ids = {c.rule_id for c in complements}
+        target_rule = next(
+            iter(rid for rid in firing_rule_ids if rid in baseline),
+            None,
+        )
+        if target_rule is None:
+            pytest.skip("No firing rule in baseline weights for this fixture")
+
+        try:
+            universal_scorer._RULE_QUALITY_MULTIPLIER[target_rule] = baseline[target_rule] * 2.0
+            legacy = score_commander_from_complements(scoring_fixture, "Test Commander", complements)
+            cached = score_commander_from_complements(scoring_fixture, "Test Commander", complements, idf_basis=basis)
+        finally:
+            universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
+            universal_scorer._RULE_QUALITY_MULTIPLIER.update(baseline)
+
+        assert legacy.top_30 == cached.top_30
+        assert dict(legacy.score_by_candidate) == dict(cached.score_by_candidate)
+        assert legacy.contributions == cached.contributions
+
 
 # ---------------------------------------------------------------------------
 # run_optimizer (Unit 3)
@@ -575,6 +633,7 @@ def _scripted_score_split(
         labels_cache: dict[str, EdhrecLabels],
         alpha: float,
         candidate_cache: object = None,
+        idf_basis_cache: object = None,
     ) -> CompositeObjective:
         rules_to_use = firing_rules if firing_rules is not None else list(weights.keys())
         for cmdr in commanders:
@@ -861,6 +920,7 @@ class TestRunOptimizerControlLogic:
             labels_cache,
             alpha,
             candidate_cache=None,
+            idf_basis_cache=None,
         ):
             from mtg_synergy_graph.bench.optimize import CompositeObjective, EdhrecLabels
 
