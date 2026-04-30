@@ -144,7 +144,7 @@ class SplitResult:
 
     train: tuple[str, ...]
     held: tuple[str, ...]
-    color_buckets: Mapping[str, dict[str, int]]
+    color_buckets: Mapping[str, Mapping[str, int]]
 
 
 _COLOR_BUCKETS = ("colorless", "mono", "2c", "3c+")
@@ -212,8 +212,11 @@ def random_split(
     for name in held:
         buckets[_color_bucket(color_by_cmdr.get(name))]["held"] += 1
 
-    # Drop empty buckets so the report stays focused.
-    non_empty = {k: v for k, v in buckets.items() if v["train"] or v["held"]}
+    # Drop empty buckets so the report stays focused. Wrap each inner dict in
+    # MappingProxyType so SplitResult.color_buckets is fully immutable through
+    # both layers (the outer Mapping[str, ...] alone wouldn't prevent
+    # `result.color_buckets["mono"]["train"] = 99`).
+    non_empty = {k: MappingProxyType(v) for k, v in buckets.items() if v["train"] or v["held"]}
 
     return SplitResult(
         train=train,
@@ -317,8 +320,7 @@ def _fast_total(score_obj: UniversalScore) -> float:
     28-key bucket dict per call. The optimizer scores ~thousands of candidates
     per grid evaluation × thousands of grid evaluations per sweep, so the dict
     allocation dominates. This helper produces bitwise-identical totals while
-    skipping the bucket-keyed accumulator AND the second-pass ``distinct_rules``
-    cached_property walk over complements.
+    skipping the bucket-keyed accumulator.
 
     Result must match ``to_legacy_buckets()["total"]`` to the bit; the optimizer's
     fidelity test in ``test_optimize.py::test_production_faithful_top_30_at_baseline``
@@ -390,7 +392,7 @@ def _build_contributions(
 def score_commander_from_complements(
     conn: sqlite3.Connection,
     commander: str,
-    complements: list[PortComplement],
+    complements: Sequence[PortComplement],
     *,
     candidate_cache: CandidateCache | None = None,
 ) -> CommanderScoreResult:
@@ -532,7 +534,7 @@ class OptimizerResult:
     dead_keys: tuple[str, ...]
     train_split: tuple[str, ...]
     held_split: tuple[str, ...]
-    color_buckets: Mapping[str, dict[str, int]]
+    color_buckets: Mapping[str, Mapping[str, int]]
     train_composite_baseline: float
     held_composite_baseline: float
     train_ndcg_baseline: float
@@ -554,6 +556,11 @@ class OptimizerSelfTestFailed(RuntimeError):
     value, and the gate that prevented recovery (train, held-out, or
     convergence). When raised, the optimizer aborts before producing a
     proposal — calibration must be fixed before trusting any output.
+
+    Invariant: this is raised ONLY by ``_planted_perturbation_self_test``,
+    which runs once before the sweep loop begins. The ``handle_optimize``
+    catch path (rc=3) relies on this — adding a sweep-phase raise site
+    would route mid-run failures through rc=3 incorrectly.
     """
 
 
@@ -730,14 +737,15 @@ def run_optimizer(
     The ``time_now`` argument is a test seam: pass a callable returning
     monotonically advancing seconds (e.g., ``itertools.count(start, step).__next__``)
     to deterministically test wall-clock termination. Default ``None`` uses
-    ``time.time``.
+    ``time.monotonic`` so an NTP step correction cannot disable the
+    wall-clock gate by moving the clock backwards.
     """
     import time as time_module
 
     from mtg_synergy_graph import universal_scorer
 
     config = config or OptimizerConfig()
-    clock: Callable[[], float] = time_now if time_now is not None else time_module.time
+    clock: Callable[[], float] = time_now if time_now is not None else time_module.monotonic
     start_time = clock()
 
     baseline_weights = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
@@ -1004,6 +1012,11 @@ def run_optimizer(
 _PROPOSAL_DEFAULT_PATH = ".audit/optimize_proposal.json"
 _HISTORY_DEFAULT_PATH = ".audit/optimize_history.csv"
 
+#: Schema version for the proposal JSON artifact. Bump on any breaking
+#: change to the payload shape (renamed/removed fields, changed semantics)
+#: so agents diffing proposals across code versions can detect drift.
+PROPOSAL_SCHEMA_VERSION = 1
+
 #: CSV column order for ``optimize_history.csv``. Bumping or reordering
 #: requires updating the reader symmetrically.
 OPTIMIZE_HISTORY_FIELDS: tuple[str, ...] = (
@@ -1049,7 +1062,7 @@ def _proposed_config_hash(proposed_weights: Mapping[str, float]) -> str:
 def write_proposal_json(
     result: OptimizerResult,
     path: str | Path | None = None,
-) -> dict:
+) -> dict[str, object]:
     """Write the optimizer's proposal artifact to ``.audit/optimize_proposal.json``.
 
     Returns the dict that was serialized (useful for tests / inspection).
@@ -1068,7 +1081,6 @@ def write_proposal_json(
     accidentally clobber them.
     """
     import json as _json
-    import sys as _sys
     from pathlib import Path as _Path
 
     target_path = _Path(path) if path is not None else _Path(_PROPOSAL_DEFAULT_PATH)
@@ -1100,7 +1112,8 @@ def write_proposal_json(
             }
         )
 
-    payload: dict = {
+    payload: dict[str, object] = {
+        "schema_version": PROPOSAL_SCHEMA_VERSION,
         "baseline_config_hash": baseline_hash,
         "proposed_config_hash": proposed_hash,
         "per_rule_diffs": per_rule_diffs,
@@ -1126,10 +1139,7 @@ def write_proposal_json(
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
     if target_path.exists():
-        print(
-            f"bench.py audit --optimize: warning: overwriting existing proposal at {target_path}",
-            file=_sys.stderr,
-        )
+        _logger.warning("overwriting existing proposal at %s", target_path)
     target_path.write_text(_json.dumps(payload, indent=2, sort_keys=False), encoding="utf-8")
     return payload
 
@@ -1141,11 +1151,14 @@ def append_optimize_history_rows(
 ) -> None:
     """Append one CSV row per attempted step to ``.audit/optimize_history.csv``.
 
-    Mirrors :func:`bench.history.append_run` exactly:
-    ``mkdir parents=True, exist_ok=True``, open ``"a" newline=""``, write
-    the header on ``tell() == 0``, wrap in try/except OSError/csv.Error
-    with a stderr-warn-and-continue degradation. Exceptions during write
-    must never abort the optimizer's primary output.
+    Header detection: check the file's on-disk size BEFORE opening in append
+    mode. ``fh.tell()`` returns 0 on Linux ext4/xfs/tmpfs even on a non-empty
+    file opened ``'a'`` (the seek-to-end happens at first write, not open),
+    so a tell-based check would re-write the header on every invocation.
+
+    Wraps in try/except OSError/csv.Error with stderr-warn-and-continue
+    degradation. Exceptions during write must never abort the optimizer's
+    primary output.
     """
     import csv as _csv
     import sys as _sys
@@ -1157,13 +1170,8 @@ def append_optimize_history_rows(
 
     try:
         target_path.parent.mkdir(parents=True, exist_ok=True)
+        write_header = not target_path.exists() or target_path.stat().st_size == 0
         with target_path.open("a", encoding="utf-8", newline="") as fh:
-            pos = fh.tell()
-            if pos < 0:
-                import os as _os
-
-                pos = _os.fstat(fh.fileno()).st_size
-            write_header = pos == 0
             writer = _csv.writer(fh)
             if write_header:
                 writer.writerow(OPTIMIZE_HISTORY_FIELDS)
@@ -1275,7 +1283,14 @@ def handle_optimize(args: argparse.Namespace) -> int:
     run_id = uuid.uuid4().hex[:12]
 
     conn = open_db(db_path)
-    edhrec_conn = open_db(edhrec_db_path)
+    try:
+        edhrec_conn = open_db(edhrec_db_path)
+    except Exception:
+        # If the second open fails, the first conn would otherwise leak —
+        # WAL-mode SQLite holds locks until close. Close it before re-raising.
+        conn.close()
+        raise
+
     try:
         try:
             result = run_optimizer(conn, edhrec_conn, commanders, config=config)
@@ -1286,8 +1301,17 @@ def handle_optimize(args: argparse.Namespace) -> int:
         conn.close()
         edhrec_conn.close()
 
-    write_proposal_json(result, path=args.proposal_path)
-    append_optimize_history_rows(result, run_id=run_id, path=args.optimize_history)
+    try:
+        write_proposal_json(result, path=args.proposal_path)
+        append_optimize_history_rows(result, run_id=run_id, path=args.optimize_history)
+    except OSError as exc:
+        # Proposal/history write failure: surface as documented rc=1
+        # ("driver-internal exception: DB I/O, JSON write failure, etc").
+        print(
+            f"error: failed to write optimizer artifacts: {exc.__class__.__name__}: {exc}",
+            file=_sys.stderr,
+        )
+        return 1
 
     if result.n_steps_accepted == 0:
         print(

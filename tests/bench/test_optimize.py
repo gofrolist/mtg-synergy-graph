@@ -8,10 +8,14 @@ under ``TestCompositeObjective``, ``TestRandomSplit``, and
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from mtg_synergy_graph.bench.optimize import CompositeObjective
 
 from mtg_synergy_graph.bench.optimize import (
     OPTIMIZE_HISTORY_FIELDS,
@@ -541,11 +545,11 @@ class TestScoreCommanderFromComplements:
 
 def _scripted_score_split(
     *,
-    composite_for_weights,
+    composite_for_weights: Callable[[dict[str, float]], float],
     ndcg: float = 0.4,
     gem: float | None = 0.84,
     firing_rules: list[str] | None = None,
-):
+) -> Callable[..., CompositeObjective]:
     """Build a callable that mimics ``_score_split`` and populates the caches.
 
     Mirrors the real function's side effect of calling ``find_all_complements``
@@ -555,8 +559,19 @@ def _scripted_score_split(
     """
 
     from mtg_synergy_graph.bench.optimize import CompositeObjective, EdhrecLabels
+    from mtg_synergy_graph.complement_rules import PortComplement
 
-    def _impl(conn, edhrec_conn, commanders, weights, *, complements_cache, labels_cache, alpha, candidate_cache=None):
+    def _impl(
+        conn: object,
+        edhrec_conn: object,
+        commanders: Sequence[str],
+        weights: Mapping[str, float],
+        *,
+        complements_cache: dict[str, list[PortComplement]],
+        labels_cache: dict[str, EdhrecLabels],
+        alpha: float,
+        candidate_cache: object = None,
+    ) -> CompositeObjective:
         rules_to_use = firing_rules if firing_rules is not None else list(weights.keys())
         for cmdr in commanders:
             if cmdr not in complements_cache:

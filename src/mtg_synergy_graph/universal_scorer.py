@@ -580,7 +580,7 @@ _RULE_QUALITY_MULTIPLIER: dict[str, float] = _LOADED_SCORING_WEIGHTS.rule_qualit
 
 
 def _compute_idf_weights(
-    complements: list[PortComplement],
+    complements: Sequence[PortComplement],
 ) -> dict[tuple[str, str, str, str], float]:
     """Compute IDF weights: ``1 / log2(1 + N)`` where N is how many
     distinct candidates match each
@@ -682,7 +682,7 @@ def score_all_universal(
 def _score_from_complements(
     conn: sqlite3.Connection,
     commander_set: Sequence[str],
-    complements: list[PortComplement],
+    complements: Sequence[PortComplement],
     *,
     candidate_cache: CandidateCache | None = None,
     tensor_sink: TensorSink | None = None,

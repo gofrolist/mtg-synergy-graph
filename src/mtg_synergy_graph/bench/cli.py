@@ -71,8 +71,10 @@ _HANDLERS: dict[str, Callable[[Namespace], int]] = {
     # near-parallel in embedding space. Read-only; never mutates the DB.
     "embedding_dedup": _stubs.embedding_dedup_stub,
     # Plan 2026-04-26-001 Unit 4 — Coordinate Ascent weight optimizer.
-    # Reads _RULE_QUALITY_MULTIPLIER, emits a candidate weight diff to
-    # .audit/optimize_proposal.json. Never mutates data/scoring_weights.json.
+    # The stub here is overridden at runtime by ``bench/__init__.py`` via
+    # ``register("optimize", handle_optimize)`` — same lazy-wiring pattern as
+    # every other mode above. The real handler lives in
+    # ``mtg_synergy_graph.bench.optimize.handle_optimize``.
     "optimize": _stubs.optimize_stub,
 }
 
@@ -98,7 +100,11 @@ Environment variables (hook mode):
 Exit codes:
   0  Clean / identical to pinned baseline.
   1  Drift detected, or --repin dry-run (use --yes to confirm).
-  2  Usage / config error (missing DB, missing fixture, empty fixture).
+     For --optimize: driver-internal exception (DB I/O, JSON write failure).
+  2  Usage / config error (missing DB, missing fixture, empty fixture,
+     stale tensor under --optimize, fixture below minimum split size).
+  3  --optimize only: planted-perturbation self-test failed (calibration
+     issue — fix and rerun before trusting any future proposal).
 """
 
 
@@ -430,6 +436,29 @@ def main(argv: list[str] | None = None) -> int:
             "bench.py audit: warning: --threshold and --min-activation have no effect without --embedding-dedup.",
             file=sys.stderr,
         )
+
+    # ``--max-sweeps`` / ``--seed`` / ``--no-self-test`` / ``--proposal-path`` /
+    # ``--optimize-history`` are companions to ``--optimize``. Warn on stderr
+    # rather than erroring so the user sees the flag had no effect — same
+    # pattern as ``--trend-n`` and ``--threshold`` above.
+    if mode != "optimize":
+        ignored = []
+        if getattr(args, "max_sweeps", 5) != 5:
+            ignored.append("--max-sweeps")
+        if getattr(args, "seed", 42) != 42:
+            ignored.append("--seed")
+        if getattr(args, "no_self_test", False):
+            ignored.append("--no-self-test")
+        if getattr(args, "proposal_path", ".audit/optimize_proposal.json") != ".audit/optimize_proposal.json":
+            ignored.append("--proposal-path")
+        if getattr(args, "optimize_history", ".audit/optimize_history.csv") != ".audit/optimize_history.csv":
+            ignored.append("--optimize-history")
+        if ignored:
+            print(
+                f"bench.py audit: warning: {', '.join(ignored)} "
+                f"{'has' if len(ignored) == 1 else 'have'} no effect without --optimize.",
+                file=sys.stderr,
+            )
 
     handler = _HANDLERS[mode]
     return handler(args)
