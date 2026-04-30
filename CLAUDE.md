@@ -63,6 +63,10 @@ uv run scripts/sweep_embedding_weights.py                                # Grid-
 uv run scripts/bench.py audit --optimize                                 # Run full sweep on the pinned 100-commander fixture
 uv run scripts/bench.py audit --optimize --no-self-test --max-sweeps 1   # Quick exploratory pass (skip planted-perturbation check)
 uv run scripts/bench.py audit --optimize --seed 17                       # Different train/held split for cross-validation
+uv run scripts/bench.py audit --optimize --format json                   # Machine-readable run-summary on stdout (for agent pipelines)
+uv run scripts/bench.py audit --optimize --alpha 0.3                     # Tune nDCG-vs-gem blend (alpha=0 → gem-only, alpha=1 → nDCG-only)
+uv run scripts/bench.py audit --optimize --grid 0.8 0.9 1.1 1.25         # Custom multiplicative grid (default 0.5 0.75 1.25 1.5 2.0)
+# Other knobs: --eps-step --eps-cumulative --clamp-min --clamp-max --train-ratio --wall-clock-seconds --self-test-seed
 ```
 
 The bench.py hook also runs advisorily on pre-commit when edits touch
