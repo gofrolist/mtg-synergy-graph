@@ -71,6 +71,7 @@ ignore = [
 "src/mtg_synergy_graph/scoring.py" = ["S608"]
 "src/mtg_synergy_graph/penalties.py" = ["S608"]
 "src/mtg_synergy_graph/complement_rules/*.py" = ["S608"]
+"src/mtg_synergy_graph/bench/optimize.py" = ["S608"]
 
 [dependency-groups]
 dev = [
