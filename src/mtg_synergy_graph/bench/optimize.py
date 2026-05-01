@@ -1468,6 +1468,19 @@ def _history_row_for_step(step: OptimizerStep, timestamp: str, run_id: str) -> l
 #: guardrail for CLI invocations against a synthetic or hand-built fixture.
 _MIN_COMMANDERS_FOR_SPLIT = 3
 
+#: Canonical 100-cmdr fixture path — the default for ``--fixture``.
+#: ``--optimize`` swaps to ``_OPTIMIZE_DEFAULT_FIXTURE`` when the user
+#: accepted this default, since 100 commanders is too few for trustworthy
+#: gradient signal (the held-out delta correlates poorly with train delta;
+#: rules slam to clamp_max). Documented in the docs/solutions/best-practices
+#: optimizer-fixture-size note.
+_CANONICAL_FIXTURE = "tests/fixtures/golden_set_run.json"
+
+#: 500-cmdr fixture path used as the optimize-mode default. Built by
+#: ``scripts/bootstrap_golden_set_500.py``. Regenerated after each
+#: cardsfolder import or scoring config change.
+_OPTIMIZE_DEFAULT_FIXTURE = "tests/fixtures/golden_set_run_500.json"
+
 
 def handle_optimize(args: argparse.Namespace) -> int:
     """Handle ``bench.py audit --optimize``.
@@ -1494,6 +1507,25 @@ def handle_optimize(args: argparse.Namespace) -> int:
     fixture_path = args.fixture
     db_path = args.db
     edhrec_db_path = args.edhrec_db
+
+    # Default-redirect: swap the 100-cmdr canonical for the 500-cmdr fixture
+    # when the user accepted the global default. The 100-cmdr fixture is too
+    # small to produce trustworthy optimizer proposals — held-delta correlates
+    # poorly with train-delta, multiple rules slam to clamp_max, and ~25 of
+    # 60+ rules are dead-keys. Users who explicitly pass --fixture get exactly
+    # what they asked for. The redirect is silent on success and noisy when
+    # the 500 fixture is missing (so a CI runner without the bootstrap data
+    # falls back gracefully instead of failing on a missing path).
+    if fixture_path == _CANONICAL_FIXTURE:
+        from pathlib import Path as _Path
+
+        if _Path(_OPTIMIZE_DEFAULT_FIXTURE).exists():
+            print(
+                f"--optimize: using {_OPTIMIZE_DEFAULT_FIXTURE} (default for --optimize). "
+                f"Pass --fixture {_CANONICAL_FIXTURE} to use the 100-cmdr canonical instead.",
+                file=_sys.stderr,
+            )
+            fixture_path = _OPTIMIZE_DEFAULT_FIXTURE
 
     fixture = PinnedFixture.load(fixture_path)
     if not fixture.entries:

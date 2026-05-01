@@ -1790,6 +1790,95 @@ class TestHandleOptimize:
         captured = capsys.readouterr()
         assert "stale" in captured.err.lower()
 
+    def test_default_redirect_swaps_to_500_fixture(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """When --fixture is the canonical 100-cmdr default, --optimize swaps to the 500 fixture.
+
+        Verifies the (B) ergonomic redirect: users running ``bench.py audit
+        --optimize`` without an explicit --fixture get the 500-cmdr fixture,
+        which has trustworthy gradient signal. Explicit --fixture is honored
+        as-is.
+        """
+        import argparse
+
+        from mtg_synergy_graph.bench.fixture import FixtureEntry, PinnedFixture
+        from mtg_synergy_graph.bench.optimize import (
+            _CANONICAL_FIXTURE,
+            _OPTIMIZE_DEFAULT_FIXTURE,
+            handle_optimize,
+        )
+
+        # Create a 500-fixture-like file at the optimize-default path so the
+        # redirect's existence check passes.
+        monkeypatch.chdir(tmp_path)
+        canonical_path = tmp_path / _CANONICAL_FIXTURE
+        optimize_path = tmp_path / _OPTIMIZE_DEFAULT_FIXTURE
+        canonical_path.parent.mkdir(parents=True, exist_ok=True)
+        # The canonical path must exist for args.fixture to be valid; we
+        # populate it with a fake hash that will fail the staleness check
+        # AFTER the redirect swaps it. Test asserts the redirect log fires
+        # before failure, which proves the swap happened.
+        PinnedFixture(
+            config_hash="0" * 64,
+            created_at="2026-01-01T00:00:00+00:00",
+            entries=[FixtureEntry(commander=f"C{i}", scores={"a": 1.0}) for i in range(5)],
+        ).write(optimize_path)
+
+        args = argparse.Namespace(
+            fixture=_CANONICAL_FIXTURE,  # exactly the canonical default
+            db="data/synergy.db",
+            edhrec_db="data/tags.db",
+            max_sweeps=1,
+            seed=42,
+            no_self_test=True,
+            proposal_path=str(tmp_path / "p.json"),
+            optimize_history=str(tmp_path / "h.csv"),
+        )
+        rc = handle_optimize(args)
+        # Redirect fires (visible in stderr); then staleness check fails (rc=2).
+        captured = capsys.readouterr()
+        assert _OPTIMIZE_DEFAULT_FIXTURE in captured.err
+        assert "default for --optimize" in captured.err
+        assert rc == 2  # stale tensor (expected — fake config_hash on the 500 stub)
+
+    def test_explicit_fixture_overrides_redirect(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """An explicit --fixture path bypasses the default-redirect."""
+        import argparse
+
+        from mtg_synergy_graph.bench.fixture import FixtureEntry, PinnedFixture
+        from mtg_synergy_graph.bench.optimize import handle_optimize
+
+        explicit_path = tmp_path / "custom_fixture.json"
+        PinnedFixture(
+            config_hash="0" * 64,
+            created_at="2026-01-01T00:00:00+00:00",
+            entries=[FixtureEntry(commander=f"C{i}", scores={"a": 1.0}) for i in range(5)],
+        ).write(explicit_path)
+
+        args = argparse.Namespace(
+            fixture=str(explicit_path),
+            db="data/synergy.db",
+            edhrec_db="data/tags.db",
+            max_sweeps=1,
+            seed=42,
+            no_self_test=True,
+            proposal_path=str(tmp_path / "p.json"),
+            optimize_history=str(tmp_path / "h.csv"),
+        )
+        handle_optimize(args)
+        captured = capsys.readouterr()
+        # No redirect log when --fixture is explicit (even if the explicit
+        # path happens not to be the 500 fixture).
+        assert "default for --optimize" not in captured.err
+
     def test_resolve_mode_picks_optimize(self) -> None:
         import argparse
 
