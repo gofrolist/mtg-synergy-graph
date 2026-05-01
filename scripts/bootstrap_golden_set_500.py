@@ -41,6 +41,16 @@ def _select_top_commanders() -> list[str]:
     cards_conn = open_db(str(SYNERGY_DB))
     edhrec_conn = open_db(str(EDHREC_DB))
     try:
+        # Build the slug -> count map in one query instead of N round trips.
+        # The corpus is ~25k commander slugs; one GROUP BY beats 1.5k point lookups.
+        slug_counts: dict[str, int] = dict(
+            edhrec_conn.execute(
+                "SELECT commander_slug, COUNT(*) FROM edhrec_card_synergy "
+                "WHERE section = 'High Synergy Cards' "
+                "GROUP BY commander_slug"
+            ).fetchall()
+        )
+
         # Pull more than 500 candidates because some will fail the high-synergy
         # filter. ~3x oversample empirically covers it.
         rows = cards_conn.execute(
@@ -56,12 +66,7 @@ def _select_top_commanders() -> list[str]:
         selected: list[str] = []
         skipped_no_edhrec = 0
         for name, _rank in rows:
-            slug = commander_to_slug(name)
-            row = edhrec_conn.execute(
-                "SELECT COUNT(*) FROM edhrec_card_synergy WHERE commander_slug = ? AND section = 'High Synergy Cards'",
-                (slug,),
-            ).fetchone()
-            count = row[0] if row else 0
+            count = slug_counts.get(commander_to_slug(name), 0)
             if count < MIN_HIGH_SYNERGY_ROWS:
                 skipped_no_edhrec += 1
                 continue
