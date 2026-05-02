@@ -25,7 +25,8 @@ implementing in a previously documented area.
 uv run python scripts/import_cardsfolder.py                              # Import fresh DB
 uv run python scripts/recommend.py --commander "Korvold, Fae-Cursed King" --top 30 --explain
 uv run pytest tests/                                                     # ~1230 tests, ~1-2s
-uv run python scripts/gap_report.py                                      # Ranked list of coverage gaps — next rule to add
+uv run python scripts/gap_report.py                                      # Ranked gap proposals; since plan 2026-05-02-001 v1.0 each entry shows a Stage A pre-flight verdict (PASS / WARN / REJECT) and entries are grouped into bands
+uv run python scripts/scaffold_rule.py --apply --walk N --strict-warn    # Walker (since plan 2026-05-02-001 v1.0): autonomous mode skips Stage A REJECTs and (with --strict-warn) WARNs; outcomes logged to .audit/walker_outcomes.csv. Add --force --force-reason "<text>" to override a WARN; logged to .audit/preflight_overrides.csv
 uv run python scripts/rule_quality_gate.py --rule RULE_ID                # Pre-commit quality gate for new rules (catches vacuum-fill / flat-noise pathology; see docs/solutions/best-practices/rule-quality-gates-2026-04-24.md)
 uv run python scripts/rule_quality_gate.py --all-declarative --sample 20 # Batch gate across current declarative set
 
