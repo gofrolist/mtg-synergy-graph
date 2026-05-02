@@ -51,12 +51,39 @@ We use the labeled `primary_label = untestable` entries as the proxy for
 commanders in the evaluation fixture" per the plan's failure-mode
 definitions.
 
-### Result: **2 of 24 (8.3%)**
+### Initial paper estimate: **2 of 24 (8.3%)**
 
-| rule_id | Primary label | Stage A verdict |
+| rule_id | Primary label | Stage A verdict (paper) |
 |---|---|---|
 | `partner_friends_tribal` | untestable | **REJECT** (0/2737 explicit — fires on no commander in either fixture or legal universe) |
 | `damage_prevention_payoff` | untestable | **WARN: FIXTURE_BLIND_SPOT** (0/100 golden, 31 legal-universe per Unit 0 verified data) |
+
+### Implementation-time discovery: **revised to 1 of 24 (4.2%) on the 500-fixture**
+
+When Stage A was implemented in Unit 1, smoke-testing against the actual
+500-cmdr fixture (`tests/fixtures/golden_set_run_500.json`) revealed:
+
+- `partner_friends_tribal` — confirmed REJECT (0 in 500-fixture, 0 in legal universe). Stage A saves this case.
+- `damage_prevention_payoff` — **PASSes Stage A** (2 fixture commanders match: Iroas, God of Victory + Losheel, Clockwork Scholar). The "0/100 golden" figure cited in `gap-report-impact-vs-golden-set-coverage-2026-04-25.md` was for the older 100-cmdr golden set (which Iroas/Losheel are not part of). The 500-cmdr fixture is broader and includes both — so the broad gate `replacement.DamageDone[Prevent]` finds matches and Stage A returns PASS, not FIXTURE_BLIND_SPOT.
+
+A deeper subtlety: Stage A's SQL predicate is built from the
+`(port_type, event_class, sub_discriminator)` 3-tuple signature only. The
+actual `damage_prevention_voltron` rule's gate is tighter
+(`replacement_result='Prevent' AND raw_line LIKE '%YouCtrl%'`); under that
+tighter gate, Iroas/Losheel may or may not match. Stage A intentionally uses
+the broader signature-only predicate because (a) it's what `gap_report.py`
+emits today, (b) over-passing is safer than over-rejecting (false PASS just
+means the rule still has to face post-scaffold gates; false REJECT silently
+deletes legitimate work). This is the v1.0 design tradeoff documented in
+the plan; v1.5 may add finer-grained gate predicates if measurement justifies.
+
+**Revised effective Stage A historical catch: 1 of 24.** Even more modest
+than the paper estimate. The Option A acknowledgment below stands — the
+forward-looking justification (library shape, evidence accumulation, walker
+autonomy benefits) doesn't depend on the catch rate being above any
+specific threshold. But the owner should know: Stage A as implemented in v1.0
+prevents only the most extreme untestable cases (rules that fire on 0 of
+500 popular commanders AND <3 of all legal-universe commanders).
 
 The other 22 reverts have evidence of firing on at least one commander
 (specific names mentioned in their reason text: Chatterfang, Goose Mother,
