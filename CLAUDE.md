@@ -25,7 +25,8 @@ implementing in a previously documented area.
 uv run python scripts/import_cardsfolder.py                              # Import fresh DB
 uv run python scripts/recommend.py --commander "Korvold, Fae-Cursed King" --top 30 --explain
 uv run pytest tests/                                                     # ~1230 tests, ~1-2s
-uv run python scripts/gap_report.py                                      # Ranked list of coverage gaps — next rule to add
+uv run python scripts/gap_report.py                                      # Ranked gap proposals; since plan 2026-05-02-001 v1.0 each entry shows a Stage A pre-flight verdict (PASS / WARN / REJECT) and entries are grouped into bands
+uv run python scripts/scaffold_rule.py --apply --walk N --strict-warn    # Walker (since plan 2026-05-02-001 v1.0): autonomous mode skips Stage A REJECTs and (with --strict-warn) WARNs; outcomes logged to .audit/walker_outcomes.csv. Add --force --force-reason "<text>" to override a WARN; logged to .audit/preflight_overrides.csv
 uv run python scripts/rule_quality_gate.py --rule RULE_ID                # Pre-commit quality gate for new rules (catches vacuum-fill / flat-noise pathology; see docs/solutions/best-practices/rule-quality-gates-2026-04-24.md)
 uv run python scripts/rule_quality_gate.py --all-declarative --sample 20 # Batch gate across current declarative set
 
@@ -60,7 +61,14 @@ uv run scripts/sweep_embedding_weights.py                                # Grid-
 # never auto-mutates data/scoring_weights.json. Append-only history at
 # .audit/optimize_history.csv. Exit codes: 0 success, 1 driver exception,
 # 2 stale tensor / fixture too small, 3 self-test failed (calibration issue).
-uv run scripts/bench.py audit --optimize                                 # Run full sweep on the pinned 100-commander fixture
+#
+# --optimize defaults to tests/fixtures/golden_set_run_500.json (500 commanders);
+# the 100-cmdr canonical is too small for trustworthy gradient signal — see
+# docs/solutions/best-practices/optimizer-fixture-size-2026-04-30.md. Pass
+# --fixture tests/fixtures/golden_set_run.json to use the 100-cmdr canonical
+# explicitly. Regenerate the 500 fixture after data refreshes:
+#   uv run python scripts/bootstrap_golden_set_500.py
+uv run scripts/bench.py audit --optimize                                 # Full sweep on the 500-cmdr default fixture
 uv run scripts/bench.py audit --optimize --no-self-test --max-sweeps 1   # Quick exploratory pass (skip planted-perturbation check)
 uv run scripts/bench.py audit --optimize --seed 17                       # Different train/held split for cross-validation
 uv run scripts/bench.py audit --optimize --format json                   # Machine-readable run-summary on stdout (for agent pipelines)

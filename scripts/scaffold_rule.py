@@ -55,6 +55,22 @@ from gap_report import (
     _scan_universe,
 )
 
+from mtg_synergy_graph.preflight import (
+    Candidate as _PreflightCandidate,
+)
+from mtg_synergy_graph.preflight import (
+    Severity as _PreflightSeverity,
+)
+from mtg_synergy_graph.preflight import (
+    evaluate_one as _preflight_evaluate_one,
+)
+from mtg_synergy_graph.preflight.overrides import (
+    record_force_override as _record_force_override,
+)
+from mtg_synergy_graph.preflight.overrides import (
+    record_walker_outcome as _record_walker_outcome,
+)
+
 REPO_ROOT = Path(__file__).parent.parent
 GENERATED_DIR = REPO_ROOT / "src" / "mtg_synergy_graph" / "complement_rules" / "generated"
 TESTS_DIR = REPO_ROOT / "tests"
@@ -2329,6 +2345,24 @@ def main() -> int:
         "rules update the queue.",
     )
     parser.add_argument(
+        "--strict-warn",
+        action="store_true",
+        help="(walker) treat Stage A WARN (FIXTURE_BLIND_SPOT) as REJECT — "
+        "skip WARN-flagged proposals instead of attempting them by default. "
+        "Use for autonomous-conservative runs. Default is to attempt WARNs "
+        "and log the outcome to .audit/walker_outcomes.csv. Use with --force "
+        "to attempt despite --strict-warn (and log the override to "
+        ".audit/preflight_overrides.csv).",
+    )
+    parser.add_argument(
+        "--force-reason",
+        type=str,
+        default="",
+        help="(use with --force on a WARN-flagged proposal) explicit "
+        "justification recorded to .audit/preflight_overrides.csv. Required "
+        "when --force is used in single-attempt mode against a WARN verdict.",
+    )
+    parser.add_argument(
         "--show-template-stats",
         action="store_true",
         help="Print per-template attempt statistics from the attempt log "
@@ -2394,11 +2428,69 @@ def main() -> int:
                 if proposal is None:
                     print("Queue exhausted (no more eligible proposals).", file=sys.stderr)
                     break
+                gap_id = f"{proposal.gap.signature[0]}.{proposal.gap.signature[1]}[{proposal.gap.signature[2] or '*'}]"
                 print(
-                    f"Picked: `{proposal.gap.signature[0]}.{proposal.gap.signature[1]}[{proposal.gap.signature[2] or '*'}]` "
-                    f"(reach={proposal.gap.commanders}, template={proposal.template})",
+                    f"Picked: `{gap_id}` (reach={proposal.gap.commanders}, template={proposal.template})",
                     file=sys.stderr,
                 )
+
+                # Pre-flight Stage A check before invoking the generator.
+                # REJECT (UNTESTABLE) is hard-skipped. WARN (FIXTURE_BLIND_SPOT)
+                # is attempted by default but logged to walker_outcomes.csv;
+                # --strict-warn inverts the WARN default to skip; --force
+                # bypasses --strict-warn (logged to preflight_overrides.csv).
+                pf_candidate = _PreflightCandidate(signature=proposal.gap.signature, gap_id=gap_id)
+                pf_verdict = _preflight_evaluate_one(pf_candidate, conn)
+                pf_reason = " | ".join(g.reason for g in pf_verdict.gates)
+                pf_severity_name = pf_verdict.severity.name
+
+                if pf_verdict.severity is _PreflightSeverity.REJECT:
+                    print(
+                        f"Pre-flight REJECT: {pf_reason} — skipping iteration",
+                        file=sys.stderr,
+                    )
+                    _record_walker_outcome(
+                        gap_id=gap_id,
+                        verdict_severity=pf_severity_name,
+                        verdict_reason=pf_reason,
+                        attempted=False,
+                        post_scaffold_outcome="not_attempted",
+                    )
+                    counts["skipped"] += 1
+                    _refresh_registry()
+                    continue
+
+                if pf_verdict.severity is _PreflightSeverity.WARN:
+                    if args.strict_warn and not args.force:
+                        print(
+                            f"Pre-flight WARN: {pf_reason} — skipping "
+                            "(--strict-warn set; pass --force to attempt anyway)",
+                            file=sys.stderr,
+                        )
+                        _record_walker_outcome(
+                            gap_id=gap_id,
+                            verdict_severity=pf_severity_name,
+                            verdict_reason=pf_reason,
+                            attempted=False,
+                            post_scaffold_outcome="not_attempted",
+                        )
+                        counts["skipped"] += 1
+                        _refresh_registry()
+                        continue
+                    if args.strict_warn and args.force:
+                        # --force overrides --strict-warn; record the human
+                        # decision to bypass for the calibration corpus.
+                        _record_force_override(
+                            gap_id=gap_id,
+                            gate_name="stage_a",
+                            verdict_severity=pf_severity_name,
+                            reason=args.force_reason or "(walker --force, no reason supplied)",
+                        )
+                    print(
+                        f"Pre-flight WARN: {pf_reason} — attempting (will log outcome to walker_outcomes.csv)",
+                        file=sys.stderr,
+                    )
+
                 art = _GENERATORS[proposal.template](proposal)
                 outcome = _attempt_one(
                     art,
@@ -2411,6 +2503,16 @@ def main() -> int:
                 counts[outcome] += 1
                 if outcome == "passed":
                     shipped.append(art.rule_id)
+                # Record walker outcome ONLY for non-PASS pre-flight verdicts;
+                # PASS verdicts are unremarkable and would flood the corpus.
+                if pf_verdict.severity is not _PreflightSeverity.PASS:
+                    _record_walker_outcome(
+                        gap_id=gap_id,
+                        verdict_severity=pf_severity_name,
+                        verdict_reason=pf_reason,
+                        attempted=True,
+                        post_scaffold_outcome=outcome,
+                    )
                 # Refresh the in-process registry so the next iteration's
                 # picker sees freshly-registered gates (or the absence of
                 # ones that were reverted). Without this, the walker

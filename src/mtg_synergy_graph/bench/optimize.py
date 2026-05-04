@@ -32,7 +32,7 @@ import argparse
 import logging
 import random
 import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING
@@ -814,6 +814,7 @@ def _select_self_test_plant(
     planted_mult: float,
     clamp_min: float,
     clamp_max: float,
+    excluded: Collection[str] = (),
 ) -> tuple[str, float]:
     """Pick a (rule_id, planted_value) pair that doesn't collapse to baseline under clamp.
 
@@ -824,17 +825,23 @@ def _select_self_test_plant(
     a 2× plant lands exactly back on baseline at grid 0.5×, and a 0.5× plant
     lands exactly on baseline at grid 2.0×.
 
+    ``excluded`` skips rules that the caller knows can't produce a recoverable
+    signal — typically dead-keys (rules that fire on zero commanders in the
+    train split). Without this filter, the selector would pick a dead rule
+    and the grid search would produce identical composite scores at every
+    cell, raising a false ``OptimizerSelfTestFailed``.
+
     Returns the first rule with non-trivial planting room. Raises only if EVERY
-    rule has zero room in both directions (only possible when every rule's
-    baseline is simultaneously pinned at clamp_min == clamp_max, which is
-    structurally unreachable for the default config and would mean the
-    catalogue is unusable anyway).
+    non-excluded rule has zero room in both directions (clamp_min == clamp_max
+    case, or the entire catalogue was excluded — both indicate the caller's
+    catalogue or filter is misconfigured).
 
     Raises:
-        OptimizerSelfTestFailed: no rule has planting room.
+        OptimizerSelfTestFailed: no eligible rule has planting room.
     """
     rng = random.Random(seed)  # noqa: S311 — determinism, not crypto
-    candidates = list(baseline_weights.keys())
+    excluded_set = frozenset(excluded)
+    candidates = [k for k in baseline_weights if k not in excluded_set]
     rng.shuffle(candidates)
 
     for rule_id in candidates:
@@ -849,6 +856,14 @@ def _select_self_test_plant(
         if down_value != baseline_value:
             return rule_id, down_value
 
+    if excluded_set:
+        raise OptimizerSelfTestFailed(
+            f"self-test could not find ANY non-excluded rule with planting room: "
+            f"{len(excluded_set)} of {len(baseline_weights)} rule(s) excluded as dead-keys, "
+            f"and every remaining rule collapses under both x{planted_mult} (UP) and "
+            f"/{planted_mult} (DOWN) clamping (clamp_min={clamp_min}, clamp_max={clamp_max}). "
+            "The catalogue may be misconfigured, or the train split is too narrow."
+        )
     raise OptimizerSelfTestFailed(
         f"self-test could not find ANY rule with planting room: every rule's "
         f"baseline collapses under both x{planted_mult} (UP) and /{planted_mult} (DOWN) "
@@ -885,12 +900,26 @@ def _planted_perturbation_self_test(
         OptimizerSelfTestFailed: optimizer could not recover the baseline,
             or no rule has planting room.
     """
+    # Pre-warm the train commanders' complements_cache so we can detect
+    # dead keys (rules that fire on zero train commanders) and exclude them
+    # from plant selection. Without this filter, the seed-shuffled selector
+    # would happily pick a rule that fires nowhere on the train split — the
+    # grid search then produces identical composite scores at every cell,
+    # raising a false-positive ``OptimizerSelfTestFailed`` on a structural
+    # property of the rule catalogue rather than a real calibration bug.
+    for cmdr in train:
+        if cmdr not in complements_cache:
+            complements_cache[cmdr] = find_all_complements(conn, [cmdr], candidate_cache=candidate_cache)
+    train_only_cache = {cmdr: complements_cache[cmdr] for cmdr in train}
+    dead_keys = frozenset(_detect_dead_keys(train_only_cache, baseline_weights))
+
     rule_id, planted_value = _select_self_test_plant(
         baseline_weights,
         seed=config.self_test_seed,
         planted_mult=config.self_test_planted_mult,
         clamp_min=config.clamp_min,
         clamp_max=config.clamp_max,
+        excluded=dead_keys,
     )
     baseline_value = baseline_weights[rule_id]
     planted_weights = {**baseline_weights, rule_id: planted_value}
@@ -1439,6 +1468,19 @@ def _history_row_for_step(step: OptimizerStep, timestamp: str, run_id: str) -> l
 #: guardrail for CLI invocations against a synthetic or hand-built fixture.
 _MIN_COMMANDERS_FOR_SPLIT = 3
 
+#: Canonical 100-cmdr fixture path — the default for ``--fixture``.
+#: ``--optimize`` swaps to ``_OPTIMIZE_DEFAULT_FIXTURE`` when the user
+#: accepted this default, since 100 commanders is too few for trustworthy
+#: gradient signal (the held-out delta correlates poorly with train delta;
+#: rules slam to clamp_max). Documented in the docs/solutions/best-practices
+#: optimizer-fixture-size note.
+_CANONICAL_FIXTURE = "tests/fixtures/golden_set_run.json"
+
+#: 500-cmdr fixture path used as the optimize-mode default. Built by
+#: ``scripts/bootstrap_golden_set_500.py``. Regenerated after each
+#: cardsfolder import or scoring config change.
+_OPTIMIZE_DEFAULT_FIXTURE = "tests/fixtures/golden_set_run_500.json"
+
 
 def handle_optimize(args: argparse.Namespace) -> int:
     """Handle ``bench.py audit --optimize``.
@@ -1465,6 +1507,25 @@ def handle_optimize(args: argparse.Namespace) -> int:
     fixture_path = args.fixture
     db_path = args.db
     edhrec_db_path = args.edhrec_db
+
+    # Default-redirect: swap the 100-cmdr canonical for the 500-cmdr fixture
+    # when the user accepted the global default. The 100-cmdr fixture is too
+    # small to produce trustworthy optimizer proposals — held-delta correlates
+    # poorly with train-delta, multiple rules slam to clamp_max, and ~25 of
+    # 60+ rules are dead-keys. Users who explicitly pass --fixture get exactly
+    # what they asked for. The redirect is silent on success and noisy when
+    # the 500 fixture is missing (so a CI runner without the bootstrap data
+    # falls back gracefully instead of failing on a missing path).
+    if fixture_path == _CANONICAL_FIXTURE:
+        from pathlib import Path as _Path
+
+        if _Path(_OPTIMIZE_DEFAULT_FIXTURE).exists():
+            print(
+                f"--optimize: using {_OPTIMIZE_DEFAULT_FIXTURE} (default for --optimize). "
+                f"Pass --fixture {_CANONICAL_FIXTURE} to use the 100-cmdr canonical instead.",
+                file=_sys.stderr,
+            )
+            fixture_path = _OPTIMIZE_DEFAULT_FIXTURE
 
     fixture = PinnedFixture.load(fixture_path)
     if not fixture.entries:
