@@ -63,3 +63,7 @@ def embedding_dedup_stub(args: argparse.Namespace) -> int:
 
 def optimize_stub(args: argparse.Namespace) -> int:
     _unimplemented("bench.py audit --optimize")
+
+
+def per_commander_ndcg_stub(args: argparse.Namespace) -> int:
+    _unimplemented("bench.py audit --per-commander-ndcg")
