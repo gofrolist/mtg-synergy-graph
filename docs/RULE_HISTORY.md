@@ -5,6 +5,49 @@ impact notes. See `scripts/_audit_rule_impact.py` for the per-rule impact
 methodology (NDCG@30 metric + golden-set safety net + CONTENTIOUS verdict).
 See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
+## 2026-05-19
+
+### `prepared_mechanic` rule (LANDED)
+
+Captures the new `AlternateMode:Prepare` / `Attributes$ Prepared` mechanic
+introduced by ~48 cards in the 2026-05-19 Forge refresh (SHA `f42b9abc1`).
+See `docs/brainstorms/2026-05-19-prepared-mechanic-requirements.md`.
+
+- **Importer extension**: `extract_alternate_mode_ports` emits a synthetic
+  `static AlternateMode Prepare` port for every card with the top-level
+  `AlternateMode:Prepare` header (47 cards). Restricted to the `Prepare`
+  value via `_ALTERNATE_MODE_PORT_VALUES` frozenset so other AlternateMode
+  values (DoubleFaced, Adventure, Split, Modal, Flip, Specialize, Omen,
+  Meld) are intentionally **not** surfaced as ports — emitting for those
+  perturbed the depth-2 cascade walker's Stage-1 relevant-event prefilter
+  (caught Tergrid in the audit before the narrowing fix).
+- **`port_attributes` extension**: every `AlterAttribute` effect port's
+  `Attributes$ <V>` value is exploded into `port_attributes` with
+  `attr_kind='attribute'`. Surfaces Prepared (29 ports), Suspected (25),
+  Solved (15), Plotted (4), Commander (3), Saddled (3), Harnessed (2).
+- **Rule**: `complement_rules/prepared.py::_find_prepared_mechanic_complements`.
+  Dual-path commander detection: cheap path on the synthetic AlternateMode
+  static port (covers all 47 Prepared payoff creatures including those
+  that self-prepare via `K:ETBReplacement:Other:DBPrepare` which doesn't
+  walk SVars), slow path via SQL join through `port_attributes` for
+  AlterAttribute Prepared (covers enabler-only commanders like a future
+  legendary version of Skycoach Waypoint).
+- **`rule_quality_gate.py --rule prepared_mechanic`**: WARN
+  (47 targets, cov=2.0, cv=0.613). Same shape as the documented-
+  acceptable `ward_2_tribal` WARN — new-mechanic targets are
+  intentionally thinly covered by existing rules.
+- **`bench.py audit`**: aggregate Δ = **+0.0000** on the 100-cmdr golden
+  set (100/100 no_change). Rule does not fire on historical commanders
+  by design — none of the 100 are Prepared payoff cards.
+- **Qualitative validation**: `recommend.py "Abigale, Poet Laureate"
+  --top 60` shows the rule contributing `port_match = 0.180` per
+  Prepared candidate (Bloodline Recollector, Adventurous Eater,
+  Cheerful Osteomancer, Defacing Duskmage, Emeritus of Truce/Woe,
+  Spiritcall Enthusiast, …). Total scores sit at ~0.187 vs ~0.516 for
+  generic WB staples (Bontu's Monument); rule magnitude can be tuned
+  via `_RULE_QUALITY_MULTIPLIER` in a follow-up if Prepared commanders
+  should weight Prepared-tribal cards above generic mana-rock staples.
+
 ## 2026-04-23
 
 ### Forge-Second-Oracle design-time pipeline (LANDED, plan 2026-04-23-002)

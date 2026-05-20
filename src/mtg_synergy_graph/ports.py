@@ -374,6 +374,10 @@ def extract_effect_ports(
     # explode it into port_attributes under attr_kind='change_type'.
     change_type = parsed.get("ChangeType", "") if verb == "ChangeZone" else ""
     token_script = parsed.get("TokenScript", "") if verb == "Token" else ""
+    # AlterAttribute effects carry their attribute state in Attributes$
+    # (Prepared, Suspected, …). Store it on the port so the importer can
+    # explode it into port_attributes under attr_kind='attribute'.
+    attributes_csv = parsed.get("Attributes", "") if verb == "AlterAttribute" else ""
 
     port: PortRow = {
         "card_name": card_name,
@@ -391,6 +395,7 @@ def extract_effect_ports(
         "raw_line": repr(parsed),
         "_change_type": change_type,  # consumed by importer, stripped before insert
         "_token_script": token_script,  # same
+        "_attributes": attributes_csv,  # same
         **branch,
     }
 
@@ -679,6 +684,42 @@ def extract_keyword_ports(card_name: str, keyword_lines: list[str]) -> list[Port
     return ports
 
 
+#: AlternateMode values that emit a synthetic static port. Restricted to
+#: ``Prepare`` for the 2026-05-19 Prepared-mechanic capture; broader
+#: emission (DoubleFaced, Adventure, Split, Modal, …) is deferred —
+#: those cards already surface their alt-face abilities through the
+#: existing ALTERNATE-block parser merge, and emitting a static port for
+#: them shifts the relevant-event set of commanders like Tergrid (Modal
+#: DFC) which perturbs the depth-2 cascade walker's Stage-1 prefilter.
+#: See ``docs/brainstorms/2026-05-19-prepared-mechanic-requirements.md``.
+_ALTERNATE_MODE_PORT_VALUES: frozenset[str] = frozenset({"Prepare"})
+
+
+def extract_alternate_mode_ports(card_name: str, alternate_mode: str) -> list[PortRow]:
+    """Emit a synthetic static port for ``AlternateMode:<Value>``.
+
+    Mirrors the keyword-port shape (one row per top-level header marker).
+    The mode value lives in ``granted_keyword`` so the complement rules can
+    join on it with the same idiom as keyword matching.
+
+    Restricted to ``_ALTERNATE_MODE_PORT_VALUES`` so adding support for a
+    new mechanic is an explicit one-line vocabulary extension.
+    """
+    value = (alternate_mode or "").strip()
+    if value not in _ALTERNATE_MODE_PORT_VALUES:
+        return []
+    return [
+        {
+            "card_name": card_name,
+            "port_type": "static",
+            "event_class": "AlternateMode",
+            "granted_keyword": value,
+            "raw_line": f"AlternateMode:{value}",
+            **_branch_defaults(),
+        }
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Scaling ports (§5.5)
 # ---------------------------------------------------------------------------
@@ -786,5 +827,6 @@ def extract_all_ports(card: dict[str, Any]) -> list[PortRow]:
         ports.extend(extractor(name, parsed, svars))
 
     ports.extend(extract_keyword_ports(name, card.get("keywords", [])))
+    ports.extend(extract_alternate_mode_ports(name, card.get("alternate_mode") or ""))
     ports.extend(extract_scaling_ports(name, svars))
     return ports
