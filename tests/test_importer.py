@@ -371,3 +371,223 @@ def test_buffed_by_svar_skips_non_type_tokens(tmp_path):
     assert "YouCtrl" not in values
     assert "cmcLE3" not in values
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# AlterAttribute Attributes$ → port_attributes (Prepared mechanic, plan 2026-05-19)
+# ---------------------------------------------------------------------------
+
+
+@_integration
+@_requires_cardsfolder
+def test_alter_attribute_prepared_exposed_on_abigale(tmp_path):
+    """Abigale's TrigPrepare SubAbility (DB$ AlterAttribute | Attributes$ Prepared)
+    must land in port_attributes with attr_kind='attribute' so the prepared_mechanic
+    rule can join on it.
+    """
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    card_path = _FORGE_CARDSFOLDER / "a" / "abigale_poet_laureate_heroic_stanza.txt"
+    card = parse_card_file(card_path)
+    import_card(conn, card, oracle_id_resolver=None)
+
+    rows = conn.execute(
+        "SELECT pa.attr_value FROM port_attributes pa "
+        "JOIN card_ports cp ON pa.port_id = cp.id "
+        "WHERE cp.card_name=? AND cp.event_class='AlterAttribute' "
+        "AND pa.attr_kind='attribute'",
+        ("Abigale, Poet Laureate",),
+    ).fetchall()
+    values = {r[0] for r in rows}
+    assert values == {"Prepared"}, f"Expected attribute Prepared, got {values}"
+    conn.close()
+
+
+@_integration
+@_requires_cardsfolder
+def test_alter_attribute_suspected_exposed_on_existing_card(tmp_path):
+    """The same code path must surface the pre-existing Suspected attribute.
+    Repeat Offender (Murders at Karlov Manor) is the canonical example.
+    """
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    card_path = _FORGE_CARDSFOLDER / "r" / "repeat_offender.txt"
+    card = parse_card_file(card_path)
+    import_card(conn, card, oracle_id_resolver=None)
+
+    rows = conn.execute(
+        "SELECT pa.attr_value FROM port_attributes pa "
+        "JOIN card_ports cp ON pa.port_id = cp.id "
+        "WHERE cp.card_name=? AND cp.event_class='AlterAttribute' "
+        "AND pa.attr_kind='attribute'",
+        ("Repeat Offender",),
+    ).fetchall()
+    values = {r[0] for r in rows}
+    assert "Suspected" in values, f"Expected Suspected attribute, got {values}"
+    conn.close()
+
+
+@_integration
+@_requires_cardsfolder
+def test_alter_attribute_prepared_exposed_on_other_targeter(tmp_path):
+    """Skycoach Waypoint prepares OTHER creatures (ValidTgts$ Creature). The
+    attribute must still land in port_attributes — the rule joins on the
+    attribute, not on the targeter shape.
+    """
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    card_path = _FORGE_CARDSFOLDER / "s" / "skycoach_waypoint.txt"
+    card = parse_card_file(card_path)
+    import_card(conn, card, oracle_id_resolver=None)
+
+    rows = conn.execute(
+        "SELECT pa.attr_value FROM port_attributes pa "
+        "JOIN card_ports cp ON pa.port_id = cp.id "
+        "WHERE cp.card_name=? AND cp.event_class='AlterAttribute' "
+        "AND pa.attr_kind='attribute'",
+        ("Skycoach Waypoint",),
+    ).fetchall()
+    values = {r[0] for r in rows}
+    assert values == {"Prepared"}, f"Expected attribute Prepared, got {values}"
+    conn.close()
+
+
+def test_alter_attribute_attributes_unit_synthetic(tmp_path):
+    """Unit test on a synthetic card dict — confirms the explode path works
+    independent of the Forge .txt parser.
+    """
+    from mtg_synergy_graph.parser import parse_forge_line
+
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    card = {
+        "name": "Test Prepare Caster",
+        "types": "Creature",
+        "abilities": [
+            (
+                "ability",
+                parse_forge_line("AB$ AlterAttribute | Cost$ 2 | ValidTgts$ Creature | Attributes$ Prepared"),
+            ),
+        ],
+        "svars": {},
+        "keywords": [],
+    }
+    import_card(conn, card, oracle_id_resolver=None)
+
+    rows = conn.execute(
+        "SELECT pa.attr_value FROM port_attributes pa "
+        "JOIN card_ports cp ON pa.port_id = cp.id "
+        "WHERE cp.card_name=? AND pa.attr_kind='attribute'",
+        ("Test Prepare Caster",),
+    ).fetchall()
+    assert {r[0] for r in rows} == {"Prepared"}
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# AlternateMode:Prepare → synthetic static port (Prepared mechanic, plan 2026-05-19)
+# ---------------------------------------------------------------------------
+
+
+@_integration
+@_requires_cardsfolder
+def test_alternate_mode_prepare_surfaced_as_port_for_abigale(tmp_path):
+    """Abigale's top-level `AlternateMode:Prepare` header must surface as a
+    queryable port — a synthetic static port with event_class='AlternateMode'
+    and granted_keyword='Prepare'. Mirrors the keyword-port shape so the
+    prepared_mechanic rule can join uniformly.
+    """
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    card_path = _FORGE_CARDSFOLDER / "a" / "abigale_poet_laureate_heroic_stanza.txt"
+    card = parse_card_file(card_path)
+    import_card(conn, card, oracle_id_resolver=None)
+
+    row = conn.execute(
+        "SELECT port_type, event_class, granted_keyword FROM card_ports "
+        "WHERE card_name=? AND event_class='AlternateMode'",
+        ("Abigale, Poet Laureate",),
+    ).fetchone()
+    assert row is not None, "Expected one AlternateMode port for Abigale"
+    assert row["port_type"] == "static"
+    assert row["granted_keyword"] == "Prepare"
+    conn.close()
+
+
+def test_alternate_mode_absent_when_card_has_no_alternate_mode(tmp_path):
+    """Cards without an AlternateMode header must NOT get a synthetic port."""
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    card = {
+        "name": "Test Plain Creature",
+        "types": "Creature",
+        "abilities": [],
+        "svars": {},
+        "keywords": [],
+    }
+    import_card(conn, card, oracle_id_resolver=None)
+
+    rows = conn.execute(
+        "SELECT 1 FROM card_ports WHERE card_name=? AND event_class='AlternateMode'",
+        ("Test Plain Creature",),
+    ).fetchall()
+    assert rows == [], "Plain card must not have AlternateMode synthetic port"
+    conn.close()
+
+
+def test_alternate_mode_synthetic_unit(tmp_path):
+    """Unit test on a synthetic card dict — confirms the synthesis path
+    works independent of the Forge .txt parser.
+    """
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    card = {
+        "name": "Test Prepare Payoff",
+        "types": "Creature",
+        "alternate_mode": "Prepare",
+        "abilities": [],
+        "svars": {},
+        "keywords": [],
+    }
+    import_card(conn, card, oracle_id_resolver=None)
+
+    row = conn.execute(
+        "SELECT port_type, event_class, granted_keyword FROM card_ports "
+        "WHERE card_name=? AND event_class='AlternateMode'",
+        ("Test Prepare Payoff",),
+    ).fetchone()
+    assert row is not None
+    assert row["port_type"] == "static"
+    assert row["granted_keyword"] == "Prepare"
+    conn.close()
+
+
+@pytest.mark.parametrize("value", ["Modal", "Adventure", "Split", "Flip", "Specialize", "Omen", "Meld", "DoubleFaced"])
+def test_alternate_mode_non_prepare_values_do_not_emit_port(tmp_path, value):
+    """Regression for ``_ALTERNATE_MODE_PORT_VALUES``: only ``Prepare``
+    emits a synthetic AlternateMode port. Other values (Modal/Adventure/
+    Split/Flip/Specialize/Omen/Meld/DoubleFaced) must NOT — emitting for
+    them previously perturbed the depth-2 cascade walker's Stage-1
+    relevant-event prefilter, causing a -0.21 regression on Tergrid.
+
+    See ``docs/RULE_HISTORY.md`` 2026-05-19 entry and
+    ``ports.py::_ALTERNATE_MODE_PORT_VALUES``.
+    """
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    card = {
+        "name": f"Test {value} DFC",
+        "types": "Creature",
+        "alternate_mode": value,
+        "abilities": [],
+        "svars": {},
+        "keywords": [],
+    }
+    import_card(conn, card, oracle_id_resolver=None)
+
+    rows = conn.execute(
+        "SELECT 1 FROM card_ports WHERE card_name=? AND event_class='AlternateMode'",
+        (f"Test {value} DFC",),
+    ).fetchall()
+    assert rows == [], f"AlternateMode:{value} must not emit a synthetic port"
+    conn.close()
