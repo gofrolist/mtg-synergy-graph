@@ -7,6 +7,62 @@ See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
 ## 2026-05-20
 
+### `CopyFaceFrom:<Name>` back-face resolution (LANDED, follow-up #2 to PR #47)
+
+Closes the data-model gap flagged in the 2026-05-19 Prepared brainstorm:
+22 of the 47 Prepared-payoff cards encode their back face as
+`CopyFaceFrom:<X>` (Reanimate, Brainstorm, Demonic Tutor, Swords to
+Plowshares, Wheel of Fortune, …), and the importer previously dropped
+the directive — Grave Researcher carried no Reanimate ports, Naktamun
+Lorespinner no Wheel-of-Fortune ports, etc. See
+`docs/brainstorms/2026-05-20-copy-face-from-resolution-requirements.md`
+for the full design (Q1-Q5 + v1 recommendations).
+
+- **Parser extension**: `CopyFaceFrom:` on the back face captures the
+  referenced card name into `card["copy_face_from"]`. Front-face
+  occurrences are ignored defensively.
+- **Schema extension**: new `cards.copy_face_from TEXT` column so the
+  second pass can find every carrier without re-parsing.
+  **Re-import required for legacy DBs**: `schema.sql` uses
+  `CREATE TABLE IF NOT EXISTS`, so existing `data/synergy.db` files
+  miss the column. Rebuild via `uv run python scripts/import_cardsfolder.py`
+  before running anything that calls `import_card`. Test DBs are
+  unaffected — they use a freshly-opened schema via `open_db()`.
+- **Importer extension (two-pass)**: after every `.txt` is imported,
+  `resolve_copy_face_from_references(conn)` iterates carriers, copies
+  every referenced-card `card_ports` row onto the carrier, and tags
+  each inherited row with `port_attributes.attr_kind='via_copyfacefrom'`,
+  `attr_value=<ReferencedCardName>`. Inherited rows skip
+  `static AlternateMode` (defensive — never inherit a Prepared marker).
+  Unresolved references warn + skip; self-references caught by a
+  depth-1 cycle guard.
+- **Production importer run**: 20 carriers, 20/20 resolved, 32 ports
+  inherited (mean ~1.6 ports/carrier, max 3 for Reanimate-shape).
+- **`bench.py audit`**: **POSITIVE**, aggregate Δ = **+0.0933** on the
+  100-cmdr golden set. Histogram: 78 no_change / 20 rank_shuffle_within
+  top30 / 2 rank_shuffle_across_top30_boundary / **0 hi_syn_loss**.
+  hidden_gem_hit_rate stable at 0.8053 (Δ —).
+- **Qualitative wins**:
+  - **Nekusar, the Mindrazer** (+0.2446): gained Naktamun Lorespinner
+    (`CopyFaceFrom:Wheel of Fortune`) — now ranked #14 alongside the
+    canonical Wheels cluster (Wheel of Fortune, Windfall, Memory Jar,
+    Whispering Madness, …).
+  - **Niv-Mizzet, Parun** (+0.1151): instant/sorcery commander absorbs
+    several inherited spell-shapes (Brainstorm carriers, etc.) into
+    its trigger pool.
+- **Notable non-win**: my brainstorm predicted Karador / Meren wins on
+  the Reanimate-shape carriers. Audit shows ~0 movement — Karador's
+  port set doesn't have the right trigger shapes for ChangeZone
+  Graveyard→Battlefield to match. Cheap follow-up if needed: add a
+  gy-recursion port to Karador-style commanders, or build a generic
+  rule that fires on any "graveyard-to-battlefield ChangeZone" port.
+- **Notable shift**: Tergrid -0.1917 (boundary shuffle, gained Nath of
+  the Gilt-Leaf, lost Ferrafor, Young Yew — neither a CopyFaceFrom
+  carrier). Pure IDF-recomputation collateral from the universe-wide
+  port-count change. Within the POSITIVE-verdict envelope.
+
+Fixture re-pinned via `bench.py audit --repin --yes`.
+
 ### `prepared_mechanic` rule weight tuned 1.0 → 3.0
 
 Follow-up to the 2026-05-19 landing. The `recommend.py` qualitative check
