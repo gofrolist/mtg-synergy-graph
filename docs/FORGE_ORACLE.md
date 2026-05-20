@@ -54,7 +54,7 @@ Before reading any sidecar-derived artifact, oracle consumers call
 `forge_oracle.version.verify_pin_matches_checkout()` — drift raises
 `OracleVersionMismatchError` with an actionable rebuild hint.
 
-Current pin: `ed97d9bb77f03d9681aba59186416bcf7923d5dd`.
+Current pin: `f42b9abc1ceed4c10b8b8ab4372bb4bcae67aa6b`.
 
 ### Bumping the pin
 
