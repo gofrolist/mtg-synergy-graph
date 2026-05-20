@@ -30,8 +30,6 @@ import sqlite3
 
 from .core import PortComplement, PortRow
 
-_RULE_ID = "prepared_mechanic"
-
 
 def _commander_has_alternate_mode_prepare(cmdr_ports: list[PortRow]) -> bool:
     """Cheap path — commander itself is a Prepared-payoff card.
@@ -95,7 +93,7 @@ def _find_prepared_mechanic_complements(
 
     return [
         PortComplement(
-            rule_id=_RULE_ID,
+            rule_id="prepared_mechanic",
             direction="synergy",
             candidate=r["card_name"],
             cmdr_event="Prepared_ecosystem",

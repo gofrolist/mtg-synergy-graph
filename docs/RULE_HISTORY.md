@@ -5,6 +5,40 @@ impact notes. See `scripts/_audit_rule_impact.py` for the per-rule impact
 methodology (NDCG@30 metric + golden-set safety net + CONTENTIOUS verdict).
 See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
+## 2026-05-20
+
+### `prepared_mechanic` rule weight tuned 1.0 → 3.0
+
+Follow-up to the 2026-05-19 landing. The `recommend.py` qualitative check
+on `Abigale, Poet Laureate` flagged that Prepared candidates scored
+~0.187 (port_match) vs ~0.516 for generic WB staples (Bontu's /
+Oketra's / Hazoret's / Rhonas's / Kefnet's Monuments + the medallion
+cycle), so they sank to rank #50-60 below mana-rock noise. Set
+`data/scoring_weights.json::rule_quality_multiplier.prepared_mechanic
+= 3.0` to push them above the staple band.
+
+- **`bench.py audit`**: Δ = **+0.0000** on the 100-cmdr golden set
+  (100/100 no_change, hidden_gem_hit_rate stable at 0.8053). Golden-
+  set-neutral because no commander in the 100-cmdr canonical triggers
+  the rule (cheap path: no `AlternateMode|Prepare` static port; slow
+  path: no `AlterAttribute → Prepared` effect port). Re-pinned the
+  fixture for the new config_hash; underlying scores unchanged.
+- **Qualitative validation**: `recommend.py "Abigale, Poet Laureate"
+  --top 60`. All 17 WB-castable Prepared-payoff cards now occupy
+  ranks **#1-17** (score 0.5); Bontu's Monument dropped from #1 to
+  **#18**. Prepared cards now tie the staple band rather than under-
+  shoot it, which is the intended ordering for a Prepared-payoff
+  commander.
+
+### `prepared_mechanic` rule_id literal inlined
+
+Minor: `prepared.py` originally used `rule_id=_RULE_ID` (constant)
+where the rest of `complement_rules/` uses inline `rule_id="..."`
+literals. The dead-key-detector test
+(`tests/test_scoring_weights.py::test_no_dead_rule_ids_in_quality_multiplier`)
+scrapes literal strings via regex, so the constant form was invisible
+to it. Inlined to match codebase convention and unblock the test.
+
 ## 2026-05-19
 
 ### `prepared_mechanic` rule (LANDED)
