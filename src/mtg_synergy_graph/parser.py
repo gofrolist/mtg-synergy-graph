@@ -173,6 +173,14 @@ def _parse_card_block(block_lines: list[str], card: dict[str, Any], *, is_altern
         if not line:
             continue
 
+        # CopyFaceFrom:<Name> — back-face directive that points at an existing
+        # card whose spell content should be inherited by this carrier.
+        # See docs/brainstorms/2026-05-20-copy-face-from-resolution-requirements.md.
+        # Front-face occurrences are ignored defensively (malformed Forge data).
+        if is_alternate and line.startswith("CopyFaceFrom:"):
+            card["copy_face_from"] = line[len("CopyFaceFrom:") :]
+            continue
+
         matched = False
         for prefix, key, plen, kind in _LINE_DISPATCH:
             if not line.startswith(prefix):
@@ -237,6 +245,7 @@ def parse_card_text(text: str) -> dict[str, Any]:
     card: dict[str, Any] = {
         "name": "",
         "alternate_name": None,  # populated for DFC/MDFC back faces
+        "copy_face_from": None,  # populated for Prepared cards whose back face is `CopyFaceFrom:<X>`
         "abilities": [],
         "svars": {},
         "keywords": [],

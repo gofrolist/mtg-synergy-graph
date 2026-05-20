@@ -146,3 +146,78 @@ def test_dfc_keeps_front_face_identity_and_merges_back_face_abilities():
     assert "DBBack" in card["svars"]
     # Back face's A: ability is present
     assert any(kind == "ability" for kind, _ in card["abilities"])
+
+
+# ---------------------------------------------------------------------------
+# CopyFaceFrom:<Name> capture (back face references another card by name)
+# ---------------------------------------------------------------------------
+
+
+def test_copy_face_from_captured_on_back_face():
+    """A Prepared card whose back face is ``CopyFaceFrom:<X>`` must record
+    the referenced card name in ``card['copy_face_from']`` so the importer's
+    second pass can materialise the referenced card's ports onto the carrier.
+
+    Mirrors the actual Forge shape (see Grave Researcher, Yavimaya Bloomsage):
+    front face is a creature with AlternateMode:Prepare, back face has only
+    the CopyFaceFrom directive.
+    """
+    text = (
+        "Name:Test Prepare Carrier\n"
+        "ManaCost:2 B\n"
+        "Types:Creature Troll Warlock\n"
+        "PT:3/3\n"
+        "T:Mode$ Phase | Phase$ Upkeep | ValidPlayer$ You | Execute$ TrigPrepare\n"
+        "SVar:TrigPrepare:DB$ AlterAttribute | Attributes$ Prepared\n"
+        "AlternateMode:Prepare\n"
+        "\n"
+        "ALTERNATE\n"
+        "\n"
+        "CopyFaceFrom:Reanimate\n"
+    )
+    card = parse_card_text(text)
+    assert card["name"] == "Test Prepare Carrier"
+    assert card["copy_face_from"] == "Reanimate"
+
+
+def test_copy_face_from_absent_when_back_face_inline():
+    """Cards whose back face is defined inline (Abigale, Poet Laureate's
+    Heroic Stanza) must NOT set ``copy_face_from`` — only the directive
+    flavour triggers second-pass resolution.
+    """
+    text = (
+        "Name:Inline Back Carrier\n"
+        "ManaCost:1 W B\n"
+        "Types:Legendary Creature Bird Bard\n"
+        "PT:2/3\n"
+        "AlternateMode:Prepare\n"
+        "\n"
+        "ALTERNATE\n"
+        "\n"
+        "Name:Heroic Stanza\n"
+        "ManaCost:1 WB\n"
+        "Types:Sorcery\n"
+        "A:SP$ PutCounter | ValidTgts$ Creature | CounterType$ P1P1\n"
+    )
+    card = parse_card_text(text)
+    assert card.get("copy_face_from") is None
+
+
+def test_copy_face_from_absent_when_no_alternate_section():
+    """Vanilla single-face cards must not have ``copy_face_from`` set."""
+    text = "Name:Vanilla Creature\nManaCost:1 G\nTypes:Creature Bear\nPT:2/2\n"
+    card = parse_card_text(text)
+    assert card.get("copy_face_from") is None
+
+
+def test_copy_face_from_on_front_face_ignored():
+    """Defensive: ``CopyFaceFrom:`` only appears on the back face in real
+    Forge data, but if it ever leaks onto the front face (data error or
+    future Forge schema change), the parser must not crash and must not
+    populate ``copy_face_from`` from the front face — it would shadow
+    the legitimate back-face directive on a malformed card and silently
+    inherit the wrong ports.
+    """
+    text = "Name:Bad Front\nManaCost:1 R\nTypes:Creature Goblin\nCopyFaceFrom:Lightning Bolt\n"
+    card = parse_card_text(text)
+    assert card.get("copy_face_from") is None
