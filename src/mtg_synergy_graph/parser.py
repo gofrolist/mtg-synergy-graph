@@ -341,4 +341,5 @@ def parser_branch_kinds() -> set[str]:
         "root",
         "static_condition",
         "replacement_condition",
+        "etb_replacement",
     }
