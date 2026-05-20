@@ -95,6 +95,63 @@ literals. The dead-key-detector test
 scrapes literal strings via regex, so the constant form was invisible
 to it. Inlined to match codebase convention and unblock the test.
 
+### `K:ETBReplacement` SVar walking (LANDED, follow-up #3 to PR #47)
+
+Closes the data-model gap on 400 cards that encode an ETB replacement
+effect via the `K:ETBReplacement:Scope:SVarRef` keyword form. Today
+`extract_keyword_ports` emits one thin keyword port per K: line with
+the full replacement payload invisible — counter-doubler / tribal /
+clone rules can't see Hardened Scales, Cavern of Souls, Reflections of
+Kiki-Jiki, etc. Brainstorm:
+`docs/brainstorms/2026-05-20-etb-replacement-svar-walking-requirements.md`.
+
+- **Parser invariant**: new `etb_replacement` branch_kind registered in
+  `parser_branch_kinds()` + `BRANCH_MULTIPLIER` (1.0× — ETB
+  replacements are unconditional once the carrier is in play).
+- **Ports extension**: new `extract_etb_replacement_ports(card_name,
+  keyword_lines, svars)` parses each `K:ETBReplacement:Scope:SVarRef[
+  :Mandatory|Optional[:Zone[:ValidFilter]]]` directive and walks the
+  referenced SVar via the existing `walk_svar_chain`. Emits one effect
+  port per ChainNode tagged with `branch_kind='etb_replacement'`,
+  `source_svar=<ref>`, `is_optional` per the K: line, and a transient
+  `_etb_scope='other'|'copy'` key.
+- **Surface keyword port preserved**: today's thin
+  `event_class='ETBReplacement:Scope:SVarRef:...'` keyword port stays
+  for back-compat (no rule actually matches on it because the
+  event_class is per-card-unique colon-joined string — but removing
+  it would require auditing every grep for ETBReplacement).
+- **`port_attributes` extension**: each inherited port gets a row with
+  `attr_kind='etb_scope'`, `attr_value='other'|'copy'` so downstream
+  rules can filter ETB-replacement-derived ports if needed. No v1
+  consumer; data infrastructure for future tuning.
+- **Production importer run**: 400 K:ETBReplacement directives parsed,
+  400 root nodes emitted with `branch_kind='etb_replacement'`, ~1290
+  additional sub-ability expansions through existing CHAIN_KEYS,
+  524 `etb_scope` provenance tags. Total card_ports row count grew
+  108,644 → 110,334 (+1,690).
+- **`bench.py audit`**: **POSITIVE**, aggregate Δ = **+6.5477** on the
+  100-cmdr golden set. Histogram: 75 no_change / 21
+  rank_shuffle_within_top30 / 4 rank_shuffle_across_top30_boundary /
+  **0 hi_syn_loss / 0 hi_syn_gain**.
+  - **hidden_gem_hit_rate**: 0.8053 → **0.8153** (+0.0100 = +1
+    hidden gem per commander on the second-axis metric).
+- **Qualitative wins** (recommend.py verified):
+  - **The Mimeoplasm** (+6.5971): top-30 reshapes around graveyard /
+    counter / animator shapes. Top 10 now: Midnight Clock, Bloodcrazed
+    Hoplite, Diabolic Servitude, Takklemaggot, Traveling Plague,
+    Wormfang Newt, Flourishing Defenses, Wormfang Turtle, Hardened
+    Scales, Ozolith. Diabolic Servitude (ETB-replaces with reanimate)
+    and Hardened Scales (counter doubler) are textbook fits.
+  - **Hamza, Guardian of Arashin** (+0.1549): gained Bramblewood
+    Paragon, lost Lonis. Bramblewood Paragon is `K:ETBReplacement:
+    Other:AddExtraCounter` for Warriors — now properly modelled.
+- **Notable shifts within envelope**: Araumi -0.0635 (Urborg Lhurgoyf
+  in, Dogmeat out); Locust God / Emry / Nekusar / others all
+  <0.05 magnitude — IDF-recomputation noise. No hi_syn_loss
+  anywhere.
+
+Fixture re-pinned via `bench.py audit --repin --yes`.
+
 ## 2026-05-19
 
 ### `prepared_mechanic` rule (LANDED)

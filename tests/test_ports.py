@@ -417,3 +417,217 @@ def test_largepox_does_not_explode():
     ports = extract_all_ports(card)
     assert len(ports) > 0, "expected at least some ports"
     assert len(ports) < 30, f"Largepox port count exploded: {len(ports)}"
+
+
+# ---------------------------------------------------------------------------
+# K:ETBReplacement SVar walking (plan 2026-05-20-002)
+# Brainstorm: docs/brainstorms/2026-05-20-etb-replacement-svar-walking-requirements.md
+# ---------------------------------------------------------------------------
+
+
+def test_parse_etb_replacement_keyword_minimal_form():
+    """Bare `ETBReplacement:Scope:SVarRef` form (Grave Researcher, Cavern
+    of Souls): no Mandatory/Optional flag, no zone, no valid filter.
+    """
+    from mtg_synergy_graph.ports import _parse_etb_replacement_keyword
+
+    parsed = _parse_etb_replacement_keyword("ETBReplacement:Other:DBPrepare")
+    assert parsed == ("Other", "DBPrepare", False, "", "")
+
+
+def test_parse_etb_replacement_keyword_with_optional_zone_filter():
+    """Full form with Mandatory/Optional + zone + valid filter (Hardened
+    Scales-likes use this form, e.g.,
+    ``ETBReplacement:Other:AddExtraCounter:Mandatory:Battlefield:Creature.Other+YouCtrl``).
+    """
+    from mtg_synergy_graph.ports import _parse_etb_replacement_keyword
+
+    parsed = _parse_etb_replacement_keyword(
+        "ETBReplacement:Other:AddExtraCounter:Mandatory:Battlefield:Creature.Other+YouCtrl"
+    )
+    assert parsed == ("Other", "AddExtraCounter", False, "Battlefield", "Creature.Other+YouCtrl")
+
+
+def test_parse_etb_replacement_keyword_optional_flag():
+    """The Reflections of Kiki-Jiki form: `Copy:DBCopy:Optional` — the
+    player may choose to apply the replacement.
+    """
+    from mtg_synergy_graph.ports import _parse_etb_replacement_keyword
+
+    parsed = _parse_etb_replacement_keyword("ETBReplacement:Copy:DBCopy:Optional")
+    assert parsed == ("Copy", "DBCopy", True, "", "")
+
+
+def test_parse_etb_replacement_keyword_rejects_non_etb_lines():
+    """Other K: forms (Flying, Trample, etc.) must return None so the
+    caller skips them silently."""
+    from mtg_synergy_graph.ports import _parse_etb_replacement_keyword
+
+    assert _parse_etb_replacement_keyword("Flying") is None
+    assert _parse_etb_replacement_keyword("Trample") is None
+    assert _parse_etb_replacement_keyword("Hexproof") is None
+    assert _parse_etb_replacement_keyword("") is None
+
+
+def test_parse_etb_replacement_keyword_rejects_truncated_directive():
+    """`ETBReplacement:Foo` (no SVar ref) is malformed — must return None
+    rather than crashing or returning a half-populated tuple.
+    """
+    from mtg_synergy_graph.ports import _parse_etb_replacement_keyword
+
+    assert _parse_etb_replacement_keyword("ETBReplacement") is None
+    assert _parse_etb_replacement_keyword("ETBReplacement:Other") is None
+
+
+def test_extract_etb_replacement_emits_resolved_effect_ports():
+    """The 22 DBPrepare cards must end up with an effect|AlterAttribute
+    port (with attr Prepared) so the prepared_mechanic slow path can
+    detect them as enablers — matching the cheap path's existing
+    coverage from the AlternateMode static port.
+    """
+    from mtg_synergy_graph.ports import extract_etb_replacement_ports
+
+    keyword_lines = ["ETBReplacement:Other:DBPrepare"]
+    svars = {
+        "DBPrepare": "DB$ AlterAttribute | Attributes$ Prepared",
+    }
+    ports = extract_etb_replacement_ports("Test Card", keyword_lines, svars)
+    effects = [p for p in ports if p["port_type"] == "effect"]
+    assert any(e["event_class"] == "AlterAttribute" and e.get("_attributes", "") == "Prepared" for e in effects), (
+        f"expected AlterAttribute Prepared effect; got {[(e['event_class'], e.get('_attributes')) for e in effects]}"
+    )
+
+
+def test_extract_etb_replacement_tags_branch_kind():
+    """Effect ports inherited from K:ETBReplacement SVar walks must
+    carry `branch_kind='etb_replacement'` on the root node so downstream
+    filtering / weighting can distinguish them from regular ability
+    chains (`root`) or trigger executes (`execute`).
+    """
+    from mtg_synergy_graph.ports import extract_etb_replacement_ports
+
+    svars = {"DBPrepare": "DB$ AlterAttribute | Attributes$ Prepared"}
+    ports = extract_etb_replacement_ports("Test Card", ["ETBReplacement:Other:DBPrepare"], svars)
+    effects = [p for p in ports if p["port_type"] == "effect"]
+    assert effects, "expected at least one effect port"
+    assert all(e["branch_kind"] == "etb_replacement" for e in effects), (
+        f"expected etb_replacement branch_kind; got {[e['branch_kind'] for e in effects]}"
+    )
+
+
+def test_extract_etb_replacement_records_etb_scope_transient():
+    """Each emitted port carries a transient `_etb_scope` key (lowercased
+    scope: 'other' or 'copy') so the importer can project it into
+    `port_attributes` with attr_kind='etb_scope'. Matches the existing
+    `_change_type` / `_token_script` / `_attributes` convention.
+    """
+    from mtg_synergy_graph.ports import extract_etb_replacement_ports
+
+    svars = {"DBPrepare": "DB$ AlterAttribute | Attributes$ Prepared"}
+    ports_other = extract_etb_replacement_ports("Other Card", ["ETBReplacement:Other:DBPrepare"], svars)
+    ports_copy = extract_etb_replacement_ports("Copy Card", ["ETBReplacement:Copy:DBPrepare"], svars)
+    for p in [pp for pp in ports_other if pp["port_type"] == "effect"]:
+        assert p.get("_etb_scope") == "other", "Other scope must propagate to _etb_scope"
+    for p in [pp for pp in ports_copy if pp["port_type"] == "effect"]:
+        assert p.get("_etb_scope") == "copy", "Copy scope must propagate to _etb_scope"
+
+
+def test_extract_etb_replacement_propagates_optional_flag():
+    """The `:Optional` suffix on the K: line must set `is_optional=True`
+    on emitted ports so downstream rules can discount optional
+    replacements (v1 ships data only; no current consumer).
+    """
+    from mtg_synergy_graph.ports import extract_etb_replacement_ports
+
+    svars = {"DBCopy": "DB$ CopyPermanent | Defined$ TriggeredCard"}
+    ports = extract_etb_replacement_ports("Test Card", ["ETBReplacement:Copy:DBCopy:Optional"], svars)
+    effects = [p for p in ports if p["port_type"] == "effect"]
+    assert effects
+    assert all(e["is_optional"] for e in effects), "Optional flag must propagate"
+
+
+def test_extract_etb_replacement_handles_chain_with_subability():
+    """If the referenced SVar has a SubAbility$ chain (multi-effect
+    sequence), every node in the chain must emit a port. Mirrors the
+    existing trigger-chain extraction.
+    """
+    from mtg_synergy_graph.ports import extract_etb_replacement_ports
+
+    svars = {
+        "DBRoot": "DB$ PutCounter | CounterType$ P1P1 | SubAbility$ DBDraw",
+        "DBDraw": "DB$ Draw | Defined$ You | NumCards$ 1",
+    }
+    ports = extract_etb_replacement_ports("Test Card", ["ETBReplacement:Other:DBRoot"], svars)
+    effects = [p for p in ports if p["port_type"] == "effect"]
+    event_classes = {e["event_class"] for e in effects}
+    assert "PutCounter" in event_classes
+    assert "Draw" in event_classes, "SubAbility chain must produce a Draw port"
+
+
+def test_extract_etb_replacement_skips_lines_without_etb_prefix():
+    """Mixed keyword set (Flying + ETBReplacement) must not crash and
+    must produce ports only for the ETB line.
+    """
+    from mtg_synergy_graph.ports import extract_etb_replacement_ports
+
+    svars = {"DBPrepare": "DB$ AlterAttribute | Attributes$ Prepared"}
+    ports = extract_etb_replacement_ports(
+        "Test Card",
+        ["Flying", "ETBReplacement:Other:DBPrepare", "Trample"],
+        svars,
+    )
+    effects = [p for p in ports if p["port_type"] == "effect"]
+    assert effects, "ETBReplacement line must still produce ports"
+    assert all(e["event_class"] == "AlterAttribute" for e in effects), (
+        "Only ports from the ETB line should appear; got " + repr([e["event_class"] for e in effects])
+    )
+
+
+def test_extract_etb_replacement_unknown_svar_returns_empty():
+    """If the referenced SVar isn't on the card (data error / Forge
+    inconsistency), walking returns an empty chain and no ports are
+    emitted. Must not crash.
+    """
+    from mtg_synergy_graph.ports import extract_etb_replacement_ports
+
+    ports = extract_etb_replacement_ports("Test Card", ["ETBReplacement:Other:NotARealSVar"], svars={})
+    assert [p for p in ports if p["port_type"] == "effect"] == []
+
+
+def test_extract_all_ports_includes_etb_replacement_effect():
+    """End-to-end: extract_all_ports on a parsed card with
+    `K:ETBReplacement:Other:DBPrepare` + SVar must include the
+    resolved effect port, in addition to the surface-level keyword port.
+    """
+    card = {
+        "name": "Test Carrier",
+        "types": "Creature Bear",
+        "abilities": [],
+        "keywords": ["ETBReplacement:Other:DBPrepare"],
+        "svars": {"DBPrepare": "DB$ AlterAttribute | Attributes$ Prepared"},
+    }
+    ports = extract_all_ports(card)
+    # Surface keyword port still present (back-compat).
+    kw_ports = [p for p in ports if p["port_type"] == "keyword"]
+    assert any(p["event_class"].startswith("ETBReplacement") for p in kw_ports), (
+        "Back-compat: thin keyword port must still be emitted"
+    )
+    # New: resolved effect port from SVar walk.
+    eff_ports = [p for p in ports if p["port_type"] == "effect"]
+    assert any(p["event_class"] == "AlterAttribute" for p in eff_ports), (
+        "Resolved effect port from SVar chain must be emitted"
+    )
+
+
+def test_branch_multiplier_covers_etb_replacement_kind():
+    """The parser must register `etb_replacement` as a branch kind, and
+    `BRANCH_MULTIPLIER` must have an entry for it — otherwise the
+    invariant test at `tests/test_graph_engine.py` fails.
+    """
+    from mtg_synergy_graph import BRANCH_MULTIPLIER, parser_branch_kinds
+
+    assert "etb_replacement" in parser_branch_kinds()
+    assert "etb_replacement" in BRANCH_MULTIPLIER
+    assert BRANCH_MULTIPLIER["etb_replacement"] == 1.0, (
+        "ETB replacement effects are unconditional once you control the card; multiplier 1.0"
+    )

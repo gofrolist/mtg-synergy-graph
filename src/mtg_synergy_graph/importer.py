@@ -414,7 +414,7 @@ _PORT_INSERT_SQL = (
 #: Keys the importer consumes from the port dict but does NOT persist
 #: on card_ports. Producers attach these; import_card must pop them
 #: before calling _normalise_port.
-_TRANSIENT_PORT_KEYS: frozenset[str] = frozenset({"_change_type", "_token_script", "_attributes"})
+_TRANSIENT_PORT_KEYS: frozenset[str] = frozenset({"_change_type", "_token_script", "_attributes", "_etb_scope"})
 
 #: BuffedBy SVar tokens classified by explode_filter → card_hints.category.
 #: attr_kinds not in this map (controller, cmc_cmp, etc.) are skipped —
@@ -528,6 +528,7 @@ def import_card(
         change_type = port.pop("_change_type", "")
         token_script = port.pop("_token_script", "")
         attributes_csv = port.pop("_attributes", "")
+        etb_scope = port.pop("_etb_scope", "")
         cur = conn.execute(_PORT_INSERT_SQL, _normalise_port(port))
         port_id = cur.lastrowid
         inserted += 1
@@ -569,6 +570,16 @@ def import_card(
                         "(port_id, attr_kind, attr_value, is_negated) VALUES (?, ?, ?, ?)",
                         (port_id, "attribute", attr_value, False),
                     )
+        # K:ETBReplacement provenance: 'other' or 'copy'. Stored under
+        # attr_kind='etb_scope' so downstream rules can distinguish
+        # SVar-walked ETB-replacement effects from regular ones.
+        # See docs/brainstorms/2026-05-20-etb-replacement-svar-walking-requirements.md.
+        if etb_scope:
+            conn.execute(
+                "INSERT OR IGNORE INTO port_attributes "
+                "(port_id, attr_kind, attr_value, is_negated) VALUES (?, ?, ?, ?)",
+                (port_id, "etb_scope", etb_scope, False),
+            )
 
     return inserted
 
