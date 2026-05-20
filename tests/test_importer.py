@@ -560,3 +560,34 @@ def test_alternate_mode_synthetic_unit(tmp_path):
     assert row["port_type"] == "static"
     assert row["granted_keyword"] == "Prepare"
     conn.close()
+
+
+@pytest.mark.parametrize("value", ["Modal", "Adventure", "Split", "Flip", "Specialize", "Omen", "Meld", "DoubleFaced"])
+def test_alternate_mode_non_prepare_values_do_not_emit_port(tmp_path, value):
+    """Regression for ``_ALTERNATE_MODE_PORT_VALUES``: only ``Prepare``
+    emits a synthetic AlternateMode port. Other values (Modal/Adventure/
+    Split/Flip/Specialize/Omen/Meld/DoubleFaced) must NOT — emitting for
+    them previously perturbed the depth-2 cascade walker's Stage-1
+    relevant-event prefilter, causing a -0.21 regression on Tergrid.
+
+    See ``docs/RULE_HISTORY.md`` 2026-05-19 entry and
+    ``ports.py::_ALTERNATE_MODE_PORT_VALUES``.
+    """
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    card = {
+        "name": f"Test {value} DFC",
+        "types": "Creature",
+        "alternate_mode": value,
+        "abilities": [],
+        "svars": {},
+        "keywords": [],
+    }
+    import_card(conn, card, oracle_id_resolver=None)
+
+    rows = conn.execute(
+        "SELECT 1 FROM card_ports WHERE card_name=? AND event_class='AlternateMode'",
+        (f"Test {value} DFC",),
+    ).fetchall()
+    assert rows == [], f"AlternateMode:{value} must not emit a synthetic port"
+    conn.close()
