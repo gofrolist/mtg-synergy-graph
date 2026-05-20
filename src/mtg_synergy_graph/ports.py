@@ -13,12 +13,35 @@ from __future__ import annotations
 
 from typing import Any
 
+from .etb_replacement import (
+    _parse_etb_replacement_keyword,
+    extract_etb_replacement_ports,
+)
 from .parser import (
     CHAIN_KEYS,
     ChainNode,
     parse_forge_line,
     walk_svar_chain,
 )
+from .tokens import _parse_token_script  # noqa: F401 — re-exported for back-compat
+
+# Re-exported so callers that imported these from ``ports`` (the
+# historical home before the 2026-05-20 extraction) keep working.
+# The source of truth is ``etb_replacement.py``; this is a thin
+# compatibility shim — same pattern as ``importer.py`` re-exporting
+# the CopyFaceFrom resolver from ``copy_face_from.py``.
+__all__ = [
+    "_parse_etb_replacement_keyword",
+    "extract_all_ports",
+    "extract_cost_ports",
+    "extract_effect_ports",
+    "extract_etb_replacement_ports",
+    "extract_keyword_ports",
+    "extract_replacement_ports",
+    "extract_scaling_ports",
+    "extract_static_ports",
+    "extract_trigger_ports",
+]
 
 PortRow = dict[str, Any]
 
@@ -59,100 +82,6 @@ COST_PATTERNS: tuple[tuple[str, str], ...] = (
     ("DamageYou<", "damage_self"),  # A4: 18 cards
     ("Draw<", "draw_cost"),  # A4: 45 cards
 )
-
-#: Forge token-script colour letters → canonical uppercase.
-_TOKEN_COLOR_MAP: dict[str, str] = {
-    "w": "W",
-    "u": "U",
-    "b": "B",
-    "r": "R",
-    "g": "G",
-    "c": "C",
-}
-
-
-def _parse_token_script(script: str) -> list[tuple[str, str]]:
-    """Parse a TokenScript like ``w_1_1_soldier`` (or multi-choice
-    ``w_1_1_human,u_1_1_merfolk``) into a list of ``(attr_kind, attr_value)``
-    pairs.
-
-    Supported prefix formats (parts[0]):
-    - Single letter in ``_TOKEN_COLOR_MAP`` (``w``, ``u``, ``b``, ``r``, ``g``,
-      ``c``) — emits one ``token_color``.
-    - Multi-letter combo (``gw``, ``bg``, ``rgw``, etc.) — emits one
-      ``token_color`` per letter. ``all`` expands to W/U/B/R/G.
-    - Non-color leading word (named scripts like ``kobolds_of_kher_keep``) —
-      emits nothing; the entry is skipped entirely to avoid junk subtypes.
-
-    Body formats:
-    - Creature         ``<p>_<t>_<subtype>[_<kw>]*``  (``w_1_1_soldier``)
-    - Artifact         ``a_<subtype>[_<flag>]*``       (``c_a_food_sac``)
-    - Artifact-creature ``<p>_<t>_a_<subtype>``       (``c_0_1_a_egg``)
-    - X/X creature      ``x_x_<subtype>``              (``b_x_x_demon``)
-
-    >>> _parse_token_script("w_1_1_soldier")
-    [('token_color', 'W'), ('token_subtype', 'Soldier')]
-    >>> _parse_token_script("w_1_1_human,u_1_1_merfolk")
-    [('token_color', 'W'), ('token_subtype', 'Human'), ('token_color', 'U'), ('token_subtype', 'Merfolk')]
-    >>> _parse_token_script("c_0_1_a_egg")
-    [('token_color', 'C'), ('token_subtype', 'Egg')]
-    >>> _parse_token_script("gw_1_1_citizen")
-    [('token_color', 'G'), ('token_color', 'W'), ('token_subtype', 'Citizen')]
-    """
-    attrs: list[tuple[str, str]] = []
-    if not script:
-        return attrs
-    for piece in script.split(","):
-        parts = piece.strip().split("_")
-        if len(parts) < 4:
-            continue
-        colors = _colors_for_prefix(parts[0])
-        if not colors:
-            # Non-color leading word (named scripts). Without a recognised
-            # color prefix we cannot identify which part holds the subtype,
-            # so skip entirely rather than emit junk.
-            continue
-        for color in colors:
-            attrs.append(("token_color", color))
-        # Forge TokenScript body positions vary by token kind:
-        #   creature         : p _ t _ subtype              (w_1_1_soldier)
-        #   artifact         : a _ subtype [_ extra]        (c_a_food_sac)
-        #   artifact-creature: p _ t _ a _ subtype          (c_0_1_a_egg)
-        #   X/X creature     : x _ x _ subtype              (b_x_x_demon)
-        # The 'a' marker can sit at [1] (no P/T) or [3] (with P/T).
-        if parts[1].isdigit() or parts[1].lower() == "x":
-            # Has P/T in positions [1] and [2]. Subtype is at [3] unless
-            # [3] is the 'a' artifact marker, in which case subtype is [4].
-            subtype_raw = parts[4] if len(parts) >= 5 and parts[3].lower() == "a" else parts[3]
-        elif parts[1].lower() == "a":
-            # No P/T: artifact token. Subtype at [2].
-            subtype_raw = parts[2]
-        else:
-            # Unknown body format; skip rather than emit a guessed subtype.
-            continue
-        if subtype_raw:
-            attrs.append(("token_subtype", subtype_raw.capitalize()))
-    return attrs
-
-
-def _colors_for_prefix(prefix: str) -> list[str]:
-    """Expand a TokenScript color-prefix to canonical uppercase letters.
-
-    - ``w`` → ``['W']``
-    - ``gw`` → ``['G', 'W']``
-    - ``all`` → ``['W', 'U', 'B', 'R', 'G']``
-    - ``kobolds`` → ``[]`` (non-color, caller should skip entire entry)
-    """
-    lowered = prefix.lower()
-    if lowered == "all":
-        return ["W", "U", "B", "R", "G"]
-    expanded = [_TOKEN_COLOR_MAP[ch] for ch in lowered if ch in _TOKEN_COLOR_MAP]
-    # Require the full prefix to consist of recognised colour letters; otherwise
-    # the prefix is a non-color word (e.g. "kobolds") and we refuse to emit.
-    if len(expanded) != len(lowered):
-        return []
-    return expanded
-
 
 #: Cost types that take a ``<count/typespec[/desc]>`` payload describing
 #: which permanents the controller picks. These are the only costs where
@@ -827,6 +756,7 @@ def extract_all_ports(card: dict[str, Any]) -> list[PortRow]:
         ports.extend(extractor(name, parsed, svars))
 
     ports.extend(extract_keyword_ports(name, card.get("keywords", [])))
+    ports.extend(extract_etb_replacement_ports(name, card.get("keywords", []), svars))
     ports.extend(extract_alternate_mode_ports(name, card.get("alternate_mode") or ""))
     ports.extend(extract_scaling_ports(name, svars))
     return ports
