@@ -13,12 +13,35 @@ from __future__ import annotations
 
 from typing import Any
 
+from .etb_replacement import (
+    _parse_etb_replacement_keyword,
+    extract_etb_replacement_ports,
+)
 from .parser import (
     CHAIN_KEYS,
     ChainNode,
     parse_forge_line,
     walk_svar_chain,
 )
+from .tokens import _parse_token_script  # noqa: F401 — re-exported for back-compat
+
+# Re-exported so callers that imported these from ``ports`` (the
+# historical home before the 2026-05-20 extraction) keep working.
+# The source of truth is ``etb_replacement.py``; this is a thin
+# compatibility shim — same pattern as ``importer.py`` re-exporting
+# the CopyFaceFrom resolver from ``copy_face_from.py``.
+__all__ = [
+    "_parse_etb_replacement_keyword",
+    "extract_all_ports",
+    "extract_cost_ports",
+    "extract_effect_ports",
+    "extract_etb_replacement_ports",
+    "extract_keyword_ports",
+    "extract_replacement_ports",
+    "extract_scaling_ports",
+    "extract_static_ports",
+    "extract_trigger_ports",
+]
 
 PortRow = dict[str, Any]
 
@@ -59,100 +82,6 @@ COST_PATTERNS: tuple[tuple[str, str], ...] = (
     ("DamageYou<", "damage_self"),  # A4: 18 cards
     ("Draw<", "draw_cost"),  # A4: 45 cards
 )
-
-#: Forge token-script colour letters → canonical uppercase.
-_TOKEN_COLOR_MAP: dict[str, str] = {
-    "w": "W",
-    "u": "U",
-    "b": "B",
-    "r": "R",
-    "g": "G",
-    "c": "C",
-}
-
-
-def _parse_token_script(script: str) -> list[tuple[str, str]]:
-    """Parse a TokenScript like ``w_1_1_soldier`` (or multi-choice
-    ``w_1_1_human,u_1_1_merfolk``) into a list of ``(attr_kind, attr_value)``
-    pairs.
-
-    Supported prefix formats (parts[0]):
-    - Single letter in ``_TOKEN_COLOR_MAP`` (``w``, ``u``, ``b``, ``r``, ``g``,
-      ``c``) — emits one ``token_color``.
-    - Multi-letter combo (``gw``, ``bg``, ``rgw``, etc.) — emits one
-      ``token_color`` per letter. ``all`` expands to W/U/B/R/G.
-    - Non-color leading word (named scripts like ``kobolds_of_kher_keep``) —
-      emits nothing; the entry is skipped entirely to avoid junk subtypes.
-
-    Body formats:
-    - Creature         ``<p>_<t>_<subtype>[_<kw>]*``  (``w_1_1_soldier``)
-    - Artifact         ``a_<subtype>[_<flag>]*``       (``c_a_food_sac``)
-    - Artifact-creature ``<p>_<t>_a_<subtype>``       (``c_0_1_a_egg``)
-    - X/X creature      ``x_x_<subtype>``              (``b_x_x_demon``)
-
-    >>> _parse_token_script("w_1_1_soldier")
-    [('token_color', 'W'), ('token_subtype', 'Soldier')]
-    >>> _parse_token_script("w_1_1_human,u_1_1_merfolk")
-    [('token_color', 'W'), ('token_subtype', 'Human'), ('token_color', 'U'), ('token_subtype', 'Merfolk')]
-    >>> _parse_token_script("c_0_1_a_egg")
-    [('token_color', 'C'), ('token_subtype', 'Egg')]
-    >>> _parse_token_script("gw_1_1_citizen")
-    [('token_color', 'G'), ('token_color', 'W'), ('token_subtype', 'Citizen')]
-    """
-    attrs: list[tuple[str, str]] = []
-    if not script:
-        return attrs
-    for piece in script.split(","):
-        parts = piece.strip().split("_")
-        if len(parts) < 4:
-            continue
-        colors = _colors_for_prefix(parts[0])
-        if not colors:
-            # Non-color leading word (named scripts). Without a recognised
-            # color prefix we cannot identify which part holds the subtype,
-            # so skip entirely rather than emit junk.
-            continue
-        for color in colors:
-            attrs.append(("token_color", color))
-        # Forge TokenScript body positions vary by token kind:
-        #   creature         : p _ t _ subtype              (w_1_1_soldier)
-        #   artifact         : a _ subtype [_ extra]        (c_a_food_sac)
-        #   artifact-creature: p _ t _ a _ subtype          (c_0_1_a_egg)
-        #   X/X creature     : x _ x _ subtype              (b_x_x_demon)
-        # The 'a' marker can sit at [1] (no P/T) or [3] (with P/T).
-        if parts[1].isdigit() or parts[1].lower() == "x":
-            # Has P/T in positions [1] and [2]. Subtype is at [3] unless
-            # [3] is the 'a' artifact marker, in which case subtype is [4].
-            subtype_raw = parts[4] if len(parts) >= 5 and parts[3].lower() == "a" else parts[3]
-        elif parts[1].lower() == "a":
-            # No P/T: artifact token. Subtype at [2].
-            subtype_raw = parts[2]
-        else:
-            # Unknown body format; skip rather than emit a guessed subtype.
-            continue
-        if subtype_raw:
-            attrs.append(("token_subtype", subtype_raw.capitalize()))
-    return attrs
-
-
-def _colors_for_prefix(prefix: str) -> list[str]:
-    """Expand a TokenScript color-prefix to canonical uppercase letters.
-
-    - ``w`` → ``['W']``
-    - ``gw`` → ``['G', 'W']``
-    - ``all`` → ``['W', 'U', 'B', 'R', 'G']``
-    - ``kobolds`` → ``[]`` (non-color, caller should skip entire entry)
-    """
-    lowered = prefix.lower()
-    if lowered == "all":
-        return ["W", "U", "B", "R", "G"]
-    expanded = [_TOKEN_COLOR_MAP[ch] for ch in lowered if ch in _TOKEN_COLOR_MAP]
-    # Require the full prefix to consist of recognised colour letters; otherwise
-    # the prefix is a non-color word (e.g. "kobolds") and we refuse to emit.
-    if len(expanded) != len(lowered):
-        return []
-    return expanded
-
 
 #: Cost types that take a ``<count/typespec[/desc]>`` payload describing
 #: which permanents the controller picks. These are the only costs where
@@ -693,89 +622,6 @@ def extract_keyword_ports(card_name: str, keyword_lines: list[str]) -> list[Port
 #: DFC) which perturbs the depth-2 cascade walker's Stage-1 prefilter.
 #: See ``docs/brainstorms/2026-05-19-prepared-mechanic-requirements.md``.
 _ALTERNATE_MODE_PORT_VALUES: frozenset[str] = frozenset({"Prepare"})
-
-
-# ---------------------------------------------------------------------------
-# K:ETBReplacement SVar walking (plan 2026-05-20-002)
-# Brainstorm: docs/brainstorms/2026-05-20-etb-replacement-svar-walking-requirements.md
-# ---------------------------------------------------------------------------
-
-
-def _parse_etb_replacement_keyword(line: str) -> tuple[str, str, bool, str, str] | None:
-    """Parse one ``K:ETBReplacement:Scope:SVarRef[:Mandatory|Optional[:Zone[:ValidFilter]]]``
-    keyword line (the K: prefix already stripped by the parser).
-
-    Returns ``(scope, svar_ref, optional, zone, valid_filter)`` or ``None``
-    if the line isn't an ETBReplacement directive or is malformed (fewer
-    than 3 colon-separated parts).
-
-    The Forge ValidFilter syntax may contain ``+``, ``,``, ``.``, ``!`` but
-    never ``:``, so a 6-way split with ``maxsplit=5`` cleanly separates
-    every segment.
-    """
-    line = line.strip()
-    if not line.startswith("ETBReplacement:"):
-        return None
-    parts = line.split(":", 5)
-    if len(parts) < 3:
-        return None
-    _, scope, svar_ref = parts[0], parts[1], parts[2]
-    if not svar_ref:
-        return None
-    optional_token = parts[3] if len(parts) > 3 else "Mandatory"
-    zone = parts[4] if len(parts) > 4 else ""
-    valid_filter = parts[5] if len(parts) > 5 else ""
-    # ruff S105 false positive: "Optional" is a Forge keyword flag, not a credential.
-    optional = optional_token == "Optional"  # noqa: S105
-    return (scope, svar_ref, optional, zone, valid_filter)
-
-
-def extract_etb_replacement_ports(
-    card_name: str,
-    keyword_lines: list[str],
-    svars: dict[str, str],
-) -> list[PortRow]:
-    """Resolve `K:ETBReplacement` keyword directives by walking the
-    referenced SVar chain and emitting standard effect ports.
-
-    Mirrors the existing trigger-chain pattern (``extract_trigger_ports``)
-    but rooted on a keyword line instead of a ``T:`` line. Each resolved
-    port carries ``branch_kind='etb_replacement'`` on the chain root
-    (sub-abilities use the existing :data:`CHAIN_KEYS` mapping for their
-    own branch kinds), ``is_optional=True`` when the keyword carried
-    ``:Optional``, and a transient ``_etb_scope='other'|'copy'`` key that
-    the importer projects into ``port_attributes`` under
-    ``attr_kind='etb_scope'``.
-
-    Today (pre-this-change) the surface-level keyword port for these
-    lines has a per-card-unique ``event_class`` like
-    ``ETBReplacement:Other:DBPrepare`` (the whole colon-separated
-    string), which no complement rule matches on. This extractor adds
-    the resolved-effect ports without altering the keyword port — that
-    stays for back-compat.
-    """
-    ports: list[PortRow] = []
-    for line in keyword_lines:
-        directive = _parse_etb_replacement_keyword(line)
-        if directive is None:
-            continue
-        scope, svar_ref, optional, _zone, _valid_filter = directive
-        chain = walk_svar_chain(
-            svar_ref,
-            svars,
-            branch_kind="etb_replacement",
-            branch_parent=None,
-            chain_depth=1,
-        )
-        scope_label = scope.lower()
-        for node in chain:
-            for child_port in extract_effect_ports(card_name, node, svars):
-                if optional:
-                    child_port["is_optional"] = True
-                # Transient — importer pops + projects into port_attributes.
-                child_port["_etb_scope"] = scope_label
-                ports.append(child_port)
-    return ports
 
 
 def extract_alternate_mode_ports(card_name: str, alternate_mode: str) -> list[PortRow]:
