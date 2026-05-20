@@ -15,8 +15,20 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from .attributes import explode_filter
+from .copy_face_from import CopyFaceFromSummary, resolve_copy_face_from_references
 from .parser import parse_card_file
 from .ports import _parse_token_script, extract_all_ports
+
+# Re-exported so call sites that imported these from ``importer`` (the
+# historical home) continue to work. Both symbols now live in
+# ``copy_face_from.py``; this is a thin compatibility shim — the source
+# of truth is the other module.
+__all__ = [
+    "CopyFaceFromSummary",
+    "import_card",
+    "import_cards_folder",
+    "resolve_copy_face_from_references",
+]
 
 log = logging.getLogger(__name__)
 
@@ -561,129 +573,6 @@ def import_card(
     return inserted
 
 
-# ---------------------------------------------------------------------------
-# CopyFaceFrom:<Name> second-pass resolution (plan 2026-05-20-001)
-# Brainstorm: docs/brainstorms/2026-05-20-copy-face-from-resolution-requirements.md
-# ---------------------------------------------------------------------------
-
-
-#: Columns copied from a referenced card's ``card_ports`` row onto a carrier.
-#: ``id`` is excluded (auto-increment); ``card_name`` is rewritten to the carrier.
-_COPY_FACE_FROM_PORT_COLUMNS = tuple(c for c in _PORT_COLUMNS if c != "card_name")
-
-
-class CopyFaceFromSummary(NamedTuple):
-    """Outcome of ``resolve_copy_face_from_references``.
-
-    - ``carriers``: count of ``cards`` rows with a non-NULL ``copy_face_from``.
-    - ``resolved``: count of carriers whose reference was found and inherited.
-    - ``inherited_ports``: total ``card_ports`` rows materialised across all
-      carriers. Sanity-bounded: ~3-5 ports per Forge spell × ~22 carriers in
-      the current Prepared corpus.
-    - ``unresolved``: ``[(carrier_name, missing_reference_name), ...]`` for
-      reporting / CSV-logging. Includes self-references (rejected as cycles).
-    """
-
-    carriers: int
-    resolved: int
-    inherited_ports: int
-    unresolved: list[tuple[str, str]]
-
-
-def resolve_copy_face_from_references(conn: sqlite3.Connection) -> CopyFaceFromSummary:
-    """Second pass over the imported ``cards`` table: for every card with a
-    non-NULL ``copy_face_from``, copy the referenced card's ``card_ports``
-    rows onto the carrier and tag each inherited row with a
-    ``port_attributes`` provenance entry (``attr_kind='via_copyfacefrom'``,
-    ``attr_value=<ReferencedCardName>``).
-
-    Idempotent. Re-running deletes the carrier's existing ``via_copyfacefrom``-
-    tagged rows before re-inserting, so port row counts stay stable across
-    repeated calls.
-
-    Defensive guards:
-    - Self-references (``copy_face_from = card_name``) are logged as
-      unresolved and skipped — no real cards hit this, but cheap to guard.
-    - ``static AlternateMode`` ports are never inherited (the Prepared
-      marker is per-carrier and inheriting it would create false
-      Prepared-mechanic matches if a referenced card were itself Prepared).
-    - Unknown references log a warning and a row in the summary's
-      ``unresolved`` list. Non-fatal — the carrier ends up with only its
-      native ports.
-    """
-    carriers = conn.execute(
-        "SELECT name, copy_face_from FROM cards WHERE copy_face_from IS NOT NULL AND copy_face_from != ''"
-    ).fetchall()
-    summary_unresolved: list[tuple[str, str]] = []
-    summary_resolved = 0
-    summary_inherited = 0
-
-    copy_cols_sql = ", ".join(_COPY_FACE_FROM_PORT_COLUMNS)
-    placeholders = ", ".join("?" * (len(_COPY_FACE_FROM_PORT_COLUMNS) + 1))  # +1 for card_name
-    insert_sql = f"INSERT INTO card_ports (card_name, {copy_cols_sql}) VALUES ({placeholders})"
-
-    for carrier_row in carriers:
-        carrier_name = carrier_row["name"]
-        reference_name = carrier_row["copy_face_from"]
-
-        # Clear any prior via_copyfacefrom-tagged rows for idempotency.
-        # CASCADE on the FK handles the port_attributes cleanup.
-        conn.execute(
-            "DELETE FROM card_ports WHERE id IN ("
-            "  SELECT cp.id FROM card_ports cp "
-            "  JOIN port_attributes pa ON pa.port_id = cp.id "
-            "  WHERE cp.card_name = ? AND pa.attr_kind = 'via_copyfacefrom'"
-            ")",
-            (carrier_name,),
-        )
-
-        # Defensive: self-reference would loop without value. Skip + log.
-        if reference_name == carrier_name:
-            log.warning(
-                "CopyFaceFrom self-reference on %s — skipping (cycle guard)",
-                carrier_name,
-            )
-            summary_unresolved.append((carrier_name, reference_name))
-            continue
-
-        ref_exists = conn.execute("SELECT 1 FROM cards WHERE name = ?", (reference_name,)).fetchone()
-        if not ref_exists:
-            log.warning(
-                "unresolved CopyFaceFrom:%s on %s — carrier inherits no ports",
-                reference_name,
-                carrier_name,
-            )
-            summary_unresolved.append((carrier_name, reference_name))
-            continue
-
-        # Pull every referenced port row EXCEPT the synthetic AlternateMode
-        # marker (the Prepared marker is per-carrier; inheriting it would
-        # create false matches between unrelated carriers).
-        ref_ports = conn.execute(
-            f"SELECT {copy_cols_sql} FROM card_ports "
-            f"WHERE card_name = ? "
-            f"AND NOT (port_type = 'static' AND event_class = 'AlternateMode')",
-            (reference_name,),
-        ).fetchall()
-        for ref_port in ref_ports:
-            cur = conn.execute(insert_sql, (carrier_name, *tuple(ref_port)))
-            new_port_id = cur.lastrowid
-            conn.execute(
-                "INSERT OR IGNORE INTO port_attributes "
-                "(port_id, attr_kind, attr_value, is_negated) VALUES (?, ?, ?, ?)",
-                (new_port_id, "via_copyfacefrom", reference_name, False),
-            )
-            summary_inherited += 1
-        summary_resolved += 1
-
-    return CopyFaceFromSummary(
-        carriers=len(carriers),
-        resolved=summary_resolved,
-        inherited_ports=summary_inherited,
-        unresolved=summary_unresolved,
-    )
-
-
 def import_cards_folder(
     conn: sqlite3.Connection,
     folder: str | Path,
@@ -788,7 +677,7 @@ def import_cards_folder(
     # carrier whose .txt sorts before its reference's .txt would fail
     # if we attempted resolution per-card during the first pass.
     with conn:
-        cff_summary = resolve_copy_face_from_references(conn)
+        cff_summary = resolve_copy_face_from_references(conn, _PORT_COLUMNS)
     log.info(
         "CopyFaceFrom resolution: %d carriers, %d/%d resolved (%d ports inherited)",
         cff_summary.carriers,

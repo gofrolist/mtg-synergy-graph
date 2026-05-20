@@ -23,6 +23,11 @@ for the full design (Q1-Q5 + v1 recommendations).
   occurrences are ignored defensively.
 - **Schema extension**: new `cards.copy_face_from TEXT` column so the
   second pass can find every carrier without re-parsing.
+  **Re-import required for legacy DBs**: `schema.sql` uses
+  `CREATE TABLE IF NOT EXISTS`, so existing `data/synergy.db` files
+  miss the column. Rebuild via `uv run python scripts/import_cardsfolder.py`
+  before running anything that calls `import_card`. Test DBs are
+  unaffected — they use a freshly-opened schema via `open_db()`.
 - **Importer extension (two-pass)**: after every `.txt` is imported,
   `resolve_copy_face_from_references(conn)` iterates carriers, copies
   every referenced-card `card_ports` row onto the carrier, and tags
