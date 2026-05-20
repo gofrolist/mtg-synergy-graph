@@ -132,6 +132,10 @@ _LINE_DISPATCH: tuple[tuple[str, str, int, str], ...] = (
     ("DeckHints:", "deck_hints", 10, "deck_hints"),
     ("DeckNeeds:", "deck_needs", 10, "deck_hints"),
     ("DeckHas:", "deck_has", 8, "deck_hints"),
+    # `AlternateMode:Prepare` marks a card whose back face is a stored
+    # spell castable when the front-face creature is prepared. Captured
+    # here so the importer can emit a synthetic AlternateMode port.
+    ("AlternateMode:", "alternate_mode", 14, "scalar"),
 )
 
 #: Map of ability prefixes (``T:``/``A:``/``S:``/``R:``) to the kind label
