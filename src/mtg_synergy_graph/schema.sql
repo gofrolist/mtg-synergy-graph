@@ -311,7 +311,7 @@ CREATE TABLE IF NOT EXISTS card_embeddings (
 -- card_embeddings_config: KV store for EmbeddingConfigInputs + derived
 -- config_hash (plan 2026-04-23-003 Unit 2). Keys include
 -- token_format_version, svd_dims, min_df, vectorizer_version,
--- port_signature_version, config_hash. The config_hash row gates
+-- vocab_version, config_hash. The config_hash row gates
 -- verify_current_or_raise in embeddings.config; individual input rows
 -- are written for human diagnostics.
 -- ---------------------------------------------------------------------------

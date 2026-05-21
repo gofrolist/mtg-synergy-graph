@@ -144,9 +144,9 @@ def test_build_writes_config_hash_and_per_field_rows(tmp_path: Path) -> None:
         assert rows["svd_dims"] == "128"
         assert rows["min_df"] == "2"
         assert rows["vectorizer_version"] == "1"
-        # port_signature_version tracks VOCAB_VERSION (FU follow-on) so a
+        # vocab_version tracks VOCAB_VERSION (FU follow-on) so a
         # vocabulary bump invalidates stored embeddings.
-        assert rows["port_signature_version"] == port_vocab.VOCAB_VERSION
+        assert rows["vocab_version"] == port_vocab.VOCAB_VERSION
         assert "built_at" in rows
     finally:
         conn.close()

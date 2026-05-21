@@ -75,7 +75,7 @@ class OracleConfigInputs(NamedTuple):
     forge_sha: str
     ppmi_smoothing_k: float
     min_decks_count: int
-    port_signature_version: str
+    vocab_version: str
     java_method_id: str
 ```
 

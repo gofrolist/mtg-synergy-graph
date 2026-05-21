@@ -111,7 +111,7 @@ def write_vectors(
             ("svd_dims", str(inputs.svd_dims)),
             ("min_df", str(inputs.min_df)),
             ("vectorizer_version", str(inputs.vectorizer_version)),
-            ("port_signature_version", inputs.port_signature_version),
+            ("vocab_version", inputs.vocab_version),
             ("built_at", now_iso),
         ]
         conn.executemany(

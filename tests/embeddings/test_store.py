@@ -65,7 +65,7 @@ def _make_inputs() -> emb_config.EmbeddingConfigInputs:
         svd_dims=128,
         min_df=2,
         vectorizer_version=1,
-        port_signature_version="v1",
+        vocab_version="v1",
     )
 
 
@@ -350,7 +350,7 @@ def test_write_vectors_populates_config_kv_and_verify_passes(tmp_path: Path) -> 
         assert stored["svd_dims"] == "128"
         assert stored["min_df"] == "2"
         assert stored["vectorizer_version"] == "1"
-        assert stored["port_signature_version"] == "v1"
+        assert stored["vocab_version"] == "v1"
         assert "built_at" in stored
 
         # Post-write, the strict verifier passes.

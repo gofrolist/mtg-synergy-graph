@@ -68,12 +68,12 @@ class EmbeddingConfigInputs(NamedTuple):
     #: algorithmic change to the SVD / normalization pipeline.
     vectorizer_version: int
 
-    #: Version of the port-signature vocabulary
+    #: Version of the port-graph vocabulary
     #: (``port_graph.vocabulary.VOCAB_VERSION``). Bumped when the
     #: canonical ``node_kind`` / ``subkind`` mapping changes — since
     #: downstream rules read ``port_nodes``, a drift there can alter
     #: the structural features the vectorizer observes.
-    port_signature_version: str
+    vocab_version: str
 
 
 class EmbeddingConfigError(RuntimeError):
@@ -120,7 +120,7 @@ _REQUIRED_CONFIG_KEYS: tuple[str, ...] = (
     "svd_dims",
     "min_df",
     "vectorizer_version",
-    "port_signature_version",
+    "vocab_version",
 )
 
 
@@ -140,8 +140,8 @@ def get_embedding_config_inputs() -> EmbeddingConfigInputs:
 
     ``token_format_version`` comes from
     ``embeddings.vectorizer.TOKEN_FORMAT_VERSION`` (single source of
-    truth for the emitted grammar). ``port_signature_version`` comes
-    from ``port_graph.vocabulary.VOCAB_VERSION`` (so a vocabulary bump
+    truth for the emitted grammar). ``vocab_version`` comes from
+    ``port_graph.vocabulary.VOCAB_VERSION`` (so a vocabulary bump
     invalidates stored embeddings). ``svd_dims`` / ``min_df`` /
     ``vectorizer_version`` are fixed at the current defaults chosen in
     plan D1 and Unit 1.
@@ -160,7 +160,7 @@ def get_embedding_config_inputs() -> EmbeddingConfigInputs:
         svd_dims=_DEFAULT_SVD_DIMS,
         min_df=_DEFAULT_MIN_DF,
         vectorizer_version=1,
-        port_signature_version=port_vocab.VOCAB_VERSION,
+        vocab_version=port_vocab.VOCAB_VERSION,
     )
 
 
@@ -203,7 +203,7 @@ def read_stored_config(
             svd_dims=int(rows["svd_dims"]),
             min_df=int(rows["min_df"]),
             vectorizer_version=int(rows["vectorizer_version"]),
-            port_signature_version=rows["port_signature_version"],
+            vocab_version=rows["vocab_version"],
         )
     except (TypeError, ValueError) as exc:
         raise EmbeddingConfigCorruptError(

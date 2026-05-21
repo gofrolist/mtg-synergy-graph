@@ -30,7 +30,7 @@ CREATE INDEX IF NOT EXISTS idx_forge_precon_ppmi_b ON forge_precon_ppmi(port_sig
 -- ---------------------------------------------------------------------------
 -- oracle_config — flexible KV store for OracleConfigInputs (Unit 5).
 -- Keys include: forge_sha, ppmi_smoothing_k, min_decks_count,
--- port_signature_version, java_method_id, config_hash, built_at.
+-- vocab_version, java_method_id, config_hash, built_at.
 -- The config_hash row gates refuse-to-run in strict consumers.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS oracle_config (

@@ -32,7 +32,7 @@ def test_hash_is_deterministic_across_calls() -> None:
         forge_sha="abcdef0123456789abcdef0123456789abcdef01",
         ppmi_smoothing_k=0.5,
         min_decks_count=3,
-        port_signature_version="2",
+        vocab_version="2",
         java_method_id="CardRanker.getScoreForDeckHints@forge-x",
     )
     h1 = fo_config.compute_oracle_hash(inputs)
@@ -47,14 +47,14 @@ def test_hash_flips_when_forge_sha_changes() -> None:
         forge_sha="abcdef0123456789abcdef0123456789abcdef01",
         ppmi_smoothing_k=0.5,
         min_decks_count=3,
-        port_signature_version="2",
+        vocab_version="2",
         java_method_id="m",
     )
     different = fo_config.OracleConfigInputs(
         forge_sha="00000000000000000000000000000000000000ff",
         ppmi_smoothing_k=0.5,
         min_decks_count=3,
-        port_signature_version="2",
+        vocab_version="2",
         java_method_id="m",
     )
     assert fo_config.compute_oracle_hash(base) != fo_config.compute_oracle_hash(different)
@@ -65,7 +65,7 @@ def test_hash_flips_when_smoothing_k_changes() -> None:
         forge_sha="a" * 40,
         ppmi_smoothing_k=0.5,
         min_decks_count=3,
-        port_signature_version="2",
+        vocab_version="2",
         java_method_id="m",
     )
     bumped = base._replace(ppmi_smoothing_k=1.0)
@@ -77,7 +77,7 @@ def test_hash_flips_when_min_decks_count_changes() -> None:
         forge_sha="a" * 40,
         ppmi_smoothing_k=0.5,
         min_decks_count=3,
-        port_signature_version="2",
+        vocab_version="2",
         java_method_id="m",
     )
     bumped = base._replace(min_decks_count=5)
@@ -89,10 +89,10 @@ def test_hash_flips_when_vocab_version_changes() -> None:
         forge_sha="a" * 40,
         ppmi_smoothing_k=0.5,
         min_decks_count=3,
-        port_signature_version="2",
+        vocab_version="2",
         java_method_id="m",
     )
-    bumped = base._replace(port_signature_version="3")
+    bumped = base._replace(vocab_version="3")
     assert fo_config.compute_oracle_hash(base) != fo_config.compute_oracle_hash(bumped)
 
 
@@ -101,7 +101,7 @@ def test_hash_flips_when_java_method_id_changes() -> None:
         forge_sha="a" * 40,
         ppmi_smoothing_k=0.5,
         min_decks_count=3,
-        port_signature_version="2",
+        vocab_version="2",
         java_method_id="CardRanker.getScoreForDeckHints@forge-a",
     )
     bumped = base._replace(java_method_id="CardRanker.getScoreForDeckHints@forge-b")
@@ -125,7 +125,7 @@ def _stable_inputs(**overrides: object) -> fo_config.OracleConfigInputs:
         "forge_sha": "a" * 40,
         "ppmi_smoothing_k": 0.5,
         "min_decks_count": 3,
-        "port_signature_version": "2",
+        "vocab_version": "2",
         "java_method_id": "m",
     }
     base.update(overrides)
@@ -336,7 +336,7 @@ def test_build_writes_config_hash_and_inputs(tmp_path: Path) -> None:
     assert stored["ppmi_smoothing_k"] == str(DEFAULT_SMOOTHING_K)
     assert stored["min_decks_count"] == "3"
     assert "java_method_id" in stored
-    assert "port_signature_version" in stored
+    assert "vocab_version" in stored
     assert "forge_sha" in stored
     # Forge SHA value is current pinned SHA (live test — tests/test_forge_oracle_version_pin.py
     # already asserts pin matches HEAD, so we can assert shape here).

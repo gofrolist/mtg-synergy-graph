@@ -93,7 +93,7 @@ def verify_current_or_raise(conn, current_code_inputs):
         svd_dims=int(stored["svd_dims"]),
         min_df=int(stored["min_df"]),
         vectorizer_version=int(stored["vectorizer_version"]),
-        port_signature_version=stored["port_signature_version"],
+        vocab_version=stored["vocab_version"],
     )
 
     # Step 2: Internal consistency check — does the DB agree with itself?

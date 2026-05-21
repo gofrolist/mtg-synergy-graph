@@ -53,7 +53,7 @@ class OracleConfigInputs(NamedTuple):
     #: from ``port_graph``). Bumped when the canonical node_kind /
     #: subkind mapping changes — forces oracle rebuild so subkinds in
     #: the table match current projection.
-    port_signature_version: str
+    vocab_version: str
 
     #: Identifier of the Forge Java method the pair scorer is ported
     #: from, with a Forge SHA suffix. Example:
@@ -102,7 +102,7 @@ _REQUIRED_ORACLE_CONFIG_KEYS: tuple[str, ...] = (
     "forge_sha",
     "ppmi_smoothing_k",
     "min_decks_count",
-    "port_signature_version",
+    "vocab_version",
     "java_method_id",
 )
 
@@ -128,7 +128,7 @@ def get_oracle_config_inputs(
 
     ``forge_sha`` comes from the live ``data/forge/`` HEAD (the build
     is refusing-to-run elsewhere if the pin has drifted).
-    ``port_signature_version`` comes from ``port_graph.vocabulary``.
+    ``vocab_version`` comes from ``port_graph.vocabulary``.
     ``java_method_id`` is fixed by the port's source (Unit 3 chose
     ``CardRanker.getScoreForDeckHints``).
 
@@ -145,7 +145,7 @@ def get_oracle_config_inputs(
         forge_sha=fo_version.read_current_forge_sha(),
         ppmi_smoothing_k=float(ppmi_smoothing_k),
         min_decks_count=int(min_decks_count),
-        port_signature_version=port_vocab.VOCAB_VERSION,
+        vocab_version=port_vocab.VOCAB_VERSION,
         java_method_id=(
             # Keep the method id stable: CardRanker.getScoreForDeckHints is
             # the Unit 3 port target. Forge SHA suffix distinguishes method
@@ -167,7 +167,7 @@ def write_oracle_config(
         ("forge_sha", inputs.forge_sha),
         ("ppmi_smoothing_k", str(inputs.ppmi_smoothing_k)),
         ("min_decks_count", str(inputs.min_decks_count)),
-        ("port_signature_version", inputs.port_signature_version),
+        ("vocab_version", inputs.vocab_version),
         ("java_method_id", inputs.java_method_id),
     ]
     conn.executemany(
@@ -215,7 +215,7 @@ def read_stored_oracle_config(
             forge_sha=rows["forge_sha"],
             ppmi_smoothing_k=float(rows["ppmi_smoothing_k"]),
             min_decks_count=int(rows["min_decks_count"]),
-            port_signature_version=rows["port_signature_version"],
+            vocab_version=rows["vocab_version"],
             java_method_id=rows["java_method_id"],
         )
     except (TypeError, ValueError) as exc:

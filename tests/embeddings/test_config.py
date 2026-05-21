@@ -35,7 +35,7 @@ def _make_inputs(**overrides: object) -> emb_config.EmbeddingConfigInputs:
         "svd_dims": 128,
         "min_df": 2,
         "vectorizer_version": 1,
-        "port_signature_version": "v1",
+        "vocab_version": "v1",
     }
     base.update(overrides)
     return emb_config.EmbeddingConfigInputs(**base)  # type: ignore[arg-type]
@@ -67,7 +67,7 @@ def _populate_kv(
         ("svd_dims", str(inputs.svd_dims)),
         ("min_df", str(inputs.min_df)),
         ("vectorizer_version", str(inputs.vectorizer_version)),
-        ("port_signature_version", inputs.port_signature_version),
+        ("vocab_version", inputs.vocab_version),
     ]
     conn.executemany(
         "INSERT INTO card_embeddings_config(key, value) VALUES (?, ?)",
@@ -114,9 +114,9 @@ def test_hash_flips_when_vectorizer_version_changes() -> None:
     assert emb_config.compute_embedding_hash(base) != emb_config.compute_embedding_hash(bumped)
 
 
-def test_hash_flips_when_port_signature_version_changes() -> None:
+def test_hash_flips_when_vocab_version_changes() -> None:
     base = _make_inputs()
-    bumped = base._replace(port_signature_version="v2")
+    bumped = base._replace(vocab_version="v2")
     assert emb_config.compute_embedding_hash(base) != emb_config.compute_embedding_hash(bumped)
 
 
@@ -133,10 +133,10 @@ def test_hash_stable_across_positional_vs_kwargs_construction() -> None:
         128,  # svd_dims
         2,  # min_df
         1,  # vectorizer_version
-        "v1",  # port_signature_version
+        "v1",  # vocab_version
     )
     kwargs = emb_config.EmbeddingConfigInputs(
-        port_signature_version="v1",
+        vocab_version="v1",
         vectorizer_version=1,
         min_df=2,
         svd_dims=128,
@@ -180,6 +180,45 @@ def test_verify_raises_stale_when_stored_inputs_diverge_from_code(tmp_path: Path
         assert "min_df" in message
         assert "stored=3" in message
         assert "current=2" in message
+        assert "uv run scripts/build_embeddings.py" in message
+    finally:
+        conn.close()
+
+
+def test_verify_raises_stale_when_stored_vocab_version_is_v2(
+    tmp_path: Path,
+) -> None:
+    """Specific guard for the VOCAB v2 → v3 bump (commit 9677097).
+
+    Wiring ``EmbeddingConfigInputs.vocab_version`` to
+    ``port_graph.vocabulary.VOCAB_VERSION`` was added so that an
+    embedding artifact built under VOCAB v2 is rejected when current
+    code is on VOCAB v3. The other tests in this file use synthetic
+    ``"v1"`` / ``"v2"`` prefixed values, which don't exercise the
+    bare-integer format real stored DBs hold. This test pins the
+    real-world rejection path: stored value ``"2"``, current code at
+    ``VOCAB_VERSION="3"``, expect Stale with ``vocab_version``
+    named.
+    """
+    from mtg_synergy_graph.port_graph import vocabulary as port_vocab
+
+    # Skip if a future VOCAB bump lands on "2" — the simulated v2-stored
+    # artifact would no longer be stale. (The bump is part of any such
+    # change's own re-pin work, which is what we're guarding against.)
+    if port_vocab.VOCAB_VERSION == "2":
+        pytest.skip("VOCAB_VERSION reverted to 2; v2→current-code rejection not applicable")
+
+    conn = _make_kv_db(tmp_path)
+    try:
+        stored_inputs = _make_inputs(vocab_version="2")
+        _populate_kv(conn, stored_inputs)
+        current_code_inputs = _make_inputs(vocab_version=port_vocab.VOCAB_VERSION)
+        with pytest.raises(emb_config.EmbeddingConfigStaleError) as exc_info:
+            emb_config.verify_current_or_raise(conn, current_code_inputs)
+        message = str(exc_info.value)
+        assert "vocab_version" in message
+        assert "stored='2'" in message
+        assert f"current='{port_vocab.VOCAB_VERSION}'" in message
         assert "uv run scripts/build_embeddings.py" in message
     finally:
         conn.close()
@@ -305,6 +344,6 @@ def test_get_embedding_config_inputs_matches_vectorizer_version() -> None:
     assert inputs.svd_dims == 128
     assert inputs.min_df == 2
     assert inputs.vectorizer_version == 1
-    # port_signature_version now tracks VOCAB_VERSION so a vocabulary bump
+    # vocab_version now tracks VOCAB_VERSION so a vocabulary bump
     # invalidates stored embeddings (FU-follow-on from Phase A).
-    assert inputs.port_signature_version == port_vocab.VOCAB_VERSION
+    assert inputs.vocab_version == port_vocab.VOCAB_VERSION
