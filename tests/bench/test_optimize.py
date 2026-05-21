@@ -1717,8 +1717,8 @@ class TestHandleOptimize:
 
         args = argparse.Namespace(
             fixture=str(fixture_path),
-            db="data/synergy.db",
-            edhrec_db="data/tags.db",
+            db=str(tmp_path / "synergy.db"),
+            edhrec_db=str(tmp_path / "tags.db"),
             max_sweeps=1,
             seed=42,
             no_self_test=True,
@@ -1755,8 +1755,8 @@ class TestHandleOptimize:
 
         args = argparse.Namespace(
             fixture=str(fixture_path),
-            db="data/synergy.db",
-            edhrec_db="data/tags.db",
+            db=str(tmp_path / "synergy.db"),
+            edhrec_db=str(tmp_path / "tags.db"),
             max_sweeps=1,
             seed=42,
             no_self_test=True,
@@ -1788,8 +1788,8 @@ class TestHandleOptimize:
 
         args = argparse.Namespace(
             fixture=str(fixture_path),
-            db="data/synergy.db",
-            edhrec_db="data/tags.db",
+            db=str(tmp_path / "synergy.db"),
+            edhrec_db=str(tmp_path / "tags.db"),
             max_sweeps=1,
             seed=42,
             no_self_test=True,
@@ -1841,8 +1841,8 @@ class TestHandleOptimize:
 
         args = argparse.Namespace(
             fixture=_CANONICAL_FIXTURE,  # exactly the canonical default
-            db="data/synergy.db",
-            edhrec_db="data/tags.db",
+            db=str(tmp_path / "synergy.db"),
+            edhrec_db=str(tmp_path / "tags.db"),
             max_sweeps=1,
             seed=42,
             no_self_test=True,
@@ -1876,8 +1876,8 @@ class TestHandleOptimize:
 
         args = argparse.Namespace(
             fixture=str(explicit_path),
-            db="data/synergy.db",
-            edhrec_db="data/tags.db",
+            db=str(tmp_path / "synergy.db"),
+            edhrec_db=str(tmp_path / "tags.db"),
             max_sweeps=1,
             seed=42,
             no_self_test=True,
@@ -2031,8 +2031,8 @@ class TestHandleOptimize:
 
         args = argparse.Namespace(
             fixture=str(fixture_path),
-            db="data/synergy.db",
-            edhrec_db="data/tags.db",
+            db=str(tmp_path / "synergy.db"),
+            edhrec_db=str(tmp_path / "tags.db"),
             max_sweeps=1,
             seed=42,
             no_self_test=True,
