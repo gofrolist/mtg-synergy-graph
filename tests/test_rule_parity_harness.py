@@ -1,0 +1,172 @@
+"""Tests for ``tests/_parity.py`` rule-level parity harness (issue #16).
+
+These tests prove the harness correctly detects parity (and parity
+violations) so a future migrator can rely on a green run BEFORE
+deleting a Python helper. The synthetic helpers below mirror the
+``cascade_tribal`` declarative rule on a tiny fixture; one is faithful,
+two are intentionally broken to exercise the error path.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from collections.abc import Sequence
+from pathlib import Path
+
+import pytest
+
+from mtg_synergy_graph.complement_rules._interpreter_cache import clear_interpreter_cache
+from mtg_synergy_graph.complement_rules.core import PortComplement
+from mtg_synergy_graph.db import open_db
+from mtg_synergy_graph.graph_engine import clear_ports_cache
+from mtg_synergy_graph.port_graph.rules_schema import seed_rules_db
+from tests._parity import assert_rule_parity
+
+
+@pytest.fixture(autouse=True)
+def _reset_caches() -> None:
+    clear_ports_cache()
+    clear_interpreter_cache()
+
+
+def _seed_card(conn: sqlite3.Connection, name: str) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO cards (name, card_types, subtypes, cmc, "
+        "color_identity, edhrec_rank, legal_commander) "
+        "VALUES (?, 'Creature', '', 4, 'G', 1000, 1)",
+        (name,),
+    )
+
+
+def _seed_keyword_port(conn: sqlite3.Connection, card_name: str, keyword: str) -> None:
+    conn.execute(
+        "INSERT INTO card_ports (card_name, port_type, event_class, raw_line) VALUES (?, 'keyword', ?, ?)",
+        (card_name, keyword, f"K:{keyword}"),
+    )
+
+
+def _build_cascade_fixture(conn: sqlite3.Connection) -> None:
+    """Synthetic fixture: 1 Cascade commander + 2 Cascade partners +
+    1 commander-self + 1 unrelated card.
+
+    The interpreter should emit ``cascade_tribal`` complements for the
+    two non-self Cascade partners, and nothing for the unrelated card.
+    """
+    for name in ("Cmdr", "PartnerA", "PartnerB", "Unrelated"):
+        _seed_card(conn, name)
+        if name != "Unrelated":
+            _seed_keyword_port(conn, name, "Cascade")
+    seed_rules_db(conn)
+    conn.commit()
+
+
+def _faithful_cascade_helper(conn: sqlite3.Connection, commanders: Sequence[str]) -> list[PortComplement]:
+    """Reference Python implementation of the declarative
+    ``cascade_tribal`` rule. Returns the same PortComplement set the
+    interpreter does on the same DB.
+    """
+    cmdr_set = set(commanders)
+    cmdr_has_cascade = bool(
+        conn.execute(
+            "SELECT 1 FROM card_ports WHERE card_name IN (?) AND port_type='keyword' AND event_class='Cascade' LIMIT 1",
+            (next(iter(cmdr_set)),),
+        ).fetchone()
+    )
+    if not cmdr_has_cascade:
+        return []
+    partners = [
+        row[0]
+        for row in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports WHERE port_type='keyword' AND event_class='Cascade'"
+        ).fetchall()
+        if row[0] not in cmdr_set
+    ]
+    return [
+        PortComplement(
+            rule_id="cascade_tribal",
+            direction="synergy",
+            candidate=p,
+            cmdr_event="cascade_tribal",
+            cand_event="same_keyword_partner",
+        )
+        for p in partners
+    ]
+
+
+def _missing_partner_helper(conn: sqlite3.Connection, commanders: Sequence[str]) -> list[PortComplement]:
+    """Buggy helper: drops the first partner. Should fail parity."""
+    return _faithful_cascade_helper(conn, commanders)[1:]
+
+
+def _extra_phantom_helper(conn: sqlite3.Connection, commanders: Sequence[str]) -> list[PortComplement]:
+    """Buggy helper: emits an extra PortComplement for a non-existent
+    partner. Should fail parity."""
+    return [
+        *_faithful_cascade_helper(conn, commanders),
+        PortComplement(
+            rule_id="cascade_tribal",
+            direction="synergy",
+            candidate="Phantom",
+            cmdr_event="cascade_tribal",
+            cand_event="same_keyword_partner",
+        ),
+    ]
+
+
+def test_parity_passes_when_helper_mirrors_interpreter(tmp_path: Path) -> None:
+    """A faithful helper produces the same PortComplement set as the
+    interpreter — ``assert_rule_parity`` must not raise."""
+    conn = open_db(tmp_path / "synergy.db")
+    try:
+        _build_cascade_fixture(conn)
+        assert_rule_parity(
+            conn,
+            ["Cmdr"],
+            rule_id="cascade_tribal",
+            py_helper=_faithful_cascade_helper,
+        )
+    finally:
+        conn.close()
+
+
+def test_parity_fails_when_helper_misses_partner(tmp_path: Path) -> None:
+    """A helper that drops a partner the interpreter finds must fail
+    with a message naming the missing row."""
+    conn = open_db(tmp_path / "synergy.db")
+    try:
+        _build_cascade_fixture(conn)
+        with pytest.raises(AssertionError) as exc_info:
+            assert_rule_parity(
+                conn,
+                ["Cmdr"],
+                rule_id="cascade_tribal",
+                py_helper=_missing_partner_helper,
+            )
+        msg = str(exc_info.value)
+        assert "cascade_tribal" in msg
+        # The interpreter has rows the helper omitted.
+        assert "In interpreter but not in Python helper" in msg
+        # And the missing row's name must appear in the error.
+        assert "PartnerA" in msg or "PartnerB" in msg
+    finally:
+        conn.close()
+
+
+def test_parity_fails_when_helper_emits_phantom_row(tmp_path: Path) -> None:
+    """A helper that emits a partner the interpreter does not find
+    must fail with a message naming the phantom row."""
+    conn = open_db(tmp_path / "synergy.db")
+    try:
+        _build_cascade_fixture(conn)
+        with pytest.raises(AssertionError) as exc_info:
+            assert_rule_parity(
+                conn,
+                ["Cmdr"],
+                rule_id="cascade_tribal",
+                py_helper=_extra_phantom_helper,
+            )
+        msg = str(exc_info.value)
+        assert "In Python helper but not in interpreter" in msg
+        assert "Phantom" in msg
+    finally:
+        conn.close()

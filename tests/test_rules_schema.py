@@ -188,7 +188,6 @@ def test_seed_round_trips_one_rule(tmp_path: Path) -> None:
                     "filter_group": "",
                     "cmdr_event": "cascade_tribal",
                     "cand_event": "same_keyword_partner",
-                    "weight_hint": 2.0,
                     "active": 1,
                 },
             ],
@@ -203,7 +202,6 @@ def test_seed_round_trips_one_rule(tmp_path: Path) -> None:
         assert row.family == "tribal"
         assert row.cmdr_event == "cascade_tribal"
         assert row.cand_event == "same_keyword_partner"
-        assert row.weight_hint == pytest.approx(2.0)
         assert row.active == 1
         # JSON columns survive as strings that re-parse.
         assert json.loads(row.gate_predicate)["op"] == "has_port"
@@ -228,7 +226,6 @@ def test_seed_is_idempotent(tmp_path: Path) -> None:
                     "filter_group": "",
                     "cmdr_event": "r1",
                     "cand_event": "r1",
-                    "weight_hint": 1.0,
                     "active": 1,
                 },
             ],
@@ -258,7 +255,6 @@ def test_seed_rejects_invalid_predicate_without_writing(tmp_path: Path) -> None:
                     "filter_group": "",
                     "cmdr_event": "x",
                     "cand_event": "y",
-                    "weight_hint": 1.0,
                     "active": 1,
                 },
                 {
@@ -270,7 +266,6 @@ def test_seed_rejects_invalid_predicate_without_writing(tmp_path: Path) -> None:
                     "filter_group": "",
                     "cmdr_event": "x",
                     "cand_event": "y",
-                    "weight_hint": 1.0,
                     "active": 1,
                 },
             ],
@@ -301,7 +296,6 @@ def test_load_filters_inactive_rules(tmp_path: Path) -> None:
                     "filter_group": "",
                     "cmdr_event": "x",
                     "cand_event": "y",
-                    "weight_hint": 1.0,
                     "active": 1,
                 },
                 {
@@ -313,7 +307,6 @@ def test_load_filters_inactive_rules(tmp_path: Path) -> None:
                     "filter_group": "",
                     "cmdr_event": "x",
                     "cand_event": "y",
-                    "weight_hint": 1.0,
                     "active": 0,
                 },
             ],
@@ -342,41 +335,11 @@ def test_seed_rejects_missing_predicate_column(tmp_path: Path) -> None:
                     "filter_group": "",
                     "cmdr_event": "x",
                     "cand_event": "y",
-                    "weight_hint": 1.0,
                     "active": 1,
                 },
             ],
         )
         with pytest.raises(ValueError, match="commander_port_predicate"):
-            seed_rules_db(conn, seed_path)
-        assert load_rules_from_db(conn) == []
-    finally:
-        conn.close()
-
-
-def test_seed_rejects_non_numeric_weight_hint(tmp_path: Path) -> None:
-    """A seed row with a non-numeric ``weight_hint`` raises ValueError
-    mentioning the rule_id so the operator can locate the bad row."""
-    conn = _fresh_db(tmp_path)
-    try:
-        seed_path = _write_seed(
-            tmp_path,
-            [
-                {
-                    "rule_id": "bad_weight_rule",
-                    "family": "test",
-                    "gate_predicate": {"op": "has_port", "port_type": "keyword"},
-                    "commander_port_predicate": {"op": "has_port", "port_type": "keyword"},
-                    "candidate_port_predicate": {"op": "has_port", "port_type": "keyword"},
-                    "filter_group": "",
-                    "cmdr_event": "x",
-                    "cand_event": "y",
-                    "weight_hint": "not-a-number",
-                    "active": 1,
-                },
-            ],
-        )
-        with pytest.raises(ValueError, match="bad_weight_rule"):
             seed_rules_db(conn, seed_path)
         assert load_rules_from_db(conn) == []
     finally:
@@ -406,7 +369,6 @@ def test_tribal_family_rejects_mismatched_event_class(tmp_path: Path) -> None:
                     "filter_group": "",
                     "cmdr_event": "x",
                     "cand_event": "y",
-                    "weight_hint": 2.0,
                     "active": 1,
                 },
             ],

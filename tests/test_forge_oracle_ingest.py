@@ -12,6 +12,7 @@ import pytest
 
 from mtg_synergy_graph.db import open_db
 from mtg_synergy_graph.forge_oracle import ingest
+from mtg_synergy_graph.forge_oracle.ppmi import DEFAULT_SMOOTHING_K
 
 
 def _write_dck(dir_path: Path, name: str, main_cards: list[str], commander: str | None = None) -> Path:
@@ -89,7 +90,6 @@ def test_build_produces_ppmi_rows(tmp_path: Path) -> None:
         target_db_path=target_db,
         deck_dirs=[decks_dir],
         min_decks_count=3,
-        smoothing_k=0.5,
     )
     assert stats.decks_parsed == 6
     assert stats.ppmi_rows_written > 0
@@ -128,7 +128,6 @@ def test_build_skips_pairs_below_threshold(tmp_path: Path) -> None:
         target_db_path=target_db,
         deck_dirs=[decks_dir],
         min_decks_count=3,
-        smoothing_k=0.5,
     )
     assert stats.ppmi_rows_written == 0
 
@@ -147,7 +146,6 @@ def test_build_is_idempotent(tmp_path: Path) -> None:
         target_db_path=target_db,
         deck_dirs=[decks_dir],
         min_decks_count=3,
-        smoothing_k=0.5,
     )
     conn1 = sqlite3.connect(target_db)
     rows1 = sorted(
@@ -160,7 +158,6 @@ def test_build_is_idempotent(tmp_path: Path) -> None:
         target_db_path=target_db,
         deck_dirs=[decks_dir],
         min_decks_count=3,
-        smoothing_k=0.5,
     )
     conn2 = sqlite3.connect(target_db)
     rows2 = sorted(
@@ -186,7 +183,6 @@ def test_build_unknown_cards_counted_but_no_failure(tmp_path: Path) -> None:
         target_db_path=target_db,
         deck_dirs=[decks_dir],
         min_decks_count=1,  # relax so we can observe rows
-        smoothing_k=0.0,
     )
     assert stats.unknown_card_names >= 2  # "Nonexistent Card", "Another Ghost"
     assert stats.decks_parsed == 3
@@ -215,7 +211,6 @@ def test_build_preserves_existing_db_on_failure(tmp_path: Path, monkeypatch: pyt
         target_db_path=target_db,
         deck_dirs=[decks_dir],
         min_decks_count=3,
-        smoothing_k=0.5,
     )
     first_mtime = target_db.stat().st_mtime_ns
     first_size = target_db.stat().st_size
@@ -233,7 +228,6 @@ def test_build_preserves_existing_db_on_failure(tmp_path: Path, monkeypatch: pyt
             target_db_path=target_db,
             deck_dirs=[decks_dir],
             min_decks_count=3,
-            smoothing_k=0.5,
         )
 
     # Prior DB still in place — atomic rename means the temp file was discarded
@@ -255,6 +249,43 @@ def test_build_creates_target_parent_dir(tmp_path: Path) -> None:
         target_db_path=target_db,
         deck_dirs=[decks_dir],
         min_decks_count=1,
-        smoothing_k=0.5,
     )
     assert target_db.is_file()
+
+
+def test_build_default_smoothing_produces_positive_ppmi_rows(tmp_path: Path) -> None:
+    """Regression guard: the *default* build path must yield non-empty,
+    non-negative PPMI rows.
+
+    A previous default of ``smoothing_k=0.5`` masked the vocab-size
+    swamping issue documented in the commit log of ac38957 — every PPMI
+    row collapsed to zero on real corpora. Tests that hardcoded
+    ``smoothing_k=0.5`` would have passed under either default, so this
+    test omits the override and asserts the default produces meaningful
+    output. If a future change restores a broken default, this fails.
+    """
+    synergy_db = _make_synergy_db(tmp_path)
+    decks_dir = tmp_path / "decks"
+    for i in range(3):
+        _write_dck(decks_dir, f"deck_{i}", ["Sac Outlet", "Death Trigger"])
+
+    target_db = tmp_path / "forge_oracle.db"
+    stats = ingest.build_forge_oracle_db(
+        synergy_db_path=synergy_db,
+        target_db_path=target_db,
+        deck_dirs=[decks_dir],
+        min_decks_count=3,
+    )
+    assert stats.ppmi_rows_written > 0, (
+        f"Default smoothing_k={DEFAULT_SMOOTHING_K} produced zero PPMI rows — smoothing default may be broken."
+    )
+
+    conn = sqlite3.connect(target_db)
+    try:
+        rows = conn.execute("SELECT ppmi FROM forge_precon_ppmi WHERE ppmi > 0.0").fetchall()
+    finally:
+        conn.close()
+    assert rows, (
+        f"Default smoothing_k={DEFAULT_SMOOTHING_K} produced only zero PPMI "
+        "values — divergence collapse, smoothing default likely broken."
+    )

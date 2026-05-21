@@ -20,6 +20,7 @@ import pytest
 
 from mtg_synergy_graph.forge_oracle import config as fo_config
 from mtg_synergy_graph.forge_oracle import ingest
+from mtg_synergy_graph.forge_oracle.ppmi import DEFAULT_SMOOTHING_K
 
 # ---------------------------------------------------------------------------
 # compute_oracle_hash — determinism + sensitivity
@@ -83,7 +84,7 @@ def test_hash_flips_when_min_decks_count_changes() -> None:
     assert fo_config.compute_oracle_hash(base) != fo_config.compute_oracle_hash(bumped)
 
 
-def test_hash_flips_when_port_signature_version_changes() -> None:
+def test_hash_flips_when_vocab_version_changes() -> None:
     base = fo_config.OracleConfigInputs(
         forge_sha="a" * 40,
         ppmi_smoothing_k=0.5,
@@ -112,57 +113,163 @@ def test_hash_flips_when_java_method_id_changes() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_verify_passes_when_hash_matches(tmp_path: Path) -> None:
+def _open_kv_db(tmp_path: Path) -> sqlite3.Connection:
     db_path = tmp_path / "oracle.db"
     conn = sqlite3.connect(db_path)
     conn.executescript("CREATE TABLE oracle_config (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
-    inputs = fo_config.OracleConfigInputs(
-        forge_sha="a" * 40,
-        ppmi_smoothing_k=0.5,
-        min_decks_count=3,
-        port_signature_version="2",
-        java_method_id="m",
-    )
-    expected = fo_config.compute_oracle_hash(inputs)
-    conn.execute("INSERT INTO oracle_config(key, value) VALUES ('config_hash', ?)", (expected,))
-    conn.commit()
-
-    fo_config.verify_current_or_raise(conn, inputs)  # no-op on match
-    conn.close()
+    return conn
 
 
-def test_verify_raises_on_stale_hash(tmp_path: Path) -> None:
-    db_path = tmp_path / "oracle.db"
-    conn = sqlite3.connect(db_path)
-    conn.executescript("CREATE TABLE oracle_config (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
-    conn.execute("INSERT INTO oracle_config(key, value) VALUES ('config_hash', 'stale_value')")
-    conn.commit()
-    inputs = fo_config.OracleConfigInputs(
-        forge_sha="a" * 40,
-        ppmi_smoothing_k=0.5,
-        min_decks_count=3,
-        port_signature_version="2",
-        java_method_id="m",
-    )
-    with pytest.raises(fo_config.OracleConfigStaleError, match=r"(?i)rebuild"):
+def _stable_inputs(**overrides: object) -> fo_config.OracleConfigInputs:
+    base: dict[str, object] = {
+        "forge_sha": "a" * 40,
+        "ppmi_smoothing_k": 0.5,
+        "min_decks_count": 3,
+        "port_signature_version": "2",
+        "java_method_id": "m",
+    }
+    base.update(overrides)
+    return fo_config.OracleConfigInputs(**base)  # type: ignore[arg-type]
+
+
+def test_verify_passes_when_stored_matches_current(tmp_path: Path) -> None:
+    """Happy path: full KV rows + correct hash + matching inputs → no raise."""
+    conn = _open_kv_db(tmp_path)
+    try:
+        inputs = _stable_inputs()
+        fo_config.write_oracle_config(conn, inputs)
+        conn.commit()
         fo_config.verify_current_or_raise(conn, inputs)
-    conn.close()
+    finally:
+        conn.close()
 
 
-def test_verify_raises_when_hash_row_missing(tmp_path: Path) -> None:
-    db_path = tmp_path / "oracle.db"
+def test_verify_raises_stale_when_stored_inputs_diverge_from_code(tmp_path: Path) -> None:
+    """Stale: stored inputs are internally consistent but differ from current code.
+
+    Build wrote ``ppmi_smoothing_k=0.5`` and a hash matching that. Code
+    now expects the default (currently 0.0). Staleness check must fire
+    naming the diverging field — not Corrupt, not Missing.
+    """
+    conn = _open_kv_db(tmp_path)
+    try:
+        stored_inputs = _stable_inputs(ppmi_smoothing_k=0.5)
+        fo_config.write_oracle_config(conn, stored_inputs)
+        conn.commit()
+        current_code_inputs = _stable_inputs(ppmi_smoothing_k=DEFAULT_SMOOTHING_K)
+        with pytest.raises(fo_config.OracleConfigStaleError) as exc_info:
+            fo_config.verify_current_or_raise(conn, current_code_inputs)
+        message = str(exc_info.value)
+        assert "ppmi_smoothing_k" in message
+        assert "stored=0.5" in message
+        assert f"current={DEFAULT_SMOOTHING_K}" in message
+        assert "rebuild" in message.lower()
+    finally:
+        conn.close()
+
+
+def test_verify_raises_corrupt_when_stored_hash_contradicts_rows(tmp_path: Path) -> None:
+    """Partial-write simulation: KV rows written but hash not updated."""
+    conn = _open_kv_db(tmp_path)
+    try:
+        inputs = _stable_inputs()
+        fo_config.write_oracle_config(conn, inputs)
+        # Now overwrite the config_hash with a well-formed but wrong value,
+        # simulating a partial write where rows were updated and the hash
+        # update step failed.
+        conn.execute(
+            "UPDATE oracle_config SET value = ? WHERE key = 'config_hash'",
+            ("a" * 64,),
+        )
+        conn.commit()
+        with pytest.raises(fo_config.OracleConfigCorruptError) as exc_info:
+            fo_config.verify_current_or_raise(conn, inputs)
+        message = str(exc_info.value)
+        correct_hash = fo_config.compute_oracle_hash(inputs)
+        assert "aaaaaaaaaaaa" in message  # stored hash truncated prefix
+        assert correct_hash[:12] in message  # recomputed hash truncated prefix
+        assert "rebuild" in message.lower()
+    finally:
+        conn.close()
+
+
+def test_verify_raises_missing_when_kv_table_empty(tmp_path: Path) -> None:
+    """Empty KV table → Missing, not Corrupt or Stale."""
+    conn = _open_kv_db(tmp_path)
+    try:
+        inputs = _stable_inputs()
+        with pytest.raises(fo_config.OracleConfigMissingError):
+            fo_config.verify_current_or_raise(conn, inputs)
+    finally:
+        conn.close()
+
+
+def test_verify_raises_missing_when_only_config_hash_present(tmp_path: Path) -> None:
+    """Only ``config_hash`` present (pre-split-DB style) → Missing."""
+    conn = _open_kv_db(tmp_path)
+    try:
+        inputs = _stable_inputs()
+        expected = fo_config.compute_oracle_hash(inputs)
+        conn.execute("INSERT INTO oracle_config(key, value) VALUES ('config_hash', ?)", (expected,))
+        conn.commit()
+        with pytest.raises(fo_config.OracleConfigMissingError) as exc_info:
+            fo_config.verify_current_or_raise(conn, inputs)
+        assert "missing required keys" in str(exc_info.value)
+    finally:
+        conn.close()
+
+
+def test_verify_raises_missing_when_kv_table_does_not_exist(tmp_path: Path) -> None:
+    """No ``oracle_config`` table at all → Missing (graceful)."""
+    db_path = tmp_path / "bare.db"
     conn = sqlite3.connect(db_path)
-    conn.executescript("CREATE TABLE oracle_config (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
-    inputs = fo_config.OracleConfigInputs(
-        forge_sha="a" * 40,
-        ppmi_smoothing_k=0.5,
-        min_decks_count=3,
-        port_signature_version="2",
-        java_method_id="m",
-    )
-    with pytest.raises(fo_config.OracleConfigMissingError):
-        fo_config.verify_current_or_raise(conn, inputs)
-    conn.close()
+    try:
+        inputs = _stable_inputs()
+        with pytest.raises(fo_config.OracleConfigMissingError) as exc_info:
+            fo_config.verify_current_or_raise(conn, inputs)
+        assert "table is missing" in str(exc_info.value)
+    finally:
+        conn.close()
+
+
+def test_verify_raises_corrupt_when_smoothing_k_malformed(tmp_path: Path) -> None:
+    """Non-numeric ``ppmi_smoothing_k`` KV value → Corrupt. The row
+    exists (so Missing is wrong) but its stored value cannot parse as
+    ``float`` — the exact failure class ``OracleConfigCorruptError`` is
+    designed to signal.
+    """
+    conn = _open_kv_db(tmp_path)
+    try:
+        inputs = _stable_inputs()
+        fo_config.write_oracle_config(conn, inputs)
+        conn.execute("UPDATE oracle_config SET value = 'not_a_float' WHERE key = 'ppmi_smoothing_k'")
+        conn.commit()
+        with pytest.raises(fo_config.OracleConfigCorruptError) as exc_info:
+            fo_config.verify_current_or_raise(conn, inputs)
+        assert "malformed" in str(exc_info.value)
+    finally:
+        conn.close()
+
+
+def test_oracle_error_classes_inherit_from_common_base() -> None:
+    """All three failure-mode subclasses descend from the same base."""
+    assert issubclass(fo_config.OracleConfigStaleError, fo_config.OracleConfigError)
+    assert issubclass(fo_config.OracleConfigMissingError, fo_config.OracleConfigError)
+    assert issubclass(fo_config.OracleConfigCorruptError, fo_config.OracleConfigError)
+
+
+def test_read_stored_oracle_config_returns_stored_not_current(tmp_path: Path) -> None:
+    """``read_stored_oracle_config`` reflects what was written, not current defaults."""
+    conn = _open_kv_db(tmp_path)
+    try:
+        stored_inputs = _stable_inputs(ppmi_smoothing_k=0.75, min_decks_count=7)
+        fo_config.write_oracle_config(conn, stored_inputs)
+        conn.commit()
+        read_inputs, read_hash = fo_config.read_stored_oracle_config(conn)
+        assert read_inputs == stored_inputs
+        assert read_hash == fo_config.compute_oracle_hash(stored_inputs)
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -214,7 +321,6 @@ def test_build_writes_config_hash_and_inputs(tmp_path: Path) -> None:
         target_db_path=target,
         deck_dirs=[decks],
         min_decks_count=3,
-        smoothing_k=0.5,
     )
 
     conn = sqlite3.connect(target)
@@ -227,7 +333,7 @@ def test_build_writes_config_hash_and_inputs(tmp_path: Path) -> None:
     assert "config_hash" in stored
     assert len(stored["config_hash"]) == 64
     # Individual inputs all stored for diagnostics
-    assert stored["ppmi_smoothing_k"] == "0.5"
+    assert stored["ppmi_smoothing_k"] == str(DEFAULT_SMOOTHING_K)
     assert stored["min_decks_count"] == "3"
     assert "java_method_id" in stored
     assert "port_signature_version" in stored
@@ -250,11 +356,10 @@ def test_build_hash_matches_verify(tmp_path: Path) -> None:
         target_db_path=target,
         deck_dirs=[decks],
         min_decks_count=3,
-        smoothing_k=0.5,
     )
 
     inputs = fo_config.get_oracle_config_inputs(
-        ppmi_smoothing_k=0.5,
+        ppmi_smoothing_k=DEFAULT_SMOOTHING_K,
         min_decks_count=3,
     )
     conn = sqlite3.connect(target)

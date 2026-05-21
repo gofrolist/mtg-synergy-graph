@@ -1,351 +1,610 @@
 {
   "_readme": "Declarative complement-rule rows (plan 003 Units 7 & 8). Loaded into the `rules` SQLite table by the importer (via port_graph.rules_schema.seed_rules_db). The RuleInterpreter (Unit 5) compiles each row's JSON predicates to SQL fragments and emits PortComplement records at query time.",
   "_predicate_grammar": "Every gate / commander_port / candidate_port predicate is a JSON tree of {\"op\": <op>, ...}. Combinators: and/or/not with `args`. Leaf ops: has_port (port_type, event_class?, replacement_result?), filter_tag, zone_eq, counter_type, tribe, color, not_in_commander_set. See port_graph.vocabulary.GATE_OPS and port_graph.rules_schema.validate_gate_predicate for the authoritative contract.",
-  "_weight_hint_note": "weight_hint is RESERVED-FOR-M2 Bayesian prior (plan 2026-04-26-001 M2 of the tensor weight optimizer). NOT consumed by the scoring pipeline today — editing it has NO runtime effect. The live per-rule tuning knob is _RULE_QUALITY_MULTIPLIER in data/scoring_weights.json. See issue #23.",
   "rules": [
     {
       "rule_id": "cascade_tribal",
       "family": "tribal",
-      "gate_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Cascade"},
-      "commander_port_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Cascade"},
+      "gate_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "Cascade"
+      },
+      "commander_port_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "Cascade"
+      },
       "candidate_port_predicate": {
         "op": "and",
         "args": [
-          {"op": "has_port", "port_type": "keyword", "event_class": "Cascade"},
-          {"op": "not_in_commander_set"}
+          {
+            "op": "has_port",
+            "port_type": "keyword",
+            "event_class": "Cascade"
+          },
+          {
+            "op": "not_in_commander_set"
+          }
         ]
       },
       "filter_group": "",
       "cmdr_event": "cascade_tribal",
       "cand_event": "same_keyword_partner",
-      "weight_hint": 2.0,
       "active": 1
     },
     {
       "rule_id": "changeling_tribal",
       "family": "tribal",
-      "gate_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Changeling"},
-      "commander_port_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Changeling"},
+      "gate_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "Changeling"
+      },
+      "commander_port_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "Changeling"
+      },
       "candidate_port_predicate": {
         "op": "and",
         "args": [
-          {"op": "has_port", "port_type": "keyword", "event_class": "Changeling"},
-          {"op": "not_in_commander_set"}
+          {
+            "op": "has_port",
+            "port_type": "keyword",
+            "event_class": "Changeling"
+          },
+          {
+            "op": "not_in_commander_set"
+          }
         ]
       },
       "filter_group": "",
       "cmdr_event": "changeling_tribal",
       "cand_event": "same_keyword_partner",
-      "weight_hint": 2.0,
       "active": 1
     },
     {
       "rule_id": "choose_tribal",
       "family": "tribal",
-      "gate_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Choose"},
-      "commander_port_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Choose"},
+      "gate_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "Choose"
+      },
+      "commander_port_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "Choose"
+      },
       "candidate_port_predicate": {
         "op": "and",
         "args": [
-          {"op": "has_port", "port_type": "keyword", "event_class": "Choose"},
-          {"op": "not_in_commander_set"}
+          {
+            "op": "has_port",
+            "port_type": "keyword",
+            "event_class": "Choose"
+          },
+          {
+            "op": "not_in_commander_set"
+          }
         ]
       },
       "filter_group": "",
       "cmdr_event": "choose_tribal",
       "cand_event": "same_keyword_partner",
-      "weight_hint": 2.0,
       "active": 1
     },
     {
       "rule_id": "doctor_s_tribal",
       "family": "tribal",
-      "gate_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Doctor's"},
-      "commander_port_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Doctor's"},
+      "gate_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "Doctor's"
+      },
+      "commander_port_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "Doctor's"
+      },
       "candidate_port_predicate": {
         "op": "and",
         "args": [
-          {"op": "has_port", "port_type": "keyword", "event_class": "Doctor's"},
-          {"op": "not_in_commander_set"}
+          {
+            "op": "has_port",
+            "port_type": "keyword",
+            "event_class": "Doctor's"
+          },
+          {
+            "op": "not_in_commander_set"
+          }
         ]
       },
       "filter_group": "",
       "cmdr_event": "doctor_s_tribal",
       "cand_event": "same_keyword_partner",
-      "weight_hint": 2.0,
       "active": 1
     },
     {
       "rule_id": "etbreplacement_copy_dbcopy_optional_tribal",
       "family": "tribal",
-      "gate_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "ETBReplacement:Copy:DBCopy:Optional"},
-      "commander_port_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "ETBReplacement:Copy:DBCopy:Optional"},
+      "gate_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "ETBReplacement:Copy:DBCopy:Optional"
+      },
+      "commander_port_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "ETBReplacement:Copy:DBCopy:Optional"
+      },
       "candidate_port_predicate": {
         "op": "and",
         "args": [
-          {"op": "has_port", "port_type": "keyword", "event_class": "ETBReplacement:Copy:DBCopy:Optional"},
-          {"op": "not_in_commander_set"}
+          {
+            "op": "has_port",
+            "port_type": "keyword",
+            "event_class": "ETBReplacement:Copy:DBCopy:Optional"
+          },
+          {
+            "op": "not_in_commander_set"
+          }
         ]
       },
       "filter_group": "",
       "cmdr_event": "etbreplacement_copy_dbcopy_optional_tribal",
       "cand_event": "same_keyword_partner",
-      "weight_hint": 2.0,
       "active": 1
     },
     {
       "rule_id": "etbreplacement_other_choosect_tribal",
       "family": "tribal",
-      "gate_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "ETBReplacement:Other:ChooseCT"},
-      "commander_port_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "ETBReplacement:Other:ChooseCT"},
+      "gate_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "ETBReplacement:Other:ChooseCT"
+      },
+      "commander_port_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "ETBReplacement:Other:ChooseCT"
+      },
       "candidate_port_predicate": {
         "op": "and",
         "args": [
-          {"op": "has_port", "port_type": "keyword", "event_class": "ETBReplacement:Other:ChooseCT"},
-          {"op": "not_in_commander_set"}
+          {
+            "op": "has_port",
+            "port_type": "keyword",
+            "event_class": "ETBReplacement:Other:ChooseCT"
+          },
+          {
+            "op": "not_in_commander_set"
+          }
         ]
       },
       "filter_group": "",
       "cmdr_event": "etbreplacement_other_choosect_tribal",
       "cand_event": "same_keyword_partner",
-      "weight_hint": 2.0,
       "active": 1
     },
     {
       "rule_id": "firebending_2_tribal",
       "family": "tribal",
-      "gate_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Firebending:2"},
-      "commander_port_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Firebending:2"},
+      "gate_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "Firebending:2"
+      },
+      "commander_port_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "Firebending:2"
+      },
       "candidate_port_predicate": {
         "op": "and",
         "args": [
-          {"op": "has_port", "port_type": "keyword", "event_class": "Firebending:2"},
-          {"op": "not_in_commander_set"}
+          {
+            "op": "has_port",
+            "port_type": "keyword",
+            "event_class": "Firebending:2"
+          },
+          {
+            "op": "not_in_commander_set"
+          }
         ]
       },
       "filter_group": "",
       "cmdr_event": "firebending_2_tribal",
       "cand_event": "same_keyword_partner",
-      "weight_hint": 2.0,
       "active": 1
     },
     {
       "rule_id": "landwalk_island_tribal",
       "family": "tribal",
-      "gate_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Landwalk:Island"},
-      "commander_port_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Landwalk:Island"},
+      "gate_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "Landwalk:Island"
+      },
+      "commander_port_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "Landwalk:Island"
+      },
       "candidate_port_predicate": {
         "op": "and",
         "args": [
-          {"op": "has_port", "port_type": "keyword", "event_class": "Landwalk:Island"},
-          {"op": "not_in_commander_set"}
+          {
+            "op": "has_port",
+            "port_type": "keyword",
+            "event_class": "Landwalk:Island"
+          },
+          {
+            "op": "not_in_commander_set"
+          }
         ]
       },
       "filter_group": "",
       "cmdr_event": "landwalk_island_tribal",
       "cand_event": "same_keyword_partner",
-      "weight_hint": 2.0,
       "active": 1
     },
     {
       "rule_id": "melee_tribal",
       "family": "tribal",
-      "gate_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Melee"},
-      "commander_port_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Melee"},
+      "gate_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "Melee"
+      },
+      "commander_port_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "Melee"
+      },
       "candidate_port_predicate": {
         "op": "and",
         "args": [
-          {"op": "has_port", "port_type": "keyword", "event_class": "Melee"},
-          {"op": "not_in_commander_set"}
+          {
+            "op": "has_port",
+            "port_type": "keyword",
+            "event_class": "Melee"
+          },
+          {
+            "op": "not_in_commander_set"
+          }
         ]
       },
       "filter_group": "",
       "cmdr_event": "melee_tribal",
       "cand_event": "same_keyword_partner",
-      "weight_hint": 2.0,
       "active": 1
     },
     {
       "rule_id": "mentor_tribal",
       "family": "tribal",
-      "gate_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Mentor"},
-      "commander_port_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Mentor"},
+      "gate_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "Mentor"
+      },
+      "commander_port_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "Mentor"
+      },
       "candidate_port_predicate": {
         "op": "and",
         "args": [
-          {"op": "has_port", "port_type": "keyword", "event_class": "Mentor"},
-          {"op": "not_in_commander_set"}
+          {
+            "op": "has_port",
+            "port_type": "keyword",
+            "event_class": "Mentor"
+          },
+          {
+            "op": "not_in_commander_set"
+          }
         ]
       },
       "filter_group": "",
       "cmdr_event": "mentor_tribal",
       "cand_event": "same_keyword_partner",
-      "weight_hint": 2.0,
       "active": 1
     },
     {
       "rule_id": "more_tribal",
       "family": "tribal",
-      "gate_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "More"},
-      "commander_port_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "More"},
+      "gate_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "More"
+      },
+      "commander_port_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "More"
+      },
       "candidate_port_predicate": {
         "op": "and",
         "args": [
-          {"op": "has_port", "port_type": "keyword", "event_class": "More"},
-          {"op": "not_in_commander_set"}
+          {
+            "op": "has_port",
+            "port_type": "keyword",
+            "event_class": "More"
+          },
+          {
+            "op": "not_in_commander_set"
+          }
         ]
       },
       "filter_group": "",
       "cmdr_event": "more_tribal",
       "cand_event": "same_keyword_partner",
-      "weight_hint": 2.0,
       "active": 1
     },
     {
       "rule_id": "prowess_tribal",
       "family": "tribal",
-      "gate_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Prowess"},
-      "commander_port_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Prowess"},
+      "gate_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "Prowess"
+      },
+      "commander_port_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "Prowess"
+      },
       "candidate_port_predicate": {
         "op": "and",
         "args": [
-          {"op": "has_port", "port_type": "keyword", "event_class": "Prowess"},
-          {"op": "not_in_commander_set"}
+          {
+            "op": "has_port",
+            "port_type": "keyword",
+            "event_class": "Prowess"
+          },
+          {
+            "op": "not_in_commander_set"
+          }
         ]
       },
       "filter_group": "",
       "cmdr_event": "prowess_tribal",
       "cand_event": "same_keyword_partner",
-      "weight_hint": 2.0,
       "active": 1
     },
     {
       "rule_id": "start_tribal",
       "family": "tribal",
-      "gate_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Start"},
-      "commander_port_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Start"},
+      "gate_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "Start"
+      },
+      "commander_port_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "Start"
+      },
       "candidate_port_predicate": {
         "op": "and",
         "args": [
-          {"op": "has_port", "port_type": "keyword", "event_class": "Start"},
-          {"op": "not_in_commander_set"}
+          {
+            "op": "has_port",
+            "port_type": "keyword",
+            "event_class": "Start"
+          },
+          {
+            "op": "not_in_commander_set"
+          }
         ]
       },
       "filter_group": "",
       "cmdr_event": "start_tribal",
       "cand_event": "same_keyword_partner",
-      "weight_hint": 2.0,
       "active": 1
     },
     {
       "rule_id": "training_tribal",
       "family": "tribal",
-      "gate_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Training"},
-      "commander_port_predicate": {"op": "has_port", "port_type": "keyword", "event_class": "Training"},
+      "gate_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "Training"
+      },
+      "commander_port_predicate": {
+        "op": "has_port",
+        "port_type": "keyword",
+        "event_class": "Training"
+      },
       "candidate_port_predicate": {
         "op": "and",
         "args": [
-          {"op": "has_port", "port_type": "keyword", "event_class": "Training"},
-          {"op": "not_in_commander_set"}
+          {
+            "op": "has_port",
+            "port_type": "keyword",
+            "event_class": "Training"
+          },
+          {
+            "op": "not_in_commander_set"
+          }
         ]
       },
       "filter_group": "",
       "cmdr_event": "training_tribal",
       "cand_event": "same_keyword_partner",
-      "weight_hint": 2.0,
       "active": 1
     },
     {
       "rule_id": "repl_damagedone_counters_stack",
       "family": "replacement-stack",
-      "gate_predicate": {"op": "has_port", "port_type": "replacement", "event_class": "DamageDone", "replacement_result": "Counters"},
-      "commander_port_predicate": {"op": "has_port", "port_type": "replacement", "event_class": "DamageDone", "replacement_result": "Counters"},
+      "gate_predicate": {
+        "op": "has_port",
+        "port_type": "replacement",
+        "event_class": "DamageDone",
+        "replacement_result": "Counters"
+      },
+      "commander_port_predicate": {
+        "op": "has_port",
+        "port_type": "replacement",
+        "event_class": "DamageDone",
+        "replacement_result": "Counters"
+      },
       "candidate_port_predicate": {
         "op": "and",
         "args": [
-          {"op": "has_port", "port_type": "replacement", "event_class": "DamageDone", "replacement_result": "Counters"},
-          {"op": "not_in_commander_set"}
+          {
+            "op": "has_port",
+            "port_type": "replacement",
+            "event_class": "DamageDone",
+            "replacement_result": "Counters"
+          },
+          {
+            "op": "not_in_commander_set"
+          }
         ]
       },
       "filter_group": "",
       "cmdr_event": "repl_damagedone_counters_stack",
       "cand_event": "same_shape_replacement",
-      "weight_hint": 2.0,
       "active": 1
     },
     {
       "rule_id": "repl_moved_exile_stack",
       "family": "replacement-stack",
-      "gate_predicate": {"op": "has_port", "port_type": "replacement", "event_class": "Moved", "replacement_result": "Exile"},
-      "commander_port_predicate": {"op": "has_port", "port_type": "replacement", "event_class": "Moved", "replacement_result": "Exile"},
+      "gate_predicate": {
+        "op": "has_port",
+        "port_type": "replacement",
+        "event_class": "Moved",
+        "replacement_result": "Exile"
+      },
+      "commander_port_predicate": {
+        "op": "has_port",
+        "port_type": "replacement",
+        "event_class": "Moved",
+        "replacement_result": "Exile"
+      },
       "candidate_port_predicate": {
         "op": "and",
         "args": [
-          {"op": "has_port", "port_type": "replacement", "event_class": "Moved", "replacement_result": "Exile"},
-          {"op": "not_in_commander_set"}
+          {
+            "op": "has_port",
+            "port_type": "replacement",
+            "event_class": "Moved",
+            "replacement_result": "Exile"
+          },
+          {
+            "op": "not_in_commander_set"
+          }
         ]
       },
       "filter_group": "",
       "cmdr_event": "repl_moved_exile_stack",
       "cand_event": "same_shape_replacement",
-      "weight_hint": 2.0,
       "active": 1
     },
     {
       "rule_id": "monarch_synergy",
       "family": "political",
-      "gate_predicate": {"op": "has_port", "port_type": "effect", "event_class": "BecomeMonarch"},
-      "commander_port_predicate": {"op": "has_port", "port_type": "effect", "event_class": "BecomeMonarch"},
+      "gate_predicate": {
+        "op": "has_port",
+        "port_type": "effect",
+        "event_class": "BecomeMonarch"
+      },
+      "commander_port_predicate": {
+        "op": "has_port",
+        "port_type": "effect",
+        "event_class": "BecomeMonarch"
+      },
       "candidate_port_predicate": {
         "op": "and",
         "args": [
-          {"op": "or", "args": [
-            {"op": "has_port", "port_type": "effect", "event_class": "BecomeMonarch"},
-            {"op": "has_port", "port_type": "static", "event_class": "CantAttackUnless"}
-          ]},
-          {"op": "not_in_commander_set"}
+          {
+            "op": "or",
+            "args": [
+              {
+                "op": "has_port",
+                "port_type": "effect",
+                "event_class": "BecomeMonarch"
+              },
+              {
+                "op": "has_port",
+                "port_type": "static",
+                "event_class": "CantAttackUnless"
+              }
+            ]
+          },
+          {
+            "op": "not_in_commander_set"
+          }
         ]
       },
       "filter_group": "",
       "cmdr_event": "BecomeMonarch",
       "cand_event": "monarch_or_pillowfort",
-      "weight_hint": 2.5,
       "active": 1
     },
     {
       "rule_id": "toughness_synergy",
       "family": "scaling",
-      "gate_predicate": {"op": "has_port", "port_type": "scales_with", "event_class": "CardToughness"},
-      "commander_port_predicate": {"op": "has_port", "port_type": "scales_with", "event_class": "CardToughness"},
+      "gate_predicate": {
+        "op": "has_port",
+        "port_type": "scales_with",
+        "event_class": "CardToughness"
+      },
+      "commander_port_predicate": {
+        "op": "has_port",
+        "port_type": "scales_with",
+        "event_class": "CardToughness"
+      },
       "candidate_port_predicate": {
         "op": "and",
         "args": [
-          {"op": "has_port", "port_type": "keyword", "event_class": "Defender"},
-          {"op": "not_in_commander_set"}
+          {
+            "op": "has_port",
+            "port_type": "keyword",
+            "event_class": "Defender"
+          },
+          {
+            "op": "not_in_commander_set"
+          }
         ]
       },
       "filter_group": "",
       "cmdr_event": "toughness_scaling",
       "cand_event": "Defender",
-      "weight_hint": 1.0,
       "active": 1
     },
     {
       "rule_id": "party_feeder",
       "family": "scaling",
-      "gate_predicate": {"op": "has_port", "port_type": "scales_with", "event_class": "Party"},
-      "commander_port_predicate": {"op": "has_port", "port_type": "scales_with", "event_class": "Party"},
+      "gate_predicate": {
+        "op": "has_port",
+        "port_type": "scales_with",
+        "event_class": "Party"
+      },
+      "commander_port_predicate": {
+        "op": "has_port",
+        "port_type": "scales_with",
+        "event_class": "Party"
+      },
       "candidate_port_predicate": {
         "op": "and",
         "args": [
-          {"op": "has_port", "port_type": "scales_with", "event_class": "Party"},
-          {"op": "not_in_commander_set"}
+          {
+            "op": "has_port",
+            "port_type": "scales_with",
+            "event_class": "Party"
+          },
+          {
+            "op": "not_in_commander_set"
+          }
         ]
       },
       "filter_group": "",
       "cmdr_event": "party_axis",
       "cand_event": "party_peer",
-      "weight_hint": 2.5,
       "active": 1
     },
     {
@@ -354,29 +613,69 @@
       "gate_predicate": {
         "op": "and",
         "args": [
-          {"op": "has_port", "port_type": "replacement", "event_class": "Moved", "replacement_result": "ETBTapped"},
-          {"op": "not", "args": [{"op": "filter_tag", "tag": "Self"}]}
+          {
+            "op": "has_port",
+            "port_type": "replacement",
+            "event_class": "Moved",
+            "replacement_result": "ETBTapped"
+          },
+          {
+            "op": "not",
+            "args": [
+              {
+                "op": "filter_tag",
+                "tag": "Self"
+              }
+            ]
+          }
         ]
       },
       "commander_port_predicate": {
         "op": "and",
         "args": [
-          {"op": "has_port", "port_type": "replacement", "event_class": "Moved", "replacement_result": "ETBTapped"},
-          {"op": "not", "args": [{"op": "filter_tag", "tag": "Self"}]}
+          {
+            "op": "has_port",
+            "port_type": "replacement",
+            "event_class": "Moved",
+            "replacement_result": "ETBTapped"
+          },
+          {
+            "op": "not",
+            "args": [
+              {
+                "op": "filter_tag",
+                "tag": "Self"
+              }
+            ]
+          }
         ]
       },
       "candidate_port_predicate": {
         "op": "and",
         "args": [
-          {"op": "has_port", "port_type": "replacement", "event_class": "Moved", "replacement_result": "ETBTapped"},
-          {"op": "not", "args": [{"op": "filter_tag", "tag": "Self"}]},
-          {"op": "not_in_commander_set"}
+          {
+            "op": "has_port",
+            "port_type": "replacement",
+            "event_class": "Moved",
+            "replacement_result": "ETBTapped"
+          },
+          {
+            "op": "not",
+            "args": [
+              {
+                "op": "filter_tag",
+                "tag": "Self"
+              }
+            ]
+          },
+          {
+            "op": "not_in_commander_set"
+          }
         ]
       },
       "filter_group": "",
       "cmdr_event": "etb_tapped_stax_axis",
       "cand_event": "etb_tapped_stax_peer",
-      "weight_hint": 2.5,
       "active": 1
     }
   ]

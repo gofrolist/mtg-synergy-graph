@@ -82,8 +82,7 @@ def _cmd_propose_rules(args: argparse.Namespace) -> int:
             )
             fo_config.verify_current_or_raise(forge_conn, inputs)
         except (
-            fo_config.OracleConfigStaleError,
-            fo_config.OracleConfigMissingError,
+            fo_config.OracleConfigError,
             fo_version.OracleVersionFileError,
             fo_version.OracleForgeCheckoutError,
         ) as exc:

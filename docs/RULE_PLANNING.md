@@ -42,8 +42,7 @@ predicates to SQL fragments + Python gate callables at load time.
 
 1. Add a row to `data/rules_seed.json`. Start by copying an existing
    tribal row and changing only the `rule_id`, `event_class` (five
-   places in a tribal row), and `cmdr_event`. Keep `weight_hint = 2.0`
-   to match the family's existing calibration.
+   places in a tribal row), and `cmdr_event`.
 2. Add the new `rule_id` to `DECLARATIVE_RULE_IDS` in
    `src/mtg_synergy_graph/complement_rules/registry.py`.
 3. Re-seed the DB: `uv run python -c "from mtg_synergy_graph.db import
@@ -76,6 +75,34 @@ port conjunction / per-card attribute inspection / custom aggregation
 stays Python. See the brainstorm
 `docs/brainstorms/2026-04-21-typed-port-graph-requirements.md` FR6
 for the imperative-escape-hatch principle.
+
+### Parity gate when migrating Python → declarative (issue #16)
+
+The golden fixture (`bench.py audit --expect-identity`) compares
+aggregate per-commander scores. A genuine sub-epsilon semantic shift
+in one rule can hide as a "float ordering artifact", get absorbed by
+`--repin`, and silently change scoring forever. To prevent that:
+
+**Before deleting the Python helper for a migrated rule**, write a
+parity test using `tests._parity.assert_rule_parity`. It runs the
+Python helper and the declarative interpreter on the same synthetic
+fixture DB and asserts the per-rule `PortComplement` sets are
+identical. See `tests/test_rule_parity_harness.py` for the canonical
+shape — `_faithful_cascade_helper` is the template.
+
+Workflow:
+
+1. Author the declarative row in `data/rules_seed.json` and add
+   `rule_id` to `DECLARATIVE_RULE_IDS`.
+2. Build a synthetic fixture exercising the rule's gate shape
+   (peer ports, anti-self exclusion, filter tags).
+3. **Keep the Python helper temporarily.** Write a parity test
+   calling `assert_rule_parity(conn, commanders, rule_id=...,
+   py_helper=...)`.
+4. Run the parity test. Diverging rows are listed by name —
+   adjust the declarative predicate until green.
+5. Once parity is green, delete the Python helper and re-pin the
+   fixture if needed.
 
 ## Scaffolder workflow
 

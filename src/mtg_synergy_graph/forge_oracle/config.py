@@ -49,7 +49,7 @@ class OracleConfigInputs(NamedTuple):
     #: Minimum-evidence filter for PPMI rows (decks_count >= this).
     min_decks_count: int
 
-    #: Version of the port-signature vocabulary (``vocabulary.VOCAB_VERSION``
+    #: Version of the port-graph vocabulary (``vocabulary.VOCAB_VERSION``
     #: from ``port_graph``). Bumped when the canonical node_kind /
     #: subkind mapping changes — forces oracle rebuild so subkinds in
     #: the table match current projection.
@@ -61,12 +61,50 @@ class OracleConfigInputs(NamedTuple):
     java_method_id: str
 
 
-class OracleConfigStaleError(RuntimeError):
-    """Raised when the DB's stored hash does not match the current config."""
+class OracleConfigError(RuntimeError):
+    """Base class for ``oracle_config`` contract failures.
+
+    Catching this subsumes the missing-rows, corruption, and stale
+    cases. Mirrors ``EmbeddingConfigError`` so callers that need a
+    one-catch degrade path can do so.
+    """
 
 
-class OracleConfigMissingError(RuntimeError):
-    """Raised when ``oracle_config`` has no ``config_hash`` row."""
+class OracleConfigMissingError(OracleConfigError):
+    """Raised when required ``oracle_config`` KV rows are absent."""
+
+
+class OracleConfigCorruptError(OracleConfigError):
+    """Raised when stored KV rows do not hash back to the stored ``config_hash``.
+
+    Indicates a partial write (rows updated without hash, or vice versa).
+    Distinct from ``Stale`` — a corrupt artifact is internally
+    inconsistent, while a stale artifact is internally consistent but
+    built under a different version of the code than the reader.
+    """
+
+
+class OracleConfigStaleError(OracleConfigError):
+    """Raised when stored config diverges from what current code expects.
+
+    The stored artifact is internally consistent (corruption check
+    passes), but was built under different ``OracleConfigInputs`` —
+    rebuild with matching flags, or update the defaults to match the
+    build.
+    """
+
+
+#: KV keys that must all be present for ``read_stored_oracle_config``
+#: to reconstruct a complete ``OracleConfigInputs``. Includes
+#: ``config_hash`` (the corruption check's expected value).
+_REQUIRED_ORACLE_CONFIG_KEYS: tuple[str, ...] = (
+    "config_hash",
+    "forge_sha",
+    "ppmi_smoothing_k",
+    "min_decks_count",
+    "port_signature_version",
+    "java_method_id",
+)
 
 
 def compute_oracle_hash(inputs: OracleConfigInputs) -> str:
@@ -139,26 +177,106 @@ def write_oracle_config(
     return h
 
 
+def read_stored_oracle_config(
+    conn: sqlite3.Connection,
+) -> tuple[OracleConfigInputs, str]:
+    """Reconstruct ``OracleConfigInputs`` + stored hash from KV rows.
+
+    Returns ``(stored_inputs, stored_hash)`` where ``stored_inputs``
+    reflects the parameters actually used at build time — not the
+    current module-level defaults. This is the provenance-correct input
+    to both the corruption check and the staleness check in
+    :func:`verify_current_or_raise`.
+
+    Raises ``OracleConfigMissingError`` if any required KV key is
+    absent. Wraps ``sqlite3.OperationalError`` (missing table) and
+    malformed numeric values in the same Missing/Corrupt classes so
+    callers see one failure class per failure mode.
+
+    See ``docs/solutions/best-practices/verify-from-stored-config-not-code-defaults-2026-04-23.md``
+    for the generalized discipline this enforces.
+    """
+    try:
+        rows = dict(conn.execute("SELECT key, value FROM oracle_config").fetchall())
+    except sqlite3.OperationalError as exc:
+        raise OracleConfigMissingError(
+            "oracle_config table is missing. Rebuild with `scripts/forge_oracle.py build` to populate it."
+        ) from exc
+
+    missing = [k for k in _REQUIRED_ORACLE_CONFIG_KEYS if k not in rows]
+    if missing:
+        raise OracleConfigMissingError(
+            f"oracle_config is missing required keys: {missing}. "
+            f"Rebuild with `scripts/forge_oracle.py build` to populate."
+        )
+
+    try:
+        stored_inputs = OracleConfigInputs(
+            forge_sha=rows["forge_sha"],
+            ppmi_smoothing_k=float(rows["ppmi_smoothing_k"]),
+            min_decks_count=int(rows["min_decks_count"]),
+            port_signature_version=rows["port_signature_version"],
+            java_method_id=rows["java_method_id"],
+        )
+    except (TypeError, ValueError) as exc:
+        raise OracleConfigCorruptError(
+            f"oracle_config has malformed numeric value: {exc}. "
+            f"Rebuild with `scripts/forge_oracle.py build` to refresh."
+        ) from exc
+
+    return stored_inputs, rows["config_hash"]
+
+
+def _format_input_differences(
+    stored: OracleConfigInputs,
+    current: OracleConfigInputs,
+) -> str:
+    """Return a human-readable list of diverging fields between two inputs."""
+    diffs = [
+        f"{key}: stored={getattr(stored, key)!r} != current={getattr(current, key)!r}"
+        for key in stored._asdict()
+        if getattr(stored, key) != getattr(current, key)
+    ]
+    return "; ".join(diffs) if diffs else "(no field-level differences — unreachable)"
+
+
 def verify_current_or_raise(
     conn: sqlite3.Connection,
     inputs: OracleConfigInputs,
 ) -> None:
-    """Assert the DB's stored hash matches the current config.
+    """Two-step verification against stored KV rows (not code defaults).
 
-    Raises ``OracleConfigMissingError`` if no hash row is present (DB
-    was built before Unit 5 landed, or the oracle_config table is
-    corrupt). Raises ``OracleConfigStaleError`` if the hash differs.
+    Step 1 — **corruption check**: reconstruct ``OracleConfigInputs``
+    from the stored KV rows and confirm its hash matches the stored
+    ``config_hash``. A mismatch means the rows were partially written
+    (hash out of sync with values) — raises
+    ``OracleConfigCorruptError``.
+
+    Step 2 — **staleness check**: the reconstructed stored inputs must
+    equal ``inputs`` (what the consuming code expects). A divergence
+    means the artifact was built with a different set of parameters
+    (e.g. different ``forge_sha`` or ``ppmi_smoothing_k``) — raises
+    ``OracleConfigStaleError`` naming the diverging fields.
+
+    See ``docs/solutions/best-practices/verify-from-stored-config-not-code-defaults-2026-04-23.md``
+    for why this must read from stored KV rather than recomputing from
+    current-code defaults.
     """
-    row = conn.execute("SELECT value FROM oracle_config WHERE key = 'config_hash'").fetchone()
-    if row is None:
-        raise OracleConfigMissingError(
-            "forge_oracle.db has no config_hash row. Rebuild with `scripts/forge_oracle.py build` to populate it."
+    stored_inputs, stored_hash = read_stored_oracle_config(conn)
+
+    recomputed = compute_oracle_hash(stored_inputs)
+    if recomputed != stored_hash:
+        raise OracleConfigCorruptError(
+            f"forge_oracle.db stored hash {stored_hash[:12]}... does not "
+            f"match hash recomputed from stored KV rows ({recomputed[:12]}...). "
+            f"DB is partially written. "
+            f"Rebuild with `scripts/forge_oracle.py build` to refresh."
         )
-    stored = row[0]
-    current = compute_oracle_hash(inputs)
-    if stored != current:
+
+    if stored_inputs != inputs:
+        diffs = _format_input_differences(stored_inputs, inputs)
         raise OracleConfigStaleError(
-            f"forge_oracle.db was built under a different config "
-            f"(stored hash {stored[:12]}..., current {current[:12]}...). "
+            f"forge_oracle.db was built with different parameters than the "
+            f"current code expects. Diverging fields: {diffs}. "
             f"Rebuild with `scripts/forge_oracle.py build` to refresh."
         )

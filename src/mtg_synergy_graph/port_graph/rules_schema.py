@@ -67,12 +67,6 @@ class RuleRow:
     filter_group: str
     cmdr_event: str
     cand_event: str
-    #: RESERVED-FOR-M2 Bayesian-prior placeholder (plan 2026-04-26-001 M2
-    #: of the tensor weight optimizer). NOT consumed by the scoring
-    #: pipeline today — changing it has no runtime effect. The live
-    #: per-rule tuning knob is ``_RULE_QUALITY_MULTIPLIER`` in
-    #: ``data/scoring_weights.json``. See issue #23.
-    weight_hint: float
     active: int
 
 
@@ -270,11 +264,7 @@ def _validate_row(row: dict[str, Any]) -> None:
             context=ctx,
         )
     # Scalar-type pre-check so executemany never raises an uncontexted
-    # TypeError on float() / int() coercion.
-    try:
-        float(row.get("weight_hint", 1.0))
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"rule {rule_id!r}: weight_hint must be numeric, got {row.get('weight_hint')!r}") from exc
+    # TypeError on int() coercion.
     try:
         int(row.get("active", 1))
     except (TypeError, ValueError) as exc:
@@ -322,7 +312,7 @@ def seed_rules_db(
             "INSERT OR REPLACE INTO rules "
             "(rule_id, family, gate_predicate, commander_port_predicate, "
             "candidate_port_predicate, filter_group, cmdr_event, cand_event, "
-            "weight_hint, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     row["rule_id"],
@@ -333,7 +323,6 @@ def seed_rules_db(
                     row.get("filter_group", ""),
                     row["cmdr_event"],
                     row["cand_event"],
-                    float(row.get("weight_hint", 1.0)),
                     int(row.get("active", 1)),
                 )
                 for row in rows
@@ -354,7 +343,7 @@ def load_rules_from_db(conn: sqlite3.Connection) -> list[RuleRow]:
     rows = conn.execute(
         "SELECT rule_id, family, gate_predicate, commander_port_predicate, "
         "candidate_port_predicate, filter_group, cmdr_event, cand_event, "
-        "weight_hint, active FROM rules WHERE active = 1 ORDER BY rule_id"
+        "active FROM rules WHERE active = 1 ORDER BY rule_id"
     ).fetchall()
     return [
         RuleRow(
@@ -366,7 +355,6 @@ def load_rules_from_db(conn: sqlite3.Connection) -> list[RuleRow]:
             filter_group=r["filter_group"],
             cmdr_event=r["cmdr_event"],
             cand_event=r["cand_event"],
-            weight_hint=r["weight_hint"],
             active=r["active"],
         )
         for r in rows
