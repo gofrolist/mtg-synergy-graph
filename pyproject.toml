@@ -24,7 +24,7 @@ testpaths = ["tests"]
 # Forge cardsfolder. They are excluded from the default run so CI — and
 # any contributor without the data — gets a fast, green suite. Run
 # explicitly with `uv run pytest -m integration` on a dev machine.
-addopts = "--cov=src/mtg_synergy_graph --cov-fail-under=80 -m 'not integration'"
+addopts = "-n=auto --cov=src/mtg_synergy_graph --cov-fail-under=80 -m 'not integration'"
 markers = [
     "integration: requires data/synergy.db or data/forge cardsfolder; excluded by default",
 ]
@@ -79,6 +79,7 @@ dev = [
     "pyright>=1.1.409",
     "pytest>=9.0.3",
     "pytest-cov>=6.1",
+    "pytest-xdist>=3.6",
     "ruff>=0.15.13",
     "vulture>=2.16",
     "mtg-synergy-graph[graph]",
