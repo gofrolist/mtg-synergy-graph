@@ -93,6 +93,26 @@ StaticAbilities$ expansion, deduped after A1's 2^N re-walk fix).
 - `attr_kind='token_color'` + `attr_kind='token_subtype'` for every TokenScript
   produced by a Token effect (multi-color prefixes like `gw`, `all`; and
   artifact-creature format like `c_0_1_a_thopter`).
+- `attr_kind='attribute'` for `AlterAttribute Attributes$ <V>` values
+  (added 2026-05-19, PR #47). One row per comma-separated entry on the
+  effect port — surfaces Prepared (29 ports), Suspected (25), Solved
+  (15), Plotted (4), Commander (3), Saddled (3), Harnessed (2). Joined
+  by `complement_rules/prepared.py::_commander_prepares_creatures` for
+  Prepared-enabler commander detection (slow path).
+
+**Synthetic ports** (no source line in the Forge .txt — emitted by the
+port extractor itself, not by parsing a `T:`/`A:`/`R:`/`K:` line):
+- `port_type='static', event_class='AlternateMode',
+  granted_keyword='Prepare'` for every card with the top-level
+  `AlternateMode:Prepare` header (47 cards, PR #47). The synthesised
+  port is the cheap-path commander-detection signal for
+  `complement_rules/prepared.py::_commander_has_alternate_mode_prepare`.
+  Emitted by `extract_alternate_mode_ports` in `ports.py`. Restricted
+  to the `Prepare` value via `_ALTERNATE_MODE_PORT_VALUES` frozenset —
+  emitting for other AlternateMode values (DoubleFaced, Adventure,
+  Split, Modal, Flip, Specialize, Omen, Meld) perturbed the depth-2
+  cascade walker's Stage-1 prefilter on Tergrid (Modal DFC) before
+  the narrowing fix landed.
 
 **`card_hints` table** — normalised projection of Forge's AI annotations
 (`DeckNeeds`/`DeckHints`/`DeckHas` → kind `needs`/`hints`/`has`,

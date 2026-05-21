@@ -32,7 +32,13 @@ CREATE TABLE IF NOT EXISTS cards (
     -- preserves behaviour when the Scryfall source DB lacks the column
     -- (tiny test fixtures) — missing data is treated as "no known reason
     -- to exclude".
-    legal_commander INTEGER DEFAULT 1
+    legal_commander INTEGER DEFAULT 1,
+    -- Forge `CopyFaceFrom:<Name>` directive (back-face of a Prepared card
+    -- references an existing card by name). NULL for the vast majority of
+    -- cards. Persisted so the importer's second pass can find every carrier
+    -- without re-parsing the .txt file.
+    -- See docs/brainstorms/2026-05-20-copy-face-from-resolution-requirements.md.
+    copy_face_from  TEXT
 );
 
 -- Partial unique index: one Forge card per Scryfall oracle_id, but NULLs are

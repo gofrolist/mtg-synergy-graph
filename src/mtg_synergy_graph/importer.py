@@ -15,8 +15,20 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from .attributes import explode_filter
+from .copy_face_from import CopyFaceFromSummary, resolve_copy_face_from_references
 from .parser import parse_card_file
 from .ports import _parse_token_script, extract_all_ports
+
+# Re-exported so call sites that imported these from ``importer`` (the
+# historical home) continue to work. Both symbols now live in
+# ``copy_face_from.py``; this is a thin compatibility shim — the source
+# of truth is the other module.
+__all__ = [
+    "CopyFaceFromSummary",
+    "import_card",
+    "import_cards_folder",
+    "resolve_copy_face_from_references",
+]
 
 log = logging.getLogger(__name__)
 
@@ -333,6 +345,7 @@ def _card_row(card: dict[str, Any]) -> dict[str, Any]:
         # carries the column. Never None: the schema enforces DEFAULT 1
         # but binding an explicit value avoids relying on that default.
         "legal_commander": 1 if card.get("legal_commander", True) else 0,
+        "copy_face_from": card.get("copy_face_from"),
     }
 
 
@@ -341,12 +354,12 @@ INSERT OR REPLACE INTO cards (
     name, oracle_id, mana_cost, cmc, types, supertypes, subtypes, card_types,
     colors, color_identity, power, toughness, loyalty, keywords,
     oracle_text, is_commander, deck_hints, deck_needs, deck_has,
-    edhrec_rank, rarity, set_code, legal_commander
+    edhrec_rank, rarity, set_code, legal_commander, copy_face_from
 ) VALUES (
     :name, :oracle_id, :mana_cost, :cmc, :types, :supertypes, :subtypes, :card_types,
     :colors, :color_identity, :power, :toughness, :loyalty, :keywords,
     :oracle_text, :is_commander, :deck_hints, :deck_needs, :deck_has,
-    :edhrec_rank, :rarity, :set_code, :legal_commander
+    :edhrec_rank, :rarity, :set_code, :legal_commander, :copy_face_from
 )
 """
 
@@ -401,7 +414,7 @@ _PORT_INSERT_SQL = (
 #: Keys the importer consumes from the port dict but does NOT persist
 #: on card_ports. Producers attach these; import_card must pop them
 #: before calling _normalise_port.
-_TRANSIENT_PORT_KEYS: frozenset[str] = frozenset({"_change_type", "_token_script"})
+_TRANSIENT_PORT_KEYS: frozenset[str] = frozenset({"_change_type", "_token_script", "_attributes", "_etb_scope"})
 
 #: BuffedBy SVar tokens classified by explode_filter → card_hints.category.
 #: attr_kinds not in this map (controller, cmc_cmp, etc.) are skipped —
@@ -514,6 +527,8 @@ def import_card(
     for port in ports:
         change_type = port.pop("_change_type", "")
         token_script = port.pop("_token_script", "")
+        attributes_csv = port.pop("_attributes", "")
+        etb_scope = port.pop("_etb_scope", "")
         cur = conn.execute(_PORT_INSERT_SQL, _normalise_port(port))
         port_id = cur.lastrowid
         inserted += 1
@@ -543,6 +558,28 @@ def import_card(
                     "(port_id, attr_kind, attr_value, is_negated) VALUES (?, ?, ?, ?)",
                     (port_id, attr_kind, attr_value, False),
                 )
+        # AlterAttribute Attributes$ values (Prepared, Suspected, …) — one
+        # port_attributes row per comma-separated entry under attr_kind=
+        # 'attribute'. Joined by the prepared_mechanic complement rule.
+        if attributes_csv:
+            for raw in attributes_csv.split(","):
+                attr_value = raw.strip()
+                if attr_value:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO port_attributes "
+                        "(port_id, attr_kind, attr_value, is_negated) VALUES (?, ?, ?, ?)",
+                        (port_id, "attribute", attr_value, False),
+                    )
+        # K:ETBReplacement provenance: 'other' or 'copy'. Stored under
+        # attr_kind='etb_scope' so downstream rules can distinguish
+        # SVar-walked ETB-replacement effects from regular ones.
+        # See docs/brainstorms/2026-05-20-etb-replacement-svar-walking-requirements.md.
+        if etb_scope:
+            conn.execute(
+                "INSERT OR IGNORE INTO port_attributes "
+                "(port_id, attr_kind, attr_value, is_negated) VALUES (?, ?, ?, ?)",
+                (port_id, "etb_scope", etb_scope, False),
+            )
 
     return inserted
 
@@ -645,6 +682,29 @@ def import_cards_folder(
                 head,
                 suffix,
             )
+
+    # Second pass: resolve CopyFaceFrom:<Name> references after every
+    # card is in the universe. Order-independence is essential — a
+    # carrier whose .txt sorts before its reference's .txt would fail
+    # if we attempted resolution per-card during the first pass.
+    with conn:
+        cff_summary = resolve_copy_face_from_references(conn, _PORT_COLUMNS)
+    log.info(
+        "CopyFaceFrom resolution: %d carriers, %d/%d resolved (%d ports inherited)",
+        cff_summary.carriers,
+        cff_summary.resolved,
+        cff_summary.carriers,
+        cff_summary.inherited_ports,
+    )
+    if cff_summary.unresolved:
+        head = ", ".join(f"{c}→{r}" for c, r in cff_summary.unresolved[:5])
+        suffix = "" if len(cff_summary.unresolved) <= 5 else f" (+{len(cff_summary.unresolved) - 5} more)"
+        log.warning(
+            "%d unresolved CopyFaceFrom references: %s%s",
+            len(cff_summary.unresolved),
+            head,
+            suffix,
+        )
 
     # Seed the event_match_map + cost_feeds_trigger tables from
     # data/event_match_seed.json (plan 003 Unit 3). Idempotent —

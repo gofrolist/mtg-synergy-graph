@@ -13,6 +13,7 @@ from mtg_synergy_graph.importer import (
     _derive_colors,
     import_card,
     import_cards_folder,
+    resolve_copy_face_from_references,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -370,4 +371,594 @@ def test_buffed_by_svar_skips_non_type_tokens(tmp_path):
     assert "Creature" in values
     assert "YouCtrl" not in values
     assert "cmcLE3" not in values
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# AlterAttribute Attributes$ → port_attributes (Prepared mechanic, plan 2026-05-19)
+# ---------------------------------------------------------------------------
+
+
+@_integration
+@_requires_cardsfolder
+def test_alter_attribute_prepared_exposed_on_abigale(tmp_path):
+    """Abigale's TrigPrepare SubAbility (DB$ AlterAttribute | Attributes$ Prepared)
+    must land in port_attributes with attr_kind='attribute' so the prepared_mechanic
+    rule can join on it.
+    """
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    card_path = _FORGE_CARDSFOLDER / "a" / "abigale_poet_laureate_heroic_stanza.txt"
+    card = parse_card_file(card_path)
+    import_card(conn, card, oracle_id_resolver=None)
+
+    rows = conn.execute(
+        "SELECT pa.attr_value FROM port_attributes pa "
+        "JOIN card_ports cp ON pa.port_id = cp.id "
+        "WHERE cp.card_name=? AND cp.event_class='AlterAttribute' "
+        "AND pa.attr_kind='attribute'",
+        ("Abigale, Poet Laureate",),
+    ).fetchall()
+    values = {r[0] for r in rows}
+    assert values == {"Prepared"}, f"Expected attribute Prepared, got {values}"
+    conn.close()
+
+
+@_integration
+@_requires_cardsfolder
+def test_alter_attribute_suspected_exposed_on_existing_card(tmp_path):
+    """The same code path must surface the pre-existing Suspected attribute.
+    Repeat Offender (Murders at Karlov Manor) is the canonical example.
+    """
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    card_path = _FORGE_CARDSFOLDER / "r" / "repeat_offender.txt"
+    card = parse_card_file(card_path)
+    import_card(conn, card, oracle_id_resolver=None)
+
+    rows = conn.execute(
+        "SELECT pa.attr_value FROM port_attributes pa "
+        "JOIN card_ports cp ON pa.port_id = cp.id "
+        "WHERE cp.card_name=? AND cp.event_class='AlterAttribute' "
+        "AND pa.attr_kind='attribute'",
+        ("Repeat Offender",),
+    ).fetchall()
+    values = {r[0] for r in rows}
+    assert "Suspected" in values, f"Expected Suspected attribute, got {values}"
+    conn.close()
+
+
+@_integration
+@_requires_cardsfolder
+def test_alter_attribute_prepared_exposed_on_other_targeter(tmp_path):
+    """Skycoach Waypoint prepares OTHER creatures (ValidTgts$ Creature). The
+    attribute must still land in port_attributes — the rule joins on the
+    attribute, not on the targeter shape.
+    """
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    card_path = _FORGE_CARDSFOLDER / "s" / "skycoach_waypoint.txt"
+    card = parse_card_file(card_path)
+    import_card(conn, card, oracle_id_resolver=None)
+
+    rows = conn.execute(
+        "SELECT pa.attr_value FROM port_attributes pa "
+        "JOIN card_ports cp ON pa.port_id = cp.id "
+        "WHERE cp.card_name=? AND cp.event_class='AlterAttribute' "
+        "AND pa.attr_kind='attribute'",
+        ("Skycoach Waypoint",),
+    ).fetchall()
+    values = {r[0] for r in rows}
+    assert values == {"Prepared"}, f"Expected attribute Prepared, got {values}"
+    conn.close()
+
+
+def test_alter_attribute_attributes_unit_synthetic(tmp_path):
+    """Unit test on a synthetic card dict — confirms the explode path works
+    independent of the Forge .txt parser.
+    """
+    from mtg_synergy_graph.parser import parse_forge_line
+
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    card = {
+        "name": "Test Prepare Caster",
+        "types": "Creature",
+        "abilities": [
+            (
+                "ability",
+                parse_forge_line("AB$ AlterAttribute | Cost$ 2 | ValidTgts$ Creature | Attributes$ Prepared"),
+            ),
+        ],
+        "svars": {},
+        "keywords": [],
+    }
+    import_card(conn, card, oracle_id_resolver=None)
+
+    rows = conn.execute(
+        "SELECT pa.attr_value FROM port_attributes pa "
+        "JOIN card_ports cp ON pa.port_id = cp.id "
+        "WHERE cp.card_name=? AND pa.attr_kind='attribute'",
+        ("Test Prepare Caster",),
+    ).fetchall()
+    assert {r[0] for r in rows} == {"Prepared"}
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# AlternateMode:Prepare → synthetic static port (Prepared mechanic, plan 2026-05-19)
+# ---------------------------------------------------------------------------
+
+
+@_integration
+@_requires_cardsfolder
+def test_alternate_mode_prepare_surfaced_as_port_for_abigale(tmp_path):
+    """Abigale's top-level `AlternateMode:Prepare` header must surface as a
+    queryable port — a synthetic static port with event_class='AlternateMode'
+    and granted_keyword='Prepare'. Mirrors the keyword-port shape so the
+    prepared_mechanic rule can join uniformly.
+    """
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    card_path = _FORGE_CARDSFOLDER / "a" / "abigale_poet_laureate_heroic_stanza.txt"
+    card = parse_card_file(card_path)
+    import_card(conn, card, oracle_id_resolver=None)
+
+    row = conn.execute(
+        "SELECT port_type, event_class, granted_keyword FROM card_ports "
+        "WHERE card_name=? AND event_class='AlternateMode'",
+        ("Abigale, Poet Laureate",),
+    ).fetchone()
+    assert row is not None, "Expected one AlternateMode port for Abigale"
+    assert row["port_type"] == "static"
+    assert row["granted_keyword"] == "Prepare"
+    conn.close()
+
+
+def test_alternate_mode_absent_when_card_has_no_alternate_mode(tmp_path):
+    """Cards without an AlternateMode header must NOT get a synthetic port."""
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    card = {
+        "name": "Test Plain Creature",
+        "types": "Creature",
+        "abilities": [],
+        "svars": {},
+        "keywords": [],
+    }
+    import_card(conn, card, oracle_id_resolver=None)
+
+    rows = conn.execute(
+        "SELECT 1 FROM card_ports WHERE card_name=? AND event_class='AlternateMode'",
+        ("Test Plain Creature",),
+    ).fetchall()
+    assert rows == [], "Plain card must not have AlternateMode synthetic port"
+    conn.close()
+
+
+def test_alternate_mode_synthetic_unit(tmp_path):
+    """Unit test on a synthetic card dict — confirms the synthesis path
+    works independent of the Forge .txt parser.
+    """
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    card = {
+        "name": "Test Prepare Payoff",
+        "types": "Creature",
+        "alternate_mode": "Prepare",
+        "abilities": [],
+        "svars": {},
+        "keywords": [],
+    }
+    import_card(conn, card, oracle_id_resolver=None)
+
+    row = conn.execute(
+        "SELECT port_type, event_class, granted_keyword FROM card_ports "
+        "WHERE card_name=? AND event_class='AlternateMode'",
+        ("Test Prepare Payoff",),
+    ).fetchone()
+    assert row is not None
+    assert row["port_type"] == "static"
+    assert row["granted_keyword"] == "Prepare"
+    conn.close()
+
+
+@pytest.mark.parametrize("value", ["Modal", "Adventure", "Split", "Flip", "Specialize", "Omen", "Meld", "DoubleFaced"])
+def test_alternate_mode_non_prepare_values_do_not_emit_port(tmp_path, value):
+    """Regression for ``_ALTERNATE_MODE_PORT_VALUES``: only ``Prepare``
+    emits a synthetic AlternateMode port. Other values (Modal/Adventure/
+    Split/Flip/Specialize/Omen/Meld/DoubleFaced) must NOT — emitting for
+    them previously perturbed the depth-2 cascade walker's Stage-1
+    relevant-event prefilter, causing a -0.21 regression on Tergrid.
+
+    See ``docs/RULE_HISTORY.md`` 2026-05-19 entry and
+    ``ports.py::_ALTERNATE_MODE_PORT_VALUES``.
+    """
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    card = {
+        "name": f"Test {value} DFC",
+        "types": "Creature",
+        "alternate_mode": value,
+        "abilities": [],
+        "svars": {},
+        "keywords": [],
+    }
+    import_card(conn, card, oracle_id_resolver=None)
+
+    rows = conn.execute(
+        "SELECT 1 FROM card_ports WHERE card_name=? AND event_class='AlternateMode'",
+        (f"Test {value} DFC",),
+    ).fetchall()
+    assert rows == [], f"AlternateMode:{value} must not emit a synthetic port"
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# CopyFaceFrom:<Name> resolution — two-pass importer
+# Brainstorm: docs/brainstorms/2026-05-20-copy-face-from-resolution-requirements.md
+# ---------------------------------------------------------------------------
+
+
+def _card_port_shapes(conn, card_name: str) -> set[tuple[str, str]]:
+    rows = conn.execute(
+        "SELECT port_type, event_class FROM card_ports WHERE card_name = ?",
+        (card_name,),
+    ).fetchall()
+    return {(r[0], r[1]) for r in rows}
+
+
+_REFERENCED_REANIMATE_SHAPE = {
+    "name": "Reference Spell",
+    "types": "Sorcery",
+    "abilities": [
+        (
+            "ability",
+            {
+                "SP": "ChangeZone",
+                "ValidTgts": "Creature.YouOwn",
+                "Origin": "Graveyard",
+                "Destination": "Battlefield",
+            },
+        ),
+    ],
+    "svars": {},
+    "keywords": [],
+}
+
+
+def test_card_row_persists_copy_face_from(db):
+    """The ``cards.copy_face_from`` column captures the directive so the
+    second pass can find every carrier without re-parsing the .txt file.
+    """
+    carrier = {
+        "name": "Carrier Creature",
+        "types": "Creature Bear",
+        "copy_face_from": "Reference Spell",
+        "alternate_mode": "Prepare",
+        "abilities": [],
+        "svars": {},
+        "keywords": [],
+    }
+    import_card(db, _REFERENCED_REANIMATE_SHAPE, oracle_id_resolver=None)
+    import_card(db, carrier, oracle_id_resolver=None)
+
+    row = db.execute(
+        "SELECT copy_face_from FROM cards WHERE name = ?",
+        ("Carrier Creature",),
+    ).fetchone()
+    assert row is not None
+    assert row["copy_face_from"] == "Reference Spell"
+
+
+def test_resolve_copy_face_from_inherits_referenced_ports(db):
+    """A carrier card with ``copy_face_from='X'`` must end up with copies
+    of every X port row attached to its card_name after the second pass.
+    Without this, Grave Researcher (CopyFaceFrom:Reanimate) carries no
+    Reanimate ports, so reanimator commanders cannot see it.
+    """
+    carrier = {
+        "name": "Carrier Creature",
+        "types": "Creature Bear",
+        "copy_face_from": "Reference Spell",
+        "abilities": [],
+        "svars": {},
+        "keywords": [],
+    }
+    import_card(db, _REFERENCED_REANIMATE_SHAPE, oracle_id_resolver=None)
+    import_card(db, carrier, oracle_id_resolver=None)
+
+    ref_shapes = _card_port_shapes(db, "Reference Spell")
+    assert ref_shapes, "Reference card must have at least one port"
+    carrier_shapes_before = _card_port_shapes(db, "Carrier Creature")
+    assert ref_shapes - carrier_shapes_before, "Pre-resolution: carrier must not have referenced ports"
+
+    summary = resolve_copy_face_from_references(db)
+
+    carrier_shapes_after = _card_port_shapes(db, "Carrier Creature")
+    assert ref_shapes <= carrier_shapes_after, (
+        f"Post-resolution: carrier must inherit all referenced shapes. Missing: {ref_shapes - carrier_shapes_after}"
+    )
+    assert summary.carriers == 1
+    assert summary.resolved == 1
+    assert summary.unresolved == []
+
+
+def test_resolve_copy_face_from_tags_provenance(db):
+    """Each inherited port must carry a ``port_attributes`` row with
+    ``attr_kind='via_copyfacefrom'`` and ``attr_value='<ReferencedName>'``
+    so downstream audits / discounts can distinguish inherited from native.
+    """
+    referenced = {
+        "name": "Spell X",
+        "types": "Sorcery",
+        "abilities": [
+            ("ability", {"SP": "Draw", "Defined": "You", "NumCards": "3"}),
+        ],
+        "svars": {},
+        "keywords": [],
+    }
+    carrier = {
+        "name": "Carrier Y",
+        "types": "Creature Wizard",
+        "copy_face_from": "Spell X",
+        "abilities": [],
+        "svars": {},
+        "keywords": [],
+    }
+    import_card(db, referenced, oracle_id_resolver=None)
+    import_card(db, carrier, oracle_id_resolver=None)
+    resolve_copy_face_from_references(db)
+
+    rows = db.execute(
+        "SELECT pa.attr_value FROM card_ports cp "
+        "JOIN port_attributes pa ON pa.port_id = cp.id "
+        "WHERE cp.card_name = ? AND pa.attr_kind = 'via_copyfacefrom'",
+        ("Carrier Y",),
+    ).fetchall()
+    assert rows, "Inherited ports must be tagged with via_copyfacefrom"
+    assert all(r[0] == "Spell X" for r in rows), "Every tag must point at the referenced card name"
+
+
+def test_resolve_copy_face_from_skips_alternate_mode_port(db):
+    """Defensive: never inherit a ``static AlternateMode`` port via
+    CopyFaceFrom. The AlternateMode marker is per-carrier and inheriting
+    it would create false Prepared-mechanic matches between unrelated
+    carriers if a referenced card itself were Prepared (not real today,
+    but cheap to guard against).
+    """
+    referenced = {
+        "name": "Weird Reference",
+        "types": "Creature Cleric",
+        "alternate_mode": "Prepare",  # itself synthesises a static AlternateMode port
+        "abilities": [
+            ("ability", {"SP": "GainLife", "Defined": "You", "LifeAmount": "2"}),
+        ],
+        "svars": {},
+        "keywords": [],
+    }
+    carrier = {
+        "name": "Carrier With Weird Ref",
+        "types": "Creature Bear",
+        "copy_face_from": "Weird Reference",
+        "abilities": [],
+        "svars": {},
+        "keywords": [],
+    }
+    import_card(db, referenced, oracle_id_resolver=None)
+    import_card(db, carrier, oracle_id_resolver=None)
+    resolve_copy_face_from_references(db)
+
+    rows = db.execute(
+        "SELECT pa.attr_value FROM card_ports cp "
+        "JOIN port_attributes pa ON pa.port_id = cp.id "
+        "WHERE cp.card_name = ? AND cp.event_class = 'AlternateMode' "
+        "AND pa.attr_kind = 'via_copyfacefrom'",
+        ("Carrier With Weird Ref",),
+    ).fetchall()
+    assert rows == [], "AlternateMode ports must not be inherited via CopyFaceFrom"
+
+    # Sanity: the non-AlternateMode port from the reference did inherit.
+    inherited = db.execute(
+        "SELECT 1 FROM card_ports cp JOIN port_attributes pa ON pa.port_id = cp.id "
+        "WHERE cp.card_name = ? AND pa.attr_kind = 'via_copyfacefrom' "
+        "AND cp.event_class = 'GainLife'",
+        ("Carrier With Weird Ref",),
+    ).fetchall()
+    assert inherited, "Non-AlternateMode reference ports must still inherit"
+
+
+def test_resolve_copy_face_from_records_unresolved_in_summary(db):
+    """A reference to a card not in the imported universe must not crash
+    the importer. The carrier ends up with only its native ports and a
+    summary entry records the unresolved name. Per-carrier warnings were
+    intentionally dropped in favour of the single aggregate warning at
+    the ``import_cards_folder`` call site.
+    """
+    carrier = {
+        "name": "Orphan Carrier",
+        "types": "Creature Bear",
+        "copy_face_from": "Card Not In Universe",
+        "abilities": [],
+        "svars": {},
+        "keywords": [],
+    }
+    import_card(db, carrier, oracle_id_resolver=None)
+    summary = resolve_copy_face_from_references(db)
+
+    assert summary.unresolved == [("Orphan Carrier", "Card Not In Universe")]
+    assert summary.resolved == 0
+    assert summary.carriers == 1
+
+    # No phantom via_copyfacefrom tag rows.
+    tagged = db.execute("SELECT 1 FROM port_attributes WHERE attr_kind = 'via_copyfacefrom'").fetchall()
+    assert tagged == []
+
+
+def test_resolve_copy_face_from_is_idempotent(db):
+    """Running the resolver twice must not duplicate inherited ports.
+    Re-imports run the full pipeline; idempotency keeps the row counts
+    stable so the audit deltas reflect signal change, not cardinality.
+    """
+    referenced = {
+        "name": "Spell A",
+        "types": "Sorcery",
+        "abilities": [("ability", {"SP": "DealDamage", "Defined": "Targeted", "NumDmg": "3"})],
+        "svars": {},
+        "keywords": [],
+    }
+    carrier = {
+        "name": "Carrier A",
+        "types": "Creature Goblin",
+        "copy_face_from": "Spell A",
+        "abilities": [],
+        "svars": {},
+        "keywords": [],
+    }
+    import_card(db, referenced, oracle_id_resolver=None)
+    import_card(db, carrier, oracle_id_resolver=None)
+    resolve_copy_face_from_references(db)
+
+    rows_first = db.execute(
+        "SELECT COUNT(*) FROM card_ports WHERE card_name = ?",
+        ("Carrier A",),
+    ).fetchone()[0]
+    attrs_first = db.execute(
+        "SELECT COUNT(*) FROM port_attributes pa "
+        "JOIN card_ports cp ON cp.id = pa.port_id "
+        "WHERE cp.card_name = ? AND pa.attr_kind = 'via_copyfacefrom'",
+        ("Carrier A",),
+    ).fetchone()[0]
+
+    resolve_copy_face_from_references(db)
+
+    rows_second = db.execute(
+        "SELECT COUNT(*) FROM card_ports WHERE card_name = ?",
+        ("Carrier A",),
+    ).fetchone()[0]
+    attrs_second = db.execute(
+        "SELECT COUNT(*) FROM port_attributes pa "
+        "JOIN card_ports cp ON cp.id = pa.port_id "
+        "WHERE cp.card_name = ? AND pa.attr_kind = 'via_copyfacefrom'",
+        ("Carrier A",),
+    ).fetchone()[0]
+
+    assert rows_first == rows_second, "Re-running the resolver duplicated inherited card_ports rows"
+    assert attrs_first == attrs_second, "Re-running the resolver duplicated provenance tags"
+
+
+def test_resolve_copy_face_from_handles_self_reference(db):
+    """Depth-1 cycle guard: a card with ``copy_face_from`` pointing at
+    itself must not infinitely recurse or duplicate its own ports.
+    No real Forge data hits this case, but the resolver shouldn't hang
+    if a future cardsfolder typo introduces one.
+    """
+    card = {
+        "name": "Self Reference",
+        "types": "Creature Spirit",
+        "copy_face_from": "Self Reference",
+        "abilities": [("ability", {"SP": "GainLife", "Defined": "You", "LifeAmount": "1"})],
+        "svars": {},
+        "keywords": [],
+    }
+    import_card(db, card, oracle_id_resolver=None)
+
+    ports_before = db.execute(
+        "SELECT COUNT(*) FROM card_ports WHERE card_name = ?",
+        ("Self Reference",),
+    ).fetchone()[0]
+
+    summary = resolve_copy_face_from_references(db)
+
+    ports_after = db.execute(
+        "SELECT COUNT(*) FROM card_ports WHERE card_name = ?",
+        ("Self Reference",),
+    ).fetchone()[0]
+    assert ports_before == ports_after, "Self-reference must not duplicate ports"
+    # Self-references are reported as unresolved (no inheritance attempted).
+    assert summary.unresolved and summary.unresolved[0] == ("Self Reference", "Self Reference")
+
+
+def test_resolve_copy_face_from_warns_on_depth_2_chain(db, caplog):
+    """A→B→C chain (B is itself a carrier) triggers a one-shot warning so
+    a future Forge data refresh that introduces one doesn't go unnoticed.
+    The brainstorm explicitly documents depth-2 as out-of-scope v1; this
+    test guarantees the visibility part of the design.
+    """
+    leaf = {
+        "name": "Leaf Spell",
+        "types": "Sorcery",
+        "abilities": [("ability", {"SP": "DealDamage", "Defined": "Targeted", "NumDmg": "1"})],
+        "svars": {},
+        "keywords": [],
+    }
+    middle = {
+        "name": "Middle Carrier",
+        "types": "Creature",
+        "copy_face_from": "Leaf Spell",
+        "abilities": [],
+        "svars": {},
+        "keywords": [],
+    }
+    top = {
+        "name": "Top Carrier",
+        "types": "Creature",
+        "copy_face_from": "Middle Carrier",
+        "abilities": [],
+        "svars": {},
+        "keywords": [],
+    }
+    for c in (leaf, middle, top):
+        import_card(db, c, oracle_id_resolver=None)
+
+    with caplog.at_level("WARNING", logger="mtg_synergy_graph.copy_face_from"):
+        resolve_copy_face_from_references(db)
+    assert any("depth-2 CopyFaceFrom chains" in r.message for r in caplog.records), (
+        "depth-2 chains must emit a one-shot warning so silent regressions are impossible"
+    )
+
+
+def test_import_cards_folder_resolves_after_all_cards_imported(tmp_path):
+    """End-to-end: when the carrier .txt is imported BEFORE the referenced
+    card's .txt, the second pass still resolves correctly. Validates the
+    two-pass contract — order-independence in the cardsfolder walk.
+    """
+    cardsfolder = tmp_path / "cardsfolder"
+    sub = cardsfolder / "a"
+    sub.mkdir(parents=True)
+
+    # Carrier filename sorts BEFORE the reference filename, so rglob
+    # yields it first. The first pass would see an unresolvable reference;
+    # the second pass must succeed because by then the reference card is in.
+    (sub / "a_carrier.txt").write_text(
+        "Name:Aaa Carrier\n"
+        "ManaCost:1 G\n"
+        "Types:Creature Bear\n"
+        "PT:2/2\n"
+        "AlternateMode:Prepare\n"
+        "\n"
+        "ALTERNATE\n"
+        "\n"
+        "CopyFaceFrom:Zzz Reference\n",
+        encoding="utf-8",
+    )
+    (sub / "z_reference.txt").write_text(
+        "Name:Zzz Reference\n"
+        "ManaCost:G\n"
+        "Types:Sorcery\n"
+        "A:SP$ ChangeZone | ValidTgts$ Creature.YouOwn | Origin$ Graveyard | Destination$ Battlefield\n",
+        encoding="utf-8",
+    )
+
+    db_path = tmp_path / "synergy.db"
+    conn = open_db(db_path)
+    import_cards_folder(conn, cardsfolder, scryfall_db=None)
+
+    inherited = conn.execute(
+        "SELECT 1 FROM card_ports cp JOIN port_attributes pa ON pa.port_id = cp.id "
+        "WHERE cp.card_name = ? AND pa.attr_kind = 'via_copyfacefrom' "
+        "AND cp.event_class = 'ChangeZone'",
+        ("Aaa Carrier",),
+    ).fetchall()
+    assert inherited, "Two-pass must resolve regardless of file order"
     conn.close()
