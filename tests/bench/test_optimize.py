@@ -1952,17 +1952,25 @@ class TestHandleOptimize:
         with pytest.raises(SystemExit):
             parser.parse_args(["audit", "--optimize", "--grid", "0.5", "-1.0"])
 
-    def test_companion_flag_warning_includes_new_flags(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Passing --alpha/--grid/etc. without --optimize warns on stderr."""
+    def test_companion_flag_warning_includes_new_flags(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Passing --alpha/--grid/etc. without --optimize warns on stderr.
+
+        Uses ``--db`` pointing at an empty tmp path so the audit short-circuits
+        on missing data. The warning fires in ``main`` BEFORE handler dispatch
+        (see ``bench/cli.py``), so the handler outcome doesn't affect the
+        assertion. Without the override the test would fall back to the
+        production ``data/synergy.db`` and spend ~60s on a full identity audit
+        per the default-fixture path.
+        """
         import contextlib
 
         from mtg_synergy_graph.bench.cli import main
 
-        # Use --expect-identity (the cheapest mode that doesn't need a fixture
-        # rebuild) and pass --alpha. Should error somewhere because no DB
-        # exists, but the warning fires before that.
+        empty_db = tmp_path / "empty.db"
         with contextlib.suppress(SystemExit):
-            main(["audit", "--expect-identity", "--alpha", "0.7"])
+            main(["audit", "--expect-identity", "--alpha", "0.7", "--db", str(empty_db)])
         captured = capsys.readouterr()
         assert "--alpha" in captured.err
         assert "no effect without --optimize" in captured.err
