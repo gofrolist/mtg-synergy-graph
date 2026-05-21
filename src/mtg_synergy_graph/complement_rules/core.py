@@ -1071,6 +1071,7 @@ from .panharmonicon import (  # noqa: E402
     _find_panharmonicon_stacking,
     _find_reverse_panharmonicon,
 )
+from .prepared import _find_prepared_mechanic_complements  # noqa: E402
 from .statics import (  # noqa: E402
     _find_affinity_archetype,
     _find_cost_reduction_synergy,
@@ -1287,6 +1288,7 @@ def find_all_complements(
         out.extend(_find_land_bounce_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_creature_died_feeders(conn, cmdr_ports, cmdr_set))
         out.extend(_find_damage_doubler_synergy(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_prepared_mechanic_complements(conn, cmdr_ports, cmdr_set))
         # Plan 2026-04-23-001: depth-2 self-bridging pathway rule
         # family. Gated behind pathway._ENABLE_PATHWAY_RULES (default
         # False) until Unit 6's bench.py audit produces a landing

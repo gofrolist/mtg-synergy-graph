@@ -35,6 +35,7 @@ from mtg_synergy_graph.bench.handlers import (
 )
 from mtg_synergy_graph.bench.histogram import Bucket, Histogram, Verdict
 from mtg_synergy_graph.bench.optimize import handle_optimize
+from mtg_synergy_graph.bench.per_commander_ndcg import handle_per_commander_ndcg
 from mtg_synergy_graph.bench.report import AuditReport, build_report
 from mtg_synergy_graph.bench.tensor import (
     TensorWriter,
@@ -66,6 +67,10 @@ _cli.register("vs_forge_oracle", handle_vs_forge_oracle)
 _cli.register("embedding_dedup", handle_embedding_dedup)
 # Plan 2026-04-26-001 Unit 4 — Coordinate Ascent weight optimizer.
 _cli.register("optimize", handle_optimize)
+# BM25 IDF probe (plan 2026-05-04-001) Unit 1 — per-commander NDCG@30
+# diff handler. Required by the BM25 probe's per-commander prerequisite
+# gate; general-purpose audit infra that survives the probe outcome.
+_cli.register("per_commander_ndcg", handle_per_commander_ndcg)
 
 __all__ = [
     "AuditReport",

@@ -132,6 +132,10 @@ _LINE_DISPATCH: tuple[tuple[str, str, int, str], ...] = (
     ("DeckHints:", "deck_hints", 10, "deck_hints"),
     ("DeckNeeds:", "deck_needs", 10, "deck_hints"),
     ("DeckHas:", "deck_has", 8, "deck_hints"),
+    # `AlternateMode:Prepare` marks a card whose back face is a stored
+    # spell castable when the front-face creature is prepared. Captured
+    # here so the importer can emit a synthetic AlternateMode port.
+    ("AlternateMode:", "alternate_mode", 14, "scalar"),
 )
 
 #: Map of ability prefixes (``T:``/``A:``/``S:``/``R:``) to the kind label
@@ -167,6 +171,14 @@ def _parse_card_block(block_lines: list[str], card: dict[str, Any], *, is_altern
     for raw in block_lines:
         line = raw.strip()
         if not line:
+            continue
+
+        # CopyFaceFrom:<Name> — back-face directive that points at an existing
+        # card whose spell content should be inherited by this carrier.
+        # See docs/brainstorms/2026-05-20-copy-face-from-resolution-requirements.md.
+        # Front-face occurrences are ignored defensively (malformed Forge data).
+        if is_alternate and line.startswith("CopyFaceFrom:"):
+            card["copy_face_from"] = line[len("CopyFaceFrom:") :]
             continue
 
         matched = False
@@ -233,6 +245,7 @@ def parse_card_text(text: str) -> dict[str, Any]:
     card: dict[str, Any] = {
         "name": "",
         "alternate_name": None,  # populated for DFC/MDFC back faces
+        "copy_face_from": None,  # populated for Prepared cards whose back face is `CopyFaceFrom:<X>`
         "abilities": [],
         "svars": {},
         "keywords": [],
@@ -337,4 +350,5 @@ def parser_branch_kinds() -> set[str]:
         "root",
         "static_condition",
         "replacement_condition",
+        "etb_replacement",
     }

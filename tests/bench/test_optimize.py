@@ -536,6 +536,64 @@ class TestScoreCommanderFromComplements:
         # And whatever's in top_30 is a subset of score_by_candidate.
         assert set(result.top_30).issubset(set(result.score_by_candidate.keys()))
 
+    def test_idf_basis_cached_path_matches_legacy(self, scoring_fixture: sqlite3.Connection) -> None:
+        """``score_commander_from_complements(idf_basis=...)`` must match the legacy path bitwise.
+
+        The cached basis is the perf optimization in Batch B (#7). This test
+        is the fidelity invariant: any future change to ``_compute_idf_basis``
+        / ``_idf_weights_from_basis`` that diverges from ``_compute_idf_weights``
+        must break this test.
+        """
+        from mtg_synergy_graph.complement_rules import find_all_complements
+        from mtg_synergy_graph.universal_scorer import _compute_idf_basis
+
+        complements = find_all_complements(scoring_fixture, ["Test Commander"])
+        # Legacy path: no basis, _compute_idf_weights runs per call.
+        legacy = score_commander_from_complements(scoring_fixture, "Test Commander", complements)
+        # Cached path: basis built once, applied per call.
+        basis = _compute_idf_basis(complements)
+        cached = score_commander_from_complements(scoring_fixture, "Test Commander", complements, idf_basis=basis)
+        assert legacy.top_30 == cached.top_30
+        assert dict(legacy.score_by_candidate) == dict(cached.score_by_candidate)
+        assert legacy.contributions == cached.contributions
+
+    def test_idf_basis_cached_path_matches_legacy_under_weight_shift(self, scoring_fixture: sqlite3.Connection) -> None:
+        """Cached basis must produce identical results to legacy path AFTER weight patching.
+
+        Verifies that ``_idf_weights_from_basis`` correctly applies the live
+        ``_RULE_QUALITY_MULTIPLIER`` — the basis is weight-INDEPENDENT, but
+        the final IDF weights it produces MUST track every multiplier change.
+        """
+        from mtg_synergy_graph import universal_scorer
+        from mtg_synergy_graph.complement_rules import find_all_complements
+        from mtg_synergy_graph.universal_scorer import _compute_idf_basis
+
+        complements = find_all_complements(scoring_fixture, ["Test Commander"])
+        # Build basis at baseline weights — basis itself is weight-independent.
+        basis = _compute_idf_basis(complements)
+
+        # Pick a non-flat rule that fires in the fixture; double its multiplier.
+        baseline = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
+        firing_rule_ids = {c.rule_id for c in complements}
+        target_rule = next(
+            iter(rid for rid in firing_rule_ids if rid in baseline),
+            None,
+        )
+        if target_rule is None:
+            pytest.skip("No firing rule in baseline weights for this fixture")
+
+        try:
+            universal_scorer._RULE_QUALITY_MULTIPLIER[target_rule] = baseline[target_rule] * 2.0
+            legacy = score_commander_from_complements(scoring_fixture, "Test Commander", complements)
+            cached = score_commander_from_complements(scoring_fixture, "Test Commander", complements, idf_basis=basis)
+        finally:
+            universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
+            universal_scorer._RULE_QUALITY_MULTIPLIER.update(baseline)
+
+        assert legacy.top_30 == cached.top_30
+        assert dict(legacy.score_by_candidate) == dict(cached.score_by_candidate)
+        assert legacy.contributions == cached.contributions
+
 
 # ---------------------------------------------------------------------------
 # run_optimizer (Unit 3)
@@ -575,6 +633,7 @@ def _scripted_score_split(
         labels_cache: dict[str, EdhrecLabels],
         alpha: float,
         candidate_cache: object = None,
+        idf_basis_cache: object = None,
     ) -> CompositeObjective:
         rules_to_use = firing_rules if firing_rules is not None else list(weights.keys())
         for cmdr in commanders:
@@ -596,24 +655,23 @@ def _scripted_score_split(
 
 
 @pytest.fixture()
-def patched_baseline_weights(monkeypatch: pytest.MonkeyPatch) -> dict[str, float]:
+def patched_baseline_weights() -> Iterator[dict[str, float]]:
     """Replace ``_RULE_QUALITY_MULTIPLIER`` with a tiny, predictable dict for tests.
 
-    Restored at fixture teardown by monkeypatch.
+    Uses the production
+    :func:`~mtg_synergy_graph.universal_scorer.patched_rule_quality_multiplier`
+    context manager so tests exercise the same patch+restore path as the
+    bench optimizer. Restoration is automatic on yield/exception.
     """
-    from mtg_synergy_graph import universal_scorer
+    from mtg_synergy_graph.universal_scorer import patched_rule_quality_multiplier
 
     test_weights = {
         "alpha_rule": 1.0,
         "beta_rule": 1.0,
         "gamma_rule": 1.0,
     }
-    saved = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
-    universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
-    universal_scorer._RULE_QUALITY_MULTIPLIER.update(test_weights)
-    yield dict(test_weights)
-    universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
-    universal_scorer._RULE_QUALITY_MULTIPLIER.update(saved)
+    with patched_rule_quality_multiplier(test_weights):
+        yield dict(test_weights)
 
 
 @pytest.fixture()
@@ -646,8 +704,20 @@ def fake_conns(monkeypatch: pytest.MonkeyPatch) -> tuple[object, object]:
     # cache value is never dereferenced.
     monkeypatch.setattr(opt_mod, "build_candidate_cache", lambda _conn: None)
 
-    # Pre-populate complement caches so the optimizer's "dead key" detection
-    # sees all firing rules and never tries to call find_all_complements.
+    # Stub find_all_complements: the self-test pre-warms its train-split
+    # cache via this call before _score_split runs, and a fake conn can't
+    # execute SQL. Return a per-commander complement list that exercises
+    # every weight key (read from _RULE_QUALITY_MULTIPLIER at CALL TIME so
+    # patched_baseline_weights' patch is visible) so dead-key detection
+    # sees all rules as firing — tests of control logic should not
+    # accidentally trip the dead-key filter.
+    def _fake_find_all_complements(_conn, _commanders, **_kwargs):
+        from mtg_synergy_graph.universal_scorer import _RULE_QUALITY_MULTIPLIER
+
+        return _make_complements_for_rules(list(_RULE_QUALITY_MULTIPLIER.keys()))
+
+    monkeypatch.setattr(opt_mod, "find_all_complements", _fake_find_all_complements)
+
     return fake_conn, fake_edhrec_conn
 
 
@@ -670,11 +740,12 @@ class TestRunOptimizerControlLogic:
             _scripted_score_split(composite_for_weights=lambda w: 0.5),
         )
         # Pretend every rule fires, so no dead keys.
+        # find_all_complements is hoisted to module-level in optimize.py
+        # post-#34 — no need for raising=False anymore.
         monkeypatch.setattr(
             opt_mod,
             "find_all_complements",
             lambda conn, cmdrs: _make_complements_for_rules(list(patched_baseline_weights.keys())),
-            raising=False,
         )
         # Stub label loader.
         monkeypatch.setattr(opt_mod, "load_edhrec_labels", lambda c, n: opt_mod.EdhrecLabels({}, None))
@@ -845,11 +916,23 @@ class TestRunOptimizerControlLogic:
         ALL accepts across all sweeps as reverted, so
         ``final_weights == baseline_weights`` and
         ``n_steps_accepted == 0`` after the trip.
+
+        Robustness: train and held are distinguished by commander identity
+        (``HELD_*`` prefix) instead of ``len(commanders) == 1``. The previous
+        test was fragile to fixture-size changes — if the test were updated
+        to a 10-commander fixture (held=2), the length check would
+        misclassify held calls as train, the drift scenario would never
+        trigger, and the test would silently pass.
         """
         from mtg_synergy_graph.bench import optimize as opt_mod
 
         train_calls = {"n": 0}
         held_calls = {"n": 0}
+
+        # Use a single named held commander; train commanders share no name
+        # with held. Distinguishing by identity is fixture-size-invariant.
+        held_name = "HELD_cmdr"
+        train_names = ["train_a", "train_b", "train_c", "train_d"]
 
         def _custom_score_split(
             conn,
@@ -861,6 +944,7 @@ class TestRunOptimizerControlLogic:
             labels_cache,
             alpha,
             candidate_cache=None,
+            idf_basis_cache=None,
         ):
             from mtg_synergy_graph.bench.optimize import CompositeObjective, EdhrecLabels
 
@@ -871,8 +955,10 @@ class TestRunOptimizerControlLogic:
                 if cmdr not in labels_cache:
                     labels_cache[cmdr] = EdhrecLabels({}, None)
 
-            commanders_tuple = tuple(commanders)
-            is_held = len(commanders_tuple) == 1
+            # Identity-based train-vs-held detection: the held call passes
+            # the held commander; train calls don't include it. Robust
+            # against future fixture-size changes.
+            is_held = held_name in commanders
             if is_held:
                 held_calls["n"] += 1
                 # Baseline (call #1) = 0.5; subsequent held calls drop by 0.003.
@@ -887,14 +973,14 @@ class TestRunOptimizerControlLogic:
                 composite=composite,
                 mean_ndcg=composite,
                 gem_rate=composite,
-                n_commanders=len(commanders_tuple),
-                n_commanders_with_gem=len(commanders_tuple),
+                n_commanders=len(commanders),
+                n_commanders_with_gem=len(commanders),
             )
 
         monkeypatch.setattr(opt_mod, "_score_split", _custom_score_split)
 
         config = OptimizerConfig(run_self_test=False, max_sweeps=3, eps_cumulative=0.005)
-        result = run_optimizer(*fake_conns, ["a", "b", "c", "d", "e"], config=config)
+        result = run_optimizer(*fake_conns, [*train_names, held_name], config=config)
 
         # After revert: weights match baseline, no accepts survive.
         assert dict(result.final_weights) == patched_baseline_weights, (
@@ -908,6 +994,190 @@ class TestRunOptimizerControlLogic:
         # Metrics-vs-weights invariant: final composites match baseline composites.
         assert result.train_composite_final == result.train_composite_baseline
         assert result.held_composite_final == result.held_composite_baseline
+
+    def test_held_out_eps_rejects_step_when_held_drops_more_than_eps(
+        self,
+        patched_baseline_weights: dict[str, float],
+        fake_conns: tuple[object, object],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A step that improves train but drops held by > eps_step is rejected.
+
+        Coverage gap from the post-merge code-review (#23): all prior
+        control-logic tests used constant or always-improving composites,
+        so the ``held_delta < -eps_step`` branch (producing
+        ``reject_reason="held_out_eps"``) was never exercised end-to-end.
+        """
+        from mtg_synergy_graph.bench import optimize as opt_mod
+        from mtg_synergy_graph.bench.optimize import CompositeObjective, EdhrecLabels
+
+        held_name = "HELD_cmdr"
+        train_names = ["train_a", "train_b", "train_c", "train_d"]
+
+        def _custom_score_split(
+            conn,
+            edhrec_conn,
+            commanders,
+            weights,
+            *,
+            complements_cache,
+            labels_cache,
+            alpha,
+            candidate_cache=None,
+            idf_basis_cache=None,
+        ) -> CompositeObjective:
+            for cmdr in commanders:
+                if cmdr not in complements_cache:
+                    complements_cache[cmdr] = _make_complements_for_rules(list(weights.keys()))
+                if cmdr not in labels_cache:
+                    labels_cache[cmdr] = EdhrecLabels({}, None)
+            is_held = held_name in commanders
+            # Identify whether the call is for the BASELINE state (all weights
+            # at default 1.0) or a perturbed state. composite_for_weights-style
+            # check: if any weight differs from baseline 1.0, it's a perturbation.
+            is_perturbed = any(v != 1.0 for v in weights.values())
+            # Held: 0.5 at baseline; drops by 0.02 (>>eps_step=0.005) on perturbations.
+            # Train: monotonically improves on perturbation so a step IS
+            # proposed (gets to the held re-eval).
+            if not is_perturbed:
+                composite = 0.5  # baseline; both train and held start here
+            elif is_held:
+                composite = 0.48  # held drops on perturbation
+            else:
+                composite = 0.55  # train climbs on perturbation
+            return CompositeObjective(
+                composite=composite,
+                mean_ndcg=composite,
+                gem_rate=composite,
+                n_commanders=len(commanders),
+                n_commanders_with_gem=len(commanders),
+            )
+
+        monkeypatch.setattr(opt_mod, "_score_split", _custom_score_split)
+
+        config = OptimizerConfig(run_self_test=False, max_sweeps=1, eps_step=0.005)
+        result = run_optimizer(*fake_conns, [*train_names, held_name], config=config)
+
+        # No step accepted (every grid cell rejected at the held-eps gate).
+        assert result.n_steps_accepted == 0
+        assert result.n_steps_rejected > 0
+        # Every history entry was rejected with reason "held_out_eps".
+        assert all(not s.accepted for s in result.history)
+        assert {s.reject_reason for s in result.history} == {"held_out_eps"}, (
+            f"Expected only held_out_eps rejects, got: { {s.reject_reason for s in result.history} }"
+        )
+
+    def test_per_axis_gem_rate_regression_warning_fires_on_accept(
+        self,
+        patched_baseline_weights: dict[str, float],
+        fake_conns: tuple[object, object],
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """``run_optimizer`` warns when an accepted step drops train gem_rate by > 0.005.
+
+        Coverage gap from the post-merge code-review (#24): the per-axis
+        regression warning at ``optimize.py:909`` had no test. Here we
+        construct a step where composite improves AND the held-eps gate
+        passes BUT train gem_rate drops — the warning must fire and name
+        the rule.
+        """
+        from mtg_synergy_graph.bench import optimize as opt_mod
+        from mtg_synergy_graph.bench.optimize import CompositeObjective, EdhrecLabels
+
+        held_name = "HELD_cmdr"
+        train_names = ["train_a", "train_b", "train_c", "train_d"]
+
+        def _custom_score_split(
+            conn,
+            edhrec_conn,
+            commanders,
+            weights,
+            *,
+            complements_cache,
+            labels_cache,
+            alpha,
+            candidate_cache=None,
+            idf_basis_cache=None,
+        ) -> CompositeObjective:
+            for cmdr in commanders:
+                if cmdr not in complements_cache:
+                    complements_cache[cmdr] = _make_complements_for_rules(list(weights.keys()))
+                if cmdr not in labels_cache:
+                    labels_cache[cmdr] = EdhrecLabels({}, None)
+            is_held = held_name in commanders
+            is_perturbed = any(v != 1.0 for v in weights.values())
+            # Train: composite improves but gem_rate DROPS by > 0.005 on
+            # perturbation. The warning fires only when an accepted step
+            # has best_train.gem_rate < current_train_gem - 0.005.
+            if not is_held and is_perturbed:
+                composite = 0.6  # strictly better → accept
+                gem_rate = 0.7  # dropped from baseline 0.8 by 0.1 (> 0.005)
+            elif not is_held:
+                composite = 0.5  # baseline
+                gem_rate = 0.8
+            else:
+                # Held passes the eps gate either way.
+                composite = 0.5 if not is_perturbed else 0.499
+                gem_rate = 0.8
+            return CompositeObjective(
+                composite=composite,
+                mean_ndcg=composite,
+                gem_rate=gem_rate,
+                n_commanders=len(commanders),
+                n_commanders_with_gem=len(commanders),
+            )
+
+        monkeypatch.setattr(opt_mod, "_score_split", _custom_score_split)
+
+        config = OptimizerConfig(run_self_test=False, max_sweeps=1)
+        with caplog.at_level("WARNING", logger="mtg_synergy_graph.bench.optimize"):
+            result = run_optimizer(*fake_conns, [*train_names, held_name], config=config)
+
+        # At least one step accepted (composite strictly improved).
+        assert result.n_steps_accepted >= 1
+        # The warning fired at least once and names the gem_rate drop.
+        warnings = [r for r in caplog.records if "gem_rate" in r.getMessage()]
+        assert warnings, (
+            f"Expected at least one gem_rate-regression WARNING; got messages: "
+            f"{[r.getMessage() for r in caplog.records]}"
+        )
+
+    def test_proposed_config_hash_restores_global_on_compute_hash_exception(
+        self,
+        patched_baseline_weights: dict[str, float],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``_proposed_config_hash`` restores ``_RULE_QUALITY_MULTIPLIER`` even if compute raises.
+
+        Coverage gap from the post-merge code-review (#26): the existing
+        ``test_patch_restore_on_proposed_hash_compute`` only tested the
+        happy path. The try/finally exists precisely so a raise inside
+        ``compute_config_hash`` doesn't leave the global mutated. This
+        test forces that exception path.
+        """
+        from mtg_synergy_graph import universal_scorer
+        from mtg_synergy_graph.bench import optimize as opt_mod
+
+        baseline_snapshot = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
+        original_id = id(universal_scorer._RULE_QUALITY_MULTIPLIER)
+
+        # Force compute_config_hash to raise from inside _proposed_config_hash.
+        def _raising_compute_hash() -> str:
+            raise RuntimeError("simulated config-hash failure")
+
+        monkeypatch.setattr(
+            "mtg_synergy_graph.bench.tensor.compute_config_hash",
+            _raising_compute_hash,
+        )
+
+        proposed = {"alpha_rule": 99.0, "beta_rule": 99.0, "gamma_rule": 99.0}
+        with pytest.raises(RuntimeError, match="simulated config-hash failure"):
+            opt_mod._proposed_config_hash(proposed)
+
+        # Dict identity preserved AND values restored to baseline.
+        assert id(universal_scorer._RULE_QUALITY_MULTIPLIER) == original_id
+        assert dict(universal_scorer._RULE_QUALITY_MULTIPLIER) == baseline_snapshot
 
 
 def _make_complements_for_rules(rule_ids):
@@ -974,6 +1244,122 @@ class TestPlantedPerturbationSelfTest:
         assert "baseline=" in str(exc.value)
         assert "recovered=" in str(exc.value)
 
+    def test_select_plant_rotates_when_picked_rule_at_clamp_max(self) -> None:
+        """If the seed-picked rule is at clamp_max, _select_self_test_plant rotates to a rule with room.
+
+        Regression test for the false-positive where applying a proposal that
+        pushes any rule to clamp_max=5.0 would cause the next run's self-test
+        to raise OptimizerSelfTestFailed("plant collapsed to baseline").
+        """
+        from mtg_synergy_graph.bench.optimize import _select_self_test_plant
+
+        # alpha_rule pinned at clamp_max → ×2.0 collapses; ÷2.0 should be picked
+        # (or the function should rotate to beta_rule which has full room).
+        baseline = {"alpha_rule": 5.0, "beta_rule": 1.0, "gamma_rule": 1.0}
+        rule_id, planted_value = _select_self_test_plant(
+            baseline, seed=0, planted_mult=2.0, clamp_min=0.01, clamp_max=5.0
+        )
+        # Either rotated to a different rule, or stayed on alpha_rule with the
+        # DOWN direction (5.0 / 2.0 = 2.5).
+        if rule_id == "alpha_rule":
+            assert planted_value == pytest.approx(2.5)
+        else:
+            # Rotated to beta_rule or gamma_rule; both have full room either direction.
+            assert rule_id in {"beta_rule", "gamma_rule"}
+            assert planted_value != baseline[rule_id]
+            # Plant must be at the configured ×2.0 (UP) since these rules have room.
+            assert planted_value == pytest.approx(2.0)
+
+    def test_select_plant_skips_excluded_dead_keys(self) -> None:
+        """Excluded rule_ids never get picked, even if they appear early in the shuffled order.
+
+        Regression test for the false-positive self-test failure observed on
+        the production fixture: ``_select_self_test_plant`` was happily picking
+        rules that fired on zero train commanders, then the grid search produced
+        identical composite scores at every cell and raised ``OptimizerSelfTestFailed``
+        on a structural property of the catalogue rather than a real calibration bug.
+        """
+        from mtg_synergy_graph.bench.optimize import _select_self_test_plant
+
+        # All three rules have full planting room. Without the filter, the
+        # seed-shuffled selector would pick whichever lands first. With the
+        # filter, alpha_rule and beta_rule are off-limits.
+        baseline = {"alpha_rule": 1.0, "beta_rule": 1.0, "gamma_rule": 1.0}
+        rule_id, planted_value = _select_self_test_plant(
+            baseline,
+            seed=0,
+            planted_mult=2.0,
+            clamp_min=0.01,
+            clamp_max=5.0,
+            excluded={"alpha_rule", "beta_rule"},
+        )
+        assert rule_id == "gamma_rule"
+        assert planted_value == pytest.approx(2.0)
+
+    def test_select_plant_raises_when_only_dead_keys_remain(self) -> None:
+        """When every non-excluded rule has zero planting room, raise with a dead-key-aware message."""
+        from mtg_synergy_graph.bench.optimize import _select_self_test_plant
+
+        # alpha_rule has full room but is excluded; beta_rule has zero room.
+        baseline = {"alpha_rule": 1.0, "beta_rule": 1.0}
+        with pytest.raises(OptimizerSelfTestFailed, match="dead-keys"):
+            _select_self_test_plant(
+                baseline,
+                seed=0,
+                planted_mult=2.0,
+                clamp_min=1.0,
+                clamp_max=1.0,
+                excluded={"alpha_rule"},
+            )
+
+    def test_select_plant_raises_when_every_rule_pinned(self) -> None:
+        """When every rule is structurally pinned (clamp_min == clamp_max == baseline), raise."""
+        from mtg_synergy_graph.bench.optimize import _select_self_test_plant
+
+        baseline = {"alpha_rule": 1.0}
+        # Every rule's baseline is pinned at the only allowed value.
+        with pytest.raises(OptimizerSelfTestFailed, match="planting room"):
+            _select_self_test_plant(baseline, seed=0, planted_mult=2.0, clamp_min=1.0, clamp_max=1.0)
+
+    def test_self_test_passes_with_rule_at_clamp_max(
+        self,
+        fake_conns: tuple[object, object],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """End-to-end: a baseline at clamp_max no longer trips the self-test.
+
+        Pre-fix: this scenario raised ``OptimizerSelfTestFailed("collapsed to
+        baseline")`` immediately and the whole run aborted with rc=3.
+        Post-fix: the self-test rotates direction (or rule) and passes.
+        """
+        from mtg_synergy_graph import universal_scorer
+        from mtg_synergy_graph.bench import optimize as opt_mod
+
+        # Set alpha_rule to clamp_max so its UP-direction plant collapses.
+        # beta_rule and gamma_rule are at the default 1.0 (full room).
+        saved = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
+        universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
+        universal_scorer._RULE_QUALITY_MULTIPLIER.update({"alpha_rule": 5.0, "beta_rule": 1.0, "gamma_rule": 1.0})
+        try:
+            baseline = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
+
+            def _composite_all_rules(weights: Mapping[str, float]) -> float:
+                total_delta = sum(abs(weights[k] - baseline[k]) for k in baseline)
+                return 1.0 - total_delta
+
+            monkeypatch.setattr(
+                opt_mod,
+                "_score_split",
+                _scripted_score_split(composite_for_weights=_composite_all_rules),
+            )
+
+            config = OptimizerConfig(run_self_test=True, max_sweeps=0, self_test_seed=0)
+            # Should NOT raise.
+            run_optimizer(*fake_conns, ["a", "b", "c", "d", "e"], config=config)
+        finally:
+            universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
+            universal_scorer._RULE_QUALITY_MULTIPLIER.update(saved)
+
 
 class TestRunOptimizerSmoke:
     """End-to-end smoke run against the real-DB scoring fixture."""
@@ -1013,7 +1399,15 @@ def _make_result(
     partial_sweep: bool = False,
     dead_keys: tuple[str, ...] = (),
 ) -> OptimizerResult:
-    """Build a synthetic OptimizerResult for artifact tests."""
+    """Build a synthetic OptimizerResult for artifact tests.
+
+    ``color_buckets`` mirrors the production type from ``random_split``:
+    ``MappingProxyType`` at BOTH layers (outer dict + inner per-bucket dict).
+    Tests that omitted the inner ``MappingProxyType`` masked a real bug —
+    ``json.dumps`` doesn't know how to encode ``mappingproxy``, so
+    ``write_proposal_json`` would crash on production input until the
+    mappingproxy values were flattened to plain dicts.
+    """
     from types import MappingProxyType
 
     return OptimizerResult(
@@ -1027,7 +1421,7 @@ def _make_result(
         dead_keys=dead_keys,
         train_split=("a", "b"),
         held_split=("c",),
-        color_buckets={"mono": {"train": 2, "held": 1}},
+        color_buckets=MappingProxyType({"mono": MappingProxyType({"train": 2, "held": 1})}),
         train_composite_baseline=0.5,
         held_composite_baseline=0.5,
         train_ndcg_baseline=0.4,
@@ -1326,14 +1720,53 @@ class TestHandleOptimize:
         assert "empty" in captured.err
 
     def test_returns_2_on_too_few_commanders(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-        """Fixture below ``_MIN_COMMANDERS_FOR_SPLIT`` is rejected to avoid degenerate held=0 split."""
+        """Fixture below ``_MIN_COMMANDERS_FOR_SPLIT`` (3) is rejected to avoid degenerate held=0 split.
+
+        The threshold is 3: at ``train_ratio=0.8``, ``round(n * 0.8)``
+        produces ``held=0`` only when ``n <= 2``. At ``n=3`` the split is
+        2 train + 1 held — minimal but non-degenerate.
+        """
         import argparse
 
         from mtg_synergy_graph.bench.fixture import FixtureEntry, PinnedFixture
         from mtg_synergy_graph.bench.optimize import handle_optimize
 
-        # 3 commanders < 5 minimum. Use a fake config_hash so we'd hit the
-        # stale-tensor check next; but the size check must fire FIRST.
+        # 2 commanders < 3 minimum (round(2 * 0.8) = 2 → held=0). Use a fake
+        # config_hash so we'd hit the stale-tensor check next; the size check
+        # must fire FIRST.
+        fixture = PinnedFixture(
+            config_hash="0" * 64,
+            created_at="2026-01-01T00:00:00+00:00",
+            entries=[FixtureEntry(commander=f"Cmdr {i}", scores={"a": 1.0}) for i in range(2)],
+        )
+        fixture_path = tmp_path / "fixture.json"
+        fixture.write(fixture_path)
+
+        args = argparse.Namespace(
+            fixture=str(fixture_path),
+            db="data/synergy.db",
+            edhrec_db="data/tags.db",
+            max_sweeps=1,
+            seed=42,
+            no_self_test=True,
+            proposal_path=str(tmp_path / "p.json"),
+            optimize_history=str(tmp_path / "h.csv"),
+        )
+        rc = handle_optimize(args)
+        assert rc == 2
+        captured = capsys.readouterr()
+        assert "2 commanders" in captured.err
+        assert "at least 3" in captured.err
+
+    def test_returns_2_on_stale_tensor(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        import argparse
+
+        from mtg_synergy_graph.bench.fixture import FixtureEntry, PinnedFixture
+        from mtg_synergy_graph.bench.optimize import handle_optimize
+
+        # Fixture with a fake config_hash that won't match the live one. Must
+        # have at least _MIN_COMMANDERS_FOR_SPLIT (3) entries so the stale-tensor
+        # check fires before the size check.
         fixture = PinnedFixture(
             config_hash="0" * 64,
             created_at="2026-01-01T00:00:00+00:00",
@@ -1355,28 +1788,48 @@ class TestHandleOptimize:
         rc = handle_optimize(args)
         assert rc == 2
         captured = capsys.readouterr()
-        assert "3 commanders" in captured.err
-        assert "at least 5" in captured.err
+        assert "stale" in captured.err.lower()
 
-    def test_returns_2_on_stale_tensor(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_default_redirect_swaps_to_500_fixture(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """When --fixture is the canonical 100-cmdr default, --optimize swaps to the 500 fixture.
+
+        Verifies the (B) ergonomic redirect: users running ``bench.py audit
+        --optimize`` without an explicit --fixture get the 500-cmdr fixture,
+        which has trustworthy gradient signal. Explicit --fixture is honored
+        as-is.
+        """
         import argparse
 
         from mtg_synergy_graph.bench.fixture import FixtureEntry, PinnedFixture
-        from mtg_synergy_graph.bench.optimize import handle_optimize
+        from mtg_synergy_graph.bench.optimize import (
+            _CANONICAL_FIXTURE,
+            _OPTIMIZE_DEFAULT_FIXTURE,
+            handle_optimize,
+        )
 
-        # Fixture with a fake config_hash that won't match the live one. Must
-        # have at least _MIN_COMMANDERS_FOR_SPLIT entries so the stale-tensor
-        # check fires before the size check.
-        fixture = PinnedFixture(
+        # Create a 500-fixture-like file at the optimize-default path so the
+        # redirect's existence check passes.
+        monkeypatch.chdir(tmp_path)
+        canonical_path = tmp_path / _CANONICAL_FIXTURE
+        optimize_path = tmp_path / _OPTIMIZE_DEFAULT_FIXTURE
+        canonical_path.parent.mkdir(parents=True, exist_ok=True)
+        # The canonical path must exist for args.fixture to be valid; we
+        # populate it with a fake hash that will fail the staleness check
+        # AFTER the redirect swaps it. Test asserts the redirect log fires
+        # before failure, which proves the swap happened.
+        PinnedFixture(
             config_hash="0" * 64,
             created_at="2026-01-01T00:00:00+00:00",
-            entries=[FixtureEntry(commander=f"Cmdr {i}", scores={"a": 1.0}) for i in range(5)],
-        )
-        fixture_path = tmp_path / "fixture.json"
-        fixture.write(fixture_path)
+            entries=[FixtureEntry(commander=f"C{i}", scores={"a": 1.0}) for i in range(5)],
+        ).write(optimize_path)
 
         args = argparse.Namespace(
-            fixture=str(fixture_path),
+            fixture=_CANONICAL_FIXTURE,  # exactly the canonical default
             db="data/synergy.db",
             edhrec_db="data/tags.db",
             max_sweeps=1,
@@ -1386,9 +1839,45 @@ class TestHandleOptimize:
             optimize_history=str(tmp_path / "h.csv"),
         )
         rc = handle_optimize(args)
-        assert rc == 2
+        # Redirect fires (visible in stderr); then staleness check fails (rc=2).
         captured = capsys.readouterr()
-        assert "stale" in captured.err.lower()
+        assert _OPTIMIZE_DEFAULT_FIXTURE in captured.err
+        assert "default for --optimize" in captured.err
+        assert rc == 2  # stale tensor (expected — fake config_hash on the 500 stub)
+
+    def test_explicit_fixture_overrides_redirect(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """An explicit --fixture path bypasses the default-redirect."""
+        import argparse
+
+        from mtg_synergy_graph.bench.fixture import FixtureEntry, PinnedFixture
+        from mtg_synergy_graph.bench.optimize import handle_optimize
+
+        explicit_path = tmp_path / "custom_fixture.json"
+        PinnedFixture(
+            config_hash="0" * 64,
+            created_at="2026-01-01T00:00:00+00:00",
+            entries=[FixtureEntry(commander=f"C{i}", scores={"a": 1.0}) for i in range(5)],
+        ).write(explicit_path)
+
+        args = argparse.Namespace(
+            fixture=str(explicit_path),
+            db="data/synergy.db",
+            edhrec_db="data/tags.db",
+            max_sweeps=1,
+            seed=42,
+            no_self_test=True,
+            proposal_path=str(tmp_path / "p.json"),
+            optimize_history=str(tmp_path / "h.csv"),
+        )
+        handle_optimize(args)
+        captured = capsys.readouterr()
+        # No redirect log when --fixture is explicit (even if the explicit
+        # path happens not to be the 500 fixture).
+        assert "default for --optimize" not in captured.err
 
     def test_resolve_mode_picks_optimize(self) -> None:
         import argparse
@@ -1424,3 +1913,135 @@ class TestHandleOptimize:
         parser = _build_parser()
         with pytest.raises(SystemExit):
             parser.parse_args(["audit", "--optimize", "--repin"])
+
+    def test_argparse_validates_alpha_range(self) -> None:
+        """--alpha must be in [0, 1]; out-of-range raises SystemExit."""
+        from mtg_synergy_graph.bench.cli import _build_parser
+
+        parser = _build_parser()
+        # Valid endpoints accepted.
+        parser.parse_args(["audit", "--optimize", "--alpha", "0.0"])
+        parser.parse_args(["audit", "--optimize", "--alpha", "1.0"])
+        # Out of range rejected.
+        with pytest.raises(SystemExit):
+            parser.parse_args(["audit", "--optimize", "--alpha", "1.5"])
+        with pytest.raises(SystemExit):
+            parser.parse_args(["audit", "--optimize", "--alpha", "-0.1"])
+
+    def test_argparse_validates_train_ratio_open_interval(self) -> None:
+        """--train-ratio must be in (0, 1) — both endpoints rejected."""
+        from mtg_synergy_graph.bench.cli import _build_parser
+
+        parser = _build_parser()
+        parser.parse_args(["audit", "--optimize", "--train-ratio", "0.5"])
+        with pytest.raises(SystemExit):
+            parser.parse_args(["audit", "--optimize", "--train-ratio", "0.0"])
+        with pytest.raises(SystemExit):
+            parser.parse_args(["audit", "--optimize", "--train-ratio", "1.0"])
+
+    def test_argparse_grid_accepts_multiple_values(self) -> None:
+        """--grid accepts a space-separated list of positive floats."""
+        from mtg_synergy_graph.bench.cli import _build_parser
+
+        parser = _build_parser()
+        ns = parser.parse_args(["audit", "--optimize", "--grid", "0.5", "0.75", "1.5", "2.0"])
+        assert ns.grid == [0.5, 0.75, 1.5, 2.0]
+        # Non-positive grid value rejected.
+        with pytest.raises(SystemExit):
+            parser.parse_args(["audit", "--optimize", "--grid", "0.5", "0.0"])
+        with pytest.raises(SystemExit):
+            parser.parse_args(["audit", "--optimize", "--grid", "0.5", "-1.0"])
+
+    def test_companion_flag_warning_includes_new_flags(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Passing --alpha/--grid/etc. without --optimize warns on stderr."""
+        import contextlib
+
+        from mtg_synergy_graph.bench.cli import main
+
+        # Use --expect-identity (the cheapest mode that doesn't need a fixture
+        # rebuild) and pass --alpha. Should error somewhere because no DB
+        # exists, but the warning fires before that.
+        with contextlib.suppress(SystemExit):
+            main(["audit", "--expect-identity", "--alpha", "0.7"])
+        captured = capsys.readouterr()
+        assert "--alpha" in captured.err
+        assert "no effect without --optimize" in captured.err
+
+    def test_format_json_emits_summary_to_stdout(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``--optimize --format json`` writes a single JSON object to stdout.
+
+        Mocks `run_optimizer` to return a synthetic OptimizerResult so the test
+        is fast and deterministic; the goal is to verify the SUMMARY shape, not
+        the optimizer logic.
+        """
+        import argparse
+        import json
+
+        from mtg_synergy_graph.bench import optimize as opt_mod
+        from mtg_synergy_graph.bench.fixture import FixtureEntry, PinnedFixture
+        from mtg_synergy_graph.bench.optimize import OPTIMIZE_SUMMARY_SCHEMA_VERSION
+
+        # Build a fixture with 5 commanders + the live config_hash so the
+        # stale-tensor check passes.
+        from mtg_synergy_graph.bench.tensor import compute_config_hash
+
+        live_hash = compute_config_hash()
+        fixture = PinnedFixture(
+            config_hash=live_hash,
+            created_at="2026-01-01T00:00:00+00:00",
+            entries=[FixtureEntry(commander=f"Cmdr {i}", scores={"a": 1.0}) for i in range(5)],
+        )
+        fixture_path = tmp_path / "fixture.json"
+        fixture.write(fixture_path)
+
+        # Mock run_optimizer to return a minimal valid OptimizerResult.
+        def _fake_run(conn, edhrec_conn, commanders, *, config=None, time_now=None):
+            return _make_result(
+                baseline_weights={"alpha_rule": 1.0},
+                final_weights={"alpha_rule": 1.5},
+                n_steps_accepted=1,
+            )
+
+        monkeypatch.setattr(opt_mod, "run_optimizer", _fake_run)
+        # Skip the actual write_proposal_json (it tries to compute_config_hash
+        # against patched globals). We just want the JSON summary on stdout.
+        monkeypatch.setattr(opt_mod, "write_proposal_json", lambda r, path=None: {})
+        monkeypatch.setattr(opt_mod, "append_optimize_history_rows", lambda r, run_id, path=None: None)
+
+        args = argparse.Namespace(
+            fixture=str(fixture_path),
+            db="data/synergy.db",
+            edhrec_db="data/tags.db",
+            max_sweeps=1,
+            seed=42,
+            no_self_test=True,
+            proposal_path=str(tmp_path / "p.json"),
+            optimize_history=str(tmp_path / "h.csv"),
+            alpha=0.5,
+            grid=[0.5, 0.75, 1.25, 1.5, 2.0],
+            eps_step=0.005,
+            eps_cumulative=0.005,
+            clamp_min=0.01,
+            clamp_max=5.0,
+            train_ratio=0.8,
+            wall_clock_seconds=300.0,
+            self_test_seed=7,
+            format="json",
+        )
+        rc = opt_mod.handle_optimize(args)
+        assert rc == 0
+        captured = capsys.readouterr()
+        # Stdout has exactly one JSON line; stderr has no human prose.
+        summary = json.loads(captured.out.strip())
+        assert summary["schema_version"] == OPTIMIZE_SUMMARY_SCHEMA_VERSION
+        assert summary["n_steps_accepted"] == 1
+        assert summary["n_iterations"] == 1
+        assert summary["partial_sweep"] is False
+        assert summary["proposal_path"] == str(tmp_path / "p.json")
+        assert summary["history_path"] == str(tmp_path / "h.csv")
+        assert "run_id" in summary
+        # No human-readable summary on stderr in JSON mode.
+        assert "optimizer accepted" not in captured.err
+        assert "no improvement found" not in captured.err

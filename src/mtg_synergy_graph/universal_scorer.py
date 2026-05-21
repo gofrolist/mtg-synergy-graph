@@ -13,9 +13,10 @@ import logging
 import math
 import sqlite3
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from functools import cached_property
+from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, Protocol
 
@@ -158,6 +159,8 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "cascade_tribal": "port_match",
     # Plan 2026-04-23-001 depth-2 self-bridging pathway.
     "self_bridging_cascade": "port_match",
+    # Plan 2026-05-19 Prepared / AlternateMode:Prepare mechanic capture.
+    "prepared_mechanic": "port_match",
 }
 
 # ---------------------------------------------------------------------------
@@ -209,8 +212,21 @@ _SYNERGY_PAIRS: dict[frozenset[str], float] = {
 }
 
 
+@lru_cache(maxsize=4096)
 def _compute_pair_bonus(rules: frozenset[str]) -> float:
-    """Sum bonuses for all synergy pairs present in a card's rule set."""
+    """Sum bonuses for all synergy pairs present in a card's rule set.
+
+    Cached because the bench optimizer calls this 43.85M+ times per sweep
+    (once per candidate per grid cell) — see the 2026-04-30 cProfile run
+    in ``docs/solutions/best-practices/optimizer-perf-profile-2026-04-30.md``.
+    The function is pure and the input is hashable, so caching is safe.
+
+    Cache invalidation contract: if a test or migration mutates
+    ``_SYNERGY_PAIRS`` at runtime, call ``_compute_pair_bonus.cache_clear()``
+    in test setup/teardown. The module-level dict is not currently mutated
+    by any non-test code path; callers that monkeypatch ``_SYNERGY_PAIRS``
+    must clear the cache explicitly.
+    """
     bonus = 0.0
     for pair, value in _SYNERGY_PAIRS.items():
         if pair <= rules:
@@ -579,6 +595,134 @@ _FLAT_WEIGHT_OVERRIDES: dict[str, float] = _LOADED_SCORING_WEIGHTS.flat_weight_o
 _RULE_QUALITY_MULTIPLIER: dict[str, float] = _LOADED_SCORING_WEIGHTS.rule_quality_multiplier
 
 
+@contextmanager
+def patched_rule_quality_multiplier(weights: Mapping[str, float]) -> Iterator[None]:
+    """Temporarily replace ``_RULE_QUALITY_MULTIPLIER`` with ``weights``; restore on exit.
+
+    The bench optimizer scores grid cells by patching the global
+    ``_RULE_QUALITY_MULTIPLIER`` dict, calling
+    :func:`score_from_complements`, and restoring the baseline. The
+    ``.clear() + .update()`` pattern preserves the dict's identity (so
+    callers holding a reference to the global keep seeing live values).
+
+    Identity preservation matters because:
+
+    * ``compute_config_hash`` and ``ScoringConfigInputs`` read the
+      module-level global by attribute access; rebinding to a new dict
+      would silently break observers.
+    * Test fixtures patch the global to install synthetic weights and
+      rely on the same dict object surviving across the fixture's yield.
+
+    The context manager consolidates the four-line ``baseline = dict(...);
+    try: clear+update; finally: clear+update`` pattern previously
+    duplicated across ``_score_split``, ``_proposed_config_hash``, the
+    ``patched_baseline_weights`` test fixture, and several individual
+    tests. One source of truth means future refactors (e.g., a future
+    atomic single-key swap) only touch this function.
+
+    Usage::
+
+        with patched_rule_quality_multiplier(weights):
+            score_from_complements(conn, [cmdr], complements)
+
+    Restores even if the body raises (try/finally semantics).
+    """
+    baseline = dict(_RULE_QUALITY_MULTIPLIER)
+    try:
+        _RULE_QUALITY_MULTIPLIER.clear()
+        _RULE_QUALITY_MULTIPLIER.update(weights)
+        yield
+    finally:
+        _RULE_QUALITY_MULTIPLIER.clear()
+        _RULE_QUALITY_MULTIPLIER.update(baseline)
+
+
+@dataclass(frozen=True)
+class IdfBasis:
+    """Per-commander IDF basis: weight-independent components of ``_compute_idf_weights``.
+
+    Splits the IDF computation into two parts:
+
+    * **Weight-independent** (this dataclass): frequency counts, ``1/log2(1+N)``,
+      ``cond_mult``, and the flat-rule overrides. Cacheable per commander.
+    * **Weight-dependent** (:func:`_idf_weights_from_basis`): a single
+      ``_RULE_QUALITY_MULTIPLIER`` lookup per non-flat key.
+
+    The bench optimizer caches one ``IdfBasis`` per commander alongside its
+    ``complements_cache`` and reuses it across every grid-cell evaluation.
+    Per-cell cost drops from ``O(complements)`` frequency counting to
+    ``O(unique_keys)`` multiplier lookup.
+
+    Cache invalidation contract: ``IdfBasis`` depends on the complements list
+    AND on ``_FLAT_WEIGHT_OVERRIDES`` (which the M1 optimizer does not sweep)
+    AND on the static dampening logic (``_FLAT_COUNT_RULES``, panharmonicon
+    floor, ``cond_mult``). It does NOT depend on ``_RULE_QUALITY_MULTIPLIER``.
+    A future optimizer variant that sweeps ``_FLAT_WEIGHT_OVERRIDES`` MUST
+    rebuild the basis on every override change.
+
+    Attributes:
+        flat_weights: Final IDF weights for ``_FLAT_COUNT_RULES`` keys
+            (already include ``base_w * cond_mult``; no per-cell work).
+        base_idf_non_flat: Pre-multiplier IDF weights for non-flat keys —
+            ``(1/log2(1+N)) * cond_mult``. Multiply by
+            ``_RULE_QUALITY_MULTIPLIER[rule_id]`` per cell.
+    """
+
+    flat_weights: Mapping[tuple[str, str, str, str], float]
+    base_idf_non_flat: Mapping[tuple[str, str, str, str], float]
+
+
+def _compute_idf_basis(complements: Sequence[PortComplement]) -> IdfBasis:
+    """Build the weight-independent IDF basis for one commander's complements.
+
+    See :class:`IdfBasis` for the cache invariant. Mirrors the frequency
+    counting + ``cond_mult`` + flat-override + log2 logic from
+    :func:`_compute_idf_weights`, but stops short of applying
+    ``_RULE_QUALITY_MULTIPLIER``.
+    """
+    freq: dict[tuple[str, str, str, str], set[str]] = defaultdict(set)
+    for c in complements:
+        key = (c.rule_id, c.cmdr_event, c.cand_event, c.filter_group)
+        freq[key].add(c.candidate)
+
+    flat_weights: dict[tuple[str, str, str, str], float] = {}
+    base_idf_non_flat: dict[tuple[str, str, str, str], float] = {}
+    for key, candidates in freq.items():
+        rule_id = key[0]
+        filter_group = key[3] or ""
+        # Effect-conditional dampening: see _compute_idf_weights docstring.
+        cond_mult = 0.5 if filter_group.endswith(":cond") else 1.0
+        if rule_id in _FLAT_COUNT_RULES:
+            override = _FLAT_WEIGHT_OVERRIDES.get(rule_id)
+            base_w = override if override is not None else 1.0
+            flat_weights[key] = base_w * cond_mult
+        else:
+            n = len(candidates)
+            cmdr_event = key[1]
+            if rule_id == "panharmonicon" and "reverse" not in cmdr_event and "stack" not in cmdr_event:
+                n = max(n, 30)
+            base_idf_non_flat[key] = (1.0 / math.log2(1.0 + n)) * cond_mult
+    return IdfBasis(
+        flat_weights=flat_weights,
+        base_idf_non_flat=base_idf_non_flat,
+    )
+
+
+def _idf_weights_from_basis(basis: IdfBasis) -> dict[tuple[str, str, str, str], float]:
+    """Apply current ``_RULE_QUALITY_MULTIPLIER`` to a cached :class:`IdfBasis`.
+
+    The hot-path inner-loop equivalent of :func:`_compute_idf_weights` when
+    the caller has already paid the frequency-counting cost. ``flat_weights``
+    pass through unchanged; non-flat keys get the per-rule multiplier.
+    """
+    result: dict[tuple[str, str, str, str], float] = dict(basis.flat_weights)
+    for key, base_w in basis.base_idf_non_flat.items():
+        rule_id = key[0]
+        mult = _RULE_QUALITY_MULTIPLIER.get(rule_id, 1.0)
+        result[key] = base_w * mult
+    return result
+
+
 def _compute_idf_weights(
     complements: Sequence[PortComplement],
 ) -> dict[tuple[str, str, str, str], float]:
@@ -595,50 +739,14 @@ def _compute_idf_weights(
     Density rules (spell_density, scaling) use flat weight per
     match — for these rules, matching many candidates IS the strategy
     (Talrand wants EVERY instant), so IDF would incorrectly penalize.
-    """
-    freq: dict[tuple[str, str, str, str], set[str]] = defaultdict(set)
-    for c in complements:
-        key = (c.rule_id, c.cmdr_event, c.cand_event, c.filter_group)
-        freq[key].add(c.candidate)
 
-    result: dict[tuple[str, str, str, str], float] = {}
-    for key, candidates in freq.items():
-        rule_id = key[0]
-        filter_group = key[3] or ""
-        # Effect-conditional dampening: when a commander trigger's
-        # execute has a runtime gate (Selvala power compare, Meren's
-        # XP-vs-CMC), matches on that trigger are tagged with ":cond" in
-        # filter_group. Halve IDF for these — the trigger fires broadly
-        # but the payoff is gated, so most matches don't pan out.
-        cond_mult = 0.5 if filter_group.endswith(":cond") else 1.0
-        if rule_id in _FLAT_COUNT_RULES:
-            override = _FLAT_WEIGHT_OVERRIDES.get(rule_id)
-            base_w = override if override is not None else 1.0
-            result[key] = base_w * cond_mult
-        else:
-            n = len(candidates)
-            # For forward panharmonicon matches, apply minimum N=10 floor.
-            # Very rare effects (SacrificeAll N=1) get inflated IDF that
-            # doesn't reflect true synergy quality — Krovikan Vampire at
-            # IDF=1.0 shouldn't outrank Zulaport Cutthroat at IDF=0.17.
-            # Exclude reverse_panharmonicon and panharmonicon_stack which
-            # have genuinely unique high-value matches (Harmonic Prodigy).
-            cmdr_event = key[1]
-            if rule_id == "panharmonicon" and "reverse" not in cmdr_event and "stack" not in cmdr_event:
-                # Floor raised from 10 to 30 so rare board-wide triggers
-                # (ChangesZoneAll + Token, N=35, IDF 0.195) don't swamp
-                # the numerous self-ETB payoff groups (ChangesZone_etb_*,
-                # IDF 0.10-0.14). Yarok's EDHREC Hi-Syn is dominated by
-                # self-ETB value creatures (Mulldrifter, Coiling Oracle)
-                # that were buried at rank 1000+ when board-wide-trigger
-                # cards captured the 0.289 cap.
-                n = max(n, 30)
-            w = 1.0 / math.log2(1.0 + n)
-            # Apply quality multiplier: cost-based rules are boosted,
-            # broad effect rules are dampened.
-            mult = _RULE_QUALITY_MULTIPLIER.get(rule_id, 1.0)
-            result[key] = w * mult * cond_mult
-    return result
+    Refactored into :func:`_compute_idf_basis` + :func:`_idf_weights_from_basis`
+    so the bench optimizer can cache the basis once per commander and only pay
+    the cheap multiplier-lookup per grid cell. This wrapper is the legacy
+    one-shot path used by ``score_all_universal``; bitwise-identical output
+    to pre-refactor.
+    """
+    return _idf_weights_from_basis(_compute_idf_basis(complements))
 
 
 def score_all_universal(
@@ -670,7 +778,7 @@ def score_all_universal(
     identity invariant in the plan.
     """
     complements = find_all_complements(conn, commander_set, candidate_cache=candidate_cache)
-    return _score_from_complements(
+    return score_from_complements(
         conn,
         commander_set,
         complements,
@@ -679,22 +787,31 @@ def score_all_universal(
     )
 
 
-def _score_from_complements(
+def score_from_complements(
     conn: sqlite3.Connection,
     commander_set: Sequence[str],
     complements: Sequence[PortComplement],
     *,
     candidate_cache: CandidateCache | None = None,
     tensor_sink: TensorSink | None = None,
+    idf_basis: IdfBasis | None = None,
 ) -> dict[str, UniversalScore]:
     """Build per-candidate ``UniversalScore`` results from precomputed complements.
 
-    Extracted from :func:`score_all_universal` so the weight optimizer
-    (``bench/optimize.py``) can score with patched ``_RULE_QUALITY_MULTIPLIER``
-    against cached complements without paying the ``find_all_complements`` cost
-    on every grid cell. Reads ``_RULE_QUALITY_MULTIPLIER``,
-    ``_FLAT_WEIGHT_OVERRIDES``, and the embedding/staple/circuit/cmc/rank
-    side-channels exactly as ``score_all_universal`` does.
+    Public counterpart to :func:`score_all_universal`: skip the
+    ``find_all_complements`` step when the caller already has the
+    complements list in hand. The bench optimizer
+    (``bench/optimize.py``) caches complements per commander and calls
+    this directly per grid cell with patched ``_RULE_QUALITY_MULTIPLIER``.
+
+    Reads ``_RULE_QUALITY_MULTIPLIER``, ``_FLAT_WEIGHT_OVERRIDES``, and
+    the embedding/staple/circuit/cmc/rank side-channels exactly as
+    ``score_all_universal`` does.
+
+    When ``idf_basis`` is supplied, skip the per-call frequency-counting walk
+    and apply the current ``_RULE_QUALITY_MULTIPLIER`` to the cached basis
+    instead. The optimizer caches one basis per commander (see
+    :class:`IdfBasis`); production scoring leaves it ``None`` and recomputes.
 
     Refactor invariant: ``score_all_universal`` is a thin wrapper that calls
     ``find_all_complements`` then this helper; behavior is bitwise-identical
@@ -702,7 +819,7 @@ def _score_from_complements(
     ``tests/bench/test_universal_scorer_identity.py`` suite and
     ``bench.py audit --expect-identity``.
     """
-    idf = _compute_idf_weights(complements)
+    idf = _idf_weights_from_basis(idf_basis) if idf_basis is not None else _compute_idf_weights(complements)
 
     # Group complements by candidate
     by_candidate: dict[str, list[PortComplement]] = defaultdict(list)

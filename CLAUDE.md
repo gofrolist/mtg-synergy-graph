@@ -25,7 +25,8 @@ implementing in a previously documented area.
 uv run python scripts/import_cardsfolder.py                              # Import fresh DB
 uv run python scripts/recommend.py --commander "Korvold, Fae-Cursed King" --top 30 --explain
 uv run pytest tests/                                                     # ~1230 tests, ~1-2s
-uv run python scripts/gap_report.py                                      # Ranked list of coverage gaps — next rule to add
+uv run python scripts/gap_report.py                                      # Ranked gap proposals; since plan 2026-05-02-001 v1.0 each entry shows a Stage A pre-flight verdict (PASS / WARN / REJECT) and entries are grouped into bands
+uv run python scripts/scaffold_rule.py --apply --walk N --strict-warn    # Walker (since plan 2026-05-02-001 v1.0): autonomous mode skips Stage A REJECTs and (with --strict-warn) WARNs; outcomes logged to .audit/walker_outcomes.csv. Add --force --force-reason "<text>" to override a WARN; logged to .audit/preflight_overrides.csv
 uv run python scripts/rule_quality_gate.py --rule RULE_ID                # Pre-commit quality gate for new rules (catches vacuum-fill / flat-noise pathology; see docs/solutions/best-practices/rule-quality-gates-2026-04-24.md)
 uv run python scripts/rule_quality_gate.py --all-declarative --sample 20 # Batch gate across current declarative set
 
@@ -60,9 +61,20 @@ uv run scripts/sweep_embedding_weights.py                                # Grid-
 # never auto-mutates data/scoring_weights.json. Append-only history at
 # .audit/optimize_history.csv. Exit codes: 0 success, 1 driver exception,
 # 2 stale tensor / fixture too small, 3 self-test failed (calibration issue).
-uv run scripts/bench.py audit --optimize                                 # Run full sweep on the pinned 100-commander fixture
+#
+# --optimize defaults to tests/fixtures/golden_set_run_500.json (500 commanders);
+# the 100-cmdr canonical is too small for trustworthy gradient signal — see
+# docs/solutions/best-practices/optimizer-fixture-size-2026-04-30.md. Pass
+# --fixture tests/fixtures/golden_set_run.json to use the 100-cmdr canonical
+# explicitly. Regenerate the 500 fixture after data refreshes:
+#   uv run python scripts/bootstrap_golden_set_500.py
+uv run scripts/bench.py audit --optimize                                 # Full sweep on the 500-cmdr default fixture
 uv run scripts/bench.py audit --optimize --no-self-test --max-sweeps 1   # Quick exploratory pass (skip planted-perturbation check)
 uv run scripts/bench.py audit --optimize --seed 17                       # Different train/held split for cross-validation
+uv run scripts/bench.py audit --optimize --format json                   # Machine-readable run-summary on stdout (for agent pipelines)
+uv run scripts/bench.py audit --optimize --alpha 0.3                     # Tune nDCG-vs-gem blend (alpha=0 → gem-only, alpha=1 → nDCG-only)
+uv run scripts/bench.py audit --optimize --grid 0.8 0.9 1.1 1.25         # Custom multiplicative grid (default 0.5 0.75 1.25 1.5 2.0)
+# Other knobs: --eps-step --eps-cumulative --clamp-min --clamp-max --train-ratio --wall-clock-seconds --self-test-seed
 ```
 
 The bench.py hook also runs advisorily on pre-commit when edits touch
@@ -81,6 +93,26 @@ StaticAbilities$ expansion, deduped after A1's 2^N re-walk fix).
 - `attr_kind='token_color'` + `attr_kind='token_subtype'` for every TokenScript
   produced by a Token effect (multi-color prefixes like `gw`, `all`; and
   artifact-creature format like `c_0_1_a_thopter`).
+- `attr_kind='attribute'` for `AlterAttribute Attributes$ <V>` values
+  (added 2026-05-19, PR #47). One row per comma-separated entry on the
+  effect port — surfaces Prepared (29 ports), Suspected (25), Solved
+  (15), Plotted (4), Commander (3), Saddled (3), Harnessed (2). Joined
+  by `complement_rules/prepared.py::_commander_prepares_creatures` for
+  Prepared-enabler commander detection (slow path).
+
+**Synthetic ports** (no source line in the Forge .txt — emitted by the
+port extractor itself, not by parsing a `T:`/`A:`/`R:`/`K:` line):
+- `port_type='static', event_class='AlternateMode',
+  granted_keyword='Prepare'` for every card with the top-level
+  `AlternateMode:Prepare` header (47 cards, PR #47). The synthesised
+  port is the cheap-path commander-detection signal for
+  `complement_rules/prepared.py::_commander_has_alternate_mode_prepare`.
+  Emitted by `extract_alternate_mode_ports` in `ports.py`. Restricted
+  to the `Prepare` value via `_ALTERNATE_MODE_PORT_VALUES` frozenset —
+  emitting for other AlternateMode values (DoubleFaced, Adventure,
+  Split, Modal, Flip, Specialize, Omen, Meld) perturbed the depth-2
+  cascade walker's Stage-1 prefilter on Tergrid (Modal DFC) before
+  the narrowing fix landed.
 
 **`card_hints` table** — normalised projection of Forge's AI annotations
 (`DeckNeeds`/`DeckHints`/`DeckHas` → kind `needs`/`hints`/`has`,

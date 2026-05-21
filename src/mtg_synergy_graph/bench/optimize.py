@@ -32,12 +32,21 @@ import argparse
 import logging
 import random
 import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from mtg_synergy_graph.complement_rules import find_all_complements
+from mtg_synergy_graph.engine import UNRANKED_EDHREC_SENTINEL
 from mtg_synergy_graph.penalties import build_candidate_cache
+from mtg_synergy_graph.universal_scorer import (
+    _compute_idf_basis,
+    _compute_pair_bonus,
+    patched_rule_quality_multiplier,
+    score_from_complements,
+)
+from mtg_synergy_graph.validate import compute_ndcg
 
 _logger = logging.getLogger(__name__)
 
@@ -46,7 +55,11 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from mtg_synergy_graph.complement_rules import PortComplement
-    from mtg_synergy_graph.universal_scorer import CandidateCache, UniversalScore
+    from mtg_synergy_graph.universal_scorer import (
+        CandidateCache,
+        IdfBasis,
+        UniversalScore,
+    )
 
 # ---------------------------------------------------------------------------
 # Unit 1: Composite α-blended objective
@@ -320,24 +333,38 @@ class CommanderScoreResult:
     contributions: tuple[tuple[str, str, float], ...]
 
 
-def _fast_total(score_obj: UniversalScore) -> float:
-    """Compute ``UniversalScore.to_legacy_buckets()["total"]`` without the bucket dict.
+def _fast_total_and_contribs(
+    score_obj: UniversalScore,
+) -> tuple[float, dict[str, float]]:
+    """Compute total + per-rule contributions in a single walk over complements.
 
-    Hot path: the production engine sorts by this same value, but allocates a
-    28-key bucket dict per call. The optimizer scores ~thousands of candidates
-    per grid evaluation × thousands of grid evaluations per sweep, so the dict
-    allocation dominates. This helper produces bitwise-identical totals while
-    skipping the bucket-keyed accumulator.
+    Fused version of the previous two-pass pattern (``_fast_total`` followed
+    by ``_build_contributions``). Both passes deduped the same complements
+    against the same key tuple — this fuses them so the per-candidate work
+    is O(complements) once instead of twice.
 
-    Result must match ``to_legacy_buckets()["total"]`` to the bit; the optimizer's
-    fidelity test in ``test_optimize.py::test_production_faithful_top_30_at_baseline``
-    verifies this invariant against ``score_all_universal``.
+    Per the 2026-04-30 cProfile run
+    (``docs/solutions/best-practices/optimizer-perf-profile-2026-04-30.md``),
+    ``_build_contributions`` was 9.9% of total run time on its own walk;
+    fusing eliminates the redundant pass. Bitwise-identical to the legacy
+    ``_fast_total`` + ``_build_contributions`` pair, verified by the
+    ``test_production_faithful_top_30_at_baseline`` fidelity test plus
+    ``bench.py audit --expect-identity`` over the 100-commander golden set.
+
+    Returns:
+        ``(total, per_rule)``:
+        * ``total``: the sort key produced by
+          ``UniversalScore.to_legacy_buckets()["total"]``.
+        * ``per_rule``: ``rule_id -> net IDF-weighted contribution``,
+          synergy positive and anti-synergy negative, each
+          ``(rule_id, cmdr_event, cand_event, filter_group, direction)``
+          deduped exactly once. Zero-net entries are NOT dropped here —
+          the caller filters them when assembling the contributions tuple.
     """
-    from mtg_synergy_graph.universal_scorer import _compute_pair_bonus
-
     total = 0.0
     seen: set[tuple[str, str, str, str, str]] = set()
     distinct_rules: set[str] = set()
+    per_rule: dict[str, float] = {}
     idf_weights = score_obj.idf_weights
     for c in score_obj.complements:
         key = (c.rule_id, c.cmdr_event, c.cand_event, c.filter_group, c.direction)
@@ -347,9 +374,11 @@ def _fast_total(score_obj: UniversalScore) -> float:
         weight = idf_weights.get((c.rule_id, c.cmdr_event, c.cand_event, c.filter_group), 1.0)
         if c.direction == "anti_synergy":
             total -= weight
+            per_rule[c.rule_id] = per_rule.get(c.rule_id, 0.0) - weight
         else:
             total += weight
             distinct_rules.add(c.rule_id)
+            per_rule[c.rule_id] = per_rule.get(c.rule_id, 0.0) + weight
 
     total += score_obj.staple_bonus
     n_rules = len(distinct_rules)
@@ -358,42 +387,20 @@ def _fast_total(score_obj: UniversalScore) -> float:
     total += _compute_pair_bonus(frozenset(distinct_rules))
     total += score_obj.circuit_bonus + score_obj.cmc_bonus + score_obj.rank_bonus
     total += score_obj.embedding_contribution
-    return total
+    return total, per_rule
 
 
-def _build_contributions(
-    results: Mapping[str, UniversalScore],
-) -> tuple[tuple[str, str, float], ...]:
-    """Fold per-candidate ``UniversalScore`` results into per-(cand, rule) contributions.
+def _fast_total(score_obj: UniversalScore) -> float:
+    """Compute ``UniversalScore.to_legacy_buckets()["total"]`` without the bucket dict.
 
-    Mirrors the dedup logic in ``universal_scorer._emit_tensor_rows``:
-    each ``(rule_id, cmdr_event, cand_event, filter_group)`` key
-    contributes at most once per direction. Anti-synergy contributes
-    negatively. Zero-contribution rows (synergy fully cancelled by anti)
-    are dropped.
+    Thin wrapper kept for the bitwise-fidelity test
+    (``test_production_faithful_top_30_at_baseline``) and any future caller
+    that needs only the scalar total. The hot path inside
+    ``score_commander_from_complements`` calls
+    :func:`_fast_total_and_contribs` directly to fuse the per-rule
+    contribution walk into the same pass.
     """
-    out: list[tuple[str, str, float]] = []
-    for cand_name, us in results.items():
-        per_rule: dict[str, float] = {}
-        seen_syn: set[tuple[str, str, str, str]] = set()
-        seen_anti: set[tuple[str, str, str, str]] = set()
-        for c in us.complements:
-            key = (c.rule_id, c.cmdr_event, c.cand_event, c.filter_group)
-            w = us.idf_weights.get(key, 1.0)
-            if c.direction == "synergy":
-                if key in seen_syn:
-                    continue
-                seen_syn.add(key)
-                per_rule[c.rule_id] = per_rule.get(c.rule_id, 0.0) + w
-            else:
-                if key in seen_anti:
-                    continue
-                seen_anti.add(key)
-                per_rule[c.rule_id] = per_rule.get(c.rule_id, 0.0) - w
-        for rid, contrib in per_rule.items():
-            if contrib != 0.0:
-                out.append((cand_name, rid, contrib))
-    return tuple(out)
+    return _fast_total_and_contribs(score_obj)[0]
 
 
 def score_commander_from_complements(
@@ -402,29 +409,34 @@ def score_commander_from_complements(
     complements: Sequence[PortComplement],
     *,
     candidate_cache: CandidateCache | None = None,
+    idf_basis: IdfBasis | None = None,
 ) -> CommanderScoreResult:
     """Score one commander given precomputed complements.
 
     Reads the live ``_RULE_QUALITY_MULTIPLIER`` and ``_FLAT_WEIGHT_OVERRIDES``
     globals — the caller is responsible for patching them via
     ``.clear() + .update(weights)`` in a ``try/finally`` BEFORE this call
-    if grid-cell weights differ from baseline. ``_score_from_complements``
+    if grid-cell weights differ from baseline. ``score_from_complements``
     handles the staple/circuit/cmc/rank/embedding side-channels exactly
     as ``score_all_universal`` does.
+
+    When ``idf_basis`` is supplied, the inner ``_compute_idf_weights`` walk
+    is replaced with a cheap ``_RULE_QUALITY_MULTIPLIER`` lookup over the
+    cached basis. The basis is weight-independent (see :class:`IdfBasis`),
+    so the optimizer can build it once per commander and reuse across
+    every grid cell.
 
     The returned ``score_by_candidate`` and ``top_30`` use
     ``to_legacy_buckets()["total"]`` — the production sort key from
     ``engine.SynergyEngine.page()`` — so the optimizer's view matches
     what ``recommend.py`` displays.
     """
-    from mtg_synergy_graph.engine import UNRANKED_EDHREC_SENTINEL
-    from mtg_synergy_graph.universal_scorer import _score_from_complements
-
-    results = _score_from_complements(
+    results = score_from_complements(
         conn,
         [commander],
         complements,
         candidate_cache=candidate_cache,
+        idf_basis=idf_basis,
     )
 
     # Production sort key: (-total, cmc_bonus_inverse_proxy, edhrec_rank, name).
@@ -448,13 +460,18 @@ def score_commander_from_complements(
 
     score_by_candidate: dict[str, float] = {}
     sortable: list[tuple[str, float]] = []
+    contributions_list: list[tuple[str, str, float]] = []
     for name, us in results.items():
-        # Hot path: use _fast_total instead of us.to_legacy_buckets()["total"]
-        # to skip the 28-key bucket dict allocation. Bitwise-identical to the
-        # `total` field that engine.SynergyEngine.page() sorts by.
-        total = _fast_total(us)
+        # Hot path: fused walk produces both the production-faithful total
+        # AND the per-rule contributions in one pass over complements (was
+        # two: _fast_total + _build_contributions). 9.9% of pre-fuse total
+        # run time was the second walk per the 2026-04-30 cProfile run.
+        total, per_rule = _fast_total_and_contribs(us)
         score_by_candidate[name] = total
         sortable.append((name, total))
+        for rule_id, contrib in per_rule.items():
+            if contrib != 0.0:
+                contributions_list.append((name, rule_id, contrib))
 
     sortable.sort(
         key=lambda r: (
@@ -466,7 +483,7 @@ def score_commander_from_complements(
     )
     top_30 = tuple(name for name, _ in sortable[:30])
 
-    contributions = _build_contributions(results)
+    contributions = tuple(contributions_list)
 
     return CommanderScoreResult(
         top_30=top_30,
@@ -584,6 +601,7 @@ def _score_split(
     labels_cache: dict[str, EdhrecLabels],
     alpha: float,
     candidate_cache: CandidateCache | None = None,
+    idf_basis_cache: dict[str, IdfBasis] | None = None,
 ) -> CompositeObjective:
     """Score a commander split with the given weights; return composite objective.
 
@@ -597,19 +615,18 @@ def _score_split(
     entry and threaded through; without it, each grid-cell evaluation re-issues
     a full ``SELECT name, cmc, edhrec_rank FROM cards`` table scan, costing
     ~5x wall-clock on a 100-commander × 53-key × 5-grid sweep.
+
+    ``idf_basis_cache`` is the per-commander IDF basis (frequency counts +
+    log2 + cond_mult, all weight-independent). Populated lazily on first miss
+    alongside ``complements_cache``; reused across every grid cell so the
+    inner ``_compute_idf_weights`` walk is replaced by a per-key
+    ``_RULE_QUALITY_MULTIPLIER`` lookup.
     """
-    from mtg_synergy_graph import universal_scorer
     from mtg_synergy_graph.bench.hidden_gems import (
         hidden_gem_hit_rate_for_commander,
     )
-    from mtg_synergy_graph.complement_rules import find_all_complements
-    from mtg_synergy_graph.validate import compute_ndcg
 
-    baseline = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
-    try:
-        universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
-        universal_scorer._RULE_QUALITY_MULTIPLIER.update(weights)
-
+    with patched_rule_quality_multiplier(weights):
         per_ndcg: dict[str, float] = {}
         per_gem: dict[str, float | None] = {}
         for cmdr in commanders:
@@ -620,7 +637,18 @@ def _score_split(
                 labels_cache[cmdr] = load_edhrec_labels(edhrec_conn, cmdr)
             labels = labels_cache[cmdr]
 
-            result = score_commander_from_complements(conn, cmdr, comps, candidate_cache=candidate_cache)
+            # Lazy-fill the IDF basis for this commander on first miss. The
+            # basis is weight-independent, so subsequent grid cells skip the
+            # frequency-counting walk entirely.
+            cmdr_basis: IdfBasis | None = None
+            if idf_basis_cache is not None:
+                if cmdr not in idf_basis_cache:
+                    idf_basis_cache[cmdr] = _compute_idf_basis(comps)
+                cmdr_basis = idf_basis_cache[cmdr]
+
+            result = score_commander_from_complements(
+                conn, cmdr, comps, candidate_cache=candidate_cache, idf_basis=cmdr_basis
+            )
             ndcg = compute_ndcg(list(result.top_30), dict(labels.graded_labels))
             per_ndcg[cmdr] = ndcg
 
@@ -634,11 +662,214 @@ def _score_split(
                 per_gem[cmdr] = gem_entry.rate if gem_entry is not None else None
             else:
                 per_gem[cmdr] = None
-    finally:
-        universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
-        universal_scorer._RULE_QUALITY_MULTIPLIER.update(baseline)
 
     return composite_objective(per_ndcg, per_gem, alpha)
+
+
+def _warn_missing_edhrec_labels(labels_cache: Mapping[str, EdhrecLabels]) -> None:
+    """Emit one aggregate warning if any commanders lack EDHREC top-30 data.
+
+    Slug-mismatch / EDHREC-empty diagnostic. After both baseline scoring
+    calls populate ``labels_cache`` for every commander, count those whose
+    ``top_30_set`` is None (no high-synergy data — typically a slug mismatch
+    or a brand-new commander not yet on EDHREC). If a meaningful fraction
+    of the catalogue lacks data, the gem axis silently degrades to zero
+    contribution. Warn once with the aggregate count instead of spamming
+    per-commander.
+    """
+    missing_gem = [c for c, lbls in labels_cache.items() if lbls.top_30_set is None]
+    if not missing_gem:
+        return
+    n_total = len(labels_cache)
+    pct = (len(missing_gem) / n_total) * 100 if n_total else 0.0
+    _logger.warning(
+        "EDHREC labels missing for %d/%d commanders (%.1f%%) — gem axis will contribute nothing for these. Sample: %s",
+        len(missing_gem),
+        n_total,
+        pct,
+        ", ".join(sorted(missing_gem)[:5]) + ("..." if len(missing_gem) > 5 else ""),
+    )
+
+
+def _detect_dead_keys(
+    complements_cache: Mapping[str, list[PortComplement]],
+    baseline_weights: Mapping[str, float],
+) -> list[str]:
+    """Return rule_ids in baseline_weights that fire on zero commanders.
+
+    Iterates the complements_cache populated by baseline scoring and
+    collects every rule_id that appeared. Any baseline-weights key NOT in
+    that set is "dead" (no candidate matched it across the entire input
+    catalogue). Reported in the proposal artifact so reviewers can prune
+    truly-unused entries from ``data/scoring_weights.json``.
+    """
+    firing_rules: set[str] = set()
+    for comps in complements_cache.values():
+        for c in comps:
+            firing_rules.add(c.rule_id)
+    return [rule_id for rule_id in baseline_weights if rule_id not in firing_rules]
+
+
+def _apply_drift_revert(
+    *,
+    history: list[OptimizerStep],
+    accepted_step_indices: list[int],
+    n_steps_accepted: int,
+    n_steps_rejected: int,
+) -> tuple[int, int]:
+    """Cumulative-drift revert: mark every accepted step as reverted, return updated counters.
+
+    Mutates ``history`` (replaces each accepted ``OptimizerStep`` with a copy
+    flagged ``accepted=False, reject_reason="cumulative_drift_revert"``) and
+    clears ``accepted_step_indices``. Returns the corrected
+    ``(n_steps_accepted, n_steps_rejected)`` so the caller can update its own
+    counters and reset metrics atomically.
+
+    Used at two trip points: mid-sweep (after every accept) and sweep-boundary
+    backstop. Both call sites must reset metrics to baseline values themselves —
+    this helper only owns the history bookkeeping.
+    """
+    for idx in accepted_step_indices:
+        step = history[idx]
+        history[idx] = OptimizerStep(
+            sweep_n=step.sweep_n,
+            rule_id=step.rule_id,
+            old_value=step.old_value,
+            new_value=step.new_value,
+            train_composite=step.train_composite,
+            held_composite=step.held_composite,
+            train_ndcg=step.train_ndcg,
+            held_ndcg=step.held_ndcg,
+            train_gem=step.train_gem,
+            held_gem=step.held_gem,
+            accepted=False,
+            reject_reason="cumulative_drift_revert",
+        )
+        n_steps_accepted -= 1
+        n_steps_rejected += 1
+    accepted_step_indices.clear()
+    return n_steps_accepted, n_steps_rejected
+
+
+def _grid_search_best_perturbation(
+    rule_id: str,
+    current_weights: Mapping[str, float],
+    *,
+    conn: sqlite3.Connection,
+    edhrec_conn: sqlite3.Connection,
+    train: Sequence[str],
+    config: OptimizerConfig,
+    complements_cache: dict[str, list[PortComplement]],
+    labels_cache: dict[str, EdhrecLabels],
+    candidate_cache: CandidateCache | None,
+    idf_basis_cache: dict[str, IdfBasis],
+    current_train_composite: float,
+) -> tuple[CompositeObjective, float] | None:
+    """Sweep ``config.grid`` for one rule; return ``(best_train_obj, best_value)`` or None.
+
+    Inner step of the Coordinate Ascent driver: for a fixed rule_id and
+    the current weights vector, evaluate every grid multiplier on the
+    train split and return the perturbation with the highest train
+    composite — but only if it strictly improves on
+    ``current_train_composite``. Returns ``None`` if no perturbation
+    beat the current state (the optimizer should skip to the next rule).
+
+    Pure with respect to optimizer state — does not mutate
+    ``current_weights`` or any cache; the caller decides whether to
+    accept the returned perturbation based on the held-out re-eval.
+    """
+    old_value = current_weights[rule_id]
+    best_train: CompositeObjective | None = None
+    best_value = old_value
+
+    for mult in config.grid:
+        new_value = _clamp(old_value * mult, config.clamp_min, config.clamp_max)
+        if new_value == old_value:
+            continue
+        candidate_weights = {**current_weights, rule_id: new_value}
+        train_obj = _score_split(
+            conn,
+            edhrec_conn,
+            train,
+            candidate_weights,
+            complements_cache=complements_cache,
+            labels_cache=labels_cache,
+            alpha=config.alpha,
+            candidate_cache=candidate_cache,
+            idf_basis_cache=idf_basis_cache,
+        )
+        if best_train is None or train_obj.composite > best_train.composite:
+            best_train = train_obj
+            best_value = new_value
+
+    if best_train is None or best_train.composite <= current_train_composite:
+        return None
+    return best_train, best_value
+
+
+def _select_self_test_plant(
+    baseline_weights: Mapping[str, float],
+    *,
+    seed: int,
+    planted_mult: float,
+    clamp_min: float,
+    clamp_max: float,
+    excluded: Collection[str] = (),
+) -> tuple[str, float]:
+    """Pick a (rule_id, planted_value) pair that doesn't collapse to baseline under clamp.
+
+    Tries rules in deterministic seed-shuffled order. For each rule, tries the
+    UP direction first (``baseline × planted_mult``); if that clamps back to
+    baseline (rule already at ``clamp_max``), tries the DOWN direction
+    (``baseline / planted_mult``). The 0.5×/2.0× grid recovers either way —
+    a 2× plant lands exactly back on baseline at grid 0.5×, and a 0.5× plant
+    lands exactly on baseline at grid 2.0×.
+
+    ``excluded`` skips rules that the caller knows can't produce a recoverable
+    signal — typically dead-keys (rules that fire on zero commanders in the
+    train split). Without this filter, the selector would pick a dead rule
+    and the grid search would produce identical composite scores at every
+    cell, raising a false ``OptimizerSelfTestFailed``.
+
+    Returns the first rule with non-trivial planting room. Raises only if EVERY
+    non-excluded rule has zero room in both directions (clamp_min == clamp_max
+    case, or the entire catalogue was excluded — both indicate the caller's
+    catalogue or filter is misconfigured).
+
+    Raises:
+        OptimizerSelfTestFailed: no eligible rule has planting room.
+    """
+    rng = random.Random(seed)  # noqa: S311 — determinism, not crypto
+    excluded_set = frozenset(excluded)
+    candidates = [k for k in baseline_weights if k not in excluded_set]
+    rng.shuffle(candidates)
+
+    for rule_id in candidates:
+        baseline_value = baseline_weights[rule_id]
+        # Try UP direction first (the original 2.0× plant).
+        up_value = _clamp(baseline_value * planted_mult, clamp_min, clamp_max)
+        if up_value != baseline_value:
+            return rule_id, up_value
+        # UP collapsed (baseline at clamp_max). Try DOWN: baseline / planted_mult.
+        # The grid recovers symmetrically — 0.5× plant + 2.0× grid step = baseline.
+        down_value = _clamp(baseline_value / planted_mult, clamp_min, clamp_max)
+        if down_value != baseline_value:
+            return rule_id, down_value
+
+    if excluded_set:
+        raise OptimizerSelfTestFailed(
+            f"self-test could not find ANY non-excluded rule with planting room: "
+            f"{len(excluded_set)} of {len(baseline_weights)} rule(s) excluded as dead-keys, "
+            f"and every remaining rule collapses under both x{planted_mult} (UP) and "
+            f"/{planted_mult} (DOWN) clamping (clamp_min={clamp_min}, clamp_max={clamp_max}). "
+            "The catalogue may be misconfigured, or the train split is too narrow."
+        )
+    raise OptimizerSelfTestFailed(
+        f"self-test could not find ANY rule with planting room: every rule's "
+        f"baseline collapses under both x{planted_mult} (UP) and /{planted_mult} (DOWN) "
+        f"clamping (clamp_min={clamp_min}, clamp_max={clamp_max}). "
+        "The catalogue may be misconfigured."
+    )
 
 
 def _planted_perturbation_self_test(
@@ -651,35 +882,46 @@ def _planted_perturbation_self_test(
     complements_cache: dict[str, list[PortComplement]],
     labels_cache: dict[str, EdhrecLabels],
     candidate_cache: CandidateCache | None = None,
+    idf_basis_cache: dict[str, IdfBasis] | None = None,
 ) -> None:
-    """Plant a 2.0x perturbation on a random rule; assert recovery on the grid.
+    """Plant a 2.0x perturbation on a rule; assert recovery on the grid.
+
+    Picks the rule via :func:`_select_self_test_plant`, which rotates through
+    rules in deterministic shuffled order until one has planting room (handles
+    the case where the seed-picked rule's baseline is already at ``clamp_max``).
 
     Sweeps ``config.grid`` from the planted state and verifies the optimizer's
     chosen multiplier lands within ``self_test_recovery_tolerance`` of the
-    baseline value. The grid step ``0.5x`` against a ``2.0x`` plant lands
-    exactly on baseline; ±5% tolerance accommodates float noise but rejects
-    "couldn't recover at all" failures.
+    baseline value. The grid step ``0.5x`` against a ``2.0x`` plant (or
+    ``2.0x`` against a ``0.5x`` plant) lands exactly on baseline; ±5% tolerance
+    accommodates float noise but rejects "couldn't recover at all" failures.
 
     Raises:
-        OptimizerSelfTestFailed: optimizer could not recover the baseline.
+        OptimizerSelfTestFailed: optimizer could not recover the baseline,
+            or no rule has planting room.
     """
-    rule_id = random.Random(config.self_test_seed).choice(list(baseline_weights.keys()))  # noqa: S311
-    baseline_value = baseline_weights[rule_id]
-    planted_value = _clamp(
-        baseline_value * config.self_test_planted_mult,
-        config.clamp_min,
-        config.clamp_max,
+    # Pre-warm the train commanders' complements_cache so we can detect
+    # dead keys (rules that fire on zero train commanders) and exclude them
+    # from plant selection. Without this filter, the seed-shuffled selector
+    # would happily pick a rule that fires nowhere on the train split — the
+    # grid search then produces identical composite scores at every cell,
+    # raising a false-positive ``OptimizerSelfTestFailed`` on a structural
+    # property of the rule catalogue rather than a real calibration bug.
+    for cmdr in train:
+        if cmdr not in complements_cache:
+            complements_cache[cmdr] = find_all_complements(conn, [cmdr], candidate_cache=candidate_cache)
+    train_only_cache = {cmdr: complements_cache[cmdr] for cmdr in train}
+    dead_keys = frozenset(_detect_dead_keys(train_only_cache, baseline_weights))
+
+    rule_id, planted_value = _select_self_test_plant(
+        baseline_weights,
+        seed=config.self_test_seed,
+        planted_mult=config.self_test_planted_mult,
+        clamp_min=config.clamp_min,
+        clamp_max=config.clamp_max,
+        excluded=dead_keys,
     )
-
-    if planted_value == baseline_value:
-        # Plant collapsed to baseline due to clamp — pick a different rule.
-        # Practically impossible at default config; bail with a clear message.
-        raise OptimizerSelfTestFailed(
-            f"self-test plant for {rule_id!r} collapsed to baseline under clamp; "
-            f"baseline={baseline_value}, planted_target={baseline_value * config.self_test_planted_mult}, "
-            f"clamp=({config.clamp_min}, {config.clamp_max})"
-        )
-
+    baseline_value = baseline_weights[rule_id]
     planted_weights = {**baseline_weights, rule_id: planted_value}
 
     # Sweep the grid from the planted state; track the best train composite.
@@ -693,6 +935,7 @@ def _planted_perturbation_self_test(
         labels_cache=labels_cache,
         alpha=config.alpha,
         candidate_cache=candidate_cache,
+        idf_basis_cache=idf_basis_cache,
     ).composite
 
     for mult in config.grid:
@@ -709,6 +952,7 @@ def _planted_perturbation_self_test(
             labels_cache=labels_cache,
             alpha=config.alpha,
             candidate_cache=candidate_cache,
+            idf_basis_cache=idf_basis_cache,
         )
         if obj.composite > best_composite:
             best_composite = obj.composite
@@ -759,16 +1003,9 @@ def run_optimizer(
     # Build the commander-independent candidate cache ONCE per run. Without this,
     # every grid-cell evaluation re-issues `SELECT name, cmc, edhrec_rank FROM
     # cards` (full ~32k-row scan) inside score_commander_from_complements +
-    # _score_from_complements. With ~26k grid evaluations per sweep, that's
+    # score_from_complements. With ~26k grid evaluations per sweep, that's
     # ~850M row reads → the bottleneck. The cache is reused across the full run.
     candidate_cache = build_candidate_cache(conn)
-
-    # Identify dead keys: entries in the JSON config whose rule_id isn't reachable
-    # via any helper / declarative rule. We can't introspect the registries here
-    # without circular imports; instead, we treat any rule that produces zero
-    # complements across ALL commanders as "dead" and report it. This is a strict
-    # subset of true dead keys but doesn't crash the optimizer.
-    dead_keys: list[str] = []
 
     # Build the split. Random_split returns frozen tuples; we keep them.
     split = random_split(
@@ -780,6 +1017,11 @@ def run_optimizer(
 
     complements_cache: dict[str, list[PortComplement]] = {}
     labels_cache: dict[str, EdhrecLabels] = {}
+    # Per-commander IDF basis cache. Lazily filled on first miss inside
+    # _score_split. Reused across every grid cell to skip the O(complements)
+    # frequency-counting walk in _compute_idf_weights — only the per-key
+    # _RULE_QUALITY_MULTIPLIER lookup runs per cell.
+    idf_basis_cache: dict[str, IdfBasis] = {}
 
     # Run self-test BEFORE measuring baseline — both for sequencing clarity and
     # because the self-test mutates only its own internal state via try/finally.
@@ -793,6 +1035,7 @@ def run_optimizer(
             complements_cache=complements_cache,
             labels_cache=labels_cache,
             candidate_cache=candidate_cache,
+            idf_basis_cache=idf_basis_cache,
         )
 
     # Baseline objectives. After this call, complements/labels caches are warm
@@ -806,6 +1049,7 @@ def run_optimizer(
         labels_cache=labels_cache,
         alpha=config.alpha,
         candidate_cache=candidate_cache,
+        idf_basis_cache=idf_basis_cache,
     )
     baseline_held = _score_split(
         conn,
@@ -816,16 +1060,12 @@ def run_optimizer(
         labels_cache=labels_cache,
         alpha=config.alpha,
         candidate_cache=candidate_cache,
+        idf_basis_cache=idf_basis_cache,
     )
 
-    # Identify dead keys after baseline scoring populates the complements cache.
-    firing_rules: set[str] = set()
-    for comps in complements_cache.values():
-        for c in comps:
-            firing_rules.add(c.rule_id)
-    for rule_id in baseline_weights:
-        if rule_id not in firing_rules:
-            dead_keys.append(rule_id)
+    # Slug-mismatch / EDHREC-empty diagnostic + dead-key detection.
+    _warn_missing_edhrec_labels(labels_cache)
+    dead_keys = _detect_dead_keys(complements_cache, baseline_weights)
 
     current_weights = dict(baseline_weights)
     current_train_composite = baseline_train.composite
@@ -854,31 +1094,23 @@ def run_optimizer(
                 break
 
             old_value = current_weights[rule_id]
-            best_train: CompositeObjective | None = None
-            best_value = old_value
-
-            for mult in config.grid:
-                new_value = _clamp(old_value * mult, config.clamp_min, config.clamp_max)
-                if new_value == old_value:
-                    continue
-                candidate_weights = {**current_weights, rule_id: new_value}
-                train_obj = _score_split(
-                    conn,
-                    edhrec_conn,
-                    split.train,
-                    candidate_weights,
-                    complements_cache=complements_cache,
-                    labels_cache=labels_cache,
-                    alpha=config.alpha,
-                    candidate_cache=candidate_cache,
-                )
-                if best_train is None or train_obj.composite > best_train.composite:
-                    best_train = train_obj
-                    best_value = new_value
-
-            # If no perturbation strictly beat the current train composite, skip.
-            if best_train is None or best_train.composite <= current_train_composite:
+            grid_result = _grid_search_best_perturbation(
+                rule_id,
+                current_weights,
+                conn=conn,
+                edhrec_conn=edhrec_conn,
+                train=split.train,
+                config=config,
+                complements_cache=complements_cache,
+                labels_cache=labels_cache,
+                candidate_cache=candidate_cache,
+                idf_basis_cache=idf_basis_cache,
+                current_train_composite=current_train_composite,
+            )
+            if grid_result is None:
+                # No grid cell beat the current train composite — skip this rule.
                 continue
+            best_train, best_value = grid_result
 
             # Re-evaluate held with the candidate weights (the best perturbation).
             candidate_weights = {**current_weights, rule_id: best_value}
@@ -891,6 +1123,7 @@ def run_optimizer(
                 labels_cache=labels_cache,
                 alpha=config.alpha,
                 candidate_cache=candidate_cache,
+                idf_basis_cache=idf_basis_cache,
             )
 
             held_delta = held_obj.composite - current_held_composite
@@ -937,46 +1170,53 @@ def run_optimizer(
                 n_steps_accepted += 1
                 accepted_step_indices.append(len(history) - 1)
                 sweep_had_accept = True
+
+                # Mid-sweep cumulative-drift check. Trip earlier if accepts have
+                # already drifted held below the cumulative gate. Without this,
+                # a wall-clock-aborted sweep would skip the drift check entirely
+                # (the boundary check at the end of sweep_n only fires when the
+                # sweep completes), and intra-sweep drift escapes detection.
+                if current_held_composite - baseline_held.composite < -config.eps_cumulative:
+                    n_steps_accepted, n_steps_rejected = _apply_drift_revert(
+                        history=history,
+                        accepted_step_indices=accepted_step_indices,
+                        n_steps_accepted=n_steps_accepted,
+                        n_steps_rejected=n_steps_rejected,
+                    )
+                    current_weights = dict(baseline_weights)
+                    current_train_composite = baseline_train.composite
+                    current_held_composite = baseline_held.composite
+                    current_train_ndcg = baseline_train.mean_ndcg
+                    current_held_ndcg = baseline_held.mean_ndcg
+                    current_train_gem = baseline_train.gem_rate
+                    current_held_gem = baseline_held.gem_rate
+                    partial_sweep = True
+                    break
             else:
                 n_steps_rejected += 1
 
-        # End of sweep: cumulative-drift check (only if we didn't already abort).
+        # End of sweep. If wall-clock or mid-sweep drift already aborted, exit.
         if partial_sweep:
             break
 
-        held_drift = current_held_composite - baseline_held.composite
-        if held_drift < -config.eps_cumulative:
-            # Cumulative drift trip: roll back to baseline weights AND mark every
-            # accept across all sweeps as reverted. The metrics-vs-weights
-            # invariant (final_weights describes the state that produced the
-            # final composite values) is preserved by resetting both together.
+        # Sweep-boundary drift check is now a backstop — most drift trips will
+        # fire mid-sweep above. Kept here for defense-in-depth and so the trip
+        # condition is identical at both call sites.
+        if current_held_composite - baseline_held.composite < -config.eps_cumulative:
+            n_steps_accepted, n_steps_rejected = _apply_drift_revert(
+                history=history,
+                accepted_step_indices=accepted_step_indices,
+                n_steps_accepted=n_steps_accepted,
+                n_steps_rejected=n_steps_rejected,
+            )
             current_weights = dict(baseline_weights)
-            for idx in accepted_step_indices:
-                step = history[idx]
-                history[idx] = OptimizerStep(
-                    sweep_n=step.sweep_n,
-                    rule_id=step.rule_id,
-                    old_value=step.old_value,
-                    new_value=step.new_value,
-                    train_composite=step.train_composite,
-                    held_composite=step.held_composite,
-                    train_ndcg=step.train_ndcg,
-                    held_ndcg=step.held_ndcg,
-                    train_gem=step.train_gem,
-                    held_gem=step.held_gem,
-                    accepted=False,
-                    reject_reason="cumulative_drift_revert",
-                )
-                n_steps_accepted -= 1
-                n_steps_rejected += 1
-            accepted_step_indices.clear()
-            partial_sweep = True
             current_train_composite = baseline_train.composite
             current_held_composite = baseline_held.composite
             current_train_ndcg = baseline_train.mean_ndcg
             current_held_ndcg = baseline_held.mean_ndcg
             current_train_gem = baseline_train.gem_rate
             current_held_gem = baseline_held.gem_rate
+            partial_sweep = True
             break
 
         # Convergence: no perturbation accepted this sweep.
@@ -1023,6 +1263,13 @@ _HISTORY_DEFAULT_PATH = ".audit/optimize_history.csv"
 #: so agents diffing proposals across code versions can detect drift.
 PROPOSAL_SCHEMA_VERSION = 1
 
+#: Schema version for the ``--format json`` run-summary printed to stdout
+#: by ``handle_optimize``. Independent from PROPOSAL_SCHEMA_VERSION because
+#: the summary covers run-level metadata (rc context, paths, deltas) while
+#: the proposal covers the candidate-diff payload. Bump on any breaking
+#: change to the summary shape.
+OPTIMIZE_SUMMARY_SCHEMA_VERSION = 1
+
 #: CSV column order for ``optimize_history.csv``. Bumping or reordering
 #: requires updating the reader symmetrically.
 OPTIMIZE_HISTORY_FIELDS: tuple[str, ...] = (
@@ -1047,22 +1294,15 @@ def _proposed_config_hash(proposed_weights: Mapping[str, float]) -> str:
     """Compute the config hash that the proposed weights would produce.
 
     Patches ``_RULE_QUALITY_MULTIPLIER`` to the proposed values, calls
-    ``compute_config_hash``, restores, and returns the hash. The
-    patch+hash+restore happens in a single ``try/finally`` so dict
-    identity is preserved on every exit path. Mirrors the established
-    test-fixture pattern (``tests/test_scoring_weights.py:309-324``).
+    ``compute_config_hash``, and restores via the
+    :func:`~mtg_synergy_graph.universal_scorer.patched_rule_quality_multiplier`
+    context manager. Dict identity preserved on every exit path
+    (including exceptions raised inside ``compute_config_hash``).
     """
-    from mtg_synergy_graph import universal_scorer
     from mtg_synergy_graph.bench.tensor import compute_config_hash
 
-    saved = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
-    try:
-        universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
-        universal_scorer._RULE_QUALITY_MULTIPLIER.update(proposed_weights)
+    with patched_rule_quality_multiplier(proposed_weights):
         return compute_config_hash()
-    finally:
-        universal_scorer._RULE_QUALITY_MULTIPLIER.clear()
-        universal_scorer._RULE_QUALITY_MULTIPLIER.update(saved)
 
 
 def write_proposal_json(
@@ -1140,7 +1380,10 @@ def write_proposal_json(
         "dead_keys": list(result.dead_keys),
         "train_split_size": len(result.train_split),
         "held_split_size": len(result.held_split),
-        "color_buckets": dict(result.color_buckets),
+        # color_buckets has nested MappingProxyType (outer + inner) for
+        # frozen-dataclass immutability. json.dumps doesn't know how to
+        # encode mappingproxy — flatten both layers to plain dicts.
+        "color_buckets": {k: dict(v) for k, v in result.color_buckets.items()},
     }
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1216,12 +1459,27 @@ def _history_row_for_step(step: OptimizerStep, timestamp: str, run_id: str) -> l
 # ---------------------------------------------------------------------------
 
 
-#: Minimum commander count for a meaningful train/held split. Below this,
-#: ``round(n * 0.8)`` may produce ``held=0``, which makes the held-eps gate
-#: trivially pass and silently nullifies cross-validation. The pinned golden
-#: set has 100 commanders; this floor is a usability guardrail for
-#: CLI invocations against a synthetic or hand-built fixture.
-_MIN_COMMANDERS_FOR_SPLIT = 5
+#: Minimum commander count for a non-degenerate train/held split.
+#: At ``train_ratio=0.8`` (default), ``round(n * 0.8)`` produces ``held=0``
+#: when ``n <= 2`` (round(0.8)=1, round(1.6)=2). At ``n=3`` the split is
+#: 2 train + 1 held — the smallest input that doesn't trivially pass the
+#: held-eps gate. Below this, cross-validation is silently nullified.
+#: The pinned golden set has 100 commanders; this floor is a usability
+#: guardrail for CLI invocations against a synthetic or hand-built fixture.
+_MIN_COMMANDERS_FOR_SPLIT = 3
+
+#: Canonical 100-cmdr fixture path — the default for ``--fixture``.
+#: ``--optimize`` swaps to ``_OPTIMIZE_DEFAULT_FIXTURE`` when the user
+#: accepted this default, since 100 commanders is too few for trustworthy
+#: gradient signal (the held-out delta correlates poorly with train delta;
+#: rules slam to clamp_max). Documented in the docs/solutions/best-practices
+#: optimizer-fixture-size note.
+_CANONICAL_FIXTURE = "tests/fixtures/golden_set_run.json"
+
+#: 500-cmdr fixture path used as the optimize-mode default. Built by
+#: ``scripts/bootstrap_golden_set_500.py``. Regenerated after each
+#: cardsfolder import or scoring config change.
+_OPTIMIZE_DEFAULT_FIXTURE = "tests/fixtures/golden_set_run_500.json"
 
 
 def handle_optimize(args: argparse.Namespace) -> int:
@@ -1249,6 +1507,25 @@ def handle_optimize(args: argparse.Namespace) -> int:
     fixture_path = args.fixture
     db_path = args.db
     edhrec_db_path = args.edhrec_db
+
+    # Default-redirect: swap the 100-cmdr canonical for the 500-cmdr fixture
+    # when the user accepted the global default. The 100-cmdr fixture is too
+    # small to produce trustworthy optimizer proposals — held-delta correlates
+    # poorly with train-delta, multiple rules slam to clamp_max, and ~25 of
+    # 60+ rules are dead-keys. Users who explicitly pass --fixture get exactly
+    # what they asked for. The redirect is silent on success and noisy when
+    # the 500 fixture is missing (so a CI runner without the bootstrap data
+    # falls back gracefully instead of failing on a missing path).
+    if fixture_path == _CANONICAL_FIXTURE:
+        from pathlib import Path as _Path
+
+        if _Path(_OPTIMIZE_DEFAULT_FIXTURE).exists():
+            print(
+                f"--optimize: using {_OPTIMIZE_DEFAULT_FIXTURE} (default for --optimize). "
+                f"Pass --fixture {_CANONICAL_FIXTURE} to use the 100-cmdr canonical instead.",
+                file=_sys.stderr,
+            )
+            fixture_path = _OPTIMIZE_DEFAULT_FIXTURE
 
     fixture = PinnedFixture.load(fixture_path)
     if not fixture.entries:
@@ -1280,9 +1557,21 @@ def handle_optimize(args: argparse.Namespace) -> int:
         )
         return 2
 
+    # All OptimizerConfig fields exposed as CLI flags. Defaults come from
+    # OptimizerConfig itself (this is just a forwarding constructor); change
+    # defaults THERE not in cli.py, otherwise the two drift.
     config = OptimizerConfig(
+        alpha=args.alpha,
+        grid=tuple(args.grid),
+        clamp_min=args.clamp_min,
+        clamp_max=args.clamp_max,
         max_sweeps=args.max_sweeps,
+        wall_clock_seconds=args.wall_clock_seconds,
+        eps_step=args.eps_step,
+        eps_cumulative=args.eps_cumulative,
+        train_ratio=args.train_ratio,
         split_seed=args.seed,
+        self_test_seed=args.self_test_seed,
         run_self_test=not args.no_self_test,
     )
     commanders = [entry.commander for entry in fixture.entries]
@@ -1319,22 +1608,50 @@ def handle_optimize(args: argparse.Namespace) -> int:
         )
         return 1
 
-    if result.n_steps_accepted == 0:
-        print(
-            f"no improvement found (n_iterations={result.n_iterations}, "
-            f"partial_sweep={result.partial_sweep}). Proposal written to "
-            f"{args.proposal_path} for inspection.",
-            file=_sys.stderr,
-        )
+    train_delta = result.train_composite_final - result.train_composite_baseline
+    held_delta = result.held_composite_final - result.held_composite_baseline
+
+    if getattr(args, "format", "md") == "json":
+        # Machine-readable summary on stdout for agent-driven sweep pipelines.
+        # The proposal JSON itself is at args.proposal_path; this is the
+        # run-summary so an agent can branch on rc + summary without re-reading
+        # the proposal file just to know "did anything change."
+        import json as _json
+
+        summary = {
+            "schema_version": OPTIMIZE_SUMMARY_SCHEMA_VERSION,
+            "run_id": run_id,
+            "n_iterations": result.n_iterations,
+            "n_steps_accepted": result.n_steps_accepted,
+            "n_steps_rejected": result.n_steps_rejected,
+            "partial_sweep": result.partial_sweep,
+            "train_composite_baseline": result.train_composite_baseline,
+            "train_composite_final": result.train_composite_final,
+            "train_composite_delta": train_delta,
+            "held_composite_baseline": result.held_composite_baseline,
+            "held_composite_final": result.held_composite_final,
+            "held_composite_delta": held_delta,
+            "proposal_path": str(args.proposal_path),
+            "history_path": str(args.optimize_history),
+            "dead_keys_count": len(result.dead_keys),
+        }
+        print(_json.dumps(summary))
     else:
-        train_delta = result.train_composite_final - result.train_composite_baseline
-        held_delta = result.held_composite_final - result.held_composite_baseline
-        print(
-            f"optimizer accepted {result.n_steps_accepted} step(s) over "
-            f"{result.n_iterations} sweep(s). "
-            f"train composite Δ={train_delta:+.4f}, held Δ={held_delta:+.4f}. "
-            f"Proposal written to {args.proposal_path}.",
-            file=_sys.stderr,
-        )
+        # Default human-readable summary on stderr, unchanged from prior behavior.
+        if result.n_steps_accepted == 0:
+            print(
+                f"no improvement found (n_iterations={result.n_iterations}, "
+                f"partial_sweep={result.partial_sweep}). Proposal written to "
+                f"{args.proposal_path} for inspection.",
+                file=_sys.stderr,
+            )
+        else:
+            print(
+                f"optimizer accepted {result.n_steps_accepted} step(s) over "
+                f"{result.n_iterations} sweep(s). "
+                f"train composite Δ={train_delta:+.4f}, held Δ={held_delta:+.4f}. "
+                f"Proposal written to {args.proposal_path}.",
+                file=_sys.stderr,
+            )
 
     return 0

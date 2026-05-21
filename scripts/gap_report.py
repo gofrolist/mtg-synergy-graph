@@ -49,6 +49,18 @@ from mtg_synergy_graph.complement_rules.core import (
 from mtg_synergy_graph.complement_rules.registry import RULE_GATES
 from mtg_synergy_graph.forge_oracle import gap_weight as _forge_gap_weight
 from mtg_synergy_graph.port_graph.interpreter import RuleInterpreter
+from mtg_synergy_graph.preflight import (
+    Candidate as _PreflightCandidate,
+)
+from mtg_synergy_graph.preflight import (
+    PipelineVerdict as _PipelineVerdict,
+)
+from mtg_synergy_graph.preflight import (
+    Severity as _PreflightSeverity,
+)
+from mtg_synergy_graph.preflight import (
+    evaluate_one as _preflight_evaluate_one,
+)
 
 # Local sibling-script import for the attempt log.
 sys.path.insert(0, str(Path(__file__).parent))
@@ -664,7 +676,40 @@ def _eligible(gap: GapStat, *, max_activation: float) -> bool:
     return not (not sub and pt not in ("cost", "keyword", "scales_with"))
 
 
-def _format_report(proposals: list[RuleProposal], stats_total: int, eligible_total: int) -> str:
+def _evaluate_preflight(
+    proposals: list[RuleProposal],
+    conn: sqlite3.Connection,
+) -> dict[tuple[str, str, str], _PipelineVerdict]:
+    """Run Stage A pre-flight on each proposal's signature.
+
+    Returns a dict keyed by signature tuple so the formatter can look up
+    each proposal's verdict without re-running the SQL queries.
+    """
+    out: dict[tuple[str, str, str], _PipelineVerdict] = {}
+    for prop in proposals:
+        sig = prop.gap.signature
+        if sig in out:
+            continue
+        candidate = _PreflightCandidate(
+            signature=sig,
+            gap_id=f"{sig[0]}.{sig[1]}[{sig[2] or '*'}]",
+        )
+        out[sig] = _preflight_evaluate_one(candidate, conn)
+    return out
+
+
+def _band_for_severity(severity: _PreflightSeverity) -> int:
+    """Return sort-key band: PASS=0, WARN=1, REJECT=2."""
+    return severity.value
+
+
+def _format_report(
+    proposals: list[RuleProposal],
+    stats_total: int,
+    eligible_total: int,
+    *,
+    verdicts: dict[tuple[str, str, str], _PipelineVerdict] | None = None,
+) -> str:
     lines: list[str] = []
     lines.append("# Rule coverage gap report")
     lines.append("")
@@ -690,77 +735,148 @@ def _format_report(proposals: list[RuleProposal], stats_total: int, eligible_tot
         lines.append("")
         return "\n".join(lines)
 
+    # Pre-flight band sorting: PASS first, then WARN, then REJECT.
+    # Within each band, preserve impact-desc order (proposals are already
+    # sorted by impact desc when they arrive here per rank_gaps).
+    if verdicts is None:
+        verdicts = {}
+
+    pass_band: list[RuleProposal] = []
+    warn_band: list[RuleProposal] = []
+    reject_band: list[RuleProposal] = []
+    unknown_band: list[RuleProposal] = []
+
+    for prop in proposals:
+        verdict = verdicts.get(prop.gap.signature)
+        if verdict is None:
+            unknown_band.append(prop)
+        elif verdict.severity is _PreflightSeverity.PASS:
+            pass_band.append(prop)
+        elif verdict.severity is _PreflightSeverity.WARN:
+            warn_band.append(prop)
+        else:
+            reject_band.append(prop)
+
     lines.append("## Ranked proposals")
     lines.append("")
-    for i, prop in enumerate(proposals, 1):
-        pt, ev, sub = prop.gap.signature
-        lines.append(f"### #{i}: `{pt}.{ev}[{sub or '*'}]`")
-        # Decorate with prior-attempt history (if any). Prevents the
-        # reader from re-attempting a known-failing template/rule_id
-        # combination without first refining it.
-        prior = prior_attempts_for_template(prop.template)
-        if prior:
-            sig_prior = [a for a in prior if tuple(a.signature) == tuple(prop.gap.signature)]
-            sig_reverts = [a for a in sig_prior if a.outcome == "reverted"]
-            sig_trivials = [a for a in sig_prior if a.outcome == "trivial"]
-            sig_passes = [a for a in sig_prior if a.outcome == "passed"]
-            tpl_reverts = [a for a in prior if a.outcome == "reverted"]
-            if sig_reverts:
-                latest = sig_reverts[-1]
-                lines.append(
-                    f"- ⚠️ **Signature reverted**: {len(sig_reverts)} prior "
-                    f"revert(s) on this exact signature — most recent "
-                    f"{latest.timestamp}: _{latest.reason[:200]}_"
-                )
-            elif sig_trivials:
-                latest = sig_trivials[-1]
-                lines.append(
-                    f"- 🟡 **Signature trivial**: {len(sig_trivials)} prior "
-                    f"trivial attempt(s) on this exact signature — most "
-                    f"recent {latest.timestamp}: _{latest.reason[:200]}_"
-                )
-            elif tpl_reverts:
-                latest = tpl_reverts[-1]
-                lines.append(
-                    f"- ⚠️ **Template caution**: {len(tpl_reverts)} revert(s) "
-                    f"elsewhere on this template — most recent "
-                    f"{latest.timestamp}: _{latest.reason[:200]}_"
-                )
-            if sig_passes:
-                lines.append(
-                    f"- ✅ **Signature already shipped**: {len(sig_passes)} "
-                    "passing apply(s) on this exact signature — rule should "
-                    "be in the registry; investigate runtime mismatch."
-                )
-        lines.append(
-            f"- **Reach**: {prop.gap.commanders} commanders carrying "
-            f"this signature; {prop.gap.activations} get any rule "
-            f"activation ({prop.gap.activation_rate:.0%})."
-        )
-        if prop.gap.forge_signal != 1.0:
-            lines.append(
-                f"- **Impact**: {prop.gap.impact:.1f} * "
-                f"forge_signal {prop.gap.forge_signal:.2f} = "
-                f"{prop.gap.weighted_impact:.1f}"
-            )
-        else:
-            lines.append(f"- **Impact**: {prop.gap.impact:.1f}")
-        lines.append(f"- **Template**: `{prop.template}`")
-        lines.append(f"- **Rationale**: {prop.rationale}")
-        if prop.gap.exemplars:
-            lines.append("- **Exemplar commanders** (no rule activation): " + ", ".join(prop.gap.exemplars))
-        if prop.gap.top_rules:
-            top = ", ".join(f"{r}({n})" for r, n in prop.gap.top_rules)
-            lines.append(f"- **Existing rule activations**: {top}")
-        lines.append(f"- **Gate sketch**: `{prop.gate_sketch}`")
-        if prop.tier_sketches:
-            lines.append("- **Tier sketches**:")
-            for t in prop.tier_sketches:
-                lines.append(f"  - {t}")
-        if prop.pool_sizes:
-            ps = ", ".join(f"{k}={v}" for k, v in prop.pool_sizes.items())
-            lines.append(f"- **Estimated pool sizes**: {ps}")
+    lines.append(
+        f"**Pre-flight summary**: {len(pass_band)} PASS · "
+        f"{len(warn_band)} WARN · {len(reject_band)} REJECT"
+        + (f" · {len(unknown_band)} unevaluated" if unknown_band else "")
+    )
+    lines.append("")
+
+    sequence: list[tuple[str, str, list[RuleProposal]]] = [
+        ("PASS", "Stage A predicts the rule is testable on the current fixture.", pass_band),
+        (
+            "WARN",
+            "Stage A flagged the rule as structurally legitimate but unmeasurable on the 500-cmdr "
+            "fixture (FIXTURE_BLIND_SPOT). Attempt at your own risk; consider extending the fixture.",
+            warn_band,
+        ),
+        (
+            "REJECT",
+            "Stage A predicts the rule fires on essentially nothing in the universe (UNTESTABLE). "
+            "Skip unless you have evidence the gate is wrong.",
+            reject_band,
+        ),
+    ]
+    if unknown_band:
+        sequence.append(("UNEVALUATED", "Pre-flight evaluation unavailable for these proposals.", unknown_band))
+
+    counter = 0
+    for band_label, band_blurb, band_props in sequence:
+        lines.append(f"### {band_label} ({len(band_props)} entries)")
         lines.append("")
+        lines.append(f"_{band_blurb}_")
+        lines.append("")
+        if not band_props:
+            lines.append("(none)")
+            lines.append("")
+            continue
+
+        for prop in band_props:
+            counter += 1
+            i = counter
+            pt, ev, sub = prop.gap.signature
+            lines.append(f"#### #{i}: `{pt}.{ev}[{sub or '*'}]`")
+            # Pre-flight verdict line: surface Stage A's reason directly
+            # so humans reading the report see the decision context per
+            # entry, not just per band.
+            verdict = verdicts.get(prop.gap.signature)
+            if verdict is not None:
+                # Always show the actual gate reason rather than the
+                # PipelineVerdict.reason property (which collapses to
+                # "PASS" when all gates pass — losing the per-gate
+                # detail humans want here).
+                gate_reasons = " | ".join(g.reason for g in verdict.gates)
+                lines.append(f"- **Pre-flight**: {verdict.severity.name} — {gate_reasons}")
+            # Decorate with prior-attempt history (if any). Prevents the
+            # reader from re-attempting a known-failing template/rule_id
+            # combination without first refining it.
+            prior = prior_attempts_for_template(prop.template)
+            if prior:
+                sig_prior = [a for a in prior if tuple(a.signature) == tuple(prop.gap.signature)]
+                sig_reverts = [a for a in sig_prior if a.outcome == "reverted"]
+                sig_trivials = [a for a in sig_prior if a.outcome == "trivial"]
+                sig_passes = [a for a in sig_prior if a.outcome == "passed"]
+                tpl_reverts = [a for a in prior if a.outcome == "reverted"]
+                if sig_reverts:
+                    latest = sig_reverts[-1]
+                    lines.append(
+                        f"- ⚠️ **Signature reverted**: {len(sig_reverts)} prior "
+                        f"revert(s) on this exact signature — most recent "
+                        f"{latest.timestamp}: _{latest.reason[:200]}_"
+                    )
+                elif sig_trivials:
+                    latest = sig_trivials[-1]
+                    lines.append(
+                        f"- 🟡 **Signature trivial**: {len(sig_trivials)} prior "
+                        f"trivial attempt(s) on this exact signature — most "
+                        f"recent {latest.timestamp}: _{latest.reason[:200]}_"
+                    )
+                elif tpl_reverts:
+                    latest = tpl_reverts[-1]
+                    lines.append(
+                        f"- ⚠️ **Template caution**: {len(tpl_reverts)} revert(s) "
+                        f"elsewhere on this template — most recent "
+                        f"{latest.timestamp}: _{latest.reason[:200]}_"
+                    )
+                if sig_passes:
+                    lines.append(
+                        f"- ✅ **Signature already shipped**: {len(sig_passes)} "
+                        "passing apply(s) on this exact signature — rule should "
+                        "be in the registry; investigate runtime mismatch."
+                    )
+            lines.append(
+                f"- **Reach**: {prop.gap.commanders} commanders carrying "
+                f"this signature; {prop.gap.activations} get any rule "
+                f"activation ({prop.gap.activation_rate:.0%})."
+            )
+            if prop.gap.forge_signal != 1.0:
+                lines.append(
+                    f"- **Impact**: {prop.gap.impact:.1f} * "
+                    f"forge_signal {prop.gap.forge_signal:.2f} = "
+                    f"{prop.gap.weighted_impact:.1f}"
+                )
+            else:
+                lines.append(f"- **Impact**: {prop.gap.impact:.1f}")
+            lines.append(f"- **Template**: `{prop.template}`")
+            lines.append(f"- **Rationale**: {prop.rationale}")
+            if prop.gap.exemplars:
+                lines.append("- **Exemplar commanders** (no rule activation): " + ", ".join(prop.gap.exemplars))
+            if prop.gap.top_rules:
+                top = ", ".join(f"{r}({n})" for r, n in prop.gap.top_rules)
+                lines.append(f"- **Existing rule activations**: {top}")
+            lines.append(f"- **Gate sketch**: `{prop.gate_sketch}`")
+            if prop.tier_sketches:
+                lines.append("- **Tier sketches**:")
+                for t in prop.tier_sketches:
+                    lines.append(f"  - {t}")
+            if prop.pool_sizes:
+                ps = ", ".join(f"{k}={v}" for k, v in prop.pool_sizes.items())
+                lines.append(f"- **Estimated pool sizes**: {ps}")
+            lines.append("")
 
     return "\n".join(lines)
 
@@ -873,7 +989,14 @@ def main() -> int:
             commanders_limit=args.limit,
             warn_fn=lambda msg: print(msg, file=sys.stderr),
         )
-        report = _format_report(proposals[: args.top], stats_total=stats_total, eligible_total=eligible_total)
+        top_proposals = proposals[: args.top]
+        verdicts = _evaluate_preflight(top_proposals, conn)
+        report = _format_report(
+            top_proposals,
+            stats_total=stats_total,
+            eligible_total=eligible_total,
+            verdicts=verdicts,
+        )
     finally:
         conn.close()
 

@@ -47,6 +47,50 @@ def _nonneg_int(s: str) -> int:
     return value
 
 
+def _alpha(s: str) -> float:
+    """argparse type callable: parse a [0, 1] alpha-blend weight."""
+    try:
+        value = float(s)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected a float, got {s!r}") from exc
+    if not 0.0 <= value <= 1.0:
+        raise argparse.ArgumentTypeError(f"alpha must be in [0, 1], got {value}")
+    return value
+
+
+def _ratio(s: str) -> float:
+    """argparse type callable: parse a (0, 1) train/held ratio (open interval)."""
+    try:
+        value = float(s)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected a float, got {s!r}") from exc
+    if not 0.0 < value < 1.0:
+        raise argparse.ArgumentTypeError(f"ratio must be in (0, 1), got {value}")
+    return value
+
+
+def _positive_float(s: str) -> float:
+    """argparse type callable: parse a strictly-positive float (excludes zero and negatives)."""
+    try:
+        value = float(s)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected a float, got {s!r}") from exc
+    if value <= 0.0:
+        raise argparse.ArgumentTypeError(f"must be > 0, got {value}")
+    return value
+
+
+def _nonneg_float(s: str) -> float:
+    """argparse type callable: parse a non-negative float (zero accepted)."""
+    try:
+        value = float(s)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected a float, got {s!r}") from exc
+    if value < 0.0:
+        raise argparse.ArgumentTypeError(f"must be >= 0, got {value}")
+    return value
+
+
 #: Handler table. Unit 2+ reassign these to real implementations.
 _HANDLERS: dict[str, Callable[[Namespace], int]] = {
     "audit": _stubs.audit_stub,
@@ -76,6 +120,10 @@ _HANDLERS: dict[str, Callable[[Namespace], int]] = {
     # every other mode above. The real handler lives in
     # ``mtg_synergy_graph.bench.optimize.handle_optimize``.
     "optimize": _stubs.optimize_stub,
+    # BM25 IDF probe (plan 2026-05-04-001) — per-commander NDCG@30
+    # diff handler. Stubbed here, real handler at
+    # ``mtg_synergy_graph.bench.per_commander_ndcg.handle_per_commander_ndcg``.
+    "per_commander_ndcg": _stubs.per_commander_ndcg_stub,
 }
 
 
@@ -202,6 +250,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "parallel in embedding space (read-only diagnostic). Requires "
         "card_embeddings to be populated — run `scripts/build_embeddings.py` "
         "first. See plan 2026-04-23-003 FR5.",
+    )
+    mode.add_argument(
+        "--per-commander-ndcg",
+        dest="per_commander_ndcg",
+        action="store_true",
+        help="Per-commander NDCG@30 deltas (live - pinned) sorted ascending. "
+        "Read-only diagnostic. Used by audit-gated probes that need a "
+        "per-commander prerequisite check (e.g., BM25 IDF probe — any "
+        "commander losing >0.05 NDCG@30 routes to DECLINE).",
     )
 
     # Shared flags.
@@ -350,6 +407,87 @@ def _build_parser() -> argparse.ArgumentParser:
         default=".audit/optimize_history.csv",
         help="Used by --optimize only. Append-only convergence log path. Default: .audit/optimize_history.csv.",
     )
+    # OptimizerConfig knobs exposed for agent-driven sweep pipelines.
+    # Defaults mirror OptimizerConfig in src/mtg_synergy_graph/bench/optimize.py;
+    # change defaults THERE not here, otherwise the two drift.
+    audit.add_argument(
+        "--alpha",
+        dest="alpha",
+        type=_alpha,
+        default=0.5,
+        help="Used by --optimize only. Composite-objective blend: "
+        "alpha*mean_ndcg + (1-alpha)*hidden_gem_hit_rate. "
+        "alpha=0 → gem-only; alpha=1 → nDCG-only. Default: 0.5.",
+    )
+    audit.add_argument(
+        "--grid",
+        dest="grid",
+        type=_positive_float,
+        nargs="+",
+        default=[0.5, 0.75, 1.25, 1.5, 2.0],
+        metavar="MULT",
+        help="Used by --optimize only. Multiplicative perturbation grid. "
+        "Each rule is evaluated at current_value*mult for each mult. "
+        "Default: 0.5 0.75 1.25 1.5 2.0.",
+    )
+    audit.add_argument(
+        "--eps-step",
+        dest="eps_step",
+        type=_nonneg_float,
+        default=0.005,
+        help="Used by --optimize only. Held-out drop tolerance per accepted "
+        "step. Steps with held composite worse than current by more than "
+        "this are rejected. Default: 0.005.",
+    )
+    audit.add_argument(
+        "--eps-cumulative",
+        dest="eps_cumulative",
+        type=_nonneg_float,
+        default=0.005,
+        help="Used by --optimize only. Held-out drop tolerance accumulated "
+        "across all accepts in a sweep. Trips the drift-revert when "
+        "cumulative held drop exceeds this. Default: 0.005.",
+    )
+    audit.add_argument(
+        "--clamp-min",
+        dest="clamp_min",
+        type=_positive_float,
+        default=0.01,
+        help="Used by --optimize only. Lower bound on rule multipliers. "
+        "Grid cells clamped at this floor. Default: 0.01.",
+    )
+    audit.add_argument(
+        "--clamp-max",
+        dest="clamp_max",
+        type=_positive_float,
+        default=5.0,
+        help="Used by --optimize only. Upper bound on rule multipliers. "
+        "Grid cells clamped at this ceiling. Default: 5.0.",
+    )
+    audit.add_argument(
+        "--train-ratio",
+        dest="train_ratio",
+        type=_ratio,
+        default=0.8,
+        help="Used by --optimize only. Train fraction in the train/held split. Held = 1 - train_ratio. Default: 0.8.",
+    )
+    audit.add_argument(
+        "--wall-clock-seconds",
+        dest="wall_clock_seconds",
+        type=_positive_float,
+        default=300.0,
+        help="Used by --optimize only. Wall-clock budget. Sweep aborts mid-loop "
+        "when exceeded; partial_sweep=True in the proposal. Default: 300.0.",
+    )
+    audit.add_argument(
+        "--self-test-seed",
+        dest="self_test_seed",
+        type=int,
+        default=7,
+        help="Used by --optimize only. Random seed for the planted-perturbation "
+        "self-test (rule selection). Useful for reproducing flaky self-test "
+        "failures. Default: 7.",
+    )
 
     return parser
 
@@ -379,6 +517,8 @@ def _resolve_mode(args: Namespace) -> str:
         return "embedding_dedup"
     if getattr(args, "optimize", False):
         return "optimize"
+    if getattr(args, "per_commander_ndcg", False):
+        return "per_commander_ndcg"
     return "audit"
 
 
@@ -437,22 +577,30 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
 
-    # ``--max-sweeps`` / ``--seed`` / ``--no-self-test`` / ``--proposal-path`` /
-    # ``--optimize-history`` are companions to ``--optimize``. Warn on stderr
-    # rather than erroring so the user sees the flag had no effect — same
-    # pattern as ``--trend-n`` and ``--threshold`` above.
+    # All --optimize companion flags warn (rather than error) when used
+    # without --optimize — same pattern as ``--trend-n`` and ``--threshold``.
+    # Each tuple is (attr_name, default_value, flag_name); compare attr
+    # against default via != to detect "user supplied a non-default value".
     if mode != "optimize":
-        ignored = []
-        if getattr(args, "max_sweeps", 5) != 5:
-            ignored.append("--max-sweeps")
-        if getattr(args, "seed", 42) != 42:
-            ignored.append("--seed")
-        if getattr(args, "no_self_test", False):
-            ignored.append("--no-self-test")
-        if getattr(args, "proposal_path", ".audit/optimize_proposal.json") != ".audit/optimize_proposal.json":
-            ignored.append("--proposal-path")
-        if getattr(args, "optimize_history", ".audit/optimize_history.csv") != ".audit/optimize_history.csv":
-            ignored.append("--optimize-history")
+        _OPTIMIZE_COMPANION_FLAGS = (
+            ("max_sweeps", 5, "--max-sweeps"),
+            ("seed", 42, "--seed"),
+            ("no_self_test", False, "--no-self-test"),
+            ("proposal_path", ".audit/optimize_proposal.json", "--proposal-path"),
+            ("optimize_history", ".audit/optimize_history.csv", "--optimize-history"),
+            ("alpha", 0.5, "--alpha"),
+            ("eps_step", 0.005, "--eps-step"),
+            ("eps_cumulative", 0.005, "--eps-cumulative"),
+            ("clamp_min", 0.01, "--clamp-min"),
+            ("clamp_max", 5.0, "--clamp-max"),
+            ("train_ratio", 0.8, "--train-ratio"),
+            ("wall_clock_seconds", 300.0, "--wall-clock-seconds"),
+            ("self_test_seed", 7, "--self-test-seed"),
+        )
+        ignored = [flag for attr, default, flag in _OPTIMIZE_COMPANION_FLAGS if getattr(args, attr, default) != default]
+        # --grid is a list, can't use the simple-equality comparison.
+        if getattr(args, "grid", None) is not None and list(args.grid) != [0.5, 0.75, 1.25, 1.5, 2.0]:
+            ignored.append("--grid")
         if ignored:
             print(
                 f"bench.py audit: warning: {', '.join(ignored)} "

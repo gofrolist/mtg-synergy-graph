@@ -160,6 +160,10 @@
       "value": 2.5,
       "comment": ""
     },
+    "prepared_mechanic": {
+      "value": 3.0,
+      "comment": "Reciprocal niche tribe (47 cards). Pushes Prepared-payoff candidates above generic WB staples on commanders that are themselves Prepared-payoff cards or grant Prepared via AlterAttribute. Golden-set-neutral (no 100-cmdr golden commander triggers the rule)."
+    },
     "prowess_tribal": {
       "value": 2.0,
       "comment": ""

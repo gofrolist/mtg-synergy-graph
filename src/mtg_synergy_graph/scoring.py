@@ -31,6 +31,9 @@ BRANCH_MULTIPLIER: dict[str, float] = {
     "change_zone_table": 1.0,
     "static_condition": 0.75,
     "replacement_condition": 0.75,
+    # K:ETBReplacement-walked chains — the replacement always fires
+    # when the carrier ETBs, so the chain root is unconditional.
+    "etb_replacement": 1.0,
 }
 
 

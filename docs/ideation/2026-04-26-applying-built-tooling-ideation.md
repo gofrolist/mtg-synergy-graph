@@ -35,7 +35,7 @@ mode: repo-grounded
 **Description.** Replace manual `data/scoring_weights.json` editing with an offline optimizer that runs SPSA or Coordinate Ascent over `_RULE_QUALITY_MULTIPLIER` and `_FLAT_WEIGHT_OVERRIDES`. Each step is O(1): re-rank by tensor dot-product, no DB rebuild. Objective = raw DCG@30 (Saito & Joachims 2023 — nDCG can anti-correlate with ground truth) **subject to** `hidden_gem_hit_rate ≥ 0.84` as a hard Lagrangian floor. SNIPS-reweight per-commander gradient so heavy-popularity commanders don't dominate. Posterior weight = `(n·empirical + tau·weight_hint) / (n + tau)` — wires the dead `weight_hint` field into the loop as a prior. Output: a candidate `scoring_weights.json` diff with verdict pre-attached, gated through `bench.py audit --repin`.
 **Rationale.** "Manual weight tuning is the only active lever" is the single biggest documented blocker. The tensor literally encodes the LTR feature matrix already. Stockfish-style SPSA tunes 60+ chess-eval features against win-rate exactly the way we need to tune ~62 IDF multipliers against DCG — structural fit is near-perfect, including the noisy non-differentiable objective. Saito & Joachims caveat addresses why aggregate NDCG might be saturating at 0.256: nDCG normalization can mask gains on sparse commanders.
 **Downsides.** Requires careful held-out commander split to avoid overfitting (the 100-cmdr set is small). SPSA convergence is variance-sensitive. The Lagrangian-floor constraint can dead-lock if NDCG and hidden-gem are anti-correlated on margin.
-**Confidence:** 85% · **Complexity:** Medium · **Status:** Explored
+**Confidence:** 85% · **Complexity:** Medium · **Status:** SHIPPED (plan 2026-04-26-001 M1) — converging at tiny gradients (+3.6e-4 train, +8.9e-5 held); 6 rules accepting consistent multiplier tweaks across 4 runs; 9 dead-keys on 500-train split; no proposal applied yet (human review pending).
 
 ### 2. Writer-side audit gate compiler (close the declarative-rule blind spot)
 **Description.** For every rule in `DECLARATIVE_RULE_IDS`, compile its `rules_seed.json` JSON predicates into the same per-port gate predicate the auditor uses, so `bench.py audit --inspect RULE_ID` actually walks the firing population instead of falling through to the "probably covered" branch. The data exists in `rules_seed.json` and `RuleInterpreter` already returns SQL fragments + Python callables — this is plumbing, not new physics. Add `bench.py audit --writer-trace RULE_ID` that emits the generated SQL + gate trace.
@@ -101,3 +101,96 @@ Every survivor's implementation passes through `bench.py audit` before merge (pe
 | 20 | Stratified golden-set expansion | Marginal vs #3's universe-side promotion. |
 
 Full rejection list and raw 49-candidate dump in scratch (`/var/folders/.../compound-engineering/ce-ideate/b7e3d4a1/`).
+
+---
+
+## Continuation 2026-05-02 — Gap-Attempt Strategy (Survivors v2)
+
+**Trigger.** User asked "which top entries from `gap_report.py` are worth attempting next?" Continuation from prior survivors after tensor optimizer (prior #1) shipped without changing the gap-queue exhaustion verdict.
+
+### Delta since 2026-04-26
+- Tensor optimizer M1 SHIPPED. 4 runs, converging at tiny gradients; 6 rules accept consistent multiplier tweaks; 9 dead-keys on 500-train split; **no proposal applied yet**.
+- 500-cmdr fixture (`tests/fixtures/golden_set_run_500.json`) shipped — but only `--optimize` consumes it; `gap_report.py` still ranks by universe signal.
+- Zero new complement rules shipped. All 5 prior blockers persist unchanged.
+- Top-20 gap_report categorization unchanged from 2026-04-25 verdict: 9 prior-revert-with-template, 7 needs_template, 1 untried-clean (#15, ZERO golden coverage). 6 of 7 generator templates BLOCKED.
+
+### New external grounding
+- **CMIM** (Fleuret 2004; arXiv 2306.03301) — incremental feature selection by `I(new; label | existing)`. Reframes "which rule next?" as "which rule has highest CMI given current 60?"
+- **MOFSRank** — redundancy in ranking-contribution space (rank distribution VIF), not value space.
+- **DR estimator** (Saito RecSys 2020) — per-query DR > SNIPS for small query sets (n<150).
+- **Subsumption-lattice rule pruning** (CSGM, Zang & Xu) — redundancy = prediction-set ⊆ union of existing.
+- **SOFaiR** (FAccT 2024) — OWA loss explicitly protects bottom-k queries.
+- **InfoRank** (WWW 2024) — CMI as debiasing loss penalising features informative-of-logging-artifact.
+
+### Survivors v2 (6 of 48 raw)
+
+#### 1. Pre-flight gate stack for gap_report queue
+**Description.** A <60s pipeline that runs BEFORE generator-writing: (a) golden-coverage SQL pre-check (drop entries with 0 hits in 500-cmdr fixture), (b) paper-rule SQL-only scoring simulator predicting per-cmdr top-30 contribution from a `(commander_gate, candidate_predicate, idf)` triple, (c) embedding-space candidate-cluster shape prior (predicts vacuum-fill / flat-noise from cosine spread). Reject candidates that fail any stage.
+**Rationale.** Three of four documented failure modes (untestable, vacuum-fill, flat-noise) are deterministically detectable from data the audit already produces. Today they're all detected POST-SHIP via revert. The damage_prevention_voltron incident (2026-04-25) wasted a 250-line generator on a rule with zero golden coverage — one SQL query would have killed it.
+**Downsides.** Plumbing-heavy. The simulator step needs care to match production scoring exactly. Embedding-shape prior is heuristic, not deterministic.
+**Confidence:** 85% · **Complexity:** Medium · **Status:** Explored (selected for ce-brainstorm 2026-05-02)
+
+#### 2. Demand-side gap reframe (replace universe ranker)
+**Description.** Replace `gap_report.py`'s `commanders × (1-covered) × forge_signal` ranker with: per-commander `hidden_gem_deficit = |edhrec_top_30 \ our_top_30|` over the 500-cmdr fixture, then surface (port_node_kind, subkind) shapes most over-represented in lost cards. Top-N becomes "shapes whose absence systematically hurts golden commanders," not "shapes underrepresented in the universe."
+**Rationale.** "Structurally exhausted" is an artifact of the supply-side ranker. Aligns with `feedback_edhrec_not_goal.md` north-star. Stays inside anti-goals — EDHREC is used only as a gap-detection signal, exactly as `--inspect-gems` already uses it. Compounds with #1 (every demand-side proposal automatically passes the golden-coverage prefilter).
+**Downsides.** Requires per-(cmdr, candidate, lost-card-port-shape) aggregation table; not a 1-day build. May surface gaps that need new vocabulary, not just new rules.
+**Confidence:** 80% · **Complexity:** Medium · **Status:** Unexplored
+
+#### 3. Optimizer-as-gap-discovery (mine M1 artifacts already produced)
+**Description.** Build `bench.py audit --gap-from-optimizer` that emits: dead-keys → predicate-loosening proposals; clamp-saturating rules → "adjacent rule missing from this family" gaps; gradient nullspace → CMIM-flavored "what direction in feature space is unexplained?" Optionally extend with PCA on the persisted contribution tensor.
+**Rationale.** The data exists. The optimizer paid the compute cost. The 9 dead-keys are stealth gaps — rules that exist but don't fire are evidence the predicate-vocabulary needs loosening. Compounds with #1 (every optimizer-derived gap inherits a contribution prior).
+**Downsides.** Only works for rule families the optimizer already touches; novel families won't have a gradient signal. Tightens coupling between optimizer state and gap_report state.
+**Confidence:** 80% · **Complexity:** Medium · **Status:** Unexplored
+
+#### 4. Multiplier-zero shipping pipeline (industrialize prior #4)
+**Description.** New rules ship to `complement_rules/` (or `rules_seed.json`) at `_RULE_QUALITY_MULTIPLIER = 0.0`. They fire in the trace, populate the tensor, contribute zero to scores. The next `--optimize` run picks the multiplier from the grid; positive convergence → auto-promote PR; converges to 0 or below threshold → auto-quarantine. Single PR can ship 5-10 candidate rules at zero-risk.
+**Rationale.** Prior #4 (dark-launch shadow mode) defined the channel; this defines the missing PROMOTION mechanism. Drops cost-per-attempt close to zero, breaks 1-rule-per-PR cadence. Cascades with #2 + #3.
+**Downsides.** Requires writer-side audit gate compiler (prior #2) to land first. Tensor write cost roughly doubles. Some rules need positive weight to be testable at all.
+**Confidence:** 75% · **Complexity:** Medium · **Sequencing:** after prior #2 · **Status:** Unexplored
+
+#### 5. Gate-relaxation as gap-closure (extend optimizer action space)
+**Description.** Extend tensor optimizer's action space from `_RULE_QUALITY_MULTIPLIER` to ALSO include selected rule gate constants — `min_count >= 2/3`, `_FLAT_WEIGHT_OVERRIDES` density thresholds, IDF-clipping thresholds. Optimizer can then close some gaps by relaxing existing rules instead of requiring new ones.
+**Rationale.** Documented next-step (B) in queue-dry post-mortem. Gate constants are arbitrarily-chosen at scaffold time and never re-validated. Avoids vacuum-fill and shared-axis-different-archetype regression entirely (no new rule introduced). Compounds with #3 (optimizer-driven mining specifically targets "which gate on which rule should move?").
+**Downsides.** Action space combinatorially larger; SPSA convergence slower. Some gates encode mechanical correctness; relaxing silently breaks semantics. Needs per-gate "relaxable" annotation.
+**Confidence:** 75% · **Complexity:** Medium · **Status:** Unexplored
+
+#### 6. Revert quarantine with auto-resurrect probes
+**Description.** Every `git revert` of a complement rule writes `quarantine/<rule_id>.json` with failure metric values, hypothesized blocker condition, and a SQL probe evaluating the condition. After every cardsfolder import / fixture expansion / vocab expansion, importer evaluates every probe. Passing probes auto-promote rule into a "re-attempt" queue with fresh audit job scheduled.
+**Rationale.** 9 of top-20 gap_report entries are prior-revert-with-template. Reverts compound: each was correct against contemporaneous catalogue but stops being correct as catalogue evolves. JSON quarantine + SQL probe captures revert-time intent (when memory is freshest). Compounds with #4 (resurrected rules ship at multiplier=0, optimizer triages).
+**Downsides.** Requires discipline at revert time. Some reverts are quality-mode (vacuum-fill, flat-noise) that no data refresh can fix — needs Gates A+B filter before counterfactual replay is meaningful.
+**Confidence:** 70% · **Complexity:** Medium · **Status:** Unexplored
+
+### Sequencing v2
+**#1 → #2 → #5 → #3 → #6 → #4.** #1 and #3 are pure-infra (no scoring change). #2 is `gap_report.py` rewrite. #5 extends optimizer M1. #4 needs prior #2 (writer-side audit) to land first.
+
+### Cross-Cutting Observation
+Three survivors (#1, #3, #5) compose into a tight loop: pre-screen blocks bad candidates → optimizer mines existing data for gap signal → existing rules retune via gate-relaxation. That's an answer to "which gaps?" that doesn't require attempting any new entry from the current `gap_report.py`.
+
+### Rejection Summary v2
+
+| # | Idea | Reason rejected |
+|---|------|-----------------|
+| 21 | Forced substitution sweep (every new rule must displace existing) | Premature; folds into #5. |
+| 22 | LLM-generates the generator from gap row | Auditability concern (per prior doc #5 rejection). Repeat. |
+| 23 | Causal-ablation primary signal replacing NDCG | Too aggressive (per prior doc #8 rejection). Repeat. |
+| 24 | Pure-intrinsic eval — drop EDHREC entirely | Anti-goal pretends EDHREC isn't useful as sanity check. Over-restrictive. |
+| 25 | Optimizer-at-inference Thompson-sampling bandit | Solves latency we don't have; inference is offline. |
+| 26 | Synthetic Commander Stress-Test Fixture | Conflicts with `optimizer-fixture-size-2026-04-30.md` lesson. |
+| 27 | 10-cmdr informativeness sieve | Same conflict (smaller fixtures = worse signal). |
+| 28 | Per-half oracle_ids for split/MDFC cards | Substrate change; not gap-attempt strategy. |
+| 29 | Cascade pathway depth-3/depth-4 generator | Better as a separate ce-brainstorm cycle. |
+| 30 | Wikipedia annual notability re-review (cull obsolete rules) | Subsumed by #5 + #3. |
+| 31 | ABC analysis cull C-class rules first | Premature deletion risky; folds into #3 + #5. |
+| 32 | Top-200 horizon instead of top-30 | Useful tweak; folds into #2 as the per-cmdr aggregator. |
+| 33 | Wine triangulation (≥2 of 3 detectors agree) | Folds into #1's gate stack as one panelist. |
+| 34 | Forge-Oracle anti-coverage diff as gap generator | Already exists as `forge_oracle.py propose-rules`; missing piece is pre-screen (#1). |
+| 35 | Bandit over (template, signature, gate-version) | Subsumed by #4. |
+| 36 | Embedding-space cluster-holes as gap reframe | Diagnostic-only; subsumed by #2 + #3 CMIM extension. |
+| 37 | Rule-pair interaction gaps (Friedman H-statistic) | Pathway.py handles depth-2; deeper without specific failure-mode driver is speculative. |
+| 38 | Drug-discovery SA score for rules | Folds into #1's pre-screen stack as a column. |
+| 39 | Gap-cell siblings clustering | Folds into #2 (demand-side ranker naturally surfaces families). |
+| 40 | Generator industrialization stack (declarative-only + DSL + LLM) | Direction not strategy; defer to separate ce-brainstorm. |
+| 41 | Audit-before-scaffold via synthetic injection | Subsumed by #1's paper-rule simulator. |
+| 42 | Vaccine Phase IIa — focused 20-cmdr sub-fixture | Useful add to #1; not own survivor. |
+
+Full raw 48-candidate dump and dedup clusters in scratch (`/var/folders/.../compound-engineering/ce-ideate/a3f7c2e1/raw-candidates.md`).
