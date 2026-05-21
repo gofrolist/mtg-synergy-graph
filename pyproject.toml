@@ -25,6 +25,13 @@ testpaths = ["tests"]
 # any contributor without the data — gets a fast, green suite. Run
 # explicitly with `uv run pytest -m integration` on a dev machine.
 addopts = "-n=auto --cov=src/mtg_synergy_graph --cov-fail-under=80 -m 'not integration'"
+# ResourceWarning is promoted to an error so any future sqlite3.Connection
+# (or other resource) leak fails the test that produced it instead of
+# silently emitting at GC time. Locks in the leak audit landed in
+# commits 43df25c + d99462e (closes #56).
+filterwarnings = [
+    "error::ResourceWarning",
+]
 markers = [
     "integration: requires data/synergy.db or data/forge cardsfolder; excluded by default",
 ]
