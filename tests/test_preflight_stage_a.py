@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -28,12 +30,13 @@ from mtg_synergy_graph.preflight.gates import stage_a_golden_coverage
 # ---------------------------------------------------------------------------
 
 
+@contextmanager
 def _make_db(
     *,
     cards: list[dict],
     ports: list[dict],
     has_legal_column: bool = True,
-) -> sqlite3.Connection:
+) -> Iterator[sqlite3.Connection]:
     """Build an in-memory synergy-DB-like schema with the cards/ports rows."""
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
@@ -96,7 +99,10 @@ def _make_db(
             ),
         )
     conn.commit()
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def _make_fixture(tmp_path: Path, commanders: list[str]) -> Path:
@@ -119,7 +125,7 @@ def _make_fixture(tmp_path: Path, commanders: list[str]) -> Path:
 
 def test_stage_a_pass_when_fixture_commander_matches_gate(tmp_path):
     """Known-good: fixture commander has a port matching the gate -> PASS."""
-    conn = _make_db(
+    with _make_db(
         cards=[{"name": "Fixture Commander"}, {"name": "Other Commander"}],
         ports=[
             {
@@ -130,16 +136,16 @@ def test_stage_a_pass_when_fixture_commander_matches_gate(tmp_path):
                 "zone_destination": "Graveyard",
             },
         ],
-    )
-    fixture = _make_fixture(tmp_path, ["Fixture Commander", "Other Commander"])
-    candidate = Candidate(
-        signature=("trigger", "ChangesZone", "Battlefield->Graveyard"),
-        gap_id="trigger.ChangesZone[Battlefield->Graveyard]",
-    )
-    verdict = stage_a_golden_coverage(candidate, conn, fixture_path=fixture)
-    assert verdict.severity is Severity.PASS
-    assert verdict.name == "stage_a"
-    assert "1 fixture commanders" in verdict.reason
+    ) as conn:
+        fixture = _make_fixture(tmp_path, ["Fixture Commander", "Other Commander"])
+        candidate = Candidate(
+            signature=("trigger", "ChangesZone", "Battlefield->Graveyard"),
+            gap_id="trigger.ChangesZone[Battlefield->Graveyard]",
+        )
+        verdict = stage_a_golden_coverage(candidate, conn, fixture_path=fixture)
+        assert verdict.severity is Severity.PASS
+        assert verdict.name == "stage_a"
+        assert "1 fixture commanders" in verdict.reason
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +161,7 @@ def test_stage_a_warn_fixture_blind_spot_when_legal_universe_has_threshold(tmp_p
     hard-blocking.
     """
     legal_only = [f"Legal Cmdr {i}" for i in range(5)]
-    conn = _make_db(
+    with _make_db(
         cards=[{"name": "Fixture Commander"}] + [{"name": n} for n in legal_only],
         ports=[
             {
@@ -166,17 +172,17 @@ def test_stage_a_warn_fixture_blind_spot_when_legal_universe_has_threshold(tmp_p
             }
             for n in legal_only
         ],
-    )
-    fixture = _make_fixture(tmp_path, ["Fixture Commander"])
-    candidate = Candidate(
-        signature=("replacement", "DamageDone", "Prevent"),
-        gap_id="replacement.DamageDone[Prevent]",
-    )
-    verdict = stage_a_golden_coverage(candidate, conn, fixture_path=fixture)
-    assert verdict.severity is Severity.WARN
-    assert verdict.name == "stage_a"
-    assert "FIXTURE_BLIND_SPOT" in verdict.reason
-    assert "5 legal-universe" in verdict.reason
+    ) as conn:
+        fixture = _make_fixture(tmp_path, ["Fixture Commander"])
+        candidate = Candidate(
+            signature=("replacement", "DamageDone", "Prevent"),
+            gap_id="replacement.DamageDone[Prevent]",
+        )
+        verdict = stage_a_golden_coverage(candidate, conn, fixture_path=fixture)
+        assert verdict.severity is Severity.WARN
+        assert verdict.name == "stage_a"
+        assert "FIXTURE_BLIND_SPOT" in verdict.reason
+        assert "5 legal-universe" in verdict.reason
 
 
 # ---------------------------------------------------------------------------
@@ -190,23 +196,23 @@ def test_stage_a_reject_when_zero_in_both_corpora(tmp_path):
     The partner_friends_tribal case from the historical revert corpus
     (0/2737 commanders activate gate).
     """
-    conn = _make_db(
+    with _make_db(
         cards=[{"name": "Fixture Commander"}, {"name": "Other Commander"}],
         ports=[],  # no card has the matching port
-    )
-    fixture = _make_fixture(tmp_path, ["Fixture Commander"])
-    candidate = Candidate(
-        signature=("trigger", "PartnerFriends", ""),
-        gap_id="trigger.PartnerFriends[*]",
-    )
-    verdict = stage_a_golden_coverage(candidate, conn, fixture_path=fixture)
-    assert verdict.severity is Severity.REJECT
-    assert "UNTESTABLE" in verdict.reason
+    ) as conn:
+        fixture = _make_fixture(tmp_path, ["Fixture Commander"])
+        candidate = Candidate(
+            signature=("trigger", "PartnerFriends", ""),
+            gap_id="trigger.PartnerFriends[*]",
+        )
+        verdict = stage_a_golden_coverage(candidate, conn, fixture_path=fixture)
+        assert verdict.severity is Severity.REJECT
+        assert "UNTESTABLE" in verdict.reason
 
 
 def test_stage_a_reject_when_legal_universe_below_threshold(tmp_path):
     """0 fixture and 1 legal-universe -> still UNTESTABLE (below ≥3 threshold)."""
-    conn = _make_db(
+    with _make_db(
         cards=[{"name": "Fixture Commander"}, {"name": "One Other"}],
         ports=[
             {
@@ -216,16 +222,16 @@ def test_stage_a_reject_when_legal_universe_below_threshold(tmp_path):
                 "replacement_result": "Prevent",
             },
         ],
-    )
-    fixture = _make_fixture(tmp_path, ["Fixture Commander"])
-    candidate = Candidate(
-        signature=("replacement", "DamageDone", "Prevent"),
-        gap_id="replacement.DamageDone[Prevent]",
-    )
-    verdict = stage_a_golden_coverage(candidate, conn, fixture_path=fixture)
-    assert verdict.severity is Severity.REJECT
-    assert "UNTESTABLE" in verdict.reason
-    assert "1 legal-universe" in verdict.reason
+    ) as conn:
+        fixture = _make_fixture(tmp_path, ["Fixture Commander"])
+        candidate = Candidate(
+            signature=("replacement", "DamageDone", "Prevent"),
+            gap_id="replacement.DamageDone[Prevent]",
+        )
+        verdict = stage_a_golden_coverage(candidate, conn, fixture_path=fixture)
+        assert verdict.severity is Severity.REJECT
+        assert "UNTESTABLE" in verdict.reason
+        assert "1 legal-universe" in verdict.reason
 
 
 # ---------------------------------------------------------------------------
@@ -235,11 +241,11 @@ def test_stage_a_reject_when_legal_universe_below_threshold(tmp_path):
 
 def test_stage_a_raises_on_empty_port_type(tmp_path):
     """Empty port_type would produce a vacuous predicate -> raise ValueError."""
-    conn = _make_db(cards=[], ports=[])
-    fixture = _make_fixture(tmp_path, [])
-    candidate = Candidate(signature=("", "ChangesZone", ""), gap_id="bad")
-    with pytest.raises(ValueError, match="empty port_type"):
-        stage_a_golden_coverage(candidate, conn, fixture_path=fixture)
+    with _make_db(cards=[], ports=[]) as conn:
+        fixture = _make_fixture(tmp_path, [])
+        candidate = Candidate(signature=("", "ChangesZone", ""), gap_id="bad")
+        with pytest.raises(ValueError, match="empty port_type"):
+            stage_a_golden_coverage(candidate, conn, fixture_path=fixture)
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +260,7 @@ def test_stage_a_falls_back_to_fixture_only_without_legal_column(tmp_path, caplo
     whenever fixture count is zero.
     """
     legal_only = [f"Legal Cmdr {i}" for i in range(5)]
-    conn = _make_db(
+    with _make_db(
         cards=[{"name": "Fixture Commander"}] + [{"name": n} for n in legal_only],
         ports=[
             {
@@ -266,19 +272,19 @@ def test_stage_a_falls_back_to_fixture_only_without_legal_column(tmp_path, caplo
             for n in legal_only
         ],
         has_legal_column=False,
-    )
-    fixture = _make_fixture(tmp_path, ["Fixture Commander"])
-    candidate = Candidate(
-        signature=("replacement", "DamageDone", "Prevent"),
-        gap_id="replacement.DamageDone[Prevent]",
-    )
-    with caplog.at_level("WARNING", logger="mtg_synergy_graph.preflight.gates"):
-        verdict = stage_a_golden_coverage(candidate, conn, fixture_path=fixture)
-    # Without the legal column we can't distinguish FIXTURE_BLIND_SPOT
-    # from UNTESTABLE — degrade to REJECT and warn.
-    assert verdict.severity is Severity.REJECT
-    assert "fallback" in verdict.reason.lower()
-    assert any("legal_commander column absent" in r.message for r in caplog.records)
+    ) as conn:
+        fixture = _make_fixture(tmp_path, ["Fixture Commander"])
+        candidate = Candidate(
+            signature=("replacement", "DamageDone", "Prevent"),
+            gap_id="replacement.DamageDone[Prevent]",
+        )
+        with caplog.at_level("WARNING", logger="mtg_synergy_graph.preflight.gates"):
+            verdict = stage_a_golden_coverage(candidate, conn, fixture_path=fixture)
+        # Without the legal column we can't distinguish FIXTURE_BLIND_SPOT
+        # from UNTESTABLE — degrade to REJECT and warn.
+        assert verdict.severity is Severity.REJECT
+        assert "fallback" in verdict.reason.lower()
+        assert any("legal_commander column absent" in r.message for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +294,7 @@ def test_stage_a_falls_back_to_fixture_only_without_legal_column(tmp_path, caplo
 
 def test_evaluate_one_returns_pipeline_verdict_with_stage_a_only(tmp_path):
     """In v1.0, evaluate_one wires only Stage A; PipelineVerdict mirrors its severity."""
-    conn = _make_db(
+    with _make_db(
         cards=[{"name": "Fixture Commander"}],
         ports=[
             {
@@ -298,25 +304,25 @@ def test_evaluate_one_returns_pipeline_verdict_with_stage_a_only(tmp_path):
                 "valid_filter": "",
             },
         ],
-    )
-    fixture = _make_fixture(tmp_path, ["Fixture Commander"])
-    candidate = Candidate(signature=("trigger", "DiesThisTurn", ""), gap_id="t")
-    verdict = evaluate_one(candidate, conn, fixture_path=fixture)
-    assert isinstance(verdict, PipelineVerdict)
-    assert verdict.severity is Severity.PASS
-    assert len(verdict.gates) == 1
-    assert verdict.gates[0].name == "stage_a"
-    assert verdict.reason == "PASS"
+    ) as conn:
+        fixture = _make_fixture(tmp_path, ["Fixture Commander"])
+        candidate = Candidate(signature=("trigger", "DiesThisTurn", ""), gap_id="t")
+        verdict = evaluate_one(candidate, conn, fixture_path=fixture)
+        assert isinstance(verdict, PipelineVerdict)
+        assert verdict.severity is Severity.PASS
+        assert len(verdict.gates) == 1
+        assert verdict.gates[0].name == "stage_a"
+        assert verdict.reason == "PASS"
 
 
 def test_pipeline_reason_concatenates_non_pass_gate_reasons(tmp_path):
     """When all gates are non-PASS, .reason concatenates them with ' | '."""
-    conn = _make_db(cards=[{"name": "X"}], ports=[])
-    fixture = _make_fixture(tmp_path, ["X"])
-    candidate = Candidate(signature=("trigger", "Nonexistent", ""), gap_id="t")
-    verdict = evaluate_one(candidate, conn, fixture_path=fixture)
-    assert verdict.severity is Severity.REJECT
-    assert "UNTESTABLE" in verdict.reason
+    with _make_db(cards=[{"name": "X"}], ports=[]) as conn:
+        fixture = _make_fixture(tmp_path, ["X"])
+        candidate = Candidate(signature=("trigger", "Nonexistent", ""), gap_id="t")
+        verdict = evaluate_one(candidate, conn, fixture_path=fixture)
+        assert verdict.severity is Severity.REJECT
+        assert "UNTESTABLE" in verdict.reason
 
 
 # ---------------------------------------------------------------------------
@@ -326,7 +332,7 @@ def test_pipeline_reason_concatenates_non_pass_gate_reasons(tmp_path):
 
 def test_stage_a_matches_valid_filter_qualifier_substring(tmp_path):
     """Plain signatures with a qualifier match valid_filter LIKE '%qualifier%'."""
-    conn = _make_db(
+    with _make_db(
         cards=[{"name": "Fixture Commander"}],
         ports=[
             {
@@ -336,19 +342,19 @@ def test_stage_a_matches_valid_filter_qualifier_substring(tmp_path):
                 "valid_filter": "Creature.attacking",
             },
         ],
-    )
-    fixture = _make_fixture(tmp_path, ["Fixture Commander"])
-    candidate = Candidate(
-        signature=("scales_with", "Valid", "attacking"),
-        gap_id="scales_with.Valid[attacking]",
-    )
-    verdict = stage_a_golden_coverage(candidate, conn, fixture_path=fixture)
-    assert verdict.severity is Severity.PASS
+    ) as conn:
+        fixture = _make_fixture(tmp_path, ["Fixture Commander"])
+        candidate = Candidate(
+            signature=("scales_with", "Valid", "attacking"),
+            gap_id="scales_with.Valid[attacking]",
+        )
+        verdict = stage_a_golden_coverage(candidate, conn, fixture_path=fixture)
+        assert verdict.severity is Severity.PASS
 
 
 def test_stage_a_replacement_signature_requires_matching_result(tmp_path):
     """Replacement signatures must match replacement_result, not just port_type+event."""
-    conn = _make_db(
+    with _make_db(
         cards=[{"name": "Fixture Commander"}],
         ports=[
             {
@@ -358,13 +364,13 @@ def test_stage_a_replacement_signature_requires_matching_result(tmp_path):
                 "replacement_result": "DmgTwice",  # NOT "Prevent"
             },
         ],
-    )
-    fixture = _make_fixture(tmp_path, ["Fixture Commander"])
-    candidate_prevent = Candidate(
-        signature=("replacement", "DamageDone", "Prevent"),
-        gap_id="replacement.DamageDone[Prevent]",
-    )
-    verdict = stage_a_golden_coverage(candidate_prevent, conn, fixture_path=fixture)
-    # Fixture cmdr's replacement_result is DmgTwice, not Prevent — so 0 fixture hits.
-    # Legal universe also has only this one cmdr with DmgTwice — so 0 legal hits for Prevent.
-    assert verdict.severity is Severity.REJECT
+    ) as conn:
+        fixture = _make_fixture(tmp_path, ["Fixture Commander"])
+        candidate_prevent = Candidate(
+            signature=("replacement", "DamageDone", "Prevent"),
+            gap_id="replacement.DamageDone[Prevent]",
+        )
+        verdict = stage_a_golden_coverage(candidate_prevent, conn, fixture_path=fixture)
+        # Fixture cmdr's replacement_result is DmgTwice, not Prevent — so 0 fixture hits.
+        # Legal universe also has only this one cmdr with DmgTwice — so 0 legal hits for Prevent.
+        assert verdict.severity is Severity.REJECT

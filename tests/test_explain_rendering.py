@@ -10,6 +10,7 @@ complements exist.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
 
@@ -23,7 +24,7 @@ from mtg_synergy_graph.universal_scorer import UniversalScore
 
 
 @pytest.fixture()
-def engine_with_mini_db(tmp_path: Path) -> SynergyEngine:
+def engine_with_mini_db(tmp_path: Path) -> Iterator[SynergyEngine]:
     """Production-schema DB seeded with Korvold + Gravecrawler."""
     db_path = tmp_path / "synergy.db"
     conn = open_db(db_path)
@@ -54,7 +55,11 @@ def engine_with_mini_db(tmp_path: Path) -> SynergyEngine:
     )
     conn.commit()
     conn.close()
-    return SynergyEngine(db_path)
+    engine = SynergyEngine(db_path)
+    try:
+        yield engine
+    finally:
+        engine.close()
 
 
 # ---------------------------------------------------------------------------
@@ -67,50 +72,55 @@ def test_helper_emits_populated_path_info() -> None:
     complement it emits. Empty string is reserved for other rule
     families that don't carry narrator metadata."""
     conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    conn.executescript(
-        """
-        CREATE TABLE cards (name TEXT PRIMARY KEY);
-        CREATE TABLE card_ports (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            card_name TEXT, port_type TEXT, event_class TEXT,
-            valid_filter TEXT, zone_origin TEXT, zone_destination TEXT,
-            counter_type TEXT
-        );
-        """
-    )
-    conn.execute("INSERT INTO cards VALUES ('SacFodder')")
-    conn.execute("INSERT INTO card_ports (card_name, port_type, event_class) VALUES ('SacFodder', 'cost', 'sacrifice')")
-    conn.execute(
-        "INSERT INTO card_ports (card_name, port_type, event_class) VALUES ('SacFodder', 'trigger', 'Sacrificed')"
-    )
-    conn.commit()
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE cards (name TEXT PRIMARY KEY);
+            CREATE TABLE card_ports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                card_name TEXT, port_type TEXT, event_class TEXT,
+                valid_filter TEXT, zone_origin TEXT, zone_destination TEXT,
+                counter_type TEXT
+            );
+            """
+        )
+        conn.execute("INSERT INTO cards VALUES ('SacFodder')")
+        conn.execute(
+            "INSERT INTO card_ports (card_name, port_type, event_class) VALUES ('SacFodder', 'cost', 'sacrifice')"
+        )
+        conn.execute(
+            "INSERT INTO card_ports (card_name, port_type, event_class) VALUES ('SacFodder', 'trigger', 'Sacrificed')"
+        )
+        conn.commit()
 
-    cmdr_ports = [
-        {
-            "port_type": "trigger",
-            "event_class": "Sacrificed",
-            "valid_filter": "Permanent",
-            "zone_origin": "",
-            "zone_destination": "",
-            "counter_type": "",
-        },
-        {
-            "port_type": "effect",
-            "event_class": "Sacrifice",
-            "valid_filter": "Permanent.Other",
-            "zone_origin": "",
-            "zone_destination": "",
-            "counter_type": "",
-        },
-    ]
-    result = pathway._find_self_bridging_cascade(conn, cmdr_ports, set())
-    assert len(result) == 1
-    info = result[0].path_info
-    # Path info names both port subkinds and the channel.
-    assert "cost.sacrifice" in info
-    assert "trigger.Sacrificed" in info
-    assert "cost_feeds" in info
+        cmdr_ports = [
+            {
+                "port_type": "trigger",
+                "event_class": "Sacrificed",
+                "valid_filter": "Permanent",
+                "zone_origin": "",
+                "zone_destination": "",
+                "counter_type": "",
+            },
+            {
+                "port_type": "effect",
+                "event_class": "Sacrifice",
+                "valid_filter": "Permanent.Other",
+                "zone_origin": "",
+                "zone_destination": "",
+                "counter_type": "",
+            },
+        ]
+        result = pathway._find_self_bridging_cascade(conn, cmdr_ports, set())
+        assert len(result) == 1
+        info = result[0].path_info
+        # Path info names both port subkinds and the channel.
+        assert "cost.sacrifice" in info
+        assert "trigger.Sacrificed" in info
+        assert "cost_feeds" in info
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------

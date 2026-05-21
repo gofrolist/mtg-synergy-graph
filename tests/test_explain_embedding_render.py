@@ -18,6 +18,7 @@ round-trip is exercised end-to-end.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
@@ -100,11 +101,15 @@ def _seed_engine_db(db_path: Path) -> None:
 
 
 @pytest.fixture()
-def engine_with_embeddings(tmp_path: Path) -> SynergyEngine:
+def engine_with_embeddings(tmp_path: Path) -> Iterator[SynergyEngine]:
     """SynergyEngine opened against a DB seeded with ports + vectors."""
     db_path = tmp_path / "synergy.db"
     _seed_engine_db(db_path)
-    return SynergyEngine(db_path)
+    engine = SynergyEngine(db_path)
+    try:
+        yield engine
+    finally:
+        engine.close()
 
 
 # ---------------------------------------------------------------------------

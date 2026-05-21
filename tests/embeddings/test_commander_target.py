@@ -26,6 +26,8 @@ Covers:
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import numpy as np
 import pytest
@@ -47,9 +49,10 @@ def _make_vector(seed: int, dim: int = 128) -> np.ndarray:
     return (vec / norm).astype(np.float32)
 
 
+@contextmanager
 def _make_edhrec_db(
     rows: list[tuple[str, str, str, float]],
-) -> sqlite3.Connection:
+) -> Iterator[sqlite3.Connection]:
     """Build an in-memory ``edhrec_card_synergy`` table.
 
     Rows are ``(commander_slug, section, card_name, synergy)`` — the
@@ -72,7 +75,10 @@ def _make_edhrec_db(
         rows,
     )
     conn.commit()
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 @pytest.fixture(autouse=True)
@@ -106,27 +112,26 @@ def test_golden_set_commander_target_matches_hand_computed_mean() -> None:
         (slug, "High Synergy Cards", "Dockside Extortionist", 0.9),
         (slug, "High Synergy Cards", "Mayhem Devil", 0.8),
     ]
-    edhrec_conn = _make_edhrec_db(edhrec_rows)
+    with _make_edhrec_db(edhrec_rows) as edhrec_conn:
+        target = ct.build_commander_target_vector((commander,), vectors, edhrec_conn)
 
-    target = ct.build_commander_target_vector((commander,), vectors, edhrec_conn)
-
-    expected = np.mean(
-        np.stack(
-            [
-                vectors[commander],
-                vectors["Dockside Extortionist"],
-                vectors["Mayhem Devil"],
-            ],
+        expected = np.mean(
+            np.stack(
+                [
+                    vectors[commander],
+                    vectors["Dockside Extortionist"],
+                    vectors["Mayhem Devil"],
+                ],
+                axis=0,
+            ),
             axis=0,
-        ),
-        axis=0,
-    )
-    expected = expected / np.linalg.norm(expected)
+        )
+        expected = expected / np.linalg.norm(expected)
 
-    assert target is not None
-    np.testing.assert_allclose(target, expected, atol=1e-6)
-    # L2 norm ≈ 1.
-    assert float(np.linalg.norm(target)) == pytest.approx(1.0, abs=1e-6)
+        assert target is not None
+        np.testing.assert_allclose(target, expected, atol=1e-6)
+        # L2 norm ≈ 1.
+        assert float(np.linalg.norm(target)) == pytest.approx(1.0, abs=1e-6)
 
 
 def test_non_golden_set_commander_falls_back_to_commander_vector() -> None:
@@ -159,36 +164,35 @@ def test_partner_pair_composes_both_commanders_and_their_hi_syn() -> None:
         (b_slug, "High Synergy Cards", "Shared Hi Syn", 0.9),
         (b_slug, "High Synergy Cards", "Alena Only Hi Syn", 0.8),
     ]
-    edhrec_conn = _make_edhrec_db(edhrec_rows)
+    with _make_edhrec_db(edhrec_rows) as edhrec_conn:
+        target = ct.build_commander_target_vector(
+            (a_name, b_name),
+            vectors,
+            edhrec_conn,
+        )
 
-    target = ct.build_commander_target_vector(
-        (a_name, b_name),
-        vectors,
-        edhrec_conn,
-    )
-
-    # Expected: 4 vectors collected — both commanders + Shared twice +
-    # Alena Only.  Shared counts once per commander query (the plan
-    # spells this out: "each commander's hi-syn cards are all averaged
-    # together", so double-counting when both partners share a hi-syn
-    # is intentional, not a bug).
-    expected = np.mean(
-        np.stack(
-            [
-                vectors[a_name],
-                vectors[b_name],
-                vectors["Shared Hi Syn"],  # from a's query
-                vectors["Shared Hi Syn"],  # from b's query
-                vectors["Alena Only Hi Syn"],
-            ],
+        # Expected: 4 vectors collected — both commanders + Shared twice +
+        # Alena Only.  Shared counts once per commander query (the plan
+        # spells this out: "each commander's hi-syn cards are all averaged
+        # together", so double-counting when both partners share a hi-syn
+        # is intentional, not a bug).
+        expected = np.mean(
+            np.stack(
+                [
+                    vectors[a_name],
+                    vectors[b_name],
+                    vectors["Shared Hi Syn"],  # from a's query
+                    vectors["Shared Hi Syn"],  # from b's query
+                    vectors["Alena Only Hi Syn"],
+                ],
+                axis=0,
+            ),
             axis=0,
-        ),
-        axis=0,
-    )
-    expected = expected / np.linalg.norm(expected)
+        )
+        expected = expected / np.linalg.norm(expected)
 
-    assert target is not None
-    np.testing.assert_allclose(target, expected, atol=1e-6)
+        assert target is not None
+        np.testing.assert_allclose(target, expected, atol=1e-6)
 
 
 def test_hi_syn_limit_is_honored() -> None:
@@ -204,30 +208,29 @@ def test_hi_syn_limit_is_honored() -> None:
         "HiSyn 5": _make_vector(seed=26),
     }
     edhrec_rows = [(slug, "High Synergy Cards", f"HiSyn {i}", 1.0 - i * 0.1) for i in range(1, 6)]
-    edhrec_conn = _make_edhrec_db(edhrec_rows)
+    with _make_edhrec_db(edhrec_rows) as edhrec_conn:
+        target = ct.build_commander_target_vector(
+            (commander,),
+            vectors,
+            edhrec_conn,
+            hi_syn_limit=2,
+        )
 
-    target = ct.build_commander_target_vector(
-        (commander,),
-        vectors,
-        edhrec_conn,
-        hi_syn_limit=2,
-    )
-
-    expected = np.mean(
-        np.stack(
-            [
-                vectors[commander],
-                vectors["HiSyn 1"],
-                vectors["HiSyn 2"],
-            ],
+        expected = np.mean(
+            np.stack(
+                [
+                    vectors[commander],
+                    vectors["HiSyn 1"],
+                    vectors["HiSyn 2"],
+                ],
+                axis=0,
+            ),
             axis=0,
-        ),
-        axis=0,
-    )
-    expected = expected / np.linalg.norm(expected)
+        )
+        expected = expected / np.linalg.norm(expected)
 
-    assert target is not None
-    np.testing.assert_allclose(target, expected, atol=1e-6)
+        assert target is not None
+        np.testing.assert_allclose(target, expected, atol=1e-6)
 
 
 # ---------------------------------------------------------------------------
@@ -242,13 +245,12 @@ def test_commander_missing_but_hi_syn_present_uses_hi_syn_alone() -> None:
     vectors = {
         "Some Hi Syn Card": _make_vector(seed=31),
     }
-    edhrec_conn = _make_edhrec_db([(slug, "High Synergy Cards", "Some Hi Syn Card", 0.9)])
+    with _make_edhrec_db([(slug, "High Synergy Cards", "Some Hi Syn Card", 0.9)]) as edhrec_conn:
+        target = ct.build_commander_target_vector((commander,), vectors, edhrec_conn)
 
-    target = ct.build_commander_target_vector((commander,), vectors, edhrec_conn)
-
-    assert target is not None
-    # Only one collected vector, so target ≈ that vector (it was already unit).
-    np.testing.assert_allclose(target, vectors["Some Hi Syn Card"], atol=1e-7)
+        assert target is not None
+        # Only one collected vector, so target ≈ that vector (it was already unit).
+        np.testing.assert_allclose(target, vectors["Some Hi Syn Card"], atol=1e-7)
 
 
 def test_commander_present_but_no_hi_syn_matches_uses_commander_only() -> None:
@@ -259,25 +261,24 @@ def test_commander_present_but_no_hi_syn_matches_uses_commander_only() -> None:
         commander: _make_vector(seed=41),
         # Notably missing: "Mystical Tutor" below.
     }
-    edhrec_conn = _make_edhrec_db([(slug, "High Synergy Cards", "Mystical Tutor", 0.9)])
+    with _make_edhrec_db([(slug, "High Synergy Cards", "Mystical Tutor", 0.9)]) as edhrec_conn:
+        target = ct.build_commander_target_vector((commander,), vectors, edhrec_conn)
 
-    target = ct.build_commander_target_vector((commander,), vectors, edhrec_conn)
-
-    assert target is not None
-    # Target equals normalized commander vector (only collected one).
-    np.testing.assert_allclose(target, vectors[commander], atol=1e-7)
+        assert target is not None
+        # Target equals normalized commander vector (only collected one).
+        np.testing.assert_allclose(target, vectors[commander], atol=1e-7)
 
 
 def test_no_vectors_at_all_returns_none() -> None:
     """Neither commander nor hi-syn match → returns ``None``."""
     commander = "Nonexistent Commander"
     slug = commander_to_slug(commander)
-    edhrec_conn = _make_edhrec_db([(slug, "High Synergy Cards", "Also Missing Card", 0.9)])
-    vectors: dict[str, np.ndarray] = {}  # nothing populated
+    with _make_edhrec_db([(slug, "High Synergy Cards", "Also Missing Card", 0.9)]) as edhrec_conn:
+        vectors: dict[str, np.ndarray] = {}  # nothing populated
 
-    target = ct.build_commander_target_vector((commander,), vectors, edhrec_conn)
+        target = ct.build_commander_target_vector((commander,), vectors, edhrec_conn)
 
-    assert target is None
+        assert target is None
 
 
 def test_empty_commander_names_returns_none() -> None:
@@ -298,38 +299,38 @@ def test_functools_cache_hits_on_repeated_call() -> None:
     """Calling twice with the same conn/commander/limit hits the cache."""
     commander = "Korvold, Fae-Cursed King"
     slug = commander_to_slug(commander)
-    edhrec_conn = _make_edhrec_db([(slug, "High Synergy Cards", "Dockside Extortionist", 0.9)])
-    vectors = {
-        commander: _make_vector(seed=51),
-        "Dockside Extortionist": _make_vector(seed=52),
-    }
+    with _make_edhrec_db([(slug, "High Synergy Cards", "Dockside Extortionist", 0.9)]) as edhrec_conn:
+        vectors = {
+            commander: _make_vector(seed=51),
+            "Dockside Extortionist": _make_vector(seed=52),
+        }
 
-    before = ct._fetch_hi_syn_names_cached.cache_info()
+        before = ct._fetch_hi_syn_names_cached.cache_info()
 
-    ct.build_commander_target_vector((commander,), vectors, edhrec_conn)
-    after_first = ct._fetch_hi_syn_names_cached.cache_info()
-    assert after_first.misses == before.misses + 1, "first call must miss"
+        ct.build_commander_target_vector((commander,), vectors, edhrec_conn)
+        after_first = ct._fetch_hi_syn_names_cached.cache_info()
+        assert after_first.misses == before.misses + 1, "first call must miss"
 
-    ct.build_commander_target_vector((commander,), vectors, edhrec_conn)
-    after_second = ct._fetch_hi_syn_names_cached.cache_info()
-    assert after_second.hits == after_first.hits + 1, "second call must hit"
-    assert after_second.misses == after_first.misses, "second call must not miss"
+        ct.build_commander_target_vector((commander,), vectors, edhrec_conn)
+        after_second = ct._fetch_hi_syn_names_cached.cache_info()
+        assert after_second.hits == after_first.hits + 1, "second call must hit"
+        assert after_second.misses == after_first.misses, "second call must not miss"
 
 
 def test_clear_cache_resets_cache_info() -> None:
     commander = "Any, Cached Commander"
     slug = commander_to_slug(commander)
-    edhrec_conn = _make_edhrec_db([(slug, "High Synergy Cards", "HS", 0.9)])
-    vectors = {commander: _make_vector(seed=61), "HS": _make_vector(seed=62)}
+    with _make_edhrec_db([(slug, "High Synergy Cards", "HS", 0.9)]) as edhrec_conn:
+        vectors = {commander: _make_vector(seed=61), "HS": _make_vector(seed=62)}
 
-    ct.build_commander_target_vector((commander,), vectors, edhrec_conn)
-    assert ct._fetch_hi_syn_names_cached.cache_info().currsize > 0
+        ct.build_commander_target_vector((commander,), vectors, edhrec_conn)
+        assert ct._fetch_hi_syn_names_cached.cache_info().currsize > 0
 
-    ct.clear_cache()
-    info = ct._fetch_hi_syn_names_cached.cache_info()
-    assert info.hits == 0
-    assert info.misses == 0
-    assert info.currsize == 0
+        ct.clear_cache()
+        info = ct._fetch_hi_syn_names_cached.cache_info()
+        assert info.hits == 0
+        assert info.misses == 0
+        assert info.currsize == 0
 
 
 # ---------------------------------------------------------------------------
@@ -344,15 +345,17 @@ def test_missing_table_degrades_to_commander_vector() -> None:
 
     # Connection with no edhrec_card_synergy table at all.
     broken_conn = sqlite3.connect(":memory:")
+    try:
+        target = ct.build_commander_target_vector(
+            (commander,),
+            vectors,
+            broken_conn,
+        )
 
-    target = ct.build_commander_target_vector(
-        (commander,),
-        vectors,
-        broken_conn,
-    )
-
-    assert target is not None
-    np.testing.assert_allclose(target, vectors[commander], atol=1e-7)
+        assert target is not None
+        np.testing.assert_allclose(target, vectors[commander], atol=1e-7)
+    finally:
+        broken_conn.close()
 
 
 def test_hi_syn_limit_zero_raises() -> None:
@@ -388,16 +391,15 @@ def test_full_pipeline_korvold_10_hi_syn_target_is_unit_length() -> None:
     vectors = {commander: _make_vector(seed=100)}
     vectors.update({name: _make_vector(seed=200 + i) for i, name in enumerate(hi_syn_names)})
     rows = [(slug, "High Synergy Cards", name, 1.0 - i * 0.05) for i, name in enumerate(hi_syn_names)]
-    edhrec_conn = _make_edhrec_db(rows)
+    with _make_edhrec_db(rows) as edhrec_conn:
+        target_a = ct.build_commander_target_vector((commander,), vectors, edhrec_conn, hi_syn_limit=10)
+        # Clear cache and recompute — determinism check.
+        ct.clear_cache()
+        target_b = ct.build_commander_target_vector((commander,), vectors, edhrec_conn, hi_syn_limit=10)
 
-    target_a = ct.build_commander_target_vector((commander,), vectors, edhrec_conn, hi_syn_limit=10)
-    # Clear cache and recompute — determinism check.
-    ct.clear_cache()
-    target_b = ct.build_commander_target_vector((commander,), vectors, edhrec_conn, hi_syn_limit=10)
-
-    assert target_a is not None and target_b is not None
-    np.testing.assert_array_equal(target_a, target_b)
-    assert float(np.linalg.norm(target_a)) == pytest.approx(1.0, abs=1e-6)
+        assert target_a is not None and target_b is not None
+        np.testing.assert_array_equal(target_a, target_b)
+        assert float(np.linalg.norm(target_a)) == pytest.approx(1.0, abs=1e-6)
 
 
 def test_commander_name_case_sensitivity_is_deterministic() -> None:
@@ -414,12 +416,12 @@ def test_commander_name_case_sensitivity_is_deterministic() -> None:
     # lowercases; the underlying SQL will return the same rows. But
     # from the cache's perspective, different string keys = different
     # entries.
-    edhrec_conn = _make_edhrec_db([(commander_to_slug(a), "High Synergy Cards", "Side Card", 0.9)])
-    vectors["Side Card"] = _make_vector(seed=303)
+    with _make_edhrec_db([(commander_to_slug(a), "High Synergy Cards", "Side Card", 0.9)]) as edhrec_conn:
+        vectors["Side Card"] = _make_vector(seed=303)
 
-    ct.build_commander_target_vector((a,), vectors, edhrec_conn)
-    ct.build_commander_target_vector((b,), vectors, edhrec_conn)
+        ct.build_commander_target_vector((a,), vectors, edhrec_conn)
+        ct.build_commander_target_vector((b,), vectors, edhrec_conn)
 
-    info = ct._fetch_hi_syn_names_cached.cache_info()
-    # Two distinct commander-name keys → two misses.
-    assert info.misses == 2
+        info = ct._fetch_hi_syn_names_cached.cache_info()
+        # Two distinct commander-name keys → two misses.
+        assert info.misses == 2

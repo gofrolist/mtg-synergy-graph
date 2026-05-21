@@ -18,6 +18,8 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import numpy as np
 import pytest
@@ -54,11 +56,15 @@ CREATE TABLE port_attributes (
 """
 
 
-def _fresh_db() -> sqlite3.Connection:
+@contextmanager
+def _fresh_db() -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     conn.executescript(_VECTORIZER_SCHEMA)
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def _insert_card(
@@ -112,125 +118,128 @@ def test_token_format_version_is_v1() -> None:
 
 
 def test_extract_tokens_port_row_columns() -> None:
-    conn = _fresh_db()
-    _insert_card(conn, "Alpha", keywords=["Flying"])
-    _insert_port(
-        conn,
-        "Alpha",
-        "trigger",
-        "SpellCast",
-        zone_origin="Hand",
-        zone_destination="Battlefield",
-        counter_type="P1P1",
-        branch_kind="root",
-    )
-    conn.commit()
+    with _fresh_db() as conn:
+        _insert_card(conn, "Alpha", keywords=["Flying"])
+        _insert_port(
+            conn,
+            "Alpha",
+            "trigger",
+            "SpellCast",
+            zone_origin="Hand",
+            zone_destination="Battlefield",
+            counter_type="P1P1",
+            branch_kind="root",
+        )
+        conn.commit()
 
-    corpus = extract_card_tokens(conn)
+        corpus = extract_card_tokens(conn)
 
-    assert set(corpus["Alpha"]) == {
-        "port_type:trigger",
-        "event_class:SpellCast",
-        "zone_origin:Hand",
-        "zone_destination:Battlefield",
-        "counter_type:P1P1",
-        "branch_kind:root",
-        "keyword:Flying",
-    }
+        assert set(corpus["Alpha"]) == {
+            "port_type:trigger",
+            "event_class:SpellCast",
+            "zone_origin:Hand",
+            "zone_destination:Battlefield",
+            "counter_type:P1P1",
+            "branch_kind:root",
+            "keyword:Flying",
+        }
 
 
 def test_extract_tokens_skips_null_optional_columns() -> None:
-    conn = _fresh_db()
-    _insert_card(conn, "Beta")
-    _insert_port(conn, "Beta", "effect", "Draw")
-    conn.commit()
+    with _fresh_db() as conn:
+        _insert_card(conn, "Beta")
+        _insert_port(conn, "Beta", "effect", "Draw")
+        conn.commit()
 
-    corpus = extract_card_tokens(conn)
+        corpus = extract_card_tokens(conn)
 
-    # Only the two required columns + nothing else (card has no keywords).
-    assert corpus["Beta"] == ("port_type:effect", "event_class:Draw")
+        # Only the two required columns + nothing else (card has no keywords).
+        assert corpus["Beta"] == ("port_type:effect", "event_class:Draw")
 
 
 def test_extract_tokens_emits_attr_rows() -> None:
-    conn = _fresh_db()
-    _insert_card(conn, "Gamma")
-    _insert_port(
-        conn,
-        "Gamma",
-        "trigger",
-        "ETB",
-        attributes=[("type", "Creature"), ("subtype", "Goblin")],
-    )
-    conn.commit()
+    with _fresh_db() as conn:
+        _insert_card(conn, "Gamma")
+        _insert_port(
+            conn,
+            "Gamma",
+            "trigger",
+            "ETB",
+            attributes=[("type", "Creature"), ("subtype", "Goblin")],
+        )
+        conn.commit()
 
-    corpus = extract_card_tokens(conn)
+        corpus = extract_card_tokens(conn)
 
-    assert "attr:type:Creature" in corpus["Gamma"]
-    assert "attr:subtype:Goblin" in corpus["Gamma"]
+        assert "attr:type:Creature" in corpus["Gamma"]
+        assert "attr:subtype:Goblin" in corpus["Gamma"]
 
 
 def test_extract_tokens_keywords_json_decoded() -> None:
-    conn = _fresh_db()
-    _insert_card(conn, "Delta", keywords=["Flying", "Haste", "Trample"])
-    _insert_port(conn, "Delta", "keyword", "Flying")
-    conn.commit()
+    with _fresh_db() as conn:
+        _insert_card(conn, "Delta", keywords=["Flying", "Haste", "Trample"])
+        _insert_port(conn, "Delta", "keyword", "Flying")
+        conn.commit()
 
-    corpus = extract_card_tokens(conn)
+        corpus = extract_card_tokens(conn)
 
-    assert sum(1 for t in corpus["Delta"] if t.startswith("keyword:")) == 3
-    assert "keyword:Flying" in corpus["Delta"]
-    assert "keyword:Haste" in corpus["Delta"]
-    assert "keyword:Trample" in corpus["Delta"]
+        assert sum(1 for t in corpus["Delta"] if t.startswith("keyword:")) == 3
+        assert "keyword:Flying" in corpus["Delta"]
+        assert "keyword:Haste" in corpus["Delta"]
+        assert "keyword:Trample" in corpus["Delta"]
 
 
 def test_extract_tokens_card_with_no_ports_and_no_keywords() -> None:
-    conn = _fresh_db()
-    _insert_card(conn, "Orphan")
-    conn.commit()
+    with _fresh_db() as conn:
+        _insert_card(conn, "Orphan")
+        conn.commit()
 
-    corpus = extract_card_tokens(conn)
+        corpus = extract_card_tokens(conn)
 
-    assert "Orphan" in corpus
-    assert corpus["Orphan"] == ()
+        assert "Orphan" in corpus
+        assert corpus["Orphan"] == ()
 
 
 def test_extract_tokens_tolerates_missing_port_attributes_table() -> None:
     conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    # No port_attributes table at all — simulates a very minimal fixture.
-    conn.executescript(
-        """
-        CREATE TABLE cards (name TEXT PRIMARY KEY, keywords TEXT);
-        CREATE TABLE card_ports (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            card_name TEXT NOT NULL,
-            port_type TEXT NOT NULL,
-            event_class TEXT NOT NULL,
-            zone_origin TEXT,
-            zone_destination TEXT,
-            counter_type TEXT,
-            branch_kind TEXT
-        );
-        """
-    )
-    conn.execute("INSERT INTO cards (name, keywords) VALUES ('Solo', NULL)")
-    conn.execute("INSERT INTO card_ports (card_name, port_type, event_class) VALUES ('Solo', 'trigger', 'ETB')")
-    conn.commit()
+    try:
+        conn.row_factory = sqlite3.Row
+        # No port_attributes table at all — simulates a very minimal fixture.
+        conn.executescript(
+            """
+            CREATE TABLE cards (name TEXT PRIMARY KEY, keywords TEXT);
+            CREATE TABLE card_ports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                card_name TEXT NOT NULL,
+                port_type TEXT NOT NULL,
+                event_class TEXT NOT NULL,
+                zone_origin TEXT,
+                zone_destination TEXT,
+                counter_type TEXT,
+                branch_kind TEXT
+            );
+            """
+        )
+        conn.execute("INSERT INTO cards (name, keywords) VALUES ('Solo', NULL)")
+        conn.execute("INSERT INTO card_ports (card_name, port_type, event_class) VALUES ('Solo', 'trigger', 'ETB')")
+        conn.commit()
 
-    corpus = extract_card_tokens(conn)
+        corpus = extract_card_tokens(conn)
 
-    assert corpus["Solo"] == ("port_type:trigger", "event_class:ETB")
+        assert corpus["Solo"] == ("port_type:trigger", "event_class:ETB")
+    finally:
+        conn.close()
 
 
 def test_extract_tokens_ignores_malformed_keywords_json() -> None:
-    conn = _fresh_db()
-    conn.execute(
-        "INSERT INTO cards (name, keywords) VALUES (?, ?)",
-        ("Bad", "{this is not json"),
-    )
-    conn.commit()
+    with _fresh_db() as conn:
+        conn.execute(
+            "INSERT INTO cards (name, keywords) VALUES (?, ?)",
+            ("Bad", "{this is not json"),
+        )
+        conn.commit()
 
-    corpus = extract_card_tokens(conn)
+        corpus = extract_card_tokens(conn)
 
     # Malformed JSON doesn't raise; the card still appears with an empty tuple.
     assert corpus["Bad"] == ()

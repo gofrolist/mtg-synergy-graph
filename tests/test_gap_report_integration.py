@@ -9,6 +9,8 @@ relies on.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import gap_report
 from gap_report import (
@@ -43,7 +45,8 @@ def test_walker_import_surface_preserved():
 # ---------------------------------------------------------------------------
 
 
-def _make_db_with_minimal_schema(rows: list[dict]) -> sqlite3.Connection:
+@contextmanager
+def _make_db_with_minimal_schema(rows: list[dict]) -> Iterator[sqlite3.Connection]:
     """Build an in-memory DB matching the minimum cards/card_ports schema."""
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
@@ -78,7 +81,10 @@ def _make_db_with_minimal_schema(rows: list[dict]) -> sqlite3.Connection:
                 ),
             )
     conn.commit()
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def _make_proposal(signature: tuple[str, str, str], template: str = "test") -> RuleProposal:
@@ -103,22 +109,22 @@ def _make_proposal(signature: tuple[str, str, str], template: str = "test") -> R
 
 def test_evaluate_preflight_returns_verdict_per_unique_signature(monkeypatch, tmp_path):
     """One verdict per unique signature; duplicate signatures dedupe."""
-    conn = _make_db_with_minimal_schema(
+    with _make_db_with_minimal_schema(
         [{"name": "X", "ports": [{"port_type": "trigger", "event_class": "DiesThisTurn"}]}]
-    )
-    # Point preflight at a tiny test fixture so it doesn't load the real 500.
-    fixture = tmp_path / "fixture.json"
-    fixture.write_text('{"entries": [{"commander": "X"}]}')
-    monkeypatch.setattr("mtg_synergy_graph.preflight.gates.DEFAULT_FIXTURE_PATH", fixture)
+    ) as conn:
+        # Point preflight at a tiny test fixture so it doesn't load the real 500.
+        fixture = tmp_path / "fixture.json"
+        fixture.write_text('{"entries": [{"commander": "X"}]}')
+        monkeypatch.setattr("mtg_synergy_graph.preflight.gates.DEFAULT_FIXTURE_PATH", fixture)
 
-    p1 = _make_proposal(("trigger", "DiesThisTurn", ""))
-    p2 = _make_proposal(("trigger", "DiesThisTurn", ""))  # same signature
-    p3 = _make_proposal(("replacement", "DamageDone", "Prevent"))
-    verdicts = _evaluate_preflight([p1, p2, p3], conn)
-    # Two unique signatures -> two verdicts (the duplicate dedupes).
-    assert len(verdicts) == 2
-    assert ("trigger", "DiesThisTurn", "") in verdicts
-    assert ("replacement", "DamageDone", "Prevent") in verdicts
+        p1 = _make_proposal(("trigger", "DiesThisTurn", ""))
+        p2 = _make_proposal(("trigger", "DiesThisTurn", ""))  # same signature
+        p3 = _make_proposal(("replacement", "DamageDone", "Prevent"))
+        verdicts = _evaluate_preflight([p1, p2, p3], conn)
+        # Two unique signatures -> two verdicts (the duplicate dedupes).
+        assert len(verdicts) == 2
+        assert ("trigger", "DiesThisTurn", "") in verdicts
+        assert ("replacement", "DamageDone", "Prevent") in verdicts
 
 
 # ---------------------------------------------------------------------------
