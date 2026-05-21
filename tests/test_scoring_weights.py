@@ -31,7 +31,7 @@ from mtg_synergy_graph.universal_scorer import (
 # Edit this only when a value in data/scoring_weights.json (or another
 # input to compute_config_hash) legitimately changes — at which point
 # bench.py audit --repin --yes is also required.
-_PRODUCTION_HASH = "48b1db2caec6d5922fbf91a7db65b5873a396484a7887c510e76a39733d365fe"
+_PRODUCTION_HASH = "a0a3879532461273b3d49115e31742e4814fde22e05751f5a15f3bb69b0ac161"
 
 
 # ---------------------------------------------------------------------------

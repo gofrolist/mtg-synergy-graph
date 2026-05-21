@@ -159,6 +159,8 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "cascade_tribal": "port_match",
     # Plan 2026-04-23-001 depth-2 self-bridging pathway.
     "self_bridging_cascade": "port_match",
+    # Plan 2026-05-19 Prepared / AlternateMode:Prepare mechanic capture.
+    "prepared_mechanic": "port_match",
 }
 
 # ---------------------------------------------------------------------------

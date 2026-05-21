@@ -5,6 +5,196 @@ impact notes. See `scripts/_audit_rule_impact.py` for the per-rule impact
 methodology (NDCG@30 metric + golden-set safety net + CONTENTIOUS verdict).
 See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
+## 2026-05-20
+
+### `CopyFaceFrom:<Name>` back-face resolution (LANDED, follow-up #2 to PR #47)
+
+Closes the data-model gap flagged in the 2026-05-19 Prepared brainstorm:
+22 of the 47 Prepared-payoff cards encode their back face as
+`CopyFaceFrom:<X>` (Reanimate, Brainstorm, Demonic Tutor, Swords to
+Plowshares, Wheel of Fortune, …), and the importer previously dropped
+the directive — Grave Researcher carried no Reanimate ports, Naktamun
+Lorespinner no Wheel-of-Fortune ports, etc. See
+`docs/brainstorms/2026-05-20-copy-face-from-resolution-requirements.md`
+for the full design (Q1-Q5 + v1 recommendations).
+
+- **Parser extension**: `CopyFaceFrom:` on the back face captures the
+  referenced card name into `card["copy_face_from"]`. Front-face
+  occurrences are ignored defensively.
+- **Schema extension**: new `cards.copy_face_from TEXT` column so the
+  second pass can find every carrier without re-parsing.
+  **Re-import required for legacy DBs**: `schema.sql` uses
+  `CREATE TABLE IF NOT EXISTS`, so existing `data/synergy.db` files
+  miss the column. Rebuild via `uv run python scripts/import_cardsfolder.py`
+  before running anything that calls `import_card`. Test DBs are
+  unaffected — they use a freshly-opened schema via `open_db()`.
+- **Importer extension (two-pass)**: after every `.txt` is imported,
+  `resolve_copy_face_from_references(conn)` iterates carriers, copies
+  every referenced-card `card_ports` row onto the carrier, and tags
+  each inherited row with `port_attributes.attr_kind='via_copyfacefrom'`,
+  `attr_value=<ReferencedCardName>`. Inherited rows skip
+  `static AlternateMode` (defensive — never inherit a Prepared marker).
+  Unresolved references warn + skip; self-references caught by a
+  depth-1 cycle guard.
+- **Production importer run**: 20 carriers, 20/20 resolved, 32 ports
+  inherited (mean ~1.6 ports/carrier, max 3 for Reanimate-shape).
+- **`bench.py audit`**: **POSITIVE**, aggregate Δ = **+0.0933** on the
+  100-cmdr golden set. Histogram: 78 no_change / 20 rank_shuffle_within
+  top30 / 2 rank_shuffle_across_top30_boundary / **0 hi_syn_loss**.
+  hidden_gem_hit_rate stable at 0.8053 (Δ —).
+- **Qualitative wins**:
+  - **Nekusar, the Mindrazer** (+0.2446): gained Naktamun Lorespinner
+    (`CopyFaceFrom:Wheel of Fortune`) — now ranked #14 alongside the
+    canonical Wheels cluster (Wheel of Fortune, Windfall, Memory Jar,
+    Whispering Madness, …).
+  - **Niv-Mizzet, Parun** (+0.1151): instant/sorcery commander absorbs
+    several inherited spell-shapes (Brainstorm carriers, etc.) into
+    its trigger pool.
+- **Notable non-win**: my brainstorm predicted Karador / Meren wins on
+  the Reanimate-shape carriers. Audit shows ~0 movement — Karador's
+  port set doesn't have the right trigger shapes for ChangeZone
+  Graveyard→Battlefield to match. Cheap follow-up if needed: add a
+  gy-recursion port to Karador-style commanders, or build a generic
+  rule that fires on any "graveyard-to-battlefield ChangeZone" port.
+- **Notable shift**: Tergrid -0.1917 (boundary shuffle, gained Nath of
+  the Gilt-Leaf, lost Ferrafor, Young Yew — neither a CopyFaceFrom
+  carrier). Pure IDF-recomputation collateral from the universe-wide
+  port-count change. Within the POSITIVE-verdict envelope.
+
+Fixture re-pinned via `bench.py audit --repin --yes`.
+
+### `prepared_mechanic` rule weight tuned 1.0 → 3.0
+
+Follow-up to the 2026-05-19 landing. The `recommend.py` qualitative check
+on `Abigale, Poet Laureate` flagged that Prepared candidates scored
+~0.187 (port_match) vs ~0.516 for generic WB staples (Bontu's /
+Oketra's / Hazoret's / Rhonas's / Kefnet's Monuments + the medallion
+cycle), so they sank to rank #50-60 below mana-rock noise. Set
+`data/scoring_weights.json::rule_quality_multiplier.prepared_mechanic
+= 3.0` to push them above the staple band.
+
+- **`bench.py audit`**: Δ = **+0.0000** on the 100-cmdr golden set
+  (100/100 no_change, hidden_gem_hit_rate stable at 0.8053). Golden-
+  set-neutral because no commander in the 100-cmdr canonical triggers
+  the rule (cheap path: no `AlternateMode|Prepare` static port; slow
+  path: no `AlterAttribute → Prepared` effect port). Re-pinned the
+  fixture for the new config_hash; underlying scores unchanged.
+- **Qualitative validation**: `recommend.py "Abigale, Poet Laureate"
+  --top 60`. All 17 WB-castable Prepared-payoff cards now occupy
+  ranks **#1-17** (score 0.5); Bontu's Monument dropped from #1 to
+  **#18**. Prepared cards now tie the staple band rather than under-
+  shoot it, which is the intended ordering for a Prepared-payoff
+  commander.
+
+### `prepared_mechanic` rule_id literal inlined
+
+Minor: `prepared.py` originally used `rule_id=_RULE_ID` (constant)
+where the rest of `complement_rules/` uses inline `rule_id="..."`
+literals. The dead-key-detector test
+(`tests/test_scoring_weights.py::test_no_dead_rule_ids_in_quality_multiplier`)
+scrapes literal strings via regex, so the constant form was invisible
+to it. Inlined to match codebase convention and unblock the test.
+
+### `K:ETBReplacement` SVar walking (LANDED, follow-up #3 to PR #47)
+
+Closes the data-model gap on 400 cards that encode an ETB replacement
+effect via the `K:ETBReplacement:Scope:SVarRef` keyword form. Today
+`extract_keyword_ports` emits one thin keyword port per K: line with
+the full replacement payload invisible — counter-doubler / tribal /
+clone rules can't see Hardened Scales, Cavern of Souls, Reflections of
+Kiki-Jiki, etc. Brainstorm:
+`docs/brainstorms/2026-05-20-etb-replacement-svar-walking-requirements.md`.
+
+- **Parser invariant**: new `etb_replacement` branch_kind registered in
+  `parser_branch_kinds()` + `BRANCH_MULTIPLIER` (1.0× — ETB
+  replacements are unconditional once the carrier is in play).
+- **Ports extension**: new `extract_etb_replacement_ports(card_name,
+  keyword_lines, svars)` parses each `K:ETBReplacement:Scope:SVarRef[
+  :Mandatory|Optional[:Zone[:ValidFilter]]]` directive and walks the
+  referenced SVar via the existing `walk_svar_chain`. Emits one effect
+  port per ChainNode tagged with `branch_kind='etb_replacement'`,
+  `source_svar=<ref>`, `is_optional` per the K: line, and a transient
+  `_etb_scope='other'|'copy'` key.
+- **Surface keyword port preserved**: today's thin
+  `event_class='ETBReplacement:Scope:SVarRef:...'` keyword port stays
+  for back-compat (no rule actually matches on it because the
+  event_class is per-card-unique colon-joined string — but removing
+  it would require auditing every grep for ETBReplacement).
+- **`port_attributes` extension**: each inherited port gets a row with
+  `attr_kind='etb_scope'`, `attr_value='other'|'copy'` so downstream
+  rules can filter ETB-replacement-derived ports if needed. No v1
+  consumer; data infrastructure for future tuning.
+- **Production importer run**: 400 K:ETBReplacement directives parsed,
+  400 root nodes emitted with `branch_kind='etb_replacement'`, ~1290
+  additional sub-ability expansions through existing CHAIN_KEYS,
+  524 `etb_scope` provenance tags. Total card_ports row count grew
+  108,644 → 110,334 (+1,690).
+- **`bench.py audit`**: **POSITIVE**, aggregate Δ = **+6.5477** on the
+  100-cmdr golden set. Histogram: 75 no_change / 21
+  rank_shuffle_within_top30 / 4 rank_shuffle_across_top30_boundary /
+  **0 hi_syn_loss / 0 hi_syn_gain**.
+  - **hidden_gem_hit_rate**: 0.8053 → **0.8153** (+0.0100 = +1
+    hidden gem per commander on the second-axis metric).
+- **Qualitative wins** (recommend.py verified):
+  - **The Mimeoplasm** (+6.5971): top-30 reshapes around graveyard /
+    counter / animator shapes. Top 10 now: Midnight Clock, Bloodcrazed
+    Hoplite, Diabolic Servitude, Takklemaggot, Traveling Plague,
+    Wormfang Newt, Flourishing Defenses, Wormfang Turtle, Hardened
+    Scales, Ozolith. Diabolic Servitude (ETB-replaces with reanimate)
+    and Hardened Scales (counter doubler) are textbook fits.
+  - **Hamza, Guardian of Arashin** (+0.1549): gained Bramblewood
+    Paragon, lost Lonis. Bramblewood Paragon is `K:ETBReplacement:
+    Other:AddExtraCounter` for Warriors — now properly modelled.
+- **Notable shifts within envelope**: Araumi -0.0635 (Urborg Lhurgoyf
+  in, Dogmeat out); Locust God / Emry / Nekusar / others all
+  <0.05 magnitude — IDF-recomputation noise. No hi_syn_loss
+  anywhere.
+
+Fixture re-pinned via `bench.py audit --repin --yes`.
+
+## 2026-05-19
+
+### `prepared_mechanic` rule (LANDED)
+
+Captures the new `AlternateMode:Prepare` / `Attributes$ Prepared` mechanic
+introduced by ~48 cards in the 2026-05-19 Forge refresh (SHA `f42b9abc1`).
+See `docs/brainstorms/2026-05-19-prepared-mechanic-requirements.md`.
+
+- **Importer extension**: `extract_alternate_mode_ports` emits a synthetic
+  `static AlternateMode Prepare` port for every card with the top-level
+  `AlternateMode:Prepare` header (47 cards). Restricted to the `Prepare`
+  value via `_ALTERNATE_MODE_PORT_VALUES` frozenset so other AlternateMode
+  values (DoubleFaced, Adventure, Split, Modal, Flip, Specialize, Omen,
+  Meld) are intentionally **not** surfaced as ports — emitting for those
+  perturbed the depth-2 cascade walker's Stage-1 relevant-event prefilter
+  (caught Tergrid in the audit before the narrowing fix).
+- **`port_attributes` extension**: every `AlterAttribute` effect port's
+  `Attributes$ <V>` value is exploded into `port_attributes` with
+  `attr_kind='attribute'`. Surfaces Prepared (29 ports), Suspected (25),
+  Solved (15), Plotted (4), Commander (3), Saddled (3), Harnessed (2).
+- **Rule**: `complement_rules/prepared.py::_find_prepared_mechanic_complements`.
+  Dual-path commander detection: cheap path on the synthetic AlternateMode
+  static port (covers all 47 Prepared payoff creatures including those
+  that self-prepare via `K:ETBReplacement:Other:DBPrepare` which doesn't
+  walk SVars), slow path via SQL join through `port_attributes` for
+  AlterAttribute Prepared (covers enabler-only commanders like a future
+  legendary version of Skycoach Waypoint).
+- **`rule_quality_gate.py --rule prepared_mechanic`**: WARN
+  (47 targets, cov=2.0, cv=0.613). Same shape as the documented-
+  acceptable `ward_2_tribal` WARN — new-mechanic targets are
+  intentionally thinly covered by existing rules.
+- **`bench.py audit`**: aggregate Δ = **+0.0000** on the 100-cmdr golden
+  set (100/100 no_change). Rule does not fire on historical commanders
+  by design — none of the 100 are Prepared payoff cards.
+- **Qualitative validation**: `recommend.py "Abigale, Poet Laureate"
+  --top 60` shows the rule contributing `port_match = 0.180` per
+  Prepared candidate (Bloodline Recollector, Adventurous Eater,
+  Cheerful Osteomancer, Defacing Duskmage, Emeritus of Truce/Woe,
+  Spiritcall Enthusiast, …). Total scores sit at ~0.187 vs ~0.516 for
+  generic WB staples (Bontu's Monument); rule magnitude can be tuned
+  via `_RULE_QUALITY_MULTIPLIER` in a follow-up if Prepared commanders
+  should weight Prepared-tribal cards above generic mana-rock staples.
+
 ## 2026-04-23
 
 ### Forge-Second-Oracle design-time pipeline (LANDED, plan 2026-04-23-002)
