@@ -296,6 +296,59 @@ no popularity.
   `ValueError` (never `assert` — stripped by `python -O`).
 - Rule additions follow the gap_report → scaffold → audit workflow. See
   [docs/RULE_PLANNING.md](docs/RULE_PLANNING.md) for the full pipeline.
+- Tests must never pass a literal project-relative DB path
+  (`db="data/synergy.db"`, `"data/tags.db"`, etc.) to any code that
+  may reach `open_db()` / `sqlite3.connect()`. `CREATE TABLE IF NOT
+  EXISTS` will silently materialize an empty file at the repo root,
+  poisoning skip-guards in other tests that key off file existence
+  (e.g., `tests/test_etb_tapped_stax_null_filter_invariant.py`). Use
+  `tmp_path` paths even when the test expects an early bail —
+  refactors can move the `open_db` call before the bail. See PR
+  history for `tests/bench/test_optimize.py` (commit `af4f8bc`).
+
+## Release workflow
+
+Trigger via `gh workflow run release.yml -f bump=<major|minor|patch>`.
+Pipeline: `release.yml` (bump pyproject + git-cliff CHANGELOG + open
+PR with auto-merge) → PR merge → `tag-release.yml` (push `vX.Y.Z`
+tag) → `publish-wheel.yml` (build wheel + create GitHub release).
+
+**Gotchas — every one of these has bitten us:**
+
+- **`GITHUB_TOKEN` does not cascade-trigger workflows.** The default
+  token used inside an Action will NOT fire other `on: pull_request`
+  or `on: push: tags` workflows. Two consequences:
+  - The release PR opened by `release.yml` does not auto-trigger CI
+    on the release branch — PR sits in `BLOCKED` mergeability with
+    no checks. Recovery: `gh pr close <N> && gh pr reopen <N>` from
+    user creds (NOT inside an Action). The reopen fires
+    `on: pull_request` workflows; auto-merge gets cleared by the
+    close, so re-enable with `gh pr merge <N> --squash --auto`.
+  - The tag pushed by `tag-release.yml` does not auto-trigger
+    `publish-wheel.yml`. Recovery: `git push origin
+    :refs/tags/vX.Y.Z && git push origin vX.Y.Z` from a local clone
+    under user creds.
+
+- **Repo setting prerequisite.** `Settings → Actions → General →
+  Workflow permissions → Allow GitHub Actions to create and approve
+  pull requests` must be ON, otherwise `gh pr create` inside
+  `release.yml` fails with "GitHub Actions is not permitted to
+  create or approve pull requests". Verify via `gh api
+  repos/<owner>/<repo>/actions/permissions/workflow` —
+  `can_approve_pull_request_reviews` must be `true`. Flip with
+  `gh api -X PUT
+  repos/<owner>/<repo>/actions/permissions/workflow -f
+  default_workflow_permissions=read -F
+  can_approve_pull_request_reviews=true`.
+
+- **Pre-commit hook rebuilds `uv.lock`.** An empty commit on a
+  release branch may fail pre-commit if the local lock drifts from
+  the branch's `pyproject.toml`. Prefer the close/reopen workaround
+  above over local commits on the release branch.
+
+- **Branch protection on `main`.** Two required status checks. Direct
+  pushes from a privileged user emit "Bypassed rule violations" but
+  go through; prefer the PR path for anything beyond a hotfix.
 
 ## graphify
 
