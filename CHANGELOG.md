@@ -2,6 +2,299 @@
 
 ### 🚀 Features
 
+- Filter-aware IDF, spellcast resonance, and scoring improvements (+3.1% NDCG)
+- Granular scoring and complement rule expansion (+13.4% NDCG)
+- New complement rules, scoring refinements, and legacy pipeline removal (+1.7% NDCG)
+- New complement rules, IDF tuning, and perf optimization (+4.7% NDCG)
+- 7 new complement rules, density rebalance, and dead code cleanup (+5.6% NDCG)
+- Extract ChangeType from ChangeZone effects into port_attributes
+- Extract TokenScript into token_color/token_subtype attrs
+- Add card_hints table populated from DeckNeeds/Hints/Has
+- Populate card_hints.buffed_by from BuffedBy SVar
+- Scope-aware trigger_effect for player-centric events
+- Scope-aware cost_feeds_trigger for player-centric events
+- Scope-aware trigger_resonance and sacrifice_cluster
+- Effect_conditional trigger flag + IDF dampening
+- Counter_producer rule for Marchesa-style counter-filter triggers
+- Extend cheat_cmc to Sharuum-style reanimate triggers
+- Yard_caster rule for Chainer-style cast-from-graveyard
+- Affinity_archetype rule for Affinity-keyword commanders
+- Multicolor_untap rule for EachColorAmong mana dorks
+- Token_etb_damage rule for passive-token commanders
+- Scryfall legal_commander filter
+- Include DamageAll in LifeOppsLost scaling
+- 6 new rules + Gate 5 for incidental token subtypes
+- 4 new rules + archetype tunings (+0.022 NDCG, 5.2× batch speedup)
+- Filter-axis generalization replaces commander-specific rules
+- Landfall-via-creature-types static + broaden combat_enhancer to Attacks-Self engines
+- Tribal_density vanilla-anchor fallback for keyword-only commanders
+- Flicker gate handles Lagrella-style temporary exile, scales_with handles pure creature-count
+- Gy_loader for replay-keyword grants, flicker Detain, scales_with Domain
+- Modified_axis_feeder rule for Kodama/Red XIII/SP//dr archetype
+- Schema-driven rule planning pipeline (port universe + coverage matrix)
+- Close 2 hard coverage gaps (damage_doubler + peer_evasion_tribal)
+- Gap_report auditor — autonomous "what's next" entry point
+- Per-port attribution via rule-gate registry
+- *(registry)* Complete sweep — 100% rule coverage
+- *(gap_report)* Expand template catalog + raise peer-tribal cutoff
+- Scaffold_rule.py — auto-generate complement rules from auditor proposals
+- *(scaffold)* Auto-revert on validation failure
+- Rule_attempts log — learning loop for the scaffolder
+- Peer_tribal_keyword generator + first PASSING auto-ship
+- *(scaffold)* --walk N for autonomous queue draining
+- *(scaffold)* X_cost_scaler generator + 4 more autonomous ships
+- Broad-set NDCG check — close the 97% blind spot in safety harness
+- *(scaffold)* Mine attempt log -- template-level block + --show-template-stats
+- Per-rule impact audit + delete ward_1_tribal (trivial) & ward_2_tribal (HARMFUL)
+- *(validate)* Pre-ship per-rule impact check -- catches HARMFUL rules at apply
+- *(scaffold)* Counter_removal_payoff generator + tighten trivial classifier
+- *(validate)* MARGINAL verdict band -- catch barely-positive rules
+- 2 new peer_tribal_keyword rules (mentor + etbreplacement_other_choosect)
+- Replacement_stack template + repl_moved_exile_stack rule
+- Changeling_tribal rule + drop 4 peer_tribal trivials
+- 2 new keyword-tribal rules (landwalk_island, melee)
+- 2 new rules (training_tribal, repl_damagedone_counters_stack)
+- *(scaffold)* Axis_feeder generator + ship attacking_axis_feeder
+- *(audit)* NDCG@30 metric + golden-set deletion-safety check
+- Cardpower_axis_feeder rule — +0.707 NDCG across 59 commanders
+- Tap_type_feeder rule — axis-aware untap engines for 27 cmdrs
+- Hand_size_feeder rule — +2.686 NDCG across 24 big-hand cmdrs
+- Gy_fuel_feeder rule — self-mill for exile-from-grave cmdrs
+- Lifegain_feeder rule — +4.353 NDCG, +45 hits, zero regressions
+- Life_total_feeder rule — +0.169 NDCG for Bilbo + Elenda
+- Land_bounce_feeder rule — +0.235 NDCG across 5 cmdrs
+- 3 new axis-feeder rules (+2.633 NDCG aggregate)
+- 3 new complement rules — cascade_tribal, changezone_resonance, spellcast_universal
+- Land_to_gy_synergy rule for Gitrog / Titania Voice of Gaea
+- *(bench)* Scaffold CLI + rule_contributions schema (Unit 1)
+- *(bench)* Tensor write-path + config_hash (Unit 2)
+- *(bench)* PinnedFixture + --repin + --expect-identity (Unit 3)
+- *(bench)* Audit main subcommand + report (Unit 4)
+- *(bench)* Rank-shuffle histogram + 5-verdict rollup (Unit 5)
+- *(bench)* --rule, --inspect, --collinearity (Unit 6)
+- *(bench)* Pre-commit hook + .audit/ output (Unit 7)
+- *(bench)* Deprecate legacy eval scripts + update docs (Unit 8)
+- *(port-graph)* Canonical vocabulary module (Unit 1 of plan 003)
+- *(port-graph)* Port_nodes view + schema (Unit 2 of plan 003)
+- *(port-graph)* Event_match_map + cost_feeds_trigger tables (Unit 3)
+- *(port-graph)* Rules table + JSON validator (Unit 4 of plan 003)
+- *(bench)* Audit --unknowns subcommand (Unit 6 of plan 003)
+- *(port-graph)* RuleInterpreter class (Unit 5 of plan 003)
+- *(port-graph)* Cascade_tribal as declarative row (Unit 7 of plan 003)
+- *(port-graph)* Migrate 15 tribal/stack rules to data rows (Unit 8)
+- *(bench)* Hidden_gem_hit_rate metric core (plan 003 Unit 1)
+- *(bench)* Build_fixture populates hidden_gem_hit_rate (plan 003 Unit 2)
+- *(bench)* Audit report surfaces hidden_gem_hit_rate + FR4 warning (Unit 3)
+- *(bench)* Audit --inspect-gems CLI handler (plan 003 Unit 4)
+- *(bench)* .audit/history.csv + audit --trend hidden_gems (Unit 5)
+- *(bench)* --format json for handle_rule/inspect/collinearity (CLR-001/002)
+- *(pathway)* Depth-2 self-bridging walker (Unit 1 of plan 2026-04-23-001)
+- *(pathway)* Self_bridging_cascade (Units 2-4 + 6, plan 2026-04-23-001)
+- *(forge-oracle)* Unit 1 — sparse-checkout ext + SHA pin + pkg skeleton
+- *(forge-oracle)* Unit 3 — Python port of CardRanker pair scorer
+- *(forge-oracle)* Unit 4 — .dck parser + PPMI ingest pipeline
+- *(forge-oracle)* Unit 5 — OracleConfigInputs + compute_oracle_hash
+- *(forge-oracle)* Unit 6 — gap_report.py forge_signal re-ranking
+- *(forge-oracle)* Unit 7 — bench.py audit --vs-forge-oracle sidecar
+- *(forge-oracle)* Unit 8 — scripts/forge_oracle.py propose-rules
+- Content embeddings as zero-shot fallback (plan 003) (#13)
+- *(port_graph)* VOCAB v3 — classify top UNKNOWN subkinds + tie embeddings to VOCAB_VERSION
+- *(rules)* Add ward_2_tribal — 28 commanders gain declarative coverage
+- *(quality-gate)* Add Gate C (EDHREC NDCG delta on target commanders)
+- *(edict)* Narrow gate + boost edict_feeder (CONTENTIOUS → positive)
+- *(token_producer)* Narrow gate + boost (HARMFUL → positive)
+- *(bench)* Tensor-driven weight optimizer (M1 foothold) (#27)
+- *(bench)* Batch E — agent-native CLI surface for --optimize (#34)
+- *(preflight)* Stage A gate stack v1.0 (golden-coverage prefilter) (#39)
+- *(bench)* Per-commander NDCG@30 audit reporting (Unit 1)
+- *(data)* Refresh Forge to f42b9abc1 (487 commits, +297 cards) (#45)
+- *(scoring)* Capture Prepared / AlternateMode:Prepare mechanic (#47)
+- *(scoring)* CopyFaceFrom:<Name> resolution v1 (replaces #50) (#54)
+- *(scoring)* K:ETBReplacement SVar walking v1 (replaces #52) (#55)
+
+### 🐛 Bug Fixes
+
+- Prevent exponential SubAbility re-walk in extract_effect_ports
+- Improve A1 test assertion messages and add lower bounds
+- Enforce transient port key contract + simplify pop
+- Handle artifact-creature TokenScript format in _parse_token_script
+- Expand multi-color TokenScript prefixes + skip named scripts
+- Close sqlite connections in effect_conditional tests; harden affinity_archetype
+- Combat_enhancer DamageDone branch requires is_combat flag
+- *(validate)* Align MARGINAL denominator + drop false-trivial on missing baseline
+- *(validate)* MARGINAL message uses scored denominator (matches verdict logic)
+- *(gap_report)* Skip replacement_stack proposals with empty result
+- Code-review HIGH/MEDIUM from session review
+- *(scaffold)* Backfill 4 reverted entries; fix per-signature attribution
+- *(ports)* Fallback to ValidCards for ChangesZoneAll triggers
+- *(land_to_gy_synergy)* Reject nonLand filters, tighten gate parser
+- *(bench)* Split tensor storage — SQLite for tensor, JSON for top-N scores
+- *(bench)* Ce-code-review fixups — 11 safe_auto + 1 P1 correctness
+- *(port-graph)* Ce-code-review safe_auto batch — 19 fixes + 10 tests
+- *(ci)* Commit declarative seed JSONs + guard against future drift
+- *(bench)* Ce-code-review P1 batch — wire edhrec_conn, 7 more (round 1)
+- *(pathway)* Ce-code-review pass — score_one, stax, perf cache (3 P1 + 5 P2/P3)
+- *(forge-oracle)* Apply safe_auto code-review findings (LFG pass)
+- *(tests)* Stub read_current_forge_sha when data/forge/ is absent
+- *(embeddings)* Verify from stored config not code defaults (FU-1, FU-4)
+- *(forge_oracle)* Default smoothing_k 0.5 -> 0.0; restores forge_signal
+- *(gap_report)* Wire declarative rules into the static coverage scan
+- *(registry)* Remove registration-ghost RuleGate for extra_land_plays
+- *(scaffold)* Patch data/scoring_weights.json instead of removed dict literal
+- *(bench)* Optimizer follow-up batch D — correctness + edge cases (#29)
+- *(bench)* Write_proposal_json crashes on production color_buckets type (#31)
+- *(test)* Harden parity harness — multiset comparison + multi-commander demo
+- *(test)* Stop test_format_json_emits_summary creating data/synergy.db
+
+### 🚜 Refactor
+
+- Add player-scope compatibility helpers
+- Address code-review findings on non-golden-coverage commits
+- Address python-review findings (3 MED, 2 LOW)
+- Hoist clause regex to core + O(ports²) fix in scales_with
+- Drop partner_friends_tribal -- 0/2737 commanders activate gate
+- Drop living_tribal -- trivial (sum Δ = 0 across 13 touched cmdrs)
+- Dedupe impact-check helpers + drop redundant validation work
+- *(scaffold)* Qualifier-portable axis_feeder test scaffold + 2 documented revert attempts
+- *(audit)* Apply code-review M1-M5 + L1+L3 polish
+- *(audit)* Apply python-review M+L findings (idiomatic Python)
+- Apply python-review findings to session's 5 new rules
+- Split utility.py into focused submodules + re-export shim
+- *(land_to_gy_synergy)* Address python-review nits
+- Address ce-code-review P2 punch-list
+- *(bench)* Land the 3 deferred P1s from ce-code-review
+- *(port-graph)* P1 structural hardening from ce-code-review
+- *(bench)* Ce-code-review P2 safe_auto batch (round 2)
+- *(pathway)* Remove dead _CHANNEL_VALID_FILTER constant
+- *(rules)* Migrate monarch_synergy to declarative (17th in rules_seed.json)
+- *(rules)* Migrate toughness_synergy to declarative (18th in rules_seed.json)
+- *(rules)* Migrate party_feeder to declarative (19th in rules_seed.json)
+- *(rules)* Migrate etb_tapped_stax_feeder to declarative (20th in rules_seed.json)
+- Apply ce-code-review fixes across 14 files
+- *(review)* Consolidate fragment tuples + harden lazy baseline + add gate tests
+- *(scoring)* Externalize _RULE_QUALITY_MULTIPLIER + _FLAT_WEIGHT_OVERRIDES to data/scoring_weights.json
+- *(scoring)* Apply ce-code-review LFG fixes (19 findings)
+- *(bench)* Consolidate optimizer patch+restore + hoist imports + rename (#36)
+- *(bench)* Split run_optimizer's monolithic body into helpers (#17) (#37)
+- Declarative-rule cleanup, forge_oracle config split, parity harness
+- Rename port_signature_version -> vocab_version, add VOCAB v2 rejection test
+
+### 📚 Documentation
+
+- Add scoring model improvement design (3 phases)
+- Add scoring model improvement implementation plan
+- Update CLAUDE.md for Phase A data-layer cleanup
+- Slim CLAUDE.md, move rule history to docs/RULE_HISTORY.md
+- *(audit)* Log life_total_feeder HARMFUL revert
+- *(audit)* Log raid_peer_feeder HARMFUL revert
+- *(audit)* Log card_counter_all_feeder HARMFUL revert
+- Move rule catalogue to docs/COMPLEMENT_RULES.md
+- Refresh gap_report + log scaffold walk TRIVIALs
+- Document token qualifier in axis_feeder block list
+- Recommendation-model roadmap — ideation, 7 brainstorms, plan #1
+- *(plan)* Typed port-graph substrate + rule-interpreter POC
+- CLAUDE.md + RULE_HISTORY for plan 003 landing
+- *(plan)* Useful-disagreement hidden_gem_hit_rate metric (plan 003)
+- CLAUDE.md + RULE_HISTORY for plan 003-gem landing (Unit 6)
+- *(solutions)* First entry — gitignore negation under ignored parent
+- *(solutions)* Flag-gated multi-port complement-rule authoring pattern
+- *(forge-oracle)* Unit 2 recon spike — GO verdict
+- *(forge-oracle)* Unit 10 — writeups + plan closed
+- *(solutions)* Capture forge_oracle CI-checkout-stub pattern
+- *(solutions)* Verify derived data from stored config, not code defaults
+- *(embeddings)* Decline flag flip, document null result (plan 003 Phase C)
+- *(rules)* Document consolidation-check baseline (zero redundancy at 62 rules)
+- *(rules)* Document scaffold walker exhaustion — bottleneck is the generator catalog
+- *(spec)* Externalize scoring weights to data/scoring_weights.json (M3+M4)
+- *(planning)* Document gap-report queue exhaustion on the current golden set
+- *(learnings)* Document writer-side audit gap as systemic blind spot
+- *(scoring)* Brainstorm + plan for BM25 IDF probe
+- *(scoring)* BM25 IDF probe declined — null result
+- *(workflow)* META lesson — read sibling solutions docs before improvement levers
+- *(scoring)* Brainstorm + design for CopyFaceFrom:<Name> resolution (#49)
+- *(scoring)* Brainstorm + design for K:ETBReplacement SVar walking (#51)
+- *(claude-md)* Document attr_kind='attribute' + synthetic AlternateMode port (#53)
+- *(rules)* Document weight_hint as reserved-for-M2 prior (#23)
+
+### ⚡ Performance
+
+- Cross-commander caching for batch eval (-30%)
+- *(tests)* Fold 5 redundant test_rule_id methods into primary tests
+- Cache token_etb_damage self-join in CandidateCache
+- *(gap_report)* Drop simulation, surface all gaps regardless of reach
+- *(validate)* Touched-only NDCG + single-process orchestrator + full universe
+- *(audit)* Single-engine + shared baseline + remove etb_sac_target (HARMFUL)
+- Delete 3 HARMFUL + 5 TRIVIAL rules — golden NDCG +0.0021
+- *(audit)* Parallelize + skip-positive-golden — full audit 12min → 5min
+- *(audit)* Delete attacking_axis_feeder — +0.450 NDCG recovery
+- *(audit)* Dampen combat_enhancer multiplier 1.0 → 0.7 (+0.486 NDCG)
+- *(audit)* Dampen counter_keyword 1.0 → 0.5 (+0.912 NDCG recovery)
+- *(audit)* Dampen token_etb_damage 0.5 → 0.3 (+0.184 NDCG, CONTENTIOUS → positive)
+- *(audit)* Boost zone_resonance 1.0 → 1.3 (+0.477 NDCG, MARGINAL → positive)
+- *(audit)* Boost counter_doubler 1.0 → 1.5 (Animar +5 on-page, 0 regressions)
+- *(cheat_cmc)* Unify subtypes into one IDF pool + drop cmc_mid
+- *(pathway)* Cache _type_token_set + short-circuit empty valid_filter
+- *(audit)* Dampen token_producer 0.25 → 0.15 (+0.266 NDCG recovery)
+- *(audit)* Boost cardpower_axis_feeder 2.5 → 3.5 (+3 hits, MARGINAL → positive)
+- *(audit)* Boost counter_keyword 0.5 → 0.7 (+2 hits, TRIVIAL → positive)
+- *(audit)* Defer golden baseline for single-rule serial audits (−44%)
+- *(audit)* Boost cost_reducer 1.0 → 1.2 (MARGINAL → positive, Melek anchor)
+- *(audit)* Dampen gy_fuel_feeder 2.5 → 1.2 (+3 hits, -0.246 → +0.289 NDCG)
+- *(audit)* Boost panharmonicon 1.0 → 2.0 (recover session IDF rebalance)
+- *(audit)* Dampen tap_type_feeder 2.0 → 1.0 (HARMFUL → positive)
+- *(audit)* Dampen evasion 0.15 → 0.10 (+0.094 NDCG)
+- *(bench)* Cache IDF basis per commander across grid cells (#7) (#30)
+- *(scoring)* Cache _compute_pair_bonus + document optimizer perf profile (#32)
+- *(bench)* Fuse _fast_total + _build_contributions into one walk (#9) (#33)
+- *(tests)* Skip prod-DB fallback in companion-flag warning test
+- *(tests)* Parallelize with pytest-xdist -n=auto
+
+### 🧪 Testing
+
+- Remove 17 integration tests that are always skipped in CI
+- Skip integration tests when data/synergy.db or cardsfolder absent
+- Close leaked sqlite connections in importer + effect_conditional
+- Introduce `integration` marker, split suite into unit + integration tiers
+- Drop draft integration workflow, keep local-dev-only
+- *(land_to_gy_synergy)* Add unit tests + address review nits
+- *(pathway)* Bloodghast fixture (Unit 5 of plan 2026-04-23-001)
+- *(forge-oracle)* Unit 9 — inference-path isolation fence
+- *(bench)* Batch C — close optimizer test gaps + fix cascade flake (#35)
+- *(rules)* Pin NULL-valid_filter invariant for etb_tapped_stax_feeder (#15)
+- *(bench)* Convert seeded_db / scoring_fixture to yield + close
+- Close leaked sqlite connections in helper-based fixtures (#56)
+- *(bench)* Broaden scoring_fixture to fire trigger_resonance
+- Promote ResourceWarning to error to lock in leak fix (#56)
+
+### ⚙️ Miscellaneous Tasks
+
+- Update golden set baseline to NDCG 0.1748
+- Refresh golden set baseline after scope fix
+- Refresh golden set baseline after cost_feeds scope fix
+- Refresh golden set baseline after trigger_resonance/sac_cluster scope
+- Refresh golden set baseline after effect_conditional dampening
+- Refresh golden set baseline after counter_producer rule
+- Refresh golden set baseline after yard_caster rule
+- Refresh golden set baseline after multicolor_untap rule
+- Refresh golden set baseline + docs hygiene
+- Drop 3 trivial peer_tribal_keyword rules (sum Δ = 0)
+- Drop 3 more peer_tribal_keyword trivials (sum Δ = 0)
+- Add graphify knowledge graph + project integration
+- Remove unused _flicker_synergy_gate
+- *(bench)* Re-pin golden_set_run.json to post-tuning baseline
+- Remove one-shot migration artifacts
+- *(bench)* Re-pin golden_set_run.json to current scoring config
+- *(bench)* Optimizer follow-up batch A — docs + cleanup (#28)
+- *(scoring)* Tune prepared_mechanic multiplier 1.0 → 3.0 (#48)
+- *(test)* Mutmut setup (known-incomplete; in-process pytest blocker)
+
+### ◀️ Revert
+
+- *(rules)* Remove ward_2_tribal + add quality gate that would have caught it
+## [0.3.0] - 2026-04-14
+
+### 🚀 Features
+
 - Model versioning, eliminate strategy dependency, 5 new Forge features
 - *(forge)* R-event verbs, 6 new GBM features, hard-negative sampling
 - *(forge)* Extract ValidAttacker$/ValidBlocker$ into raw_trigger_filters
@@ -91,6 +384,7 @@
 - Migrate to Python 3.13, add pre-commit/ruff/CI/publish workflow
 - Add automated release pipeline, security fixes, changelog
 - Add pyright, 80% test coverage, fix type errors and resource leaks
+- Release v0.3.0
 
 ### ◀️ Revert
 
