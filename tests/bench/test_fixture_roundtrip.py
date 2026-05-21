@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -29,7 +30,7 @@ from mtg_synergy_graph.db import open_db
 
 
 @pytest.fixture()
-def seeded_db(tmp_path: Path) -> sqlite3.Connection:
+def seeded_db(tmp_path: Path) -> Iterator[sqlite3.Connection]:
     """Minimal DB with one commander that matches at least one rule."""
     conn = open_db(tmp_path / "synergy.db")
     conn.execute(
@@ -51,7 +52,10 @@ def seeded_db(tmp_path: Path) -> sqlite3.Connection:
         ("Token Maker", "effect", "Token", "Creature.Token", "{make}"),
     )
     conn.commit()
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------

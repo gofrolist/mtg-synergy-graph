@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -86,10 +87,13 @@ def _make_edhrec_db(
 
 
 @pytest.fixture()
-def seeded_db(tmp_path: Path) -> sqlite3.Connection:
+def seeded_db(tmp_path: Path) -> Iterator[sqlite3.Connection]:
     conn = open_db(tmp_path / "synergy.db")
     _seed_synergy_db(conn)
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@ invariant, not on any particular rule's behavior.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
@@ -29,7 +30,7 @@ from mtg_synergy_graph.universal_scorer import (
 
 
 @pytest.fixture()
-def scoring_fixture(tmp_path: Path) -> sqlite3.Connection:
+def scoring_fixture(tmp_path: Path) -> Iterator[sqlite3.Connection]:
     """Minimal fixture: one commander with one trigger, three candidates
     whose effects match. Enough to drive multiple complement rules.
 
@@ -76,7 +77,10 @@ def scoring_fixture(tmp_path: Path) -> sqlite3.Connection:
         ("Counter Doubler", "replacement", "PutCounter", "Creature.YouCtrl", "{double}"),
     )
     conn.commit()
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def _score_dict(scores: dict[str, UniversalScore]) -> dict[str, tuple[float, int, frozenset[str]]]:
