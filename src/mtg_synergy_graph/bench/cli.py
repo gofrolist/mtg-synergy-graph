@@ -120,6 +120,10 @@ _HANDLERS: dict[str, Callable[[Namespace], int]] = {
     # every other mode above. The real handler lives in
     # ``mtg_synergy_graph.bench.optimize.handle_optimize``.
     "optimize": _stubs.optimize_stub,
+    # BM25 IDF probe (plan 2026-05-04-001) — per-commander NDCG@30
+    # diff handler. Stubbed here, real handler at
+    # ``mtg_synergy_graph.bench.per_commander_ndcg.handle_per_commander_ndcg``.
+    "per_commander_ndcg": _stubs.per_commander_ndcg_stub,
 }
 
 
@@ -246,6 +250,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "parallel in embedding space (read-only diagnostic). Requires "
         "card_embeddings to be populated — run `scripts/build_embeddings.py` "
         "first. See plan 2026-04-23-003 FR5.",
+    )
+    mode.add_argument(
+        "--per-commander-ndcg",
+        dest="per_commander_ndcg",
+        action="store_true",
+        help="Per-commander NDCG@30 deltas (live - pinned) sorted ascending. "
+        "Read-only diagnostic. Used by audit-gated probes that need a "
+        "per-commander prerequisite check (e.g., BM25 IDF probe — any "
+        "commander losing >0.05 NDCG@30 routes to DECLINE).",
     )
 
     # Shared flags.
@@ -504,6 +517,8 @@ def _resolve_mode(args: Namespace) -> str:
         return "embedding_dedup"
     if getattr(args, "optimize", False):
         return "optimize"
+    if getattr(args, "per_commander_ndcg", False):
+        return "per_commander_ndcg"
     return "audit"
 
 

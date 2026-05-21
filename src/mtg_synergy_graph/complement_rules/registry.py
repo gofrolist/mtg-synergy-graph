@@ -97,6 +97,24 @@ _MODIFIED_QUALIFIER_RE = re.compile(r"(?<![A-Za-z])modified(?![A-Za-z])")
 _COUNTER_GATE_RE = re.compile(r"counters_GE\d*_[A-Z0-9]+")
 
 
+def _prepared_mechanic_gate(port: PortRow) -> bool:
+    """Mirror of ``_find_prepared_mechanic_complements``'s commander-side
+    activation signature.
+
+    Attributes the rule to a commander's ``static AlternateMode Prepare``
+    port — the cheap-path signal that covers all 47 Prepared-payoff cards.
+    The slow-path (AlterAttribute on enabler-only commanders) is not
+    captured by a single-port predicate; per-port attribution there is
+    deferred (same posture as life_total_feeder etc. — see the
+    'Gate-miss' comment above).
+    """
+    if (port.get("port_type") or "").strip() != "static":
+        return False
+    if (port.get("event_class") or "").strip() != "AlternateMode":
+        return False
+    return (port.get("granted_keyword") or "").strip() == "Prepare"
+
+
 def _damage_doubler_gate(port: PortRow) -> bool:
     if (port.get("port_type") or "").strip() != "replacement":
         return False
@@ -731,6 +749,7 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     # the canonical attribution source. Per-port auditor attribution
     # through the interpreter is a deferred follow-up item in plan
     # 003 Open Questions.
+    RuleGate("prepared_mechanic", _prepared_mechanic_gate),
 )
 
 
