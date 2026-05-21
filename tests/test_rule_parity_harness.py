@@ -64,14 +64,25 @@ def _faithful_cascade_helper(conn: sqlite3.Connection, commanders: Sequence[str]
     """Reference Python implementation of the declarative
     ``cascade_tribal`` rule. Returns the same PortComplement set the
     interpreter does on the same DB.
+
+    Handles the multi-commander commander_set shape (a partner-pair
+    commander or a Background combo passes two names). The gate fires
+    if ANY commander in the set carries the Cascade keyword, and the
+    candidate-side excludes every commander name.
     """
     cmdr_set = set(commanders)
-    cmdr_has_cascade = bool(
-        conn.execute(
-            "SELECT 1 FROM card_ports WHERE card_name IN (?) AND port_type='keyword' AND event_class='Cascade' LIMIT 1",
-            (next(iter(cmdr_set)),),
-        ).fetchone()
+    if not cmdr_set:
+        return []
+    placeholders = ",".join("?" * len(cmdr_set))
+    cmdr_names = tuple(cmdr_set)
+    # placeholders is a count-derived string of `?,?,?,…` — no user input
+    # flows into the SQL fragment; the commander names are bound via
+    # parameters. ruff S608's heuristic flags the f-string anyway.
+    sql = (
+        f"SELECT 1 FROM card_ports WHERE card_name IN ({placeholders}) "  # noqa: S608
+        "AND port_type='keyword' AND event_class='Cascade' LIMIT 1"
     )
+    cmdr_has_cascade = bool(conn.execute(sql, cmdr_names).fetchone())
     if not cmdr_has_cascade:
         return []
     partners = [
@@ -168,5 +179,97 @@ def test_parity_fails_when_helper_emits_phantom_row(tmp_path: Path) -> None:
         msg = str(exc_info.value)
         assert "In Python helper but not in interpreter" in msg
         assert "Phantom" in msg
+    finally:
+        conn.close()
+
+
+def test_parity_passes_with_multi_commander_partner_pair(tmp_path: Path) -> None:
+    """A partner-pair commander_set (two cards, both carrying Cascade)
+    must produce parity: the demo helper's IN-clause expands to cover
+    both names, and the interpreter likewise excludes both from
+    candidate matches."""
+    conn = open_db(tmp_path / "synergy.db")
+    try:
+        for name in ("CmdrA", "CmdrB", "PartnerA", "PartnerB"):
+            _seed_card(conn, name)
+            _seed_keyword_port(conn, name, "Cascade")
+        seed_rules_db(conn)
+        conn.commit()
+
+        assert_rule_parity(
+            conn,
+            ["CmdrA", "CmdrB"],
+            rule_id="cascade_tribal",
+            py_helper=_faithful_cascade_helper,
+        )
+    finally:
+        conn.close()
+
+
+def _duplicating_cascade_helper(conn: sqlite3.Connection, commanders: Sequence[str]) -> list[PortComplement]:
+    """Buggy helper: emits every PortComplement twice. The interpreter
+    dedupes; the harness must catch this as a multiplicity mismatch
+    (set comparison would silently pass)."""
+    base = _faithful_cascade_helper(conn, commanders)
+    return [*base, *base]
+
+
+def test_parity_fails_when_helper_emits_duplicates_interpreter_does_not(
+    tmp_path: Path,
+) -> None:
+    """Multiset guard: helper emits each row twice, interpreter once.
+    Set comparison would silently pass (the unique sets are identical);
+    multiset (Counter) comparison must reject. The raise itself is
+    the proof — under the old frozenset-based implementation this
+    test would not raise.
+    """
+    conn = open_db(tmp_path / "synergy.db")
+    try:
+        _build_cascade_fixture(conn)
+        with pytest.raises(AssertionError) as exc_info:
+            assert_rule_parity(
+                conn,
+                ["Cmdr"],
+                rule_id="cascade_tribal",
+                py_helper=_duplicating_cascade_helper,
+            )
+        msg = str(exc_info.value)
+        # Side: Python helper has 2 extra rows (one extra copy of each
+        # partner). The header line reports the total extra count.
+        assert "In Python helper but not in interpreter (2)" in msg
+        # And the rows themselves are listed by partner name.
+        assert "PartnerA" in msg
+        assert "PartnerB" in msg
+    finally:
+        conn.close()
+
+
+def _double_duplicating_cascade_helper(conn: sqlite3.Connection, commanders: Sequence[str]) -> list[PortComplement]:
+    """Buggy helper: emits each row three times so the per-row delta
+    is (x2). Used to exercise the multiplicity-marker formatter."""
+    base = _faithful_cascade_helper(conn, commanders)
+    return [*base, *base, *base]
+
+
+def test_parity_error_message_includes_multiplicity_marker_when_delta_gt_one(
+    tmp_path: Path,
+) -> None:
+    """When a single PortComplement diverges by more than one copy,
+    the error message renders the ``(xN)`` multiplicity marker so the
+    reader can distinguish 'extra row' from 'extra copies of an
+    existing row'."""
+    conn = open_db(tmp_path / "synergy.db")
+    try:
+        _build_cascade_fixture(conn)
+        with pytest.raises(AssertionError) as exc_info:
+            assert_rule_parity(
+                conn,
+                ["Cmdr"],
+                rule_id="cascade_tribal",
+                py_helper=_double_duplicating_cascade_helper,
+            )
+        msg = str(exc_info.value)
+        # Per partner the helper has 3 copies, interpreter has 1; diff = 2.
+        assert "(x2)" in msg, f"expected multiplicity marker (x2) in: {msg!r}"
     finally:
         conn.close()
