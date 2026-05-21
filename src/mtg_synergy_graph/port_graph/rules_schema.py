@@ -67,6 +67,11 @@ class RuleRow:
     filter_group: str
     cmdr_event: str
     cand_event: str
+    #: RESERVED-FOR-M2 Bayesian-prior placeholder (plan 2026-04-26-001 M2
+    #: of the tensor weight optimizer). NOT consumed by the scoring
+    #: pipeline today — changing it has no runtime effect. The live
+    #: per-rule tuning knob is ``_RULE_QUALITY_MULTIPLIER`` in
+    #: ``data/scoring_weights.json``. See issue #23.
     weight_hint: float
     active: int
 

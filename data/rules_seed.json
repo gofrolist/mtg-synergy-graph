@@ -1,6 +1,7 @@
 {
   "_readme": "Declarative complement-rule rows (plan 003 Units 7 & 8). Loaded into the `rules` SQLite table by the importer (via port_graph.rules_schema.seed_rules_db). The RuleInterpreter (Unit 5) compiles each row's JSON predicates to SQL fragments and emits PortComplement records at query time.",
   "_predicate_grammar": "Every gate / commander_port / candidate_port predicate is a JSON tree of {\"op\": <op>, ...}. Combinators: and/or/not with `args`. Leaf ops: has_port (port_type, event_class?, replacement_result?), filter_tag, zone_eq, counter_type, tribe, color, not_in_commander_set. See port_graph.vocabulary.GATE_OPS and port_graph.rules_schema.validate_gate_predicate for the authoritative contract.",
+  "_weight_hint_note": "weight_hint is RESERVED-FOR-M2 Bayesian prior (plan 2026-04-26-001 M2 of the tensor weight optimizer). NOT consumed by the scoring pipeline today — editing it has NO runtime effect. The live per-rule tuning knob is _RULE_QUALITY_MULTIPLIER in data/scoring_weights.json. See issue #23.",
   "rules": [
     {
       "rule_id": "cascade_tribal",

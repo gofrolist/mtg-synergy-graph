@@ -273,6 +273,12 @@ CREATE TABLE IF NOT EXISTS rules (
     filter_group               TEXT NOT NULL DEFAULT '',
     cmdr_event                 TEXT NOT NULL,
     cand_event                 TEXT NOT NULL,
+    -- weight_hint: RESERVED-FOR-M2 Bayesian prior over per-rule quality
+    -- (plan 2026-04-26-001 M2 of the tensor weight optimizer). Currently
+    -- unconsumed by the scoring pipeline — editing it has NO runtime
+    -- effect today. The live per-rule tuning knob is _RULE_QUALITY_MULTIPLIER
+    -- in data/scoring_weights.json. See issue #23 + docs/solutions/best-practices/
+    -- rule-quality-gates-2026-04-24.md.
     weight_hint                REAL NOT NULL DEFAULT 1.0,
     active                     INTEGER NOT NULL DEFAULT 1
 );
