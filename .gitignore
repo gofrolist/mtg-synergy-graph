@@ -41,3 +41,6 @@ logs/
 
 # commit graph outputs, ignore the extraction cache
 graphify-out/cache/
+
+# mutmut artifacts (mutation testing — see [tool.mutmut] in pyproject.toml)
+mutants/

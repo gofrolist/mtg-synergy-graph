@@ -43,6 +43,55 @@ exclude_lines = [
     "if __name__",
 ]
 
+# Mutation testing config. Scope is narrow (high-value scoring core) by
+# design — full-suite mutation testing on 9.8k LOC would take days.
+# Run with: `uv run mutmut run` (slow; expect ~hours).
+# Inspect survivors with: `uv run mutmut results` then `uv run mutmut show <id>`.
+[tool.mutmut]
+# KNOWN-INCOMPLETE — mutmut 3.x is not currently runnable against this
+# codebase. The blocker is mutmut's in-process pytest model: it invokes
+# ``pytest.main()`` twice in the same Python process (once for coverage
+# gathering, once for stats collection). The second call fails with
+# ``ImportError: cannot load module more than once per process`` because
+# our ``tests/conftest.py`` has module-level state that pytest cannot
+# re-import.
+#
+# What's already wired up (preserved for a future fix attempt):
+#  - ``conftest.py`` at repo root injects ``mutants/src/`` onto sys.path
+#    so the mutated source supersedes the editable install. No-op for
+#    normal pytest runs.
+#  - ``also_copy`` brings the full package, test suite, fixtures, data
+#    seeds, and supporting scripts into ``mutants/``.
+#  - ``pytest_add_cli_args`` overrides the suite's xdist + --cov defaults,
+#    which interact badly with mutmut's subprocess model.
+#
+# Recommended next steps (not in scope of this commit):
+#  - Try ``cosmic-ray`` instead — patches in-place rather than copying,
+#    uses subprocess pytest, sidesteps the re-import issue.
+#  - Or: refactor ``tests/conftest.py`` to remove module-level state
+#    that's incompatible with re-import (the embedding shim + sys.path
+#    mutation in particular).
+paths_to_mutate = [
+    "src/mtg_synergy_graph/universal_scorer.py",
+]
+tests_dir = ["tests/"]
+mutate_only_covered_lines = true
+also_copy = [
+    "tests/",
+    "data/",
+    "scripts/",
+    "pyproject.toml",
+    "src/mtg_synergy_graph/",
+    "conftest.py",
+]
+pytest_add_cli_args = [
+    "-o", "addopts=",
+    "-p", "no:xdist",
+    "-p", "no:randomly",
+    "--no-cov",
+    "-m", "not integration",
+]
+
 [tool.ruff]
 target-version = "py313"
 line-length = 120
@@ -91,4 +140,5 @@ dev = [
     "vulture>=2.16",
     "mtg-synergy-graph[graph]",
     "coverage>=7.14.0",
+    "mutmut>=3.5",
 ]
