@@ -335,6 +335,12 @@ def scoring_fixture(tmp_path: Path) -> Iterator[sqlite3.Connection]:
         ("Counter Doubler", 3, 300),
         ("Generic Creature", 2, 5000),
         ("Sacrifice Outlet", 2, 200),
+        # Trigger Twin shares the commander's ChangesZone-ETB trigger so the
+        # weight-multiplier-sensitive ``trigger_resonance`` rule fires on this
+        # fixture (it's in ``_RULE_QUALITY_MULTIPLIER``); without it the two
+        # multiplier-shift tests below get skipped for lack of a non-flat
+        # firing rule. See git log for prior skip reasons.
+        ("Trigger Twin", 3, 400),
     ]:
         conn.execute(
             "INSERT INTO cards (name, card_types, subtypes, cmc, color_identity, edhrec_rank, legal_commander) "
@@ -358,6 +364,11 @@ def scoring_fixture(tmp_path: Path) -> Iterator[sqlite3.Connection]:
     conn.execute(
         "INSERT INTO card_ports (card_name, port_type, event_class, valid_filter, raw_line) VALUES (?, ?, ?, ?, ?)",
         ("Sacrifice Outlet", "effect", "Sacrifice", "Creature.YouCtrl", "{sac}"),
+    )
+    # Trigger Twin: same trigger axis as commander → fires trigger_resonance.
+    conn.execute(
+        "INSERT INTO card_ports (card_name, port_type, event_class, valid_filter, raw_line) VALUES (?, ?, ?, ?, ?)",
+        ("Trigger Twin", "trigger", "ChangesZone", "Creature.YouCtrl", "{ETB}"),
     )
     conn.commit()
     try:
