@@ -139,6 +139,6 @@ dev = [
     "ruff>=0.15.13",
     "vulture>=2.16",
     "mtg-synergy-graph[graph]",
-    "coverage>=7.14.0",
+    "coverage>=7.14.1",
     "mutmut>=3.5",
 ]
