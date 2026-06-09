@@ -53,11 +53,12 @@ import logging
 import math
 import sqlite3
 from collections.abc import Mapping
-
-import numpy as np
+from typing import TYPE_CHECKING
 
 from mtg_synergy_graph.embeddings import config as emb_config
-from mtg_synergy_graph.embeddings import store as emb_store
+
+if TYPE_CHECKING:
+    import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +167,13 @@ def load_card_embeddings_verified(conn: sqlite3.Connection) -> dict[str, np.ndar
     # error / empty table / malformed row" taxonomy and returns ``{}``
     # on every failure, never raises. We trust that contract here and
     # wrap only the config-hash verify, which *does* raise by design.
+    # Local import: ``store`` imports numpy at module level. Keeping it
+    # off this module's import path lets the rule-only scoring path
+    # (embedding flag off) run without numpy installed — the base
+    # install declares no runtime dependencies; numpy ships with the
+    # optional [graph] extra.
+    from mtg_synergy_graph.embeddings import store as emb_store
+
     vectors = emb_store.load_card_embeddings(conn)
     if not vectors:
         # Store has already logged about missing/empty/corrupt table;

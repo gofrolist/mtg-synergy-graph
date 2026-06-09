@@ -315,3 +315,45 @@ def rhystic_study() -> dict:
 @pytest.fixture(scope="session")
 def scute_swarm() -> dict:
     return _load("scute_swarm.txt")
+
+
+# ---------------------------------------------------------------------------
+# DB-materialization guard (mechanical enforcement of the CLAUDE.md
+# Conventions rule)
+# ---------------------------------------------------------------------------
+#
+# A test that passes a literal project-relative DB path to open_db() /
+# sqlite3.connect() silently materializes a file at the repo root or under
+# data/, poisoning existence-keyed skip-guards in OTHER tests (see commit
+# af4f8bc and the four zero-byte artifacts removed 2026-06-09). The rule
+# used to be prose-only; this fixture makes it mechanical: any *.db file
+# that appears under the repo root or data/ during the session fails the
+# run by name. Under xdist each worker checks the same invariant.
+
+_REPO_ROOT_FOR_DB_GUARD = Path(__file__).resolve().parent.parent
+
+
+def _snapshot_db_files() -> set[Path]:
+    # Only *.db: WAL/SHM sidecars are transient artifacts of legitimately
+    # opening a PRE-EXISTING database (tests that skip-guard on the real
+    # data/synergy.db) — the poison class is a newly materialized .db.
+    found: set[Path] = set()
+    for directory in (_REPO_ROOT_FOR_DB_GUARD, _REPO_ROOT_FOR_DB_GUARD / "data"):
+        if directory.is_dir():
+            found.update(directory.glob("*.db"))
+    return found
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _no_stray_db_materialization():
+    before = _snapshot_db_files()
+    yield
+    stray = _snapshot_db_files() - before
+    if stray:
+        raise RuntimeError(
+            "Test run materialized stray database file(s) in the project tree: "
+            + ", ".join(sorted(str(p) for p in stray))
+            + ". A test passed a literal project-relative DB path to "
+            "open_db()/sqlite3.connect(). Use tmp_path instead "
+            "(see CLAUDE.md Conventions)."
+        )

@@ -19,13 +19,52 @@ built exactly once.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..port_graph.interpreter import RuleInterpreter
 
+logger = logging.getLogger(__name__)
+
 _interpreter_cache: dict[int, RuleInterpreter] = {}
+
+
+def _validate_no_drift(interp: RuleInterpreter) -> None:
+    """Fail loudly when the DB ``rules`` table has drifted from
+    ``data/rules_seed.json``.
+
+    Routing (``DECLARATIVE_RULE_IDS``) is derived from the seed JSON,
+    but execution reads the DB table — and ``seed_rules_db`` never
+    deletes rows. Without this check, a rule deleted from the JSON
+    keeps firing from its stale DB row, and a rule added to the JSON
+    but not yet re-seeded silently never fires.
+
+    An EMPTY rules table is tolerated with a warning: test fixture
+    DBs are routinely built without seeding, and the interpreter
+    correctly contributes nothing there.
+    """
+    from .registry import DECLARATIVE_RULE_IDS
+
+    db_ids = interp.rule_ids
+    if db_ids == DECLARATIVE_RULE_IDS:
+        return
+    if not db_ids:
+        logger.warning(
+            "rules table is empty but %d rule_id(s) are declaratively routed — "
+            "declarative rules will not fire for this connection. Re-run "
+            "scripts/import_cardsfolder.py or seed_rules_db(conn) to seed them.",
+            len(DECLARATIVE_RULE_IDS),
+        )
+        return
+    missing = sorted(DECLARATIVE_RULE_IDS - db_ids)
+    stale = sorted(db_ids - DECLARATIVE_RULE_IDS)
+    raise ValueError(
+        "declarative-rule drift between data/rules_seed.json and the DB rules "
+        f"table: missing from DB {missing}; stale in DB {stale}. Re-run "
+        "scripts/import_cardsfolder.py or seed_rules_db(conn) to resync."
+    )
 
 
 def get_interpreter(conn: sqlite3.Connection) -> RuleInterpreter:
@@ -44,6 +83,7 @@ def get_interpreter(conn: sqlite3.Connection) -> RuleInterpreter:
     from ..port_graph.interpreter import RuleInterpreter
 
     interp = RuleInterpreter(conn)
+    _validate_no_drift(interp)
     _interpreter_cache[key] = interp
     return interp
 

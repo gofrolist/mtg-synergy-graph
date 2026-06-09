@@ -44,7 +44,7 @@ def compute_config_hash() -> str:
     current hash and refuse to read a pre-change tensor.
 
     ``_RULE_QUALITY_MULTIPLIER`` and ``_FLAT_WEIGHT_OVERRIDES`` are
-    loaded from ``data/scoring_weights.json`` at module import. Editing
+    loaded from ``src/mtg_synergy_graph/data/scoring_weights.json`` at module import. Editing
     a ``value`` in that file flips the hash; editing a ``comment``
     does not (the comment field is metadata for human readers and is
     intentionally excluded from the hash input set).
@@ -92,6 +92,16 @@ def compute_config_hash() -> str:
     h.update(repr(cfg.embedding_k).encode("utf-8"))
     h.update(b"|vectorizer_version:")
     h.update(repr(cfg.vectorizer_version).encode("utf-8"))
+    # 2026-06-09 audit follow-up: seed JSONs and the STAPLES dict all
+    # change live scores when edited, so each must invalidate the
+    # pinned tensor (previously none of the three was hashed and an
+    # edit left stale tensors silently readable).
+    h.update(b"|event_match_seed:")
+    h.update(cfg.event_match_seed_digest.encode("utf-8"))
+    h.update(b"|declarative_rules:")
+    h.update(cfg.declarative_rules_digest.encode("utf-8"))
+    h.update(b"|staples:")
+    h.update(repr(sorted((pip, tuple(names)) for pip, names in cfg.staples.items())).encode("utf-8"))
     return h.hexdigest()
 
 

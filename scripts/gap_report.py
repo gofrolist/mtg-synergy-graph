@@ -20,7 +20,7 @@ top of the report, with no human prioritization required.
 The auditor walks both coverage substrates:
   * Python helpers registered in ``complement_rules.registry.RULE_GATES``
     (each gate is a ``(rule_id, predicate)`` pair).
-  * Declarative rules in ``data/rules_seed.json`` — the ``RuleInterpreter``
+  * Declarative rules in ``src/mtg_synergy_graph/data/rules_seed.json`` — the ``RuleInterpreter``
     compiles their ``gate_predicate`` JSON into equivalent port-level
     predicates so this scan treats them the same way as Python helpers.
 
@@ -200,7 +200,7 @@ def _scan_universe(conn: sqlite3.Connection, commanders: list[str]) -> list[GapS
     Pure static analysis — O(commanders * ports * gates), runs in
     seconds vs minutes for the simulation-based scan. The trade-off:
     rules without a registered gate on either substrate are invisible
-    (no Python ``RuleGate`` entry AND no row in ``data/rules_seed.json``).
+    (no Python ``RuleGate`` entry AND no row in ``src/mtg_synergy_graph/data/rules_seed.json``).
     """
     commanders_per_sig: collections.Counter[tuple[str, str, str]] = collections.Counter()
     activations_per_sig: collections.Counter[tuple[str, str, str]] = collections.Counter()
@@ -978,6 +978,15 @@ def main() -> int:
         "single-commander gaps still appear (just lower in the queue).",
     )
     args = parser.parse_args()
+
+    # sqlite3.connect would silently create an empty DB at a missing
+    # path and the report would show zero ports / zero gaps.
+    if not Path(args.db).is_file():
+        print(
+            f"error: {args.db} not found — run scripts/import_cardsfolder.py first.",
+            file=sys.stderr,
+        )
+        return 2
 
     conn = sqlite3.connect(args.db)
     conn.row_factory = sqlite3.Row

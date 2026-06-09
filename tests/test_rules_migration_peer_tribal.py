@@ -85,7 +85,9 @@ def test_declarative_set_size_matches_seed() -> None:
     set constant (or vice versa)."""
     import json
 
-    seed_path = Path(__file__).resolve().parent.parent / "data" / "rules_seed.json"
+    from mtg_synergy_graph.port_graph._paths import default_seed_path
+
+    seed_path = default_seed_path("rules_seed.json")
     seed = json.loads(seed_path.read_text())
     seed_ids = {r["rule_id"] for r in seed["rules"]}
     assert seed_ids == DECLARATIVE_RULE_IDS

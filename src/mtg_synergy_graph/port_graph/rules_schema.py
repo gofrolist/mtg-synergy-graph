@@ -84,6 +84,14 @@ _LEAF_OP_REQUIRED: dict[str, frozenset[str]] = {
     "color": frozenset({"color"}),
 }
 
+#: Closed universe of ``card_ports.port_type`` values the importer
+#: emits. A typo'd port_type in a ``has_port`` predicate would
+#: otherwise compile to valid SQL that matches zero rows forever —
+#: a silently dead rule, indistinguishable from "no synergy".
+_VALID_PORT_TYPES: frozenset[str] = frozenset(
+    {"cost", "effect", "keyword", "replacement", "scales_with", "static", "trigger"}
+)
+
 
 def _count_not_in_commander_set(predicate: dict[str, Any]) -> int:
     """Return the number of ``not_in_commander_set`` leaves anywhere in
@@ -197,6 +205,14 @@ def validate_gate_predicate(
     for field in required:
         if field not in predicate:
             raise ValueError(f"{path}: op {op!r} missing required field {field!r}")
+
+    if op == "has_port":
+        port_type = predicate.get("port_type")
+        if port_type not in _VALID_PORT_TYPES:
+            raise ValueError(
+                f"{path}: has_port.port_type {port_type!r} is not a known "
+                f"port type; valid values are {sorted(_VALID_PORT_TYPES)}"
+            )
 
     if op == "not_in_commander_set":
         if context == "gate":
