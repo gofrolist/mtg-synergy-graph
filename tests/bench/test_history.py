@@ -239,6 +239,14 @@ def test_commit_sha_empty_on_non_git_dir(
 ) -> None:
     """Running the real ``_commit_sha`` in a non-git directory → empty string."""
     monkeypatch.setattr(bench_history, "_commit_sha", _REAL_COMMIT_SHA)
+    # ``git`` exports GIT_DIR / GIT_INDEX_FILE / GIT_WORK_TREE into hook
+    # environments (and CI may set them too). When present they override
+    # CWD-based repo discovery, so ``git rev-parse HEAD`` resolves the parent
+    # repo even from ``tmp_path``. Clear them so the directory is genuinely
+    # outside any git checkout — without this the test fails when the suite
+    # runs from a git worktree's pre-commit hook, where GIT_DIR is absolute.
+    for var in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE"):
+        monkeypatch.delenv(var, raising=False)
     monkeypatch.chdir(tmp_path)
     sha = bench_history._commit_sha()
     assert sha == ""
