@@ -35,9 +35,14 @@ jobs:
         uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98  # v3.1.0
 
       - name: Enable auto-merge (squash)
-        # Default: auto-merge every Dependabot update once checks are green.
-        # To hold MAJOR bumps for manual review instead, add to this step:
-        #   if: ${{ steps.meta.outputs.update-type != 'version-update:semver-major' }}
+        # Auto-merge patch/minor updates once checks are green; hold
+        # semver-MAJOR bumps for manual review. CI passing is not a
+        # security gate against a compromised release (installing the
+        # bump executes its build hooks; pytest loads plugin entry
+        # points), so majors — where upstream churn is highest — get
+        # human eyes. The 7-day cooldown in dependabot.yml is the
+        # main soak-time mitigation for patch/minor.
+        if: ${{ steps.meta.outputs.update-type != 'version-update:semver-major' }}
         run: gh pr merge --auto --squash --delete-branch "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}

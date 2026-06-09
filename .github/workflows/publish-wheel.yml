@@ -7,6 +7,9 @@ on:
 
 permissions:
   contents: write
+  # For wheel provenance attestation (attest-build-provenance).
+  id-token: write
+  attestations: write
 
 jobs:
   build-and-release:
@@ -26,7 +29,16 @@ jobs:
         run: uv build
 
       - name: Generate changelog
-        run: uvx git-cliff --latest --strip header -o RELEASE_NOTES.md
+        # Version-pinned — same rationale as release.yml: contents:write
+        # job must not execute whatever PyPI serves as "latest".
+        run: uvx git-cliff==2.13.1 --latest --strip header -o RELEASE_NOTES.md
+
+      - name: Attest wheel provenance
+        # Lets consumers verify the wheel was built by this workflow
+        # from the tagged source: `gh attestation verify <wheel> -R <repo>`.
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32  # v4.1.0
+        with:
+          subject-path: "dist/*.whl"
 
       - name: Create release
         env:
