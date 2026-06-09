@@ -150,13 +150,14 @@ def get_embedding_config_inputs() -> EmbeddingConfigInputs:
     "would this require rebuild?" tests) can construct an
     ``EmbeddingConfigInputs`` directly.
     """
-    # Local imports to avoid circular-import risk: vectorizer imports
-    # numpy + sqlite3 and may grow more consumers over time.
-    from mtg_synergy_graph.embeddings import vectorizer as emb_vectorizer
+    # _constants instead of vectorizer: the constant's canonical home is
+    # numpy-free, so this accessor (reached from the scoring config-hash
+    # path) works on a base install without the [graph] extra.
+    from mtg_synergy_graph.embeddings._constants import TOKEN_FORMAT_VERSION
     from mtg_synergy_graph.port_graph import vocabulary as port_vocab
 
     return EmbeddingConfigInputs(
-        token_format_version=emb_vectorizer.TOKEN_FORMAT_VERSION,
+        token_format_version=TOKEN_FORMAT_VERSION,
         svd_dims=_DEFAULT_SVD_DIMS,
         min_df=_DEFAULT_MIN_DF,
         vectorizer_version=1,

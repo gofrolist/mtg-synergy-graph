@@ -21,7 +21,7 @@ output writers (Unit 5):
 * **Unit 4 — CLI handler.** Wires ``bench.py audit --optimize`` into the
   existing dispatcher; tensor-staleness precondition.
 
-The optimizer never mutates ``data/scoring_weights.json`` — it emits a
+The optimizer never mutates ``src/mtg_synergy_graph/data/scoring_weights.json`` — it emits a
 candidate diff for human review. Application is human-driven via
 ``bench.py audit --repin --yes``.
 """
@@ -701,7 +701,7 @@ def _detect_dead_keys(
     collects every rule_id that appeared. Any baseline-weights key NOT in
     that set is "dead" (no candidate matched it across the entire input
     catalogue). Reported in the proposal artifact so reviewers can prune
-    truly-unused entries from ``data/scoring_weights.json``.
+    truly-unused entries from ``src/mtg_synergy_graph/data/scoring_weights.json``.
     """
     firing_rules: set[str] = set()
     for comps in complements_cache.values():
@@ -1315,14 +1315,14 @@ def write_proposal_json(
     Per FR6: ``per_rule_diffs`` includes only rules whose value actually
     changed; ``proposed_config_hash`` flips relative to baseline iff any
     weight changed; ``dead_keys`` non-empty signals a stale
-    ``data/scoring_weights.json`` entry.
+    ``src/mtg_synergy_graph/data/scoring_weights.json`` entry.
 
     If ``target_path`` already exists, a stderr warning is emitted before
     overwriting — the file is still overwritten (non-blocking) so CI runs
     don't stall, but the human reviewer sees that a prior proposal was
     replaced.
 
-    The ``comment`` fields in ``data/scoring_weights.json`` are never
+    The ``comment`` fields in ``src/mtg_synergy_graph/data/scoring_weights.json`` are never
     read or emitted by this function — humans applying the diff cannot
     accidentally clobber them.
     """

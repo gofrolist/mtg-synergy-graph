@@ -149,6 +149,11 @@ def test_scoring_config_inputs_exposes_pathway_flag() -> None:
     ``vectorizer_version``) so the embedding flip + weight knobs also
     invalidate the pinned tensor. The leading four fields stay at their
     legacy positions.
+
+    2026-06-09 audit follow-up appends three more
+    (``event_match_seed_digest``, ``declarative_rules_digest``,
+    ``staples``) so seed-JSON edits and STAPLES tuning also invalidate
+    the pinned tensor.
     """
     from mtg_synergy_graph.universal_scorer import ScoringConfigInputs
 
@@ -161,6 +166,9 @@ def test_scoring_config_inputs_exposes_pathway_flag() -> None:
         "embedding_w",
         "embedding_k",
         "vectorizer_version",
+        "event_match_seed_digest",
+        "declarative_rules_digest",
+        "staples",
     )
 
 

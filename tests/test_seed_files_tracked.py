@@ -6,10 +6,13 @@ tracked file won't be caught locally. CI clones fresh and fails on
 import. This test closes that gap by asserting at test time that
 the required files are tracked, not merely present.
 
-If this test fails, check `.gitignore`: the `data/` directory is
-intentionally ignored (it also holds regenerable .db files), so
-tracked artifacts under `data/` must be un-ignored via per-path
-``!data/...`` exceptions.
+If this test fails for a `data/...` path, check `.gitignore`: the
+`data/` directory is intentionally ignored (it also holds regenerable
+.db files), so tracked artifacts under `data/` must be un-ignored via
+per-path ``!data/...`` exceptions. Seed JSONs moved into the package
+(``src/mtg_synergy_graph/data/``) on 2026-06-09 so installed wheels
+ship them; ``src/`` is never gitignored, but the tracked-ness guard
+still applies (a deleted-from-git seed breaks every import).
 """
 
 from __future__ import annotations
@@ -19,8 +22,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 REQUIRED_TRACKED_FILES = (
-    "data/event_match_seed.json",
-    "data/rules_seed.json",
+    "src/mtg_synergy_graph/data/event_match_seed.json",
+    "src/mtg_synergy_graph/data/rules_seed.json",
+    "src/mtg_synergy_graph/data/scoring_weights.json",
     # Forge-Second-Oracle plan 002 unit 1: SHA pin for the vendored
     # Forge checkout. Regenerable table (forge_oracle.db) is NOT
     # tracked — only the pin that identifies which Forge commit the
@@ -31,7 +35,7 @@ REQUIRED_TRACKED_FILES = (
 
 def _git_tracked_files() -> set[str]:
     result = subprocess.run(
-        ["git", "ls-files", "data/"],  # noqa: S607 — `git` from PATH is the point
+        ["git", "ls-files", "data/", "src/mtg_synergy_graph/data/"],  # noqa: S607 — `git` from PATH is the point
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,

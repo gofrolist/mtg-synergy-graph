@@ -229,7 +229,7 @@ CREATE INDEX IF NOT EXISTS idx_rule_contributions_cmdr_hash
 -- event_match_map: trigger event → effect event equivalences (plan 003 Unit 3).
 -- Rows: (from_event, to_event, match_quality) where match_quality is one
 -- of mtg_synergy_graph.port_graph.vocabulary.MATCH_QUALITIES. The table is
--- populated from data/event_match_seed.json by the importer (via
+-- populated from src/mtg_synergy_graph/data/event_match_seed.json by the importer (via
 -- port_graph.event_maps.seed_event_match_map_db). Scoring-side callers
 -- continue to read the nested Python dict in graph_engine.py, which is
 -- itself populated from the same JSON seed at module import — both
@@ -260,7 +260,7 @@ CREATE INDEX IF NOT EXISTS idx_cost_feeds_cost ON cost_feeds_trigger(cost_event)
 -- rules: declarative complement-rule rows consumed by the RuleInterpreter
 -- (plan 003 Unit 4 + Unit 5). Each row's gate / commander / candidate
 -- predicates are JSON trees built from port_graph.vocabulary.GATE_OPS.
--- Populated from data/rules_seed.json by the importer; empty in Unit 4
+-- Populated from src/mtg_synergy_graph/data/rules_seed.json by the importer; empty in Unit 4
 -- (migrations land in Units 7 & 8). The rules table coexists with the
 -- Python-helper registry: a rule_id lives in ONE of the two, never both.
 -- ---------------------------------------------------------------------------

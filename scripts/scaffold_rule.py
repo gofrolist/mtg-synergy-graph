@@ -77,7 +77,7 @@ TESTS_DIR = REPO_ROOT / "tests"
 CORE_PATH = REPO_ROOT / "src" / "mtg_synergy_graph" / "complement_rules" / "core.py"
 REGISTRY_PATH = REPO_ROOT / "src" / "mtg_synergy_graph" / "complement_rules" / "registry.py"
 SCORER_PATH = REPO_ROOT / "src" / "mtg_synergy_graph" / "universal_scorer.py"
-SCORING_WEIGHTS_PATH = REPO_ROOT / "data" / "scoring_weights.json"
+SCORING_WEIGHTS_PATH = REPO_ROOT / "src" / "mtg_synergy_graph" / "data" / "scoring_weights.json"
 
 
 @dataclass(frozen=True)
@@ -1886,7 +1886,7 @@ def _patch_registry(art: ScaffoldArtifacts) -> bool:
 
 def _patch_scorer(art: ScaffoldArtifacts) -> bool:
     """Insert ``rule_id`` into ``_RULE_TO_BUCKET`` (still a Python literal)
-    and add the multiplier entry to ``data/scoring_weights.json`` (the
+    and add the multiplier entry to ``src/mtg_synergy_graph/data/scoring_weights.json`` (the
     new source-of-truth since the 2026-04-25 externalization). Returns
     True when both writes happened, False if the rule is already
     registered in either store.
@@ -1903,7 +1903,7 @@ def _patch_scorer(art: ScaffoldArtifacts) -> bool:
 
 
 def _patch_scoring_weights_json(art: ScaffoldArtifacts) -> bool:
-    """Insert ``art.rule_id`` into ``data/scoring_weights.json`` under
+    """Insert ``art.rule_id`` into ``src/mtg_synergy_graph/data/scoring_weights.json`` under
     ``rule_quality_multiplier`` with the generator's chosen multiplier.
 
     The ``comment`` field is left empty per the migration convention —
@@ -2412,6 +2412,15 @@ def main() -> int:
         return 2
     if args.walk > 1 and args.template:
         print("error: --walk can't be combined with --template (walk re-picks each iteration)", file=sys.stderr)
+        return 2
+
+    # sqlite3.connect would silently create an empty DB at a missing
+    # path and every gap/coverage query would return zero rows.
+    if not Path(args.db).is_file():
+        print(
+            f"error: {args.db} not found — run scripts/import_cardsfolder.py first.",
+            file=sys.stderr,
+        )
         return 2
 
     conn = sqlite3.connect(args.db)

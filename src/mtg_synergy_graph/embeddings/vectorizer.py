@@ -35,14 +35,14 @@ from typing import NamedTuple
 
 import numpy as np
 
+# Canonical home is the numpy-free _constants module (so the config-hash
+# accessor can read it on a base install); re-exported here because this
+# module defines the grammar the version tags.
+from mtg_synergy_graph.embeddings._constants import TOKEN_FORMAT_VERSION
+
 logger = logging.getLogger(__name__)
 
-#: Token-format version. Bump this when the emitted token grammar
-#: changes (new field added, old field renamed, attr-kind vocabulary
-#: restructured). Flows into ``EmbeddingConfigInputs`` so a change
-#: invalidates both the pinned audit tensor and the on-disk
-#: ``card_embeddings`` table.
-TOKEN_FORMAT_VERSION: str = "v1"  # noqa: S105 — not a secret; version tag
+__all__ = ["TOKEN_FORMAT_VERSION", "TfidfResult", "compute_tfidf", "extract_card_tokens"]
 
 
 #: Columns from ``card_ports`` that are emitted as ``<column>:<value>``

@@ -139,7 +139,9 @@ class SynergyEngine:
         weights, no global penalties.
         """
         self._db_path = Path(db_path)
-        self._conn = open_db(self._db_path)
+        # create=False: a mistyped/missing DB path must fail with a
+        # rebuild hint, not silently score against an empty database.
+        self._conn = open_db(self._db_path, create=False)
         self._forge_version: str = self._detect_forge_version()
         self._candidate_cache: CandidateCache | None = None
         self._score_cache: dict[tuple[str, ...], Any] = {}

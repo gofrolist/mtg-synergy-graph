@@ -216,8 +216,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run the Coordinate Ascent weight optimizer over "
         "_RULE_QUALITY_MULTIPLIER. Emits a candidate diff to "
         ".audit/optimize_proposal.json for human review. Never mutates "
-        "data/scoring_weights.json — apply via --repin manually after "
-        "reviewing the proposal.",
+        "src/mtg_synergy_graph/data/scoring_weights.json — apply via "
+        "--repin manually after reviewing the proposal.",
     )
     mode.add_argument(
         "--inspect-gems",

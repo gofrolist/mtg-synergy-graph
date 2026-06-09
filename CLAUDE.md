@@ -58,7 +58,7 @@ uv run scripts/sweep_embedding_weights.py                                # Grid-
 
 # Tensor-driven weight optimizer (plan 2026-04-26-001 M1) — Coordinate Ascent over
 # _RULE_QUALITY_MULTIPLIER. Emits .audit/optimize_proposal.json for human review;
-# never auto-mutates data/scoring_weights.json. Append-only history at
+# never auto-mutates src/mtg_synergy_graph/data/scoring_weights.json. Append-only history at
 # .audit/optimize_history.csv. Exit codes: 0 success, 1 driver exception,
 # 2 stale tensor / fixture too small, 3 self-test failed (calibration issue).
 #
@@ -79,7 +79,7 @@ uv run scripts/bench.py audit --optimize --grid 0.8 0.9 1.1 1.25         # Custo
 
 The bench.py hook also runs advisorily on pre-commit when edits touch
 `complement_rules/`, `universal_scorer.py`, `graph_engine.py`,
-`embeddings/`, or `data/scoring_weights.json`; see
+`embeddings/`, or `src/mtg_synergy_graph/data/scoring_weights.json`; see
 `memory/feedback_audit_every_change.md` for the guardrail.
 
 ## Data Model
@@ -180,18 +180,18 @@ of Python code.
   audit reporter.
 - **`event_match_map` + `cost_feeds_trigger` tables** (`port_graph/
   event_maps.py`) — SQLite tables seeded from
-  `data/event_match_seed.json`. The Python dicts in `graph_engine.py`
+  `src/mtg_synergy_graph/data/event_match_seed.json`. The Python dicts in `graph_engine.py`
   are loaded from the same JSON at module import, so both
   representations cannot drift. Edit the JSON to add an equivalence.
 - **`rules` table + `RuleInterpreter`** (`port_graph/rules_schema.py`,
   `port_graph/interpreter.py`) — declarative complement-rule rows in
-  `data/rules_seed.json`; each row's JSON predicates compile to SQL
+  `src/mtg_synergy_graph/data/rules_seed.json`; each row's JSON predicates compile to SQL
   fragments + Python gate callables at interpreter init. Rule IDs
   in `complement_rules.registry.DECLARATIVE_RULE_IDS` route through
   the interpreter; every other rule_id stays on the Python-helper
   path. A rule_id lives in EXACTLY ONE of the two sides.
 - **Authoring new rules for covered families**: edit
-  `data/rules_seed.json` + `DECLARATIVE_RULE_IDS`; re-import (or
+  `src/mtg_synergy_graph/data/rules_seed.json` + `DECLARATIVE_RULE_IDS`; re-import (or
   call `seed_rules_db(conn)`); no new Python file. The
   `peer_tribal_keyword` family (16 migrated rules in plan 003 Units
   7-8) is the canonical template.
@@ -277,10 +277,15 @@ no popularity.
 - `port_graph/` — typed port-graph substrate: vocabulary, `port_nodes`
   view, `event_match_map`/`cost_feeds_trigger`/`rules` tables,
   `RuleInterpreter`
-- `data/event_match_seed.json`, `data/rules_seed.json` — committed
+- `src/mtg_synergy_graph/data/event_match_seed.json`, `src/mtg_synergy_graph/data/rules_seed.json` — committed
   seed artifacts. Edit these instead of code for equivalence /
-  declarative-rule changes
-- `data/scoring_weights.json` — source-of-truth for
+  declarative-rule changes. Since 2026-06-09 functional edits to
+  either file (and to `heuristics.STAPLES`) flip
+  `compute_config_hash` → re-pin required; prose blocks (`_readme`,
+  grammar docs) do not. Drift between `rules_seed.json` and an
+  already-built DB's `rules` table raises at interpreter init —
+  re-run the importer or `seed_rules_db(conn)` to resync.
+- `src/mtg_synergy_graph/data/scoring_weights.json` — source-of-truth for
   `_RULE_QUALITY_MULTIPLIER` (per-rule IDF multipliers) and
   `_FLAT_WEIGHT_OVERRIDES` (per-rule density-bucket overrides),
   loaded by `universal_scorer` at module import. Edit a `value` to
@@ -305,6 +310,12 @@ no popularity.
   `tmp_path` paths even when the test expects an early bail —
   refactors can move the `open_db` call before the bail. See PR
   history for `tests/bench/test_optimize.py` (commit `af4f8bc`).
+  Since 2026-06-09 this is mechanically enforced: a session-scoped
+  autouse fixture in `tests/conftest.py` fails the run when a new
+  `*.db` file appears under the repo root or `data/`, and
+  `SynergyEngine` opens its DB with `open_db(..., create=False)`
+  (FileNotFoundError with a rebuild hint instead of materializing an
+  empty DB).
 
 ## Release workflow
 
@@ -327,7 +338,14 @@ tag) → `publish-wheel.yml` (build wheel + create GitHub release).
   - The tag pushed by `tag-release.yml` does not auto-trigger
     `publish-wheel.yml`. Recovery: `git push origin
     :refs/tags/vX.Y.Z && git push origin vX.Y.Z` from a local clone
-    under user creds.
+    under user creds. Since 2026-06-09 a tag ruleset ("Protect
+    release tags", id 17471689) blocks `v*` update/deletion for
+    non-admins; the recovery still works for the repo admin via
+    bypass — expect a "Bypassed rule violations" notice. Tag
+    CREATION stays open because GitHub Actions cannot be a bypass
+    actor on a personal repo and `tag-release.yml` must push new
+    tags; wheel provenance attestation (publish-wheel.yml) makes a
+    forged tag's artifact detectable regardless.
 
 - **Repo setting prerequisite.** `Settings → Actions → General →
   Workflow permissions → Allow GitHub Actions to create and approve

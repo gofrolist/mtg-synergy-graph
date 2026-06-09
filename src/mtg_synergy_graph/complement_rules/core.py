@@ -1313,6 +1313,18 @@ def find_all_complements(
         if DECLARATIVE_RULE_IDS:
             from ._interpreter_cache import get_interpreter
 
+            # Dual-path disjointness guard: a rule_id emitted by a
+            # Python helper above AND routed declaratively would be
+            # double-counted in scoring. The import-time check in
+            # registry.py covers the gate registry; this covers what
+            # the helpers actually emitted.
+            helper_overlap = {c.rule_id for c in out} & DECLARATIVE_RULE_IDS
+            if helper_overlap:
+                raise ValueError(
+                    "Python-helper path emitted declaratively-routed "
+                    f"rule_id(s) {sorted(helper_overlap)} — a rule_id must "
+                    "live in exactly one of the two authoring paths."
+                )
             interpreter = get_interpreter(conn)
             out.extend(interpreter.find_complements(conn, cmdr_ports, cmdr_set))
 

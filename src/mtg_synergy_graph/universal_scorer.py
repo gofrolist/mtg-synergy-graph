@@ -8,6 +8,7 @@ candidates satisfy is worth more than one 2000 candidates satisfy.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -284,6 +285,38 @@ class ScoringConfigInputs(NamedTuple):
     #: under a new token grammar bumps this and invalidates the tensor
     #: even when the flip flag + w + k are unchanged.
     vectorizer_version: int
+    #: 2026-06-09 audit follow-up: the two committed seed JSONs
+    #: directly determine scores (``event_match_seed.json`` builds the
+    #: core rules' event_pairs; ``rules_seed.json`` predicate bodies
+    #: compile to the interpreter's SQL/gates) but were absent from
+    #: the hash — editing either left pinned tensors/fixtures silently
+    #: "fresh". Digests cover the functional rows only, so edits to
+    #: ``_readme`` / grammar prose do not flip the hash (mirroring the
+    #: value-vs-comment discipline of ``scoring_weights.json``).
+    event_match_seed_digest: str
+    declarative_rules_digest: str
+    #: The hand-curated ``heuristics.STAPLES`` dict both adds
+    #: ``staple_bonus`` and injects staple-only candidates into
+    #: results — editing it changes live scores, so per this
+    #: accessor's own docstring rule it must invalidate the tensor.
+    staples: dict[str, tuple[str, ...]]
+
+
+def _seed_digest(filename: str, functional_keys: tuple[str, ...]) -> str:
+    """SHA-256 over the functional content of a committed seed JSON.
+
+    Only ``functional_keys`` participate — top-level documentation
+    blocks (``_readme``, ``_match_qualities``, ``_predicate_grammar``)
+    are excluded so prose edits do not invalidate pinned tensors.
+    """
+    # Local import: _paths is a port_graph leaf module; importing it at
+    # module scope would couple the scorer's import to port_graph.
+    from .port_graph._paths import default_seed_path
+
+    data = json.loads(default_seed_path(filename).read_text(encoding="utf-8"))
+    functional = {k: data.get(k) for k in functional_keys}
+    canonical = json.dumps(functional, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def get_scoring_config_inputs() -> ScoringConfigInputs:
@@ -311,6 +344,9 @@ def get_scoring_config_inputs() -> ScoringConfigInputs:
         embedding_w=emb_contribution._EMBEDDING_W,
         embedding_k=emb_contribution._EMBEDDING_K,
         vectorizer_version=_get_emb_cfg().vectorizer_version,
+        event_match_seed_digest=_seed_digest("event_match_seed.json", ("event_match_map", "cost_feeds_trigger")),
+        declarative_rules_digest=_seed_digest("rules_seed.json", ("rules",)),
+        staples=STAPLES,
     )
 
 
@@ -463,11 +499,11 @@ _FLAT_COUNT_RULES: frozenset[str] = frozenset(
 )
 
 #: Path to the committed JSON sidecar holding the float values for
-#: ``_FLAT_WEIGHT_OVERRIDES`` and ``_RULE_QUALITY_MULTIPLIER``. Located
-#: as a sibling of ``src/`` (``data/`` lives at the repo root); the
-#: project is run via ``uv run`` from the repo root and is never
-#: installed as a wheel.
-_SCORING_WEIGHTS_PATH = Path(__file__).resolve().parents[2] / "data" / "scoring_weights.json"
+#: ``_FLAT_WEIGHT_OVERRIDES`` and ``_RULE_QUALITY_MULTIPLIER``.
+#: Packaged inside the module (``src/mtg_synergy_graph/data/``) since
+#: 2026-06-09 so installed wheels are importable — consumers like
+#: mtg-edh-builder install this package from GitHub-release wheels.
+_SCORING_WEIGHTS_PATH = Path(__file__).resolve().parent / "data" / "scoring_weights.json"
 
 _VALID_SECTIONS = frozenset({"rule_quality_multiplier", "flat_weight_overrides"})
 _VALID_ENTRY_FIELDS = frozenset({"value", "comment"})
@@ -493,7 +529,7 @@ def _is_numeric_non_bool(x: object) -> bool:
 
 
 def _load_scoring_weights() -> ScoringWeights:
-    """Read ``data/scoring_weights.json`` into the two scoring-weight dicts.
+    """Read ``src/mtg_synergy_graph/data/scoring_weights.json`` into the two scoring-weight dicts.
 
     Returns a ``ScoringWeights`` NamedTuple with both sections.
 
@@ -583,14 +619,14 @@ _LOADED_SCORING_WEIGHTS = _load_scoring_weights()
 #: synergy rules can compete, while small groups (Land N=1.1k) keep
 #: full weight of 1.0.
 #:
-#: Source-of-truth: ``data/scoring_weights.json``. Per-key tuning
+#: Source-of-truth: ``src/mtg_synergy_graph/data/scoring_weights.json``. Per-key tuning
 #: history lives in commit messages and ``docs/RULE_HISTORY.md``.
 _FLAT_WEIGHT_OVERRIDES: dict[str, float] = _LOADED_SCORING_WEIGHTS.flat_weight_overrides
 
 #: Quality multiplier applied to IDF weights. Dampens broad effect-only
 #: rules and enabler-on-enabler trigger-trigger matches.
 #:
-#: Source-of-truth: ``data/scoring_weights.json``. Per-key tuning
+#: Source-of-truth: ``src/mtg_synergy_graph/data/scoring_weights.json``. Per-key tuning
 #: history lives in commit messages and ``docs/RULE_HISTORY.md``.
 _RULE_QUALITY_MULTIPLIER: dict[str, float] = _LOADED_SCORING_WEIGHTS.rule_quality_multiplier
 
@@ -833,7 +869,6 @@ def score_from_complements(
     # short-circuits to 0.0 — the scorer remains bitwise-identical to
     # pre-plan baseline. Local imports keep the embeddings subpackage
     # off the scorer's hot import path.
-    from .embeddings.commander_target import build_commander_target_vector
     from .embeddings.contribution import (
         _ENABLE_EMBEDDING_CONTRIBUTION,
         embedding_contribution,
@@ -841,6 +876,10 @@ def score_from_complements(
     )
 
     if _ENABLE_EMBEDDING_CONTRIBUTION:
+        # numpy-dependent import deferred behind the flag: the base
+        # install (no [graph] extra) must be able to score rules-only.
+        from .embeddings.commander_target import build_commander_target_vector
+
         _emb_vectors = load_card_embeddings_verified(conn)
         try:
             _emb_cmdr_target = (

@@ -45,7 +45,7 @@ EventCheck = Callable[[PortRow, PortRow], bool]
 # PEP 562 ``__getattr__`` so the seed file is only read on first access
 # of ``EVENT_MATCH_MAP`` / ``COST_FEEDS_TRIGGER``. This lets consumers
 # (lint tooling, documentation generators, test harnesses) import the
-# module even when ``data/event_match_seed.json`` is absent.
+# module even when ``src/mtg_synergy_graph/data/event_match_seed.json`` is absent.
 # ---------------------------------------------------------------------------
 
 
@@ -71,7 +71,7 @@ _COST_FEEDS_TRIGGER_CACHE: dict[str, frozenset[str]] | None = None
 def _get_event_match_map() -> dict[str, dict[str, EventCheck]]:
     """Return the event-match map, loading the JSON seed on first call.
 
-    Populated at first access from ``data/event_match_seed.json`` via
+    Populated at first access from ``src/mtg_synergy_graph/data/event_match_seed.json`` via
     :func:`port_graph.event_maps.load_event_match_map_from_json`. Edit
     the JSON to add a new equivalence — the ``event_match_map`` SQLite
     table is re-seeded from the same JSON on next DB import, so both

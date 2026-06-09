@@ -40,7 +40,7 @@ from .statics import _edict_benefits_from_trigger
 from .tokens import TOKEN_PRODUCER_REJECTING_FRAGMENTS
 
 # All 15 generated tribal + replacement-stack rules migrated to
-# declarative rows in data/rules_seed.json (plan 003 Unit 8).
+# declarative rows in src/mtg_synergy_graph/data/rules_seed.json (plan 003 Unit 8).
 # Their per-port gate predicates are compiled at interpreter load
 # time; auditor per-port attribution via interpreter.rule_ids is
 # a deferred follow-up.
@@ -800,7 +800,7 @@ RULE_GATES: tuple[RuleGate, ...] = tuple(_formal_rule_gates()) + _CARD_ATTR_GATE
 
 def _load_declarative_rule_ids() -> frozenset[str]:
     """Derive :data:`DECLARATIVE_RULE_IDS` at import time from
-    ``data/rules_seed.json``.
+    ``src/mtg_synergy_graph/data/rules_seed.json``.
 
     Previously a hand-maintained literal, the set is now computed
     from the seed so adding / removing a rule in the JSON cannot
@@ -820,7 +820,7 @@ def _load_declarative_rule_ids() -> frozenset[str]:
         seed_path: Path = default_seed_path("rules_seed.json")
     except FileNotFoundError as exc:
         raise FileNotFoundError(
-            "DECLARATIVE_RULE_IDS: data/rules_seed.json not found; "
+            "DECLARATIVE_RULE_IDS: src/mtg_synergy_graph/data/rules_seed.json not found; "
             "interpreter routing cannot be initialised. Run the importer "
             "or restore the seed file before importing registry."
         ) from exc
@@ -839,12 +839,27 @@ def _load_declarative_rule_ids() -> frozenset[str]:
 
 #: Rule ids owned by the declarative interpreter (plan 003 Unit 5).
 #:
-#: Derived at module import from ``data/rules_seed.json`` (every
+#: Derived at module import from ``src/mtg_synergy_graph/data/rules_seed.json`` (every
 #: ``active == 1`` row's ``rule_id``). A rule_id appears in EXACTLY
-#: ONE of this set or the Python-helper dispatch — the auditor at
-#: ``find_all_complements`` call time refuses duplicates. Adding a
-#: declarative rule is a one-step change: edit the JSON, re-import.
+#: ONE of this set or the Python-helper dispatch — enforced by the
+#: import-time disjointness check just below (against the gate
+#: registry) and by the runtime duplicate check in
+#: ``find_all_complements`` (against what the helpers actually
+#: emitted). Adding a declarative rule is a one-step change: edit
+#: the JSON, re-import.
 DECLARATIVE_RULE_IDS: frozenset[str] = _load_declarative_rule_ids()
+
+# Disjointness guard: a rule_id present on both authoring paths would
+# fire twice and double-count candidates in scoring. RULE_GATES is the
+# Python-helper side's registry, so any overlap is a migration bug —
+# fail at import so the first test or scoring run catches it.
+_DUAL_PATH_OVERLAP = DECLARATIVE_RULE_IDS & frozenset(g.rule_id for g in RULE_GATES)
+if _DUAL_PATH_OVERLAP:
+    raise ValueError(
+        "rule_id(s) registered on BOTH the declarative and Python-helper "
+        f"paths (must live in exactly one): {sorted(_DUAL_PATH_OVERLAP)}"
+    )
+del _DUAL_PATH_OVERLAP
 
 
 def registered_rule_ids() -> frozenset[str]:

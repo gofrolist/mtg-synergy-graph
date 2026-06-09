@@ -268,15 +268,17 @@ def _worker_run_batch(
         edhrec_conn = sqlite3.connect(edhrec_db_path)
         edhrec_conn.row_factory = sqlite3.Row
     results: list[dict[str, Any]] = []
-    with SynergyEngine(db_path) as engine:
-        for cmdr in batch:
-            try:
-                entry = _run_one(engine, cmdr, edhrec_conn)
-                results.append(asdict(entry))
-            except ValueError as exc:
-                results.append({"_error": str(exc), "_cmdr": cmdr})
-    if edhrec_conn is not None:
-        edhrec_conn.close()
+    try:
+        with SynergyEngine(db_path) as engine:
+            for cmdr in batch:
+                try:
+                    entry = _run_one(engine, cmdr, edhrec_conn)
+                    results.append(asdict(entry))
+                except ValueError as exc:
+                    results.append({"_error": str(exc), "_cmdr": cmdr})
+    finally:
+        if edhrec_conn is not None:
+            edhrec_conn.close()
     return results
 
 
@@ -298,15 +300,17 @@ def _run_parallel(
             if edhrec_db_path is not None:
                 edhrec_conn = sqlite3.connect(edhrec_db_path)
                 edhrec_conn.row_factory = sqlite3.Row
-            entries: list[GoldenSetEntry] = []
-            for cmdr in commander_lists:
-                try:
-                    entries.append(_run_one(engine, cmdr, edhrec_conn))
-                except ValueError as exc:
-                    log.warning("skipping %s: %s", cmdr, exc)
-            if edhrec_conn is not None:
-                edhrec_conn.close()
-            return entries
+            try:
+                entries: list[GoldenSetEntry] = []
+                for cmdr in commander_lists:
+                    try:
+                        entries.append(_run_one(engine, cmdr, edhrec_conn))
+                    except ValueError as exc:
+                        log.warning("skipping %s: %s", cmdr, exc)
+                return entries
+            finally:
+                if edhrec_conn is not None:
+                    edhrec_conn.close()
 
     # Split into roughly equal batches
     batches: list[list[list[str]]] = [[] for _ in range(n_workers)]
