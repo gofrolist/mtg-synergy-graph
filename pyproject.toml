@@ -136,7 +136,7 @@ ignore = [
 [dependency-groups]
 dev = [
     "pre-commit>=4.6.0",
-    "pyright>=1.1.409",
+    "pyright>=1.1.410",
     "pytest>=9.0.3",
     "pytest-cov>=6.1",
     "pytest-xdist>=3.6",
