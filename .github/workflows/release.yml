@@ -32,6 +32,12 @@ jobs:
           BUMP: ${{ inputs.bump }}
         run: uv version --bump "$BUMP" --no-sync
 
+      - name: Update lockfile
+        # uv.lock records the project's own version; CI enforces
+        # `uv sync --locked`, so the bump must regenerate the lock or
+        # the release PR fails its required checks (seen on v0.5.0).
+        run: uv lock
+
       - name: Read version
         id: version
         run: echo "version=$(uv version --short)" >> "$GITHUB_OUTPUT"
@@ -51,7 +57,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git add pyproject.toml CHANGELOG.md
+          git add pyproject.toml uv.lock CHANGELOG.md
           git commit -m "chore: release v${VERSION}"
           git push origin "$BRANCH"
           gh pr create \
