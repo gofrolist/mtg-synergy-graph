@@ -37,7 +37,10 @@ jobs:
         run: echo "version=$(uv version --short)" >> "$GITHUB_OUTPUT"
 
       - name: Update changelog
-        run: uvx git-cliff -o CHANGELOG.md
+        # Version-pinned: this job holds contents:write, so resolving
+        # "latest from PyPI" at run time would hand that token to any
+        # future compromised git-cliff release.
+        run: uvx git-cliff==2.13.1 -o CHANGELOG.md
 
       - name: Create release PR with auto-merge
         env:

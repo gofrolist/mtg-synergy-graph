@@ -4,8 +4,15 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # Soak time: don't open a PR until a release is 7 days old, so a
+    # freshly-compromised upstream version is likely yanked before the
+    # auto-merge pipeline (dependabot-auto-merge.yml) ever sees it.
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
