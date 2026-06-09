@@ -1,5 +1,21 @@
 ## [unreleased]
 
+### 🐛 Bug Fixes
+
+- *(test)* Isolate GIT_* env in test_commit_sha_empty_on_non_git_dir (#69)
+- Audit hardening — packaged seeds, integrity guards, importable wheel
+
+### 📚 Documentation
+
+- *(claude)* Release-workflow gotchas + test-isolation reminder
+
+### ⚙️ Miscellaneous Tasks
+
+- Auto-merge Dependabot PRs when checks pass (#70)
+- Add GPL-3.0 license (same as Forge)
+- Harden release pipeline and dependabot auto-merge
+## [0.4.0] - 2026-05-21
+
 ### 🚀 Features
 
 - Filter-aware IDF, spellcast resonance, and scoring improvements (+3.1% NDCG)
@@ -287,6 +303,7 @@
 - *(bench)* Optimizer follow-up batch A — docs + cleanup (#28)
 - *(scoring)* Tune prepared_mechanic multiplier 1.0 → 3.0 (#48)
 - *(test)* Mutmut setup (known-incomplete; in-process pytest blocker)
+- Release v0.4.0 (#57)
 
 ### ◀️ Revert
 

@@ -1,6 +1,6 @@
 [project]
 name = "mtg-synergy-graph"
-version = "0.4.0"
+version = "0.5.0"
 description = "Deterministic Forge-DSL graph engine for MTG EDH/Commander synergy"
 # Same license as Forge (the upstream the card-script DSL and game data
 # derive from): GPL-3.0. See LICENSE and data/forge/LICENSE.
