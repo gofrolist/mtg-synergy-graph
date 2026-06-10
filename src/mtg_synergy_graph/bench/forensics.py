@@ -36,18 +36,46 @@ isolated in the ``load_*`` helpers and the :func:`compute_forensics`
 shell, which uses the repo's two-connection pattern (``open_db`` for
 synergy.db + ``sqlite3.connect`` for tags.db — never ATTACH).
 
+Metric sidecars (Unit 2 of the same plan) ride on the Unit-1 live
+pass — no additional scoring pass:
+
+* Per-commander NDCG@30 (:func:`validate.compute_ndcg` over the live
+  ranking, canonical validate-path labels) and raw DCG@30
+  (:func:`compute_raw_dcg` — same gains/discounts, no ideal
+  normalizer), both stored UNROUNDED on :class:`CommanderForensics`.
+* ``aggregate_ndcg_canonical`` — mean over ALL fixture commanders
+  with zero-label commanders contributing 0.0 (the validate-path
+  golden-set denominator); the exclusion-based per-commander view is
+  ``ForensicsReport.entries`` + ``skipped_commanders``.
+* Reconciliation assertion (:func:`reconcile_canonical_ndcg`):
+  every commander's canonical NDCG is recomputed from an
+  INDEPENDENT ``engine.page(offset=0, limit=top_n)`` window
+  (:func:`extract_canonical_window` — cache hit on the shared
+  engine, so no second scoring pass) and the two canonical
+  aggregates must agree within :data:`RECONCILIATION_EPSILON`;
+  mismatch raises :class:`ForensicsReconciliationError` naming the
+  first divergent commander, before anything is written.
+* Sampled independent-engine check
+  (:func:`run_independent_engine_check`): the first
+  :data:`INDEPENDENT_CHECK_SAMPLE_SIZE` commanders alphabetically
+  are re-scored on a SEPARATELY constructed :class:`SynergyEngine`
+  (own connection) — the production-faithfulness evidence the
+  shared-engine assertion cannot provide. Runs by default inside
+  :func:`compute_forensics` (``independent_check=False`` to skip).
+
 Read-only diagnostic: nothing here mutates either database or the
-pinned fixture. CLI wiring, renderers, metric sidecars, history CSV,
-and the tiebreaker ablation are later units of the same plan.
+pinned fixture. CLI wiring, renderers, history CSV, and the
+tiebreaker ablation are later units of the same plan.
 """
 
 from __future__ import annotations
 
 import hashlib
+import math
 import sqlite3
 import sys
 from collections.abc import Iterable, Mapping, Sequence, Set
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -61,7 +89,7 @@ from mtg_synergy_graph.engine import (
     UNRANKED_EDHREC_SENTINEL,
     SynergyEngine,
 )
-from mtg_synergy_graph.validate import commander_to_slug, edhrec_labels_for_commander
+from mtg_synergy_graph.validate import commander_to_slug, compute_ndcg, edhrec_labels_for_commander
 
 # ---------------------------------------------------------------------------
 # Constants — buckets, reason codes, classification thresholds
@@ -119,6 +147,17 @@ UNKNOWN_PORT_SHARE_THRESHOLD = 0.5
 #: ``engine`` (``UNRANKED_EDHREC_SENTINEL``), never duplicated.
 NULL_CMC_SENTINEL = 99.0
 
+#: Tolerance for the reconciliation assertion and the sampled
+#: independent-engine check. Comparisons use UNROUNDED values on both
+#: sides (``validate._run_one`` rounds to 6 dp — conventions are
+#: never mixed here).
+RECONCILIATION_EPSILON = 1e-6
+
+#: How many commanders (first N alphabetically, for determinism) the
+#: sampled independent-engine check re-scores on a separately
+#: constructed :class:`SynergyEngine`.
+INDEPENDENT_CHECK_SAMPLE_SIZE = 5
+
 
 class ForensicsPreconditionError(Exception):
     """A forensics precondition failed — nothing was computed.
@@ -127,6 +166,21 @@ class ForensicsPreconditionError(Exception):
     code 2 (usage / stale input), matching the strict-consumer
     failure mode of ``bench/optimize.py`` and the offline-oracle hash
     pattern: no partial report, no history row.
+    """
+
+
+class ForensicsReconciliationError(Exception):
+    """The canonical-NDCG reconciliation (or the sampled
+    independent-engine check) failed.
+
+    Raised by :func:`reconcile_canonical_ndcg` when the forensics
+    aggregate diverges from the same-run canonical recompute by more
+    than :data:`RECONCILIATION_EPSILON`, and by
+    :func:`run_independent_engine_check` when a separately
+    constructed engine disagrees on a sampled commander. The message
+    names the first divergent commander. Callers must write NOTHING
+    when this raises (the Unit-4 handler maps it to exit 2: no
+    report file, no history row).
     """
 
 
@@ -212,6 +266,16 @@ class CommanderForensics:
     #: Full live ranking with captured sort-key components (Unit 6
     #: re-sorts these; Units 2-3 read the top-30 window).
     ranking: tuple[RankedCandidate, ...]
+    #: Per-commander NDCG@30 over the live ranking against canonical
+    #: validate-path labels (``grade_floor=0.0``). UNROUNDED — the
+    #: reconciliation assertion and the sampled independent-engine
+    #: check compare at :data:`RECONCILIATION_EPSILON`; renderers may
+    #: round for display. 0.0 for skipped (zero-label) commanders.
+    ndcg30: float = 0.0
+    #: Per-commander raw DCG@30: same gains (``2^rel − 1``) and
+    #: ``log2`` discounts as ``validate.compute_ndcg`` but WITHOUT
+    #: dividing by the ideal DCG. UNROUNDED; always >= 0.
+    raw_dcg30: float = 0.0
     #: True when the commander was skipped (zero graded labels) and
     #: must be excluded from bucket aggregates.
     skipped: bool = False
@@ -225,15 +289,29 @@ class CommanderForensics:
 class ForensicsReport:
     """Aggregate forensics across the fixture's commanders.
 
-    ``entries`` holds only non-skipped commanders; skipped ones
-    (zero graded labels) are listed in ``skipped_commanders`` and
-    contribute nothing to ``aggregate_bucket_counts``.
+    Two denominators, explicitly named (plan Key Decisions):
+
+    * ``aggregate_ndcg_canonical`` / ``aggregate_raw_dcg_canonical``
+      — mean over ALL fixture commanders, with zero-label (skipped)
+      commanders contributing 0.0. This matches the validate-path
+      golden-set aggregate denominator and is the one the
+      reconciliation assertion uses.
+    * The exclusion-based per-commander view: ``entries`` holds only
+      non-skipped commanders; skipped ones (zero graded labels) are
+      listed in ``skipped_commanders`` and contribute nothing to
+      ``aggregate_bucket_counts`` (bucket proportions use this
+      denominator).
     """
 
     entries: tuple[CommanderForensics, ...]
     aggregate_bucket_counts: Mapping[str, int]
     total_misses: int
     skipped_commanders: tuple[str, ...]
+    #: Canonical-denominator mean NDCG@30 (all fixture commanders,
+    #: zero-label → 0.0). UNROUNDED.
+    aggregate_ndcg_canonical: float = 0.0
+    #: Canonical-denominator mean raw DCG@30 (same denominator).
+    aggregate_raw_dcg_canonical: float = 0.0
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -241,6 +319,22 @@ class ForensicsReport:
             "aggregate_bucket_counts",
             MappingProxyType(dict(self.aggregate_bucket_counts)),
         )
+
+
+@dataclass(frozen=True)
+class ReconciliationPair:
+    """One commander's (forensics, canonical-recompute) NDCG pair.
+
+    ``forensics_ndcg`` comes from the Unit-1 full-ranking pass;
+    ``recompute_ndcg`` from the independent
+    ``engine.page(limit=top_n)`` window. Both UNROUNDED. Zero-label
+    commanders appear as ``(0.0, 0.0)`` so the canonical denominator
+    (all fixture commanders) is preserved.
+    """
+
+    commander: str
+    forensics_ndcg: float
+    recompute_ndcg: float
 
 
 # ---------------------------------------------------------------------------
@@ -298,16 +392,20 @@ def load_miss_universe(
     commander: str,
     *,
     top_n: int = TOP_N_DEFAULT,
+    labels: Mapping[str, float] | None = None,
 ) -> tuple[LabelCard, ...]:
     """Load the tie-closed top-``top_n`` miss universe for a commander.
 
     Labels come from the canonical validate-path loader
     (:func:`edhrec_labels_for_commander` with ``grade_floor=0.0``);
-    HS-section membership is queried separately so every miss carries
-    the flag. Returns an empty tuple for zero-label commanders (the
-    caller skips them).
+    pass ``labels`` to reuse an already-loaded mapping (the Unit-2
+    metric sidecars load it once per commander) instead of
+    re-querying. HS-section membership is queried separately so every
+    miss carries the flag. Returns an empty tuple for zero-label
+    commanders (the caller skips them).
     """
-    labels = edhrec_labels_for_commander(edhrec_conn, commander, grade_floor=0.0)
+    if labels is None:
+        labels = edhrec_labels_for_commander(edhrec_conn, commander, grade_floor=0.0)
     if not labels:
         return ()
     slug = commander_to_slug(commander)
@@ -343,6 +441,8 @@ def extract_live_ranking(
     engine: SynergyEngine,
     commander: str,
     card_meta: Mapping[str, tuple[float, int]],
+    *,
+    clear_cache: bool = True,
 ) -> tuple[RankedCandidate, ...]:
     """One full live ranking for ``commander`` via ``engine.page()``.
 
@@ -353,9 +453,13 @@ def extract_live_ranking(
     ``Recommendation`` plus ``cmc``/``edhrec_rank`` from
     ``card_meta`` (the cards-table re-read with engine sentinels).
 
-    The engine's score cache is cleared after extraction: a shared
-    engine otherwise retains every commander's full score dict in one
-    process — a multi-GB exposure no existing consumer has.
+    With ``clear_cache=True`` (default) the engine's score cache is
+    cleared after extraction: a shared engine otherwise retains every
+    commander's full score dict in one process — a multi-GB exposure
+    no existing consumer has. :func:`compute_forensics` passes
+    ``clear_cache=False`` so the Unit-2 reconciliation window
+    (:func:`extract_canonical_window`) is a cache HIT — never a
+    second scoring pass — and clears the cache itself afterwards.
     """
     page = engine.page([commander], offset=0, limit=1_000_000)
     ranking = tuple(
@@ -368,8 +472,28 @@ def extract_live_ranking(
         )
         for rec in page.items
     )
-    engine._score_cache.clear()
+    if clear_cache:
+        engine._score_cache.clear()
     return ranking
+
+
+def extract_canonical_window(
+    engine: SynergyEngine,
+    commander: str,
+    *,
+    top_n: int = TOP_N_DEFAULT,
+) -> tuple[str, ...]:
+    """Independent ``engine.page(offset=0, limit=top_n)`` window.
+
+    The Unit-2 reconciliation recompute must use its OWN ``page()``
+    invocation — never a slice of the forensics ranking list — so a
+    rank-extraction bug in :func:`extract_live_ranking` cannot
+    self-validate. On the shared engine this is a cache hit (no
+    second scoring pass; R4 holds). Call BEFORE clearing the
+    engine's score cache for the commander.
+    """
+    page = engine.page([commander], offset=0, limit=top_n)
+    return tuple(rec.card for rec in page.items)
 
 
 # ---------------------------------------------------------------------------
@@ -567,6 +691,11 @@ def aggregate_forensics(entries: Iterable[CommanderForensics]) -> ForensicsRepor
     ``skipped_commanders`` and contribute nothing to the aggregate
     bucket counts; zero-miss commanders stay in ``entries`` with
     ``misses=()`` (renderers exclude them from leaderboards).
+
+    ``aggregate_ndcg_canonical`` / ``aggregate_raw_dcg_canonical``
+    use the CANONICAL denominator — every fixture commander, with
+    skipped (zero-label) commanders contributing 0.0 — matching the
+    validate-path golden-set aggregate.
     """
     kept: list[CommanderForensics] = []
     skipped: list[str] = []
@@ -580,11 +709,16 @@ def aggregate_forensics(entries: Iterable[CommanderForensics]) -> ForensicsRepor
         for bucket in BUCKETS:
             counts[bucket] += entry.bucket_counts.get(bucket, 0)
         total_misses += len(entry.misses)
+    n_canonical = len(kept) + len(skipped)
+    aggregate_ndcg = sum(e.ndcg30 for e in kept) / n_canonical if n_canonical else 0.0
+    aggregate_raw_dcg = sum(e.raw_dcg30 for e in kept) / n_canonical if n_canonical else 0.0
     return ForensicsReport(
         entries=tuple(kept),
         aggregate_bucket_counts=counts,
         total_misses=total_misses,
         skipped_commanders=tuple(skipped),
+        aggregate_ndcg_canonical=aggregate_ndcg,
+        aggregate_raw_dcg_canonical=aggregate_raw_dcg,
     )
 
 
@@ -598,6 +732,68 @@ def bucket_proportions(bucket_counts: Mapping[str, int]) -> dict[str, float] | N
     if total == 0:
         return None
     return {b: 100.0 * bucket_counts.get(b, 0) / total for b in BUCKETS}
+
+
+# ---------------------------------------------------------------------------
+# Metric sidecars (Unit 2) — raw DCG + reconciliation (pure core)
+# ---------------------------------------------------------------------------
+
+
+def compute_raw_dcg(
+    predicted: Sequence[str],
+    labels: Mapping[str, float],
+    *,
+    k: int = TOP_N_DEFAULT,
+) -> float:
+    """Raw (unnormalised) DCG@``k`` over a ranking.
+
+    Mirrors ``validate.compute_ndcg``'s exact conventions — gains
+    ``2^rel − 1``, discounts ``log2(i + 2)``, absent label → 0 gain,
+    empty ``labels`` or ``k <= 0`` → 0.0 — WITHOUT dividing by the
+    ideal DCG, so ``compute_raw_dcg(p, l, k=k) ==
+    compute_ndcg(p, l, k=k) * ideal_dcg``. Pure function; always
+    >= 0.
+    """
+    if not labels or k <= 0:
+        return 0.0
+    pred_scores = [float(labels.get(card, 0.0)) for card in predicted[:k]]
+    return sum((math.pow(2.0, rel) - 1.0) / math.log2(i + 2) for i, rel in enumerate(pred_scores) if rel > 0)
+
+
+def reconcile_canonical_ndcg(
+    pairs: Sequence[ReconciliationPair],
+    *,
+    epsilon: float = RECONCILIATION_EPSILON,
+) -> tuple[float, float]:
+    """Assert the two canonical NDCG aggregates agree within ``epsilon``.
+
+    Aggregate-to-aggregate comparison over the CANONICAL denominator
+    (``pairs`` must contain every fixture commander, zero-label ones
+    as ``(0.0, 0.0)``), with UNROUNDED values on both sides. On
+    mismatch raises :class:`ForensicsReconciliationError` naming the
+    FIRST divergent commander (fixture order; falls back to the
+    largest per-commander divergence if no single pair exceeds
+    ``epsilon``). Returns ``(forensics_aggregate,
+    recompute_aggregate)`` when reconciled.
+    """
+    if not pairs:
+        return (0.0, 0.0)
+    n = len(pairs)
+    agg_forensics = sum(p.forensics_ndcg for p in pairs) / n
+    agg_recompute = sum(p.recompute_ndcg for p in pairs) / n
+    if abs(agg_forensics - agg_recompute) <= epsilon:
+        return (agg_forensics, agg_recompute)
+    divergent = next(
+        (p for p in pairs if abs(p.forensics_ndcg - p.recompute_ndcg) > epsilon),
+        max(pairs, key=lambda p: abs(p.forensics_ndcg - p.recompute_ndcg)),
+    )
+    raise ForensicsReconciliationError(
+        f"canonical NDCG reconciliation failed: forensics aggregate {agg_forensics!r} vs "
+        f"independent page(limit=top_n) recompute {agg_recompute!r} differ by more than "
+        f"{epsilon}; first divergent commander: {divergent.commander!r} "
+        f"(forensics {divergent.forensics_ndcg!r} vs recompute {divergent.recompute_ndcg!r}). "
+        "Nothing was written."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -740,6 +936,72 @@ def _check_tensor_populated(conn: sqlite3.Connection, config_hash: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Sampled independent-engine check (Unit 2 production-faithfulness evidence)
+# ---------------------------------------------------------------------------
+
+
+def run_independent_engine_check(
+    report: ForensicsReport,
+    *,
+    db_path: Path | str,
+    tags_path: Path | str,
+    sample_size: int = INDEPENDENT_CHECK_SAMPLE_SIZE,
+    top_n: int = TOP_N_DEFAULT,
+    epsilon: float = RECONCILIATION_EPSILON,
+) -> tuple[str, ...]:
+    """Re-score sampled commanders on a SEPARATE engine and compare NDCG.
+
+    The shared-engine reconciliation is a bookkeeping-consistency
+    check; this is the production-faithfulness evidence: the first
+    ``sample_size`` non-skipped commanders alphabetically (a
+    deterministic sample) are re-scored on a separately constructed
+    :class:`SynergyEngine` (own connection, mirroring
+    ``validate._run_one``'s canonical pass without its 6-dp
+    rounding), and each per-commander NDCG must agree with the
+    report's UNROUNDED value within ``epsilon``. Disagreement raises
+    :class:`ForensicsReconciliationError` naming the commander.
+
+    Runs by default inside :func:`compute_forensics`
+    (``independent_check=False`` to skip — e.g. tests whose
+    synthetic DB makes it redundant); the Unit-4 handler can also
+    call it directly. Returns the sampled commander names.
+    """
+    tags_path = Path(tags_path)
+    if not tags_path.exists():
+        raise ForensicsPreconditionError(
+            f"EDHREC DB {tags_path} not found — required for the independent-engine check."
+        )
+    sampled = tuple(sorted(e.commander for e in report.entries)[:sample_size])
+    if not sampled:
+        return ()
+    by_name = {e.commander: e for e in report.entries}
+    try:
+        engine = SynergyEngine(Path(db_path))
+    except FileNotFoundError as exc:
+        raise ForensicsPreconditionError(str(exc)) from exc
+    try:
+        edhrec_conn = sqlite3.connect(tags_path)
+        edhrec_conn.row_factory = sqlite3.Row
+        try:
+            for commander in sampled:
+                labels = edhrec_labels_for_commander(edhrec_conn, commander, grade_floor=0.0)
+                window = [rec.card for rec in engine.page([commander], offset=0, limit=top_n).items]
+                independent = compute_ndcg(window, labels, k=top_n)
+                recorded = by_name[commander].ndcg30
+                if abs(independent - recorded) > epsilon:
+                    raise ForensicsReconciliationError(
+                        f"independent-engine NDCG check failed for {commander!r}: forensics "
+                        f"recorded {recorded!r} but a separately constructed SynergyEngine "
+                        f"computed {independent!r} (epsilon {epsilon}). Nothing was written."
+                    )
+        finally:
+            edhrec_conn.close()
+    finally:
+        engine.close()
+    return sampled
+
+
+# ---------------------------------------------------------------------------
 # DB-shell compute function (two-connection pattern, NOT ATTACH)
 # ---------------------------------------------------------------------------
 
@@ -750,15 +1012,29 @@ def compute_forensics(
     tags_path: Path | str,
     fixture_path: Path | str,
     top_n: int = TOP_N_DEFAULT,
+    independent_check: bool = True,
 ) -> ForensicsReport:
-    """Run the full Unit-1 forensics pass over the pinned fixture.
+    """Run the full forensics pass (Units 1 + 2) over the pinned fixture.
 
     Two-connection pattern: ``open_db(db_path, create=False)`` for
     synergy.db (gives the ``port_nodes`` view; refuses to materialize
     a missing DB) plus ``sqlite3.connect(tags_path)`` with
     ``row_factory = sqlite3.Row`` for tags.db. One shared
-    :class:`SynergyEngine` supplies the live rankings; its score
-    cache is cleared after each commander.
+    :class:`SynergyEngine` supplies the live rankings.
+
+    Per-commander order (load-bearing): ``page(limit=1_000_000)`` →
+    extract the forensics ranking; ``page(limit=top_n)`` → the
+    independent reconciliation window (cache hit — no second scoring
+    pass); THEN clear the engine's score cache. Metric sidecars
+    (``ndcg30``, ``raw_dcg30``) are computed from the same pass with
+    canonical validate-path labels and stored UNROUNDED.
+
+    After the loop the canonical aggregates must reconcile within
+    :data:`RECONCILIATION_EPSILON` (:func:`reconcile_canonical_ndcg`,
+    raising :class:`ForensicsReconciliationError` on a planted-bug
+    mismatch) and, unless ``independent_check=False``, the sampled
+    independent-engine check runs. Nothing is written by this
+    function, so a raise means nothing was written.
 
     All preconditions are checked before anything is computed; any
     failure raises :class:`ForensicsPreconditionError` (the future
@@ -800,13 +1076,31 @@ def compute_forensics(
                 card_meta = load_card_meta(conn)
                 known_names = frozenset(card_meta)
                 entries: list[CommanderForensics] = []
+                recon_pairs: list[ReconciliationPair] = []
                 for commander in commanders:
-                    miss_universe = load_miss_universe(edhrec_conn, commander, top_n=top_n)
+                    labels = edhrec_labels_for_commander(edhrec_conn, commander, grade_floor=0.0)
+                    miss_universe = load_miss_universe(edhrec_conn, commander, top_n=top_n, labels=labels)
                     if not miss_universe:
                         entries.append(classify_commander_misses(commander, (), top_n=top_n))
+                        # Canonical denominator: zero-label commanders
+                        # contribute 0.0 on both sides.
+                        recon_pairs.append(ReconciliationPair(commander, 0.0, 0.0))
                         continue
 
-                    ranking = extract_live_ranking(engine, commander, card_meta)
+                    # Load-bearing order: full ranking first, then the
+                    # independent reconciliation window (cache hit),
+                    # then clear the cache for this commander.
+                    ranking = extract_live_ranking(engine, commander, card_meta, clear_cache=False)
+                    window = extract_canonical_window(engine, commander, top_n=top_n)
+                    engine._score_cache.clear()
+
+                    ranking_names = [rc.name for rc in ranking]
+                    labels_dict = dict(labels)
+                    ndcg30 = compute_ndcg(ranking_names, labels_dict, k=top_n)
+                    raw_dcg30 = compute_raw_dcg(ranking_names, labels_dict, k=top_n)
+                    recompute_ndcg = compute_ndcg(list(window), labels_dict, k=top_n)
+                    recon_pairs.append(ReconciliationPair(commander, ndcg30, recompute_ndcg))
+
                     tensor_candidates = load_tensor_candidates(conn, commander, config_hash)
                     resolved = {
                         name
@@ -819,21 +1113,32 @@ def compute_forensics(
                     cmdr_row = card_rows.get(commander)
                     commander_identity = _split_pips(cmdr_row.get("color_identity") if cmdr_row else None)
 
-                    entries.append(
-                        classify_commander_misses(
-                            commander,
-                            miss_universe,
-                            ranking=ranking,
-                            known_names=known_names,
-                            tensor_candidates=tensor_candidates,
-                            card_rows=card_rows,
-                            commander_identity=commander_identity,
-                            commander_names=frozenset({commander}),
-                            port_stats=port_stats,
-                            top_n=top_n,
-                        )
+                    entry = classify_commander_misses(
+                        commander,
+                        miss_universe,
+                        ranking=ranking,
+                        known_names=known_names,
+                        tensor_candidates=tensor_candidates,
+                        card_rows=card_rows,
+                        commander_identity=commander_identity,
+                        commander_names=frozenset({commander}),
+                        port_stats=port_stats,
+                        top_n=top_n,
                     )
-                return aggregate_forensics(entries)
+                    entries.append(replace(entry, ndcg30=ndcg30, raw_dcg30=raw_dcg30))
+
+                # Reconciliation BEFORE the report is handed back:
+                # callers write nothing when this raises.
+                reconcile_canonical_ndcg(recon_pairs)
+                report = aggregate_forensics(entries)
+                if independent_check:
+                    run_independent_engine_check(
+                        report,
+                        db_path=db_path,
+                        tags_path=tags_path,
+                        top_n=top_n,
+                    )
+                return report
             finally:
                 engine.close()
         finally:
