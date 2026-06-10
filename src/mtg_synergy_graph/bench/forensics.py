@@ -63,6 +63,37 @@ pass — no additional scoring pass:
   shared-engine assertion cannot provide. Runs by default inside
   :func:`compute_forensics` (``independent_check=False`` to skip).
 
+Justified-divergence view (Unit 3 of the same plan, R9):
+
+* Divergent picks per commander = live top-30 cards ABSENT from the
+  ALL-SECTIONS graded label set (the same
+  ``edhrec_labels_for_commander(grade_floor=0.0)`` mapping the miss
+  universe is built from). This is DELIBERATELY a different
+  reference set from the HS-top-30 one
+  ``hidden_gem_hit_rate_for_commander`` uses — the gem axis keeps
+  HS-top-30 for series continuity (origin R7); R9 asks "of the
+  picks EDHREC lists NOWHERE with positive synergy, how many can we
+  mechanically justify?".
+* :func:`justified_divergence_for_commander` is a thin wrapper
+  applying the SAME plausibility-gate constants as
+  ``bench/hidden_gems.py`` (``N_rules_firing >= 2`` OR
+  ``total_contribution > cohort median``, identical cohort
+  convention: the commander's full tensor-row cohort) to the wider
+  reference set. Advisory only — never a gate (FR6 discipline).
+* ``listed_nonpositive`` = live top-30 picks present in the
+  UNFLOORED label set with ``MAX(synergy) <= 0`` (the floored
+  loader excludes them). Counted separately; never subtracts from
+  bucket sums or divergence counts. Loaded by
+  :func:`load_nonpositive_listed` — the ONLY new DB read Unit 3
+  adds, on the existing tags.db connection.
+* Gate-margin stratification: bucketed counts of N_rules_firing
+  (:data:`N_RULES_BIN_LABELS`) and contribution/median ratio
+  (:data:`RATIO_BIN_LABELS`) for the justified picks. Bin edges are
+  implementation-chosen (the plan defers them).
+* A 100% pass-rate is representable: ``gate_saturated`` is True
+  when every divergent pick passed, so the Unit-4 renderer can
+  annotate "gate too loose to discriminate".
+
 Read-only diagnostic: nothing here mutates either database or the
 pinned fixture. CLI wiring, renderers, history CSV, and the
 tiebreaker ablation are later units of the same plan.
@@ -81,6 +112,11 @@ from types import MappingProxyType
 from typing import Any
 
 from mtg_synergy_graph.bench.fixture import PinnedFixture
+from mtg_synergy_graph.bench.hidden_gems import (
+    _aggregate_contributions,
+    _cohort_median,
+    _plausibility_from_maps,
+)
 from mtg_synergy_graph.bench.tensor import compute_config_hash
 from mtg_synergy_graph.db import open_db
 from mtg_synergy_graph.edhrec_helpers import HIGH_SYNERGY_SECTION
@@ -157,6 +193,20 @@ RECONCILIATION_EPSILON = 1e-6
 #: sampled independent-engine check re-scores on a separately
 #: constructed :class:`SynergyEngine`.
 INDEPENDENT_CHECK_SAMPLE_SIZE = 5
+
+#: Gate-margin stratification bins for justified divergent picks
+#: (Unit 3). IMPLEMENTATION-CHOSEN — the plan defers exact edges.
+#: ``N_rules_firing`` bins: a pick justified via the contribution leg
+#: can carry 0 or 1 firing rules, hence the ``0-1`` bin alongside the
+#: gate's ``>= 2`` leg values.
+N_RULES_BIN_LABELS: tuple[str, ...] = ("0-1", "2", "3", "4", "5+")
+
+#: ``total_contribution / cohort_median`` ratio bins (same
+#: implementation-chosen caveat). Edges are inclusive on the upper
+#: bound: ``<=1``, ``(1, 2]``, ``(2, 5]``, ``> 5``. A zero/negative
+#: cohort median makes the ratio undefined — such picks (justified
+#: via the N_rules leg only) land in ``<=1``.
+RATIO_BIN_LABELS: tuple[str, ...] = ("<=1", "1-2", "2-5", ">5")
 
 
 class ForensicsPreconditionError(Exception):
@@ -248,6 +298,59 @@ class MissRecord:
 
 
 @dataclass(frozen=True)
+class JustifiedDivergence:
+    """Per-commander justified-divergence view (Unit 3, R9).
+
+    Divergent picks = live top-30 cards absent from the ALL-SECTIONS
+    graded label set (the ``edhrec_labels_for_commander
+    (grade_floor=0.0)`` mapping — NOT the HS-top-30 reference the gem
+    axis uses) and not listed at nonpositive synergy. Annotation
+    only: these counts never subtract from bucket sums.
+
+    ``n_rules_distribution`` / ``ratio_distribution`` carry every bin
+    key from :data:`N_RULES_BIN_LABELS` / :data:`RATIO_BIN_LABELS`
+    (zero-filled) and are wrapped in ``MappingProxyType`` at
+    construction (same frozen-mapping discipline as
+    ``CommanderForensics.bucket_counts``).
+    """
+
+    #: Total divergent picks (the gate-pass-rate denominator).
+    divergent: int
+    justified_divergences: int
+    unjustified_divergences: int
+    #: ``justified / divergent``; ``None`` when zero divergent picks
+    #: (renderers show ``—`` instead of dividing by zero).
+    gate_pass_rate: float | None
+    #: Live top-30 picks present in the UNFLOORED label set with
+    #: ``MAX(synergy) <= 0``. A separate reported count — never
+    #: counted divergent, never subtracted from bucket sums.
+    listed_nonpositive: int
+    #: Divergent picks that passed / failed the plausibility gate,
+    #: name-sorted (deterministic; Unit 4 renders these).
+    justified_cards: tuple[str, ...]
+    unjustified_cards: tuple[str, ...]
+    #: Gate-margin stratification over the JUSTIFIED picks only.
+    n_rules_distribution: Mapping[str, int]
+    ratio_distribution: Mapping[str, int]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "n_rules_distribution", MappingProxyType(dict(self.n_rules_distribution)))
+        object.__setattr__(self, "ratio_distribution", MappingProxyType(dict(self.ratio_distribution)))
+
+    @property
+    def gate_saturated(self) -> bool:
+        """True when EVERY divergent pick passed the gate.
+
+        A 100% pass-rate over a nonempty divergent set means the gate
+        discriminated nothing for this commander — the Unit-4
+        renderer annotates it "gate too loose to discriminate".
+        ``False`` when there are zero divergent picks (nothing to
+        saturate).
+        """
+        return self.divergent > 0 and self.justified_divergences == self.divergent
+
+
+@dataclass(frozen=True)
 class CommanderForensics:
     """One commander's classified misses + live-ranking capture.
 
@@ -276,6 +379,10 @@ class CommanderForensics:
     #: ``log2`` discounts as ``validate.compute_ndcg`` but WITHOUT
     #: dividing by the ideal DCG. UNROUNDED; always >= 0.
     raw_dcg30: float = 0.0
+    #: Unit-3 justified-divergence view (R9). ``None`` for skipped
+    #: (zero-label) commanders and for entries built by pure-core
+    #: callers that did not compute it.
+    justified_divergence: JustifiedDivergence | None = None
     #: True when the commander was skipped (zero graded labels) and
     #: must be excluded from bucket aggregates.
     skipped: bool = False
@@ -415,6 +522,30 @@ def load_miss_universe(
     ).fetchall()
     hs_members = {r[0] for r in rows}
     return miss_universe_from_labels(labels, hs_members, top_n=top_n)
+
+
+def load_nonpositive_listed(
+    edhrec_conn: sqlite3.Connection,
+    commander: str,
+) -> frozenset[str]:
+    """Card names listed for ``commander`` at ``MAX(synergy) <= 0``.
+
+    The UNFLOORED membership complement of
+    ``edhrec_labels_for_commander(grade_floor=0.0)`` — same query
+    shape (``MAX(synergy)`` grouped by card name, all sections) with
+    the floor inverted, so the two sets partition the graded
+    listings exactly. Names listed only at NULL synergy (ungraded)
+    belong to neither set. This is the ONLY new DB read Unit 3 adds,
+    and it runs on the existing tags.db connection.
+    """
+    slug = commander_to_slug(commander)
+    rows = edhrec_conn.execute(
+        "SELECT card_name, MAX(synergy) AS synergy "
+        "FROM edhrec_card_synergy WHERE commander_slug = ? "
+        "GROUP BY card_name",
+        (slug,),
+    ).fetchall()
+    return frozenset(row["card_name"] for row in rows if row["synergy"] is not None and float(row["synergy"]) <= 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -735,6 +866,101 @@ def bucket_proportions(bucket_counts: Mapping[str, int]) -> dict[str, float] | N
 
 
 # ---------------------------------------------------------------------------
+# Justified-divergence view (Unit 3) — pure core
+# ---------------------------------------------------------------------------
+
+
+def _n_rules_bin(n_rules: int) -> str:
+    """Stratification bin for a justified pick's N_rules_firing."""
+    if n_rules <= 1:
+        return "0-1"
+    if n_rules >= 5:
+        return "5+"
+    return str(n_rules)
+
+
+def _ratio_bin(ratio: float) -> str:
+    """Stratification bin for a justified pick's contribution/median ratio."""
+    if ratio <= 1.0:
+        return "<=1"
+    if ratio <= 2.0:
+        return "1-2"
+    if ratio <= 5.0:
+        return "2-5"
+    return ">5"
+
+
+def justified_divergence_for_commander(
+    live_top_30: Sequence[str],
+    reference_labels: Set[str],
+    nonpositive_listed: Set[str],
+    contributions: Iterable[tuple[str, str, float]],
+) -> JustifiedDivergence:
+    """R9 justified-divergence view for one commander (pure function).
+
+    Thin wrapper applying the SAME plausibility-gate constants as
+    ``bench/hidden_gems.py`` (``N_rules_firing >= 2`` OR
+    ``total_contribution > cohort median``, strict inequality,
+    zero-median fallback to the N_rules leg) to the wider
+    ALL-SECTIONS reference set. The cohort convention is identical to
+    ``hidden_gem_hit_rate_for_commander``: ``contributions`` is the
+    commander's FULL tensor-row cohort (``(candidate, rule_id,
+    contribution)`` tuples), aggregated once, with the median taken
+    over strictly-positive candidate totals. Deliberately does NOT
+    reuse ``hidden_gem_hit_rate_for_commander`` — its HS-top-30
+    reference answers a different question (module docstring).
+
+    ``reference_labels`` is the floored all-sections label-name set
+    (``edhrec_labels_for_commander(grade_floor=0.0)`` keys);
+    ``nonpositive_listed`` is the unfloored complement at
+    ``MAX(synergy) <= 0`` (:func:`load_nonpositive_listed`). Picks in
+    the latter are counted under ``listed_nonpositive`` and are NOT
+    divergent. Names listed only at NULL synergy (ungraded) belong to
+    neither set and stay divergent.
+
+    Raises ``ValueError`` on duplicate ``live_top_30`` entries (same
+    contract as ``hidden_gem_hit_rate_for_commander``).
+    """
+    if len(set(live_top_30)) != len(live_top_30):
+        raise ValueError("live_top_30 must be unique")
+
+    n_rules_map, totals_map = _aggregate_contributions(contributions)
+    median = _cohort_median(totals_map)
+
+    listed_nonpositive = sum(1 for pick in live_top_30 if pick not in reference_labels and pick in nonpositive_listed)
+    divergent_picks = sorted(
+        pick for pick in live_top_30 if pick not in reference_labels and pick not in nonpositive_listed
+    )
+
+    justified: list[str] = []
+    unjustified: list[str] = []
+    n_rules_dist = dict.fromkeys(N_RULES_BIN_LABELS, 0)
+    ratio_dist = dict.fromkeys(RATIO_BIN_LABELS, 0)
+    for pick in divergent_picks:
+        if _plausibility_from_maps(pick, n_rules_map, totals_map, median):
+            justified.append(pick)
+            n_rules_dist[_n_rules_bin(n_rules_map.get(pick, 0))] += 1
+            total = totals_map.get(pick, 0.0)
+            ratio = total / median if median > 0 else 0.0
+            ratio_dist[_ratio_bin(ratio)] += 1
+        else:
+            unjustified.append(pick)
+
+    n_divergent = len(divergent_picks)
+    return JustifiedDivergence(
+        divergent=n_divergent,
+        justified_divergences=len(justified),
+        unjustified_divergences=len(unjustified),
+        gate_pass_rate=len(justified) / n_divergent if n_divergent else None,
+        listed_nonpositive=listed_nonpositive,
+        justified_cards=tuple(justified),
+        unjustified_cards=tuple(unjustified),
+        n_rules_distribution=n_rules_dist,
+        ratio_distribution=ratio_dist,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Metric sidecars (Unit 2) — raw DCG + reconciliation (pure core)
 # ---------------------------------------------------------------------------
 
@@ -816,6 +1042,30 @@ def load_tensor_candidates(
         (commander, config_hash),
     ).fetchall()
     return frozenset(r[0] for r in rows)
+
+
+def load_tensor_contributions(
+    conn: sqlite3.Connection,
+    commander: str,
+    config_hash: str,
+) -> tuple[tuple[str, str, float], ...]:
+    """Full tensor-row cohort for ``commander`` at ``config_hash``.
+
+    ``(candidate, rule_id, contribution)`` tuples in the shape the
+    ``hidden_gems`` gate consumes — the Unit-3 justified-divergence
+    cohort. Hash-filtered like every tensor read; deterministic
+    ordering (aggregation is order-insensitive, but repeat-run
+    equality of the report must hold bitwise).
+
+    ``compute_forensics`` derives the Unit-1 tensor-candidate set
+    from these rows (one tensor read per commander, not two).
+    """
+    rows = conn.execute(
+        "SELECT candidate, rule_id, contribution FROM rule_contributions "
+        "WHERE commander = ? AND config_hash = ? ORDER BY candidate, rule_id, contribution",
+        (commander, config_hash),
+    ).fetchall()
+    return tuple((str(r[0]), str(r[1]), float(r[2])) for r in rows)
 
 
 def load_card_rows(
@@ -1014,7 +1264,7 @@ def compute_forensics(
     top_n: int = TOP_N_DEFAULT,
     independent_check: bool = True,
 ) -> ForensicsReport:
-    """Run the full forensics pass (Units 1 + 2) over the pinned fixture.
+    """Run the full forensics pass (Units 1–3) over the pinned fixture.
 
     Two-connection pattern: ``open_db(db_path, create=False)`` for
     synergy.db (gives the ``port_nodes`` view; refuses to materialize
@@ -1101,7 +1351,11 @@ def compute_forensics(
                     recompute_ndcg = compute_ndcg(list(window), labels_dict, k=top_n)
                     recon_pairs.append(ReconciliationPair(commander, ndcg30, recompute_ndcg))
 
-                    tensor_candidates = load_tensor_candidates(conn, commander, config_hash)
+                    # One tensor read per commander: the full cohort
+                    # feeds the Unit-3 gate; the candidate set the
+                    # Unit-1 classifier needs is derived from it.
+                    tensor_rows = load_tensor_contributions(conn, commander, config_hash)
+                    tensor_candidates = frozenset(cand for cand, _rule_id, _value in tensor_rows)
                     resolved = {
                         name
                         for name in (normalize_label_name(label.name, known_names) for label in miss_universe)
@@ -1125,7 +1379,19 @@ def compute_forensics(
                         port_stats=port_stats,
                         top_n=top_n,
                     )
-                    entries.append(replace(entry, ndcg30=ndcg30, raw_dcg30=raw_dcg30))
+                    # Unit 3 (R9): justified-divergence view over the
+                    # ALL-SECTIONS reference set, from already-loaded
+                    # data (live top-30, tensor cohort, labels) plus
+                    # the one allowed new read on the existing
+                    # tags.db connection (unfloored membership).
+                    nonpositive_listed = load_nonpositive_listed(edhrec_conn, commander)
+                    justified = justified_divergence_for_commander(
+                        entry.live_top_30,
+                        frozenset(labels_dict),
+                        nonpositive_listed,
+                        tensor_rows,
+                    )
+                    entries.append(replace(entry, ndcg30=ndcg30, raw_dcg30=raw_dcg30, justified_divergence=justified))
 
                 # Reconciliation BEFORE the report is handed back:
                 # callers write nothing when this raises.
