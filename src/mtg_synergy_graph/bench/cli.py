@@ -124,6 +124,10 @@ _HANDLERS: dict[str, Callable[[Namespace], int]] = {
     # diff handler. Stubbed here, real handler at
     # ``mtg_synergy_graph.bench.per_commander_ndcg.handle_per_commander_ndcg``.
     "per_commander_ndcg": _stubs.per_commander_ndcg_stub,
+    # Divergence forensics (plan 2026-06-10-001 Unit 4) — per-miss
+    # failure taxonomy + metric sidecars. Stubbed here, real handler at
+    # ``mtg_synergy_graph.bench.forensics_report.handle_forensics``.
+    "forensics": _stubs.forensics_stub,
 }
 
 
@@ -259,6 +263,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "Read-only diagnostic. Used by audit-gated probes that need a "
         "per-commander prerequisite check (e.g., BM25 IDF probe — any "
         "commander losing >0.05 NDCG@30 routes to DECLINE).",
+    )
+    mode.add_argument(
+        "--forensics",
+        action="store_true",
+        help="Divergence forensics: classify every missed EDHREC label card "
+        "into failure buckets (NEAR_MISS/OUTRANKED/FILTERED/DATA_GAP/"
+        "NO_RULES) with NDCG/raw-DCG sidecars and the justified-divergence "
+        "view. Read-only diagnostic; writes .audit/forensics.md by default. "
+        "Requires the persisted tensor at the current config_hash and "
+        "--edhrec-db (default data/tags.db).",
     )
 
     # Shared flags.
@@ -519,6 +533,8 @@ def _resolve_mode(args: Namespace) -> str:
         return "optimize"
     if getattr(args, "per_commander_ndcg", False):
         return "per_commander_ndcg"
+    if getattr(args, "forensics", False):
+        return "forensics"
     return "audit"
 
 
