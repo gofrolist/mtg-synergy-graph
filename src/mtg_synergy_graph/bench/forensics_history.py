@@ -81,6 +81,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from mtg_synergy_graph.bench.forensics import (
+    _EM_DASH,
     BUCKET_DATA_GAP,
     BUCKET_FILTERED,
     BUCKET_NEAR_MISS,
@@ -92,7 +93,7 @@ from mtg_synergy_graph.bench.forensics import (
     load_tensor_contributions,
 )
 from mtg_synergy_graph.bench.hidden_gems import hidden_gem_hit_rate_for_commander
-from mtg_synergy_graph.bench.history import _commit_sha, fmt_float
+from mtg_synergy_graph.bench.history import _commit_sha, _parse_float, fmt_float
 from mtg_synergy_graph.edhrec_helpers import fetch_high_synergy_top_n
 
 #: CSV column order. Must match ``ForensicsHistoryRow`` field order.
@@ -414,15 +415,14 @@ def _parse_row(raw: list[str], *, lineno: int, path: Path) -> ForensicsHistoryRo
         return None
 
 
-def _parse_float(value: str) -> float | None:
-    if value == "":
-        return None
-    return float(value)
-
-
 def _parse_int(value: str) -> int:
-    if value == "":
-        return 0
+    """Strict int-cell parser — DELIBERATELY different from
+    ``history._parse_int``'s lenient empty→0: this schema always writes
+    the two count fields, so an empty cell signals a malformed row.
+    ``int("")`` raises ``ValueError``, which the :func:`_parse_row`
+    malformed-row catcher converts into a skip + stderr warning.
+    (``_parse_float`` keeps the empty→``None`` semantics and is
+    imported from ``history`` — byte-identical there.)"""
     return int(value)
 
 
@@ -485,7 +485,6 @@ def build_trend_items(rows: Sequence[ForensicsHistoryRow]) -> list[ForensicsTren
     return items
 
 
-_EM_DASH = "—"
 _TREND_MD_FIELDS: tuple[str, ...] = (*FORENSICS_CSV_FIELDS, "ndcg_delta", "gem_rate_delta")
 
 

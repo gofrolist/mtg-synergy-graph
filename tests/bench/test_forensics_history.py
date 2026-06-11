@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from mtg_synergy_graph.bench.forensics import ForensicsReconciliationError
+from mtg_synergy_graph.bench.forensics import ForensicsReconciliationError, synergy_content_digest
 from mtg_synergy_graph.bench.forensics_history import (
     BOUNDARY_MARKER,
     FORENSICS_CSV_FIELDS,
@@ -163,12 +163,12 @@ def _write_history_csv(path: Path, rows: list[list[str]]) -> None:
         writer.writerows(rows)
 
 
-def _trend_args(history: Path, *, fmt: str = "md", trend_n: int = 20) -> argparse.Namespace:
+def _trend_args(history: Path, *, fmt: str = "md", trend_n: int = 20, output: str | None = None) -> argparse.Namespace:
     return argparse.Namespace(
         forensics_history=str(history),
         trend_n=trend_n,
         format=fmt,
-        output=None,
+        output=output,
     )
 
 
@@ -346,6 +346,17 @@ class TestDigests:
         target.write_bytes(b'{"entries": []}')
         assert fixture_file_sha256(target) == hashlib.sha256(b'{"entries": []}').hexdigest()
 
+    def test_synergy_content_digest_rejects_unknown_table(self) -> None:
+        """SQL fragment interpolation is frozenset-guarded (project
+        convention): a non-allowlisted table name raises ValueError
+        BEFORE any SQL is built."""
+        conn = sqlite3.connect(":memory:")
+        try:
+            with pytest.raises(ValueError, match="invalid digest table"):
+                synergy_content_digest(conn, tables=("cards; DROP TABLE cards --",))
+        finally:
+            conn.close()
+
 
 # ---------------------------------------------------------------------------
 # Failure paths — no row on reconciliation failure; unwritable path degrades
@@ -430,6 +441,43 @@ class TestReader:
 
     def test_missing_file_returns_empty(self, tmp_path: Path) -> None:
         assert read_last_forensics(20, path=tmp_path / "nope.csv") == []
+
+    def test_empty_int_cell_skipped_as_malformed(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """The schema always writes the two int count fields, so an
+        empty cell is a malformed row: _parse_int raises ValueError and
+        the _parse_row catcher skips it with a warning (unlike the
+        lenient empty→0 of history._parse_int)."""
+        history = tmp_path / "hist.csv"
+        good = _row_cells()
+        bad = _row_cells(ts="2026-06-10T03:00:00+00:00")
+        bad[14] = ""  # n_commanders — empty int cell
+        _write_history_csv(history, [good, bad])
+
+        rows = read_last_forensics(20, path=history)
+        assert [r.timestamp for r in rows] == [good[0]]
+        err = capsys.readouterr().err
+        assert "bad row" in err
+        assert "malformed" in err
+
+    def test_foreign_header_returns_empty_with_warning(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A foreign CSV at the path (here: the audit-history header)
+        skips the whole file: [] plus a 'header mismatch' warning."""
+        history = tmp_path / "hist.csv"
+        with history.open("w", encoding="utf-8", newline="") as fh:
+            writer = csv.writer(fh)
+            writer.writerow(CSV_FIELDS)
+            writer.writerow(["2026-06-10T00:00:00+00:00"] + ["x"] * (len(CSV_FIELDS) - 1))
+
+        assert read_last_forensics(20, path=history) == []
+        assert "header mismatch" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------
@@ -524,6 +572,25 @@ class TestTrendForensics:
         payload = json.loads(capsys.readouterr().out)
         assert len(payload) == 2
         assert payload[1]["ndcg_delta"] == pytest.approx(0.0)
+
+    def test_output_flag_writes_file_and_notes_stderr(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """--output PATH routes the rendered trend to the file and notes
+        it on stderr instead of printing to stdout."""
+        history = tmp_path / "hist.csv"
+        _write_history_csv(history, [_row_cells()])
+        out_path = tmp_path / "trend.md"
+        rc = handle_trend_forensics(_trend_args(history, fmt="md", output=str(out_path)))
+        assert rc == 0
+        assert out_path.exists()
+        assert out_path.read_text(encoding="utf-8").startswith("| timestamp |")
+        cap = capsys.readouterr()
+        assert "report written to" in cap.err
+        assert str(out_path) in cap.err
+        assert cap.out == ""
 
 
 # ---------------------------------------------------------------------------

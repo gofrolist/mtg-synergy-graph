@@ -572,6 +572,36 @@ class TestComputeForensicsIntegration:
         err = capsys.readouterr().err
         assert "freshness cannot be cross-checked" in err
 
+    def test_missing_commander_cards_row_warns_and_proceeds(
+        self,
+        forensics_paths: dict[str, Path],
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
+    ) -> None:
+        """A commander with no ``cards`` row gets a stderr warning naming
+        it (advisory: identity falls back to empty, classification
+        proceeds)."""
+        from mtg_synergy_graph.bench import forensics as forensics_module
+
+        real_load_card_rows = forensics_module.load_card_rows
+
+        def _without_commander(conn, names):
+            rows = real_load_card_rows(conn, names)
+            rows.pop(COMMANDER, None)
+            return rows
+
+        monkeypatch.setattr(forensics_module, "load_card_rows", _without_commander)
+        report = compute_forensics(
+            db_path=forensics_paths["db"],
+            tags_path=forensics_paths["tags"],
+            fixture_path=forensics_paths["fixture"],
+        )
+        err = capsys.readouterr().err
+        assert "has no cards row" in err
+        assert COMMANDER in err
+        # Classification proceeded — the entry is still produced.
+        assert [e.commander for e in report.entries] == [COMMANDER]
+
 
 class TestPreconditions:
     def test_tensor_config_hash_mismatch_raises(self, forensics_paths: dict[str, Path]) -> None:
@@ -617,6 +647,17 @@ class TestPreconditions:
     def test_partner_fixture_entry_raises(self, forensics_paths: dict[str, Path]) -> None:
         _write_fixture(forensics_paths["fixture"], [["Tymna the Weaver", "Thrasios, Triton Hero"]])
         with pytest.raises(ForensicsPreconditionError, match="partners not supported in v1"):
+            compute_forensics(
+                db_path=forensics_paths["db"],
+                tags_path=forensics_paths["tags"],
+                fixture_path=forensics_paths["fixture"],
+            )
+
+    def test_duplicate_commander_fixture_entry_raises(self, forensics_paths: dict[str, Path]) -> None:
+        """Duplicate fixture commanders would silently double-count every
+        aggregate — fail loud (the partner-entry pattern)."""
+        _write_fixture(forensics_paths["fixture"], [COMMANDER, COMMANDER])
+        with pytest.raises(ForensicsPreconditionError, match="more than once"):
             compute_forensics(
                 db_path=forensics_paths["db"],
                 tags_path=forensics_paths["tags"],

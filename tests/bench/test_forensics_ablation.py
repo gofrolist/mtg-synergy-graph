@@ -294,11 +294,15 @@ def _args(
     db: Path,
     fixture: Path,
     tags: Path,
+    tmp_path: Path,
     *,
     fmt: str = "md",
     output: str | None = None,
     ablate_tiebreak: bool = False,
 ) -> argparse.Namespace:
+    """``forensics_history`` is always set explicitly under ``tmp_path``
+    (the test_forensics_history.py pattern) so the Unit-5 history
+    append never depends on chdir side effects."""
     return argparse.Namespace(
         db=str(db),
         fixture=str(fixture),
@@ -306,6 +310,7 @@ def _args(
         format=fmt,
         output=output,
         ablate_tiebreak=ablate_tiebreak,
+        forensics_history=str(tmp_path / "forensics_history.csv"),
     )
 
 
@@ -351,7 +356,7 @@ class TestHandlerSectionPresence:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         monkeypatch.chdir(tmp_path)
-        rc = handle_forensics(_args(paths["db"], paths["fixture"], paths["tags"], ablate_tiebreak=True))
+        rc = handle_forensics(_args(paths["db"], paths["fixture"], paths["tags"], tmp_path, ablate_tiebreak=True))
         assert rc == 0
         out = capsys.readouterr().out
         assert TIEBREAK_SECTION_HEADER in out
@@ -360,7 +365,7 @@ class TestHandlerSectionPresence:
         # capture (the load-bearing Unit-1 prerequisite).
         assert "self-check passed on every commander" in out
 
-        rc = handle_forensics(_args(paths["db"], paths["fixture"], paths["tags"], ablate_tiebreak=False))
+        rc = handle_forensics(_args(paths["db"], paths["fixture"], paths["tags"], tmp_path, ablate_tiebreak=False))
         assert rc == 0
         assert TIEBREAK_SECTION_HEADER not in capsys.readouterr().out
 
@@ -379,6 +384,7 @@ class TestHandlerSectionPresence:
                     paths["db"],
                     paths["fixture"],
                     paths["tags"],
+                    tmp_path,
                     fmt="json",
                     output=str(with_flag),
                     ablate_tiebreak=True,
@@ -387,7 +393,9 @@ class TestHandlerSectionPresence:
             == 0
         )
         assert (
-            handle_forensics(_args(paths["db"], paths["fixture"], paths["tags"], fmt="json", output=str(without_flag)))
+            handle_forensics(
+                _args(paths["db"], paths["fixture"], paths["tags"], tmp_path, fmt="json", output=str(without_flag))
+            )
             == 0
         )
 
@@ -424,7 +432,7 @@ class TestHandlerSectionPresence:
         monkeypatch.chdir(tmp_path)
         out_path = tmp_path / "report.md"
         rc = handle_forensics(
-            _args(paths["db"], paths["fixture"], paths["tags"], output=str(out_path), ablate_tiebreak=True)
+            _args(paths["db"], paths["fixture"], paths["tags"], tmp_path, output=str(out_path), ablate_tiebreak=True)
         )
         assert rc == 2
         cap = capsys.readouterr()
@@ -452,6 +460,7 @@ class TestDeterminism:
                     paths["db"],
                     paths["fixture"],
                     paths["tags"],
+                    tmp_path,
                     fmt=fmt,
                     output=str(target),
                     ablate_tiebreak=True,

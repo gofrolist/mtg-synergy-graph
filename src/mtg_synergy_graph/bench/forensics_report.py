@@ -62,6 +62,7 @@ from pathlib import Path
 from typing import Any
 
 from mtg_synergy_graph.bench.forensics import (
+    _EM_DASH,
     BUCKET_NO_RULES,
     BUCKET_OUTRANKED,
     BUCKETS,
@@ -127,8 +128,6 @@ OUTRANKED_RANK_BANDS: tuple[tuple[str, int, int | None], ...] = (
 DISPLACER_TOP_FAMILIES_MD = 3
 OUTRANKED_TOP_FAMILIES_MD = 10
 NO_RULES_TOP_SHAPES_MD = 20
-
-_EM_DASH = "—"
 
 
 def rule_family(rule_id: str) -> str:
@@ -359,6 +358,11 @@ class JustifiedAggregate:
     gate_saturated: bool
     n_rules_distribution: tuple[tuple[str, int], ...]
     ratio_distribution: tuple[tuple[str, int], ...]
+    #: Name-sorted concatenation of the per-commander card lists
+    #: (duplicates retained when a card diverges for several
+    #: commanders, so lengths always match the counts above).
+    justified_cards: tuple[str, ...] = ()
+    unjustified_cards: tuple[str, ...] = ()
 
 
 def aggregate_justified(report: ForensicsReport) -> JustifiedAggregate:
@@ -389,6 +393,8 @@ def aggregate_justified(report: ForensicsReport) -> JustifiedAggregate:
         gate_saturated=divergent > 0 and justified == divergent,
         n_rules_distribution=tuple((label, n_rules[label]) for label in N_RULES_BIN_LABELS),
         ratio_distribution=tuple((label, ratios[label]) for label in RATIO_BIN_LABELS),
+        justified_cards=tuple(sorted(card for v in views for card in v.justified_cards)),
+        unjustified_cards=tuple(sorted(card for v in views for card in v.unjustified_cards)),
     )
 
 
@@ -733,6 +739,7 @@ def render_forensics_json(data: ForensicsRenderData) -> str:
                 "divergent": view.divergent if view is not None else None,
                 "justified": view.justified_divergences if view is not None else None,
                 "ndcg30": entry.ndcg30,
+                "raw_dcg30": entry.raw_dcg30,
                 "tensor_candidates": (enrichment.tensor_candidate_count if enrichment is not None else None),
             }
         )
@@ -786,6 +793,8 @@ def render_forensics_json(data: ForensicsRenderData) -> str:
             "divergent": justified.divergent,
             "justified": justified.justified,
             "unjustified": justified.unjustified,
+            "justified_cards": list(justified.justified_cards),
+            "unjustified_cards": list(justified.unjustified_cards),
             "gate_pass_rate": justified.pass_rate,
             "listed_nonpositive": justified.listed_nonpositive,
             "gate_saturated": justified.gate_saturated,

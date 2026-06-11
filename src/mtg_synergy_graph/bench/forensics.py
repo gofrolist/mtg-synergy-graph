@@ -12,7 +12,7 @@ exactly one of five mechanical failure buckets:
   and then dropped by ``engine.page()``'s legality chain. The reason
   code re-evaluates the engine's exact predicate chain from ``cards``
   rows in documented precedence (``color_illegal`` / ``not_legal`` /
-  ``non_edh_type`` / ``empty_types`` / ``is_commander``); when no
+  ``empty_types`` / ``non_edh_type`` / ``is_commander``); when no
   predicate fails, ``filter_reason_unknown`` is a tensor-staleness
   diagnostic counted explicitly.
 * ``DATA_GAP`` — unranked, no tensor rows, and the card is absent from
@@ -176,8 +176,8 @@ REASON_STAPLE_ONLY = "staple_only"
 #: FILTERED reason codes, in the documented re-evaluation precedence.
 REASON_COLOR_ILLEGAL = "color_illegal"
 REASON_NOT_LEGAL = "not_legal"
-REASON_NON_EDH_TYPE = "non_edh_type"
 REASON_EMPTY_TYPES = "empty_types"
+REASON_NON_EDH_TYPE = "non_edh_type"
 REASON_IS_COMMANDER = "is_commander"
 #: Tensor rows present + legal + unranked: no drop predicate fails.
 #: This is a tensor-staleness diagnostic and is counted explicitly.
@@ -240,6 +240,10 @@ N_RULES_BIN_LABELS: tuple[str, ...] = ("0-1", "2", "3", "4", "5+")
 #: cohort median makes the ratio undefined — such picks (justified
 #: via the N_rules leg only) land in ``<=1``.
 RATIO_BIN_LABELS: tuple[str, ...] = ("<=1", "1-2", "2-5", ">5")
+
+#: Em-dash placeholder cell. Defined ONCE here and imported by the
+#: renderers in :mod:`bench.forensics_report` / :mod:`bench.forensics_history`.
+_EM_DASH = "—"
 
 
 class ForensicsPreconditionError(Exception):
@@ -682,11 +686,14 @@ def _first_filter_reason(
     """First failing predicate of ``page()``'s drop chain, re-evaluated
     from a ``cards`` row in the documented precedence.
 
-    Order (binding, from the plan's Key Technical Decisions):
-    ``color_illegal`` → ``not_legal`` → ``non_edh_type`` →
-    ``empty_types`` → ``is_commander``. When nothing fails the card
-    should have been ranked — ``filter_reason_unknown`` flags a stale
-    tensor (rows present for a card the live engine no longer scores).
+    Order (binding): ``color_illegal`` → ``not_legal`` →
+    ``empty_types`` → ``non_edh_type`` → ``is_commander``. Empty
+    ``card_types`` is checked BEFORE :data:`NON_EDH_CARD_TYPES`
+    membership, matching ``engine.page()``'s own drop order
+    (``if not cand_types: continue`` comes first). When nothing fails
+    the card should have been ranked — ``filter_reason_unknown`` flags
+    a stale tensor (rows present for a card the live engine no longer
+    scores).
     """
     if card_row is None:
         return REASON_FILTER_UNKNOWN
@@ -696,10 +703,10 @@ def _first_filter_reason(
     if card_row.get("legal_commander") == 0:
         return REASON_NOT_LEGAL
     card_types = str(card_row.get("card_types") or "").split()
-    if any(t in NON_EDH_CARD_TYPES for t in card_types):
-        return REASON_NON_EDH_TYPE
     if not card_types:
         return REASON_EMPTY_TYPES
+    if any(t in NON_EDH_CARD_TYPES for t in card_types):
+        return REASON_NON_EDH_TYPE
     if resolved_name in commander_names:
         return REASON_IS_COMMANDER
     return REASON_FILTER_UNKNOWN
@@ -1335,18 +1342,31 @@ def load_port_stats(
     return {r["card_name"]: (int(r["n_ports"]), int(r["n_unknown"] or 0)) for r in rows}
 
 
-def synergy_content_digest(conn: sqlite3.Connection) -> str:
+#: Tables :func:`synergy_content_digest` may interpolate into its SQL.
+#: Project convention: SQL fragment interpolation guarded by frozensets
+#: + ``ValueError`` (never ``assert`` — stripped by ``python -O``).
+_VALID_DIGEST_TABLES: frozenset[str] = frozenset({"cards", "card_ports"})
+
+
+def synergy_content_digest(
+    conn: sqlite3.Connection,
+    tables: Sequence[str] = ("cards", "card_ports"),
+) -> str:
     """Cheap content digest over ``cards`` / ``card_ports``.
 
     SHA-256 over ``(COUNT(*), MAX(rowid))`` per table — mirrors the
     EDHREC snapshot digest mechanism: stable, cheap, sufficient to
     detect a cardsfolder re-import (which ``compute_config_hash``
     deliberately does NOT cover). Unit 5 records it as a provenance
-    column.
+    column. ``tables`` must be a subset of
+    :data:`_VALID_DIGEST_TABLES`; anything else raises ``ValueError``
+    before any SQL interpolation.
     """
     h = hashlib.sha256()
-    for table in ("cards", "card_ports"):
-        row = conn.execute(f"SELECT COUNT(*), MAX(rowid) FROM {table}").fetchone()  # noqa: S608 — literal table names
+    for table in tables:
+        if table not in _VALID_DIGEST_TABLES:
+            raise ValueError(f"invalid digest table {table!r}; allowed: {sorted(_VALID_DIGEST_TABLES)}")
+        row = conn.execute(f"SELECT COUNT(*), MAX(rowid) FROM {table}").fetchone()  # noqa: S608 — guarded above
         h.update(f"{table}:{row[0]}:{row[1]}|".encode())
     return h.hexdigest()
 
@@ -1391,14 +1411,23 @@ def load_fixture_commanders(fixture_path: Path | str) -> list[str]:
     partner guard: any non-string ``commander`` entry (a partner
     pair) raises :class:`ForensicsPreconditionError` — partners are
     out of scope for forensics v1 and must fail loud, not misclassify.
+    Duplicate commander names also raise — duplicates would silently
+    double-count every aggregate (bucket sums, canonical denominator).
     """
     pinned = PinnedFixture.load(Path(fixture_path))
     commanders: list[str] = []
+    seen: set[str] = set()
     for entry in pinned.entries:
         if not isinstance(entry.commander, str):
             raise ForensicsPreconditionError(
                 f"fixture entry {entry.commander!r} is a multi-commander entry: partners not supported in v1"
             )
+        if entry.commander in seen:
+            raise ForensicsPreconditionError(
+                f"fixture entry {entry.commander!r} appears more than once: duplicate "
+                "commanders would silently double-count aggregate denominators"
+            )
+        seen.add(entry.commander)
         commanders.append(entry.commander)
     return commanders
 
@@ -1597,6 +1626,15 @@ def compute_forensics(
                     card_rows = load_card_rows(conn, lookup_names)
                     port_stats = load_port_stats(conn, lookup_names)
                     cmdr_row = card_rows.get(commander)
+                    if cmdr_row is None:
+                        # Advisory only: classification proceeds with an
+                        # empty commander identity (every colored card
+                        # then re-evaluates as color_illegal).
+                        print(
+                            f"warning: commander {commander!r} has no cards row — commander "
+                            "color identity falls back to empty; classification proceeds.",
+                            file=sys.stderr,
+                        )
                     commander_identity = _split_pips(cmdr_row.get("color_identity") if cmdr_row else None)
 
                     entry = classify_commander_misses(

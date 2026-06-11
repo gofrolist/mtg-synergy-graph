@@ -1,7 +1,7 @@
 ---
 title: "feat: Divergence forensics — per-miss failure taxonomy + metric sidecars"
 type: feat
-status: active
+status: completed
 date: 2026-06-10
 origin: docs/brainstorms/2026-06-10-divergence-forensics-requirements.md
 ---

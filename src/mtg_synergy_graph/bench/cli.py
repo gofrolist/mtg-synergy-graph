@@ -162,6 +162,8 @@ Exit codes:
      stale tensor under --optimize, fixture below minimum split size).
   3  --optimize only: planted-perturbation self-test failed (calibration
      issue — fix and rerun before trusting any future proposal).
+  For --forensics: 0 = run succeeded (findings are not errors);
+     2 = precondition/reconciliation failure (nothing written); never 1.
 """
 
 
@@ -277,9 +279,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Divergence forensics: classify every missed EDHREC label card "
         "into failure buckets (NEAR_MISS/OUTRANKED/FILTERED/DATA_GAP/"
         "NO_RULES) with NDCG/raw-DCG sidecars and the justified-divergence "
-        "view. Read-only diagnostic; writes .audit/forensics.md by default. "
-        "Requires the persisted tensor at the current config_hash and "
-        "--edhrec-db (default data/tags.db).",
+        "view. Read-only diagnostic; default output is "
+        ".audit/forensics.{md,json} (suffix matches --format). Uses "
+        "--edhrec-db (default data/tags.db) and requires the persisted "
+        "tensor at the current config_hash — run `bench.py audit --repin "
+        "--yes` if missing.",
     )
 
     # Companion flag for --forensics (NOT a mode): plan 2026-06-10-001
@@ -313,7 +317,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--format",
         choices=("md", "json", "csv"),
         default=None,
-        help="Output format. Default: md (csv for --trend).",
+        help="Output format. Default md; --trend hidden_gems defaults to csv; --trend forensics defaults to md.",
     )
     audit.add_argument(
         "--trend-n",

@@ -112,18 +112,23 @@ def _args(
     db: Path,
     fixture: Path,
     tags: Path,
+    tmp_path: Path,
     *,
     fmt: str = "md",
     output: str | None = None,
 ) -> argparse.Namespace:
     """Namespace with the attrs handle_forensics reads (the
-    test_handle_unknowns pattern)."""
+    test_handle_unknowns pattern). ``forensics_history`` is always set
+    explicitly under ``tmp_path`` (the test_forensics_history.py
+    pattern) so the Unit-5 history append never depends on chdir side
+    effects."""
     return argparse.Namespace(
         db=str(db),
         fixture=str(fixture),
         edhrec_db=str(tags),
         format=fmt,
         output=output,
+        forensics_history=str(tmp_path / "forensics_history.csv"),
     )
 
 
@@ -198,7 +203,7 @@ class TestHappyPath:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         monkeypatch.chdir(tmp_path)
-        rc = handle_forensics(_args(paths["db"], paths["fixture"], paths["tags"]))
+        rc = handle_forensics(_args(paths["db"], paths["fixture"], paths["tags"], tmp_path))
         assert rc == 0
         out = capsys.readouterr().out
         for section in EXPECTED_MD_SECTIONS:
@@ -217,12 +222,13 @@ class TestHappyPath:
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        # chdir so the Unit-5 history append (default
-        # .audit/forensics_history.csv) lands under tmp_path, never the
-        # repo root.
+        # forensics_history is routed explicitly under tmp_path by
+        # _args; chdir keeps any other relative write under tmp_path.
         monkeypatch.chdir(tmp_path)
         out_path = tmp_path / "report.json"
-        rc = handle_forensics(_args(paths["db"], paths["fixture"], paths["tags"], fmt="json", output=str(out_path)))
+        rc = handle_forensics(
+            _args(paths["db"], paths["fixture"], paths["tags"], tmp_path, fmt="json", output=str(out_path))
+        )
         assert rc == 0
         payload = json.loads(out_path.read_text(encoding="utf-8"))
 
@@ -239,6 +245,9 @@ class TestHappyPath:
         assert row["misses"] == 1
         assert row["tensor_candidates"] == 2
         assert isinstance(row["divergent"], int)
+        # JSON parity: raw DCG sidecar mirrored per leaderboard entry.
+        assert isinstance(row["raw_dcg30"], float)
+        assert row["raw_dcg30"] >= 0.0
         # Displacer profile from the seeded tensor rows (top-30 hits both).
         per_cmdr = payload["displacers"]["per_commander"]
         assert per_cmdr[0]["commander"] == KORVOLD
@@ -249,6 +258,11 @@ class TestHappyPath:
         assert r9["divergent"] == r9["justified"] + r9["unjustified"]
         assert set(r9["n_rules_distribution"]) == set(N_RULES_BIN_LABELS)
         assert set(r9["ratio_distribution"]) == set(RATIO_BIN_LABELS)
+        # JSON parity: the card lists mirror the counts (name-sorted).
+        assert len(r9["justified_cards"]) == r9["justified"]
+        assert len(r9["unjustified_cards"]) == r9["unjustified"]
+        assert r9["justified_cards"] == sorted(r9["justified_cards"])
+        assert r9["unjustified_cards"] == sorted(r9["unjustified_cards"])
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +292,7 @@ class TestEmptyMissSet:
         _write_fixture(fixture_path, [KORVOLD])
 
         monkeypatch.chdir(tmp_path)
-        rc = handle_forensics(_args(synergy_db, fixture_path, tags_path))
+        rc = handle_forensics(_args(synergy_db, fixture_path, tags_path, tmp_path))
         assert rc == 0
         out = capsys.readouterr().out
         assert "Total misses: 0" in out
@@ -304,7 +318,7 @@ class TestErrorPaths:
     ) -> None:
         monkeypatch.chdir(tmp_path)
         missing_fixture = tmp_path / "nope.json"
-        rc = handle_forensics(_args(paths["db"], missing_fixture, paths["tags"]))
+        rc = handle_forensics(_args(paths["db"], missing_fixture, paths["tags"], tmp_path))
         assert rc == 2
         err = capsys.readouterr().err
         assert "not found" in err
@@ -332,7 +346,7 @@ class TestErrorPaths:
 
         monkeypatch.chdir(tmp_path)
         out_path = tmp_path / "report.md"
-        rc = handle_forensics(_args(db_path, fixture_path, tags_path, output=str(out_path)))
+        rc = handle_forensics(_args(db_path, fixture_path, tags_path, tmp_path, output=str(out_path)))
         assert rc == 2
         err = capsys.readouterr().err
         assert "stale or absent" in err
@@ -356,13 +370,14 @@ class TestOutputRouting:
     ) -> None:
         monkeypatch.chdir(tmp_path)
         out_path = tmp_path / "report.md"
-        rc = handle_forensics(_args(paths["db"], paths["fixture"], paths["tags"], output=str(out_path)))
+        rc = handle_forensics(_args(paths["db"], paths["fixture"], paths["tags"], tmp_path, output=str(out_path)))
         assert rc == 0
         assert out_path.exists()
         assert "# bench.py audit --forensics" in out_path.read_text(encoding="utf-8")
         # The REPORT skips .audit/ under --output; the Unit-5 history
-        # append (an independent artifact) still lands there by default.
+        # append goes to the explicit --forensics-history path.
         assert not (tmp_path / ".audit" / "forensics.md").exists()
+        assert (tmp_path / "forensics_history.csv").exists()
         assert "report written to" in capsys.readouterr().err
 
     def test_unwritable_default_audit_degrades_to_warning(
@@ -383,7 +398,7 @@ class TestOutputRouting:
             original_mkdir(self, *args, **kwargs)  # type: ignore[arg-type]
 
         monkeypatch.setattr(Path, "mkdir", _boom)
-        rc = handle_forensics(_args(paths["db"], paths["fixture"], paths["tags"]))
+        rc = handle_forensics(_args(paths["db"], paths["fixture"], paths["tags"], tmp_path))
         assert rc == 0
         cap = capsys.readouterr()
         assert "could not write" in cap.err.lower()
@@ -405,14 +420,19 @@ class TestDeterminism:
         monkeypatch: pytest.MonkeyPatch,
         fmt: str,
     ) -> None:
-        # chdir so the Unit-5 history append (default
-        # .audit/forensics_history.csv) lands under tmp_path, never the
-        # repo root.
+        # forensics_history is routed explicitly under tmp_path by
+        # _args; chdir keeps any other relative write under tmp_path.
         monkeypatch.chdir(tmp_path)
         first = tmp_path / f"first.{fmt}"
         second = tmp_path / f"second.{fmt}"
-        assert handle_forensics(_args(paths["db"], paths["fixture"], paths["tags"], fmt=fmt, output=str(first))) == 0
-        assert handle_forensics(_args(paths["db"], paths["fixture"], paths["tags"], fmt=fmt, output=str(second))) == 0
+        assert (
+            handle_forensics(_args(paths["db"], paths["fixture"], paths["tags"], tmp_path, fmt=fmt, output=str(first)))
+            == 0
+        )
+        assert (
+            handle_forensics(_args(paths["db"], paths["fixture"], paths["tags"], tmp_path, fmt=fmt, output=str(second)))
+            == 0
+        )
         assert first.read_bytes() == second.read_bytes()
 
 
