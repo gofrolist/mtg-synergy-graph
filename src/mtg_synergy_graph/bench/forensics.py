@@ -94,9 +94,32 @@ Justified-divergence view (Unit 3 of the same plan, R9):
   when every divergent pick passed, so the Unit-4 renderer can
   annotate "gate too loose to discriminate".
 
+Tiebreaker ablation (Unit 6 of the same plan, R8 — one-off
+measurement mode, ``--forensics --ablate-tiebreak``):
+
+* :func:`compute_tiebreak_ablation` re-sorts each commander's
+  captured :class:`RankedCandidate` tuples under two bracketing
+  replacement keys — weak ``(-total_score, name)`` and strong
+  ``(-total_score, cmc, name)`` — and reports the signed
+  production-minus-replacement NDCG@30 deltas plus their range,
+  aggregated over the CANONICAL denominator. Pure function of the
+  Unit-1 capture; no extra scoring pass, ``engine.page()`` untouched.
+* MANDATORY self-check first (:func:`verify_production_sort`):
+  re-sorting by the reconstructed production key ``(-total_score,
+  cmc, edhrec_rank, name)`` must reproduce the captured rank order
+  EXACTLY for every commander; any mismatch raises
+  :class:`TiebreakSelfCheckError` (exit-2 mapped — catches
+  sentinel/NULL drift) and NO deltas are reported.
+* When the upper bound of unearned credit exceeds
+  :data:`TIEBREAK_FLAG_THRESHOLD` (0.01),
+  :attr:`TiebreakAblation.rule_history_markdown` carries a
+  ready-to-paste RULE_HISTORY entry citing the plan — the human
+  commits it; the run stays read-only. The forensics history row is
+  NOT extended (one-off mode; no schema change).
+
 Read-only diagnostic: nothing here mutates either database or the
-pinned fixture. CLI wiring, renderers, history CSV, and the
-tiebreaker ablation are later units of the same plan.
+pinned fixture. CLI wiring, renderers, and the history CSV live in
+:mod:`bench.forensics_report` / :mod:`bench.forensics_history`.
 """
 
 from __future__ import annotations
@@ -193,6 +216,16 @@ RECONCILIATION_EPSILON = 1e-6
 #: sampled independent-engine check re-scores on a separately
 #: constructed :class:`SynergyEngine`.
 INDEPENDENT_CHECK_SAMPLE_SIZE = 5
+
+#: Unit-6 (R8) tiebreaker-ablation flag threshold: when the UPPER
+#: BOUND of unearned EDHREC tiebreak credit (the larger of the two
+#: production-minus-replacement NDCG deltas) exceeds this, the run
+#: emits a ready-to-paste RULE_HISTORY entry flagging sort-key
+#: remediation as a next-cycle candidate.
+TIEBREAK_FLAG_THRESHOLD = 0.01
+
+#: Plan path cited by the R8 RULE_HISTORY flag entry.
+FORENSICS_PLAN_PATH = "docs/plans/2026-06-10-001-feat-divergence-forensics-plan.md"
 
 #: Gate-margin stratification bins for justified divergent picks
 #: (Unit 3). IMPLEMENTATION-CHOSEN — the plan defers exact edges.
@@ -1019,6 +1052,205 @@ def reconcile_canonical_ndcg(
         f"{epsilon}; first divergent commander: {divergent.commander!r} "
         f"(forensics {divergent.forensics_ndcg!r} vs recompute {divergent.recompute_ndcg!r}). "
         "Nothing was written."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tiebreaker ablation (Unit 6, R8) — pure functions over the Unit-1 capture
+# ---------------------------------------------------------------------------
+
+
+class TiebreakSelfCheckError(ForensicsReconciliationError):
+    """The mandatory production-sort-key reconstruction self-check failed.
+
+    Re-sorting a commander's captured :class:`RankedCandidate` tuples
+    by the reconstructed production key ``(-total_score, cmc,
+    edhrec_rank, name)`` must reproduce the captured rank order
+    EXACTLY (``bench/optimize.py::score_commander_from_complements``
+    is the sanctioned reconstruction precedent). A mismatch means
+    sentinel/NULL drift between the capture and ``engine.page()`` —
+    no ablation deltas may be reported. Subclasses
+    :class:`ForensicsReconciliationError` so the Unit-4 handler's
+    exit-2 mapping (nothing written) applies unchanged.
+    """
+
+
+@dataclass(frozen=True)
+class TiebreakAblation:
+    """Aggregate R8 ablation result over the canonical denominator.
+
+    All NDCG figures are canonical-denominator means (every fixture
+    commander; zero-label / skipped commanders contribute 0.0 on
+    every key, so they never move a delta). Deltas are signed in the
+    "production minus replacement" direction: a POSITIVE delta means
+    the production key (with ``edhrec_rank``) scores higher than the
+    replacement — i.e. credit that vanishes when the EDHREC
+    tiebreaker is removed.
+    """
+
+    #: Canonical denominator (classified + skipped fixture commanders).
+    n_commanders: int
+    production_ndcg: float
+    #: Weak replacement key ``(-total_score, name)``.
+    weak_ndcg: float
+    #: Strong replacement key ``(-total_score, cmc, name)``.
+    strong_ndcg: float
+    #: ``production_ndcg - weak_ndcg`` (signed).
+    weak_delta: float
+    #: ``production_ndcg - strong_ndcg`` (signed).
+    strong_delta: float
+    #: ISO date stamped into the RULE_HISTORY flag entry (injected by
+    #: the caller so this dataclass stays a pure function of inputs).
+    run_date: str
+
+    @property
+    def delta_range(self) -> tuple[float, float]:
+        """The bracketed (min, max) of the two signed deltas."""
+        lo, hi = sorted((self.weak_delta, self.strong_delta))
+        return (lo, hi)
+
+    @property
+    def upper_bound(self) -> float:
+        """Upper bound of unearned EDHREC tiebreak credit: the larger
+        NDCG drop when ``edhrec_rank`` is removed from the key."""
+        return max(self.weak_delta, self.strong_delta)
+
+    @property
+    def flagged(self) -> bool:
+        """True when the upper bound exceeds :data:`TIEBREAK_FLAG_THRESHOLD`."""
+        return self.upper_bound > TIEBREAK_FLAG_THRESHOLD
+
+    @property
+    def rule_history_markdown(self) -> str | None:
+        """Ready-to-paste RULE_HISTORY entry when :attr:`flagged`.
+
+        ``None`` below the threshold. The HUMAN commits the entry —
+        the forensics run itself stays read-only (plan Unit 6).
+        """
+        if not self.flagged:
+            return None
+        lo, hi = self.delta_range
+        return (
+            f"## {self.run_date} — EDHREC tiebreaker credit measured (R8 ablation): "
+            "sort-key remediation flagged\n"
+            "\n"
+            "`bench.py audit --forensics --ablate-tiebreak` re-sorted the captured\n"
+            "production rankings under bracketing replacement keys (pure re-sort of\n"
+            "the Unit-1 capture; no scoring change, no `engine.page()` change):\n"
+            "\n"
+            f"- weak key `(-total_score, name)`: delta {self.weak_delta:+.6f}\n"
+            f"- strong key `(-total_score, cmc, name)`: delta {self.strong_delta:+.6f}\n"
+            f"- bracketed credit range: [{lo:+.6f}, {hi:+.6f}] "
+            f"(NDCG@30, canonical denominator, {self.n_commanders} commanders)\n"
+            "\n"
+            f"Upper bound {self.upper_bound:+.6f} exceeds the "
+            f"{TIEBREAK_FLAG_THRESHOLD} threshold — sort-key remediation is a\n"
+            "next-cycle candidate (needs its own plan; the production sort key is\n"
+            f"unchanged by this measurement). Plan: {FORENSICS_PLAN_PATH}."
+        )
+
+
+def weak_sort_key(candidate: RankedCandidate) -> tuple[float, str]:
+    """Weak replacement key ``(-total_score, name)`` (R8 lower bracket)."""
+    return (-candidate.total_score, candidate.name)
+
+
+def strong_sort_key(candidate: RankedCandidate) -> tuple[float, float, str]:
+    """Strong replacement key ``(-total_score, cmc, name)`` (R8 upper bracket)."""
+    return (-candidate.total_score, candidate.cmc, candidate.name)
+
+
+def verify_production_sort(
+    commander: str,
+    ranking: Sequence[RankedCandidate],
+) -> tuple[RankedCandidate, ...]:
+    """Mandatory R8 self-check: the reconstructed production key must
+    reproduce the captured rank order EXACTLY.
+
+    Re-sorts the captured candidates by
+    :attr:`RankedCandidate.production_sort_key` and compares against
+    the capture ordered by its ``rank`` field. Any mismatch raises
+    :class:`TiebreakSelfCheckError` naming the commander and the first
+    divergent position — sentinel/NULL drift between the Unit-1
+    capture and ``engine.page()`` invalidates every delta, so callers
+    must report NO deltas. Returns the captured rank order on success.
+    """
+    captured = tuple(sorted(ranking, key=lambda rc: rc.rank))
+    reconstructed = tuple(sorted(ranking, key=lambda rc: rc.production_sort_key))
+    for position, (cap, rec) in enumerate(zip(captured, reconstructed, strict=True), start=1):
+        if cap.name != rec.name:
+            raise TiebreakSelfCheckError(
+                f"tiebreak-ablation self-check failed for {commander!r}: re-sorting the "
+                f"captured candidates by the reconstructed production key (-total_score, "
+                f"cmc, edhrec_rank, name) diverges from the captured rank order at "
+                f"position {position} (captured {cap.name!r}, reconstructed {rec.name!r}). "
+                "Sentinel/NULL drift between the capture and engine.page() — no ablation "
+                "deltas reported. Nothing was written."
+            )
+    return captured
+
+
+def compute_tiebreak_ablation(
+    rankings: Mapping[str, Sequence[RankedCandidate]],
+    labels_by_commander: Mapping[str, Mapping[str, float]],
+    *,
+    n_canonical: int,
+    run_date: str,
+    top_n: int = TOP_N_DEFAULT,
+) -> TiebreakAblation:
+    """R8 tiebreaker ablation over the captured rankings (pure function).
+
+    ``rankings`` maps each non-skipped commander to its Unit-1
+    captured full ranking; ``labels_by_commander`` carries the same
+    canonical validate-path labels (``grade_floor=0.0``) the forensics
+    run already loaded. ``n_canonical`` is the canonical denominator
+    (ALL fixture commanders — commanders absent from ``rankings``,
+    i.e. zero-label skips, contribute exactly 0.0 on every key).
+
+    The mandatory self-check (:func:`verify_production_sort`) runs
+    over EVERY commander BEFORE any NDCG is computed; a single
+    mismatch raises :class:`TiebreakSelfCheckError` and no deltas
+    exist. With no score ties anywhere, all three sorts coincide and
+    both deltas are exactly 0.0.
+
+    Raises ``ValueError`` when ``n_canonical`` is smaller than the
+    number of supplied rankings (the canonical denominator can never
+    shrink below the classified set).
+    """
+    if n_canonical < len(rankings):
+        raise ValueError(f"n_canonical ({n_canonical}) < number of rankings ({len(rankings)})")
+
+    # Self-check EVERY commander first — no deltas on any mismatch.
+    captured_by_commander = {
+        commander: verify_production_sort(commander, rankings[commander]) for commander in sorted(rankings)
+    }
+
+    sum_production = sum_weak = sum_strong = 0.0
+    for commander in sorted(rankings):
+        captured = captured_by_commander[commander]
+        labels = dict(labels_by_commander.get(commander, {}))
+        production_window = [rc.name for rc in captured[:top_n]]
+        weak_window = [rc.name for rc in sorted(captured, key=weak_sort_key)[:top_n]]
+        strong_window = [rc.name for rc in sorted(captured, key=strong_sort_key)[:top_n]]
+        sum_production += compute_ndcg(production_window, labels, k=top_n)
+        sum_weak += compute_ndcg(weak_window, labels, k=top_n)
+        sum_strong += compute_ndcg(strong_window, labels, k=top_n)
+
+    if n_canonical:
+        agg_production = sum_production / n_canonical
+        agg_weak = sum_weak / n_canonical
+        agg_strong = sum_strong / n_canonical
+    else:
+        agg_production = agg_weak = agg_strong = 0.0
+
+    return TiebreakAblation(
+        n_commanders=n_canonical,
+        production_ndcg=agg_production,
+        weak_ndcg=agg_weak,
+        strong_ndcg=agg_strong,
+        weak_delta=agg_production - agg_weak,
+        strong_delta=agg_production - agg_strong,
+        run_date=run_date,
     )
 
 

@@ -35,8 +35,18 @@ render all passed) the handler appends one provenance-stamped row to
 the forensics history CSV (Unit 5, :mod:`bench.forensics_history` —
 default ``.audit/forensics_history.csv``, ``--forensics-history PATH``
 to override); the append itself degrades to a stderr warning on write
-failure and never changes the exit code. The tiebreaker ablation
-(Unit 6) is a later unit of the same plan.
+failure and never changes the exit code.
+
+Tiebreaker ablation (Unit 6, R8 — one-off measurement mode): with the
+``--ablate-tiebreak`` companion flag the handler additionally runs
+:func:`bench.forensics.compute_tiebreak_ablation` over the
+already-captured rankings + labels (no extra scoring pass) and the
+renderers append a "Tiebreaker ablation (R8)" section (md + json) —
+ONLY when the flag is set; absent otherwise. The mandatory
+production-key self-check failing
+(:class:`bench.forensics.TiebreakSelfCheckError`) maps to exit 2
+BEFORE anything is written (no report, no history row). The forensics
+history row is NOT extended (one-off mode; no schema change).
 """
 
 from __future__ import annotations
@@ -46,7 +56,8 @@ import json
 import sqlite3
 import sys
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -56,12 +67,16 @@ from mtg_synergy_graph.bench.forensics import (
     BUCKETS,
     N_RULES_BIN_LABELS,
     RATIO_BIN_LABELS,
+    TIEBREAK_FLAG_THRESHOLD,
     CommanderForensics,
     ForensicsPreconditionError,
     ForensicsReconciliationError,
     ForensicsReport,
+    TiebreakAblation,
+    TiebreakSelfCheckError,
     bucket_proportions,
     compute_forensics,
+    compute_tiebreak_ablation,
     load_tensor_contributions,
     synergy_content_digest,
 )
@@ -75,6 +90,7 @@ from mtg_synergy_graph.bench.forensics_history import (
 )
 from mtg_synergy_graph.bench.tensor import compute_config_hash
 from mtg_synergy_graph.db import open_db
+from mtg_synergy_graph.validate import edhrec_labels_for_commander
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -94,6 +110,10 @@ GOLDEN_SET_BUBBLE_CAVEAT = (
 #: R9 aggregate-saturation annotation, rendered verbatim when every
 #: divergent pick across the run passed the plausibility gate.
 GATE_SATURATED_ANNOTATION = "gate too loose to discriminate — this is a finding about the gate"
+
+#: Markdown header of the Unit-6 (R8) ablation section — present in
+#: the report ONLY when ``--ablate-tiebreak`` was passed.
+TIEBREAK_SECTION_HEADER = "## Tiebreaker ablation (R8)"
 
 #: OUTRANKED rank-quantile bands (R2). OUTRANKED misses always carry a
 #: LIVE rank >= 61 (ranks 31..60 are NEAR_MISS at the default top_n).
@@ -169,6 +189,10 @@ class ForensicsRenderData:
     #: Frequency-ranked ``(node_kind, subkind, n_cards)`` shapes shared
     #: across all NO_RULES cards (R3).
     no_rules_port_shapes: tuple[tuple[str, str, int], ...]
+    #: Unit-6 (R8) tiebreaker ablation. ``None`` unless the run was
+    #: invoked with ``--ablate-tiebreak`` — the renderers emit the
+    #: ablation section ONLY when this is set.
+    ablation: TiebreakAblation | None = None
 
 
 def load_port_shape_counts(
@@ -636,7 +660,52 @@ def render_forensics_markdown(data: ForensicsRenderData) -> str:
     lines.append("|-----|------:|")
     for label, count in justified.ratio_distribution:
         lines.append(f"| {label} | {count} |")
+
+    # -- Tiebreaker ablation (R8, only with --ablate-tiebreak) -----------------
+    if data.ablation is not None:
+        lines.extend(_render_ablation_markdown(data.ablation))
     return "\n".join(lines) + "\n"
+
+
+def _render_ablation_markdown(ablation: TiebreakAblation) -> list[str]:
+    """Markdown lines for the Unit-6 (R8) ablation section (pure)."""
+    lo, hi = ablation.delta_range
+    lines: list[str] = []
+    lines.append("")
+    lines.append(TIEBREAK_SECTION_HEADER)
+    lines.append("")
+    lines.append(
+        "Bracketing re-sorts of the captured production rankings (pure re-sort "
+        "of the Unit-1 capture — no extra scoring pass; `engine.page()` "
+        "untouched). Deltas are signed production-minus-replacement NDCG@30 over "
+        f"the canonical denominator ({ablation.n_commanders} commanders, "
+        "zero-label → 0.0). The production-key reconstruction self-check "
+        "passed on every commander."
+    )
+    lines.append("")
+    lines.append("| key | NDCG@30 | delta vs production |")
+    lines.append("|-----|--------:|--------------------:|")
+    lines.append(
+        f"| production `(-total_score, cmc, edhrec_rank, name)` | {ablation.production_ndcg:.6f} | {_EM_DASH} |"
+    )
+    lines.append(f"| strong `(-total_score, cmc, name)` | {ablation.strong_ndcg:.6f} | {ablation.strong_delta:+.6f} |")
+    lines.append(f"| weak `(-total_score, name)` | {ablation.weak_ndcg:.6f} | {ablation.weak_delta:+.6f} |")
+    lines.append("")
+    lines.append(f"delta range: [{lo:+.6f}, {hi:+.6f}]")
+    lines.append(
+        f"upper bound of unearned EDHREC tiebreak credit: {ablation.upper_bound:+.6f} "
+        f"(flag threshold {TIEBREAK_FLAG_THRESHOLD})"
+    )
+    entry = ablation.rule_history_markdown
+    if entry is not None:
+        lines.append("")
+        lines.append(
+            f"**Upper bound exceeds {TIEBREAK_FLAG_THRESHOLD} — ready-to-paste "
+            "RULE_HISTORY entry below (commit it manually; this run stays read-only):**"
+        )
+        lines.append("")
+        lines.extend(entry.splitlines())
+    return lines
 
 
 def render_forensics_json(data: ForensicsRenderData) -> str:
@@ -723,6 +792,24 @@ def render_forensics_json(data: ForensicsRenderData) -> str:
             "ratio_distribution": {label: count for label, count in justified.ratio_distribution},
         },
     }
+    # Unit 6 (R8): the ablation block exists ONLY when --ablate-tiebreak
+    # was passed — absent otherwise (no null placeholder).
+    if data.ablation is not None:
+        ablation = data.ablation
+        lo, hi = ablation.delta_range
+        payload["tiebreak_ablation"] = {
+            "n_commanders": ablation.n_commanders,
+            "production_ndcg30": ablation.production_ndcg,
+            "strong_ndcg30": ablation.strong_ndcg,
+            "weak_ndcg30": ablation.weak_ndcg,
+            "strong_delta": ablation.strong_delta,
+            "weak_delta": ablation.weak_delta,
+            "delta_range": [lo, hi],
+            "upper_bound": ablation.upper_bound,
+            "flag_threshold": TIEBREAK_FLAG_THRESHOLD,
+            "flagged": ablation.flagged,
+            "rule_history_entry": ablation.rule_history_markdown,
+        }
     return json.dumps(payload, indent=2, ensure_ascii=False)
 
 
@@ -797,7 +884,10 @@ def handle_forensics(args: argparse.Namespace) -> int:
     # it), so create=False cannot raise here. The Unit-5 history-row
     # inputs (provenance digests + in-run gem rate) are gathered on the
     # same connections while they're open; the append itself happens
-    # only after rendering succeeds below.
+    # only after rendering succeeds below. With --ablate-tiebreak the
+    # Unit-6 label reload also rides on the open tags.db connection.
+    ablate_tiebreak = bool(getattr(args, "ablate_tiebreak", False))
+    labels_by_commander: dict[str, dict[str, float]] = {}
     config_hash = compute_config_hash()
     conn = open_db(db_path, create=False)
     try:
@@ -813,10 +903,33 @@ def handle_forensics(args: argparse.Namespace) -> int:
         try:
             snapshot_digest = edhrec_snapshot_digest(edhrec_conn)
             gem_rate = compute_gem_rate_forensics(report, edhrec_conn, conn, config_hash)
+            if ablate_tiebreak:
+                labels_by_commander = {
+                    entry.commander: edhrec_labels_for_commander(edhrec_conn, entry.commander, grade_floor=0.0)
+                    for entry in report.entries
+                }
         finally:
             edhrec_conn.close()
     finally:
         conn.close()
+
+    if ablate_tiebreak:
+        # Unit 6 (R8): pure re-sort of the already-captured rankings +
+        # labels — no extra scoring pass. The mandatory production-key
+        # self-check failing maps to exit 2 BEFORE anything is written
+        # (no report file, no history row, no deltas). One-off mode:
+        # the history row schema is NOT extended.
+        try:
+            ablation = compute_tiebreak_ablation(
+                {entry.commander: entry.ranking for entry in report.entries},
+                labels_by_commander,
+                n_canonical=len(report.entries) + len(report.skipped_commanders),
+                run_date=datetime.now(UTC).date().isoformat(),
+            )
+        except TiebreakSelfCheckError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        data = replace(data, ablation=ablation)
 
     fmt = getattr(args, "format", "md")
     rendered = render_forensics_json(data) if fmt == "json" else render_forensics_markdown(data)

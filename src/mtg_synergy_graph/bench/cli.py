@@ -282,6 +282,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--edhrec-db (default data/tags.db).",
     )
 
+    # Companion flag for --forensics (NOT a mode): plan 2026-06-10-001
+    # Unit 6 (R8) one-off tiebreaker-ablation measurement.
+    audit.add_argument(
+        "--ablate-tiebreak",
+        dest="ablate_tiebreak",
+        action="store_true",
+        help="Used by --forensics only. One-off tiebreaker ablation (R8): "
+        "re-sort the captured rankings under the weak (-total_score, name) "
+        "and strong (-total_score, cmc, name) replacement keys and report "
+        "the bracketed NDCG@30 delta range vs the production key. Emits a "
+        "ready-to-paste RULE_HISTORY entry when the upper bound of unearned "
+        "EDHREC tiebreak credit exceeds 0.01. Pure re-sort — no scoring "
+        "change; the forensics history row is not extended.",
+    )
+
     # Shared flags.
     audit.add_argument(
         "--commander",
@@ -611,6 +626,15 @@ def main(argv: list[str] | None = None) -> int:
     ):
         print(
             "bench.py audit: warning: --forensics-history has no effect without --forensics or --trend forensics.",
+            file=sys.stderr,
+        )
+
+    # ``--ablate-tiebreak`` is a companion to ``--forensics`` (plan
+    # 2026-06-10-001 Unit 6). Same warn-don't-error pattern as
+    # ``--trend-n``.
+    if mode != "forensics" and getattr(args, "ablate_tiebreak", False):
+        print(
+            "bench.py audit: warning: --ablate-tiebreak has no effect without --forensics.",
             file=sys.stderr,
         )
 
