@@ -128,6 +128,11 @@ _HANDLERS: dict[str, Callable[[Namespace], int]] = {
     # failure taxonomy + metric sidecars. Stubbed here, real handler at
     # ``mtg_synergy_graph.bench.forensics_report.handle_forensics``.
     "forensics": _stubs.forensics_stub,
+    # Plan 2026-06-10-001 Unit 5 — ``--trend forensics`` reader over the
+    # sibling forensics history CSV (boundary-marker grouping). Stubbed
+    # here, real handler at
+    # ``mtg_synergy_graph.bench.forensics_history.handle_trend_forensics``.
+    "trend_forensics": _stubs.trend_forensics_stub,
 }
 
 
@@ -231,11 +236,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     mode.add_argument(
         "--trend",
-        choices=("hidden_gems",),
+        choices=("hidden_gems", "forensics"),
         metavar="METRIC",
-        help="Print the last N rows of .audit/history.csv. MVP supports "
-        "METRIC=hidden_gems; argparse choices leaves room for additional "
-        "metrics without breaking users.",
+        help="Print the last N rows of a history CSV. METRIC=hidden_gems "
+        "reads .audit/history.csv (CSV default); METRIC=forensics reads "
+        ".audit/forensics_history.csv (md default, with "
+        "(config_hash, snapshot) boundary markers; override the path via "
+        "--forensics-history).",
     )
     mode.add_argument(
         "--vs-forge-oracle",
@@ -305,6 +312,15 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         default=".audit/history.csv",
         help="Path to the append-only history CSV. Default: .audit/history.csv.",
+    )
+    audit.add_argument(
+        "--forensics-history",
+        dest="forensics_history",
+        metavar="PATH",
+        default=".audit/forensics_history.csv",
+        help="Used by --forensics (append target) and --trend forensics "
+        "(read source) only. Path to the append-only forensics history "
+        "CSV. Default: .audit/forensics_history.csv.",
     )
     audit.add_argument(
         "--output",
@@ -524,7 +540,10 @@ def _resolve_mode(args: Namespace) -> str:
     if args.inspect_gems:
         return "inspect_gems"
     if getattr(args, "trend", None) is not None:
-        return "trend"
+        # METRIC selects the handler slot: ``forensics`` reads the
+        # sibling forensics history CSV (plan 2026-06-10-001 Unit 5);
+        # everything else stays on the original hidden_gems reader.
+        return "trend_forensics" if args.trend == "forensics" else "trend"
     if getattr(args, "vs_forge_oracle", False):
         return "vs_forge_oracle"
     if getattr(args, "embedding_dedup", False):
@@ -550,34 +569,48 @@ def main(argv: list[str] | None = None) -> int:
 
     mode = _resolve_mode(args)
 
-    # ``--format csv`` is only meaningful for ``--trend`` (the history
-    # file itself is CSV). Silently falling back to markdown for every
-    # other mode hid user typos; reject it at the CLI boundary so the
-    # user sees the mismatch instead of wondering why the flag did
-    # nothing.
-    if getattr(args, "format", None) == "csv" and mode != "trend":
+    # ``--format csv`` is only meaningful for the ``--trend`` modes (the
+    # history files themselves are CSV). Silently falling back to
+    # markdown for every other mode hid user typos; reject it at the
+    # CLI boundary so the user sees the mismatch instead of wondering
+    # why the flag did nothing.
+    if getattr(args, "format", None) == "csv" and mode not in ("trend", "trend_forensics"):
         parser.error("--format csv is only supported with --trend")
 
     # ``--commander`` filters a per-commander audit; it is meaningless
     # for ``--trend`` (which renders raw history rows without a
     # commander concept). Fail loudly instead of silently ignoring.
-    if getattr(args, "commander", None) is not None and mode == "trend":
+    if getattr(args, "commander", None) is not None and mode in ("trend", "trend_forensics"):
         parser.error("--commander is not supported with --trend")
 
     # ``--format`` is stored as ``None`` when not passed so we can
-    # apply mode-specific defaults: ``--trend`` defaults to CSV (the
-    # history file is already CSV), every other mode defaults to ``md``
-    # (matches the legacy behaviour). Users still get ``md`` / ``json``
-    # / ``csv`` explicit overrides.
+    # apply mode-specific defaults: ``--trend hidden_gems`` defaults to
+    # CSV (the history file is already CSV), every other mode —
+    # including ``--trend forensics``, whose boundary-marker view reads
+    # best as a table — defaults to ``md`` (matches the legacy
+    # behaviour). Users still get ``md`` / ``json`` / ``csv`` explicit
+    # overrides.
     if getattr(args, "format", None) is None:
         args.format = "csv" if mode == "trend" else "md"
 
-    # ``--trend-n`` only makes sense with ``--trend``. A lone
+    # ``--trend-n`` only makes sense with the ``--trend`` modes. A lone
     # ``--trend-n`` is harmless — warn on stderr rather than erroring so
     # the user sees the flag had no effect.
-    if mode != "trend" and getattr(args, "trend_n", 20) != 20:
+    if mode not in ("trend", "trend_forensics") and getattr(args, "trend_n", 20) != 20:
         print(
             "bench.py audit: warning: --trend-n has no effect without --trend.",
+            file=sys.stderr,
+        )
+
+    # ``--forensics-history`` is the append target for ``--forensics``
+    # and the read source for ``--trend forensics``. Same
+    # warn-don't-error companion-flag pattern as ``--trend-n``.
+    if (
+        mode not in ("forensics", "trend_forensics")
+        and getattr(args, "forensics_history", ".audit/forensics_history.csv") != ".audit/forensics_history.csv"
+    ):
+        print(
+            "bench.py audit: warning: --forensics-history has no effect without --forensics or --trend forensics.",
             file=sys.stderr,
         )
 

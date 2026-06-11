@@ -214,8 +214,13 @@ class TestHappyPath:
         self,
         paths: dict[str, Path],
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
+        # chdir so the Unit-5 history append (default
+        # .audit/forensics_history.csv) lands under tmp_path, never the
+        # repo root.
+        monkeypatch.chdir(tmp_path)
         out_path = tmp_path / "report.json"
         rc = handle_forensics(_args(paths["db"], paths["fixture"], paths["tags"], fmt="json", output=str(out_path)))
         assert rc == 0
@@ -355,7 +360,9 @@ class TestOutputRouting:
         assert rc == 0
         assert out_path.exists()
         assert "# bench.py audit --forensics" in out_path.read_text(encoding="utf-8")
-        assert not (tmp_path / ".audit").exists()
+        # The REPORT skips .audit/ under --output; the Unit-5 history
+        # append (an independent artifact) still lands there by default.
+        assert not (tmp_path / ".audit" / "forensics.md").exists()
         assert "report written to" in capsys.readouterr().err
 
     def test_unwritable_default_audit_degrades_to_warning(
@@ -391,7 +398,17 @@ class TestOutputRouting:
 
 class TestDeterminism:
     @pytest.mark.parametrize("fmt", ["md", "json"])
-    def test_byte_identical_across_runs(self, paths: dict[str, Path], tmp_path: Path, fmt: str) -> None:
+    def test_byte_identical_across_runs(
+        self,
+        paths: dict[str, Path],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        fmt: str,
+    ) -> None:
+        # chdir so the Unit-5 history append (default
+        # .audit/forensics_history.csv) lands under tmp_path, never the
+        # repo root.
+        monkeypatch.chdir(tmp_path)
         first = tmp_path / f"first.{fmt}"
         second = tmp_path / f"second.{fmt}"
         assert handle_forensics(_args(paths["db"], paths["fixture"], paths["tags"], fmt=fmt, output=str(first))) == 0

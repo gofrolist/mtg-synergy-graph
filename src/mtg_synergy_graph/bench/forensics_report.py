@@ -30,8 +30,13 @@ warning, never a failure — the report has already been printed to
 stdout); ``--output PATH`` writes there instead and skips ``.audit/``.
 
 Read-only diagnostic: nothing here mutates either database or the
-pinned fixture. The forensics history CSV (Unit 5) and the tiebreaker
-ablation (Unit 6) are later units of the same plan.
+pinned fixture. On full success (preconditions + reconciliation +
+render all passed) the handler appends one provenance-stamped row to
+the forensics history CSV (Unit 5, :mod:`bench.forensics_history` —
+default ``.audit/forensics_history.csv``, ``--forensics-history PATH``
+to override); the append itself degrades to a stderr warning on write
+failure and never changes the exit code. The tiebreaker ablation
+(Unit 6) is a later unit of the same plan.
 """
 
 from __future__ import annotations
@@ -58,6 +63,15 @@ from mtg_synergy_graph.bench.forensics import (
     bucket_proportions,
     compute_forensics,
     load_tensor_contributions,
+    synergy_content_digest,
+)
+from mtg_synergy_graph.bench.forensics_history import (
+    DEFAULT_FORENSICS_HISTORY_PATH,
+    append_forensics_run,
+    build_history_row,
+    compute_gem_rate_forensics,
+    edhrec_snapshot_digest,
+    fixture_file_sha256,
 )
 from mtg_synergy_graph.bench.tensor import compute_config_hash
 from mtg_synergy_graph.db import open_db
@@ -755,6 +769,14 @@ def handle_forensics(args: argparse.Namespace) -> int:
 
     Exit 1 is reserved for the main audit's drift verdict and is never
     emitted by this mode.
+
+    On full success ONLY — after reconciliation (inside
+    ``compute_forensics``) and rendering both succeeded — one
+    provenance-stamped row is appended to the forensics history CSV
+    (Unit 5). The append degrades to a stderr warning on write failure
+    (``append_forensics_run``'s contract) and never changes the exit
+    code; an exit-2 path above never reaches it, so a failed run leaves
+    the history file untouched.
     """
     db_path = Path(args.db)
     tags_path = Path(getattr(args, "edhrec_db", "data/tags.db"))
@@ -772,15 +794,27 @@ def handle_forensics(args: argparse.Namespace) -> int:
 
     # Enrichment reads (tensor + port_nodes) on a fresh read-side
     # connection; the DB demonstrably exists (compute_forensics opened
-    # it), so create=False cannot raise here.
+    # it), so create=False cannot raise here. The Unit-5 history-row
+    # inputs (provenance digests + in-run gem rate) are gathered on the
+    # same connections while they're open; the append itself happens
+    # only after rendering succeeds below.
+    config_hash = compute_config_hash()
     conn = open_db(db_path, create=False)
     try:
         data = build_render_data(
             report,
             conn,
-            config_hash=compute_config_hash(),
+            config_hash=config_hash,
             fixture_path=str(fixture_path),
         )
+        synergy_digest = synergy_content_digest(conn)
+        edhrec_conn = sqlite3.connect(tags_path)
+        edhrec_conn.row_factory = sqlite3.Row
+        try:
+            snapshot_digest = edhrec_snapshot_digest(edhrec_conn)
+            gem_rate = compute_gem_rate_forensics(report, edhrec_conn, conn, config_hash)
+        finally:
+            edhrec_conn.close()
     finally:
         conn.close()
 
@@ -799,4 +833,21 @@ def handle_forensics(args: argparse.Namespace) -> int:
             f"bench.py audit --forensics: report written to {output_path}",
             file=sys.stderr,
         )
+
+    # Unit 5: history row, appended only now that reconciliation +
+    # rendering succeeded. Provenance per the verify-from-stored-config
+    # learning: fixture file hash + the config_hash the tensor reads
+    # were filtered by.
+    history_row = build_history_row(
+        report,
+        config_hash=config_hash,
+        fixture_digest=fixture_file_sha256(fixture_path),
+        snapshot_digest=snapshot_digest,
+        synergy_digest=synergy_digest,
+        gem_rate=gem_rate,
+    )
+    append_forensics_run(
+        history_row,
+        path=Path(getattr(args, "forensics_history", DEFAULT_FORENSICS_HISTORY_PATH)),
+    )
     return 0

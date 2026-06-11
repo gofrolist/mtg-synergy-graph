@@ -71,3 +71,7 @@ def per_commander_ndcg_stub(args: argparse.Namespace) -> int:
 
 def forensics_stub(args: argparse.Namespace) -> int:
     _unimplemented("bench.py audit --forensics")
+
+
+def trend_forensics_stub(args: argparse.Namespace) -> int:
+    _unimplemented("bench.py audit --trend forensics")
