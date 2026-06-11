@@ -47,6 +47,15 @@ uv run scripts/build_embeddings.py                                       # Build
 uv run scripts/bench.py audit --embedding-dedup                          # Rule-pair redundancy diagnostic in embedding space
 uv run scripts/bench.py audit --embedding-dedup --threshold 0.90         # Looser threshold for exploration
 
+# Divergence forensics (plan 2026-06-10-001) — read-side standing instrument; classifies every
+# EDHREC-label miss into NEAR_MISS / OUTRANKED / FILTERED / DATA_GAP / NO_RULES buckets via a live
+# production-ranking pass + the persisted tensor. Writes .audit/forensics.md and appends a
+# provenance-stamped row to .audit/forensics_history.csv. Zero scoring-path changes.
+uv run scripts/bench.py audit --forensics                                 # Full per-miss failure taxonomy + metric sidecars + R9 justified-divergence view
+uv run scripts/bench.py audit --forensics --format json                   # Machine-readable report
+uv run scripts/bench.py audit --forensics --ablate-tiebreak               # + one-off EDHREC tiebreaker-credit measurement (bracketed weak/strong keys)
+uv run scripts/bench.py audit --trend forensics                           # History of bucket proportions / NDCG / gem rate with (config, snapshot) boundary markers
+
 # Forge-Second-Oracle pipeline (plan 2026-04-23-002) — design-time only, never at inference.
 # --smoothing-k defaults to 0.0 since 2026-04-24 (ac38957). The build-time and
 # query-time flags must agree or the config-hash check on --vs-forge-oracle rejects the DB.

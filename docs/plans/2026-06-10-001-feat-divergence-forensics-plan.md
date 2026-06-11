@@ -131,7 +131,7 @@ Data flow: `tags.db` (labels, HS sections) + `synergy.db` (live ranking via engi
 
 ## Implementation Units
 
-- [ ] **Unit 1: Forensics core — classification engine and data model**
+- [x] **Unit 1: Forensics core — classification engine and data model**
 
 **Goal:** `bench/forensics.py` with frozen dataclasses (`MissRecord`, `CommanderForensics`, `ForensicsReport`), the name-normalization helper, label/miss-universe loader (tie-closed top-30), the live full-ranking pass, and the five-bucket classifier with sub-tags.
 
@@ -169,7 +169,7 @@ Data flow: `tags.db` (labels, HS sections) + `synergy.db` (live ranking via engi
 
 **Verification:** classifier is deterministic for identical inputs (repeat-run equality test); every synthetic miss classified exactly once.
 
-- [ ] **Unit 2: Metric sidecars — per-commander NDCG, raw DCG, reconciliation assertion**
+- [x] **Unit 2: Metric sidecars — per-commander NDCG, raw DCG, reconciliation assertion**
 
 **Goal:** Compute per-commander NDCG@30 (validate-path labels) and raw DCG@30 from the Unit 1 live rankings; assert the aggregate reconciles with a same-run canonical recompute within 1e-6, failing exit-2 with the first divergent commander named.
 
@@ -195,7 +195,7 @@ Data flow: `tags.db` (labels, HS sections) + `synergy.db` (live ranking via engi
 
 **Verification:** reconciliation assertion demonstrably catches a planted ordering bug (bookkeeping-consistency regression test); the sampled independent-engine check agrees on the chosen commanders (production-faithfulness evidence).
 
-- [ ] **Unit 3: Justified-divergence view (R9)**
+- [x] **Unit 3: Justified-divergence view (R9)**
 
 **Goal:** Per-commander `justified_divergences` count + gate-margin stratification + gate pass-rate + `listed_nonpositive`, using the wider all-sections reference set with the existing plausibility-gate constants.
 
@@ -221,7 +221,7 @@ Data flow: `tags.db` (labels, HS sections) + `synergy.db` (live ranking via engi
 
 **Verification:** R9 outputs derive from Unit 1's live top-30 + tensor contributions + the all-sections label set loaded from the existing tags.db connection; no additional DB connections are opened. Repeat-run equality confirms determinism.
 
-- [ ] **Unit 4: CLI wiring and report rendering**
+- [x] **Unit 4: CLI wiring and report rendering**
 
 **Goal:** `--forensics` mode flag, handler, markdown/JSON renderers, default output `.audit/forensics.md`, leaderboard, OUTRANKED quantile + rule-family breakdown, displacer profiles, NO_RULES port-shape list, golden-set-bubble caveat line.
 
@@ -250,7 +250,7 @@ Data flow: `tags.db` (labels, HS sections) + `synergy.db` (live ranking via engi
 
 **Verification:** running `--forensics` twice on identical inputs produces byte-identical reports.
 
-- [ ] **Unit 5: Forensics history CSV + `--trend forensics`**
+- [x] **Unit 5: Forensics history CSV + `--trend forensics`**
 
 **Goal:** Append-only `.audit/forensics_history.csv` (`ForensicsHistoryRow`: timestamp, commit_sha, config_hash, fixture_sha256, edhrec_snapshot_digest, bucket proportions, aggregate NDCG, raw DCG, `gem_rate_forensics`, n_commanders, n_skipped) and a `--trend forensics` reader with (config_hash, snapshot) boundary markers.
 
@@ -277,7 +277,7 @@ Data flow: `tags.db` (labels, HS sections) + `synergy.db` (live ranking via engi
 
 **Verification:** a history row is written only when the full run succeeded (no row on reconciliation failure).
 
-- [ ] **Unit 6: Tiebreaker ablation (R8, one-off mode)**
+- [x] **Unit 6: Tiebreaker ablation (R8, one-off mode)**
 
 **Goal:** `--forensics --ablate-tiebreak` re-sorts each commander's in-memory full ranking under the weak (`(-score, name)`) and strong (`(-score, cmc, name)`) keys, reports the bracketed NDCG@30 delta range vs the production key, and prints the RULE_HISTORY flag text when the upper bound exceeds 0.01.
 
