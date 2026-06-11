@@ -522,7 +522,9 @@ def render_forensics_markdown(data: ForensicsRenderData) -> str:
     lines.append("|--------|------:|------:|-------------------|")
     for bucket in BUCKETS:
         count = report.aggregate_bucket_counts.get(bucket, 0)
-        share = _fmt_share(proportions[bucket]) if proportions is not None else _EM_DASH
+        # bucket_proportions() already returns percentages (0-100); do not
+        # route through _fmt_share, which expects a 0-1 fraction.
+        share = f"{proportions[bucket]:.1f}%" if proportions is not None else _EM_DASH
         lines.append(f"| {bucket} | {count} | {share} | {_fmt_reason_cell(reason_counts[bucket])} |")
     lines.append("")
 

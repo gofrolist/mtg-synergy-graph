@@ -464,6 +464,38 @@ class TestGateSaturationAnnotation:
         out = render_forensics_markdown(self._render_data_with_pass_rate(justified=1, divergent=2))
         assert GATE_SATURATED_ANNOTATION not in out
 
+    def test_bucket_share_column_is_a_real_percentage(self) -> None:
+        """Regression: bucket_proportions() already returns 0-100 values.
+
+        The share cell must not be scaled by 100 a second time (a 7.1%
+        bucket once rendered as 713.2%).
+        """
+        counts = dict.fromkeys(BUCKETS, 0)
+        counts["NEAR_MISS"] = 1
+        counts["OUTRANKED"] = 3
+        entry = CommanderForensics(
+            commander="General Gee",
+            misses=(),
+            bucket_counts=counts,
+            live_top_30=(),
+            ranking=(),
+        )
+        report = aggregate_forensics([entry])
+        data = ForensicsRenderData(
+            report=report,
+            config_hash="cafebabe0000",
+            fixture_path="fixture.json",
+            enrichments=(),
+            outranked_rank_quantiles=(("61-100", 0), ("101-500", 0), (">500", 0)),
+            outranked_family_contributions=(),
+            aggregate_displacer_shares=(),
+            no_rules_port_shapes=(),
+        )
+        out = render_forensics_markdown(data)
+        assert "| NEAR_MISS | 1 | 25.0% |" in out
+        assert "| OUTRANKED | 3 | 75.0% |" in out
+        assert "2500.0%" not in out
+
 
 # ---------------------------------------------------------------------------
 # CLI wiring — dispatch + mutex group
