@@ -7,7 +7,7 @@ See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
 ## 2026-07-02
 
-### Walker validator config-hash false-failure fixed; two April template blocks re-adjudicated and CONFIRMED
+### Walker validator config-hash false-failure fixed; three April template blocks re-adjudicated and CONFIRMED
 
 The gap_report → scaffold walker had been structurally broken since
 the 2026-06-09 config-hash discipline landed: a freshly-applied rule
@@ -28,11 +28,24 @@ CONFIRMED on merit and auto-reverted:
 - `x_cost_scaler` (impact 115.1): golden NDCG −0.0006
   (0.2461 → 0.2456). Nearly neutral now (April: −0.0021), still a
   regression at zero tolerance.
+- `attacking_axis_feeder` (impact 21.1, `effect.PumpAll[attacking]`,
+  the only blocked signature with existing tier data and a
+  mechanical April failure): passed pytest AND golden this time, but
+  failed broad NDCG — Raph & Leo / Casey Jones / Ith each lost their
+  single top-N hit (0.100 → 0.000). Driven via `_attempt_one(force=True)`
+  directly; the CLI cannot reach a known-bad signature-bearing
+  template (`--template` feeds an empty-qualifier stub, and
+  `_pick_top_proposal` skips known-bad unconditionally).
 
-Walker queue exhaustion is therefore genuine: remaining gap capital
-needs new authoring (axis_feeder tiers for token/tapped/untapped/
-blocking/counters_GE; templates for `needs_template` gaps), not
-re-runs. Details:
+Walker queue exhaustion is therefore genuine, three-for-three on
+merit at three DIFFERENT gates (golden, near-neutral golden, broad).
+The consistent pattern — broad shallow axis rules displace existing
+picks — argues against authoring the remaining low-impact axis_feeder
+tiers (untapped/blocking/counters_GE, ~1-2 fixture commanders each;
+token/tapped/Other are documented intentionally-absent). Remaining
+honest gap capital: `needs_template` shapes, the `--unknowns`
+DATA_GAP vocabulary route, and deeper mechanical understanding per
+`memory/feedback_no_individual_rules.md`. Details:
 docs/solutions/test-failures/walker-validator-config-hash-pins-2026-07-02.md.
 
 ### Portfolio selection (per-family diminishing returns at assembly) — DECLINED at R0 (plan 2026-07-02-004)
