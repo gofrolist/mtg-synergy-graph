@@ -1076,6 +1076,156 @@ class TestFindTribalDensityComplements:
         assert results == []
 
 
+class TestSkiplistTribeStructuredEvidence:
+    """Plan 2026-07-02-002 Unit 2: skiplisted tribes (Human / Warrior /
+    Soldier) need structured-field evidence on the PRIMARY path too.
+
+    The Adeline shape: a Human-subtyped commander whose trigger raw_line
+    carries TriggerDescription prose ("...create a 1/1 white Human
+    creature token...") and whose Token effect makes tokens of her own
+    literal subtype. Neither prose nor own-type token production is a
+    tribal strategy signal for a ~4300-card tribe; only a structured
+    valid_filter / affected_scope reference is."""
+
+    def test_adeline_prose_and_own_type_token_do_not_admit_human(self, conn):
+        _insert_card(
+            conn,
+            "AdelineLike",
+            card_types="Creature",
+            subtypes="Human Knight",
+            types="Legendary Creature",
+        )
+        _insert_card(conn, "Random Human", card_types="Creature", subtypes="Human Soldier")
+        # Attack trigger whose raw_line contains English prose naming
+        # "Human" (TriggerDescription) — the raw_line admission route.
+        _insert_port(
+            conn,
+            "AdelineLike",
+            "trigger",
+            "AttackersDeclared",
+            valid_filter="Card.Self",
+            raw_line=(
+                "{'Mode':'AttackersDeclared','ValidAttackers':'Card.Self',"
+                "'TriggerDescription':'Whenever you attack, for each opponent, "
+                "create a 1/1 white Human creature token'}"
+            ),
+        )
+        # Token effect of her own literal subtype — the Gate 1 route.
+        _insert_port(
+            conn,
+            "AdelineLike",
+            "effect",
+            "Token",
+            raw_line="{'TokenScript': 'w_1_1_human'}",
+        )
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("AdelineLike",)).fetchall()
+        ]
+        results = _find_tribal_density_complements(conn, cmdr_ports, {"AdelineLike"})
+        assert "Random Human" not in _candidates(results), (
+            "prose raw_line + own-type token must not activate a skiplisted tribe"
+        )
+
+    def test_structured_filter_still_admits_skiplisted_tribe(self, conn):
+        """A true Human-tribal commander (valid_filter references Human)
+        keeps the tribe even with own-type tokens in the mix."""
+        _insert_card(
+            conn,
+            "HumanTribalCmdr",
+            card_types="Creature",
+            subtypes="Human Soldier",
+            types="Legendary Creature",
+        )
+        _insert_card(conn, "Random Human", card_types="Creature", subtypes="Human Soldier")
+        _insert_port(
+            conn,
+            "HumanTribalCmdr",
+            "static",
+            "Continuous",
+            valid_filter="",
+            affected_scope="Human.YouCtrl",
+            raw_line="{'Mode':'Continuous','Affected':'Human.YouCtrl','AddPower':'1'}",
+        )
+        _insert_port(
+            conn,
+            "HumanTribalCmdr",
+            "effect",
+            "Token",
+            raw_line="{'TokenScript': 'w_1_1_human'}",
+        )
+
+        cmdr_ports = [
+            dict(r)
+            for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("HumanTribalCmdr",)).fetchall()
+        ]
+        results = _find_tribal_density_complements(conn, cmdr_ports, {"HumanTribalCmdr"})
+        assert "Random Human" in _candidates(results)
+
+    def test_lord_payoff_direction_keeps_skiplisted_tribe(self, conn):
+        """Payoff direction survives: Adeline makes Human tokens, so a
+        Human anthem (lord) is genuine synergy — the overbroad-tribe
+        restriction guards the body direction (tribal_density) only."""
+        _insert_card(
+            conn,
+            "AdelineLike",
+            card_types="Creature",
+            subtypes="Human Knight",
+            types="Legendary Creature",
+        )
+        _insert_card(conn, "Human Anthem", card_types="Creature", subtypes="Human Soldier")
+        _insert_port(
+            conn,
+            "AdelineLike",
+            "effect",
+            "Token",
+            raw_line="{'TokenScript': 'w_1_1_human'}",
+        )
+        # Candidate-side lord static: pumps Humans you control.
+        _insert_port(
+            conn,
+            "Human Anthem",
+            "static",
+            "Continuous",
+            affected_scope="Human.YouCtrl",
+            raw_line="{'Mode':'Continuous','Affected':'Human.YouCtrl','AddPower':'1','AddToughness':'1'}",
+        )
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("AdelineLike",)).fetchall()
+        ]
+        results = _find_lord_complements(conn, cmdr_ports, {"AdelineLike"})
+        assert "Human Anthem" in _candidates(results), (
+            "lord matching must keep the payoff direction for skiplisted tribes"
+        )
+
+    def test_non_skiplisted_own_type_token_still_admitted(self, conn):
+        """Chatterfang shape: Squirrel commander making Squirrel tokens —
+        Gate 1 unchanged for non-skiplisted tribes."""
+        _insert_card(
+            conn,
+            "ChatterfangLike",
+            card_types="Creature",
+            subtypes="Squirrel Warlock",
+            types="Legendary Creature",
+        )
+        _insert_card(conn, "Squirrel Sovereign", card_types="Creature", subtypes="Squirrel")
+        _insert_port(
+            conn,
+            "ChatterfangLike",
+            "effect",
+            "Token",
+            raw_line="{'TokenScript': 'g_1_1_squirrel'}",
+        )
+
+        cmdr_ports = [
+            dict(r)
+            for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("ChatterfangLike",)).fetchall()
+        ]
+        results = _find_tribal_density_complements(conn, cmdr_ports, {"ChatterfangLike"})
+        assert "Squirrel Sovereign" in _candidates(results)
+
+
 # ---------------------------------------------------------------------------
 # _find_scales_with_density
 # ---------------------------------------------------------------------------

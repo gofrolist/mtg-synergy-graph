@@ -828,10 +828,43 @@ _NON_CREATURE_ARCHETYPE_TYPES: frozenset[str] = frozenset({"Artifact", "Enchantm
 _COMPETING_ARCHETYPE_THRESHOLD: int = 2
 
 
+#: Creature subtypes whose tribal pool is too large/weak to activate
+#: without a structured-field reference. Human alone has ~1500-4300
+#: creatures and flattens any top-30 it enters at the flat tribal
+#: weight; Warrior / Soldier are similarly over-represented across
+#: 1000+ commanders' own subtypes without being the EDHREC-recognized
+#: tribal axis. Shared by the primary extraction path below and the
+#: vanilla-anchor fallback in density.py (which imports it from here —
+#: density.py already imports core, so the reverse direction would be
+#: a circular import).
+_VANILLA_TRIBAL_SKIPLIST: frozenset[str] = frozenset({"Human", "Warrior", "Soldier"})
+
+
+def _sub_in_structured_fields(sub: str, cmdr_ports: list[PortRow]) -> bool:
+    """True iff ``sub`` appears in some port's valid_filter/affected_scope.
+
+    Structured fields only — raw_line carries Forge TriggerDescription
+    prose ("...create a 1/1 white Human creature token...") which names
+    tribes without any tribal mechanic behind them.
+    """
+    for p in cmdr_ports:
+        haystack = " ".join(
+            [
+                p.get("valid_filter") or "",
+                p.get("affected_scope") or "",
+            ]
+        )
+        if sub in haystack:
+            return True
+    return False
+
+
 def _commander_subtypes_from_ports(
     conn: sqlite3.Connection,
     commander_set: Sequence[str],
     cmdr_ports: list[PortRow],
+    *,
+    include_overbroad_tribes: bool = False,
 ) -> set[str]:
     """Extract commander subtypes that are mechanically relevant.
 
@@ -840,6 +873,16 @@ def _commander_subtypes_from_ports(
        (same logic as find_lord_matches in graph_engine.py)
     2. Token subtypes from TokenScript (Slimefoot creates Saprolings
        but is literally a Fungus -- the tribal axis is Saproling)
+
+    ``include_overbroad_tribes`` controls the ``_VANILLA_TRIBAL_SKIPLIST``
+    tribes (Human/Warrior/Soldier). Default False: those tribes need a
+    structured valid_filter/affected_scope reference — prose raw_line
+    mentions and own-type token production don't qualify, because the
+    body-direction consumer (tribal_density) would flood a 1500+-card
+    pool. Payoff-direction consumers (lord/anthem matching) pass True:
+    a commander producing Human tokens genuinely wants Human anthems —
+    the payoff targets the commander's own token output, not the
+    tribe's vanilla bodies (plan 2026-07-02-002 Unit 2, Adeline shape).
     """
     rows = conn.execute(
         "SELECT subtypes, types FROM cards WHERE name IN ({})".format(",".join("?" * len(commander_set))),
@@ -853,17 +896,23 @@ def _commander_subtypes_from_ports(
         if r["subtypes"]:
             literal.update(r["subtypes"].split())
 
-    # Keep literal subtypes mentioned in port data
+    # Keep literal subtypes mentioned in port data. Skiplisted tribes
+    # (Human/Warrior/Soldier) only count on structured fields —
+    # raw_line carries TriggerDescription prose that names tribes
+    # ("...create a 1/1 white Human creature token...") with no tribal
+    # mechanic behind them (plan 2026-07-02-002 Unit 2, Adeline shape).
     relevant: set[str] = set()
     for p in cmdr_ports:
-        haystack = " ".join(
+        structured = " ".join(
             [
                 p.get("valid_filter") or "",
                 p.get("affected_scope") or "",
-                str(p.get("raw_line") or ""),
             ]
         )
+        full = structured + " " + str(p.get("raw_line") or "")
         for sub in literal:
+            restrict = sub in _VANILLA_TRIBAL_SKIPLIST and not include_overbroad_tribes
+            haystack = structured if restrict else full
             if sub in haystack:
                 relevant.add(sub)
 
@@ -938,6 +987,15 @@ def _commander_subtypes_from_ports(
             if m:
                 sub = _token_subtype(m.group(1))
                 if not sub:
+                    continue
+                if sub in _VANILLA_TRIBAL_SKIPLIST and not include_overbroad_tribes:
+                    # Skiplisted tribes: own-type token production is
+                    # not a strategy signal at a 1500+-card pool size.
+                    # Only a structured valid_filter/affected_scope
+                    # reference qualifies; skip all later gates either
+                    # way (plan 2026-07-02-002 Unit 2).
+                    if _sub_in_structured_fields(sub, cmdr_ports):
+                        relevant.add(sub)
                     continue
                 # Gate 1: literal subtype match (Krenko IS a Goblin)
                 if sub in literal:

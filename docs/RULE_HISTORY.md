@@ -5,6 +5,36 @@ impact notes. See `scripts/_audit_rule_impact.py` for the per-rule impact
 methodology (NDCG@30 metric + golden-set safety net + CONTENTIOUS verdict).
 See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
+## 2026-07-02
+
+### Tribal skiplist bypass fix — structured evidence for overbroad tribes (SHIPPED, plan 2026-07-02-002 Unit 2)
+
+The `_VANILLA_TRIBAL_SKIPLIST` (Human/Warrior/Soldier) only guarded the
+vanilla-anchor fallback; the primary `_commander_subtypes_from_ports`
+path admitted skiplisted tribes via (a) TriggerDescription prose in
+`raw_line` ("...create a 1/1 white Human creature token...") and (b)
+token Gate 1 (own-type token production). Adeline activated the full
+~1,500-card Human pool at flat 0.5 — her forensics displacer profile was
+93.5% tribal_density.
+
+- **Fix**: skiplisted tribes now require a structured
+  `valid_filter`/`affected_scope` reference on the body direction
+  (`tribal_density`). The payoff direction (`lord` anthem matching)
+  passes `include_overbroad_tribes=True` — Adeline making Human tokens
+  genuinely wants Human anthems (first pass without this restored
+  direction put Adeline at −0.0697 NDCG by dropping Coppercoat
+  Vanguard / General's Enforcer; the flag recovered them).
+- **Skiplist constant** moved density.py → core.py (density imports
+  core; reverse would be circular).
+- **Audit (non-probe gate, plan 2026-07-02-002)**: 100-cmdr aggregate
+  NDCG −0.0003, gem 0.8153→0.8160; 500-cmdr aggregate −0.0001, gem
+  −0.0005, per-commander cliff violations 0 (worst: Adeline −0.0392).
+  Score mass −60.8 on the golden set = the Human/Warrior flood removed
+  (Adeline −41, Yawgmoth −21.5, Rhys −2.5); hi_syn losses 0. Histogram
+  verdict HARMFUL is the expected score-mass reaction; gate asymmetry
+  documented in the plan.
+- Both fixtures re-pinned in the landing commit.
+
 ## 2026-05-20
 
 ### `CopyFaceFrom:<Name>` back-face resolution (LANDED, follow-up #2 to PR #47)

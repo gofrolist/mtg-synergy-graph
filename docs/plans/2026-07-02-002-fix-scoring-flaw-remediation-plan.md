@@ -301,7 +301,7 @@ baseline):
 
 ### Phase 1 — Baseline, bug fix, purity
 
-- [ ] **Unit 1: Baseline hygiene and branch setup**
+- [x] **Unit 1: Baseline hygiene and branch setup** *(done 2026-07-02: tag `pre-scoring-remediation`; NDCG 0.236126; gem 0.8153 std / 0.7160 decontaminated; dual-total divergence 15/100 cmdrs, 46 cards; exploratory sweep skipped — flat keys not in grid until Unit 7)*
 
 **Goal:** Clean baseline to measure every subsequent unit against.
 
@@ -347,7 +347,7 @@ baseline):
 - `--expect-identity` PASS; ~1230 tests green; tag exists; baseline
   numbers recorded and referenced by later units.
 
-- [ ] **Unit 2: A3 — tribal skiplist bypass fix (token-gate scoped)**
+- [x] **Unit 2: A3 — tribal skiplist bypass fix (token-gate scoped)** *(SHIPPED 2026-07-02: cliff 0 violations on 500, agg −0.0003/−0.0001, gem +0.0007/−0.0005; lord payoff direction restored via `include_overbroad_tribes=True` after first pass tripped Adeline −0.0697; both fixtures re-pinned)*
 
 **Goal:** A commander that merely produces tokens of its own literal
 subtype no longer activates an overbroad tribe through the primary

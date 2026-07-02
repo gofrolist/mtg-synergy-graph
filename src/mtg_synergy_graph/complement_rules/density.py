@@ -17,6 +17,7 @@ from ..graph_engine import (
 from .core import (
     _AFFECTED_CLAUSE_RE,
     _VALID_TARGET_CLAUSE_RE,
+    _VANILLA_TRIBAL_SKIPLIST,
     PortComplement,
     PortRow,
     _commander_subtypes_from_ports,
@@ -40,10 +41,15 @@ def _find_lord_complements(
     """Lord matching: candidate static Continuous ports whose affected_scope
     overlaps with commander's mechanically-relevant subtypes.
     """
+    # Payoff direction: lords/anthems targeting the commander's token
+    # output are genuine synergy even for skiplisted tribes (Adeline
+    # makes Human tokens -> Human anthems pump them), so the overbroad-
+    # tribe restriction that guards tribal_density does not apply here.
     cmdr_subtypes = _commander_subtypes_from_ports(
         conn,
         list(cmdr_set),
         cmdr_ports,
+        include_overbroad_tribes=True,
     )
     if not cmdr_subtypes:
         return []
@@ -565,14 +571,6 @@ def _find_spellcast_density_complements(
                 )
 
     return results
-
-
-#: Creature subtypes whose tribal pool is too large/weak to emit at the
-#: vanilla-anchor fallback. Human alone has ~1500 creatures and would
-#: flatten top-30 for any Human-subtyped vanilla anchor. Warrior / Soldier
-#: are similarly over-represented across 1000+ commanders' own subtypes
-#: and aren't the EDHREC-recognized tribal axis.
-_VANILLA_TRIBAL_SKIPLIST: frozenset[str] = frozenset({"Human", "Warrior", "Soldier"})
 
 
 def _vanilla_tribal_subtypes(conn: sqlite3.Connection, commander_set: set[str]) -> set[str]:
