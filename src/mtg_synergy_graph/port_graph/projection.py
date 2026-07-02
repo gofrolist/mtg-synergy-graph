@@ -127,6 +127,14 @@ SELECT
         -- v3: cost.remove_counter is symmetric with trigger.CounterRemoved.
         WHEN port_type = 'cost' AND event_class = 'remove_counter'
             THEN 'COUNTER_REMOVED'
+        -- v4 (plan 2026-07-02-002 Unit 8): phase triggers (upkeep /
+        -- begin-combat / end-step engines). The Execute payload is a
+        -- separate effect port; this classifies the trigger itself.
+        WHEN port_type = 'trigger' AND event_class = 'Phase'
+            THEN 'PHASE'
+        -- v4: Forge bookkeeping chains — no game semantics.
+        WHEN port_type = 'effect' AND event_class = 'Cleanup'
+            THEN 'INTERNAL'
         -- Statics / replacements / scales_with / keyword
         WHEN port_type = 'static' AND event_class = 'Continuous'
             THEN 'STATIC_BUFF'

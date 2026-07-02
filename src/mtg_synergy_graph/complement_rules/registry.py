@@ -766,6 +766,7 @@ CARD_LEVEL_RULES: frozenset[str] = frozenset(
         # Match on the commander's literal subtypes from `cards`, not
         # on any port — Goblin / Zombie / Dragon tribal lord identity.
         "tribal_density",
+        "tribal_body",
         "lord",
         # Aggregate signals (multiple ports + card text features) that
         # don't cleanly map to a single port shape.

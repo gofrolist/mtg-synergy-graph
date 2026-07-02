@@ -1076,6 +1076,295 @@ class TestFindTribalDensityComplements:
         assert results == []
 
 
+class TestSkiplistTribeStructuredEvidence:
+    """Plan 2026-07-02-002 Unit 2: skiplisted tribes (Human / Warrior /
+    Soldier) need structured-field evidence on the PRIMARY path too.
+
+    The Adeline shape: a Human-subtyped commander whose trigger raw_line
+    carries TriggerDescription prose ("...create a 1/1 white Human
+    creature token...") and whose Token effect makes tokens of her own
+    literal subtype. Neither prose nor own-type token production is a
+    tribal strategy signal for a ~4300-card tribe; only a structured
+    valid_filter / affected_scope reference is."""
+
+    def test_adeline_prose_and_own_type_token_do_not_admit_human(self, conn):
+        _insert_card(
+            conn,
+            "AdelineLike",
+            card_types="Creature",
+            subtypes="Human Knight",
+            types="Legendary Creature",
+        )
+        _insert_card(conn, "Random Human", card_types="Creature", subtypes="Human Soldier")
+        # Attack trigger whose raw_line contains English prose naming
+        # "Human" (TriggerDescription) — the raw_line admission route.
+        _insert_port(
+            conn,
+            "AdelineLike",
+            "trigger",
+            "AttackersDeclared",
+            valid_filter="Card.Self",
+            raw_line=(
+                "{'Mode':'AttackersDeclared','ValidAttackers':'Card.Self',"
+                "'TriggerDescription':'Whenever you attack, for each opponent, "
+                "create a 1/1 white Human creature token'}"
+            ),
+        )
+        # Token effect of her own literal subtype — the Gate 1 route.
+        _insert_port(
+            conn,
+            "AdelineLike",
+            "effect",
+            "Token",
+            raw_line="{'TokenScript': 'w_1_1_human'}",
+        )
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("AdelineLike",)).fetchall()
+        ]
+        results = _find_tribal_density_complements(conn, cmdr_ports, {"AdelineLike"})
+        assert "Random Human" not in _candidates(results), (
+            "prose raw_line + own-type token must not activate a skiplisted tribe"
+        )
+
+    def test_structured_filter_still_admits_skiplisted_tribe(self, conn):
+        """A true Human-tribal commander (valid_filter references Human)
+        keeps the tribe even with own-type tokens in the mix."""
+        _insert_card(
+            conn,
+            "HumanTribalCmdr",
+            card_types="Creature",
+            subtypes="Human Soldier",
+            types="Legendary Creature",
+        )
+        _insert_card(conn, "Random Human", card_types="Creature", subtypes="Human Soldier")
+        _insert_port(
+            conn,
+            "HumanTribalCmdr",
+            "static",
+            "Continuous",
+            valid_filter="",
+            affected_scope="Human.YouCtrl",
+            raw_line="{'Mode':'Continuous','Affected':'Human.YouCtrl','AddPower':'1'}",
+        )
+        _insert_port(
+            conn,
+            "HumanTribalCmdr",
+            "effect",
+            "Token",
+            raw_line="{'TokenScript': 'w_1_1_human'}",
+        )
+
+        cmdr_ports = [
+            dict(r)
+            for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("HumanTribalCmdr",)).fetchall()
+        ]
+        results = _find_tribal_density_complements(conn, cmdr_ports, {"HumanTribalCmdr"})
+        assert "Random Human" in _candidates(results)
+
+    def test_lord_payoff_direction_keeps_skiplisted_tribe(self, conn):
+        """Payoff direction survives: Adeline makes Human tokens, so a
+        Human anthem (lord) is genuine synergy — the overbroad-tribe
+        restriction guards the body direction (tribal_density) only."""
+        _insert_card(
+            conn,
+            "AdelineLike",
+            card_types="Creature",
+            subtypes="Human Knight",
+            types="Legendary Creature",
+        )
+        _insert_card(conn, "Human Anthem", card_types="Creature", subtypes="Human Soldier")
+        _insert_port(
+            conn,
+            "AdelineLike",
+            "effect",
+            "Token",
+            raw_line="{'TokenScript': 'w_1_1_human'}",
+        )
+        # Candidate-side lord static: pumps Humans you control.
+        _insert_port(
+            conn,
+            "Human Anthem",
+            "static",
+            "Continuous",
+            affected_scope="Human.YouCtrl",
+            raw_line="{'Mode':'Continuous','Affected':'Human.YouCtrl','AddPower':'1','AddToughness':'1'}",
+        )
+
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("AdelineLike",)).fetchall()
+        ]
+        results = _find_lord_complements(conn, cmdr_ports, {"AdelineLike"})
+        assert "Human Anthem" in _candidates(results), (
+            "lord matching must keep the payoff direction for skiplisted tribes"
+        )
+
+    def test_non_skiplisted_own_type_token_still_admitted(self, conn):
+        """Chatterfang shape: Squirrel commander making Squirrel tokens —
+        Gate 1 unchanged for non-skiplisted tribes."""
+        _insert_card(
+            conn,
+            "ChatterfangLike",
+            card_types="Creature",
+            subtypes="Squirrel Warlock",
+            types="Legendary Creature",
+        )
+        _insert_card(conn, "Squirrel Sovereign", card_types="Creature", subtypes="Squirrel")
+        _insert_port(
+            conn,
+            "ChatterfangLike",
+            "effect",
+            "Token",
+            raw_line="{'TokenScript': 'g_1_1_squirrel'}",
+        )
+
+        cmdr_ports = [
+            dict(r)
+            for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("ChatterfangLike",)).fetchall()
+        ]
+        results = _find_tribal_density_complements(conn, cmdr_ports, {"ChatterfangLike"})
+        assert "Squirrel Sovereign" in _candidates(results)
+
+
+class TestTribalPayoffTier:
+    """Plan 2026-07-02-002 Unit 5: payoff/body two-tier tribal emission
+    behind ``_ENABLE_TRIBAL_PAYOFF_TIER`` (mandated by the Unit 4
+    null result — uniform haircuts cannot separate flood-as-noise from
+    flood-as-archetype; candidate-side payoff evidence can).
+
+    Payoff tier (rule_id ``tribal_density``): a tribe member whose own
+    ports reference the tribe in structured fields (lords-on-bodies,
+    tribal triggers). Body tier (rule_id ``tribal_body``): a mere
+    same-type body, at a materially lower flat weight."""
+
+    def _krenko_world(self, conn):
+        _insert_card(
+            conn,
+            "KrenkoLike",
+            card_types="Creature",
+            subtypes="Goblin Warrior",
+            types="Legendary Creature",
+        )
+        _insert_port(
+            conn,
+            "KrenkoLike",
+            "effect",
+            "Token",
+            raw_line="{'TokenScript': 'r_1_1_goblin'}",
+        )
+        # Payoff: a Goblin whose trigger references Goblins.
+        _insert_card(conn, "Goblin Payoff", card_types="Creature", subtypes="Goblin Shaman")
+        _insert_port(
+            conn,
+            "Goblin Payoff",
+            "trigger",
+            "ChangesZone",
+            valid_filter="Goblin.YouCtrl",
+            raw_line="{'Mode':'ChangesZone','ValidCard':'Goblin.YouCtrl','Destination':'Battlefield'}",
+        )
+        # Body: vanilla Goblin, no ports.
+        _insert_card(conn, "Vanilla Goblin", card_types="Creature", subtypes="Goblin")
+        return [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("KrenkoLike",)).fetchall()
+        ]
+
+    def test_flag_default_is_false(self):
+        import mtg_synergy_graph.complement_rules.density as density_mod
+
+        assert density_mod._ENABLE_TRIBAL_PAYOFF_TIER is False
+
+    def test_flag_off_single_tier(self, conn):
+        """Flag OFF: payoff and body both emit rule_id tribal_density —
+        current behavior, bitwise-inert."""
+        cmdr_ports = self._krenko_world(conn)
+        results = _find_tribal_density_complements(conn, cmdr_ports, {"KrenkoLike"})
+        by_rule = {r.candidate: r.rule_id for r in results}
+        assert by_rule["Goblin Payoff"] == "tribal_density"
+        assert by_rule["Vanilla Goblin"] == "tribal_density"
+
+    def test_flag_on_two_tiers(self, conn):
+        """Flag ON: structured tribal reference -> payoff tier; vanilla
+        body -> tribal_body."""
+        from unittest.mock import patch
+
+        import mtg_synergy_graph.complement_rules.density as density_mod
+
+        cmdr_ports = self._krenko_world(conn)
+        with patch.object(density_mod, "_ENABLE_TRIBAL_PAYOFF_TIER", True):
+            results = _find_tribal_density_complements(conn, cmdr_ports, {"KrenkoLike"})
+        by_rule = {r.candidate: r.rule_id for r in results}
+        assert by_rule["Goblin Payoff"] == "tribal_density"
+        assert by_rule["Vanilla Goblin"] == "tribal_body"
+
+    def test_flag_on_affected_scope_counts_as_payoff(self, conn):
+        """A tribe member granting an anthem via affected_scope is a
+        payoff (lords-on-bodies)."""
+        from unittest.mock import patch
+
+        import mtg_synergy_graph.complement_rules.density as density_mod
+
+        cmdr_ports = self._krenko_world(conn)
+        _insert_card(conn, "Goblin Lordling", card_types="Creature", subtypes="Goblin")
+        _insert_port(
+            conn,
+            "Goblin Lordling",
+            "static",
+            "Continuous",
+            affected_scope="Goblin.YouCtrl",
+            raw_line="{'Mode':'Continuous','Affected':'Goblin.YouCtrl','AddPower':'1'}",
+        )
+        with patch.object(density_mod, "_ENABLE_TRIBAL_PAYOFF_TIER", True):
+            results = _find_tribal_density_complements(conn, cmdr_ports, {"KrenkoLike"})
+        by_rule = {r.candidate: r.rule_id for r in results}
+        assert by_rule["Goblin Lordling"] == "tribal_density"
+
+    def test_vanilla_anchor_exemption_keeps_bodies_tier1(self, conn):
+        """Keywords-only vanilla anchor (Rograkh shape): the fallback's
+        rationale is 'the deck IS the tribe' — bodies stay tier-1."""
+        from unittest.mock import patch
+
+        import mtg_synergy_graph.complement_rules.density as density_mod
+
+        _insert_card(
+            conn,
+            "RograkhLike",
+            card_types="Creature",
+            subtypes="Kobold Warrior",
+            types="Legendary Creature",
+        )
+        _insert_port(conn, "RograkhLike", "keyword", "Menace")
+        _insert_card(conn, "Vanilla Kobold", card_types="Creature", subtypes="Kobold")
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("RograkhLike",)).fetchall()
+        ]
+        with patch.object(density_mod, "_ENABLE_TRIBAL_PAYOFF_TIER", True):
+            results = _find_tribal_density_complements(conn, cmdr_ports, {"RograkhLike"})
+        by_rule = {r.candidate: r.rule_id for r in results}
+        assert by_rule["Vanilla Kobold"] == "tribal_density"
+
+    def test_flag_on_unrelated_ports_stay_body(self, conn):
+        """A tribe member with ports that never reference the tribe is
+        still a body (having ports is not payoff evidence)."""
+        from unittest.mock import patch
+
+        import mtg_synergy_graph.complement_rules.density as density_mod
+
+        cmdr_ports = self._krenko_world(conn)
+        _insert_card(conn, "Goblin Cantrip", card_types="Creature", subtypes="Goblin")
+        _insert_port(
+            conn,
+            "Goblin Cantrip",
+            "trigger",
+            "ChangesZone",
+            valid_filter="Card.Self",
+            raw_line="{'Mode':'ChangesZone','ValidCard':'Card.Self','Destination':'Battlefield'}",
+        )
+        with patch.object(density_mod, "_ENABLE_TRIBAL_PAYOFF_TIER", True):
+            results = _find_tribal_density_complements(conn, cmdr_ports, {"KrenkoLike"})
+        by_rule = {r.candidate: r.rule_id for r in results}
+        assert by_rule["Goblin Cantrip"] == "tribal_body"
+
+
 # ---------------------------------------------------------------------------
 # _find_scales_with_density
 # ---------------------------------------------------------------------------

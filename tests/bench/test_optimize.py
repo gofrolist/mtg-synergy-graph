@@ -767,8 +767,13 @@ class TestRunOptimizerControlLogic:
         assert result.n_iterations == 1
         assert result.n_steps_accepted == 0
         assert not result.partial_sweep
-        # Final weights == baseline (nothing accepted).
-        assert dict(result.final_weights) == patched_baseline_weights
+        # Final weights == baseline (nothing accepted). Unit 7 adds the
+        # real flat rules at 1.0 to the sweepable set — strip them for
+        # the comparison against the synthetic baseline.
+        from mtg_synergy_graph.universal_scorer import _FLAT_COUNT_RULES
+
+        final_nonflat = {k: v for k, v in result.final_weights.items() if k not in _FLAT_COUNT_RULES}
+        assert final_nonflat == patched_baseline_weights
 
     def test_sweep_cap_honored(
         self,
@@ -870,7 +875,12 @@ class TestRunOptimizerControlLogic:
 
         config = OptimizerConfig(run_self_test=False, max_sweeps=1)
         result = run_optimizer(*fake_conns, ["a", "b", "c", "d", "e"], config=config)
-        assert set(result.dead_keys) == {"beta_rule", "gamma_rule"}
+        # Unit 7: real flat rules are auto-added to the sweepable key
+        # set at 1.0; with no firings in this synthetic fixture they
+        # are correctly detected as dead alongside the fake rules.
+        from mtg_synergy_graph.universal_scorer import _FLAT_COUNT_RULES
+
+        assert set(result.dead_keys) == {"beta_rule", "gamma_rule"} | set(_FLAT_COUNT_RULES)
 
     def test_run_self_test_false_skips(
         self,
@@ -994,7 +1004,10 @@ class TestRunOptimizerControlLogic:
         result = run_optimizer(*fake_conns, [*train_names, held_name], config=config)
 
         # After revert: weights match baseline, no accepts survive.
-        assert dict(result.final_weights) == patched_baseline_weights, (
+        from mtg_synergy_graph.universal_scorer import _FLAT_COUNT_RULES
+
+        final_nonflat = {k: v for k, v in result.final_weights.items() if k not in _FLAT_COUNT_RULES}
+        assert final_nonflat == patched_baseline_weights, (
             "Drift revert must restore baseline_weights, not just sweep_start_weights"
         )
         assert result.n_steps_accepted == 0, "Every prior accept must be marked reverted"

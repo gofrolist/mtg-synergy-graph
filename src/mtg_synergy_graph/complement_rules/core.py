@@ -484,23 +484,74 @@ def _changezone_type_set(valid_filter: str | None) -> frozenset[str] | None:
     return frozenset(types) if types else None
 
 
+def _zone_equivalence_map() -> dict[tuple[str, str], str]:
+    """(origin, destination) → equivalence-class name from seed data.
+
+    Loaded from ``event_match_seed.json``'s ``zone_equivalence_classes``
+    section (plan 2026-07-02-002 Unit 9) and cached on first use.
+    Classes are DATA, not code branches, so future edits stay
+    re-pin-disciplined: the section is folded into
+    ``event_match_seed_digest`` in ``get_scoring_config_inputs``.
+    Malformed rows raise at load, mirroring the interpreter's seed
+    drift-check behavior.
+    """
+    global _ZONE_EQUIVALENCE_CACHE
+    if _ZONE_EQUIVALENCE_CACHE is not None:
+        return _ZONE_EQUIVALENCE_CACHE
+    import json as _json
+
+    from ..port_graph._paths import default_seed_path
+
+    data = _json.loads(default_seed_path("event_match_seed.json").read_text(encoding="utf-8"))
+    mapping: dict[tuple[str, str], str] = {}
+    for row in data.get("zone_equivalence_classes", []):
+        cls = row.get("class")
+        origins = row.get("origins")
+        dest = row.get("destination")
+        if not cls or not isinstance(origins, list) or not origins or not dest:
+            raise ValueError(f"malformed zone_equivalence_classes row in event_match_seed.json: {row!r}")
+        for origin in origins:
+            key = (str(origin), str(dest))
+            if key in mapping:
+                raise ValueError(f"zone pair {key} appears in multiple equivalence classes")
+            mapping[key] = str(cls)
+    _ZONE_EQUIVALENCE_CACHE = mapping
+    return mapping
+
+
+_ZONE_EQUIVALENCE_CACHE: dict[tuple[str, str], str] | None = None
+
+
 def _changezone_resonance_check(cmdr: PortRow, cand: PortRow) -> bool:
     """Two ``ChangeZone`` effects resonate iff they move cards between
-    the same zones AND their card-type families overlap.
+    the same zones — or zones in the same seed-data equivalence class —
+    AND their card-type families overlap.
 
     Canonical pair: Meren (Creature.YouOwn, Graveyard→Battlefield) ×
     Karmic Guide (Creature.YouCtrl, same zones) → both fire "creature
-    from graveyard to battlefield" effects. Disallows Meren × Lord
-    Windgrace (Land) — disjoint types — and Meren × Eternal Witness
-    (Graveyard→Hand) — different destination. Runtime-bound filters
-    (Tergrid's ``TriggeredCard``, Marchesa's
-    ``DelayTriggerRememberedLKI``) return ``None`` from the type
-    extractor and are silently excluded.
+    from graveyard to battlefield" effects. Since plan 2026-07-02-002
+    Unit 9, Meren also resonates with Exile→Battlefield recursion
+    (``recur_to_battlefield`` class) while Meren × Eternal Witness
+    (Graveyard→Hand, ``retrieve_to_hand`` class) stays excluded —
+    retrieval is not reanimation. Zone pairs outside every class keep
+    exact-equality semantics. Disallows Meren × Lord Windgrace (Land)
+    — disjoint types. Runtime-bound filters (Tergrid's
+    ``TriggeredCard``, Marchesa's ``DelayTriggerRememberedLKI``)
+    return ``None`` from the type extractor and are silently excluded.
     """
-    if (cmdr.get("zone_origin") or "").strip() != (cand.get("zone_origin") or "").strip():
-        return False
-    if (cmdr.get("zone_destination") or "").strip() != (cand.get("zone_destination") or "").strip():
-        return False
+    cmdr_zone = (
+        (cmdr.get("zone_origin") or "").strip(),
+        (cmdr.get("zone_destination") or "").strip(),
+    )
+    cand_zone = (
+        (cand.get("zone_origin") or "").strip(),
+        (cand.get("zone_destination") or "").strip(),
+    )
+    if cmdr_zone != cand_zone:
+        zmap = _zone_equivalence_map()
+        cmdr_cls = zmap.get(cmdr_zone)
+        if cmdr_cls is None or cmdr_cls != zmap.get(cand_zone):
+            return False
     cmdr_types = _changezone_type_set(cmdr.get("valid_filter"))
     cand_types = _changezone_type_set(cand.get("valid_filter"))
     if cmdr_types is None or cand_types is None:
@@ -828,10 +879,43 @@ _NON_CREATURE_ARCHETYPE_TYPES: frozenset[str] = frozenset({"Artifact", "Enchantm
 _COMPETING_ARCHETYPE_THRESHOLD: int = 2
 
 
+#: Creature subtypes whose tribal pool is too large/weak to activate
+#: without a structured-field reference. Human alone has ~1500-4300
+#: creatures and flattens any top-30 it enters at the flat tribal
+#: weight; Warrior / Soldier are similarly over-represented across
+#: 1000+ commanders' own subtypes without being the EDHREC-recognized
+#: tribal axis. Shared by the primary extraction path below and the
+#: vanilla-anchor fallback in density.py (which imports it from here —
+#: density.py already imports core, so the reverse direction would be
+#: a circular import).
+_VANILLA_TRIBAL_SKIPLIST: frozenset[str] = frozenset({"Human", "Warrior", "Soldier"})
+
+
+def _sub_in_structured_fields(sub: str, cmdr_ports: list[PortRow]) -> bool:
+    """True iff ``sub`` appears in some port's valid_filter/affected_scope.
+
+    Structured fields only — raw_line carries Forge TriggerDescription
+    prose ("...create a 1/1 white Human creature token...") which names
+    tribes without any tribal mechanic behind them.
+    """
+    for p in cmdr_ports:
+        haystack = " ".join(
+            [
+                p.get("valid_filter") or "",
+                p.get("affected_scope") or "",
+            ]
+        )
+        if sub in haystack:
+            return True
+    return False
+
+
 def _commander_subtypes_from_ports(
     conn: sqlite3.Connection,
     commander_set: Sequence[str],
     cmdr_ports: list[PortRow],
+    *,
+    include_overbroad_tribes: bool = False,
 ) -> set[str]:
     """Extract commander subtypes that are mechanically relevant.
 
@@ -840,6 +924,16 @@ def _commander_subtypes_from_ports(
        (same logic as find_lord_matches in graph_engine.py)
     2. Token subtypes from TokenScript (Slimefoot creates Saprolings
        but is literally a Fungus -- the tribal axis is Saproling)
+
+    ``include_overbroad_tribes`` controls the ``_VANILLA_TRIBAL_SKIPLIST``
+    tribes (Human/Warrior/Soldier). Default False: those tribes need a
+    structured valid_filter/affected_scope reference — prose raw_line
+    mentions and own-type token production don't qualify, because the
+    body-direction consumer (tribal_density) would flood a 1500+-card
+    pool. Payoff-direction consumers (lord/anthem matching) pass True:
+    a commander producing Human tokens genuinely wants Human anthems —
+    the payoff targets the commander's own token output, not the
+    tribe's vanilla bodies (plan 2026-07-02-002 Unit 2, Adeline shape).
     """
     rows = conn.execute(
         "SELECT subtypes, types FROM cards WHERE name IN ({})".format(",".join("?" * len(commander_set))),
@@ -853,17 +947,23 @@ def _commander_subtypes_from_ports(
         if r["subtypes"]:
             literal.update(r["subtypes"].split())
 
-    # Keep literal subtypes mentioned in port data
+    # Keep literal subtypes mentioned in port data. Skiplisted tribes
+    # (Human/Warrior/Soldier) only count on structured fields —
+    # raw_line carries TriggerDescription prose that names tribes
+    # ("...create a 1/1 white Human creature token...") with no tribal
+    # mechanic behind them (plan 2026-07-02-002 Unit 2, Adeline shape).
     relevant: set[str] = set()
     for p in cmdr_ports:
-        haystack = " ".join(
+        structured = " ".join(
             [
                 p.get("valid_filter") or "",
                 p.get("affected_scope") or "",
-                str(p.get("raw_line") or ""),
             ]
         )
+        full = structured + " " + str(p.get("raw_line") or "")
         for sub in literal:
+            restrict = sub in _VANILLA_TRIBAL_SKIPLIST and not include_overbroad_tribes
+            haystack = structured if restrict else full
             if sub in haystack:
                 relevant.add(sub)
 
@@ -938,6 +1038,15 @@ def _commander_subtypes_from_ports(
             if m:
                 sub = _token_subtype(m.group(1))
                 if not sub:
+                    continue
+                if sub in _VANILLA_TRIBAL_SKIPLIST and not include_overbroad_tribes:
+                    # Skiplisted tribes: own-type token production is
+                    # not a strategy signal at a 1500+-card pool size.
+                    # Only a structured valid_filter/affected_scope
+                    # reference qualifies; skip all later gates either
+                    # way (plan 2026-07-02-002 Unit 2).
+                    if _sub_in_structured_fields(sub, cmdr_ports):
+                        relevant.add(sub)
                     continue
                 # Gate 1: literal subtype match (Krenko IS a Goblin)
                 if sub in literal:

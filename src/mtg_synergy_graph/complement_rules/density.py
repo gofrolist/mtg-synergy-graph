@@ -17,6 +17,7 @@ from ..graph_engine import (
 from .core import (
     _AFFECTED_CLAUSE_RE,
     _VALID_TARGET_CLAUSE_RE,
+    _VANILLA_TRIBAL_SKIPLIST,
     PortComplement,
     PortRow,
     _commander_subtypes_from_ports,
@@ -40,10 +41,15 @@ def _find_lord_complements(
     """Lord matching: candidate static Continuous ports whose affected_scope
     overlaps with commander's mechanically-relevant subtypes.
     """
+    # Payoff direction: lords/anthems targeting the commander's token
+    # output are genuine synergy even for skiplisted tribes (Adeline
+    # makes Human tokens -> Human anthems pump them), so the overbroad-
+    # tribe restriction that guards tribal_density does not apply here.
     cmdr_subtypes = _commander_subtypes_from_ports(
         conn,
         list(cmdr_set),
         cmdr_ports,
+        include_overbroad_tribes=True,
     )
     if not cmdr_subtypes:
         return []
@@ -567,12 +573,32 @@ def _find_spellcast_density_complements(
     return results
 
 
-#: Creature subtypes whose tribal pool is too large/weak to emit at the
-#: vanilla-anchor fallback. Human alone has ~1500 creatures and would
-#: flatten top-30 for any Human-subtyped vanilla anchor. Warrior / Soldier
-#: are similarly over-represented across 1000+ commanders' own subtypes
-#: and aren't the EDHREC-recognized tribal axis.
-_VANILLA_TRIBAL_SKIPLIST: frozenset[str] = frozenset({"Human", "Warrior", "Soldier"})
+#: Plan 2026-07-02-002 Unit 5: payoff/body two-tier tribal emission.
+#: When False (module default), every tribe member emits rule_id
+#: ``tribal_density`` at the single flat weight — bitwise-inert legacy
+#: behavior. When True, tribe members whose own ports reference the
+#: tribe in structured fields (valid_filter/affected_scope: tribal
+#: triggers, lords-on-bodies) keep ``tribal_density``; mere same-type
+#: bodies emit ``tribal_body`` at a materially lower flat weight.
+#: Mandated by the Unit 4 null result: uniform within-family haircuts
+#: cannot separate flood-as-noise from flood-as-archetype — the
+#: payoff/body distinction is candidate-side evidence that can.
+_ENABLE_TRIBAL_PAYOFF_TIER: bool = False
+
+
+def _tribal_payoff_names(conn: sqlite3.Connection, sub: str) -> set[str]:
+    """Card names whose ports reference ``sub`` in structured fields.
+
+    Structured fields only (valid_filter / affected_scope) — raw_line
+    prose would re-admit TriggerDescription noise (the Unit 2 lesson).
+    """
+    pat = f"%{_escape_like(sub)}%"
+    cur = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE valid_filter LIKE ? ESCAPE '\\' OR affected_scope LIKE ? ESCAPE '\\'",
+        (pat, pat),
+    )
+    return {r["card_name"] for r in cur.fetchall()}
 
 
 def _vanilla_tribal_subtypes(conn: sqlite3.Connection, commander_set: set[str]) -> set[str]:
@@ -658,15 +684,26 @@ def _find_tribal_density_complements(
         if pt == "static" and "'Conspire'" in raw:
             return []
 
+    vanilla_fallback = False
     subtypes = _commander_subtypes_from_ports(conn, list(cmdr_set), cmdr_ports)
     if not subtypes:
         subtypes = _vanilla_tribal_subtypes(conn, cmdr_set)
+        vanilla_fallback = True
     if not subtypes:
         return []
 
     results: list[PortComplement] = []
     seen: set[str] = set()
     for sub in subtypes:
+        # Body-tier exemption (Unit 5 sweep evidence): vanilla-anchor
+        # tribes stay tier-1 — for keywords-only commanders the
+        # fallback's documented rationale is "the deck IS the tribe"
+        # (Rograkh's Kobolds). A broader fuel-tribe exemption
+        # (commander filter references the tribe) was measured and
+        # rejected: it gutted the payoff-surfacing wins (Marrow-Gnawer
+        # +0.2544 -> 0.0) to fix fewer cliffs than it cost.
+        tier_active = _ENABLE_TRIBAL_PAYOFF_TIER and not vanilla_fallback
+        payoffs = _tribal_payoff_names(conn, sub) if tier_active else None
         cur = conn.execute(
             "SELECT name FROM cards WHERE subtypes LIKE ? AND card_types LIKE '%Creature%'",
             (f"%{sub}%",),
@@ -675,9 +712,12 @@ def _find_tribal_density_complements(
             name = r["name"]
             if name not in cmdr_set and name not in seen:
                 seen.add(name)
+                rule_id = "tribal_density"
+                if payoffs is not None and name not in payoffs:
+                    rule_id = "tribal_body"
                 results.append(
                     PortComplement(
-                        rule_id="tribal_density",
+                        rule_id=rule_id,
                         direction="synergy",
                         candidate=name,
                         cmdr_event="tribal",

@@ -392,3 +392,103 @@ def _find_edict_feeders(
             )
 
     return results
+
+
+#: Creature-token scripts carry a P/T segment (``w_1_1_human``,
+#: ``c_0_1_a_thopter``); Treasure/Food/Clue scripts do not. Gate for
+#: anthem_payoff's commander-side token-production check.
+_CREATURE_TOKEN_PT_RE = re.compile(r"_\d+_\d+")
+
+_TOKENSCRIPT_RE = re.compile(r"'TokenScript':\s*'([^']+)'")
+
+#: Buff keys an anthem must add for the payoff to be real; a negative
+#: value (drawback statics) disqualifies the port.
+_ANTHEM_BUFF_KEYS: tuple[str, ...] = ("'AddPower'", "'AddToughness'", "'AddKeyword'")
+
+
+def _commander_makes_creature_tokens(cmdr_ports: list[PortRow]) -> bool:
+    """True iff some effect.Token port produces a creature token."""
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "effect":
+            continue
+        if (p.get("event_class") or "").strip() != "Token":
+            continue
+        m = _TOKENSCRIPT_RE.search(str(p.get("raw_line") or ""))
+        if m and _CREATURE_TOKEN_PT_RE.search(m.group(1)):
+            return True
+    return False
+
+
+def _find_anthem_payoffs(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Type-scoped anthems for creature-token producers.
+
+    Plan 2026-07-02-002 Unit 10: the lord rule only matches statics
+    whose affected_scope names a SUBTYPE the commander references —
+    global anthems (``Creature.YouCtrl`` Cathars'-Crusade shapes) were
+    part of the 159-card static.Continuous NO_RULES block. Gated the
+    way axis-feeders are: the commander must provably supply the axis
+    (creature-token production), so this does not become a new
+    flat-noise family (the ward_2_tribal lesson). IDF-weighted, keyed
+    per affected-scope shape so specificity has real granularity.
+
+    Tribal-scoped anthems (``Goblin.YouCtrl``) stay lord's territory —
+    the base must be the Creature TYPE here, which also prevents
+    double counting between the two rules.
+    """
+    if not _commander_makes_creature_tokens(cmdr_ports):
+        return []
+
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+    cur = conn.execute(
+        "SELECT card_name, affected_scope, raw_line, branch_kind FROM card_ports "
+        "WHERE port_type = 'static' AND event_class = 'Continuous' "
+        "AND affected_scope IS NOT NULL AND affected_scope != ''"
+    )
+    for row in cur.fetchall():
+        name = row["card_name"]
+        if name in cmdr_set or name in seen:
+            continue
+        raw = str(row["raw_line"] or "")
+        if not any(k in raw for k in _ANTHEM_BUFF_KEYS):
+            continue
+        # Drawback statics pump negatively — not a payoff.
+        if re.search(r"'Add(?:Power|Toughness)':\s*'-", raw):
+            continue
+        scope = row["affected_scope"] or ""
+        matched_alt: str | None = None
+        for alt in scope.split(","):
+            alt = alt.strip()
+            base = alt.split(".")[0].split("+")[0].strip()
+            if base != "Creature":
+                continue
+            # Own-board anthems only: an anthem for opponents'
+            # creatures (or one with no controller scope at all,
+            # which pumps every board equally) is not a payoff.
+            if "YouCtrl" not in alt:
+                continue
+            matched_alt = alt
+            break
+        if matched_alt is None:
+            continue
+        seen.add(name)
+        # Coarse two-value key: full scope strings fragment into
+        # tiny-N IDF keys that saturate toward weight 1.0 (the
+        # high-cardinality granularity trap) — first measurement
+        # flooded 35 cliffs (Krenko -0.357) exactly that way.
+        cand_event = "token_anthem" if ".token" in matched_alt else "creature_anthem"
+        results.append(
+            PortComplement(
+                rule_id="anthem_payoff",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="token_go_wide",
+                cand_event=cand_event,
+                branch_kind=row["branch_kind"] or "root",
+            )
+        )
+    return results

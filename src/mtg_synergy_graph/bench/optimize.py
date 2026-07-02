@@ -361,10 +361,19 @@ def _fast_total_and_contribs(
           deduped exactly once. Zero-net entries are NOT dropped here —
           the caller filters them when assembling the contributions tuple.
     """
+    # Mirror of to_legacy_buckets' flag-gated concentration dampening
+    # (plan 2026-07-02-002 Unit 4) — the fused total must track the
+    # production total exactly or the fidelity invariant breaks when
+    # the flag is on. Module-attribute read so mock-patch works.
+    from mtg_synergy_graph import universal_scorer as _uscorer
+
+    concave = _uscorer._ENABLE_CONCAVE_FAMILY_AGG
     total = 0.0
     seen: set[tuple[str, str, str, str, str]] = set()
     distinct_rules: set[str] = set()
     per_rule: dict[str, float] = {}
+    syn = 0.0
+    syn_by_rule: dict[str, float] = {}
     idf_weights = score_obj.idf_weights
     for c in score_obj.complements:
         key = (c.rule_id, c.cmdr_event, c.cand_event, c.filter_group, c.direction)
@@ -379,6 +388,13 @@ def _fast_total_and_contribs(
             total += weight
             distinct_rules.add(c.rule_id)
             per_rule[c.rule_id] = per_rule.get(c.rule_id, 0.0) + weight
+            if concave:
+                syn += weight
+                syn_by_rule[c.rule_id] = syn_by_rule.get(c.rule_id, 0.0) + weight
+    if concave:
+        factor = _uscorer._syn_concentration_factor(syn_by_rule, syn)
+        if factor != 1.0:
+            total -= (1.0 - factor) * syn
 
     total += score_obj.staple_bonus
     n_rules = len(distinct_rules)
@@ -999,6 +1015,17 @@ def run_optimizer(
     start_time = clock()
 
     baseline_weights = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
+    # Plan 2026-07-02-002 Unit 7: flat rules are sweepable as multiplier
+    # keys — _idf_weights_from_basis applies the per-rule multiplier to
+    # flat values too (exact while pool scaling is off). Absent entries
+    # default to 1.0; proposals for these keys land as ordinary
+    # rule_quality_multiplier entries for human review. Note for
+    # reviewers: the optimizer objective blends NDCG-vs-EDHREC with the
+    # (B3-contaminated) gem rate — proposals that push flat-rule
+    # multipliers UP need forensics-secondary justification, not just
+    # objective improvement (see calibration-track null result).
+    for flat_rule in sorted(universal_scorer._FLAT_COUNT_RULES):
+        baseline_weights.setdefault(flat_rule, 1.0)
 
     # Build the commander-independent candidate cache ONCE per run. Without this,
     # every grid-cell evaluation re-issues `SELECT name, cmc, edhrec_rank FROM

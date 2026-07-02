@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -48,6 +49,28 @@ def _prepin(conn_path: Path, fixture_path: Path, commanders: list[str]) -> None:
         build_fixture(conn, commanders).write(fixture_path)
     finally:
         conn.close()
+
+
+def _make_edhrec_db(path: Path) -> Path:
+    """Minimal EDHREC DB so --repin's pre-flight probe passes.
+
+    Since plan 2026-07-02-003 Unit 1, --repin validates the EDHREC DB
+    before scoring; tests must pass an explicit tmp-path DB instead of
+    silently hitting the developer's local data/tags.db (absent in CI).
+    """
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            "CREATE TABLE edhrec_card_synergy (commander_slug TEXT, card_name TEXT, section TEXT, synergy REAL)"
+        )
+        conn.execute(
+            "INSERT INTO edhrec_card_synergy (commander_slug, card_name, section, synergy) VALUES (?, ?, ?, ?)",
+            ("test-commander", "Token Maker", "High Synergy Cards", 0.5),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return path
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +154,8 @@ def test_repin_with_yes_writes_fresh_fixture(
             str(seeded_db_path),
             "--fixture",
             str(fixture_path),
+            "--edhrec-db",
+            str(_make_edhrec_db(tmp_path / "tags.db")),
         ]
     )
     assert exit_code == 0

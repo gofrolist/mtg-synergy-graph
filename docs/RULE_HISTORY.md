@@ -5,6 +5,153 @@ impact notes. See `scripts/_audit_rule_impact.py` for the per-rule impact
 methodology (NDCG@30 metric + golden-set safety net + CONTENTIOUS verdict).
 See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
+## 2026-07-02
+
+### C1 lift-normalization probe — DECLINED at the R0 kill-test (plan 2026-07-02-003)
+
+The baseline-subtraction axis (`score − λ·panel_mean`, ideation #4) is
+measured closed at the designed cheap exit — Units 3–7 never ran, no
+scoring-path change. Offline NDCG@30 simulation over all 100 golden-set
+commanders: every λ in {0.25, 0.5, 0.75, 1.0} degrades the aggregate
+(−0.0136 to −0.0287) with 14–23 per-commander cliffs < −0.05
+concentrated on the flood-as-archetype population (Bruvac −0.18, Kess
+−0.17, Edgar −0.13 at λ=0.25). z-score fallback: −0.1115 aggregate, 65
+cliffs. Root cause: flood displacers are mechanically NARROW (low
+panel_mean), displaced labels are broadly good (high panel_mean) — the
+subtraction points the wrong way on the exact population it was funded
+to fix. Full readouts + the wrong-way mechanism:
+docs/solutions/best-practices/lift-normalization-kill-test-null-result-2026-07-02.md.
+OUTRANKED lever re-points to the role/quota portfolio sibling
+(list-composition, not pointwise scoring).
+
+**R9 rider SHIPPED (Unit 1, commit 92fba39):** `--repin` now passes
+`edhrec_conn` into `build_fixture` with a pre-flight
+`edhrec_card_synergy` probe (exit 2, no fixture write, on
+missing/corrupt EDHREC DB). Closes the measurement bug logged in the
+plan-002 wrap-up below. Both fixtures re-pinned with fresh gem values
+at config 34a9d110: 100-cmdr gem coverage 0/100 → 100/100 (agg
+0.8160), 500-cmdr regenerated (agg 0.7123; one stale value found:
+Adeline 0.8 → 0.8667). Tag `pre-lift-normalization` is the cycle
+baseline ledger and re-bases all plan-002-era gem figures.
+
+### Plan 2026-07-02-002 wrap-up — end state + measurement bug found
+
+End state (vs `pre-scoring-remediation` tag): NDCG 0.2361 → 0.2336
+(forensics canonical); OUTRANKED 46.2% → 45.6%; NO_RULES 41.5% → 43.0%
+(share shifts as OUTRANKED shrinks); DATA_GAP 5.0% → 4.2% (unknown_ports
+115 → 95, vocab v4); dual-total divergence 15/100 cmdrs → 8/100.
+Shipped: Unit 2 tribal-flood fix, Unit 7 optimizer flat exposure,
+Unit 8 vocab v4, Unit 9 zone classes. Declined with evidence: Units 4,
+6, 10 (+ Unit 5 INVESTIGATE) — see
+calibration-track-null-result-2026-07-02.md; escalation to the C1
+lift-normalization cycle fired.
+
+**Measurement bug (open, C1-cycle input):** `handle_repin`
+(bench/handlers.py:59) calls `build_fixture` WITHOUT `edhrec_conn`, so
+every `--repin --yes` carries the PREVIOUS pin's gem legacy forward —
+the 100-cmdr audit gem line has echoed a stale pre-plan value
+(`Δ —`) all along. The 500-cmdr batteries computed live gem with real
+Δs against a constant stale base, so all plan gate decisions remain
+valid (relative comparisons). Fix when plumbing the C1 cycle: pass
+`edhrec_conn` in handle_repin (the :739 comment already anticipates
+it), then re-pin to refresh gem legacy. A scratch sidecar recomputation
+from tensor rows read 0.49 on the 100-cmdr set vs the canonical live
+0.71 on the 500 — unreconciled; treat tensor-derived gem recomputations
+as unverified until the repin plumbing lands.
+
+### anthem_payoff probe — DECLINED, helper retained for the C1 cycle (plan 2026-07-02-002 Unit 10)
+
+Type-scoped anthems (Creature.YouCtrl AddPower/AddToughness/AddKeyword
+statics) for creature-token producers — the global-anthem slice of the
+159-card static.Continuous NO_RULES block. Quality Gates A/B PASS (288
+target commanders, coverage 6.0, CV 0.117). Three variants measured on
+the 500-cmdr fixture: full-scope IDF keys flooded (35 cliffs, Krenko
+−0.357 — the high-cardinality granularity trap); coarse two-key
+granularity reached mean −0.0001 / gem +0.0192 / Krenko +0.053 with 2
+cliffs; multiplier 0.6 fixed Jan Jansen but worsened Myrel to −0.1266
+(Soldier archetype × Unit-2 skiplist interplay). Fourth appearance of
+the flood-vs-archetype displacement pattern (see
+calibration-track-null-result-2026-07-02.md) — the weight layer cannot
+place even a well-formed support family safely. Unwired; the
+`_find_anthem_payoffs` helper + tests stay for the C1 cycle to re-wire
+behind the lift baseline.
+
+### Vocabulary v4 — PHASE + INTERNAL classification; unwrapping deferred with evidence (plan 2026-07-02-002 Unit 8)
+
+`trigger.Phase` (2,305 rows) and `effect.Cleanup` (2,759 rows) leave
+UNKNOWN; distinct UNKNOWN-shaped cards 15,338 → 13,777. Embeddings
+rebuilt under vocab v4; zero scoring impact (identity PASS).
+Investigation findings: Phase triggers' Execute payloads were already
+extracted as separate effect ports, so no event-map expansion is
+needed at the trigger level; the REAL coverage gap is the
+granted-ability / wrapper family — `effect.Effect` SVar wrappers and
+`AddAbility` statics (Phenax's mill lives inside a Continuous static
+granting "T: target player mills X" and never surfaces as an
+effect.Mill port). That unwrapping is importer-level work, deferred to
+the PPMI/importer batch. Remaining top UNKNOWN shapes (Destroy 1,200 /
+Dig 828 / Charm 738 cards) are generic-glue classes owned by the C1
+design cycle.
+
+### Calibration track closed — Units 4–6 DECLINE, escalation to C1 (plan 2026-07-02-002)
+
+Ten weight-layer configurations measured (concave haircuts, payoff/body
+tiers, pool scaling, joint arms) — none clears the −0.05 per-commander
+cliff gate; every cliff is a flood-as-archetype commander (tribal /
+tribe-as-fuel / spell-as-archetype). Gem rate improved in every
+configuration (up to +0.0297); NDCG-vs-EDHREC cliffs are the sole
+blocker. Escalation rule fired: the OUTRANKED lever moves to the C1
+lift-normalization design cycle. Full table + structural finding:
+`docs/solutions/best-practices/calibration-track-null-result-2026-07-02.md`.
+All probe infrastructure survives flag-OFF.
+
+### Tribal payoff/body two-tier probe — INVESTIGATE, resolution via Unit 6 joint probe (plan 2026-07-02-002 Unit 5)
+
+`_ENABLE_TRIBAL_PAYOFF_TIER` splits tribal emission into payoff pieces
+(structured tribal reference → `tribal_density` 0.5) and vanilla bodies
+(`tribal_body`, flat 0.3). Best-variant evidence on the 500-cmdr
+fixture: gem +0.0241 (the largest goal-axis gain of the remediation
+plan), mean NDCG +0.0051, Marrow-Gnawer +0.2544 / Chatterfang +0.0775 /
+Lathril +0.0238 / Edgar +0.0188 — but 5 fuel-tribe cliffs (Nissa
+Resurgent Animist −0.107, Arasta −0.096, Rograkh −0.067, Camellia
+−0.060, Elenda −0.053): commanders whose engine consumes vanilla tribe
+bodies (mana elves, sac fodder, token fuel). Body-weight sweep
+0.15/0.30/0.40 → 11/5/"gains lost"; a fuel-tribe exemption (commander
+filter references tribe) was measured and REJECTED — it zeroed the
+Marrow-class wins. The gem-dominant INVESTIGATE trigger fired (gem ≥
++0.02, NDCG flat). Flag stays OFF; infra (tribal_body rule_id, weight
+entry, hash field, vanilla-anchor exemption, tests) lands inert.
+Resolution: Unit 6 pool-scaled flat weights naturally protect small
+fuel tribes (Kobold 8, Spider 60, Squirrel 40) — the tier re-flips
+jointly in Unit 6's evidence package.
+
+### Tribal skiplist bypass fix — structured evidence for overbroad tribes (SHIPPED, plan 2026-07-02-002 Unit 2)
+
+The `_VANILLA_TRIBAL_SKIPLIST` (Human/Warrior/Soldier) only guarded the
+vanilla-anchor fallback; the primary `_commander_subtypes_from_ports`
+path admitted skiplisted tribes via (a) TriggerDescription prose in
+`raw_line` ("...create a 1/1 white Human creature token...") and (b)
+token Gate 1 (own-type token production). Adeline activated the full
+~1,500-card Human pool at flat 0.5 — her forensics displacer profile was
+93.5% tribal_density.
+
+- **Fix**: skiplisted tribes now require a structured
+  `valid_filter`/`affected_scope` reference on the body direction
+  (`tribal_density`). The payoff direction (`lord` anthem matching)
+  passes `include_overbroad_tribes=True` — Adeline making Human tokens
+  genuinely wants Human anthems (first pass without this restored
+  direction put Adeline at −0.0697 NDCG by dropping Coppercoat
+  Vanguard / General's Enforcer; the flag recovered them).
+- **Skiplist constant** moved density.py → core.py (density imports
+  core; reverse would be circular).
+- **Audit (non-probe gate, plan 2026-07-02-002)**: 100-cmdr aggregate
+  NDCG −0.0003, gem 0.8153→0.8160; 500-cmdr aggregate −0.0001, gem
+  −0.0005, per-commander cliff violations 0 (worst: Adeline −0.0392).
+  Score mass −60.8 on the golden set = the Human/Warrior flood removed
+  (Adeline −41, Yawgmoth −21.5, Rhys −2.5); hi_syn losses 0. Histogram
+  verdict HARMFUL is the expected score-mass reaction; gate asymmetry
+  documented in the plan.
+- Both fixtures re-pinned in the landing commit.
+
 ## 2026-05-20
 
 ### `CopyFaceFrom:<Name>` back-face resolution (LANDED, follow-up #2 to PR #47)

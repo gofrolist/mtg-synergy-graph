@@ -369,7 +369,8 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         default="data/tags.db",
         help="Path to the EDHREC synergy DB. Used by --inspect-gems to "
-        "rebuild live hidden-gem data. Default: data/tags.db.",
+        "rebuild live hidden-gem data and by --repin to refresh the "
+        "pinned gem baseline. Default: data/tags.db.",
     )
     # --vs-forge-oracle sidecar (plan 002 Unit 7) — forge_oracle.db path +
     # config knobs that must match the build's values so the stored hash

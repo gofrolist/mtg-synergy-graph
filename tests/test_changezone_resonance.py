@@ -344,3 +344,90 @@ class TestChangeZoneResonanceMatching:
         }
         check = self._check()
         assert check(eternal_witness, regrowth_creature) is True
+
+
+class TestZoneEquivalenceClasses:
+    """Plan 2026-07-02-002 Unit 9: seed-data zone equivalence classes.
+
+    ``recur_to_battlefield`` = {Graveyard, Exile} → Battlefield;
+    ``retrieve_to_hand`` = {Graveyard, Exile} → Hand. Pairs outside
+    every class keep exact-equality semantics.
+    """
+
+    def _check(self):
+        from mtg_synergy_graph.complement_rules.core import (
+            _changezone_resonance_check,
+        )
+
+        return _changezone_resonance_check
+
+    def _port(self, origin, dest, vf="Creature.YouCtrl"):
+        return {
+            "zone_origin": origin,
+            "zone_destination": dest,
+            "valid_filter": vf,
+        }
+
+    def test_gy_and_exile_to_battlefield_resonate(self):
+        """Meren (GY→BF) × an Exile→BF recursion piece — same class."""
+        check = self._check()
+        assert check(self._port("Graveyard", "Battlefield"), self._port("Exile", "Battlefield"))
+
+    def test_retrieval_is_not_reanimation(self):
+        """GY→Hand vs GY→BF stay distinct — different classes."""
+        check = self._check()
+        assert not check(self._port("Graveyard", "Hand"), self._port("Graveyard", "Battlefield"))
+
+    def test_exile_to_hand_resonates_with_gy_to_hand(self):
+        check = self._check()
+        assert check(self._port("Exile", "Hand"), self._port("Graveyard", "Hand"))
+
+    def test_unclassed_pair_keeps_exact_equality(self):
+        """Zone pairs outside every class: exact match still resonates,
+        mismatch still does not."""
+        check = self._check()
+        assert check(self._port("Hand", "Library"), self._port("Hand", "Library"))
+        assert not check(self._port("Hand", "Library"), self._port("Library", "Hand"))
+
+    def test_type_family_still_required_across_class(self):
+        """The class relaxes zones only — disjoint card types still
+        block resonance (Meren × Land recursion)."""
+        check = self._check()
+        assert not check(
+            self._port("Graveyard", "Battlefield", vf="Creature.YouOwn"),
+            self._port("Exile", "Battlefield", vf="Land.YouCtrl"),
+        )
+
+    def test_malformed_seed_row_raises(self, tmp_path, monkeypatch):
+        """Loader raises at first use on a malformed class row — the
+        interpreter's seed drift-check pattern."""
+        import json
+
+        import mtg_synergy_graph.complement_rules.core as core_mod
+        import mtg_synergy_graph.port_graph._paths as paths_mod
+
+        bad = tmp_path / "event_match_seed.json"
+        bad.write_text(
+            json.dumps({"zone_equivalence_classes": [{"class": "x", "origins": [], "destination": "Battlefield"}]})
+        )
+        monkeypatch.setattr(paths_mod, "default_seed_path", lambda name: bad)
+        monkeypatch.setattr(core_mod, "_ZONE_EQUIVALENCE_CACHE", None)
+        import pytest
+
+        with pytest.raises(ValueError, match="malformed zone_equivalence_classes"):
+            core_mod._zone_equivalence_map()
+
+    def test_class_rows_participate_in_config_digest(self):
+        """Editing a class row must flip the scoring config hash — the
+        section is part of event_match_seed_digest."""
+        from mtg_synergy_graph.universal_scorer import _seed_digest
+
+        with_zones = _seed_digest(
+            "event_match_seed.json",
+            ("event_match_map", "cost_feeds_trigger", "zone_equivalence_classes"),
+        )
+        without_zones = _seed_digest(
+            "event_match_seed.json",
+            ("event_match_map", "cost_feeds_trigger"),
+        )
+        assert with_zones != without_zones

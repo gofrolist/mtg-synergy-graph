@@ -83,6 +83,7 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "etb_self": "port_match",
     "spell_density": "spellcast_density",
     "tribal_density": "catchall",
+    "tribal_body": "catchall",
     "sacrifice_cluster": "sacrifice_synergy",
     "zone_resonance": "trigger_resonance",
     "effect_feeds_trigger": "port_match",
@@ -300,6 +301,20 @@ class ScoringConfigInputs(NamedTuple):
     #: results — editing it changes live scores, so per this
     #: accessor's own docstring rule it must invalidate the tensor.
     staples: dict[str, tuple[str, ...]]
+    #: Plan 2026-07-02-002 Unit 4: the concave family-aggregation gate
+    #: (``_ENABLE_CONCAVE_FAMILY_AGG``). Flipping it changes both
+    #: totals' dampening semantics, so it must invalidate the tensor.
+    enable_concave_family_agg: bool
+    #: Plan 2026-07-02-002 Unit 5: the tribal payoff/body tier gate
+    #: (``complement_rules.density._ENABLE_TRIBAL_PAYOFF_TIER``).
+    #: Flipping it reroutes body-tier emissions to ``tribal_body``,
+    #: so it must invalidate the tensor.
+    enable_tribal_payoff_tier: bool
+    #: Plan 2026-07-02-002 Unit 6: pool-scaled flat weights gate +
+    #: its floor knob — both change flat-key weights, so both must
+    #: invalidate the tensor.
+    enable_pool_scaled_flat_weights: bool
+    pool_scale_floor: int
 
 
 def _seed_digest(filename: str, functional_keys: tuple[str, ...]) -> str:
@@ -331,7 +346,7 @@ def get_scoring_config_inputs() -> ScoringConfigInputs:
     # at function-call time avoids the cycle. Same rationale for the
     # embeddings modules — they import numpy + sqlite3 and have no
     # reason to be pulled in at scorer-module import.
-    from .complement_rules import pathway
+    from .complement_rules import density, pathway
     from .embeddings import contribution as emb_contribution
     from .embeddings.config import get_embedding_config_inputs as _get_emb_cfg
 
@@ -344,10 +359,95 @@ def get_scoring_config_inputs() -> ScoringConfigInputs:
         embedding_w=emb_contribution._EMBEDDING_W,
         embedding_k=emb_contribution._EMBEDDING_K,
         vectorizer_version=_get_emb_cfg().vectorizer_version,
-        event_match_seed_digest=_seed_digest("event_match_seed.json", ("event_match_map", "cost_feeds_trigger")),
+        event_match_seed_digest=_seed_digest(
+            "event_match_seed.json",
+            ("event_match_map", "cost_feeds_trigger", "zone_equivalence_classes"),
+        ),
         declarative_rules_digest=_seed_digest("rules_seed.json", ("rules",)),
         staples=STAPLES,
+        enable_concave_family_agg=_ENABLE_CONCAVE_FAMILY_AGG,
+        enable_tribal_payoff_tier=density._ENABLE_TRIBAL_PAYOFF_TIER,
+        enable_pool_scaled_flat_weights=_ENABLE_POOL_SCALED_FLAT_WEIGHTS,
+        pool_scale_floor=_POOL_SCALE_FLOOR,
     )
+
+
+#: Plan 2026-07-02-002 Unit 4: concave within-family aggregation probe.
+#: When False (module default), the signal-concentration dampener keeps
+#: its legacy semantics — ``len(syn_by_rule) >= 2`` only, applied in
+#: ``UniversalScore.score`` and NOT in ``to_legacy_buckets`` (the
+#: historic dual-total split). When True, the dampener reaches
+#: single-rule candidates (frac == 1.0 → −30%) and applies at the
+#: shared choke point below, so BOTH totals — the audit-fixture
+#: ``score`` and the production ``to_legacy_buckets()["total"]`` —
+#: agree on dampening. Flip only via the audit-gated evidence package;
+#: the ``ScoringConfigInputs`` field lands at the flip step.
+_ENABLE_CONCAVE_FAMILY_AGG: bool = False
+
+#: Plan 2026-07-02-002 Unit 6: pool-scaled flat weights. When False
+#: (module default), flat rules keep their constant per-hit override.
+#: When True, each flat key's weight scales down with the size of the
+#: candidate pool it floods: ``base_w * log2(1+floor)/log2(1+pool_N)``
+#: for pools above the floor — per basis key, so each tribe / spell
+#: type prices separately. Flip only via the audit-gated evidence
+#: package (which also re-flips the Unit 5 tier flag jointly).
+_ENABLE_POOL_SCALED_FLAT_WEIGHTS: bool = False
+
+#: Pools at or below this size keep the full flat weight. 30 mirrors
+#: the panharmonicon IDF floor and shields the small fuel tribes that
+#: cliffed the Unit 5 tier probe (Kobold 8, Squirrel 40, Spider 60 —
+#: the latter two sit above it but scale only mildly).
+_POOL_SCALE_FLOOR: int = 30
+
+#: Rules the pool scaling applies to. Arm (i)/(ii) evidence (plan
+#: 2026-07-02-002 Unit 6): scaling whole families uniformly cliffs
+#: their archetype commanders (Kess −0.233 on spell_density, Hakbal
+#: −0.137 / Edgar −0.103 on tribal_density) — the same
+#: flood-as-archetype failure as Units 4/5. Only bodies WITHOUT
+#: payoff evidence are safely scalable.
+_POOL_SCALED_RULES: frozenset[str] = frozenset({"tribal_body"})
+
+
+def _syn_concentration_factor(syn_by_rule: dict[str, float], syn: float) -> float:
+    """Multiplier in [0.7, 1.0] for the synergy sum of one candidate.
+
+    When one rule dominates >70% of the synergy score, compress the
+    total by up to 30% (at 100% concentration). Flag OFF preserves the
+    legacy exemption for single-rule candidates; flag ON removes it —
+    the exemption is exactly what let 87–100% single-family
+    monoculture cards flood top-30s undampened (plan 2026-07-02-002).
+    """
+    if syn <= 0 or not syn_by_rule:
+        return 1.0
+    if len(syn_by_rule) < 2:
+        # Single-rule candidates: legacy exempts them entirely. The
+        # probe extends the dampener only to those whose lone family
+        # is a FLAT density rule — the monoculture pathology — while
+        # specific single-axis matches (a lord with one match axis, a
+        # counter_doubler payoff) stay exempt. Blanket extension was
+        # measured first and tripped 6 per-commander cliffs on the
+        # 500-cmdr fixture (Kodama −0.194, Bruenor −0.143, Lathiel
+        # −0.120): single-archetype commanders' specific true
+        # positives fell below diversified noise.
+        if not _ENABLE_CONCAVE_FAMILY_AGG:
+            return 1.0
+        only_rule = next(iter(syn_by_rule))
+        if only_rule not in _FLAT_COUNT_RULES or only_rule == "tribal_density":
+            # tribal_density is excluded from the single-rule
+            # extension: for genuine tribal commanders the flooding
+            # family IS the archetype (variant-B cliffs: Edgar −0.103,
+            # Lathril −0.069, Rionya −0.052 — all tribal). The
+            # payoff-vs-body distinction (plan Unit 5) is the right
+            # instrument for tribal; the uniform haircut is not.
+            return 1.0
+    max_rule_frac = max(syn_by_rule.values()) / syn
+    if max_rule_frac <= 0.7:
+        return 1.0
+    # At 70% concentration: no penalty. At 100%: -30%. The 0.3/0.3
+    # form is kept verbatim from the legacy inline block so the
+    # flag-off refactor stays bitwise-identical.
+    penalty = 0.3 * (max_rule_frac - 0.7) / 0.3
+    return 1.0 - penalty
 
 
 @dataclass
@@ -405,19 +505,13 @@ class UniversalScore:
                     seen_anti.add(key)
                     anti += self.idf_weights.get(key, 1.0)
 
-        # Signal concentration dampening: if one rule dominates >70% of
-        # the synergy score AND the card matches 2+ distinct keys, compress
-        # the total. This prevents broad density axes (etb_self N=17k) from
-        # creating a uniform baseline that drowns real score differences.
-        # Cards with only 1 complement key are not penalized — single-axis
-        # matches are genuine (e.g., a specific lord with one match axis).
-        if syn > 0 and len(syn_by_rule) >= 2:
-            max_rule_frac = max(syn_by_rule.values()) / syn
-            if max_rule_frac > 0.7:
-                # Reduce by up to 30% based on how concentrated the signal is.
-                # At 70% concentration: no penalty. At 100%: -30%.
-                penalty = 0.3 * (max_rule_frac - 0.7) / 0.3
-                syn *= 1.0 - penalty
+        # Signal concentration dampening — shared choke point with
+        # to_legacy_buckets (plan 2026-07-02-002 Unit 4). Flag OFF:
+        # legacy semantics (2+ distinct rules only); flag ON: reaches
+        # single-rule candidates too.
+        factor = _syn_concentration_factor(syn_by_rule, syn)
+        if factor != 1.0:
+            syn *= factor
 
         base = syn - anti + self.staple_bonus
         # Multi-rule bonus: flat breadth reward (+0.02 per extra rule)
@@ -448,6 +542,13 @@ class UniversalScore:
         seen: set[tuple[str, str, str, str, str]] = set()
         seen_add = seen.add
         idf_weights = self.idf_weights
+        # Flag-gated (plan 2026-07-02-002 Unit 4): accumulate per-rule
+        # synergy sums so the concentration dampener can apply to the
+        # production total too. OFF path does no extra work and stays
+        # bitwise-identical to the historic undampened total.
+        concave = _ENABLE_CONCAVE_FAMILY_AGG
+        syn = 0.0
+        syn_by_rule: dict[str, float] = {}
         for c in self.complements:
             key = (c.rule_id, c.cmdr_event, c.cand_event, c.filter_group, c.direction)
             if key in seen:
@@ -462,6 +563,17 @@ class UniversalScore:
             else:
                 buckets[bucket] += weight
                 total += weight
+                if concave:
+                    syn += weight
+                    syn_by_rule[c.rule_id] = syn_by_rule.get(c.rule_id, 0.0) + weight
+        if concave:
+            factor = _syn_concentration_factor(syn_by_rule, syn)
+            if factor != 1.0:
+                dampen = (1.0 - factor) * syn
+                total -= dampen
+                # Named bucket keeps the sum(named_bucket_values) ==
+                # total invariant, same pattern as ``embedding``.
+                buckets["concentration_dampen"] = -dampen
         if self.staple_bonus:
             buckets["staple"] = self.staple_bonus
             total += self.staple_bonus
@@ -493,6 +605,10 @@ _FLAT_COUNT_RULES: frozenset[str] = frozenset(
         "scaling",
         "etb_self",
         "tribal_density",
+        # Plan 2026-07-02-002 Unit 5: body tier of the two-tier tribal
+        # emission — flag-gated in density.py, flat weight from its own
+        # scoring_weights.json entry at flip time.
+        "tribal_body",
         "token_producer",
         "evasion",
     }
@@ -731,6 +847,19 @@ def _compute_idf_basis(complements: Sequence[PortComplement]) -> IdfBasis:
         if rule_id in _FLAT_COUNT_RULES:
             override = _FLAT_WEIGHT_OVERRIDES.get(rule_id)
             base_w = override if override is not None else 1.0
+            if _ENABLE_POOL_SCALED_FLAT_WEIGHTS and rule_id in _POOL_SCALED_RULES:
+                # Plan 2026-07-02-002 Unit 6: per-key pool scaling — a
+                # 4,300-card tribe pays more than a 40-card tribe.
+                # Keyed per (rule, cmdr_event, cand_event, filter_group)
+                # so each tribe prices separately (cand_event = tribe).
+                # Pools at or below the floor keep full weight — the
+                # small-N saturation guard (panharmonicon precedent,
+                # color-IDF null-result lesson) and the natural
+                # protection for small fuel tribes (Kobold 8, Spider
+                # 60, Squirrel 40) that cliffed the Unit 5 tier probe.
+                pool_n = len(candidates)
+                if pool_n > _POOL_SCALE_FLOOR:
+                    base_w *= math.log2(1.0 + _POOL_SCALE_FLOOR) / math.log2(1.0 + pool_n)
             flat_weights[key] = base_w * cond_mult
         else:
             n = len(candidates)
@@ -748,10 +877,19 @@ def _idf_weights_from_basis(basis: IdfBasis) -> dict[tuple[str, str, str, str], 
     """Apply current ``_RULE_QUALITY_MULTIPLIER`` to a cached :class:`IdfBasis`.
 
     The hot-path inner-loop equivalent of :func:`_compute_idf_weights` when
-    the caller has already paid the frequency-counting cost. ``flat_weights``
-    pass through unchanged; non-flat keys get the per-rule multiplier.
+    the caller has already paid the frequency-counting cost.
+
+    Since plan 2026-07-02-002 Unit 7, flat keys also honor the per-rule
+    multiplier (multiplier on the flat value — exact while pool scaling
+    is off), so the optimizer can sweep flat rules through the same
+    knob. With no flat entries in ``rule_quality_multiplier`` (the
+    committed default), the output is bitwise-identical to the old
+    passthrough.
     """
-    result: dict[tuple[str, str, str, str], float] = dict(basis.flat_weights)
+    result: dict[tuple[str, str, str, str], float] = {}
+    for key, base_w in basis.flat_weights.items():
+        mult = _RULE_QUALITY_MULTIPLIER.get(key[0], 1.0)
+        result[key] = base_w * mult if mult != 1.0 else base_w
     for key, base_w in basis.base_idf_non_flat.items():
         rule_id = key[0]
         mult = _RULE_QUALITY_MULTIPLIER.get(rule_id, 1.0)

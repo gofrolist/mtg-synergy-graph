@@ -241,6 +241,10 @@
     "tribal_density": {
       "value": 0.5,
       "comment": ""
+    },
+    "tribal_body": {
+      "value": 0.3,
+      "comment": "Plan 2026-07-02-002 Unit 5: body tier of two-tier tribal emission (payoff pieces keep tribal_density 0.5). Sweep evidence: 0.15 -> 11 cliffs, 0.30 -> 5 cliffs / best aggregate +0.0051, 0.40 -> gains lost. Fuel-tribe + vanilla-anchor exemptions handle the residual cliffs."
     }
   }
 }
