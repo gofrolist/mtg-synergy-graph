@@ -22,6 +22,8 @@ from mtg_synergy_graph.bench.fixture import (
     build_fixture,
     score_commander,
 )
+from mtg_synergy_graph.bench.forensics_history import handle_trend_forensics
+from mtg_synergy_graph.bench.forensics_report import handle_forensics
 from mtg_synergy_graph.bench.forge_oracle_handler import handle_vs_forge_oracle
 from mtg_synergy_graph.bench.handlers import (
     handle_collinearity,
@@ -71,6 +73,13 @@ _cli.register("optimize", handle_optimize)
 # diff handler. Required by the BM25 probe's per-commander prerequisite
 # gate; general-purpose audit infra that survives the probe outcome.
 _cli.register("per_commander_ndcg", handle_per_commander_ndcg)
+# Divergence forensics (plan 2026-06-10-001 Unit 4) — per-miss failure
+# taxonomy + metric sidecars + justified-divergence view. Read-only.
+_cli.register("forensics", handle_forensics)
+# Plan 2026-06-10-001 Unit 5 — ``--trend forensics`` reader over the
+# sibling forensics history CSV with (config_hash, snapshot) boundary
+# markers.
+_cli.register("trend_forensics", handle_trend_forensics)
 
 __all__ = [
     "AuditReport",
