@@ -300,6 +300,10 @@ class ScoringConfigInputs(NamedTuple):
     #: results — editing it changes live scores, so per this
     #: accessor's own docstring rule it must invalidate the tensor.
     staples: dict[str, tuple[str, ...]]
+    #: Plan 2026-07-02-002 Unit 4: the concave family-aggregation gate
+    #: (``_ENABLE_CONCAVE_FAMILY_AGG``). Flipping it changes both
+    #: totals' dampening semantics, so it must invalidate the tensor.
+    enable_concave_family_agg: bool
 
 
 def _seed_digest(filename: str, functional_keys: tuple[str, ...]) -> str:
@@ -347,6 +351,7 @@ def get_scoring_config_inputs() -> ScoringConfigInputs:
         event_match_seed_digest=_seed_digest("event_match_seed.json", ("event_match_map", "cost_feeds_trigger")),
         declarative_rules_digest=_seed_digest("rules_seed.json", ("rules",)),
         staples=STAPLES,
+        enable_concave_family_agg=_ENABLE_CONCAVE_FAMILY_AGG,
     )
 
 
@@ -374,9 +379,27 @@ def _syn_concentration_factor(syn_by_rule: dict[str, float], syn: float) -> floa
     """
     if syn <= 0 or not syn_by_rule:
         return 1.0
-    min_rules = 1 if _ENABLE_CONCAVE_FAMILY_AGG else 2
-    if len(syn_by_rule) < min_rules:
-        return 1.0
+    if len(syn_by_rule) < 2:
+        # Single-rule candidates: legacy exempts them entirely. The
+        # probe extends the dampener only to those whose lone family
+        # is a FLAT density rule — the monoculture pathology — while
+        # specific single-axis matches (a lord with one match axis, a
+        # counter_doubler payoff) stay exempt. Blanket extension was
+        # measured first and tripped 6 per-commander cliffs on the
+        # 500-cmdr fixture (Kodama −0.194, Bruenor −0.143, Lathiel
+        # −0.120): single-archetype commanders' specific true
+        # positives fell below diversified noise.
+        if not _ENABLE_CONCAVE_FAMILY_AGG:
+            return 1.0
+        only_rule = next(iter(syn_by_rule))
+        if only_rule not in _FLAT_COUNT_RULES or only_rule == "tribal_density":
+            # tribal_density is excluded from the single-rule
+            # extension: for genuine tribal commanders the flooding
+            # family IS the archetype (variant-B cliffs: Edgar −0.103,
+            # Lathril −0.069, Rionya −0.052 — all tribal). The
+            # payoff-vs-body distinction (plan Unit 5) is the right
+            # instrument for tribal; the uniform haircut is not.
+            return 1.0
     max_rule_frac = max(syn_by_rule.values()) / syn
     if max_rule_frac <= 0.7:
         return 1.0

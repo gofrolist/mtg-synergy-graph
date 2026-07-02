@@ -49,9 +49,10 @@ class TestFlagOff:
         """Flag OFF: single-rule candidate keeps the legacy exemption —
         score is the plain weight sum (0.5), no factor applied."""
         comps = [_comp("tribal_density", "Goblin")]
-        s = UniversalScore(complements=comps, idf_weights=_weights(comps, 0.5))
-        assert s.score == pytest.approx(0.5)
-        assert s.to_legacy_buckets()["total"] == pytest.approx(0.5)
+        with patch.object(us_mod, "_ENABLE_CONCAVE_FAMILY_AGG", False):
+            s = UniversalScore(complements=comps, idf_weights=_weights(comps, 0.5))
+            assert s.score == pytest.approx(0.5)
+            assert s.to_legacy_buckets()["total"] == pytest.approx(0.5)
 
     def test_legacy_buckets_have_no_dampener_flag_off(self):
         """Flag OFF preserves the historic dual-total split: score damps
@@ -62,19 +63,20 @@ class TestFlagOff:
         ]
         w = _weights([comps[0]], 0.9)
         w.update(_weights([comps[1]], 0.1))
-        s = UniversalScore(complements=comps, idf_weights=w)
-        # frac = 0.9 -> penalty = 0.2 -> syn 1.0*0.8 = 0.8, + multi-rule
-        # bonus 0.02
-        assert s.score == pytest.approx(0.8 + 0.02)
-        # legacy total: undampened 1.0 + 0.02
-        assert s.to_legacy_buckets()["total"] == pytest.approx(1.0 + 0.02)
+        with patch.object(us_mod, "_ENABLE_CONCAVE_FAMILY_AGG", False):
+            s = UniversalScore(complements=comps, idf_weights=w)
+            # frac = 0.9 -> penalty = 0.2 -> syn 1.0*0.8 = 0.8, +
+            # multi-rule bonus 0.02
+            assert s.score == pytest.approx(0.8 + 0.02)
+            # legacy total: undampened 1.0 + 0.02
+            assert s.to_legacy_buckets()["total"] == pytest.approx(1.0 + 0.02)
 
 
 class TestFlagOn:
     def test_single_rule_candidate_dampened(self):
-        """Flag ON: single-rule candidate (frac == 1.0) takes the full
-        30% haircut on its synergy sum."""
-        comps = [_comp("tribal_density", "Goblin")]
+        """Flag ON: single-rule candidate (frac == 1.0) whose lone
+        family is a non-tribal flat rule takes the full 30% haircut."""
+        comps = [_comp("spell_density", "Instant")]
         with patch.object(us_mod, "_ENABLE_CONCAVE_FAMILY_AGG", True):
             s = UniversalScore(complements=comps, idf_weights=_weights(comps, 0.5))
             assert s.score == pytest.approx(0.5 * 0.7)
@@ -83,7 +85,7 @@ class TestFlagOn:
     def test_diversified_candidate_outranks_equal_monoculture(self):
         """Flag ON: three equal families (frac 1/3, no penalty) beat a
         single-family candidate with the same raw sum."""
-        mono = [_comp("tribal_density", "Goblin")]
+        mono = [_comp("spell_density", "Instant")]
         div = [
             _comp("trigger_effect", "TokenA"),
             _comp("cost_feeds_trigger", "TokenB"),
@@ -107,7 +109,7 @@ class TestFlagOn:
         """Factor applies to the synergy side only — anti subtracts at
         full weight, consistent with legacy dampener semantics."""
         comps = [
-            _comp("tribal_density", "Goblin"),
+            _comp("spell_density", "Instant"),
             _comp("etb_tapped_stax", "Tapped", direction="anti_synergy"),
         ]
         w = _weights(comps, 0.5)
@@ -128,6 +130,25 @@ class TestFlagOn:
             assert s.to_legacy_buckets()["total"] == pytest.approx(s.score)
 
 
+class TestConfigHash:
+    def test_flag_exposed_in_scoring_config_inputs(self):
+        cfg = us_mod.get_scoring_config_inputs()
+        assert hasattr(cfg, "enable_concave_family_agg")
+
+    def test_config_hash_flips_with_flag_and_restores(self):
+        from mtg_synergy_graph.bench.tensor import compute_config_hash
+
+        baseline = compute_config_hash()
+        with patch.object(
+            us_mod,
+            "_ENABLE_CONCAVE_FAMILY_AGG",
+            not us_mod._ENABLE_CONCAVE_FAMILY_AGG,
+        ):
+            flipped = compute_config_hash()
+        assert flipped != baseline
+        assert compute_config_hash() == baseline
+
+
 class TestFactorHelper:
     def test_below_threshold_no_penalty(self):
         assert us_mod._syn_concentration_factor({"a": 0.5, "b": 0.5}, 1.0) == 1.0
@@ -135,9 +156,24 @@ class TestFactorHelper:
     def test_legacy_min_rules_two_flag_off(self):
         assert us_mod._syn_concentration_factor({"a": 1.0}, 1.0) == 1.0
 
-    def test_min_rules_one_flag_on(self):
+    def test_min_rules_one_flag_on_flat_rule(self):
         with patch.object(us_mod, "_ENABLE_CONCAVE_FAMILY_AGG", True):
-            assert us_mod._syn_concentration_factor({"a": 1.0}, 1.0) == pytest.approx(0.7)
+            assert us_mod._syn_concentration_factor({"spell_density": 1.0}, 1.0) == pytest.approx(0.7)
+
+    def test_single_tribal_density_exempt_flag_on(self):
+        """tribal_density is excluded from the single-rule extension —
+        for genuine tribal commanders the flooding family IS the
+        archetype (variant-B cliffs: Edgar/Lathril/Rionya); Unit 5's
+        payoff tier is the instrument for tribal."""
+        with patch.object(us_mod, "_ENABLE_CONCAVE_FAMILY_AGG", True):
+            assert us_mod._syn_concentration_factor({"tribal_density": 1.0}, 1.0) == 1.0
+
+    def test_single_nonflat_rule_exempt_flag_on(self):
+        """Specific single-axis matches (non-flat rules) keep the legacy
+        exemption even with the flag on — the Kodama/Bruenor/Lathiel
+        cliff evidence from the blanket variant."""
+        with patch.object(us_mod, "_ENABLE_CONCAVE_FAMILY_AGG", True):
+            assert us_mod._syn_concentration_factor({"counter_doubler": 1.0}, 1.0) == 1.0
 
     def test_zero_syn_guard(self):
         assert us_mod._syn_concentration_factor({}, 0.0) == 1.0

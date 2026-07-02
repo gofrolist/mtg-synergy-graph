@@ -169,6 +169,7 @@ def test_scoring_config_inputs_exposes_pathway_flag() -> None:
         "event_match_seed_digest",
         "declarative_rules_digest",
         "staples",
+        "enable_concave_family_agg",
     )
 
 

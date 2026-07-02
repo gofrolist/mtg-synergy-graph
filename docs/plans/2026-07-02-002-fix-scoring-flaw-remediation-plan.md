@@ -492,7 +492,7 @@ no EDHREC tiebreak in the sort key.
 
 ### Phase 2 — Density-family calibration (OUTRANKED track)
 
-- [ ] **Unit 4: A4 — concave within-family aggregation (flag-gated probe)**
+- [x] **Unit 4: A4 — concave within-family aggregation (flag-gated probe)** *(DECLINED 2026-07-02: three variants measured — blanket 6 cliffs / flat-only 3 / flat-minus-tribal 1 (Rionya −0.0520) with agg ~0; R8a re-sweep held +0.00006 rules out calibration; structural finding: uniform haircuts cannot separate flood-as-noise from flood-as-archetype → mandate for Unit 5 tiering. Survives: dual-total choke point (flag OFF, inert), hash registration, 16 tests. See docs/solutions/best-practices/concave-family-agg-null-result-2026-07-02.md)*
 
 **Goal:** Single-family monoculture candidates stop scaling linearly:
 within-family contributions aggregate concavely (or the dampener reaches

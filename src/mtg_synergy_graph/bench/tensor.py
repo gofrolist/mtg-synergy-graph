@@ -102,6 +102,11 @@ def compute_config_hash() -> str:
     h.update(cfg.declarative_rules_digest.encode("utf-8"))
     h.update(b"|staples:")
     h.update(repr(sorted((pip, tuple(names)) for pip, names in cfg.staples.items())).encode("utf-8"))
+    # Plan 2026-07-02-002 Unit 4: concave family-aggregation flip flag
+    # changes both totals' dampening semantics — flag=True vs False
+    # runs must not compare against each other's pinned tensor.
+    h.update(b"|concave_family_agg:")
+    h.update(repr(cfg.enable_concave_family_agg).encode("utf-8"))
     return h.hexdigest()
 
 
