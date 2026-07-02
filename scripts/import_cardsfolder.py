@@ -7,6 +7,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 import time
 from pathlib import Path
@@ -16,6 +17,10 @@ from mtg_synergy_graph.importer import import_cards_folder
 
 
 def main() -> int:
+    # Surface the importer's INFO-level coverage stats (oracle_id /
+    # edhrec_rank / color_identity); the default last-resort handler
+    # only shows WARNING and above.
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--folder",

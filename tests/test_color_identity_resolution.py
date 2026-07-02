@@ -15,6 +15,7 @@ lacks the column (tiny legacy fixtures).
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 
 import pytest
@@ -38,20 +39,33 @@ SISAY_TXT = (
 
 RED_CANDIDATE_TXT = "Name:Test Red Blast\nManaCost:R\nTypes:Instant\nOracle:Deal 3 damage to any target.\n"
 
+SISAY_IDENTITY_JSON = '["B", "G", "R", "U", "W"]'
 
-def _scryfall_db(tmp_path, rows, *, with_identity_column=True):
-    """Minimal Scryfall-shaped sqlite DB, optionally with color_identity."""
+_DEFAULT_COLUMNS = ("oracle_id", "name", "color_identity")
+
+
+def _scryfall_db(tmp_path, rows, *, columns=_DEFAULT_COLUMNS):
+    """Minimal Scryfall-shaped sqlite DB with the given cards columns."""
     path = tmp_path / "tags.db"
     conn = sqlite3.connect(path)
-    if with_identity_column:
-        conn.execute("CREATE TABLE cards (oracle_id TEXT, name TEXT, color_identity TEXT)")
-        conn.executemany("INSERT INTO cards VALUES (?, ?, ?)", rows)
-    else:
-        conn.execute("CREATE TABLE cards (oracle_id TEXT, name TEXT)")
-        conn.executemany("INSERT INTO cards VALUES (?, ?)", rows)
+    conn.execute(f"CREATE TABLE cards ({', '.join(f'{c} TEXT' for c in columns)})")
+    conn.executemany(
+        f"INSERT INTO cards VALUES ({', '.join('?' * len(columns))})",  # noqa: S608 — placeholders only
+        rows,
+    )
     conn.commit()
     conn.close()
     return path
+
+
+def _resolver_for(tmp_path, rows, *, columns=_DEFAULT_COLUMNS):
+    """Build a resolver straight from fixture rows (connect/close handled)."""
+    db = _scryfall_db(tmp_path, rows, columns=columns)
+    conn = sqlite3.connect(db)
+    try:
+        return _build_oracle_id_resolver(conn)
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -62,12 +76,7 @@ def _scryfall_db(tmp_path, rows, *, with_identity_column=True):
 def test_resolver_carries_color_identity(tmp_path):
     """tags.db stores identity as a JSON array; the resolver must expose
     it as the engine's sorted comma-joined pip format."""
-    db = _scryfall_db(tmp_path, [("aa" * 16, "Sisay Test Captain", '["B", "G", "R", "U", "W"]')])
-    conn = sqlite3.connect(db)
-    try:
-        resolver = _build_oracle_id_resolver(conn)
-    finally:
-        conn.close()
+    resolver = _resolver_for(tmp_path, [("aa" * 16, "Sisay Test Captain", SISAY_IDENTITY_JSON)])
 
     hit = _resolve_scryfall_meta("Sisay Test Captain", None, resolver)
     assert hit is not None
@@ -77,12 +86,7 @@ def test_resolver_carries_color_identity(tmp_path):
 def test_resolver_color_identity_none_when_column_missing(tmp_path):
     """Legacy fixture DBs without the column must yield None (→ importer
     falls back to the cost-derived placeholder)."""
-    db = _scryfall_db(tmp_path, [("aa" * 16, "Sol Ring")], with_identity_column=False)
-    conn = sqlite3.connect(db)
-    try:
-        resolver = _build_oracle_id_resolver(conn)
-    finally:
-        conn.close()
+    resolver = _resolver_for(tmp_path, [("aa" * 16, "Sol Ring")], columns=("oracle_id", "name"))
 
     hit = _resolve_scryfall_meta("Sol Ring", None, resolver)
     assert hit is not None
@@ -91,12 +95,7 @@ def test_resolver_color_identity_none_when_column_missing(tmp_path):
 
 def test_resolver_color_identity_empty_array_is_colorless(tmp_path):
     """Scryfall ``[]`` is a real (colourless) identity, not missing data."""
-    db = _scryfall_db(tmp_path, [("aa" * 16, "Sol Ring", "[]")])
-    conn = sqlite3.connect(db)
-    try:
-        resolver = _build_oracle_id_resolver(conn)
-    finally:
-        conn.close()
+    resolver = _resolver_for(tmp_path, [("aa" * 16, "Sol Ring", "[]")])
 
     hit = _resolve_scryfall_meta("Sol Ring", None, resolver)
     assert hit is not None
@@ -105,16 +104,53 @@ def test_resolver_color_identity_empty_array_is_colorless(tmp_path):
 
 def test_resolver_color_identity_garbage_yields_none(tmp_path):
     """Unparseable identity values must degrade to None, never crash."""
-    db = _scryfall_db(tmp_path, [("aa" * 16, "Broken Card", "not json at all {{")])
-    conn = sqlite3.connect(db)
-    try:
-        resolver = _build_oracle_id_resolver(conn)
-    finally:
-        conn.close()
+    resolver = _resolver_for(tmp_path, [("aa" * 16, "Broken Card", "not json at all {{")])
 
     hit = _resolve_scryfall_meta("Broken Card", None, resolver)
     assert hit is not None
     assert hit.color_identity is None
+
+
+def test_resolver_warns_on_identity_normalisation_failures(tmp_path, caplog):
+    """Silent corpus-wide fallback is the failure mode this guards: a
+    tags.db format drift must produce a loud WARNING with a count, not a
+    quiet degradation to cost-derived identities."""
+    rows = [
+        ("aa" * 16, "Broken One", "not json"),
+        ("bb" * 16, "Broken Two", '["C"]'),  # unknown pip → rejected
+        ("cc" * 16, "Fine Card", '["W"]'),
+    ]
+    with caplog.at_level(logging.WARNING, logger="mtg_synergy_graph.importer"):
+        _resolver_for(tmp_path, rows)
+
+    warnings = [r for r in caplog.records if "color_identity normalisation failed" in r.message]
+    assert len(warnings) == 1
+    assert "2 Scryfall rows" in warnings[0].message
+
+
+def test_token_row_never_supplies_color_identity(tmp_path):
+    """A token printing sharing a real card's name may still resolve
+    oracle_id (last-resort tier) but must never stamp its own colour
+    identity onto the card — the cost-derived value stays."""
+    resolver = _resolver_for(
+        tmp_path,
+        [("aa" * 16, "Test Red Blast", "Token Creature — Illusion", '["U"]')],
+        columns=("oracle_id", "name", "type_line", "color_identity"),
+    )
+
+    hit = _resolve_scryfall_meta("Test Red Blast", None, resolver)
+    assert hit is not None
+    assert hit.oracle_id == "aa" * 16  # oracle_id still useful
+    assert hit.color_identity is None  # token identity blanked
+
+    conn = open_db(tmp_path / "synergy.db")
+    try:
+        with conn:
+            import_card(conn, parse_card_text(RED_CANDIDATE_TXT), oracle_id_resolver=resolver)
+        row = conn.execute("SELECT color_identity FROM cards WHERE name = 'Test Red Blast'").fetchone()
+        assert row["color_identity"] == "R"  # cost-derived, not the token's U
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -125,12 +161,7 @@ def test_resolver_color_identity_garbage_yields_none(tmp_path):
 def test_import_card_prefers_scryfall_identity_over_mana_cost(tmp_path):
     """The Sisay case: cost-derived colors stay 'W' but color_identity
     must come from Scryfall (WUBRG)."""
-    db = _scryfall_db(tmp_path, [("aa" * 16, "Sisay Test Captain", '["B", "G", "R", "U", "W"]')])
-    sconn = sqlite3.connect(db)
-    try:
-        resolver = _build_oracle_id_resolver(sconn)
-    finally:
-        sconn.close()
+    resolver = _resolver_for(tmp_path, [("aa" * 16, "Sisay Test Captain", SISAY_IDENTITY_JSON)])
 
     conn = open_db(tmp_path / "synergy.db")
     try:
@@ -145,12 +176,7 @@ def test_import_card_prefers_scryfall_identity_over_mana_cost(tmp_path):
 
 def test_import_card_falls_back_to_placeholder_without_identity_column(tmp_path):
     """Old-schema Scryfall DB → keep the cost-derived placeholder."""
-    db = _scryfall_db(tmp_path, [("aa" * 16, "Sisay Test Captain")], with_identity_column=False)
-    sconn = sqlite3.connect(db)
-    try:
-        resolver = _build_oracle_id_resolver(sconn)
-    finally:
-        sconn.close()
+    resolver = _resolver_for(tmp_path, [("aa" * 16, "Sisay Test Captain")], columns=("oracle_id", "name"))
 
     conn = open_db(tmp_path / "synergy.db")
     try:
@@ -163,6 +189,27 @@ def test_import_card_falls_back_to_placeholder_without_identity_column(tmp_path)
         conn.close()
 
 
+def test_import_card_resolves_identity_even_when_oracle_id_preset(tmp_path):
+    """Field-level gating regression guard: a card dict arriving with
+    oracle_id already set must STILL receive the Scryfall colour identity
+    — gating the whole resolver block on oracle_id would silently
+    reintroduce the cost-derived placeholder (the original Sisay bug)."""
+    resolver = _resolver_for(tmp_path, [("aa" * 16, "Sisay Test Captain", SISAY_IDENTITY_JSON)])
+
+    card = parse_card_text(SISAY_TXT)
+    card["oracle_id"] = "ee" * 16  # pre-resolved by a hypothetical caller
+
+    conn = open_db(tmp_path / "synergy.db")
+    try:
+        with conn:
+            import_card(conn, card, oracle_id_resolver=resolver)
+        row = conn.execute("SELECT oracle_id, color_identity FROM cards WHERE name = 'Sisay Test Captain'").fetchone()
+        assert row["oracle_id"] == "ee" * 16  # pre-set id is preserved
+        assert row["color_identity"] == "B,G,R,U,W"  # identity still resolved
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Engine: candidate pool honours the Scryfall identity
 # ---------------------------------------------------------------------------
@@ -170,18 +217,13 @@ def test_import_card_falls_back_to_placeholder_without_identity_column(tmp_path)
 
 @pytest.fixture()
 def engine_with_five_color_sisay(tmp_path):
-    db = _scryfall_db(
+    resolver = _resolver_for(
         tmp_path,
         [
-            ("aa" * 16, "Sisay Test Captain", '["B", "G", "R", "U", "W"]'),
+            ("aa" * 16, "Sisay Test Captain", SISAY_IDENTITY_JSON),
             ("bb" * 16, "Test Red Blast", '["R"]'),
         ],
     )
-    sconn = sqlite3.connect(db)
-    try:
-        resolver = _build_oracle_id_resolver(sconn)
-    finally:
-        sconn.close()
 
     synergy_path = tmp_path / "synergy.db"
     conn = open_db(synergy_path)
