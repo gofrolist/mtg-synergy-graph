@@ -217,7 +217,22 @@ def main() -> int:
         )
         return 1
 
-    rc = pytest.main(["tests/", "-q", "--no-cov", "--tb=short"])
+    # The config-hash pins (fixture freshness + the production-hash
+    # literal) assert pinned hash == live, which is by design false
+    # mid-attempt: the freshly-applied rule flips the hash, and stages
+    # 2-4 below are the adjudication of that change. Both guards still
+    # protect committed states via pre-commit/CI.
+    rc = pytest.main(
+        [
+            "tests/",
+            "-q",
+            "--no-cov",
+            "--tb=short",
+            "--ignore=tests/bench/test_fixture_freshness.py",
+            "--deselect",
+            "tests/test_scoring_weights.py::test_compute_config_hash_pinned_to_known_value",
+        ]
+    )
     if rc != 0:
         _fail(f"Full pytest suite failed (exit {int(rc)}).")
         return 1

@@ -7,6 +7,34 @@ See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
 ## 2026-07-02
 
+### Walker validator config-hash false-failure fixed; two April template blocks re-adjudicated and CONFIRMED
+
+The gap_report → scaffold walker had been structurally broken since
+the 2026-06-09 config-hash discipline landed: a freshly-applied rule
+always flips `compute_config_hash`, so the two hash-pin guard tests
+(`test_fixture_freshness`, `test_compute_config_hash_pinned_to_known_value`)
+failed stage-1 pytest on EVERY attempt before the NDCG stages could
+adjudicate. Fix: `scripts/_validate_rule.py` now deselects exactly
+those two guards mid-attempt (commit-time protection unchanged —
+both still run in pre-commit/CI). Two false-failure ledger rows were
+removed before commit.
+
+With the validator fixed, force-retried the two highest-impact
+April-blocked templates on the current ruleset — both blocks
+CONFIRMED on merit and auto-reverted:
+
+- `creature_count_scaler` (impact 135.2): golden NDCG −0.0039
+  (0.2461 → 0.2422). Axis already covered by scaling/lord/token.
+- `x_cost_scaler` (impact 115.1): golden NDCG −0.0006
+  (0.2461 → 0.2456). Nearly neutral now (April: −0.0021), still a
+  regression at zero tolerance.
+
+Walker queue exhaustion is therefore genuine: remaining gap capital
+needs new authoring (axis_feeder tiers for token/tapped/untapped/
+blocking/counters_GE; templates for `needs_template` gaps), not
+re-runs. Details:
+docs/solutions/test-failures/walker-validator-config-hash-pins-2026-07-02.md.
+
 ### Portfolio selection (per-family diminishing returns at assembly) — DECLINED at R0 (plan 2026-07-02-004)
 
 The funded OUTRANKED successor — greedy top-30 assembly with
