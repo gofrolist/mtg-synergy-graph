@@ -25,6 +25,9 @@ REQUIRED_TRACKED_FILES = (
     "src/mtg_synergy_graph/data/event_match_seed.json",
     "src/mtg_synergy_graph/data/rules_seed.json",
     "src/mtg_synergy_graph/data/scoring_weights.json",
+    # Portfolio-selection family map (plan 2026-07-02-004 Unit 1):
+    # rule_id -> family authority loaded at import by portfolio.py.
+    "src/mtg_synergy_graph/data/family_map.json",
     # Forge-Second-Oracle plan 002 unit 1: SHA pin for the vendored
     # Forge checkout. Regenerable table (forge_oracle.db) is NOT
     # tracked — only the pin that identifies which Forge commit the
