@@ -7,6 +7,23 @@ See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
 ## 2026-07-02
 
+### anthem_payoff probe — DECLINED, helper retained for the C1 cycle (plan 2026-07-02-002 Unit 10)
+
+Type-scoped anthems (Creature.YouCtrl AddPower/AddToughness/AddKeyword
+statics) for creature-token producers — the global-anthem slice of the
+159-card static.Continuous NO_RULES block. Quality Gates A/B PASS (288
+target commanders, coverage 6.0, CV 0.117). Three variants measured on
+the 500-cmdr fixture: full-scope IDF keys flooded (35 cliffs, Krenko
+−0.357 — the high-cardinality granularity trap); coarse two-key
+granularity reached mean −0.0001 / gem +0.0192 / Krenko +0.053 with 2
+cliffs; multiplier 0.6 fixed Jan Jansen but worsened Myrel to −0.1266
+(Soldier archetype × Unit-2 skiplist interplay). Fourth appearance of
+the flood-vs-archetype displacement pattern (see
+calibration-track-null-result-2026-07-02.md) — the weight layer cannot
+place even a well-formed support family safely. Unwired; the
+`_find_anthem_payoffs` helper + tests stay for the C1 cycle to re-wire
+behind the lift baseline.
+
 ### Vocabulary v4 — PHASE + INTERNAL classification; unwrapping deferred with evidence (plan 2026-07-02-002 Unit 8)
 
 `trigger.Phase` (2,305 rows) and `effect.Cleanup` (2,759 rows) leave

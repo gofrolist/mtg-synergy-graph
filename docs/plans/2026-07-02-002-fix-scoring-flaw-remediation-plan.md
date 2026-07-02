@@ -824,7 +824,7 @@ file, approach, or test below and needs its own evidence base.)
 - Scope regression suites green; audit gates evaluated per arm; re-pin
   atomic with Unit 8's cycle or its own.
 
-- [ ] **Unit 10: C2 — candidate-side static/anthem consumption**
+- [x] **Unit 10: C2 — candidate-side static/anthem consumption** *(DECLINED 2026-07-02 after three variants: full-scope keys flooded 35 cliffs (the IDF granularity trap, Krenko −0.357); coarse two-key granularity tamed it to 2 cliffs with Krenko +0.053 / gem +0.019; multiplier 0.6 fixed Jan Jansen but worsened Myrel to −0.127 (Soldier-archetype × Unit-2-skiplist interplay) — the fourth appearance of flood-vs-archetype displacement, now on the anthem axis. Gates A/B PASSED (288 targets, cov 6.0, CV 0.117) — the rule is well-formed; the weight layer cannot place it safely. Survives unwired: `_find_anthem_payoffs` helper + 8 tests; the C1 cycle re-wires it behind the lift baseline.)*
 
 **Goal:** Anthems, keyword granters, and protective statics score for
 commanders whose strategy they serve (go-wide/token → anthem; voltron →
