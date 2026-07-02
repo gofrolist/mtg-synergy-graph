@@ -43,6 +43,7 @@ from mtg_synergy_graph.penalties import build_candidate_cache
 from mtg_synergy_graph.universal_scorer import (
     _compute_idf_basis,
     _compute_pair_bonus,
+    maybe_color_legal_pool,
     patched_rule_quality_multiplier,
     score_from_complements,
 )
@@ -643,7 +644,13 @@ def _score_split(
             cmdr_basis: IdfBasis | None = None
             if idf_basis_cache is not None:
                 if cmdr not in idf_basis_cache:
-                    idf_basis_cache[cmdr] = _compute_idf_basis(comps)
+                    # Color-conditioned IDF (plan 2026-07-02-001): bake the
+                    # pool into the cached basis. maybe_color_legal_pool
+                    # reads the flag at call time in universal_scorer, so
+                    # this site and the live scorer path can never diverge
+                    # under mock-patching.
+                    pool = maybe_color_legal_pool(conn, [cmdr], candidate_cache)
+                    idf_basis_cache[cmdr] = _compute_idf_basis(comps, legal_pool=pool)
                 cmdr_basis = idf_basis_cache[cmdr]
 
             result = score_commander_from_complements(

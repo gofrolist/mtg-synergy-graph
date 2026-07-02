@@ -125,6 +125,7 @@ ignore = [
 "scripts/**" = ["S101"]
 # S608: all SQL uses ? placeholders; f-strings only interpolate placeholder counts
 "src/mtg_synergy_graph/engine.py" = ["S608"]
+"src/mtg_synergy_graph/universal_scorer.py" = ["S608"]
 "src/mtg_synergy_graph/graph_engine.py" = ["S608"]
 "src/mtg_synergy_graph/graph_cache.py" = ["S608"]
 "src/mtg_synergy_graph/importer.py" = ["S608"]
