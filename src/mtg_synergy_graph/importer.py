@@ -66,10 +66,45 @@ _RESOLVER_TIERS = (
 #:   rank, or the DB schema pre-dates the column.
 #: - ``legal_commander`` defaults to ``True`` when the schema pre-dates
 #:   the ``legal_commander`` column — "no known reason to exclude".
+#: - ``color_identity`` is the engine's sorted comma-joined pip format
+#:   (``"B,G,R,U,W"``; ``""`` = colourless). ``None`` when the schema
+#:   pre-dates the column or the value is unparseable — the importer
+#:   then falls back to the cost-derived placeholder.
 class ScryfallMeta(NamedTuple):
     oracle_id: str
     edhrec_rank: int | None
     legal_commander: bool = True
+    color_identity: str | None = None
+
+
+def _normalise_scryfall_identity(raw: object) -> str | None:
+    """Convert a Scryfall ``color_identity`` value to sorted ``"B,G,R,U,W"`` form.
+
+    tags.db stores the column as a JSON array string (``'["B", "W"]'``);
+    tolerate an already comma-joined string as well. Returns ``""`` for a
+    genuinely colourless identity (``[]``) and ``None`` for missing or
+    unparseable input so callers can fall back to the cost-derived
+    placeholder.
+    """
+    if raw is None or not isinstance(raw, str):
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    if text.startswith("["):
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(parsed, list):
+            return None
+        tokens = [str(t) for t in parsed]
+    else:
+        tokens = text.split(",")
+    pips = {t.strip().upper() for t in tokens if t.strip()}
+    if pips - _MANA_PIPS:
+        return None
+    return ",".join(sorted(pips))
 
 
 def _build_oracle_id_resolver(
@@ -97,6 +132,7 @@ def _build_oracle_id_resolver(
     has_type_line = "type_line" in cols
     has_edhrec_rank = "edhrec_rank" in cols
     has_legal_commander = "legal_commander" in cols
+    has_color_identity = "color_identity" in cols
 
     # Bucket each Scryfall row by priority so later tiers never clobber
     # earlier ones.
@@ -112,6 +148,8 @@ def _build_oracle_id_resolver(
         select_cols.append("edhrec_rank")
     if has_legal_commander:
         select_cols.append("legal_commander")
+    if has_color_identity:
+        select_cols.append("color_identity")
     sql = "SELECT " + ", ".join(select_cols) + " FROM cards"
 
     for row in scryfall_conn.execute(sql):
@@ -129,11 +167,14 @@ def _build_oracle_id_resolver(
         # explicitly 0 is treated as legal — "no known reason to exclude".
         raw_legal = row[idx] if has_legal_commander else None
         legal_commander = raw_legal != 0
+        if has_legal_commander:
+            idx += 1
+        color_identity = _normalise_scryfall_identity(row[idx]) if has_color_identity else None
 
         if not oracle_id or not canonical:
             continue
 
-        meta = ScryfallMeta(oracle_id, edhrec_rank, legal_commander)
+        meta = ScryfallMeta(oracle_id, edhrec_rank, legal_commander, color_identity)
         is_token = bool(type_line) and "Token" in type_line
         if is_token:
             by_name_any.setdefault(canonical, meta)
@@ -327,7 +368,10 @@ def _card_row(card: dict[str, Any]) -> dict[str, Any]:
         "subtypes": subtypes,
         "card_types": card_types,
         "colors": colors,
-        "color_identity": colors,  # placeholder until full identity logic lands
+        # Scryfall-resolved identity when available (set by import_card);
+        # cost-derived proxy otherwise. "" is a valid colourless identity,
+        # so only None falls back.
+        "color_identity": (card["color_identity"] if card.get("color_identity") is not None else colors),
         "power": power or None,
         "toughness": toughness or None,
         "loyalty": card.get("loyalty"),
@@ -485,6 +529,11 @@ def import_card(
             # signal, so there is nothing to protect against being
             # overwritten here.
             card["legal_commander"] = hit.legal_commander
+            # Scryfall colour identity always wins too: the cost-derived
+            # placeholder misses off-cost pips (activated abilities like
+            # Sisay's {W}{U}{B}{R}{G}, colour indicators, land types).
+            if hit.color_identity is not None:
+                card["color_identity"] = hit.color_identity
 
     conn.execute(_CARD_INSERT_SQL, _card_row(card))
 
