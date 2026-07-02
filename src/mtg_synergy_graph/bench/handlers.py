@@ -83,6 +83,35 @@ def handle_repin(args: argparse.Namespace) -> int:
         )
         return 2
 
+    # Pre-flight EDHREC-DB validation (plan 2026-07-02-003 Unit 1 / R9).
+    # A re-pin must refresh the hidden-gem legacy values, and
+    # ``_edhrec_top_30`` swallows per-commander DatabaseErrors by design
+    # — so a missing/corrupt EDHREC DB would silently produce a gem-less
+    # (stale) pin. Probe ``edhrec_card_synergy`` directly BEFORE any
+    # scoring work and refuse to write anything on failure.
+    edhrec_db_path = getattr(args, "edhrec_db", None)
+    if edhrec_db_path is None or not Path(edhrec_db_path).exists():
+        print(
+            f"error: EDHREC DB {edhrec_db_path!r} not found. --repin refreshes "
+            "hidden-gem baseline values and requires it. Pass --edhrec-db PATH "
+            "or import the EDHREC data first.",
+            file=sys.stderr,
+        )
+        return 2
+    edhrec_conn = sqlite3.connect(edhrec_db_path)
+    edhrec_conn.row_factory = sqlite3.Row
+    try:
+        edhrec_conn.execute("SELECT commander_slug FROM edhrec_card_synergy LIMIT 1").fetchone()
+    except sqlite3.DatabaseError as exc:
+        edhrec_conn.close()
+        print(
+            f"error: EDHREC DB {edhrec_db_path!r} is unusable: {exc}. "
+            "Pass --edhrec-db PATH to a valid EDHREC synergy DB, "
+            "or re-import the EDHREC data.",
+            file=sys.stderr,
+        )
+        return 2
+
     commanders = _load_commanders_from_fixture(existing)
     conn = open_db(args.db)
     try:
@@ -101,11 +130,18 @@ def handle_repin(args: argparse.Namespace) -> int:
 
         writer = TensorWriter(conn, config_hash=live_hash)
         with writer:
-            fresh = build_fixture(conn, commanders, existing=existing, tensor_writer=writer)
+            fresh = build_fixture(
+                conn,
+                commanders,
+                existing=existing,
+                tensor_writer=writer,
+                edhrec_conn=edhrec_conn,
+            )
         # rows_written is updated on _flush(), which __exit__ calls via close().
         rows_written = writer.rows_written
     finally:
         conn.close()
+        edhrec_conn.close()
     fresh.write(fixture_path)
     print(
         f"--repin wrote {len(fresh.entries)} commanders to {fixture_path} "
@@ -736,9 +772,9 @@ def handle_inspect_gems(args: argparse.Namespace) -> int:
         return 2
 
     # Short-circuit when the pinned fixture carries no gem data — no
-    # useful diff is possible. Predates Unit 2 plumbing of edhrec_conn
-    # into handle_repin; once that lands, pins will carry gem data by
-    # default and this branch becomes a rare edge case.
+    # useful diff is possible. Since plan 2026-07-02-003 Unit 1 plumbed
+    # edhrec_conn into handle_repin, pins carry gem data by default and
+    # this branch is a rare edge case (hand-built or pre-plumbing pins).
     if not _has_gem_data(pinned):
         print("no baseline gems to compare", file=sys.stderr)
         return 0
