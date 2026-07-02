@@ -1,12 +1,19 @@
 ---
 title: "feat: Portfolio selection — per-family diminishing returns at top-30 assembly"
 type: feat
-status: active
+status: declined
 date: 2026-07-02
 origin: docs/brainstorms/2026-07-02-portfolio-selection-requirements.md
 ---
 
 # feat: Portfolio Selection — Per-Family Diminishing Returns at Top-30 Assembly
+
+> **DECISION 2026-07-02: DECLINED at the R0 kill-test (Unit 4).**
+> Both 100-cmdr survivors failed the 500-cmdr R9 gate (agg +0.0013 vs
+> the +0.0136 band; 9/7 cliffs incl. Magda −0.0571 — the pre-named
+> fuel-tribe trap). Optimizer confound pass: no headroom (held
+> −0.0001). Units 3 and 5–8 unexecuted per the designed cheap exit.
+> Evidence: docs/solutions/best-practices/portfolio-selection-null-result-2026-07-02.md
 
 ## Overview
 
@@ -347,7 +354,7 @@ flowchart LR
 
 ### Phase A — Kill-test (cheap exit; zero scoring-path changes)
 
-- [ ] **Unit 1: Committed rule_id→family map artifact + loader**
+- [x] **Unit 1: Committed rule_id→family map artifact + loader**
 
 **Goal:** the single family authority exists, is validated, and is
 inert (no hash wiring, no behavior change).
@@ -405,7 +412,7 @@ inert (no hash wiring, no behavior change).
 
 **Verification:** tests pass; `--expect-identity` clean; JSON tracked.
 
-- [ ] **Unit 2: Committed R0 simulation harness + pinned thresholds**
+- [x] **Unit 2: Committed R0 simulation harness + pinned thresholds**
 
 **Goal:** the kill-test instrument exists as committed code (not
 scratchpad), with all gates numeric before any sweep runs.
@@ -475,7 +482,7 @@ Decision "one instrument".
 predicate recorded; addressable-share readout runs end-to-end on the
 100-cmdr fixture.
 
-- [ ] **Unit 4: R0 kill-test run + decision**
+- [x] **Unit 4: R0 kill-test run + decision**
 
 **Goal:** fund integration or DECLINE with evidence, before any
 scoring-path change.
