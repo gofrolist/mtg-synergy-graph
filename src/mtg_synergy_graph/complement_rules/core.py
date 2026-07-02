@@ -484,23 +484,74 @@ def _changezone_type_set(valid_filter: str | None) -> frozenset[str] | None:
     return frozenset(types) if types else None
 
 
+def _zone_equivalence_map() -> dict[tuple[str, str], str]:
+    """(origin, destination) → equivalence-class name from seed data.
+
+    Loaded from ``event_match_seed.json``'s ``zone_equivalence_classes``
+    section (plan 2026-07-02-002 Unit 9) and cached on first use.
+    Classes are DATA, not code branches, so future edits stay
+    re-pin-disciplined: the section is folded into
+    ``event_match_seed_digest`` in ``get_scoring_config_inputs``.
+    Malformed rows raise at load, mirroring the interpreter's seed
+    drift-check behavior.
+    """
+    global _ZONE_EQUIVALENCE_CACHE
+    if _ZONE_EQUIVALENCE_CACHE is not None:
+        return _ZONE_EQUIVALENCE_CACHE
+    import json as _json
+
+    from ..port_graph._paths import default_seed_path
+
+    data = _json.loads(default_seed_path("event_match_seed.json").read_text(encoding="utf-8"))
+    mapping: dict[tuple[str, str], str] = {}
+    for row in data.get("zone_equivalence_classes", []):
+        cls = row.get("class")
+        origins = row.get("origins")
+        dest = row.get("destination")
+        if not cls or not isinstance(origins, list) or not origins or not dest:
+            raise ValueError(f"malformed zone_equivalence_classes row in event_match_seed.json: {row!r}")
+        for origin in origins:
+            key = (str(origin), str(dest))
+            if key in mapping:
+                raise ValueError(f"zone pair {key} appears in multiple equivalence classes")
+            mapping[key] = str(cls)
+    _ZONE_EQUIVALENCE_CACHE = mapping
+    return mapping
+
+
+_ZONE_EQUIVALENCE_CACHE: dict[tuple[str, str], str] | None = None
+
+
 def _changezone_resonance_check(cmdr: PortRow, cand: PortRow) -> bool:
     """Two ``ChangeZone`` effects resonate iff they move cards between
-    the same zones AND their card-type families overlap.
+    the same zones — or zones in the same seed-data equivalence class —
+    AND their card-type families overlap.
 
     Canonical pair: Meren (Creature.YouOwn, Graveyard→Battlefield) ×
     Karmic Guide (Creature.YouCtrl, same zones) → both fire "creature
-    from graveyard to battlefield" effects. Disallows Meren × Lord
-    Windgrace (Land) — disjoint types — and Meren × Eternal Witness
-    (Graveyard→Hand) — different destination. Runtime-bound filters
-    (Tergrid's ``TriggeredCard``, Marchesa's
-    ``DelayTriggerRememberedLKI``) return ``None`` from the type
-    extractor and are silently excluded.
+    from graveyard to battlefield" effects. Since plan 2026-07-02-002
+    Unit 9, Meren also resonates with Exile→Battlefield recursion
+    (``recur_to_battlefield`` class) while Meren × Eternal Witness
+    (Graveyard→Hand, ``retrieve_to_hand`` class) stays excluded —
+    retrieval is not reanimation. Zone pairs outside every class keep
+    exact-equality semantics. Disallows Meren × Lord Windgrace (Land)
+    — disjoint types. Runtime-bound filters (Tergrid's
+    ``TriggeredCard``, Marchesa's ``DelayTriggerRememberedLKI``)
+    return ``None`` from the type extractor and are silently excluded.
     """
-    if (cmdr.get("zone_origin") or "").strip() != (cand.get("zone_origin") or "").strip():
-        return False
-    if (cmdr.get("zone_destination") or "").strip() != (cand.get("zone_destination") or "").strip():
-        return False
+    cmdr_zone = (
+        (cmdr.get("zone_origin") or "").strip(),
+        (cmdr.get("zone_destination") or "").strip(),
+    )
+    cand_zone = (
+        (cand.get("zone_origin") or "").strip(),
+        (cand.get("zone_destination") or "").strip(),
+    )
+    if cmdr_zone != cand_zone:
+        zmap = _zone_equivalence_map()
+        cmdr_cls = zmap.get(cmdr_zone)
+        if cmdr_cls is None or cmdr_cls != zmap.get(cand_zone):
+            return False
     cmdr_types = _changezone_type_set(cmdr.get("valid_filter"))
     cand_types = _changezone_type_set(cand.get("valid_filter"))
     if cmdr_types is None or cand_types is None:

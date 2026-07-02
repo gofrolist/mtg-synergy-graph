@@ -768,7 +768,7 @@ trigger engines get a node_kind and event-map reach; Forge's generic
 - Re-import clean; audit gates evaluated; `--unknowns` delta recorded in
   the landing commit message; re-pin atomic.
 
-- [ ] **Unit 9: C4 — zone-equivalence classes and tutor attrs**
+- [x] **Unit 9: C4 — zone-equivalence classes and tutor attrs** *(ARM 1 SHIPPED 2026-07-02: seed-data zone classes (recur_to_battlefield {GY,Exile}→BF; retrieve_to_hand {GY,Exile}→Hand) with digest registration + malformed-row raise + 7 new tests; measured effect ≈ ZERO (mean +0.0000 both fixtures, 0 cliffs, gem flat) — Exile→BF ChangeZone ports are rare; ships as semantic correctness, not a metric win. ARM 2 (tutor attrs) DEFERRED to C1: tutor value is commander-independent glue, and any consumer without the lift baseline is the false-positive engine the plan warned about.)*
 
 **Goal:** Semantically-equivalent shapes match: recursion resonates across
 zone-pair classes ({GY, Exile}→Battlefield, etc.) and tutors/

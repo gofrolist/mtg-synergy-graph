@@ -359,7 +359,10 @@ def get_scoring_config_inputs() -> ScoringConfigInputs:
         embedding_w=emb_contribution._EMBEDDING_W,
         embedding_k=emb_contribution._EMBEDDING_K,
         vectorizer_version=_get_emb_cfg().vectorizer_version,
-        event_match_seed_digest=_seed_digest("event_match_seed.json", ("event_match_map", "cost_feeds_trigger")),
+        event_match_seed_digest=_seed_digest(
+            "event_match_seed.json",
+            ("event_match_map", "cost_feeds_trigger", "zone_equivalence_classes"),
+        ),
         declarative_rules_digest=_seed_digest("rules_seed.json", ("rules",)),
         staples=STAPLES,
         enable_concave_family_agg=_ENABLE_CONCAVE_FAMILY_AGG,

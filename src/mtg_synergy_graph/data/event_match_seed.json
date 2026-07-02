@@ -2,60 +2,237 @@
   "_readme": "Single source of truth for EVENT_MATCH_MAP and COST_FEEDS_TRIGGER (plan 003 Unit 3). Loaded at graph_engine module import (to populate the Python dicts) AND by the importer (to seed the event_match_map + cost_feeds_trigger SQLite tables). Edit this file to add an equivalence; both representations refresh automatically on next import.",
   "_match_qualities": "Must be members of port_graph.vocabulary.MATCH_QUALITIES: 'always', 'zone_compatible', 'zone_dest_battlefield', 'counter_compatible', 'tribe_match', 'color_match'.",
   "event_match_map": [
-    {"from": "ChangesZone", "to": "Token", "match_quality": "zone_dest_battlefield"},
-    {"from": "ChangesZone", "to": "ChangeZone", "match_quality": "zone_compatible"},
-    {"from": "ChangesZone", "to": "ChangeZoneAll", "match_quality": "zone_compatible"},
-    {"from": "ChangesZone", "to": "CopyPermanent", "match_quality": "zone_dest_battlefield"},
-    {"from": "ChangesZone", "to": "Animate", "match_quality": "zone_dest_battlefield"},
-
-    {"from": "CounterAdded", "to": "PutCounter", "match_quality": "counter_compatible"},
-    {"from": "CounterAdded", "to": "PutCounterAll", "match_quality": "counter_compatible"},
-    {"from": "CounterAdded", "to": "Proliferate", "match_quality": "always"},
-    {"from": "CounterAdded", "to": "MultiplyCounter", "match_quality": "always"},
-
-    {"from": "SpellCast", "to": "*", "match_quality": "always"},
-    {"from": "LandPlayed", "to": "*", "match_quality": "always"},
-    {"from": "Attacks", "to": "*", "match_quality": "always"},
-    {"from": "AttackerBlocked", "to": "*", "match_quality": "always"},
-    {"from": "BecomesTarget", "to": "*", "match_quality": "always"},
-
-    {"from": "DamageDone", "to": "DealDamage", "match_quality": "always"},
-    {"from": "DamageDone", "to": "DamageAll", "match_quality": "always"},
-    {"from": "DamageDone", "to": "AddPhase", "match_quality": "always"},
-
-    {"from": "LifeGained", "to": "GainLife", "match_quality": "always"},
-
-    {"from": "Sacrificed", "to": "Sacrifice", "match_quality": "always"},
-    {"from": "Sacrificed", "to": "SacrificeAll", "match_quality": "always"},
-
-    {"from": "Discarded", "to": "Discard", "match_quality": "always"},
-    {"from": "Drawn", "to": "Draw", "match_quality": "always"},
-
-    {"from": "Taps", "to": "Tap", "match_quality": "always"},
-    {"from": "Taps", "to": "TapAll", "match_quality": "always"},
-    {"from": "Taps", "to": "TapOrUntap", "match_quality": "always"},
-    {"from": "Untaps", "to": "Untap", "match_quality": "always"},
-    {"from": "Untaps", "to": "UntapAll", "match_quality": "always"},
-    {"from": "Untaps", "to": "TapOrUntap", "match_quality": "always"},
-
-    {"from": "TapsForMana", "to": "Mana", "match_quality": "always"},
-
-    {"from": "Proliferate", "to": "Proliferate", "match_quality": "always"},
-    {"from": "Investigated", "to": "Investigate", "match_quality": "always"},
-    {"from": "Surveil", "to": "Surveil", "match_quality": "always"},
-    {"from": "LifeLost", "to": "LoseLife", "match_quality": "always"},
-    {"from": "BecomeMonarch", "to": "BecomeMonarch", "match_quality": "always"}
+    {
+      "from": "ChangesZone",
+      "to": "Token",
+      "match_quality": "zone_dest_battlefield"
+    },
+    {
+      "from": "ChangesZone",
+      "to": "ChangeZone",
+      "match_quality": "zone_compatible"
+    },
+    {
+      "from": "ChangesZone",
+      "to": "ChangeZoneAll",
+      "match_quality": "zone_compatible"
+    },
+    {
+      "from": "ChangesZone",
+      "to": "CopyPermanent",
+      "match_quality": "zone_dest_battlefield"
+    },
+    {
+      "from": "ChangesZone",
+      "to": "Animate",
+      "match_quality": "zone_dest_battlefield"
+    },
+    {
+      "from": "CounterAdded",
+      "to": "PutCounter",
+      "match_quality": "counter_compatible"
+    },
+    {
+      "from": "CounterAdded",
+      "to": "PutCounterAll",
+      "match_quality": "counter_compatible"
+    },
+    {
+      "from": "CounterAdded",
+      "to": "Proliferate",
+      "match_quality": "always"
+    },
+    {
+      "from": "CounterAdded",
+      "to": "MultiplyCounter",
+      "match_quality": "always"
+    },
+    {
+      "from": "SpellCast",
+      "to": "*",
+      "match_quality": "always"
+    },
+    {
+      "from": "LandPlayed",
+      "to": "*",
+      "match_quality": "always"
+    },
+    {
+      "from": "Attacks",
+      "to": "*",
+      "match_quality": "always"
+    },
+    {
+      "from": "AttackerBlocked",
+      "to": "*",
+      "match_quality": "always"
+    },
+    {
+      "from": "BecomesTarget",
+      "to": "*",
+      "match_quality": "always"
+    },
+    {
+      "from": "DamageDone",
+      "to": "DealDamage",
+      "match_quality": "always"
+    },
+    {
+      "from": "DamageDone",
+      "to": "DamageAll",
+      "match_quality": "always"
+    },
+    {
+      "from": "DamageDone",
+      "to": "AddPhase",
+      "match_quality": "always"
+    },
+    {
+      "from": "LifeGained",
+      "to": "GainLife",
+      "match_quality": "always"
+    },
+    {
+      "from": "Sacrificed",
+      "to": "Sacrifice",
+      "match_quality": "always"
+    },
+    {
+      "from": "Sacrificed",
+      "to": "SacrificeAll",
+      "match_quality": "always"
+    },
+    {
+      "from": "Discarded",
+      "to": "Discard",
+      "match_quality": "always"
+    },
+    {
+      "from": "Drawn",
+      "to": "Draw",
+      "match_quality": "always"
+    },
+    {
+      "from": "Taps",
+      "to": "Tap",
+      "match_quality": "always"
+    },
+    {
+      "from": "Taps",
+      "to": "TapAll",
+      "match_quality": "always"
+    },
+    {
+      "from": "Taps",
+      "to": "TapOrUntap",
+      "match_quality": "always"
+    },
+    {
+      "from": "Untaps",
+      "to": "Untap",
+      "match_quality": "always"
+    },
+    {
+      "from": "Untaps",
+      "to": "UntapAll",
+      "match_quality": "always"
+    },
+    {
+      "from": "Untaps",
+      "to": "TapOrUntap",
+      "match_quality": "always"
+    },
+    {
+      "from": "TapsForMana",
+      "to": "Mana",
+      "match_quality": "always"
+    },
+    {
+      "from": "Proliferate",
+      "to": "Proliferate",
+      "match_quality": "always"
+    },
+    {
+      "from": "Investigated",
+      "to": "Investigate",
+      "match_quality": "always"
+    },
+    {
+      "from": "Surveil",
+      "to": "Surveil",
+      "match_quality": "always"
+    },
+    {
+      "from": "LifeLost",
+      "to": "LoseLife",
+      "match_quality": "always"
+    },
+    {
+      "from": "BecomeMonarch",
+      "to": "BecomeMonarch",
+      "match_quality": "always"
+    }
   ],
   "cost_feeds_trigger": [
-    {"cost_event": "sacrifice", "trigger_event": "Sacrificed"},
-    {"cost_event": "discard", "trigger_event": "Discarded"},
-    {"cost_event": "exile", "trigger_event": "Exiled"},
-    {"cost_event": "exile_from_grave", "trigger_event": "Exiled"},
-    {"cost_event": "exile_from_hand", "trigger_event": "Exiled"},
-    {"cost_event": "exile_from_top", "trigger_event": "Exiled"},
-    {"cost_event": "mill", "trigger_event": "Milled"},
-    {"cost_event": "pay_life", "trigger_event": "LifeLost"},
-    {"cost_event": "tap", "trigger_event": "Taps"},
-    {"cost_event": "tap_type", "trigger_event": "Taps"}
+    {
+      "cost_event": "sacrifice",
+      "trigger_event": "Sacrificed"
+    },
+    {
+      "cost_event": "discard",
+      "trigger_event": "Discarded"
+    },
+    {
+      "cost_event": "exile",
+      "trigger_event": "Exiled"
+    },
+    {
+      "cost_event": "exile_from_grave",
+      "trigger_event": "Exiled"
+    },
+    {
+      "cost_event": "exile_from_hand",
+      "trigger_event": "Exiled"
+    },
+    {
+      "cost_event": "exile_from_top",
+      "trigger_event": "Exiled"
+    },
+    {
+      "cost_event": "mill",
+      "trigger_event": "Milled"
+    },
+    {
+      "cost_event": "pay_life",
+      "trigger_event": "LifeLost"
+    },
+    {
+      "cost_event": "tap",
+      "trigger_event": "Taps"
+    },
+    {
+      "cost_event": "tap_type",
+      "trigger_event": "Taps"
+    }
+  ],
+  "zone_equivalence_classes": [
+    {
+      "class": "recur_to_battlefield",
+      "origins": [
+        "Graveyard",
+        "Exile"
+      ],
+      "destination": "Battlefield",
+      "comment": "Plan 2026-07-02-002 Unit 9: reanimation-class recursion — Meren (GY->BF) resonates with Exile->BF recursion pieces. Hand/Library origins deliberately excluded (casting/cheating are different archetypes)."
+    },
+    {
+      "class": "retrieve_to_hand",
+      "origins": [
+        "Graveyard",
+        "Exile"
+      ],
+      "destination": "Hand",
+      "comment": "Retrieval class — Eternal Witness (GY->Hand) resonates with Exile->Hand retrieval. Distinct from recur_to_battlefield: retrieval != reanimation."
+    }
   ]
 }
