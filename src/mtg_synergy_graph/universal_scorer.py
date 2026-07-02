@@ -83,6 +83,7 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "etb_self": "port_match",
     "spell_density": "spellcast_density",
     "tribal_density": "catchall",
+    "tribal_body": "catchall",
     "sacrifice_cluster": "sacrifice_synergy",
     "zone_resonance": "trigger_resonance",
     "effect_feeds_trigger": "port_match",
@@ -565,6 +566,10 @@ _FLAT_COUNT_RULES: frozenset[str] = frozenset(
         "scaling",
         "etb_self",
         "tribal_density",
+        # Plan 2026-07-02-002 Unit 5: body tier of the two-tier tribal
+        # emission — flag-gated in density.py, flat weight from its own
+        # scoring_weights.json entry at flip time.
+        "tribal_body",
         "token_producer",
         "evasion",
     }

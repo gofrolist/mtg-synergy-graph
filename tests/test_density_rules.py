@@ -1226,6 +1226,121 @@ class TestSkiplistTribeStructuredEvidence:
         assert "Squirrel Sovereign" in _candidates(results)
 
 
+class TestTribalPayoffTier:
+    """Plan 2026-07-02-002 Unit 5: payoff/body two-tier tribal emission
+    behind ``_ENABLE_TRIBAL_PAYOFF_TIER`` (mandated by the Unit 4
+    null result — uniform haircuts cannot separate flood-as-noise from
+    flood-as-archetype; candidate-side payoff evidence can).
+
+    Payoff tier (rule_id ``tribal_density``): a tribe member whose own
+    ports reference the tribe in structured fields (lords-on-bodies,
+    tribal triggers). Body tier (rule_id ``tribal_body``): a mere
+    same-type body, at a materially lower flat weight."""
+
+    def _krenko_world(self, conn):
+        _insert_card(
+            conn,
+            "KrenkoLike",
+            card_types="Creature",
+            subtypes="Goblin Warrior",
+            types="Legendary Creature",
+        )
+        _insert_port(
+            conn,
+            "KrenkoLike",
+            "effect",
+            "Token",
+            raw_line="{'TokenScript': 'r_1_1_goblin'}",
+        )
+        # Payoff: a Goblin whose trigger references Goblins.
+        _insert_card(conn, "Goblin Payoff", card_types="Creature", subtypes="Goblin Shaman")
+        _insert_port(
+            conn,
+            "Goblin Payoff",
+            "trigger",
+            "ChangesZone",
+            valid_filter="Goblin.YouCtrl",
+            raw_line="{'Mode':'ChangesZone','ValidCard':'Goblin.YouCtrl','Destination':'Battlefield'}",
+        )
+        # Body: vanilla Goblin, no ports.
+        _insert_card(conn, "Vanilla Goblin", card_types="Creature", subtypes="Goblin")
+        return [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("KrenkoLike",)).fetchall()
+        ]
+
+    def test_flag_default_is_false(self):
+        import mtg_synergy_graph.complement_rules.density as density_mod
+
+        assert density_mod._ENABLE_TRIBAL_PAYOFF_TIER is False
+
+    def test_flag_off_single_tier(self, conn):
+        """Flag OFF: payoff and body both emit rule_id tribal_density —
+        current behavior, bitwise-inert."""
+        cmdr_ports = self._krenko_world(conn)
+        results = _find_tribal_density_complements(conn, cmdr_ports, {"KrenkoLike"})
+        by_rule = {r.candidate: r.rule_id for r in results}
+        assert by_rule["Goblin Payoff"] == "tribal_density"
+        assert by_rule["Vanilla Goblin"] == "tribal_density"
+
+    def test_flag_on_two_tiers(self, conn):
+        """Flag ON: structured tribal reference -> payoff tier; vanilla
+        body -> tribal_body."""
+        from unittest.mock import patch
+
+        import mtg_synergy_graph.complement_rules.density as density_mod
+
+        cmdr_ports = self._krenko_world(conn)
+        with patch.object(density_mod, "_ENABLE_TRIBAL_PAYOFF_TIER", True):
+            results = _find_tribal_density_complements(conn, cmdr_ports, {"KrenkoLike"})
+        by_rule = {r.candidate: r.rule_id for r in results}
+        assert by_rule["Goblin Payoff"] == "tribal_density"
+        assert by_rule["Vanilla Goblin"] == "tribal_body"
+
+    def test_flag_on_affected_scope_counts_as_payoff(self, conn):
+        """A tribe member granting an anthem via affected_scope is a
+        payoff (lords-on-bodies)."""
+        from unittest.mock import patch
+
+        import mtg_synergy_graph.complement_rules.density as density_mod
+
+        cmdr_ports = self._krenko_world(conn)
+        _insert_card(conn, "Goblin Lordling", card_types="Creature", subtypes="Goblin")
+        _insert_port(
+            conn,
+            "Goblin Lordling",
+            "static",
+            "Continuous",
+            affected_scope="Goblin.YouCtrl",
+            raw_line="{'Mode':'Continuous','Affected':'Goblin.YouCtrl','AddPower':'1'}",
+        )
+        with patch.object(density_mod, "_ENABLE_TRIBAL_PAYOFF_TIER", True):
+            results = _find_tribal_density_complements(conn, cmdr_ports, {"KrenkoLike"})
+        by_rule = {r.candidate: r.rule_id for r in results}
+        assert by_rule["Goblin Lordling"] == "tribal_density"
+
+    def test_flag_on_unrelated_ports_stay_body(self, conn):
+        """A tribe member with ports that never reference the tribe is
+        still a body (having ports is not payoff evidence)."""
+        from unittest.mock import patch
+
+        import mtg_synergy_graph.complement_rules.density as density_mod
+
+        cmdr_ports = self._krenko_world(conn)
+        _insert_card(conn, "Goblin Cantrip", card_types="Creature", subtypes="Goblin")
+        _insert_port(
+            conn,
+            "Goblin Cantrip",
+            "trigger",
+            "ChangesZone",
+            valid_filter="Card.Self",
+            raw_line="{'Mode':'ChangesZone','ValidCard':'Card.Self','Destination':'Battlefield'}",
+        )
+        with patch.object(density_mod, "_ENABLE_TRIBAL_PAYOFF_TIER", True):
+            results = _find_tribal_density_complements(conn, cmdr_ports, {"KrenkoLike"})
+        by_rule = {r.candidate: r.rule_id for r in results}
+        assert by_rule["Goblin Cantrip"] == "tribal_body"
+
+
 # ---------------------------------------------------------------------------
 # _find_scales_with_density
 # ---------------------------------------------------------------------------

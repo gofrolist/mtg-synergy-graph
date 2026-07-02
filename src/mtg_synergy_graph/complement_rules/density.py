@@ -573,6 +573,34 @@ def _find_spellcast_density_complements(
     return results
 
 
+#: Plan 2026-07-02-002 Unit 5: payoff/body two-tier tribal emission.
+#: When False (module default), every tribe member emits rule_id
+#: ``tribal_density`` at the single flat weight — bitwise-inert legacy
+#: behavior. When True, tribe members whose own ports reference the
+#: tribe in structured fields (valid_filter/affected_scope: tribal
+#: triggers, lords-on-bodies) keep ``tribal_density``; mere same-type
+#: bodies emit ``tribal_body`` at a materially lower flat weight.
+#: Mandated by the Unit 4 null result: uniform within-family haircuts
+#: cannot separate flood-as-noise from flood-as-archetype — the
+#: payoff/body distinction is candidate-side evidence that can.
+_ENABLE_TRIBAL_PAYOFF_TIER: bool = False
+
+
+def _tribal_payoff_names(conn: sqlite3.Connection, sub: str) -> set[str]:
+    """Card names whose ports reference ``sub`` in structured fields.
+
+    Structured fields only (valid_filter / affected_scope) — raw_line
+    prose would re-admit TriggerDescription noise (the Unit 2 lesson).
+    """
+    pat = f"%{_escape_like(sub)}%"
+    cur = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE valid_filter LIKE ? ESCAPE '\\' OR affected_scope LIKE ? ESCAPE '\\'",
+        (pat, pat),
+    )
+    return {r["card_name"] for r in cur.fetchall()}
+
+
 def _vanilla_tribal_subtypes(conn: sqlite3.Connection, commander_set: set[str]) -> set[str]:
     """Return creature subtypes for a vanilla-anchor commander.
 
@@ -665,6 +693,7 @@ def _find_tribal_density_complements(
     results: list[PortComplement] = []
     seen: set[str] = set()
     for sub in subtypes:
+        payoffs = _tribal_payoff_names(conn, sub) if _ENABLE_TRIBAL_PAYOFF_TIER else None
         cur = conn.execute(
             "SELECT name FROM cards WHERE subtypes LIKE ? AND card_types LIKE '%Creature%'",
             (f"%{sub}%",),
@@ -673,9 +702,12 @@ def _find_tribal_density_complements(
             name = r["name"]
             if name not in cmdr_set and name not in seen:
                 seen.add(name)
+                rule_id = "tribal_density"
+                if payoffs is not None and name not in payoffs:
+                    rule_id = "tribal_body"
                 results.append(
                     PortComplement(
-                        rule_id="tribal_density",
+                        rule_id=rule_id,
                         direction="synergy",
                         candidate=name,
                         cmdr_event="tribal",
