@@ -7,6 +7,22 @@ See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
 ## 2026-07-02
 
+### Vocabulary v4 — PHASE + INTERNAL classification; unwrapping deferred with evidence (plan 2026-07-02-002 Unit 8)
+
+`trigger.Phase` (2,305 rows) and `effect.Cleanup` (2,759 rows) leave
+UNKNOWN; distinct UNKNOWN-shaped cards 15,338 → 13,777. Embeddings
+rebuilt under vocab v4; zero scoring impact (identity PASS).
+Investigation findings: Phase triggers' Execute payloads were already
+extracted as separate effect ports, so no event-map expansion is
+needed at the trigger level; the REAL coverage gap is the
+granted-ability / wrapper family — `effect.Effect` SVar wrappers and
+`AddAbility` statics (Phenax's mill lives inside a Continuous static
+granting "T: target player mills X" and never surfaces as an
+effect.Mill port). That unwrapping is importer-level work, deferred to
+the PPMI/importer batch. Remaining top UNKNOWN shapes (Destroy 1,200 /
+Dig 828 / Charm 738 cards) are generic-glue classes owned by the C1
+design cycle.
+
 ### Calibration track closed — Units 4–6 DECLINE, escalation to C1 (plan 2026-07-02-002)
 
 Ten weight-layer configurations measured (concave haircuts, payoff/body

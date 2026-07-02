@@ -32,13 +32,19 @@ from __future__ import annotations
 #:        preserve the exact semantics of the inline lambdas in
 #:        ``graph_engine.EVENT_MATCH_MAP`` for Token /
 #:        CopyPermanent / Animate entries.
+#:   v4 — 2026-07-02 — plan 2026-07-02-002 Unit 8: PHASE
+#:        (trigger.Phase upkeep/combat/end-step engines; Execute
+#:        payloads were already separate effect ports) + INTERNAL
+#:        (effect.Cleanup bookkeeping chains). effect.Effect wrapper
+#:        unwrapping deferred to the importer batch — see
+#:        RULE_HISTORY 2026-07-02.
 #:   v3 — 2026-04-24 — projection.py added classifications for the
 #:        highest-weight UNKNOWN subkinds: ``effect.Pump`` +
 #:        ``effect.PumpAll`` → STATIC_BUFF, ``effect.LoseLife`` →
 #:        LIFE_CHANGE (extending the existing ``effect.GainLife``
 #:        branch), ``cost.remove_counter`` → COUNTER_REMOVED. Reduces
 #:        ``--unknowns`` rank_weight by ~80M across ~6,400 cards.
-VOCAB_VERSION: str = "3"
+VOCAB_VERSION: str = "4"
 
 #: Canonical event-node kinds. Projection (Unit 2) maps every
 #: ``card_ports`` row to exactly one of these (or to ``"UNKNOWN"``).
@@ -66,6 +72,13 @@ NODE_KINDS: frozenset[str] = frozenset(
         "STATIC_BUFF",
         "STATIC_REPLACEMENT",
         "SCALES_WITH",
+        # v4 (plan 2026-07-02-002 Unit 8): upkeep/end-step trigger
+        # engines — the trigger event itself; its Execute-chain effect
+        # payloads are extracted as separate effect ports already.
+        "PHASE",
+        # v4: Forge bookkeeping sub-abilities (DBCleanup 'forget
+        # remembered objects' chains) — real rows, no game semantics.
+        "INTERNAL",
     }
 )
 

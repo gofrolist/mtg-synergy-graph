@@ -13,7 +13,7 @@ from mtg_synergy_graph.port_graph import vocabulary as vocab
 
 
 def test_node_kinds_is_closed_set() -> None:
-    """NODE_KINDS is a frozenset of exactly the 21 canonical kinds
+    """NODE_KINDS is a frozenset of exactly the 23 canonical kinds
     listed in plan 002 FR1. Any addition or removal must be paired
     with a VOCAB_VERSION bump — lock the size here so the bump
     can't be forgotten."""
@@ -39,10 +39,12 @@ def test_node_kinds_is_closed_set() -> None:
         "STATIC_BUFF",
         "STATIC_REPLACEMENT",
         "SCALES_WITH",
+        "PHASE",
+        "INTERNAL",
     }
     assert isinstance(vocab.NODE_KINDS, frozenset)
     assert expected == vocab.NODE_KINDS
-    assert len(vocab.NODE_KINDS) == 21
+    assert len(vocab.NODE_KINDS) == 23
 
 
 def test_match_qualities_is_closed_set() -> None:

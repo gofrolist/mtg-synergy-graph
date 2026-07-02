@@ -711,7 +711,7 @@ aggregation semantics)
 
 ### Phase 3 — Coverage expansion (NO_RULES track)
 
-- [ ] **Unit 8: C3 — classify `trigger.Phase`, unwrap `effect.Effect`**
+- [x] **Unit 8: C3 — classify `trigger.Phase`, unwrap `effect.Effect`** *(HYGIENE ARM SHIPPED 2026-07-02, vocab v4: PHASE (2,305 rows) + INTERNAL (effect.Cleanup, 2,759 rows), UNKNOWN cards 15,338→13,777, embeddings rebuilt, identity PASS. Investigation findings reshape the rest: (a) Phase Execute payloads are already extracted as separate effect ports — event-map rows unneeded, the premise of "unmatchable upkeep engines" was wrong at the trigger level; (b) effect.Effect + granted-ability statics (Phenax's mill inside AddAbility) are one importer-level unwrapping family — deferred to the PPMI/importer batch with this evidence; (c) the remaining big UNKNOWN shapes (Destroy 1200, Dig 828, Charm 738) are C1 glue territory. No scoring-path change; no probe gates consumed.)*
 
 **Goal:** The two largest UNKNOWN shapes become matchable: upkeep/end-step
 trigger engines get a node_kind and event-map reach; Forge's generic
