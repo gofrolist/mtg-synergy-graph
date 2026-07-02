@@ -52,7 +52,7 @@ Sharper findings:
 **Description:** Compute IDF over the commander's color-identity-legal pool instead of the 32k universe (optionally restrict the ranking pool too). Single choke point `_compute_idf_basis` in universal_scorer.py; cacheable per color bucket.
 **Rationale:** 4-frame convergence; EDHREC's own methodological move; documented open direction; failure mode distinct from rejected BM25 (denominator population, not curve shape).
 **Downsides:** Per-commander cliff risk (measure with per-commander histogram); cache plumbing.
-**Confidence:** 75% · **Complexity:** Low-Medium · **Status:** FUNDED (OUTRANKED 46.2%; a1eae6e's Scryfall color_identity also makes the color-pool denominator trustworthy now)
+**Confidence:** 75% · **Complexity:** Low-Medium · **Status:** PROBED & DECLINED (2026-07-02, plan 2026-07-02-001): small-N key saturation cliff — 28/500 commanders < −0.05, aggregate −0.0076 (CI excludes 0), gem down on both instruments, OUTRANKED unchanged; multiplier re-sweep ruled out calibration as confound. Population axis closed; see docs/solutions/best-practices/color-conditioned-idf-null-result-2026-07-02.md. Counter-hypothesis (displacer amplification) fired → evidence now points at #3-weak (concave within-family aggregation) as the next lever.
 
 ### 3. Deck-shaped top-30: redundancy-penalized greedy selection
 **Description:** Re-rank top-200 by greedy marginal gain: discount candidates whose rule-firing niche (axis/family vector from the tensor) is already covered by higher picks (submodular/MMR). Output order is the top-30. Weak variant: concave within-axis aggregation at scoring time.

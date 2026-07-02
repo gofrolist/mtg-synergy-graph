@@ -1,7 +1,8 @@
 ---
 title: "feat: Color-identity-conditioned IDF denominator (probe)"
 type: feat
-status: active
+status: completed
+outcome: DECLINE (2026-07-02) — see docs/solutions/best-practices/color-conditioned-idf-null-result-2026-07-02.md
 date: 2026-07-02
 origin: docs/brainstorms/2026-07-02-color-conditioned-idf-requirements.md
 ---
@@ -245,7 +246,7 @@ Decision matrix (flag × pool availability):
 
 ## Implementation Units
 
-- [ ] **Unit 1: Baseline commit + 500-cmdr fixture regeneration (R11)**
+- [x] **Unit 1: Baseline commit + 500-cmdr fixture regeneration (R11)**
 
 **Goal:** Clean baseline state: land the outstanding post-refresh
 housekeeping, regenerate the stale 500-cmdr fixture on baseline
@@ -288,7 +289,7 @@ scoring code, and tag the baseline.
   baseline prover is the `--expect-identity` PASS above).
 - `pre-color-idf` tag exists on the baseline commit.
 
-- [ ] **Unit 2: Conditioned `_compute_idf_basis` + legal-pool derivation (R1–R5)**
+- [x] **Unit 2: Conditioned `_compute_idf_basis` + legal-pool derivation (R1–R5)**
 
 **Goal:** The scoring change itself, flag-gated off, bitwise-inert
 until flipped.
@@ -373,7 +374,7 @@ weight pairs, mirroring the BM25 plan's Unit 2 style.
 - `bench.py audit --expect-identity` PASSES with flag off (bitwise
   inertness proven).
 
-- [ ] **Unit 3: Report plumbing — aggregate line + identity-size slices (R8, R12)**
+- [x] **Unit 3: Report plumbing — aggregate line + identity-size slices (R8, R12)**
 
 **Goal:** Machine-emitted gate numbers: the SHIP aggregate and the
 per-identity-class delta view, so Unit 4's verdict reads off a
@@ -422,7 +423,7 @@ Unit 1)
   aggregate ≈ 0 and slice rows for every identity class present in
   the 500 set (incl. 15 colorless).
 
-- [ ] **Unit 4: Flip, register config hash, audit, gate evaluation (R6, R7, R13)**
+- [x] **Unit 4: Flip, register config hash, audit, gate evaluation (R6, R7, R13)**
 
 **Goal:** Flip the flag on, make the config hash reflect it, produce
 the full evidence package, and evaluate the R6 gates.
@@ -492,7 +493,7 @@ the full evidence package, and evaluate the R6 gates.
 - An explicit R6 outcome is recorded with the numbers that
   triggered it.
 
-- [ ] **Unit 5: Calibration re-sweep before DECLINE (R8a — conditional)**
+- [x] **Unit 5: Calibration re-sweep before DECLINE (R8a — conditional)**
 
 **Goal:** If raw gates fail, distinguish "population axis is wrong"
 from "surrounding constants were tuned for the old denominator."
@@ -532,7 +533,7 @@ from "surrounding constants were tuned for the old denominator."
   cites post-sweep numbers; or: the sweep's failure to rescue is
   recorded as part of the DECLINE evidence.
 
-- [ ] **Unit 6: Outcome handling (R9, R10 + origin Success Criteria)**
+- [x] **Unit 6: Outcome handling (R9, R10 + origin Success Criteria)**
 
 **Goal:** Land exactly one outcome cleanly, with the repo left in a
 coherent state whichever way the verdict went.
