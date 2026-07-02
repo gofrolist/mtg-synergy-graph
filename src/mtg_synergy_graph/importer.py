@@ -37,7 +37,7 @@ log = logging.getLogger(__name__)
 # Scryfall metadata resolver (4-tier, mirrors the legacy forge_name_map)
 # ---------------------------------------------------------------------------
 #
-# Resolver value type: ``(oracle_id, edhrec_rank)``.
+# Resolver value type: :class:`ScryfallMeta` (see below).
 #
 # ``edhrec_rank`` is Scryfall's global popularity index — lower rank =
 # more commonly played across *all* commanders. We persist it alongside
@@ -66,10 +66,40 @@ _RESOLVER_TIERS = (
 #:   rank, or the DB schema pre-dates the column.
 #: - ``legal_commander`` defaults to ``True`` when the schema pre-dates
 #:   the ``legal_commander`` column — "no known reason to exclude".
+#: - ``color_identity`` is the engine's sorted comma-joined pip format
+#:   (``"B,G,R,U,W"``; ``""`` = colourless). ``None`` when the schema
+#:   pre-dates the column or the value is unparseable — the importer
+#:   then falls back to the cost-derived placeholder.
 class ScryfallMeta(NamedTuple):
     oracle_id: str
     edhrec_rank: int | None
     legal_commander: bool = True
+    color_identity: str | None = None
+
+
+def _normalise_scryfall_identity(raw: object) -> str | None:
+    """Convert a Scryfall ``color_identity`` value to sorted ``"B,G,R,U,W"`` form.
+
+    tags.db stores the column exclusively as a JSON array string
+    (``'["B", "W"]'``; all 33k rows). Returns ``""`` for a genuinely
+    colourless identity (``[]``) and ``None`` for missing or unparseable
+    input so callers can fall back to the cost-derived placeholder
+    (:func:`_derive_colors` output). Rejecting the whole value on any
+    unknown token is deliberate: a fallback is detectable (and counted
+    by the resolver), a partially-salvaged identity is silently wrong.
+    """
+    if raw is None or not isinstance(raw, str):
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, list):
+        return None
+    pips = {str(t).strip().upper() for t in parsed if str(t).strip()}
+    if pips - _MANA_PIPS:
+        return None
+    return ",".join(sorted(pips))
 
 
 def _build_oracle_id_resolver(
@@ -79,24 +109,22 @@ def _build_oracle_id_resolver(
 
     Returns a dict keyed by the canonical Scryfall name *and* — for
     DFC/MDFC cards — the front-face and back-face substrings split out
-    of ``A // B`` forms. Values are :data:`ScryfallMeta` tuples
-    ``(oracle_id, edhrec_rank)``.
+    of ``A // B`` forms. Values are :class:`ScryfallMeta`.
 
     Resolution priority is encoded by bucket iteration order: exact
     non-token matches win, then exact any, then DFC front-face, then
     DFC back-face. ``dict.setdefault`` guarantees earlier tiers are
     never overwritten by later ones.
 
-    The scryfall DB is permitted to lack ``type_line`` or
-    ``edhrec_rank`` columns — the former disables the token-priority
-    tier, the latter makes every entry's ``edhrec_rank`` ``None``.
-    Both concessions exist for the tiny synthetic fixtures used in
-    unit tests.
+    The scryfall DB is permitted to lack the ``type_line``,
+    ``edhrec_rank``, ``legal_commander`` or ``color_identity`` columns —
+    the first disables the token-priority tier, the others make the
+    corresponding :class:`ScryfallMeta` field its default. These
+    concessions exist for the tiny synthetic fixtures used in unit
+    tests.
     """
     cols = {r[1] for r in scryfall_conn.execute("PRAGMA table_info(cards)").fetchall()}
-    has_type_line = "type_line" in cols
-    has_edhrec_rank = "edhrec_rank" in cols
-    has_legal_commander = "legal_commander" in cols
+    optional_cols = ("type_line", "edhrec_rank", "legal_commander", "color_identity")
 
     # Bucket each Scryfall row by priority so later tiers never clobber
     # earlier ones.
@@ -105,36 +133,43 @@ def _build_oracle_id_resolver(
     by_front: dict[str, ScryfallMeta] = {}
     by_back: dict[str, ScryfallMeta] = {}
 
-    select_cols = ["oracle_id", "name"]
-    if has_type_line:
-        select_cols.append("type_line")
-    if has_edhrec_rank:
-        select_cols.append("edhrec_rank")
-    if has_legal_commander:
-        select_cols.append("legal_commander")
+    select_cols = ["oracle_id", "name"] + [c for c in optional_cols if c in cols]
     sql = "SELECT " + ", ".join(select_cols) + " FROM cards"
 
-    for row in scryfall_conn.execute(sql):
-        oracle_id = row[0]
-        canonical = row[1]
-        idx = 2
-        type_line = row[idx] if has_type_line else ""
-        if has_type_line:
-            idx += 1
-        raw_rank = row[idx] if has_edhrec_rank else None
-        edhrec_rank = int(raw_rank) if raw_rank is not None else None
-        if has_edhrec_rank:
-            idx += 1
-        # Scryfall stores commander legality as 1/0/None. Anything not
-        # explicitly 0 is treated as legal — "no known reason to exclude".
-        raw_legal = row[idx] if has_legal_commander else None
-        legal_commander = raw_legal != 0
+    # tags.db is external data — if its color_identity format ever drifts,
+    # every row would silently fall back to the cost-derived placeholder
+    # (the original Sisay bug, corpus-wide). Count failures so the drift
+    # is loud instead.
+    identity_failures = 0
 
+    for raw_row in scryfall_conn.execute(sql):
+        # Name-based access: a positional cursor over dynamically-selected
+        # columns is an off-by-one trap every new optional column re-arms.
+        row = dict(zip(select_cols, raw_row, strict=True))
+        oracle_id = row["oracle_id"]
+        canonical = row["name"]
         if not oracle_id or not canonical:
             continue
 
-        meta = ScryfallMeta(oracle_id, edhrec_rank, legal_commander)
+        type_line = row.get("type_line") or ""
+        raw_rank = row.get("edhrec_rank")
+        edhrec_rank = int(raw_rank) if raw_rank is not None else None
+        # Scryfall stores commander legality as 1/0/None. Anything not
+        # explicitly 0 is treated as legal — "no known reason to exclude".
+        legal_commander = row.get("legal_commander") != 0
+        raw_identity = row.get("color_identity")
+        color_identity = _normalise_scryfall_identity(raw_identity)
+        if raw_identity is not None and color_identity is None:
+            identity_failures += 1
+
         is_token = bool(type_line) and "Token" in type_line
+        if is_token:
+            # A token printing may share its name with a real card. Its
+            # oracle_id/rank are still useful as a last-resort match, but
+            # its colour identity must never overwrite the real card's —
+            # blank it so the importer keeps the cost-derived value.
+            color_identity = None
+        meta = ScryfallMeta(oracle_id, edhrec_rank, legal_commander, color_identity)
         if is_token:
             by_name_any.setdefault(canonical, meta)
         else:
@@ -145,6 +180,15 @@ def _build_oracle_id_resolver(
             front, _, back = canonical.partition(" // ")
             by_front.setdefault(front, meta)
             by_back.setdefault(back, meta)
+
+    if identity_failures:
+        log.warning(
+            "color_identity normalisation failed for %d Scryfall rows — "
+            "those cards fall back to cost-derived identity (check the "
+            "tags.db color_identity format: expected a JSON array of "
+            "W/U/B/R/G pips)",
+            identity_failures,
+        )
 
     resolver: dict[str, ScryfallMeta] = {}
     for bucket in (by_name_non_token, by_name_any, by_front, by_back):
@@ -188,10 +232,12 @@ def _resolve_oracle_id(
 # Card row construction
 # ---------------------------------------------------------------------------
 
-# Pip-letter sets used to derive a colour-identity proxy from ManaCost when
-# Forge does not give us an explicit Colors: line. This is a starter — full
-# colour identity (including activated abilities, hybrid pips, etc.) lives
-# in Phase 2.
+# Pip-letter sets used to derive a colour-identity proxy from ManaCost /
+# Colors: lines. Full colour identity (activated abilities, colour
+# indicators, land types) comes from Scryfall via the resolver
+# (_normalise_scryfall_identity); this cost-derived proxy is only the
+# fallback for cards the resolver cannot match or legacy Scryfall DBs
+# without a color_identity column.
 _MANA_PIPS = {"W", "U", "B", "R", "G"}
 
 # Forge's ``Colors:`` line uses full colour words (``black,green``), not pip
@@ -327,7 +373,10 @@ def _card_row(card: dict[str, Any]) -> dict[str, Any]:
         "subtypes": subtypes,
         "card_types": card_types,
         "colors": colors,
-        "color_identity": colors,  # placeholder until full identity logic lands
+        # Scryfall-resolved identity when available (set by import_card);
+        # cost-derived proxy otherwise. "" is a valid colourless identity,
+        # so only None falls back.
+        "color_identity": (card["color_identity"] if card.get("color_identity") is not None else colors),
         "power": power or None,
         "toughness": toughness or None,
         "loyalty": card.get("loyalty"),
@@ -449,9 +498,10 @@ def import_card(
     """Import a single parsed card. Returns number of port rows inserted.
 
     Idempotent — drops any existing rows for this card before reinserting.
-    When ``oracle_id_resolver`` is supplied, the card's ``oracle_id``
-    *and* ``edhrec_rank`` are resolved via the 4-tier lookup and
-    persisted into the corresponding ``cards`` columns.
+    When ``oracle_id_resolver`` is supplied, the card's ``oracle_id``,
+    ``edhrec_rank``, ``legal_commander`` and ``color_identity`` are
+    resolved via the 4-tier lookup and persisted into the corresponding
+    ``cards`` columns.
     """
     name = card.get("name")
     if not name:
@@ -467,24 +517,34 @@ def import_card(
     conn.execute("DELETE FROM card_svars WHERE card_name = ?", (name,))
     conn.execute("DELETE FROM card_hints WHERE card_name = ?", (name,))
 
-    if oracle_id_resolver is not None and not card.get("oracle_id"):
+    # Resolution is gated per FIELD, not per card: a dict arriving with
+    # oracle_id pre-set (a future parser enhancement, or an API caller)
+    # must still receive Scryfall legality and colour identity —
+    # otherwise it silently keeps the cost-derived identity placeholder,
+    # the exact bug the Scryfall resolution exists to fix.
+    if oracle_id_resolver is not None:
         hit = _resolve_scryfall_meta(
             name,
             card.get("alternate_name"),
             oracle_id_resolver,
         )
         if hit is not None:
-            card["oracle_id"] = hit.oracle_id
-            # Only overwrite edhrec_rank when not already set on the
-            # parsed card (future-proofing: if parsers ever learn to
-            # read rank directly from Forge data, that would take
-            # priority).
+            # Only fill oracle_id / edhrec_rank when not already set on
+            # the parsed card (future-proofing: if parsers ever learn to
+            # read them directly from Forge data, that takes priority).
+            if not card.get("oracle_id"):
+                card["oracle_id"] = hit.oracle_id
             if card.get("edhrec_rank") is None:
                 card["edhrec_rank"] = hit.edhrec_rank
             # Scryfall legality always wins — Forge has no legality
             # signal, so there is nothing to protect against being
             # overwritten here.
             card["legal_commander"] = hit.legal_commander
+            # Scryfall colour identity always wins too: the cost-derived
+            # placeholder misses off-cost pips (activated abilities like
+            # Sisay's {W}{U}{B}{R}{G}, colour indicators, land types).
+            if hit.color_identity is not None:
+                card["color_identity"] = hit.color_identity
 
     conn.execute(_CARD_INSERT_SQL, _card_row(card))
 
@@ -595,12 +655,13 @@ def import_cards_folder(
 
     ``scryfall_db`` must point at a Scryfall-shaped sqlite database with
     a ``cards(oracle_id TEXT, name TEXT[, type_line TEXT, edhrec_rank
-    INTEGER])`` table — in practice the ECC-era ``data/tags.db``. The
-    importer builds a 4-tier name→metadata resolver and writes both
-    ``cards.oracle_id`` and ``cards.edhrec_rank`` for every Forge card
-    it can match. Pass ``None`` *only* from tests where Scryfall
-    metadata population is intentionally skipped; production callers
-    must supply a real path.
+    INTEGER, legal_commander INTEGER, color_identity TEXT])`` table — in
+    practice the ECC-era ``data/tags.db``. The importer builds a 4-tier
+    name→metadata resolver and writes ``cards.oracle_id``,
+    ``cards.edhrec_rank``, ``cards.legal_commander`` and
+    ``cards.color_identity`` for every Forge card it can match. Pass
+    ``None`` *only* from tests where Scryfall metadata population is
+    intentionally skipped; production callers must supply a real path.
 
     Returns ``(card_count, port_count)``.
     """
@@ -628,6 +689,7 @@ def import_cards_folder(
     card_count = 0
     port_count = 0
     resolved = 0
+    identity_from_scryfall = 0
     unresolved: list[str] = []
     with conn:
         for path in txt_files:
@@ -656,6 +718,11 @@ def import_cards_folder(
                     resolved += 1
                 else:
                     unresolved.append(name)
+                # The parser never emits color_identity, so its presence
+                # after import_card means Scryfall supplied it; absence
+                # means the cost-derived placeholder was persisted.
+                if card.get("color_identity") is not None:
+                    identity_from_scryfall += 1
 
     if resolver is not None:
         pct = (100.0 * resolved / card_count) if card_count else 0.0
@@ -672,6 +739,18 @@ def import_cards_folder(
             ranked,
             card_count,
             rank_pct,
+        )
+        # Cards WITHOUT a Scryfall identity carry the cost-derived
+        # placeholder, which is wrong for off-cost identities (the Sisay
+        # bug) — a sudden drop here means tags.db format drift, not a
+        # cosmetic gap.
+        identity_pct = (100.0 * identity_from_scryfall / card_count) if card_count else 0.0
+        log.info(
+            "color_identity coverage: %d/%d cards from Scryfall (%.1f%%), %d on cost-derived fallback",
+            identity_from_scryfall,
+            card_count,
+            identity_pct,
+            card_count - identity_from_scryfall,
         )
         if unresolved:
             head = ", ".join(unresolved[:5])
