@@ -17,6 +17,12 @@ Data flow:
   - Compute live NDCG@30 from a fresh re-score against the same labels.
   - Delta = live - pinned.
 - Render as Markdown table sorted ascending by delta (worst first).
+- Append an aggregate summary block (mean pinned / mean live / mean
+  delta — the SHIP gate number — + violation count) and an
+  identity-size slice table (colorless / mono / 2..5-color from
+  ``cards.color_identity`` pip count; commanders missing from the
+  ``cards`` table land in an explicit "unknown" slice). Plan
+  2026-07-02-001 Unit 3 (R8, R12).
 """
 
 from __future__ import annotations
@@ -37,6 +43,20 @@ from mtg_synergy_graph.validate import compute_ndcg
 #: losing more than 0.05 NDCG@30 → DECLINE).
 PER_COMMANDER_REGRESSION_THRESHOLD: float = -0.05
 
+#: Canonical rendering order for the identity-size slice table.
+#: "unknown" collects fixture commanders missing from the ``cards``
+#: table (post-refresh renames) — explicit slice, never silently
+#: miscounted into another class.
+IDENTITY_CLASS_ORDER: tuple[str, ...] = (
+    "colorless",
+    "mono",
+    "2-color",
+    "3-color",
+    "4-color",
+    "5-color",
+    "unknown",
+)
+
 
 @dataclass(frozen=True)
 class PerCommanderNdcgRow:
@@ -48,9 +68,126 @@ class PerCommanderNdcgRow:
     delta: float
 
 
+@dataclass(frozen=True)
+class IdentitySliceRow:
+    """Aggregated delta stats for one identity-size class."""
+
+    identity_class: str
+    n: int
+    mean_delta: float
+    worst_delta: float
+    violations: int
+
+
 def sort_rows_ascending(rows: list[PerCommanderNdcgRow]) -> list[PerCommanderNdcgRow]:
     """Sort rows by delta ascending; tiebreak by commander name."""
     return sorted(rows, key=lambda r: (r.delta, r.commander))
+
+
+def identity_class_from_color_identity(color_identity: str | None) -> str:
+    """Map a ``cards.color_identity`` value to an identity-size class.
+
+    ``color_identity`` is a comma-separated pip list ("W,U" → 2-color).
+    Empty string / NULL → "colorless"; one pip → "mono"; otherwise
+    ``"{n}-color"``.
+    """
+    if color_identity is None:
+        return "colorless"
+    pips = [p for p in color_identity.split(",") if p.strip()]
+    if not pips:
+        return "colorless"
+    if len(pips) == 1:
+        return "mono"
+    return f"{len(pips)}-color"
+
+
+def fetch_identity_classes(
+    conn: sqlite3.Connection,
+    commanders: list[str],
+) -> dict[str, str]:
+    """Map each commander name to its identity-size class.
+
+    Reads ``cards.color_identity`` from the same DB connection the
+    handler scores against. Commanders absent from the ``cards`` table
+    (e.g. renamed in a data refresh after the fixture was pinned) map
+    to "unknown" — an explicit slice rather than a crash or a silent
+    miscount. ``FixtureEntry.commander`` is a single name, so no
+    partner-union handling is needed here.
+    """
+    classes: dict[str, str] = {}
+    for name in commanders:
+        row = conn.execute(
+            "SELECT color_identity FROM cards WHERE name = ?",
+            (name,),
+        ).fetchone()
+        classes[name] = "unknown" if row is None else identity_class_from_color_identity(row[0])
+    return classes
+
+
+def compute_identity_slices(
+    rows: list[PerCommanderNdcgRow],
+    identity_class_by_commander: dict[str, str],
+) -> list[IdentitySliceRow]:
+    """Aggregate per-commander deltas into identity-size slice rows.
+
+    Only classes with at least one commander are returned, ordered by
+    ``IDENTITY_CLASS_ORDER`` (unrecognized labels sort last, by name).
+    Commanders missing from the mapping fall into "unknown".
+    """
+    deltas_by_class: dict[str, list[float]] = {}
+    for row in rows:
+        cls = identity_class_by_commander.get(row.commander, "unknown")
+        deltas_by_class.setdefault(cls, []).append(row.delta)
+
+    order = {cls: i for i, cls in enumerate(IDENTITY_CLASS_ORDER)}
+    slices = [
+        IdentitySliceRow(
+            identity_class=cls,
+            n=len(deltas),
+            mean_delta=sum(deltas) / len(deltas),
+            worst_delta=min(deltas),
+            violations=sum(1 for d in deltas if d < PER_COMMANDER_REGRESSION_THRESHOLD),
+        )
+        for cls, deltas in deltas_by_class.items()
+    ]
+    return sorted(slices, key=lambda s: (order.get(s.identity_class, len(order)), s.identity_class))
+
+
+def _render_aggregate_summary(rows: list[PerCommanderNdcgRow]) -> list[str]:
+    """Render the aggregate summary block (plan 2026-07-02-001 R8).
+
+    The mean delta line is the SHIP gate number — the machine-emitted
+    mean of per-commander deltas Unit 4's verdict reads off directly.
+    """
+    n = len(rows)
+    mean_pinned = sum(r.pinned_ndcg for r in rows) / n
+    mean_live = sum(r.live_ndcg for r in rows) / n
+    mean_delta = sum(r.delta for r in rows) / n
+    violations = sum(1 for r in rows if r.delta < PER_COMMANDER_REGRESSION_THRESHOLD)
+    return [
+        "## Aggregate summary",
+        "",
+        f"{'commanders':<28} {n:>10}",
+        f"{'mean pinned NDCG@30':<28} {mean_pinned:>10.4f}",
+        f"{'mean live NDCG@30':<28} {mean_live:>10.4f}",
+        f"{'mean delta (SHIP gate)':<28} {mean_delta:>+10.4f}",
+        f"{'violations (delta < ' + format(PER_COMMANDER_REGRESSION_THRESHOLD, '+.2f') + ')':<28} {violations:>10}",
+    ]
+
+
+def _render_identity_slices(slices: list[IdentitySliceRow]) -> list[str]:
+    """Render the identity-size slice table (plan 2026-07-02-001 R12)."""
+    lines = [
+        "## Identity-size slices",
+        "",
+        f"{'identity class':<16} {'n':>6} {'mean delta':>12} {'worst delta':>12} {'violations':>10}",
+        f"{'-' * 16} {'-' * 6} {'-' * 12} {'-' * 12} {'-' * 10}",
+    ]
+    for s in slices:
+        lines.append(
+            f"{s.identity_class:<16} {s.n:>6} {s.mean_delta:>+12.4f} {s.worst_delta:>+12.4f} {s.violations:>10}"
+        )
+    return lines
 
 
 def render_per_commander_ndcg_markdown(
@@ -58,12 +195,18 @@ def render_per_commander_ndcg_markdown(
     *,
     fixture_path: str,
     config_hash: str,
+    identity_class_by_commander: dict[str, str] | None = None,
 ) -> str:
     """Render rows as a Markdown table.
 
     Caller decides the order; this function preserves the input order
     (use ``sort_rows_ascending`` first for the worst-first convention
     the BM25 probe's per-commander gate expects).
+
+    When ``rows`` is non-empty an aggregate summary block follows the
+    table; when ``identity_class_by_commander`` is also provided (the
+    handler passes :func:`fetch_identity_classes` output), an
+    identity-size slice table follows the aggregate block.
     """
     lines: list[str] = []
     lines.append("# bench.py audit --per-commander-ndcg")
@@ -88,6 +231,14 @@ def render_per_commander_ndcg_markdown(
         lines.append(
             f"{row.commander[:40]:<40} {row.pinned_ndcg:>10.4f} {row.live_ndcg:>10.4f} {row.delta:>+10.4f}{flag}"
         )
+
+    lines.append("")
+    lines.extend(_render_aggregate_summary(rows))
+
+    if identity_class_by_commander is not None:
+        slices = compute_identity_slices(rows, identity_class_by_commander)
+        lines.append("")
+        lines.extend(_render_identity_slices(slices))
     return "\n".join(lines)
 
 
@@ -173,6 +324,7 @@ def handle_per_commander_ndcg(args: argparse.Namespace) -> int:
     edhrec_conn.row_factory = sqlite3.Row
     try:
         rows = compute_per_commander_ndcg_rows(conn, edhrec_conn, pinned)
+        identity_classes = fetch_identity_classes(conn, [e.commander for e in pinned.entries])
     finally:
         conn.close()
         edhrec_conn.close()
@@ -182,6 +334,7 @@ def handle_per_commander_ndcg(args: argparse.Namespace) -> int:
         sorted_rows,
         fixture_path=str(fixture_path),
         config_hash=pinned.config_hash,
+        identity_class_by_commander=identity_classes,
     )
 
     output_target = getattr(args, "output", None)

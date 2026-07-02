@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "config_hash": "d08d5800daea73affb7b3954a3a344130429371b54a0a2fee7eaef4e6712a198",
-  "created_at": "2026-06-09T21:51:23+00:00",
+  "created_at": "2026-07-02T05:45:10+00:00",
   "entries": [
     {
       "hidden_gem_hit_rate": 0.9666666666666667,
@@ -10786,6 +10786,11 @@
         "Swiftfoot Boots": 0.022140857142857143,
         "Lightning Greaves": 0.022140690476190477,
         "Thought Vessel": 0.02213935714285714,
+        "Nature's Lore": 0.022137857142857147,
+        "Heroic Intervention": 0.02213752380952381,
+        "Sylvan Library": 0.022100690476190475,
+        "Beast Within": 0.020710119047619047,
+        "Kodama's Reach": 0.020708452380952383,
         "Generous Gift": 0.020705285714285714,
         "Teferi's Protection": 0.020697785714285717,
         "Smothering Tithe": 0.019276214285714285,
