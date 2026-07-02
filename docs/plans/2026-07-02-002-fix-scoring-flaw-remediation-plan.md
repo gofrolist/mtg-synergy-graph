@@ -417,6 +417,33 @@ subtype-extraction path.
 
 - [ ] **Unit 3: B1 — remove `rank_bonus` and the `edhrec_rank` sort tiebreak**
 
+> **INVESTIGATE → DEFERRED until after Unit 6** (2026-07-02 two-step
+> ablation, measured against the post-Unit-2 pin):
+>
+> - Step 1 (`rank_bonus` = 0 only): mean NDCG **−0.0395**, 26
+>   per-commander cliffs < −0.05, gem 0.8160 → **0.8243** (+0.0083).
+> - Step 2 (+ sort-tiebreak drop): identical numbers — the tiebreak's
+>   marginal effect is ~0 even post-removal because `cmc` breaks ties
+>   first. The entire cost is `rank_bonus`; the old R8 zero-credit
+>   claim is confirmed valid for the tiebreak but was never evidence
+>   about `rank_bonus`.
+> - **Why deferred, not shipped**: forensics on the ablated code shows
+>   the R9 justified-divergence pass-rate collapsing 0.8472 → 0.4654
+>   (280 → 1,097 unjustified picks). Removing EDHREC ordering hands the
+>   flat-weight exact-tie cohorts to the residual `(cmc, name)` sort —
+>   effectively alphabetical — filling top-30s with arbitrary
+>   single-rule density cards. `rank_bonus` is not only leakage; it is
+>   currently MASKING the tie-density flaw Units 4–6 fix. Shipping now
+>   degrades the goal-aligned axis (unjustified divergence) even though
+>   gem rate rises.
+> - **Re-run condition**: after Unit 6 lands/declines, repeat the
+>   two-step ablation. Expected: calibration shrinks tie cohorts, the
+>   NDCG cost shrinks toward the honest deflation, and unjustified
+>   divergence stays flat. The honest EDHREC-free NDCG today is ~0.19
+>   (vs 0.236 reported) — ~4.7 points of the headline metric are
+>   EDHREC-sourced ordering, which recalibrates expectations for every
+>   Phase 2 gate (their +/− deltas ride on a partially-inflated base).
+
 **Goal:** EDHREC-clean inference path: no EDHREC-derived term in the score,
 no EDHREC tiebreak in the sort key.
 
