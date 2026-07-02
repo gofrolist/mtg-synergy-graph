@@ -65,13 +65,16 @@ from mtg_synergy_graph.bench.hidden_gems import (
 from mtg_synergy_graph.bench.optimize import load_edhrec_labels
 from mtg_synergy_graph.portfolio import (
     FAMILY_MAP,
+    FamilyReconciliationError,
     ScoreDecomposition,
+    UnmappedRuleFamilyError,
     assemble_portfolio,
     decompose_universal_score,
 )
 from mtg_synergy_graph.validate import compute_ndcg
 
 if TYPE_CHECKING:
+    from mtg_synergy_graph.engine import SynergyEngine
     from mtg_synergy_graph.universal_scorer import UniversalScore
 
 #: Trap commanders (plan Unit 2): scored at EVERY sweep cell. Fragments
@@ -124,9 +127,23 @@ class SelfCheckError(PortfolioSimError):
 
 
 def load_fixture_commanders(path: Path | str) -> list[str]:
-    """Read only the commander names from a golden-set fixture JSON."""
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    commanders = [e["commander"] for e in data.get("entries", [])]
+    """Read only the commander names from a golden-set fixture JSON.
+
+    Malformed JSON or a wrong entry shape raises a named
+    :class:`PortfolioSimError` carrying the fixture path (clean CLI
+    error, exit 1) instead of a raw ``json``/``KeyError`` traceback.
+    """
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise PortfolioSimError(f"fixture {path}: malformed JSON ({exc})") from exc
+    try:
+        commanders = [e["commander"] for e in data.get("entries", [])]
+    except (AttributeError, KeyError, TypeError) as exc:
+        raise PortfolioSimError(
+            f"fixture {path}: unexpected shape — expected an object with an "
+            f"'entries' list of objects each carrying a 'commander' key ({exc!r})"
+        ) from exc
     if not commanders:
         raise PortfolioSimError(f"fixture {path} has no commander entries")
     return commanders
@@ -217,7 +234,7 @@ class CommanderSim:
 
 
 def build_commander_sim(
-    engine: Any,
+    engine: SynergyEngine,
     edhrec_conn: sqlite3.Connection | None,
     commander: str,
     *,
@@ -227,13 +244,14 @@ def build_commander_sim(
 ) -> CommanderSim:
     """Score one commander live and cache its decomposed pool.
 
-    ``engine`` is duck-typed on the ``SynergyEngine`` surface used here
-    (``page``, ``_score_cache``, ``_candidate_cache``) so tests can
-    substitute fakes. Raises :class:`CommanderResolutionError` for a
-    commander absent from the DB or with an empty scored pool (named
-    error, never a silent skip) and :class:`SelfCheckError` when either
-    the per-card recomposition or the λ=0 assembly diverges from the
-    engine's own ``page()`` output.
+    ``engine`` is annotated as ``SynergyEngine`` but only duck-typed on
+    the surface used here (``page``, ``_score_cache``,
+    ``_candidate_cache``) so tests can substitute fakes. Raises
+    :class:`CommanderResolutionError` for a commander absent from the
+    DB or with an empty scored pool (named error, never a silent skip)
+    and :class:`SelfCheckError` when the per-card recomposition, the
+    per-card family-attribution reconciliation, or the λ=0 assembly
+    diverges from the engine's own ``page()`` output.
     """
     fmap = FAMILY_MAP if family_map is None else family_map
     started = time.perf_counter()
@@ -253,9 +271,14 @@ def build_commander_sim(
 
     # cmc / edhrec_rank tiebreak lookups, mirroring page() exactly
     # (candidate_rows is the same dict page()'s penalty context reads).
+    candidate_cache = engine._candidate_cache
+    if candidate_cache is None:
+        raise PortfolioSimError(
+            f"engine candidate cache not populated after page() for {commander!r}; engine contract changed?"
+        )
     cmc_lookup: dict[str, float] = {}
     rank_lookup: dict[str, int] = {}
-    for name, row in engine._candidate_cache.candidate_rows.items():
+    for name, row in candidate_cache.candidate_rows.items():
         cmc_lookup[name] = row["cmc"] if row["cmc"] is not None else 99.0
         raw_rank = row.get("edhrec_rank")
         rank_lookup[name] = int(raw_rank) if raw_rank is not None else 10**9
@@ -267,7 +290,10 @@ def build_commander_sim(
             raise ValueError(f"unknown granularity {gran!r} (known: {sorted(maps)})")
         per_card: dict[str, ScoreDecomposition] = {}
         for rec in page.items:
-            dec = decompose_universal_score(universal[rec.card], maps[gran])
+            try:
+                dec = decompose_universal_score(universal[rec.card], maps[gran])
+            except FamilyReconciliationError as exc:
+                raise SelfCheckError(f"{commander}: family-attribution reconciliation failed: {exc}") from exc
             if dec.total != rec.total_score:
                 raise SelfCheckError(
                     f"{commander}: recomposed total for {rec.card!r} is {dec.total!r} "
@@ -362,7 +388,7 @@ def build_commander_sim(
 
 
 def _iter_sims(
-    engine: Any,
+    engine: SynergyEngine,
     edhrec_conn: sqlite3.Connection | None,
     commanders: Sequence[str],
     *,
@@ -385,12 +411,22 @@ def _iter_sims(
 # ---------------------------------------------------------------------------
 
 
-def gem_rate_for_assembly(sim: CommanderSim, assembled: Sequence[str]) -> tuple[float, frozenset[str]] | None:
-    """hidden_gem_hit_rate for an assembled top-30 (None without EDHREC data)."""
+def gem_rate_for_assembly(
+    sim: CommanderSim,
+    assembled: Sequence[str],
+    *,
+    k: int = 30,
+) -> tuple[float, frozenset[str]] | None:
+    """hidden_gem_hit_rate for an assembled top-``k`` (None without EDHREC data).
+
+    ``k`` must match the assembly depth the caller used — the rate
+    denominator is the selection size, mirroring
+    ``hidden_gem_hit_rate_for_commander``'s ``/30`` at the default.
+    """
     if sim.edhrec_top_30 is None:
         return None
     gems = frozenset((set(assembled) - sim.edhrec_top_30) & sim.plausible)
-    return len(gems) / 30, gems
+    return len(gems) / k, gems
 
 
 def gem_quality_predicate(dec: ScoreDecomposition, flood_family: str | None) -> bool | None:
@@ -526,7 +562,7 @@ def _ablate_rank_bonus(decomps: Mapping[str, ScoreDecomposition]) -> dict[str, S
 
 
 def run_bands(
-    engine: Any,
+    engine: SynergyEngine,
     edhrec_conn: sqlite3.Connection,
     commanders: Sequence[str],
     *,
@@ -599,7 +635,7 @@ def run_bands(
 
 
 def run_share(
-    engine: Any,
+    engine: SynergyEngine,
     edhrec_conn: sqlite3.Connection,
     commanders: Sequence[str],
     *,
@@ -712,7 +748,7 @@ def _mean(values: Sequence[float]) -> float | None:
 
 
 def run_sweep(
-    engine: Any,
+    engine: SynergyEngine,
     edhrec_conn: sqlite3.Connection,
     commanders: Sequence[str],
     *,
@@ -803,12 +839,17 @@ def run_sweep(
                 abl_ndcg = compute_ndcg(list(abl_result.cards), dict(sim.graded_labels))
                 cell_acc.ablated_deltas.append(abl_ndcg - ablated_base_ndcg[cell.granularity])
 
-            gem = gem_rate_for_assembly(sim, top)
+            gem = gem_rate_for_assembly(sim, top, k=30)
             if gem is not None and sim.base_gem_rate is not None:
                 gem_rate, gems = gem
                 cell_acc.gem_deltas.append(gem_rate - sim.base_gem_rate)
                 gained = gems - sim.base_gems
-                g_pass, g_eval, g_excl = _predicate_counts(sim, gained, sim.decomps["committed"])
+                # Predicate decompositions must match the cell's own
+                # granularity — the discount that admitted a gained gem
+                # was computed on cell.granularity's family vectors, so
+                # grading it against the committed map would misreport
+                # identity-map cells (correctness fix, review P2).
+                g_pass, g_eval, g_excl = _predicate_counts(sim, gained, sim.decomps[cell.granularity])
                 bucket = cell_acc.r9a_gained[stratum]
                 bucket[0] += g_pass
                 bucket[1] += g_eval
@@ -901,9 +942,10 @@ def render_sweep_markdown(report: dict[str, Any]) -> str:
     if trap_names:
         for cell in report["cells"]:
             label = f"{cell['form']}/λ={cell['lam']:g}/{cell['granularity']}/{cell['discount_base']}"
-            rendered = ", ".join(
-                f"{n.split(',')[0]}: {cell['trap_deltas'].get(n, float('nan')):+.4f}" for n in trap_names
-            )
+            # Full names on purpose: truncating at the first comma
+            # collapsed distinct commanders sharing a given name
+            # ("Gisa, Glorious Resurrector" vs "Ghoulcaller Gisa").
+            rendered = ", ".join(f"{n}: {cell['trap_deltas'].get(n, float('nan')):+.4f}" for n in trap_names)
             lines.append(f"- {label}: {rendered}")
     else:
         lines.append("(no trap commanders present in this run)")
@@ -920,13 +962,38 @@ def _add_common_args(p: argparse.ArgumentParser, *, default_fixture: str) -> Non
     p.add_argument("--edhrec-db", default="data/tags.db", help="EDHREC tags DB path")
     p.add_argument("--fixture", default=default_fixture, help="golden-set fixture (commander names only)")
     p.add_argument("--commanders", type=int, default=None, help="limit to the first N fixture commanders")
+    p.add_argument(
+        "--commander",
+        metavar="NAME",
+        action="append",
+        default=None,
+        help=(
+            "restrict to this fixture commander (exact name; repeatable; "
+            "mirrors `bench.py audit --commander`); applied before --commanders"
+        ),
+    )
     p.add_argument("--output", default=_DEFAULT_OUTPUT_DIR, help="report output directory")
+
+
+_EXIT_CODE_EPILOG = """\
+Exit codes (mirrors scripts/bench.py's taxonomy):
+  0  Run completed; reports written to --output.
+  1  Named harness failure: commander resolution, malformed fixture,
+     unmapped rule family, or an invalid parameter (e.g. negative --lam).
+  2  Usage / precondition error: missing DB / EDHREC DB / fixture, or a
+     --commander name absent from the fixture list.
+  3  Self-check failure: the λ=0 identity, the bitwise per-card
+     recomposition, or the family-attribution reconciliation diverged.
+     Do not trust any report from an exit-3 run.
+"""
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="portfolio_sim.py",
         description="R0 portfolio-selection kill-test instrument (plan 2026-07-02-004 Unit 2)",
+        epilog=_EXIT_CODE_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -971,7 +1038,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"error: {what} {path} not found", file=sys.stderr)
             return 2
 
-    commanders = load_fixture_commanders(fixture_path)
+    try:
+        commanders = load_fixture_commanders(fixture_path)
+    except PortfolioSimError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if args.commander:
+        available = set(commanders)
+        missing = sorted(name for name in args.commander if name not in available)
+        if missing:
+            print(
+                f"error: --commander name(s) not in fixture {fixture_path}: {missing} "
+                "(exact-name match against the fixture commander list)",
+                file=sys.stderr,
+            )
+            return 2
+        requested = set(args.commander)
+        commanders = [c for c in commanders if c in requested]
     if args.commanders is not None:
         commanders = commanders[: args.commanders]
 
@@ -1046,7 +1129,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             md_path.write_text(render_sweep_markdown(report), encoding="utf-8")
             print(render_sweep_markdown(report))
             print(f"reports: {path}, {md_path}")
+    except SelfCheckError as exc:
+        # bench.py exit-3 analog: a failed self-check means the
+        # instrument itself cannot be trusted — distinct from a mere
+        # resolution/data failure (exit 1).
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
     except PortfolioSimError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except (UnmappedRuleFamilyError, ValueError) as exc:
+        # Bad user parameters (e.g. negative --lam) or an unmapped
+        # rule_id surface as a clean one-line error, never a traceback.
         print(f"error: {exc}", file=sys.stderr)
         return 1
     finally:

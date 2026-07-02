@@ -33,10 +33,12 @@
     "convention-derived families. Each pair is allowlisted with rationale in",
     "tests/test_family_map.py::test_consistent_with_rules_seed_family_field.",
     "",
-    "Maintenance: every newly registered rule_id needs an entry here",
-    "(tests/test_family_map.py coverage test); scaffold_rule.py write-path",
-    "closure lands in Unit 3 (Phase B). Not yet folded into",
-    "compute_config_hash — hash wiring is Unit 6."
+    "Maintenance: adding an entry for a newly registered rule_id is OPTIONAL —",
+    "the standing full-universe obligation (scaffold_rule.py write-path, plan",
+    "Unit 3) is UNFUNDED under the 2026-07-02 DECLINE (plan 2026-07-02-004;",
+    "map retained as inert data infrastructure). tests/test_family_map.py pins",
+    "the authoring-time snapshot instead. Not folded into compute_config_hash —",
+    "hash wiring was Unit 6 (also unfunded)."
   ],
   "families": {
     "affinity_archetype": "affinity_archetype",

@@ -1,4 +1,5 @@
 ---
+last_updated: 2026-07-02
 module: universal_scorer
 tags:
   - portfolio-selection
@@ -8,6 +9,15 @@ tags:
   - null-result
   - outranked
 problem_type: null-result
+resolution_type: reference
+applies_when:
+  - Considering MMR / submodular / per-family diminishing-returns re-ranking of the top-30 (or any list-level diversity transform over rule/family contribution vectors)
+  - Considering per-family or per-rule decay applied at selection time rather than scoring time
+  - Looking for the OUTRANKED lever after the lift-normalization DECLINE (lift-normalization-kill-test-null-result-2026-07-02.md)
+  - Planning any ranking-transform experiment — reuse scripts/portfolio_sim.py as the committed kill-test template before integration
+created: 2026-07-02
+plan_ref: docs/plans/2026-07-02-004-feat-portfolio-selection-plan.md
+brainstorm_ref: docs/brainstorms/2026-07-02-portfolio-selection-requirements.md
 ---
 
 # Portfolio selection (per-family diminishing returns at top-30 assembly): DECLINED at R0

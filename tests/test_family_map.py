@@ -1,13 +1,17 @@
 """Tests for the portfolio-selection family map (plan 2026-07-02-004, Unit 1).
 
 Covers the strict loader (``portfolio.load_family_map``), the shape
-validation error paths, full-universe coverage of the committed
+validation error paths, PINNED-SNAPSHOT coverage of the committed
 artifact, the dead-key direction, the mandated R6 sibling merges, and
 consistency with ``rules_seed.json``'s per-row ``family`` field.
 
-The coverage test doubles as the authoring-time snapshot check; the
-standing walker-blocking obligation is deliberate (plan Unit 3 lands
-the scaffold write-path that keeps it green as rules are added).
+Coverage is deliberately snapshot-based, NOT full-universe: plan
+2026-07-02-004 was DECLINED at R0 and the scaffold write-path that
+would have kept a full-universe check green as rules land (Unit 3) is
+UNFUNDED. A full-universe assertion here would break the autonomous
+walker's pytest pass on every new rule — a standing authoring
+obligation the DECLINE explicitly does not carry. Re-enable the
+full-universe direction only if the Unit 3 mechanism is revived.
 """
 
 from __future__ import annotations
@@ -172,23 +176,137 @@ def test_loader_missing_file_raises(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Coverage: both directions against the rule universe
+# Coverage: pinned snapshot + dead-key direction
 # ---------------------------------------------------------------------------
+
+#: The 92 rule_ids in the emitted-rule universe at authoring time
+#: (2026-07-02, plan 2026-07-02-004 Unit 1). Full-universe standing
+#: enforcement was plan Unit 3, UNFUNDED on the DECLINE — pinning the
+#: snapshot keeps the committed artifact honest without obligating the
+#: autonomous walker to author a family entry for every new rule.
+#: Re-enable a universe ⊆ map assertion only if the Unit 3
+#: scaffold write-path is revived. If a rule is deliberately REMOVED
+#: from the codebase, drop it here AND from family_map.json (see
+#: test_no_dead_keys_in_family_map).
+_PINNED_RULE_SNAPSHOT: frozenset[str] = frozenset(
+    {
+        "affinity_archetype",
+        "anthem_payoff",
+        "artifact_recursion",
+        "attack_payoffs",
+        "aura_equipment_support",
+        "cardpower_axis_feeder",
+        "cascade_tribal",
+        "cascade_value",
+        "changeling_tribal",
+        "cheat_cmc",
+        "choose_tribal",
+        "combat_enhancer",
+        "copy_synergy",
+        "cost_feeds_trigger",
+        "cost_payoff",
+        "cost_reducer",
+        "cost_reduction_target",
+        "counter_axis_feeder",
+        "counter_doubler",
+        "counter_keyword",
+        "counter_target_payoff",
+        "creature_died_feeder",
+        "creature_untap_engine",
+        "creatures_as_lands_landfall",
+        "damage_doubler_synergy",
+        "dies_drain",
+        "doctor_s_tribal",
+        "edict_feeder",
+        "effect_feeds_trigger",
+        "effect_resonance",
+        "etb_self",
+        "etb_tapped_stax_feeder",
+        "etbreplacement_copy_dbcopy_optional_tribal",
+        "etbreplacement_other_choosect_tribal",
+        "evasion",
+        "exalted_density",
+        "extra_land_plays",
+        "firebending_2_tribal",
+        "flicker_payoff",
+        "flicker_synergy",
+        "graveyard_play",
+        "gy_fuel_feeder",
+        "gy_loader",
+        "hand_size_feeder",
+        "land_bounce_feeder",
+        "land_to_gy_synergy",
+        "landfall_enabler",
+        "landwalk_island_tribal",
+        "life_total_feeder",
+        "lifegain_feeder",
+        "lord",
+        "mana_doubler",
+        "melee_tribal",
+        "mentor_tribal",
+        "modified_axis_feeder",
+        "monarch_synergy",
+        "more_tribal",
+        "multicolor_untap",
+        "opponent_forcing",
+        "panharmonicon",
+        "party_feeder",
+        "populate_stack",
+        "prepared_mechanic",
+        "proliferate_synergy",
+        "prowess_tribal",
+        "repl_damagedone_counters_stack",
+        "repl_moved_exile_stack",
+        "replacement_blocks",
+        "replacement_producer",
+        "replacement_resonance",
+        "sacrifice_cluster",
+        "scaling",
+        "self_bridging_cascade",
+        "spell_density",
+        "spellcast_resonance",
+        "start_tribal",
+        "subject_zone_feeder",
+        "tap_type_feeder",
+        "token_etb_damage",
+        "token_producer",
+        "toughness_synergy",
+        "training_tribal",
+        "tribal_body",
+        "tribal_density",
+        "trigger_effect",
+        "trigger_resonance",
+        "untap_combo",
+        "untap_synergy",
+        "value_engine",
+        "voltron",
+        "wheel_synergy",
+        "zone_resonance",
+    }
+)
 
 
 def test_every_registered_rule_has_a_family_entry() -> None:
-    """Authoring-time snapshot check of the committed artifact.
+    """Pinned-snapshot coverage check of the committed artifact.
 
-    Runs in the walker's pytest pass, so a newly registered rule_id
-    without a family entry fails here; the scaffold write-path that
-    keeps this green automatically is plan Unit 3 (Phase B).
+    Asserts every AUTHORING-TIME rule_id keeps its family entry —
+    i.e. nobody deletes map entries out from under the selection
+    helpers. Deliberately does NOT assert the full current universe is
+    mapped: a newly registered rule_id must NOT fail this test (no
+    authoring obligation under the 2026-07-02 DECLINE; the standing
+    full-universe enforcement was plan Unit 3, unfunded — see module
+    docstring).
     """
-    universe = _rule_universe()
-    unmapped = universe - set(FAMILY_MAP)
-    assert not unmapped, (
-        f"rule_ids without a family entry in family_map.json: {sorted(unmapped)}. "
-        "Every registered/emitted rule_id needs a family for portfolio selection."
+    missing = _PINNED_RULE_SNAPSHOT - set(FAMILY_MAP)
+    assert not missing, (
+        f"authoring-time rule_ids missing from family_map.json: {sorted(missing)}. "
+        "If the rule was deliberately removed from the codebase, drop it from "
+        "_PINNED_RULE_SNAPSHOT in this test alongside the map entry; otherwise "
+        "restore the entry."
     )
+    # Sanity: the snapshot itself was derived from the authoring-time
+    # universe; a subset check against today's universe is intentionally
+    # absent (new rules are allowed to be unmapped).
 
 
 def test_no_dead_keys_in_family_map() -> None:
@@ -198,7 +316,13 @@ def test_no_dead_keys_in_family_map() -> None:
     """
     universe = _rule_universe()
     dead = set(FAMILY_MAP) - universe
-    assert not dead, f"family_map.json contains entries for unregistered rule_ids: {sorted(dead)}"
+    assert not dead, (
+        f"family_map.json contains entries for unregistered rule_ids: {sorted(dead)}. "
+        "If these rules were deliberately REMOVED from the codebase, delete their "
+        "family_map.json entries and drop them from _PINNED_RULE_SNAPSHOT in this "
+        "test (the map only carries live or pinned rule_ids); if they were renamed, "
+        "rename the map keys to match."
+    )
 
 
 # ---------------------------------------------------------------------------

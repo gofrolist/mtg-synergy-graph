@@ -24,18 +24,26 @@ DB discipline: every database is created under ``tmp_path`` /
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import sqlite3
 from pathlib import Path
 
 import pytest
 
+import mtg_synergy_graph.universal_scorer as universal_scorer
+from mtg_synergy_graph.bench import portfolio_sim
 from mtg_synergy_graph.bench.portfolio_sim import (
     CommanderResolutionError,
+    PortfolioSimError,
+    SelfCheckError,
+    _ablate_rank_bonus,
     bootstrap_band,
     build_commander_sim,
+    gem_quality_predicate,
     load_fixture_commanders,
     main,
+    render_sweep_markdown,
     resolve_trap_commanders,
     run_bands,
     run_share,
@@ -47,8 +55,11 @@ from mtg_synergy_graph.engine import SynergyEngine
 from mtg_synergy_graph.importer import import_cards_folder
 from mtg_synergy_graph.portfolio import (
     FAMILY_MAP,
+    AssemblyResult,
+    FamilyReconciliationError,
     ScoreDecomposition,
     UnmappedRuleFamilyError,
+    _reconcile_family_attribution,
     assemble_portfolio,
     decompose_universal_score,
 )
@@ -591,3 +602,432 @@ def test_load_fixture_commanders_reads_names(tmp_path: Path) -> None:
     empty.write_text(json.dumps({"entries": []}), encoding="utf-8")
     with pytest.raises(Exception, match="no commander entries"):
         load_fixture_commanders(empty)
+
+
+def test_load_fixture_commanders_named_errors(tmp_path: Path) -> None:
+    """Malformed JSON / wrong shape surface as PortfolioSimError with the
+    fixture path — never a raw json/KeyError traceback."""
+    bad_json = tmp_path / "bad.json"
+    bad_json.write_text("{not json", encoding="utf-8")
+    with pytest.raises(PortfolioSimError, match=r"bad\.json.*malformed JSON"):
+        load_fixture_commanders(bad_json)
+    bad_shape = tmp_path / "shape.json"
+    bad_shape.write_text(json.dumps({"entries": [{"name": "A"}]}), encoding="utf-8")
+    with pytest.raises(PortfolioSimError, match=r"shape\.json.*unexpected shape"):
+        load_fixture_commanders(bad_shape)
+    bad_top = tmp_path / "top.json"
+    bad_top.write_text(json.dumps(["not", "an", "object"]), encoding="utf-8")
+    with pytest.raises(PortfolioSimError, match=r"top\.json.*unexpected shape"):
+        load_fixture_commanders(bad_top)
+
+
+# ---------------------------------------------------------------------------
+# Family-attribution reconciliation (adversarial P1)
+# ---------------------------------------------------------------------------
+
+
+def test_reconciliation_helper_accepts_consistent_decomposition() -> None:
+    # total = dampener * syn - anti + residual = 0.75*0.8 - 0.1 + 0.2 = 0.7
+    _reconcile_family_attribution(
+        "Consistent Card",
+        {"f": 0.5, "g": 0.3},
+        {"f": 0.2},
+        total=0.7,
+        anti_total=0.1,
+        residual=0.2,
+        dampener=0.75,
+    )
+
+
+def test_reconciliation_helper_fires_on_corrupted_family_syn() -> None:
+    with pytest.raises(FamilyReconciliationError, match=r"'Card X'.*does not reconcile"):
+        _reconcile_family_attribution(
+            "Card X",
+            {"f": 0.5},  # implied synergy from the parts is 1.0
+            {},
+            total=1.0,
+            anti_total=0.0,
+            residual=0.0,
+            dampener=1.0,
+        )
+
+
+def test_reconciliation_helper_fires_on_flat_exceeding_full() -> None:
+    with pytest.raises(FamilyReconciliationError, match=r"not a subset"):
+        _reconcile_family_attribution(
+            "Card Y",
+            {"f": 0.5},
+            {"f": 0.6},
+            total=0.5,
+            anti_total=0.0,
+            residual=0.0,
+            dampener=1.0,
+        )
+    with pytest.raises(FamilyReconciliationError, match=r"not a subset"):
+        _reconcile_family_attribution(
+            "Card Z",
+            {"f": 0.5},
+            {"g": 0.1},  # flat family absent from family_syn entirely
+            total=0.5,
+            anti_total=0.0,
+            residual=0.0,
+            dampener=1.0,
+        )
+
+
+def test_reconciliation_error_wrapped_as_selfcheck(engine: SynergyEngine, monkeypatch: pytest.MonkeyPatch) -> None:
+    """build_commander_sim wraps FamilyReconciliationError → SelfCheckError."""
+
+    def boom(us: UniversalScore, fmap: dict[str, str]) -> ScoreDecomposition:
+        raise FamilyReconciliationError("synthetic attribution corruption")
+
+    monkeypatch.setattr(portfolio_sim, "decompose_universal_score", boom)
+    with pytest.raises(SelfCheckError, match="family-attribution reconciliation failed"):
+        build_commander_sim(engine, None, KORVOLD)
+
+
+# ---------------------------------------------------------------------------
+# SelfCheckError branches in build_commander_sim (injected divergence)
+# ---------------------------------------------------------------------------
+
+
+def test_selfcheck_fires_on_recomposition_divergence(engine: SynergyEngine, monkeypatch: pytest.MonkeyPatch) -> None:
+    def corrupted(us: UniversalScore, fmap: dict[str, str]) -> ScoreDecomposition:
+        d = decompose_universal_score(us, fmap)
+        return dataclasses.replace(d, total=d.total + 1.0)
+
+    monkeypatch.setattr(portfolio_sim, "decompose_universal_score", corrupted)
+    with pytest.raises(SelfCheckError, match="bitwise mismatch"):
+        build_commander_sim(engine, None, KORVOLD)
+
+
+def test_selfcheck_fires_on_lambda_zero_divergence(engine: SynergyEngine, monkeypatch: pytest.MonkeyPatch) -> None:
+    def shuffled(decomps, **kwargs):  # signature mirrors assemble_portfolio
+        result = assemble_portfolio(decomps, **kwargs)
+        return AssemblyResult(picks=tuple(reversed(result.picks)), family_mass=dict(result.family_mass))
+
+    monkeypatch.setattr(portfolio_sim, "assemble_portfolio", shuffled)
+    with pytest.raises(SelfCheckError, match="λ=0 assembly diverges"):
+        build_commander_sim(engine, None, KORVOLD)
+
+
+# ---------------------------------------------------------------------------
+# Concave-flag-ON recomposition (dampener replay, bitwise)
+# ---------------------------------------------------------------------------
+
+
+def test_decompose_dampener_replay_bitwise_under_concave_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With _ENABLE_CONCAVE_FAMILY_AGG ON, the production total applies
+    the concentration dampener and the decomposition must replay it
+    bitwise (80%-concentrated two-rule mix trips the >70% branch)."""
+    monkeypatch.setattr(universal_scorer, "_ENABLE_CONCAVE_FAMILY_AGG", True)
+    complements = [_pc("lord"), _pc("trigger_effect")]
+    idf = {
+        ("lord", "E1", "F1", ""): 0.8,
+        ("trigger_effect", "E1", "F1", ""): 0.2,
+    }
+    us = UniversalScore(complements=complements, idf_weights=idf)
+    d = decompose_universal_score(us, FAMILY_MAP)
+    assert d.dampener != 1.0
+    assert d.total == us.to_legacy_buckets()["total"]
+
+
+def test_real_scoring_recomposition_bitwise_under_concave_flag(
+    engine_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Flag-ON recomposition on a REAL scored pool: every candidate's
+    decomposed total equals to_legacy_buckets()['total'] and the page
+    total bitwise (also exercises the reconciliation self-check under
+    dampened semantics)."""
+    monkeypatch.setattr(universal_scorer, "_ENABLE_CONCAVE_FAMILY_AGG", True)
+    eng = SynergyEngine(engine_db)
+    try:
+        page = eng.page([KORVOLD], offset=0, limit=1_000_000)
+        assert page.items
+        universal = eng._score_cache.get((KORVOLD,))
+        assert universal is not None
+        for rec in page.items:
+            us = universal[rec.card]
+            d = decompose_universal_score(us, FAMILY_MAP)
+            assert d.total == us.to_legacy_buckets()["total"]
+            assert d.total == rec.total_score
+    finally:
+        eng.close()
+
+
+# ---------------------------------------------------------------------------
+# _ablate_rank_bonus (active branch + pass-through)
+# ---------------------------------------------------------------------------
+
+
+def test_ablate_rank_bonus_active_and_passthrough() -> None:
+    with_rb = _decomp(1.0, {"f": 1.0}, residual=0.1, rank_bonus=0.004)
+    without_rb = _decomp(0.5, {"g": 0.5})
+    out = _ablate_rank_bonus({"A": with_rb, "B": without_rb})
+    # Pass-through: zero rank_bonus objects are reused, not copied.
+    assert out["B"] is without_rb
+    # Active branch: total and residual both drop by rank_bonus.
+    assert out["A"].total == pytest.approx(1.0 - 0.004)
+    assert out["A"].residual == pytest.approx(0.1 - 0.004)
+    assert out["A"].rank_bonus == 0.0
+    assert dict(out["A"].family_syn) == dict(with_rb.family_syn)
+
+
+# ---------------------------------------------------------------------------
+# gem_quality_predicate branches
+# ---------------------------------------------------------------------------
+
+
+def test_gem_quality_predicate_branches() -> None:
+    # No positive families → None (staple-only / no-rule gem, excluded).
+    assert gem_quality_predicate(_decomp(0.1, {}), "tribal") is None
+    assert gem_quality_predicate(_decomp(0.1, {"f": -0.2}), "tribal") is None
+    # Single family → False (needs >= 2 distinct families).
+    assert gem_quality_predicate(_decomp(0.5, {"tribal": 0.5}), "tribal") is False
+    # Two families, one outside the flood family → True.
+    assert gem_quality_predicate(_decomp(0.5, {"tribal": 0.3, "spell": 0.2}), "tribal") is True
+    # No flood family at all → any 2-family card passes.
+    assert gem_quality_predicate(_decomp(0.5, {"a": 0.3, "b": 0.2}), None) is True
+
+
+# ---------------------------------------------------------------------------
+# render_sweep_markdown (direct)
+# ---------------------------------------------------------------------------
+
+
+def _minimal_sweep_report(trap_deltas: dict[str, float]) -> dict:
+    cell = {
+        "form": "exp",
+        "lam": 0.5,
+        "granularity": "committed",
+        "discount_base": "full",
+        "n_ndcg": 1,
+        "mean_ndcg_delta": 0.01,
+        "cliff_count": 0,
+        "cliffs": [],
+        "mean_gem_delta": -0.01,
+        "monoculture_mean_delta": None,
+        "trap_deltas": trap_deltas,
+        "mean_cv_top30": 0.5,
+        "rank_bonus_ablated_mean_delta": None,
+        "r9a_gained_pass_rate": {"monoculture": None, "other": None},
+        "r9a_gained_counts": {"monoculture": [0, 0, 0], "other": [0, 0, 0]},
+        "survives": True,
+    }
+    return {
+        "instrument": "portfolio_sim sweep",
+        "fixture": "synthetic",
+        "n_commanders": 1,
+        "base_mean_cv_top30": 0.4,
+        "monoculture_commanders": [],
+        "monoculture_threshold": 0.85,
+        "trap_fragments_absent": [],
+        "cells": [cell],
+    }
+
+
+def test_render_sweep_markdown_keeps_full_comma_names() -> None:
+    """Trap sidecar must render the FULL commander name — truncating at
+    the first comma collapsed distinct commanders."""
+    md = render_sweep_markdown(_minimal_sweep_report({"Krenko, Mob Boss": 0.0123}))
+    assert "Krenko, Mob Boss: +0.0123" in md
+
+
+def test_render_sweep_markdown_trap_absent() -> None:
+    md = render_sweep_markdown(_minimal_sweep_report({}))
+    assert "(no trap commanders present in this run)" in md
+    assert "exp/λ=0.5/committed/full" in md
+
+
+# ---------------------------------------------------------------------------
+# Custom DecayFn guard (lazy-greedy validity probe)
+# ---------------------------------------------------------------------------
+
+
+def test_custom_decay_validation() -> None:
+    decomps = {"A": _decomp(1.0, {"f": 1.0})}
+    with pytest.raises(ValueError, match=r"g\(0, lam\) == 1\.0"):
+        _assemble(decomps, lam=1.0, decay=lambda m, lam: 0.9)
+    with pytest.raises(ValueError, match="non-increasing"):
+        _assemble(decomps, lam=1.0, decay=lambda m, lam: {0.0: 1.0, 1.0: 0.5, 10.0: 0.8}[m])
+    with pytest.raises(ValueError, match=r"lie in \(0, 1\]"):
+        _assemble(decomps, lam=1.0, decay=lambda m, lam: 1.0 if m == 0.0 else 1.5)
+
+
+def test_custom_decay_valid_callable_accepted() -> None:
+    """A well-formed custom decay passes the probe and drives assembly."""
+    decomps = {
+        "A": _decomp(1.0, {"f": 1.0}),
+        "B": _decomp(0.9, {"f": 0.9}),
+    }
+    result = _assemble(decomps, lam=1.0, decay=lambda m, lam: 1.0 / (1.0 + lam * m), k=2)
+    assert result.cards == ("A", "B")
+    # B discounted by the harmonic-shaped custom form at mass 1.0.
+    assert result.picks[1].effective_score == pytest.approx(0.9 - 0.9 * (1.0 - 1.0 / 2.0))
+
+
+# ---------------------------------------------------------------------------
+# CLI: exit-code taxonomy, --commander filter, smoke tests
+# ---------------------------------------------------------------------------
+
+
+def _write_fixture(tmp_path: Path, commanders: list[str]) -> Path:
+    fixture = tmp_path / "golden.json"
+    fixture.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "config_hash": "",
+                "created_at": "",
+                "entries": [{"commander": c} for c in commanders],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return fixture
+
+
+def _common_cli_args(engine_db: Path, edhrec_db: Path, fixture: Path, outdir: Path) -> list[str]:
+    return [
+        "--db",
+        str(engine_db),
+        "--edhrec-db",
+        str(edhrec_db),
+        "--fixture",
+        str(fixture),
+        "--output",
+        str(outdir),
+    ]
+
+
+def test_main_bands_smoke(
+    engine_db: Path,
+    edhrec_db: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fixture = _write_fixture(tmp_path, [KORVOLD])
+    outdir = tmp_path / "out"
+    rc = main(["bands", *_common_cli_args(engine_db, edhrec_db, fixture, outdir), "--n-boot", "20"])
+    assert rc == 0
+    report = json.loads((outdir / "bands.json").read_text(encoding="utf-8"))
+    assert report["n_commanders"] == 1
+    assert "bands:" in capsys.readouterr().out
+
+
+def test_main_sweep_smoke(
+    engine_db: Path,
+    edhrec_db: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fixture = _write_fixture(tmp_path, [KORVOLD])
+    outdir = tmp_path / "out"
+    rc = main(
+        [
+            "sweep",
+            *_common_cli_args(engine_db, edhrec_db, fixture, outdir),
+            "--forms",
+            "exp",
+            "--lams",
+            "0.5",
+            "--granularities",
+            "committed",
+            "--bases",
+            "full",
+        ]
+    )
+    assert rc == 0
+    report = json.loads((outdir / "sweep.json").read_text(encoding="utf-8"))
+    assert report["n_commanders"] == 1
+    assert (outdir / "sweep.md").exists()
+    assert "portfolio_sim sweep" in capsys.readouterr().out
+
+
+def test_main_negative_lam_exits_1_without_traceback(
+    engine_db: Path,
+    edhrec_db: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fixture = _write_fixture(tmp_path, [KORVOLD])
+    rc = main(["share", *_common_cli_args(engine_db, edhrec_db, fixture, tmp_path / "out"), "--lam", "-0.5"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "error:" in err
+    assert "lam must be >= 0" in err
+    assert "Traceback" not in err
+
+
+def test_main_selfcheck_vs_resolution_exit_codes(
+    engine_db: Path,
+    edhrec_db: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SelfCheckError → exit 3 (bench.py taxonomy analog); other named
+    harness failures → exit 1."""
+    fixture = _write_fixture(tmp_path, [KORVOLD])
+    args = ["share", *_common_cli_args(engine_db, edhrec_db, fixture, tmp_path / "out")]
+
+    def raise_selfcheck(*a: object, **k: object) -> dict:
+        raise SelfCheckError("synthetic self-check divergence")
+
+    monkeypatch.setattr(portfolio_sim, "run_share", raise_selfcheck)
+    assert main(args) == 3
+    assert "synthetic self-check divergence" in capsys.readouterr().err
+
+    def raise_resolution(*a: object, **k: object) -> dict:
+        raise CommanderResolutionError("synthetic resolution failure")
+
+    monkeypatch.setattr(portfolio_sim, "run_share", raise_resolution)
+    assert main(args) == 1
+    assert "synthetic resolution failure" in capsys.readouterr().err
+
+
+def test_main_malformed_fixture_exits_1(
+    engine_db: Path,
+    edhrec_db: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+    rc = main(["share", *_common_cli_args(engine_db, edhrec_db, bad, tmp_path / "out")])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "error:" in err
+    assert "malformed JSON" in err
+    assert "Traceback" not in err
+
+
+def test_main_commander_filter(
+    engine_db: Path,
+    edhrec_db: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Second entry would raise CommanderResolutionError if scored — a
+    # clean rc 0 proves --commander filtered it out.
+    fixture = _write_fixture(tmp_path, [KORVOLD, "Imaginary Second Commander"])
+    outdir = tmp_path / "out"
+    rc = main(["share", *_common_cli_args(engine_db, edhrec_db, fixture, outdir), "--commander", KORVOLD])
+    assert rc == 0
+    report = json.loads((outdir / "share.json").read_text(encoding="utf-8"))
+    assert report["n_commanders"] == 1
+    assert report["per_commander"][0]["commander"] == KORVOLD
+
+
+def test_main_commander_filter_unknown_name_exits_2(
+    engine_db: Path,
+    edhrec_db: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fixture = _write_fixture(tmp_path, [KORVOLD])
+    rc = main(
+        ["share", *_common_cli_args(engine_db, edhrec_db, fixture, tmp_path / "out"), "--commander", "Nobody At All"]
+    )
+    assert rc == 2
+    assert "not in fixture" in capsys.readouterr().err

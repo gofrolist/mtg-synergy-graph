@@ -13,6 +13,14 @@ R0 simulation (``bench/portfolio_sim.py``), the future live selection
 layer (Unit 5), and the R7b addressability readout — no sim/live
 arithmetic drift by construction.
 
+DECLINE status (2026-07-02): plan 2026-07-02-004 was DECLINED at the
+R0 kill-test (see docs/solutions/best-practices/
+portfolio-selection-null-result-2026-07-02.md). The "Unit 5" live
+selection layer and "Unit 6" hash wiring referenced in this module are
+UNFUNDED and never ran; the map + helpers are retained as inert data
+infrastructure (the ``card_hints`` precedent) and as the standing
+ranking-transform kill-test substrate (``bench/portfolio_sim.py``).
+
 Scoring-module coupling is kept to *function-local* imports inside
 :func:`decompose_universal_score` so the Unit-1 loader stays importable
 without pulling the scorer (and so the flag/private symbols are read
@@ -20,11 +28,12 @@ live at call time, which keeps monkeypatching in tests effective).
 
 The map artifact stays inert on the scoring path: nothing in
 ``engine.py`` reads it yet, and it is not folded into
-``compute_config_hash`` (Unit 6). Coverage of the full rule universe is
-enforced by ``tests/test_family_map.py``, NOT at load time — an
-unmapped rule_id must not brick flag-OFF engine load (origin R4); the
-selection layer hard-errors (:class:`UnmappedRuleFamilyError`) on
-unmapped rule_ids it actually encounters.
+``compute_config_hash`` (Unit 6 — UNFUNDED, see DECLINE note above).
+Coverage of the authoring-time rule snapshot is enforced by
+``tests/test_family_map.py``, NOT at load time — an unmapped rule_id
+must not brick flag-OFF engine load (origin R4); the selection layer
+hard-errors (:class:`UnmappedRuleFamilyError`) on unmapped rule_ids it
+actually encounters.
 """
 
 from __future__ import annotations
@@ -45,9 +54,10 @@ if TYPE_CHECKING:
 
 _FAMILY_MAP_FILENAME = "family_map.json"
 
-#: ``_readme`` is prose for human readers (excluded from the seed
-#: digest when hash wiring lands in Unit 6, mirroring the
-#: ``scoring_weights.json`` / ``rules_seed.json`` convention).
+#: ``_readme`` is prose for human readers (would have been excluded
+#: from the seed digest by the Unit 6 hash wiring — UNFUNDED under the
+#: 2026-07-02 DECLINE — mirroring the ``scoring_weights.json`` /
+#: ``rules_seed.json`` convention).
 _VALID_TOP_LEVEL_KEYS = frozenset({"_readme", "families"})
 
 
@@ -132,11 +142,67 @@ class UnmappedRuleFamilyError(ValueError):
     """
 
 
+class FamilyReconciliationError(ValueError):
+    """Family attribution failed to reconcile with the replayed total.
+
+    Raised by :func:`decompose_universal_score` (via
+    :func:`_reconcile_family_attribution`) when ``sum(family_syn)``
+    does not match the synergy sum implied by ``(total, residual,
+    anti_total, dampener)``, or when a ``family_syn_flat`` share
+    exceeds its ``family_syn`` total. The λ=0 self-check in
+    ``bench/portfolio_sim.py`` only validates the TOTAL replay; this
+    check closes the attribution gap (adversarial P1) — a wrong
+    per-family split with a correct total would otherwise pass every
+    downstream identity check. Wrapped as ``SelfCheckError`` by the
+    sim harness.
+    """
+
+
+def _reconcile_family_attribution(
+    card: str,
+    family_syn: Mapping[str, float],
+    family_syn_flat: Mapping[str, float],
+    *,
+    total: float,
+    anti_total: float,
+    residual: float,
+    dampener: float,
+) -> None:
+    """Assert the per-family attribution reconciles with the total.
+
+    The replayed total satisfies ``total == dampener * syn - anti_total
+    + residual`` (up to float reassociation), so the implied synergy
+    sum is ``(total + anti_total - residual) / dampener`` and must
+    match ``sum(family_syn.values())`` within float tolerance. Also
+    checks ``family_syn_flat`` is a per-family subset of ``family_syn``
+    (the flat share sums a subset of the same weights).
+    """
+    fam_sum = sum(family_syn.values())
+    implied_syn = (total + anti_total - residual) / dampener
+    if not math.isclose(fam_sum, implied_syn, rel_tol=1e-9, abs_tol=1e-12):
+        raise FamilyReconciliationError(
+            f"{card!r}: family attribution does not reconcile: sum(family_syn) = "
+            f"{fam_sum!r} but (total + anti_total - residual) / dampener implies "
+            f"{implied_syn!r} (total={total!r}, anti_total={anti_total!r}, "
+            f"residual={residual!r}, dampener={dampener!r})"
+        )
+    for fam, flat_v in family_syn_flat.items():
+        full_v = family_syn.get(fam)
+        if full_v is None or (flat_v > full_v and not math.isclose(flat_v, full_v, rel_tol=1e-9, abs_tol=1e-12)):
+            raise FamilyReconciliationError(
+                f"{card!r}: family_syn_flat[{fam!r}] = {flat_v!r} is not a subset of "
+                f"family_syn[{fam!r}] = {full_v!r} (flat share must never exceed the "
+                "full family synergy)"
+            )
+
+
 #: Fallback tiebreak values mirroring ``engine.SynergyEngine.page()``:
 #: ``cmc`` defaults to 99.0 and ``edhrec_rank`` to the unranked
 #: sentinel (``engine.UNRANKED_EDHREC_SENTINEL == 10**9``). Duplicated
 #: here (documented) instead of imported so ``portfolio`` never imports
-#: ``engine`` — Unit 5 makes ``engine`` import this module.
+#: ``engine`` — Unit 5 would have made ``engine`` import this module
+#: (UNFUNDED under the 2026-07-02 DECLINE; the no-cycle discipline is
+#: kept anyway).
 _CMC_FALLBACK: float = 99.0
 _RANK_FALLBACK: int = 10**9
 
@@ -321,6 +387,20 @@ def decompose_universal_score(
         if net != 0.0:
             per_rule_net[rule_id] = net
 
+    # Attribution self-check (adversarial P1): runs for EVERY
+    # decomposition — the λ=0 identity check downstream only validates
+    # the total, never the per-family split.
+    card = us.complements[0].candidate if us.complements else "<no-complements>"
+    _reconcile_family_attribution(
+        card,
+        family_syn,
+        family_syn_flat,
+        total=total,
+        anti_total=anti,
+        residual=residual,
+        dampener=dampener,
+    )
+
     return ScoreDecomposition(
         family_syn=family_syn,
         family_syn_flat=family_syn_flat,
@@ -354,11 +434,41 @@ def _decay_harmonic(mass: float, lam: float) -> float:
 
 
 #: Named decay forms for the R0 sweep. Pluggable: callers may pass any
-#: ``DecayFn`` directly to :func:`assemble_portfolio`.
+#: ``DecayFn`` directly to :func:`assemble_portfolio` (probed by
+#: :func:`_validate_custom_decay` before use).
 DECAY_FORMS: dict[str, DecayFn] = {
     "exp": _decay_exp,
     "harmonic": _decay_harmonic,
 }
+
+#: Masses at which a caller-supplied ``DecayFn`` is probed.
+_DECAY_PROBE_MASSES: tuple[float, ...] = (0.0, 1.0, 10.0)
+
+
+def _validate_custom_decay(g: DecayFn, lam: float) -> None:
+    """Probe a caller-supplied decay callable — lazy-greedy validity.
+
+    The lazy-greedy heap is only correct when effective scores never
+    increase as family mass accumulates, and the λ=0 / zero-mass
+    identity limit requires the correction term to vanish exactly.
+    Concretely: ``g(0, λ) == 1.0``, values lie in ``(0, 1]``, and
+    ``g`` is non-increasing in mass. A three-point probe cannot PROVE
+    monotonicity, but it rejects the obviously invalid shapes before
+    they silently corrupt an assembly. Shipped named forms skip the
+    probe (they satisfy the contract by construction).
+    """
+    probes = [g(mass, lam) for mass in _DECAY_PROBE_MASSES]
+    if probes[0] != 1.0:
+        raise ValueError(f"custom decay must satisfy g(0, lam) == 1.0 (identity limit), got {probes[0]!r}")
+    for mass, value in zip(_DECAY_PROBE_MASSES, probes, strict=True):
+        if not 0.0 < value <= 1.0:
+            raise ValueError(f"custom decay values must lie in (0, 1]; g({mass}, {lam}) = {value!r}")
+    if probes[0] < probes[1] or probes[1] < probes[2]:
+        raise ValueError(
+            f"custom decay must be non-increasing in mass (lazy-greedy validity); "
+            f"probe values at masses {_DECAY_PROBE_MASSES} were {probes!r}"
+        )
+
 
 #: Which per-family synergy share the discount applies to (R0 sweep
 #: discount-base variants): the full family synergy or only its
@@ -368,11 +478,14 @@ DISCOUNT_BASES: tuple[str, ...] = ("full", "flat")
 
 @dataclass(frozen=True)
 class PortfolioPick:
-    """One selected card with the effective score it was picked at."""
+    """One selected card with the effective score it was picked at.
+
+    The undiscounted production total is available from the caller's
+    ``decompositions[card].total`` — not duplicated here.
+    """
 
     card: str
     effective_score: float
-    raw_total: float
 
 
 @dataclass(frozen=True)
@@ -444,6 +557,7 @@ def assemble_portfolio(
             raise ValueError(f"unknown decay form {decay!r} (known: {sorted(DECAY_FORMS)})") from None
     else:
         g = decay
+        _validate_custom_decay(g, lam)
 
     def vec(d: ScoreDecomposition) -> Mapping[str, float]:
         return d.family_syn if discount_base == "full" else d.family_syn_flat
@@ -485,7 +599,7 @@ def assemble_portfolio(
             heapq.heappush(heap, (current_key, name))
             continue
         d = decompositions[name]
-        picks.append(PortfolioPick(card=name, effective_score=-current_key[0], raw_total=d.total))
+        picks.append(PortfolioPick(card=name, effective_score=-current_key[0]))
         for fam, v in vec(d).items():
             if v > 0.0:
                 mass[fam] = mass.get(fam, 0.0) + v
