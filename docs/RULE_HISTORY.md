@@ -7,6 +7,18 @@ See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
 ## 2026-07-02
 
+### Calibration track closed — Units 4–6 DECLINE, escalation to C1 (plan 2026-07-02-002)
+
+Ten weight-layer configurations measured (concave haircuts, payoff/body
+tiers, pool scaling, joint arms) — none clears the −0.05 per-commander
+cliff gate; every cliff is a flood-as-archetype commander (tribal /
+tribe-as-fuel / spell-as-archetype). Gem rate improved in every
+configuration (up to +0.0297); NDCG-vs-EDHREC cliffs are the sole
+blocker. Escalation rule fired: the OUTRANKED lever moves to the C1
+lift-normalization design cycle. Full table + structural finding:
+`docs/solutions/best-practices/calibration-track-null-result-2026-07-02.md`.
+All probe infrastructure survives flag-OFF.
+
 ### Tribal payoff/body two-tier probe — INVESTIGATE, resolution via Unit 6 joint probe (plan 2026-07-02-002 Unit 5)
 
 `_ENABLE_TRIBAL_PAYOFF_TIER` splits tribal emission into payoff pieces

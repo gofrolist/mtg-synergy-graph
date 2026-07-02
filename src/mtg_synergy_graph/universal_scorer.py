@@ -310,6 +310,11 @@ class ScoringConfigInputs(NamedTuple):
     #: Flipping it reroutes body-tier emissions to ``tribal_body``,
     #: so it must invalidate the tensor.
     enable_tribal_payoff_tier: bool
+    #: Plan 2026-07-02-002 Unit 6: pool-scaled flat weights gate +
+    #: its floor knob — both change flat-key weights, so both must
+    #: invalidate the tensor.
+    enable_pool_scaled_flat_weights: bool
+    pool_scale_floor: int
 
 
 def _seed_digest(filename: str, functional_keys: tuple[str, ...]) -> str:
@@ -359,6 +364,8 @@ def get_scoring_config_inputs() -> ScoringConfigInputs:
         staples=STAPLES,
         enable_concave_family_agg=_ENABLE_CONCAVE_FAMILY_AGG,
         enable_tribal_payoff_tier=density._ENABLE_TRIBAL_PAYOFF_TIER,
+        enable_pool_scaled_flat_weights=_ENABLE_POOL_SCALED_FLAT_WEIGHTS,
+        pool_scale_floor=_POOL_SCALE_FLOOR,
     )
 
 
@@ -373,6 +380,29 @@ def get_scoring_config_inputs() -> ScoringConfigInputs:
 #: agree on dampening. Flip only via the audit-gated evidence package;
 #: the ``ScoringConfigInputs`` field lands at the flip step.
 _ENABLE_CONCAVE_FAMILY_AGG: bool = False
+
+#: Plan 2026-07-02-002 Unit 6: pool-scaled flat weights. When False
+#: (module default), flat rules keep their constant per-hit override.
+#: When True, each flat key's weight scales down with the size of the
+#: candidate pool it floods: ``base_w * log2(1+floor)/log2(1+pool_N)``
+#: for pools above the floor — per basis key, so each tribe / spell
+#: type prices separately. Flip only via the audit-gated evidence
+#: package (which also re-flips the Unit 5 tier flag jointly).
+_ENABLE_POOL_SCALED_FLAT_WEIGHTS: bool = False
+
+#: Pools at or below this size keep the full flat weight. 30 mirrors
+#: the panharmonicon IDF floor and shields the small fuel tribes that
+#: cliffed the Unit 5 tier probe (Kobold 8, Squirrel 40, Spider 60 —
+#: the latter two sit above it but scale only mildly).
+_POOL_SCALE_FLOOR: int = 30
+
+#: Rules the pool scaling applies to. Arm (i)/(ii) evidence (plan
+#: 2026-07-02-002 Unit 6): scaling whole families uniformly cliffs
+#: their archetype commanders (Kess −0.233 on spell_density, Hakbal
+#: −0.137 / Edgar −0.103 on tribal_density) — the same
+#: flood-as-archetype failure as Units 4/5. Only bodies WITHOUT
+#: payoff evidence are safely scalable.
+_POOL_SCALED_RULES: frozenset[str] = frozenset({"tribal_body"})
 
 
 def _syn_concentration_factor(syn_by_rule: dict[str, float], syn: float) -> float:
@@ -814,6 +844,19 @@ def _compute_idf_basis(complements: Sequence[PortComplement]) -> IdfBasis:
         if rule_id in _FLAT_COUNT_RULES:
             override = _FLAT_WEIGHT_OVERRIDES.get(rule_id)
             base_w = override if override is not None else 1.0
+            if _ENABLE_POOL_SCALED_FLAT_WEIGHTS and rule_id in _POOL_SCALED_RULES:
+                # Plan 2026-07-02-002 Unit 6: per-key pool scaling — a
+                # 4,300-card tribe pays more than a 40-card tribe.
+                # Keyed per (rule, cmdr_event, cand_event, filter_group)
+                # so each tribe prices separately (cand_event = tribe).
+                # Pools at or below the floor keep full weight — the
+                # small-N saturation guard (panharmonicon precedent,
+                # color-IDF null-result lesson) and the natural
+                # protection for small fuel tribes (Kobold 8, Spider
+                # 60, Squirrel 40) that cliffed the Unit 5 tier probe.
+                pool_n = len(candidates)
+                if pool_n > _POOL_SCALE_FLOOR:
+                    base_w *= math.log2(1.0 + _POOL_SCALE_FLOOR) / math.log2(1.0 + pool_n)
             flat_weights[key] = base_w * cond_mult
         else:
             n = len(candidates)

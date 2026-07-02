@@ -111,6 +111,11 @@ def compute_config_hash() -> str:
     # body emissions to tribal_body — flag flips invalidate the tensor.
     h.update(b"|tribal_payoff_tier:")
     h.update(repr(cfg.enable_tribal_payoff_tier).encode("utf-8"))
+    # Plan 2026-07-02-002 Unit 6: pool-scaled flat weights flag + floor.
+    h.update(b"|pool_scaled_flat:")
+    h.update(repr(cfg.enable_pool_scaled_flat_weights).encode("utf-8"))
+    h.update(b"|pool_scale_floor:")
+    h.update(repr(cfg.pool_scale_floor).encode("utf-8"))
     return h.hexdigest()
 
 

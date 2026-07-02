@@ -597,7 +597,7 @@ reduced tier or require commander-side tribal payoff evidence.
 - Flag-off identity PASS; Gates A/B PASS; probe gates evaluated; outcome
   paths per template.
 
-- [ ] **Unit 6: A1 + A6 — pool-size-aware density weights and spell/tribal dedup (flag-gated probe)**
+- [x] **Unit 6: A1 + A6 — pool-size-aware density weights and spell/tribal dedup (flag-gated probe)** *(DECLINED 2026-07-02, three arms: pool alone 15 cliffs (Kess −0.233) / joint+tier 15 (gem +0.0297 best-ever but compounding cliffs) / pool(tribal_body)+tier 8 (Magda −0.149). ESCALATION RULE FIRED — ≥2 calibration DECLINEs: the OUTRANKED lever moves to the C1/lift-normalization design cycle; A6 dedup unmeasured, folded into C1. Full config table + structural finding: docs/solutions/best-practices/calibration-track-null-result-2026-07-02.md. Infra survives flag-OFF incl. _POOL_SCALED_RULES scoping.)*
 
 **Goal:** Flat density weights scale with the size of the pool they flood
 (a 4,300-card tribe pays more than a 40-card tribe), and a candidate no

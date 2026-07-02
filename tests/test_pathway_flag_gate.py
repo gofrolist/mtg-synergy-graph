@@ -171,6 +171,8 @@ def test_scoring_config_inputs_exposes_pathway_flag() -> None:
         "staples",
         "enable_concave_family_agg",
         "enable_tribal_payoff_tier",
+        "enable_pool_scaled_flat_weights",
+        "pool_scale_floor",
     )
 
 
