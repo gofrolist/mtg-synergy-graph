@@ -1,5 +1,5 @@
 ---
-last_updated: 2026-04-24
+last_updated: 2026-05-22
 module: embeddings
 title: Infrastructure value without scoring activation (content embeddings null result)
 tags:
@@ -83,6 +83,90 @@ Reproduce at any point:
 uv run scripts/build_embeddings.py    # if data/synergy.db lacks vectors
 uv run scripts/sweep_embedding_weights.py --commanders 30 --include-baseline
 ```
+
+## Re-sweep 2026-05-22 (vocab v2 + AlterAttribute + Forge refresh)
+
+Cited deltas justifying a re-sweep against the §"When to re-sweep"
+preconditions (commit `e19f7a7`):
+
+- **Vocabulary expansion** — `vocab_version` bumped to v2
+  (`d527631`); `attr_kind='attribute'` rows added in PR #47
+  (Prepared/Suspected/Plotted/Solved/Commander/Saddled/Harnessed) plus
+  synthetic `AlternateMode:Prepare` keyword ports.
+- **Corpus refresh** — Forge `f7ab132` added +297 cards (32,327 →
+  32,624 vectors built).
+- **Commander-target composition** — unchanged.
+
+Same 3×3 grid as the April run, scored across the full 100-cmdr
+golden-set fixture (vs the April run's 30-cmdr subset):
+
+| Cell            | hit_rate | Δ vs baseline | score_delta | Notes |
+|-----------------|----------|---------------|-------------|-------|
+| flag-off (w=0)  | 0.8153   | 0.0           | 0.0         | baseline |
+| w=0.05, k=0.60  | 0.8163   | **+0.0010**   | 632.3       | best Δ |
+| w=0.05, k=0.80  | 0.8163   | +0.0010       | 559.2       | best Δ tie |
+| w=0.05, k=1.00  | 0.8160   | +0.0007       | 490.0       | lowest score_delta |
+| w=0.10, k=0.60  | 0.8130   | -0.0023       | 836.5       | regression |
+| w=0.10, k=0.80  | 0.8130   | -0.0023       | 741.1       | regression |
+| w=0.10, k=1.00  | 0.8133   | -0.0020       | 665.0       | regression |
+| w=0.20, k=0.60  | 0.8077   | -0.0076       | 1096.8      | regression |
+| w=0.20, k=0.80  | 0.8117   | -0.0037       | 980.4       | regression |
+| w=0.20, k=1.00  | 0.8133   | -0.0020       | 886.2       | regression |
+
+**Verdict: DECLINE.** Bar from §"Define the flip-decision bar
+quantitatively before the sweep" requires Δ ≥ 0.02 hit_rate AND
+|score_delta| ≤ 250. Best cell misses both: Δ = +0.0010 (20× below
+the bar) and lowest cell `score_delta` is 490 (~2× above the cap).
+Every `w_emb ≥ 0.10` cell *regresses* hit_rate vs baseline.
+
+Two observations worth carrying forward:
+
+1. **Baseline hit_rate climbed from 0.7533 → 0.8153** (+0.062) between
+   2026-04-24 and 2026-05-22. The intervening rule-shipping work
+   (Prepared mechanic, K:ETBReplacement walking, CopyFaceFrom, walker
+   PRs) genuinely closed hidden-gem coverage that previously sat in
+   the "rule-uncovered but embedding-near" zone. The embedding term
+   now has less headroom to add value, not more — the vocabulary
+   expansion *raised the floor* but did not change the ceiling, so
+   the embedding contribution looks *smaller* in absolute terms than
+   in April, not larger.
+2. **The sweep's `[sweep] advisory winner` line is misleading** — it
+   compares against `pinned=0.0000` because the current
+   `tests/fixtures/golden_set_run.json` was pinned before
+   `hidden_gem_hit_rate` was persisted in `FixtureEntry.legacy`. The
+   flag-off cell (`w=0`) is the real baseline. Worth a small CLI
+   fix: detect the missing-key case and either silence the advisory
+   line or compare against the flag-off cell.
+
+Reproduce:
+
+```
+uv run scripts/build_embeddings.py
+uv run scripts/sweep_embedding_weights.py --include-baseline
+# (default --w-grid 0.05,0.1,0.2 --k-grid 0.6,0.8,1.0,
+#  default fixture tests/fixtures/golden_set_run.json = 100 cmdrs)
+```
+
+Wall time: ~22 min (sweep) + ~1 min (build) on the 100-cmdr fixture.
+
+**Next-sweep preconditions are now stricter.** A future re-sweep should
+not run unless one of:
+
+- A *new* commander-target composition (richer EDHREC-free target
+  source, different blending ratio), since the corpus-side levers
+  (vocabulary + card count) have now both been measured and produced
+  null deltas. The remaining unexplored axis is the commander-target
+  vector itself.
+- A vectorizer-architecture change (e.g., bumping `vectorizer_version`
+  beyond TF-IDF + truncated-SVD — a learned encoder, a co-occurrence
+  matrix factorization, etc.), which would change the geometry of the
+  embedding space rather than its inputs.
+
+Corpus refreshes alone (+Forge cardsfolder bumps) and incremental
+vocabulary expansion (a handful of new `attr_kind` rows, new keyword
+ports) are now **insufficient justification** for a re-sweep — the
+2026-05-22 run measured both of those simultaneously and found no
+shippable signal.
 
 ## Guidance
 
