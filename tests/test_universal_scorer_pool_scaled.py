@@ -86,3 +86,24 @@ def test_cond_mult_composes_with_pool_scaling():
     key = ("tribal_body", "tribal", "Goblin", "Goblin:cond")
     expected = 0.3 * (math.log2(31) / math.log2(101)) * 0.5
     assert basis.flat_weights[key] == pytest.approx(expected)
+
+
+# ---------------------------------------------------------------------------
+# Unit 7: flat keys honor _RULE_QUALITY_MULTIPLIER (optimizer exposure)
+# ---------------------------------------------------------------------------
+
+
+def test_flat_key_honors_quality_multiplier():
+    """A rule_quality_multiplier entry for a flat rule scales the flat
+    value — the knob the optimizer sweeps (plan Unit 7)."""
+    basis = _compute_idf_basis(_comps("tribal_body", "Goblin", 10))
+    with patch.dict(us_mod._RULE_QUALITY_MULTIPLIER, {"tribal_body": 0.5}):
+        weights = us_mod._idf_weights_from_basis(basis)
+    assert weights[KEY_GOBLIN] == pytest.approx(0.3 * 0.5)
+
+
+def test_flat_key_without_multiplier_unchanged():
+    """No entry -> bitwise passthrough (the committed default)."""
+    basis = _compute_idf_basis(_comps("tribal_body", "Goblin", 10))
+    weights = us_mod._idf_weights_from_basis(basis)
+    assert weights[KEY_GOBLIN] == basis.flat_weights[KEY_GOBLIN]

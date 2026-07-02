@@ -1015,6 +1015,17 @@ def run_optimizer(
     start_time = clock()
 
     baseline_weights = dict(universal_scorer._RULE_QUALITY_MULTIPLIER)
+    # Plan 2026-07-02-002 Unit 7: flat rules are sweepable as multiplier
+    # keys — _idf_weights_from_basis applies the per-rule multiplier to
+    # flat values too (exact while pool scaling is off). Absent entries
+    # default to 1.0; proposals for these keys land as ordinary
+    # rule_quality_multiplier entries for human review. Note for
+    # reviewers: the optimizer objective blends NDCG-vs-EDHREC with the
+    # (B3-contaminated) gem rate — proposals that push flat-rule
+    # multipliers UP need forensics-secondary justification, not just
+    # objective improvement (see calibration-track null result).
+    for flat_rule in sorted(universal_scorer._FLAT_COUNT_RULES):
+        baseline_weights.setdefault(flat_rule, 1.0)
 
     # Build the commander-independent candidate cache ONCE per run. Without this,
     # every grid-cell evaluation re-issues `SELECT name, cmc, edhrec_rank FROM

@@ -657,7 +657,7 @@ for the same tribe axis.
 - Flag-off identity PASS; probe gates evaluated; `--collinearity` healthy;
   outcome paths per template.
 
-- [ ] **Unit 7: A5 — expose flat overrides to the optimizer sweep**
+- [x] **Unit 7: A5 — expose flat overrides to the optimizer sweep** *(DONE 2026-07-02, tooling-only: flat keys honor `_RULE_QUALITY_MULTIPLIER` (multiplier-on-flat-value, exact with Unit 6 declined; bitwise passthrough with no entries — identity PASS); optimizer auto-adds flat rules at 1.0; smoke sweep clean on 500-cmdr; re-inflation warning in the reviewer-facing comment; 2112 tests green)*
 
 **Goal:** The coordinate-ascent optimizer can propose changes to
 `_FLAT_WEIGHT_OVERRIDES` values, ending the frozen-constant status of the

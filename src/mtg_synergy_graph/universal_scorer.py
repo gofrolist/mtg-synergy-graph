@@ -874,10 +874,19 @@ def _idf_weights_from_basis(basis: IdfBasis) -> dict[tuple[str, str, str, str], 
     """Apply current ``_RULE_QUALITY_MULTIPLIER`` to a cached :class:`IdfBasis`.
 
     The hot-path inner-loop equivalent of :func:`_compute_idf_weights` when
-    the caller has already paid the frequency-counting cost. ``flat_weights``
-    pass through unchanged; non-flat keys get the per-rule multiplier.
+    the caller has already paid the frequency-counting cost.
+
+    Since plan 2026-07-02-002 Unit 7, flat keys also honor the per-rule
+    multiplier (multiplier on the flat value — exact while pool scaling
+    is off), so the optimizer can sweep flat rules through the same
+    knob. With no flat entries in ``rule_quality_multiplier`` (the
+    committed default), the output is bitwise-identical to the old
+    passthrough.
     """
-    result: dict[tuple[str, str, str, str], float] = dict(basis.flat_weights)
+    result: dict[tuple[str, str, str, str], float] = {}
+    for key, base_w in basis.flat_weights.items():
+        mult = _RULE_QUALITY_MULTIPLIER.get(key[0], 1.0)
+        result[key] = base_w * mult if mult != 1.0 else base_w
     for key, base_w in basis.base_idf_non_flat.items():
         rule_id = key[0]
         mult = _RULE_QUALITY_MULTIPLIER.get(rule_id, 1.0)
