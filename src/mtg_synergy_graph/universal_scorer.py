@@ -305,6 +305,11 @@ class ScoringConfigInputs(NamedTuple):
     #: (``_ENABLE_CONCAVE_FAMILY_AGG``). Flipping it changes both
     #: totals' dampening semantics, so it must invalidate the tensor.
     enable_concave_family_agg: bool
+    #: Plan 2026-07-02-002 Unit 5: the tribal payoff/body tier gate
+    #: (``complement_rules.density._ENABLE_TRIBAL_PAYOFF_TIER``).
+    #: Flipping it reroutes body-tier emissions to ``tribal_body``,
+    #: so it must invalidate the tensor.
+    enable_tribal_payoff_tier: bool
 
 
 def _seed_digest(filename: str, functional_keys: tuple[str, ...]) -> str:
@@ -336,7 +341,7 @@ def get_scoring_config_inputs() -> ScoringConfigInputs:
     # at function-call time avoids the cycle. Same rationale for the
     # embeddings modules — they import numpy + sqlite3 and have no
     # reason to be pulled in at scorer-module import.
-    from .complement_rules import pathway
+    from .complement_rules import density, pathway
     from .embeddings import contribution as emb_contribution
     from .embeddings.config import get_embedding_config_inputs as _get_emb_cfg
 
@@ -353,6 +358,7 @@ def get_scoring_config_inputs() -> ScoringConfigInputs:
         declarative_rules_digest=_seed_digest("rules_seed.json", ("rules",)),
         staples=STAPLES,
         enable_concave_family_agg=_ENABLE_CONCAVE_FAMILY_AGG,
+        enable_tribal_payoff_tier=density._ENABLE_TRIBAL_PAYOFF_TIER,
     )
 
 

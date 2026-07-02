@@ -7,6 +7,26 @@ See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
 ## 2026-07-02
 
+### Tribal payoff/body two-tier probe — INVESTIGATE, resolution via Unit 6 joint probe (plan 2026-07-02-002 Unit 5)
+
+`_ENABLE_TRIBAL_PAYOFF_TIER` splits tribal emission into payoff pieces
+(structured tribal reference → `tribal_density` 0.5) and vanilla bodies
+(`tribal_body`, flat 0.3). Best-variant evidence on the 500-cmdr
+fixture: gem +0.0241 (the largest goal-axis gain of the remediation
+plan), mean NDCG +0.0051, Marrow-Gnawer +0.2544 / Chatterfang +0.0775 /
+Lathril +0.0238 / Edgar +0.0188 — but 5 fuel-tribe cliffs (Nissa
+Resurgent Animist −0.107, Arasta −0.096, Rograkh −0.067, Camellia
+−0.060, Elenda −0.053): commanders whose engine consumes vanilla tribe
+bodies (mana elves, sac fodder, token fuel). Body-weight sweep
+0.15/0.30/0.40 → 11/5/"gains lost"; a fuel-tribe exemption (commander
+filter references tribe) was measured and REJECTED — it zeroed the
+Marrow-class wins. The gem-dominant INVESTIGATE trigger fired (gem ≥
++0.02, NDCG flat). Flag stays OFF; infra (tribal_body rule_id, weight
+entry, hash field, vanilla-anchor exemption, tests) lands inert.
+Resolution: Unit 6 pool-scaled flat weights naturally protect small
+fuel tribes (Kobold 8, Spider 60, Squirrel 40) — the tier re-flips
+jointly in Unit 6's evidence package.
+
 ### Tribal skiplist bypass fix — structured evidence for overbroad tribes (SHIPPED, plan 2026-07-02-002 Unit 2)
 
 The `_VANILLA_TRIBAL_SKIPLIST` (Human/Warrior/Soldier) only guarded the

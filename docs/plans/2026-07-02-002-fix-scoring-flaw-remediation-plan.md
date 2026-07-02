@@ -558,7 +558,7 @@ color-IDF probe's Unit-2 pattern).
   template (SHIP: re-pin + docs; DECLINE: null-result doc + revert to tag,
   keep tests).
 
-- [ ] **Unit 5: A2 — payoff-qualified tribal_density (flag-gated probe)**
+- [x] **Unit 5: A2 — payoff-qualified tribal_density (flag-gated probe)** *(INVESTIGATE 2026-07-02, gem-dominant trigger fired: best variant (body 0.30, vanilla-anchor exemption) = 500-cmdr gem +0.0241, mean NDCG +0.0051, watch-list wins Marrow +0.254 / Chatterfang +0.078 / Lathril +0.024 / Edgar +0.019 — but 5 fuel-tribe cliffs (Nissa −0.107, Arasta −0.096, Rograkh −0.067, Camellia −0.060, Elenda −0.053). Sweep: 0.15→11 cliffs, 0.30→5 best, 0.40→gains lost. Fuel-tribe exemption rejected: gutted Marrow to 0.0. Resolution path: Unit 6 pool-scaled weights protect small fuel tribes — run the tier flag jointly in Unit 6's evidence package. Flag OFF in tree; tribal_body infra + weight entry + tests land now.)*
 
 **Goal:** Tribal emission distinguishes payoff pieces (lord scopes, tribal
 triggers/filters) from vanilla same-type bodies; vanilla bodies get a

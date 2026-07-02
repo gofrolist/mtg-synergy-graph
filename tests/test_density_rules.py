@@ -1318,6 +1318,30 @@ class TestTribalPayoffTier:
         by_rule = {r.candidate: r.rule_id for r in results}
         assert by_rule["Goblin Lordling"] == "tribal_density"
 
+    def test_vanilla_anchor_exemption_keeps_bodies_tier1(self, conn):
+        """Keywords-only vanilla anchor (Rograkh shape): the fallback's
+        rationale is 'the deck IS the tribe' — bodies stay tier-1."""
+        from unittest.mock import patch
+
+        import mtg_synergy_graph.complement_rules.density as density_mod
+
+        _insert_card(
+            conn,
+            "RograkhLike",
+            card_types="Creature",
+            subtypes="Kobold Warrior",
+            types="Legendary Creature",
+        )
+        _insert_port(conn, "RograkhLike", "keyword", "Menace")
+        _insert_card(conn, "Vanilla Kobold", card_types="Creature", subtypes="Kobold")
+        cmdr_ports = [
+            dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", ("RograkhLike",)).fetchall()
+        ]
+        with patch.object(density_mod, "_ENABLE_TRIBAL_PAYOFF_TIER", True):
+            results = _find_tribal_density_complements(conn, cmdr_ports, {"RograkhLike"})
+        by_rule = {r.candidate: r.rule_id for r in results}
+        assert by_rule["Vanilla Kobold"] == "tribal_density"
+
     def test_flag_on_unrelated_ports_stay_body(self, conn):
         """A tribe member with ports that never reference the tribe is
         still a body (having ports is not payoff evidence)."""

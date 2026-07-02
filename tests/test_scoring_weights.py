@@ -36,7 +36,7 @@ from mtg_synergy_graph.universal_scorer import (
 # finding: editing any of the three changed scores without flipping
 # the hash). Scores verified bitwise-identical before/after the
 # formula change via bench.py audit --expect-identity.
-_PRODUCTION_HASH = "d1ac8fe86a3dd619effc8f404404dff1f3c4d30e9720f31fde3fb0c659769440"
+_PRODUCTION_HASH = "0cbdb9e217e7bf92e7100b36f8533fe4facc02ed89fdb8de3d786f9fb00ce0f3"
 
 
 # ---------------------------------------------------------------------------

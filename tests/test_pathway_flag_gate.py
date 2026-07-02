@@ -170,6 +170,7 @@ def test_scoring_config_inputs_exposes_pathway_flag() -> None:
         "declarative_rules_digest",
         "staples",
         "enable_concave_family_agg",
+        "enable_tribal_payoff_tier",
     )
 
 

@@ -684,16 +684,26 @@ def _find_tribal_density_complements(
         if pt == "static" and "'Conspire'" in raw:
             return []
 
+    vanilla_fallback = False
     subtypes = _commander_subtypes_from_ports(conn, list(cmdr_set), cmdr_ports)
     if not subtypes:
         subtypes = _vanilla_tribal_subtypes(conn, cmdr_set)
+        vanilla_fallback = True
     if not subtypes:
         return []
 
     results: list[PortComplement] = []
     seen: set[str] = set()
     for sub in subtypes:
-        payoffs = _tribal_payoff_names(conn, sub) if _ENABLE_TRIBAL_PAYOFF_TIER else None
+        # Body-tier exemption (Unit 5 sweep evidence): vanilla-anchor
+        # tribes stay tier-1 — for keywords-only commanders the
+        # fallback's documented rationale is "the deck IS the tribe"
+        # (Rograkh's Kobolds). A broader fuel-tribe exemption
+        # (commander filter references the tribe) was measured and
+        # rejected: it gutted the payoff-surfacing wins (Marrow-Gnawer
+        # +0.2544 -> 0.0) to fix fewer cliffs than it cost.
+        tier_active = _ENABLE_TRIBAL_PAYOFF_TIER and not vanilla_fallback
+        payoffs = _tribal_payoff_names(conn, sub) if tier_active else None
         cur = conn.execute(
             "SELECT name FROM cards WHERE subtypes LIKE ? AND card_types LIKE '%Creature%'",
             (f"%{sub}%",),

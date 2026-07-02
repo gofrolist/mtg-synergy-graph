@@ -107,6 +107,10 @@ def compute_config_hash() -> str:
     # runs must not compare against each other's pinned tensor.
     h.update(b"|concave_family_agg:")
     h.update(repr(cfg.enable_concave_family_agg).encode("utf-8"))
+    # Plan 2026-07-02-002 Unit 5: tribal payoff/body tier flag reroutes
+    # body emissions to tribal_body — flag flips invalidate the tensor.
+    h.update(b"|tribal_payoff_tier:")
+    h.update(repr(cfg.enable_tribal_payoff_tier).encode("utf-8"))
     return h.hexdigest()
 
 
