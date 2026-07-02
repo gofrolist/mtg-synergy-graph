@@ -7,6 +7,34 @@ See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
 ## 2026-07-02
 
+### Portfolio selection (per-family diminishing returns at assembly) — DECLINED at R0 (plan 2026-07-02-004)
+
+The funded OUTRANKED successor — greedy top-30 assembly with
+per-family diminishing returns over contribution vectors — is
+measured closed at the designed cheap exit. Units 3 and 5–8 never
+ran; zero scoring-path changes; pins untouched. Evidence (all via the
+NEW COMMITTED kill-test instrument `scripts/portfolio_sim.py`, λ=0
+self-check vs `engine.page()` bitwise-clean on all 100 + all 500
+commanders; bands pinned pre-sweep from 500-cmdr bootstrap: NDCG
+±0.0136, gem 0.0355):
+
+- Empirical addressable share 0.0518 (24/463 OUTRANKED misses cross
+  at λ=0.5) vs the 0.630 family-identity pre-planning bound — misses
+  sit far below the marginal flood member.
+- 48-cell grid on the golden 100: 46 cells fail (cliffs scale with λ;
+  Kess −0.37, Edgar −0.25 at strong decay). Two weakest survivors
+  (λ=0.05/identity/full, both forms): +0.006 agg, 0 cliffs, gems
+  −0.025 in-band.
+- 500-cmdr confirmation: both fail — agg +0.0013 (band +0.0136),
+  cliffs 9/7 including the pre-named fuel-tribe trap (Magda −0.0571).
+- Optimizer confound pass: held-out −0.0001 — no calibration headroom.
+
+With plans 002 (weights), 003 (baselines), 004 (selection), uniform
+family transforms are dead at every layer of the ranking stack.
+Mechanism + surviving infrastructure (family_map.json, portfolio_sim
+harness, exact production-total decomposition):
+docs/solutions/best-practices/portfolio-selection-null-result-2026-07-02.md.
+
 ### C1 lift-normalization probe — DECLINED at the R0 kill-test (plan 2026-07-02-003)
 
 The baseline-subtraction axis (`score − λ·panel_mean`, ideation #4) is

@@ -65,6 +65,12 @@ uv run scripts/forge_oracle.py propose-rules --top 20 --smoothing-k 0.0  # N rul
 # Embedding weight sweep (plan 003 Phase C) — design-time diagnostic, does not mutate state.
 uv run scripts/sweep_embedding_weights.py                                # Grid-search (w_emb, k) cells, print hit_rate + score_delta per cell
 
+# Portfolio-selection kill-test instrument (plan 2026-07-02-004, DECLINED at R0 — standing
+# ranking-transform kill-test infra; zero scoring-path changes, reports to .audit/portfolio_sim/).
+uv run scripts/portfolio_sim.py bands                                    # Bootstrap NDCG/gem noise bands + R9a baseline pass rates (500-cmdr fixture)
+uv run scripts/portfolio_sim.py share                                    # Empirical addressable-share readout for EDHREC-label misses (R7b)
+uv run scripts/portfolio_sim.py sweep                                    # Decay-form × λ × granularity × discount-base grid with trap/ablation sidecars
+
 # Tensor-driven weight optimizer (plan 2026-04-26-001 M1) — Coordinate Ascent over
 # _RULE_QUALITY_MULTIPLIER. Emits .audit/optimize_proposal.json for human review;
 # never auto-mutates src/mtg_synergy_graph/data/scoring_weights.json. Append-only history at
