@@ -7,6 +7,31 @@ See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
 ## 2026-07-02
 
+### Plan 2026-07-02-002 wrap-up — end state + measurement bug found
+
+End state (vs `pre-scoring-remediation` tag): NDCG 0.2361 → 0.2336
+(forensics canonical); OUTRANKED 46.2% → 45.6%; NO_RULES 41.5% → 43.0%
+(share shifts as OUTRANKED shrinks); DATA_GAP 5.0% → 4.2% (unknown_ports
+115 → 95, vocab v4); dual-total divergence 15/100 cmdrs → 8/100.
+Shipped: Unit 2 tribal-flood fix, Unit 7 optimizer flat exposure,
+Unit 8 vocab v4, Unit 9 zone classes. Declined with evidence: Units 4,
+6, 10 (+ Unit 5 INVESTIGATE) — see
+calibration-track-null-result-2026-07-02.md; escalation to the C1
+lift-normalization cycle fired.
+
+**Measurement bug (open, C1-cycle input):** `handle_repin`
+(bench/handlers.py:59) calls `build_fixture` WITHOUT `edhrec_conn`, so
+every `--repin --yes` carries the PREVIOUS pin's gem legacy forward —
+the 100-cmdr audit gem line has echoed a stale pre-plan value
+(`Δ —`) all along. The 500-cmdr batteries computed live gem with real
+Δs against a constant stale base, so all plan gate decisions remain
+valid (relative comparisons). Fix when plumbing the C1 cycle: pass
+`edhrec_conn` in handle_repin (the :739 comment already anticipates
+it), then re-pin to refresh gem legacy. A scratch sidecar recomputation
+from tensor rows read 0.49 on the 100-cmdr set vs the canonical live
+0.71 on the 500 — unreconciled; treat tensor-derived gem recomputations
+as unverified until the repin plumbing lands.
+
 ### anthem_payoff probe — DECLINED, helper retained for the C1 cycle (plan 2026-07-02-002 Unit 10)
 
 Type-scoped anthems (Creature.YouCtrl AddPower/AddToughness/AddKeyword

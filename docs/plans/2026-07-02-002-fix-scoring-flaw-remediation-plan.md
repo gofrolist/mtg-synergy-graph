@@ -1,7 +1,8 @@
 ---
 title: "fix: Scoring-flaw remediation — density calibration, EDHREC purity, coverage gaps"
 type: fix
-status: active
+status: completed
+outcome: "2 shipped (Units 2, 9) + 2 infra (7, 8); calibration track declined with evidence (4, 5, 6, 10) -> escalation to C1 lift-normalization cycle; Unit 3 deferred behind C1; repin gem-staleness bug found (RULE_HISTORY 2026-07-02 wrap-up)"
 date: 2026-07-02
 origin: docs/ideation/2026-06-10-synergy-accuracy-ideation.md
 ---
