@@ -350,6 +350,43 @@ def get_scoring_config_inputs() -> ScoringConfigInputs:
     )
 
 
+#: Plan 2026-07-02-002 Unit 4: concave within-family aggregation probe.
+#: When False (module default), the signal-concentration dampener keeps
+#: its legacy semantics — ``len(syn_by_rule) >= 2`` only, applied in
+#: ``UniversalScore.score`` and NOT in ``to_legacy_buckets`` (the
+#: historic dual-total split). When True, the dampener reaches
+#: single-rule candidates (frac == 1.0 → −30%) and applies at the
+#: shared choke point below, so BOTH totals — the audit-fixture
+#: ``score`` and the production ``to_legacy_buckets()["total"]`` —
+#: agree on dampening. Flip only via the audit-gated evidence package;
+#: the ``ScoringConfigInputs`` field lands at the flip step.
+_ENABLE_CONCAVE_FAMILY_AGG: bool = False
+
+
+def _syn_concentration_factor(syn_by_rule: dict[str, float], syn: float) -> float:
+    """Multiplier in [0.7, 1.0] for the synergy sum of one candidate.
+
+    When one rule dominates >70% of the synergy score, compress the
+    total by up to 30% (at 100% concentration). Flag OFF preserves the
+    legacy exemption for single-rule candidates; flag ON removes it —
+    the exemption is exactly what let 87–100% single-family
+    monoculture cards flood top-30s undampened (plan 2026-07-02-002).
+    """
+    if syn <= 0 or not syn_by_rule:
+        return 1.0
+    min_rules = 1 if _ENABLE_CONCAVE_FAMILY_AGG else 2
+    if len(syn_by_rule) < min_rules:
+        return 1.0
+    max_rule_frac = max(syn_by_rule.values()) / syn
+    if max_rule_frac <= 0.7:
+        return 1.0
+    # At 70% concentration: no penalty. At 100%: -30%. The 0.3/0.3
+    # form is kept verbatim from the legacy inline block so the
+    # flag-off refactor stays bitwise-identical.
+    penalty = 0.3 * (max_rule_frac - 0.7) / 0.3
+    return 1.0 - penalty
+
+
 @dataclass
 class UniversalScore:
     """Scoring result for one candidate under the universal port matcher.
@@ -405,19 +442,13 @@ class UniversalScore:
                     seen_anti.add(key)
                     anti += self.idf_weights.get(key, 1.0)
 
-        # Signal concentration dampening: if one rule dominates >70% of
-        # the synergy score AND the card matches 2+ distinct keys, compress
-        # the total. This prevents broad density axes (etb_self N=17k) from
-        # creating a uniform baseline that drowns real score differences.
-        # Cards with only 1 complement key are not penalized — single-axis
-        # matches are genuine (e.g., a specific lord with one match axis).
-        if syn > 0 and len(syn_by_rule) >= 2:
-            max_rule_frac = max(syn_by_rule.values()) / syn
-            if max_rule_frac > 0.7:
-                # Reduce by up to 30% based on how concentrated the signal is.
-                # At 70% concentration: no penalty. At 100%: -30%.
-                penalty = 0.3 * (max_rule_frac - 0.7) / 0.3
-                syn *= 1.0 - penalty
+        # Signal concentration dampening — shared choke point with
+        # to_legacy_buckets (plan 2026-07-02-002 Unit 4). Flag OFF:
+        # legacy semantics (2+ distinct rules only); flag ON: reaches
+        # single-rule candidates too.
+        factor = _syn_concentration_factor(syn_by_rule, syn)
+        if factor != 1.0:
+            syn *= factor
 
         base = syn - anti + self.staple_bonus
         # Multi-rule bonus: flat breadth reward (+0.02 per extra rule)
@@ -448,6 +479,13 @@ class UniversalScore:
         seen: set[tuple[str, str, str, str, str]] = set()
         seen_add = seen.add
         idf_weights = self.idf_weights
+        # Flag-gated (plan 2026-07-02-002 Unit 4): accumulate per-rule
+        # synergy sums so the concentration dampener can apply to the
+        # production total too. OFF path does no extra work and stays
+        # bitwise-identical to the historic undampened total.
+        concave = _ENABLE_CONCAVE_FAMILY_AGG
+        syn = 0.0
+        syn_by_rule: dict[str, float] = {}
         for c in self.complements:
             key = (c.rule_id, c.cmdr_event, c.cand_event, c.filter_group, c.direction)
             if key in seen:
@@ -462,6 +500,17 @@ class UniversalScore:
             else:
                 buckets[bucket] += weight
                 total += weight
+                if concave:
+                    syn += weight
+                    syn_by_rule[c.rule_id] = syn_by_rule.get(c.rule_id, 0.0) + weight
+        if concave:
+            factor = _syn_concentration_factor(syn_by_rule, syn)
+            if factor != 1.0:
+                dampen = (1.0 - factor) * syn
+                total -= dampen
+                # Named bucket keeps the sum(named_bucket_values) ==
+                # total invariant, same pattern as ``embedding``.
+                buckets["concentration_dampen"] = -dampen
         if self.staple_bonus:
             buckets["staple"] = self.staple_bonus
             total += self.staple_bonus
