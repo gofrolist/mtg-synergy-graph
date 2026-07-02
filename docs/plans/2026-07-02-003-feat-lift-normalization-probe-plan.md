@@ -1,12 +1,28 @@
 ---
 title: "feat: Lift-normalization probe — score minus expected-baseline panel (C1)"
 type: feat
-status: active
+status: completed
+outcome: DECLINED at Unit 2 (R0 kill-test) — Units 3–7 never ran
 date: 2026-07-02
 origin: docs/brainstorms/2026-07-02-lift-normalization-requirements.md
 ---
 
 # feat: Lift-normalization probe — score minus expected-baseline panel (C1)
+
+> **OUTCOME (2026-07-02): DECLINED at the R0 kill-test — the designed
+> cheap exit.** Unit 1 (R9 repin rider) SHIPPED (commit 92fba39, tag
+> `pre-lift-normalization`). Unit 2 measured the displacer inequality
+> across 16 panel variants, a median-crossing recovery readout, and a
+> full offline NDCG@30 simulation: every λ degrades aggregate NDCG
+> (−0.0136 @ λ=0.25 → −0.0287 @ λ=1.0) with 14–23 cliffs < −0.05 on
+> the flood-as-archetype population (Edgar −0.128 — the adversarial
+> review's prediction confirmed); the z-score fallback is worse
+> (−0.1115, 65 cliffs). Root cause: flood displacers are mechanically
+> narrow (LOW panel_mean), so baseline subtraction rewards them
+> relative to the broadly-good labels they displace. Units 3–7 never
+> ran; no scoring-path change; no flag; no hash flip. Null-result doc:
+> docs/solutions/best-practices/lift-normalization-kill-test-null-result-2026-07-02.md.
+> The OUTRANKED lever re-points to the role/quota portfolio sibling.
 
 ## Overview
 
@@ -195,7 +211,11 @@ inference (flag ON):
 
 ## Implementation Units
 
-- [ ] **Unit 1: R9 rider — repin gem plumbing + fresh baseline tag**
+- [x] **Unit 1: R9 rider — repin gem plumbing + fresh baseline tag**
+  — SHIPPED (commit 92fba39). Pre-flight probe + edhrec_conn plumbing;
+  7 new tests; 100-cmdr pin gem coverage 0/100 → 100/100 (agg 0.8160);
+  500-cmdr regenerated (agg 0.7123, Adeline staleness fixed); identity
+  PASS; tag `pre-lift-normalization` created with the full ledger.
 
 **Goal:** `--repin --yes` refreshes gem legacy; both fixtures re-pinned
 with fresh gem values; new baseline tag for this cycle's gates.
@@ -248,7 +268,14 @@ plan-002 Unit 1 baseline-tag discipline.
 **Verification:** suite green; both committed fixtures carry fresh gem
 values; tag exists with numbers; `--expect-identity` PASS.
 
-- [ ] **Unit 2: R0 kill-test — throwaway panel + displacer inequality**
+- [x] **Unit 2: R0 kill-test — throwaway panel + displacer inequality**
+  — DECLINE. Mean inequality a wash (holds 9–14/21, ±0.01 gap,
+  sign-unstable; inverts 2–3× on tribal floods). Median-crossing
+  recovery one-sidedly positive (7→33 lift, 7→51 z) but the full
+  NDCG@30 simulation is decisive: negative aggregate at every λ with
+  14–23 cliffs on the monoculture stratum; z-score fallback −0.1115 /
+  65 cliffs. Both compositions near-identical → composition is not the
+  lever. Decision record: the null-result doc.
 
 **Goal:** Decide go/no-go for the whole cycle in minutes of compute:
 does `mean panel_mean(displacers) > mean panel_mean(displaced labels)`
@@ -290,7 +317,7 @@ this unit's numbers are recorded.
 **Verification:** a written go/no-go decision with the inequality
 numbers for every measured variant; on GO, the frozen Unit-3 spec.
 
-- [ ] **Unit 3: Panel builder + storage (GO path only)**
+- [ ] ~~**Unit 3: Panel builder + storage (GO path only)**~~ — NOT RUN (Unit 2 DECLINE-and-stop)
 
 **Goal:** Deterministic committed panel + `card_panel_mean` storage
 with full hash discipline.
@@ -354,7 +381,7 @@ shape; `event_match_seed.json` committed-artifact conventions.
 **Verification:** builder deterministic; loader values match direct
 computation on a tiny fixture DB; suite green.
 
-- [ ] **Unit 4: Scoring integration, flag-gated OFF**
+- [ ] ~~**Unit 4: Scoring integration, flag-gated OFF**~~ — NOT RUN (Unit 2 DECLINE-and-stop)
 
 **Goal:** `lift_penalty` per-candidate field wired at all three
 total-assembly sites, bitwise-inert while OFF.
@@ -417,7 +444,7 @@ color-IDF/concave probes' pattern).
 **Verification:** suite green; identity PASS flag-off; fidelity test
 extended and green flag-on.
 
-- [ ] **Unit 5: Flip + bounded evidence matrix (≤7 batteries)**
+- [ ] ~~**Unit 5: Flip + bounded evidence matrix (≤7 batteries)**~~ — NOT RUN (Unit 2 DECLINE-and-stop)
 
 **Goal:** Measured SHIP/DECLINE/INVESTIGATE decision under origin R7,
 R8, R11.
@@ -468,7 +495,7 @@ watch-list strata), R11 (gates)
 battery, both watch-list strata, and one declared outcome with the
 gate arithmetic shown.
 
-- [ ] **Unit 6: R10 rider — conditional rank_bonus ablation**
+- [ ] ~~**Unit 6: R10 rider — conditional rank_bonus ablation**~~ — NOT RUN (Unit 2 DECLINE-and-stop)
 
 **Goal:** Re-run the deferred Unit-3 (plan 002) purity removal iff the
 lift outcome improved tie density.
@@ -501,7 +528,7 @@ lift outcome improved tie density.
 **Verification:** either a recorded no-run decision with sidecar
 numbers, or the removal landed under its gates with re-pin.
 
-- [ ] **Unit 7: Outcome handling and docs**
+- [ ] ~~**Unit 7: Outcome handling and docs**~~ — NOT RUN (Unit 2 DECLINE-and-stop)
 
 **Goal:** Every terminal state leaves the standard paper trail.
 

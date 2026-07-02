@@ -7,6 +7,33 @@ See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
 ## 2026-07-02
 
+### C1 lift-normalization probe — DECLINED at the R0 kill-test (plan 2026-07-02-003)
+
+The baseline-subtraction axis (`score − λ·panel_mean`, ideation #4) is
+measured closed at the designed cheap exit — Units 3–7 never ran, no
+scoring-path change. Offline NDCG@30 simulation over all 100 golden-set
+commanders: every λ in {0.25, 0.5, 0.75, 1.0} degrades the aggregate
+(−0.0136 to −0.0287) with 14–23 per-commander cliffs < −0.05
+concentrated on the flood-as-archetype population (Bruvac −0.18, Kess
+−0.17, Edgar −0.13 at λ=0.25). z-score fallback: −0.1115 aggregate, 65
+cliffs. Root cause: flood displacers are mechanically NARROW (low
+panel_mean), displaced labels are broadly good (high panel_mean) — the
+subtraction points the wrong way on the exact population it was funded
+to fix. Full readouts + the wrong-way mechanism:
+docs/solutions/best-practices/lift-normalization-kill-test-null-result-2026-07-02.md.
+OUTRANKED lever re-points to the role/quota portfolio sibling
+(list-composition, not pointwise scoring).
+
+**R9 rider SHIPPED (Unit 1, commit 92fba39):** `--repin` now passes
+`edhrec_conn` into `build_fixture` with a pre-flight
+`edhrec_card_synergy` probe (exit 2, no fixture write, on
+missing/corrupt EDHREC DB). Closes the measurement bug logged in the
+plan-002 wrap-up below. Both fixtures re-pinned with fresh gem values
+at config 34a9d110: 100-cmdr gem coverage 0/100 → 100/100 (agg
+0.8160), 500-cmdr regenerated (agg 0.7123; one stale value found:
+Adeline 0.8 → 0.8667). Tag `pre-lift-normalization` is the cycle
+baseline ledger and re-bases all plan-002-era gem figures.
+
 ### Plan 2026-07-02-002 wrap-up — end state + measurement bug found
 
 End state (vs `pre-scoring-remediation` tag): NDCG 0.2361 → 0.2336
