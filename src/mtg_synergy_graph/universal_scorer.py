@@ -673,112 +673,6 @@ def patched_rule_quality_multiplier(weights: Mapping[str, float]) -> Iterator[No
         _RULE_QUALITY_MULTIPLIER.update(baseline)
 
 
-#: Plan 2026-07-02-001 (color-conditioned IDF probe). When True, the IDF
-#: denominator N for non-flat keys counts only candidates in the
-#: commander's color-identity-legal pool (``_color_legal_pool``) instead
-#: of the color-unfiltered matched set. Default False — the flag-off
-#: path is bitwise-identical to the pre-probe scorer (proven by
-#: ``bench.py audit --expect-identity``). Flip procedure (plan Unit 4):
-#: set True AND register the value in ``ScoringConfigInputs`` so
-#: ``compute_config_hash`` flips. Tests toggle via
-#: ``mock.patch.object(universal_scorer, "_ENABLE_COLOR_CONDITIONED_IDF", True)``
-#: — the flag is read at call time inside ``maybe_color_legal_pool``,
-#: never snapshotted by a ``from``-import.
-_ENABLE_COLOR_CONDITIONED_IDF: bool = False
-
-
-def _color_legal_pool(
-    conn: sqlite3.Connection,
-    commander_set: Sequence[str],
-    candidate_cache: CandidateCache | None = None,
-) -> frozenset[str]:
-    """Card names legal in the commander's color-identity pool.
-
-    Mirrors the ``engine.page()`` / ``legal_cards()`` predicate exactly
-    (all three conditions conjoined): candidate colour identity ⊆ the
-    identity UNION over the full ``commander_set``, AND a non-empty
-    top-level type not in ``NON_EDH_CARD_TYPES``, AND
-    ``legal_commander != 0``. The queried commanders themselves are
-    excluded, mirroring ``page()``. Parity with ``legal_cards()`` is
-    locked by ``tests/test_universal_scorer_color_idf.py`` — the R2a
-    orphan policy is only sound while the pool ⊇ every ranked candidate.
-
-    Raises ``ValueError`` on an unknown commander. Never silently
-    returns an empty pool for a known commander set — an empty pool
-    would orphan every key and reproduce unconditioned behaviour,
-    masking the probe.
-    """
-    # Local import: engine.py imports this module at top level.
-    from .engine import NON_EDH_CARD_TYPES
-
-    names = list(commander_set)
-    placeholders = ",".join("?" * len(names))
-    cmdr_rows = conn.execute(
-        f"SELECT name, color_identity FROM cards WHERE name IN ({placeholders})",
-        tuple(names),
-    ).fetchall()
-    found = {r["name"] for r in cmdr_rows}
-    missing = [n for n in names if n not in found]
-    if missing:
-        raise ValueError(f"unknown commander(s) for color-legal pool: {missing!r}")
-    identity: set[str] = set()
-    for r in cmdr_rows:
-        identity.update(t.strip() for t in (r["color_identity"] or "").split(",") if t.strip())
-
-    cmdr_names = set(names)
-    pool: set[str] = set()
-    if candidate_cache is not None:
-        for name, row in candidate_cache.candidate_rows.items():
-            if name in cmdr_names:
-                continue
-            cand_types = (row["card_types"] or "").split()
-            if not cand_types or any(t in NON_EDH_CARD_TYPES for t in cand_types):
-                continue
-            if row.get("legal_commander") == 0:
-                continue
-            pips = {t.strip() for t in (row["color_identity"] or "").split(",") if t.strip()}
-            if not (pips - identity):
-                pool.add(name)
-        return frozenset(pool)
-
-    # SQL fallback (no cache — e.g. one-off score_one calls). Same
-    # back-compat legal_commander shim as engine.legal_cards().
-    has_legal = any(r[1] == "legal_commander" for r in conn.execute("PRAGMA table_info(cards)").fetchall())
-    legal_expr = "legal_commander" if has_legal else "1 AS legal_commander"
-    cur = conn.execute(
-        f"SELECT name, color_identity, card_types, {legal_expr} FROM cards WHERE name NOT IN ({placeholders})",
-        tuple(names),
-    )
-    for r in cur.fetchall():
-        cand_types = (r["card_types"] or "").split()
-        if not cand_types or any(t in NON_EDH_CARD_TYPES for t in cand_types):
-            continue
-        if r["legal_commander"] == 0:
-            continue
-        pips = {t.strip() for t in (r["color_identity"] or "").split(",") if t.strip()}
-        if not (pips - identity):
-            pool.add(r["name"])
-    return frozenset(pool)
-
-
-def maybe_color_legal_pool(
-    conn: sqlite3.Connection,
-    commander_set: Sequence[str],
-    candidate_cache: CandidateCache | None = None,
-) -> frozenset[str] | None:
-    """Single flag-read point for color-conditioned IDF.
-
-    Returns ``None`` when ``_ENABLE_COLOR_CONDITIONED_IDF`` is off.
-    Both the scorer (``score_from_complements``) and the optimizer
-    basis fill site (``bench/optimize.py::_score_split``) route through
-    here, so one ``mock.patch`` of the flag on this module flips every
-    call site together — no import-time snapshot can diverge.
-    """
-    if not _ENABLE_COLOR_CONDITIONED_IDF:
-        return None
-    return _color_legal_pool(conn, commander_set, candidate_cache)
-
-
 @dataclass(frozen=True)
 class IdfBasis:
     """Per-commander IDF basis: weight-independent components of ``_compute_idf_weights``.
@@ -814,27 +708,13 @@ class IdfBasis:
     base_idf_non_flat: Mapping[tuple[str, str, str, str], float]
 
 
-def _compute_idf_basis(
-    complements: Sequence[PortComplement],
-    legal_pool: frozenset[str] | None = None,
-) -> IdfBasis:
+def _compute_idf_basis(complements: Sequence[PortComplement]) -> IdfBasis:
     """Build the weight-independent IDF basis for one commander's complements.
 
     See :class:`IdfBasis` for the cache invariant. Mirrors the frequency
     counting + ``cond_mult`` + flat-override + log2 logic from
     :func:`_compute_idf_weights`, but stops short of applying
     ``_RULE_QUALITY_MULTIPLIER``.
-
-    When ``legal_pool`` is given (plan 2026-07-02-001, color-conditioned
-    IDF), non-flat N counts only candidates inside the pool. A key with
-    zero in-pool matchers keeps its unconditioned N (R2a orphan policy:
-    such keys cannot touch any ranked candidate — the pool ⊇ the ranked
-    legal set — and falling back avoids both ``log2(1)`` division blowup
-    and the implicit weight-1.0 default). ``None`` reproduces the
-    unconditioned basis bitwise. NOTE the cache contract: a cached basis
-    additionally depends on the pool it was built with — the optimizer's
-    per-commander cache stays valid because the pool is a pure function
-    of the commander set and DB snapshot.
     """
     freq: dict[tuple[str, str, str, str], set[str]] = defaultdict(set)
     for c in complements:
@@ -854,10 +734,6 @@ def _compute_idf_basis(
             flat_weights[key] = base_w * cond_mult
         else:
             n = len(candidates)
-            if legal_pool is not None:
-                n_legal = len(candidates & legal_pool)
-                if n_legal > 0:
-                    n = n_legal
             cmdr_event = key[1]
             if rule_id == "panharmonicon" and "reverse" not in cmdr_event and "stack" not in cmdr_event:
                 n = max(n, 30)
@@ -979,13 +855,7 @@ def score_from_complements(
     ``tests/bench/test_universal_scorer_identity.py`` suite and
     ``bench.py audit --expect-identity``.
     """
-    if idf_basis is not None:
-        # Optimizer path: the pool (if any) is already baked into the
-        # cached basis at its fill site (bench/optimize.py).
-        idf = _idf_weights_from_basis(idf_basis)
-    else:
-        _pool = maybe_color_legal_pool(conn, commander_set, candidate_cache)
-        idf = _idf_weights_from_basis(_compute_idf_basis(complements, legal_pool=_pool))
+    idf = _idf_weights_from_basis(idf_basis) if idf_basis is not None else _compute_idf_weights(complements)
 
     # Group complements by candidate
     by_candidate: dict[str, list[PortComplement]] = defaultdict(list)
