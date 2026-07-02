@@ -13,7 +13,7 @@ dependencies = []
 graph = ["numpy>=2.4.6"]
 
 [build-system]
-requires = ["uv_build>=0.11.19,<0.12"]
+requires = ["uv_build>=0.11.23,<0.12"]
 build-backend = "uv_build"
 
 [tool.pyright]
@@ -137,12 +137,12 @@ ignore = [
 dev = [
     "pre-commit>=4.6.0",
     "pyright>=1.1.410",
-    "pytest>=9.0.3",
+    "pytest>=9.1.1",
     "pytest-cov>=6.1",
     "pytest-xdist>=3.6",
-    "ruff>=0.15.16",
+    "ruff>=0.15.18",
     "vulture>=2.16",
     "mtg-synergy-graph[graph]",
-    "coverage>=7.14.1",
+    "coverage>=7.14.2",
     "mutmut>=3.6.0",
 ]
