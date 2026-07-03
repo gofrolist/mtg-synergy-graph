@@ -176,6 +176,33 @@ def test_non_token_subtype_excluded(cohort_db: sqlite3.Connection) -> None:
     assert "Wall Whisperer" not in cohort
 
 
+def test_subtype_after_dot_is_matched(tmp_path: Path) -> None:
+    """A subtype expressed as a restriction after the dot is caught (not just heads).
+
+    Forge encodes many payoffs as ``Creature.<Subtype>+YouCtrl`` where the clause
+    head is ``Creature`` and the subtype lives in the restriction. Extracting only
+    the pre-dot head would silently drop these (the latent bug fixed in the
+    _valid_filter_subtype_tokens broadening).
+    """
+    conn = open_db(tmp_path / "synergy.db")
+    _seed_token_subtype_vocab(conn, ["Zombie"])
+    _insert_commander(conn, "Rot Marshal")
+    _insert_port(
+        conn,
+        "Rot Marshal",
+        port_type="trigger",
+        event_class="ChangesZone",
+        valid_filter="Creature.Zombie+YouCtrl",
+        zone_origin="Battlefield",
+        zone_destination="Graveyard",
+    )
+    conn.commit()
+    try:
+        assert "Rot Marshal" in subtype_death_payoff(conn)
+    finally:
+        conn.close()
+
+
 def test_non_legal_commander_excluded(tmp_path: Path) -> None:
     """Edge: an illegal-commander card with a subtype death trigger is excluded."""
     conn = open_db(tmp_path / "synergy.db")

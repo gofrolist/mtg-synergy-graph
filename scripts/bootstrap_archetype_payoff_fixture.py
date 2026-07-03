@@ -23,15 +23,13 @@ DB is missing.
 from __future__ import annotations
 
 import sys
-from datetime import UTC, datetime
 from pathlib import Path
 
 # Make src/ importable when run as a bare script.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from mtg_synergy_graph.bench.cohorts import archetype_payoff_cohort
-from mtg_synergy_graph.bench.fixture import build_fixture
-from mtg_synergy_graph.bench.tensor import compute_config_hash
+from mtg_synergy_graph.bench.fixture import build_and_write_fixture, high_synergy_slug_counts
 from mtg_synergy_graph.db import open_db
 from mtg_synergy_graph.validate import commander_to_slug
 
@@ -52,22 +50,20 @@ def _select_cohort_commanders() -> list[str]:
     cards_conn = open_db(str(SYNERGY_DB), create=False)
     edhrec_conn = open_db(str(EDHREC_DB), create=False)
     try:
-        cohort = archetype_payoff_cohort(cards_conn)
+        cohort = sorted(archetype_payoff_cohort(cards_conn))
+        slug_counts = high_synergy_slug_counts(edhrec_conn)
 
-        # slug -> High-Synergy row count, one GROUP BY instead of N point lookups.
-        slug_counts: dict[str, int] = dict(
-            edhrec_conn.execute(
-                "SELECT commander_slug, COUNT(*) FROM edhrec_card_synergy "
-                "WHERE section = 'High Synergy Cards' "
-                "GROUP BY commander_slug"
+        # edhrec_rank for deterministic ordering, fetched in one static query
+        # over the legendary-creature superset (every cohort member is one) —
+        # avoids N point lookups without dynamic SQL / injection surface.
+        ranks: dict[str, int | None] = dict(
+            cards_conn.execute(
+                "SELECT name, edhrec_rank FROM cards "
+                "WHERE legal_commander = 1 "
+                "AND supertypes LIKE '%Legendary%' "
+                "AND card_types LIKE '%Creature%'"
             ).fetchall()
         )
-
-        # edhrec_rank for deterministic ordering (nulls sort last).
-        ranks: dict[str, int | None] = {}
-        for name in cohort:
-            row = cards_conn.execute("SELECT edhrec_rank FROM cards WHERE name = ?", (name,)).fetchone()
-            ranks[name] = row[0] if row is not None else None
 
         kept: list[str] = []
         dropped: list[str] = []
@@ -77,7 +73,7 @@ def _select_cohort_commanders() -> list[str]:
             else:
                 kept.append(name)
 
-        kept.sort(key=lambda n: (ranks[n] if ranks[n] is not None else 1_000_000_000, n))
+        kept.sort(key=lambda n: (ranks.get(n) if ranks.get(n) is not None else 1_000_000_000, n))
 
         print(
             f"cohort={len(cohort)} kept={len(kept)} dropped={len(dropped)} (no High-Synergy EDHREC data)",
@@ -104,22 +100,10 @@ def main() -> int:
         print("error: no cohort commanders cleared the EDHREC High-Synergy filter.", file=sys.stderr)
         return 2
 
-    config_hash = compute_config_hash()
-    conn = open_db(str(SYNERGY_DB), create=False)
-    edhrec_conn = open_db(str(EDHREC_DB), create=False)
-    try:
-        fixture = build_fixture(conn, commanders, edhrec_conn=edhrec_conn)
-    finally:
-        conn.close()
-        edhrec_conn.close()
-
-    fixture.config_hash = config_hash
-    fixture.created_at = datetime.now(UTC).isoformat(timespec="seconds")
     # Snapshot cohort membership for reproducible slice partitioning (KD 4).
-    fixture.cohort_members = sorted(commanders)
-    fixture.write(OUTPUT_PATH)
+    fixture = build_and_write_fixture(SYNERGY_DB, EDHREC_DB, commanders, OUTPUT_PATH, cohort_members=sorted(commanders))
     print(
-        f"wrote {len(fixture.entries)} entries to {OUTPUT_PATH} (config_hash={config_hash[:12]}...)",
+        f"wrote {len(fixture.entries)} entries to {OUTPUT_PATH} (config_hash={fixture.config_hash[:12]}...)",
         file=sys.stderr,
     )
     return 0

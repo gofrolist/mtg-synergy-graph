@@ -36,6 +36,7 @@ from typing import Any
 
 from mtg_synergy_graph.bench.hidden_gems import hidden_gem_hit_rate_for_commander
 from mtg_synergy_graph.bench.tensor import TensorWriter, compute_config_hash
+from mtg_synergy_graph.db import open_db
 from mtg_synergy_graph.edhrec_helpers import fetch_high_synergy_top_n
 from mtg_synergy_graph.universal_scorer import (
     TensorRow,
@@ -296,6 +297,7 @@ def build_fixture(
     existing: PinnedFixture | None = None,
     tensor_writer: TensorWriter | None = None,
     edhrec_conn: sqlite3.Connection | None = None,
+    cohort_members: list[str] | None = None,
 ) -> PinnedFixture:
     """Score all commanders and produce a fresh fixture.
 
@@ -312,6 +314,13 @@ def build_fixture(
     EDHREC rows have the keys ABSENT (not ``None``), so Unit 3's
     aggregator filters on key presence. Callers without an
     ``edhrec_conn`` get the old behavior — no gem fields written.
+
+    ``cohort_members`` (plan 2026-07-03-001 Key Decision 4) carries the
+    cohort-membership snapshot structurally so preservation is the
+    default, not a per-call obligation of every rebuild path: when it is
+    omitted the snapshot is inherited from ``existing`` (so ``--repin``
+    keeps it automatically); when passed explicitly it overrides. Empty
+    for untagged fixtures — ``write`` then omits the key entirely.
     """
     existing_by_cmdr = {e.commander: e for e in existing.entries} if existing is not None else {}
 
@@ -342,9 +351,69 @@ def build_fixture(
             )
         )
 
+    # Snapshot resolution: explicit arg wins; otherwise inherit from the
+    # fixture being re-pinned so a rebuild never silently drops it.
+    if cohort_members is not None:
+        resolved_cohort = list(cohort_members)
+    elif existing is not None:
+        resolved_cohort = list(existing.cohort_members)
+    else:
+        resolved_cohort = []
+
     return PinnedFixture(
         config_hash=compute_config_hash(),
         created_at=datetime.now(UTC).isoformat(timespec="seconds"),
         schema_version=SCHEMA_VERSION,
         entries=entries,
+        cohort_members=resolved_cohort,
     )
+
+
+#: EDHREC section whose row count gates a commander into a golden fixture.
+#: Centralized so the bootstrap scripts cannot drift on the section name.
+HIGH_SYNERGY_SECTION = "High Synergy Cards"
+
+
+def high_synergy_slug_counts(edhrec_conn: sqlite3.Connection) -> dict[str, int]:
+    """Map ``commander_slug -> High-Synergy row count`` in one GROUP BY.
+
+    Shared by the golden-set bootstrap scripts (500-cmdr + archetype-payoff
+    cohort) so the EDHREC-coverage filter is defined in exactly one place.
+    """
+    return dict(
+        edhrec_conn.execute(
+            "SELECT commander_slug, COUNT(*) FROM edhrec_card_synergy WHERE section = ? GROUP BY commander_slug",
+            (HIGH_SYNERGY_SECTION,),
+        ).fetchall()
+    )
+
+
+def build_and_write_fixture(
+    synergy_db: Path | str,
+    edhrec_db: Path | str,
+    commanders: list[str],
+    output_path: Path | str,
+    *,
+    cohort_members: list[str] | None = None,
+) -> PinnedFixture:
+    """Build a fixture over ``commanders`` and write it to ``output_path``.
+
+    The shared build/write protocol for the golden-set bootstrap scripts:
+    stamp the live ``config_hash`` + a fresh ``created_at``, score each
+    commander with EDHREC gem data, snapshot ``cohort_members`` when given,
+    and persist. DBs are opened with ``create=False`` (callers verify
+    existence first). Returns the written fixture so the caller can log its
+    entry count / config_hash.
+    """
+    config_hash = compute_config_hash()
+    conn = open_db(str(synergy_db), create=False)
+    edhrec_conn = open_db(str(edhrec_db), create=False)
+    try:
+        fixture = build_fixture(conn, commanders, edhrec_conn=edhrec_conn, cohort_members=cohort_members)
+    finally:
+        conn.close()
+        edhrec_conn.close()
+    fixture.config_hash = config_hash
+    fixture.created_at = datetime.now(UTC).isoformat(timespec="seconds")
+    fixture.write(output_path)
+    return fixture

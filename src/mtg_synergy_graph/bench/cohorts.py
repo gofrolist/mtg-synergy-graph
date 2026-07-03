@@ -37,6 +37,11 @@ _CHANGESZONE_EVENTS = frozenset({"ChangesZone", "ChangesZoneAll"})
 #: ``Any``, empty, and comma-lists — a strict ``zone_origin='Battlefield'``
 #: clause would drop them, so we accept these plus any comma-list *containing*
 #: ``Battlefield``. Library/Hand-only origins (mill, tutor) are excluded.
+#: The empty-origin arm is the loosest (it could in principle admit a
+#: "put into a graveyard from anywhere" mill payoff), and is intentional per the
+#: plan's decision to prefer inclusion; it is currently inert — no cohort
+#: commander matches solely via an empty-origin ChangesZone (verified against
+#: data/synergy.db). Re-check after a cardsfolder refresh if precision matters.
 _BATTLEFIELD_TOLERANT_ORIGINS = frozenset({"", "Battlefield", "Any"})
 
 
@@ -48,22 +53,34 @@ def _token_subtype_vocab(conn: sqlite3.Connection) -> set[str]:
     }
 
 
-def _valid_filter_head_tokens(valid_filter: str) -> list[str]:
-    """Extract the leading subtype/type token of each comma-separated clause.
+def _valid_filter_subtype_tokens(valid_filter: str) -> list[str]:
+    """Every token in a ``valid_filter`` that could name a subtype.
 
-    ``valid_filter`` is a comma-list of Forge filter clauses; the head token of a
-    clause is the text before the first ``.`` (restriction) or ``+`` (conjoined
-    restriction). ``"Insect.YouCtrl+Other,Food.token"`` -> ``["Insect", "Food"]``.
+    ``valid_filter`` is a comma-list of Forge filter clauses. A subtype can be
+    the clause head (``Insect.YouCtrl`` -> ``Insect``) OR a restriction after
+    the ``.`` (``Creature.Zombie+YouCtrl`` -> the head is ``Creature`` but the
+    subtype is ``Zombie``). Both forms occur in the corpus, so we emit the head
+    plus every ``+``-separated restriction token; the caller filters against the
+    token-subtype vocabulary, so non-subtype restrictions (``YouCtrl``,
+    ``!token``, ``Other``) simply never match. Negated (``!Zombie``) and
+    ``non``-prefixed tokens keep their prefix and so do not false-match a bare
+    subtype. ``"Insect.YouCtrl,Creature.Zombie+Other"`` ->
+    ``["Insect", "YouCtrl", "Creature", "Zombie", "Other"]``.
     """
-    heads: list[str] = []
+    tokens: list[str] = []
     for clause in valid_filter.split(","):
         clause = clause.strip()
         if not clause:
             continue
-        head = clause.split(".")[0].split("+")[0].strip()
+        head, _, restriction = clause.partition(".")
+        head = head.split("+")[0].strip()
         if head:
-            heads.append(head)
-    return heads
+            tokens.append(head)
+        for part in restriction.split("+"):
+            part = part.strip()
+            if part:
+                tokens.append(part)
+    return tokens
 
 
 def _reaches_graveyard_from_battlefield(zone_origin: str | None, zone_destination: str | None) -> bool:
@@ -114,7 +131,7 @@ def subtype_death_payoff(conn: sqlite3.Connection) -> set[str]:
     for card_name, event_class, valid_filter, zone_origin, zone_destination in rows:
         if not _is_death_event(event_class, zone_origin, zone_destination):
             continue
-        if any(head in vocab for head in _valid_filter_head_tokens(valid_filter)):
+        if any(token in vocab for token in _valid_filter_subtype_tokens(valid_filter)):
             cohort.add(card_name)
     return cohort
 

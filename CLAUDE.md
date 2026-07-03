@@ -88,16 +88,23 @@ uv run python scripts/demand_coverage.py --commander "Yawgmoth, Thran Physician"
 # Cohort predicate: src/mtg_synergy_graph/bench/cohorts.py (seeded with
 # subtype_death_payoff; 36 cohort / 33 buildable after the High-Synergy EDHREC filter
 # — dropped: Daryl, Jenny Flint, Miara). Build/pin/read/band:
-uv run python scripts/bootstrap_archetype_payoff_fixture.py               # (Re)build + pin the cohort fixture (do this after a cardsfolder/scoring-config change — NOT `--repin`, which needs an existing fixture; the bootstrap script is the builder). Snapshots cohort_members for pin-reproducible slicing.
-uv run scripts/bench.py audit --repin --yes --fixture tests/fixtures/golden_set_archetype_payoff.json  # Re-pin scores + persist tensor to SQLite; preserves the cohort_members snapshot
+uv run python scripts/bootstrap_archetype_payoff_fixture.py               # (Re)build + pin the cohort fixture. Use THIS (not `--repin`) after a cardsfolder refresh: `--repin` preserves the OLD cohort_members snapshot and does NOT re-derive membership, and a data refresh does not flip config_hash so the freshness gate will not force a rebuild. Snapshots cohort_members for pin-reproducible slicing.
+uv run scripts/bench.py audit --repin --yes --fixture tests/fixtures/golden_set_archetype_payoff.json  # Re-pin scores + persist tensor to SQLite; preserves (does NOT re-derive) the cohort_members snapshot — correct only for a scoring-config re-pin, not a data refresh
 uv run scripts/bench.py audit --per-commander-ndcg --fixture tests/fixtures/golden_set_archetype_payoff.json  # Read the in-cohort vs rest NDCG slice (membership from the pinned snapshot)
-uv run scripts/portfolio_sim.py bands --fixture tests/fixtures/golden_set_archetype_payoff.json  # Cohort NDCG noise band
-# NOISE BAND (seed 17): cohort NDCG@30 mean 0.2858, 95% CI [0.2302, 0.3437],
-# noise-band half-width = 0.0567. A cohort-NDCG readout below +0.0567 is NOISE,
-# not a win. A cohort gain is also NECESSARY-BUT-NOT-SUFFICIENT: the cohort is
-# selected by the same predicate a rule would key on, so a disguised whitelist
-# scores maximally by construction — any future SHIP must ALSO clear a whole-
-# fixture golden-500 no-regression check AND a whitelist-equivalence check.
+uv run scripts/portfolio_sim.py bands --fixture tests/fixtures/golden_set_archetype_payoff.json  # Separate page-ranking NDCG band (different instrument — see below)
+# NOISE BAND — the gate for the --per-commander-ndcg in-cohort readout is the
+# bootstrap band of THAT SAME instrument's distribution (score_commander top-N
+# NDCG@30, seed 17): cohort mean 0.1436, 95% CI [0.0990, 0.1885], half-width
+# = 0.0448. A cohort in-cohort mean-delta below +0.0448 is NOISE, not a win.
+#   NOTE: `portfolio_sim bands` reports a DIFFERENT number (mean 0.2858, half-
+#   width 0.0567) because it ranks via full engine.page() production ranking,
+#   not score_commander top-N — do NOT compare its band to the --per-commander-
+#   ndcg readout. Recompute the reporter band by bootstrap_band()-ing the
+#   reporter's in-cohort live NDCG@30 values (seed 17) after a data refresh.
+# A cohort gain is also NECESSARY-BUT-NOT-SUFFICIENT: the cohort is selected by
+# the same predicate a rule would key on, so a disguised whitelist scores
+# maximally by construction — any future SHIP must ALSO clear a whole-fixture
+# golden-500 no-regression check AND a whitelist-equivalence check.
 
 # Tensor-driven weight optimizer (plan 2026-04-26-001 M1) — Coordinate Ascent over
 # _RULE_QUALITY_MULTIPLIER. Emits .audit/optimize_proposal.json for human review;

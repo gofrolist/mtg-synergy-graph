@@ -142,12 +142,12 @@ def handle_repin(args: argparse.Namespace) -> int:
     finally:
         conn.close()
         edhrec_conn.close()
-    # Preserve a cohort-membership snapshot across re-pin: build_fixture does
-    # not carry it, so a generic --repin on the archetype-payoff cohort fixture
-    # would otherwise drop the snapshot and force the NDCG slice onto the
-    # non-reproducible live path (plan 2026-07-03-001 Key Decision 4). No-op for
-    # untagged fixtures (empty snapshot → write() omits the key).
-    fresh.cohort_members = list(existing.cohort_members)
+    # build_fixture(existing=...) already inherits the cohort-membership
+    # snapshot (plan 2026-07-03-001 Key Decision 4), so --repin preserves it
+    # structurally. NOTE: --repin does NOT re-derive membership from the live
+    # predicate — after a cardsfolder refresh that shifts the cohort, rebuild
+    # via scripts/bootstrap_archetype_payoff_fixture.py instead (a data refresh
+    # does not flip config_hash, so the freshness gate will not force it).
     fresh.write(fixture_path)
     print(
         f"--repin wrote {len(fresh.entries)} commanders to {fixture_path} "
