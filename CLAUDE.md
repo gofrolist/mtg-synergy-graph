@@ -79,6 +79,26 @@ uv run scripts/portfolio_sim.py sweep                                    # Decay
 uv run python scripts/demand_coverage.py                                 # Full 100-cmdr run (~2 min; includes a live forensics pass)
 uv run python scripts/demand_coverage.py --commander "Yawgmoth, Thran Physician"  # Filtered debug run
 
+# Archetype-payoff cohort fixture (plan 2026-07-03-001) — an EVAL INSTRUMENT, not a
+# scoring change. The golden-100/500 audit fixtures hold only 2/4 of the archetype-
+# payoff cohort, so a future cohort mechanism DECLINEs on eval-set dilution rather
+# than merit. This names the cohort (subtype-keyed death-payoff commanders) and
+# reports its NDCG undiluted. Zero scoring-path changes; the fixture carries its own
+# config_hash and joins the no-DB freshness gate (tests/bench/test_fixture_freshness.py).
+# Cohort predicate: src/mtg_synergy_graph/bench/cohorts.py (seeded with
+# subtype_death_payoff; 36 cohort / 33 buildable after the High-Synergy EDHREC filter
+# — dropped: Daryl, Jenny Flint, Miara). Build/pin/read/band:
+uv run python scripts/bootstrap_archetype_payoff_fixture.py               # (Re)build + pin the cohort fixture (do this after a cardsfolder/scoring-config change — NOT `--repin`, which needs an existing fixture; the bootstrap script is the builder). Snapshots cohort_members for pin-reproducible slicing.
+uv run scripts/bench.py audit --repin --yes --fixture tests/fixtures/golden_set_archetype_payoff.json  # Re-pin scores + persist tensor to SQLite; preserves the cohort_members snapshot
+uv run scripts/bench.py audit --per-commander-ndcg --fixture tests/fixtures/golden_set_archetype_payoff.json  # Read the in-cohort vs rest NDCG slice (membership from the pinned snapshot)
+uv run scripts/portfolio_sim.py bands --fixture tests/fixtures/golden_set_archetype_payoff.json  # Cohort NDCG noise band
+# NOISE BAND (seed 17): cohort NDCG@30 mean 0.2858, 95% CI [0.2302, 0.3437],
+# noise-band half-width = 0.0567. A cohort-NDCG readout below +0.0567 is NOISE,
+# not a win. A cohort gain is also NECESSARY-BUT-NOT-SUFFICIENT: the cohort is
+# selected by the same predicate a rule would key on, so a disguised whitelist
+# scores maximally by construction — any future SHIP must ALSO clear a whole-
+# fixture golden-500 no-regression check AND a whitelist-equivalence check.
+
 # Tensor-driven weight optimizer (plan 2026-04-26-001 M1) — Coordinate Ascent over
 # _RULE_QUALITY_MULTIPLIER. Emits .audit/optimize_proposal.json for human review;
 # never auto-mutates src/mtg_synergy_graph/data/scoring_weights.json. Append-only history at

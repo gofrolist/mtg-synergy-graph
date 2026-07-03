@@ -142,6 +142,12 @@ def handle_repin(args: argparse.Namespace) -> int:
     finally:
         conn.close()
         edhrec_conn.close()
+    # Preserve a cohort-membership snapshot across re-pin: build_fixture does
+    # not carry it, so a generic --repin on the archetype-payoff cohort fixture
+    # would otherwise drop the snapshot and force the NDCG slice onto the
+    # non-reproducible live path (plan 2026-07-03-001 Key Decision 4). No-op for
+    # untagged fixtures (empty snapshot → write() omits the key).
+    fresh.cohort_members = list(existing.cohort_members)
     fresh.write(fixture_path)
     print(
         f"--repin wrote {len(fresh.entries)} commanders to {fixture_path} "
