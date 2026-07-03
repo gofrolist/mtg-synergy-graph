@@ -80,15 +80,33 @@ supply-shaped.
 
 ## Why it failed (mechanism)
 
-The origin document named the rival hypothesis explicitly and Stage
-0 confirmed it: **most NO_RULES miss mass is generic goodstuff /
-deck-function inclusions whose correct mechanical score under this
-architecture is zero.** 398 of 435 cohort misses are unreachable by
-ANY of five well-narrowed demand→supply pairings. The flows carry
-real signal (4.5× null), but the recoverable mass tops out at ~47
-labels fixture-wide — an order of magnitude below what justifies a
-mechanism build (new GATE_OPS leaf ops, seed grammar, overlap
-governance against 7+ shipped feeders, kill-test cycle).
+398 of 435 cohort misses are unreachable by ANY of five
+well-narrowed cost→supply pairings. The flows carry real signal
+(4.5× null), but the recoverable mass tops out at ~47 labels
+fixture-wide — an order of magnitude below what justifies a mechanism
+build (new GATE_OPS leaf ops, seed grammar, overlap governance
+against 7+ shipped feeders, kill-test cycle). So the **cost→supply
+FRAME** is a weak lever. That is the whole of what the measurement
+established.
+
+**Correction (2026-07-03, model doubt-check — DO NOT repeat the
+original overreach).** The first draft of this section read the
+DECLINE as "most NO_RULES mass is generic goodstuff whose correct
+mechanical score is zero." Reading the actual unreachable cards
+refutes that flatly: they are the cores of these decks — Slimefoot's
+19 misses are ALL saprolings (Mycoloth, Sporemound, Verdant Force;
+Mycoloth is absent from Slimefoot's entire top-200), Yawgmoth's are
+undying / aristocrat death-drain / -1-1-counter payoffs, Araumi's are
+self-mill enablers + reanimation targets, Gitrog's and Borborygmos's
+are land-recursion / cycling-lands / discard outlets. These are
+real, EDHREC-corroborated mechanical synergies the engine scores
+zero. They are unreachable **by the cost→supply frame**, not
+unreachable in principle: the synergies run through archetype-payoff
+axes (commander *wants* tokens / graveyard / lands as a payoff), and
+those payoff identities are often buried in activated abilities the
+port model flattens (same class as the Phenax granted-ability gap).
+The bucket is an OPEN coverage gap, not a scored-correctly-at-zero
+bucket.
 
 Honest caveat recorded at decision time: the `wrong_supply_cards`
 feeder diagnosis is partially tautological (NO_RULES misses have
@@ -113,21 +131,26 @@ Stage 0's self-checks.
 
 ## What this closes and what stays open
 
-- **Closed**: uniform demand→supply resource-flow mechanisms for the
-  NO_RULES bucket; commander-cost feeder expansion as an NDCG
-  recovery lever (the demand ports are real but the labels aren't
-  reachable through them). Together with the OUTRANKED closure
-  (portfolio cycle: 0.0518 addressable) this means BOTH large miss
-  buckets are now measured mostly-unaddressable under the
-  mechanical-interaction architecture — the honest reading is that
-  aggregate NDCG@30 against EDHREC labels is near its architectural
-  ceiling, and further EDHREC-alignment pushes have steeply
-  diminishing returns.
-- **Open**: the hidden-gems axis (BM25 revisit measured +0.0407 gem
-  rate, documented possible SHIP under gems-first criteria — the
-  natural next cycle); granted-ability demand extraction (Phenax's
-  AddAbility engine — an extraction gap, small); mechanics-native
-  quality work that doesn't gate on EDHREC labels.
+- **Closed**: the specific cost→supply resource-flow FRAME for the
+  NO_RULES bucket — commander-cost feeder expansion over these five
+  flows is a weak lever (≤~9% cohort reach). Nothing broader is
+  closed. Do NOT read this as "NO_RULES is unaddressable" or "NDCG is
+  at its ceiling" — the earlier draft said that and it is refuted by
+  the card evidence above.
+- **Open — the primary lever this cycle actually surfaced**:
+  archetype-payoff detection. The unreachable misses are on-theme
+  token / aristocrat / graveyard / lands synergies the engine scores
+  zero because it under-detects the commander's payoff identity
+  (Slimefoot isn't seen as a token payoff; his saproling-sac is an
+  activated ability). This is cliff-prone — it is the flood/tribal
+  territory of the calibration/portfolio null-results and the
+  "no per-archetype rules" feedback — so it needs a Stage-0
+  addressable-share measurement (how many misses would archetype
+  detection reach?) and kill-tests, NOT a naive lord/go-wide rule.
+- **Open (other)**: the hidden-gems axis (BM25 revisit, +0.0407 gem
+  rate, possible SHIP under gems-first criteria); granted-ability
+  payoff/demand extraction (the Phenax/Slimefoot buried-ability class
+  — likely a prerequisite for archetype detection).
 
 ## Surviving infrastructure (all inert on the scoring path)
 

@@ -43,10 +43,16 @@ upper bound covers ~1/10 of the gap to either bar.
 **Interpretation**: the measured share exceeds the null model 4.5×
 (0.0828 vs 0.0184), so the five flows carry real mechanical signal —
 but the recoverable mass is an order of magnitude below the funding
-bars. This substantially confirms the origin's rival hypothesis:
-most cohort NO_RULES mass is generic goodstuff / deck-function
-inclusions whose correct mechanical score under this architecture is
-zero. Honest caveat recorded: the `wrong_supply_cards` feeder
+bars. The correct reading is narrow: the **cost→supply resource-flow
+frame is a weak lever** for this bucket. (An earlier draft here
+over-read it as "most NO_RULES mass is generic goodstuff scored
+correctly at zero" — that was RETRACTED 2026-07-03 after reading the
+actual unreachable cards, which are on-theme archetype synergies the
+engine scores zero: Slimefoot→all saprolings, Yawgmoth→undying/
+aristocrat/-1-1, Araumi→reanimate, Gitrog/Borborygmos→lands. See
+`docs/solutions/best-practices/resource-flow-demand-null-result-2026-07-02.md`
+Correction. The bucket is an OPEN archetype-payoff-detection gap, not
+a ceiling.) Honest caveat recorded: the `wrong_supply_cards` feeder
 diagnosis is partially tautological (NO_RULES misses have zero
 tensor rows by definition), so the load-bearing numbers are the
 reachability counts, not the diagnosis labels.

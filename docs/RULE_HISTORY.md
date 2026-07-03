@@ -20,14 +20,19 @@ cohort share **0.0828** (36/435, null 0.0184), fixture-wide reach
 **47/1,137 labels** — both bars failed; Phase B never ran; zero
 scoring-path changes; pins untouched.
 
-Mechanism: the origin's rival hypothesis confirmed — most NO_RULES
-mass is deck-function goodstuff whose correct mechanical score is
-zero. With OUTRANKED already closed (0.0518 addressable), both
-large miss buckets are measured mostly-unaddressable: aggregate
-NDCG@30 vs EDHREC is near its architectural ceiling. Next honest
-lever is the gems axis (BM25 revisit, +0.0407 gem rate on record).
-Shipped floor outcome: `scripts/demand_coverage.py` standing
-instrument + provisional pairing table (hash-inert). Details:
+Mechanism: the cost→supply resource-flow FRAME is a weak lever for
+this bucket. (An earlier version of this entry over-read it as
+"NO_RULES is goodstuff scored at zero / NDCG near its ceiling" —
+RETRACTED 2026-07-03: reading the actual unreachable cards shows
+they are on-theme archetype synergies the engine scores zero —
+Slimefoot→all saprolings, Yawgmoth→undying/aristocrats,
+Araumi→reanimate, Gitrog→lands.) The bucket is an OPEN
+archetype-payoff-detection gap, not a ceiling. Next levers: a
+Stage-0 measurement of archetype-payoff detection (cliff-prone —
+flood/tribal territory, needs kill-tests), and the gems axis (BM25
+revisit, +0.0407 gem rate on record). Shipped floor outcome:
+`scripts/demand_coverage.py` standing instrument + provisional
+pairing table (hash-inert). Details:
 docs/solutions/best-practices/resource-flow-demand-null-result-2026-07-02.md.
 
 ### Walker validator config-hash false-failure fixed; three April template blocks re-adjudicated and CONFIRMED
