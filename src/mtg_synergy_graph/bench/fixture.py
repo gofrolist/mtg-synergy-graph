@@ -126,6 +126,13 @@ class PinnedFixture:
     created_at: str
     schema_version: int = SCHEMA_VERSION
     entries: list[FixtureEntry] = field(default_factory=list)
+    #: Optional snapshot of cohort membership at build time (plan
+    #: 2026-07-03-001 Key Decision 4). Present on the archetype-payoff cohort
+    #: fixture so the NDCG cohort slice partitions reproducibly from the pin
+    #: (the live predicate is a volatile multi-join over port data). Empty for
+    #: untagged fixtures (golden-100/500), whose slice falls back to a live,
+    #: explicitly non-reproducible cohort computation.
+    cohort_members: list[str] = field(default_factory=list)
 
     # ---- I/O --------------------------------------------------------------
 
@@ -142,15 +149,20 @@ class PinnedFixture:
             created_at=data.get("created_at", ""),
             schema_version=schema,
             entries=[FixtureEntry.from_dict(e) for e in data.get("entries", [])],
+            cohort_members=list(data.get("cohort_members", [])),
         )
 
     def write(self, path: Path | str) -> None:
-        out = {
+        out: dict[str, Any] = {
             "schema_version": self.schema_version,
             "config_hash": self.config_hash,
             "created_at": self.created_at,
-            "entries": [e.to_dict() for e in self.entries],
         }
+        # Only emit the cohort snapshot when populated — keeps the canonical
+        # golden-100/500 fixtures byte-for-byte unchanged (no empty key).
+        if self.cohort_members:
+            out["cohort_members"] = list(self.cohort_members)
+        out["entries"] = [e.to_dict() for e in self.entries]
         Path(path).write_text(
             json.dumps(out, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
