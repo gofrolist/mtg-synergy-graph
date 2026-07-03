@@ -1,12 +1,50 @@
 ---
 title: "feat: Resource-flow demand probe — Stage 0 instrument + conditional mechanism"
 type: feat
-status: active
+status: declined
 date: 2026-07-02
 origin: docs/brainstorms/2026-07-02-resource-flow-demand-requirements.md
 ---
 
 # feat: Resource-flow demand probe — Stage 0 instrument + conditional mechanism
+
+## DECISION — DECLINED at Stage 0 (2026-07-03, Unit 3 routing)
+
+Both pinned funding bars failed on the full 100-commander run
+(config_hash `34a9d110…`, run 2026-07-03T01:49Z, wall clock 120s):
+
+- **Cohort addressable share 0.0828** (36 of 435 cohort NO_RULES
+  misses reachable via healthy under-served demand pairings;
+  1 burial-excluded) — bar was ≥ 0.25. Cohort by rule (<1,000
+  activated candidates) = 26 commanders; of the seven named
+  verification commanders, Phenax/Slimefoot/Osgir fall OUTSIDE the
+  rule-defined cohort.
+- **Fixture-wide reach 47 labels** (of 1,137 NO_RULES misses; null
+  model 15) — floor was ≥ 100.
+
+Routing per the pinned R2 table: share < 0.25 OR reach < 100 →
+**DECLINE**. The feeder-widening reroute branch is not reachable
+(both bars must be met first), and its premise also fails on the
+evidence: the yield diagnosis shows the shipped feeders already
+DELIVER (Araumi's `gy_fuel_feeder` puts 29 of its 107 candidates in
+her top-30) — the misses simply are not supply-shaped.
+
+**Interpretation**: the measured share exceeds the null model 4.5×
+(0.0828 vs 0.0184), so the five flows carry real mechanical signal —
+but the recoverable mass is an order of magnitude below the funding
+bars. This substantially confirms the origin's rival hypothesis:
+most cohort NO_RULES mass is generic goodstuff / deck-function
+inclusions whose correct mechanical score under this architecture is
+zero. Honest caveat recorded: the `wrong_supply_cards` feeder
+diagnosis is partially tautological (NO_RULES misses have zero
+tensor rows by definition), so the load-bearing numbers are the
+reachability counts, not the diagnosis labels.
+
+Units 4–8 (Phase B) never ran; zero scoring-path changes; pins
+untouched. Shipped floor outcome: the demand-coverage instrument
+(`scripts/demand_coverage.py`) as a standing forensics companion,
+plus the provisional pairing table. Null-result doc:
+`docs/solutions/best-practices/resource-flow-demand-null-result-2026-07-02.md`.
 
 ## Overview
 
@@ -244,7 +282,7 @@ the kill-test negative control.
 
 ### Phase A — Stage 0 (unconditional)
 
-- [ ] **Unit 1: Provisional pairing table (pre-pinned, blind)**
+- [x] **Unit 1: Provisional pairing table (pre-pinned, blind)**
 
 **Goal:** Commit the five-flow demand→supply pairing table BEFORE any
 share computation, satisfying R1b-pin's authoring-blindness and
@@ -298,7 +336,7 @@ anti-gaming bounds.
 --expect-identity` still passes (no scoring-path change); the seed
 commit lands before any Unit 2 share computation exists.
 
-- [ ] **Unit 2: Demand-coverage instrument**
+- [x] **Unit 2: Demand-coverage instrument**
 
 **Goal:** The Stage 0 read-only instrument: three-way port
 classification, feeder-yield diagnosis, addressable-share
@@ -395,7 +433,7 @@ reports contain per-commander three-way classification, cohort +
 aggregate shares, null-model comparison, yield diagnosis rows for
 `gy_fuel_feeder`/`cost_payoff`; `--expect-identity` still passes.
 
-- [ ] **Unit 3: Stage 0 readout + routing decision**
+- [x] **Unit 3: Stage 0 readout + routing decision**
 
 **Goal:** Run the instrument, evaluate the pinned routing (DECLINE /
 fund mechanism / feeder-widening reroute), and record the decision.

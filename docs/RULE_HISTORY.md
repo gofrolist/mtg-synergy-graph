@@ -7,6 +7,29 @@ See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
 ## 2026-07-02
 
+### Resource-flow demand mechanism — DECLINED at Stage 0 (plan 2026-07-02-005)
+
+The NO_RULES-bucket successor cycle (funded after the walker route
+exhausted the same day) died at its designed cheap exit. A general
+commander-demand → candidate-supply mechanism over five resource
+flows was gated by a Stage 0 evidence pass with every boundary
+pinned blind (share ≥ 0.25 AND ≥ 100 labels fixture-wide; starved
+floor < 1,000; IDF-burial criterion; ≤ 2,000-card pools; pairing
+table committed before the share computation existed). Measured:
+cohort share **0.0828** (36/435, null 0.0184), fixture-wide reach
+**47/1,137 labels** — both bars failed; Phase B never ran; zero
+scoring-path changes; pins untouched.
+
+Mechanism: the origin's rival hypothesis confirmed — most NO_RULES
+mass is deck-function goodstuff whose correct mechanical score is
+zero. With OUTRANKED already closed (0.0518 addressable), both
+large miss buckets are measured mostly-unaddressable: aggregate
+NDCG@30 vs EDHREC is near its architectural ceiling. Next honest
+lever is the gems axis (BM25 revisit, +0.0407 gem rate on record).
+Shipped floor outcome: `scripts/demand_coverage.py` standing
+instrument + provisional pairing table (hash-inert). Details:
+docs/solutions/best-practices/resource-flow-demand-null-result-2026-07-02.md.
+
 ### Walker validator config-hash false-failure fixed; three April template blocks re-adjudicated and CONFIRMED
 
 The gap_report → scaffold walker had been structurally broken since

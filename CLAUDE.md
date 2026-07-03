@@ -71,6 +71,14 @@ uv run scripts/portfolio_sim.py bands                                    # Boots
 uv run scripts/portfolio_sim.py share                                    # Empirical addressable-share readout for EDHREC-label misses (R7b)
 uv run scripts/portfolio_sim.py sweep                                    # Decay-form × λ × granularity × discount-base grid with trap/ablation sidecars
 
+# Demand-coverage instrument (plan 2026-07-02-005, DECLINED at Stage 0 — standing forensics
+# companion; zero scoring-path changes, reports to .audit/demand_coverage/). Three-way commander-
+# port classification (unconsumed / material-yield / starved), feeder-yield diagnosis, and
+# addressable-share readout vs the provisional pairing table (resource_flows_seed.json, hash-inert).
+# Re-run after major rule additions or data refreshes to re-measure under-served demand.
+uv run python scripts/demand_coverage.py                                 # Full 100-cmdr run (~2 min; includes a live forensics pass)
+uv run python scripts/demand_coverage.py --commander "Yawgmoth, Thran Physician"  # Filtered debug run
+
 # Tensor-driven weight optimizer (plan 2026-04-26-001 M1) — Coordinate Ascent over
 # _RULE_QUALITY_MULTIPLIER. Emits .audit/optimize_proposal.json for human review;
 # never auto-mutates src/mtg_synergy_graph/data/scoring_weights.json. Append-only history at
