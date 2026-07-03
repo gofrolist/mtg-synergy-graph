@@ -203,13 +203,21 @@ against the cohort — recorded here so the instrument is not misread:
   a few more (e.g. the 3 low-data commanders Daryl / Sierra / Titania).
   Log dropped commanders; the fixture ships with whatever clears the
   filter. Not a blocker — a smaller cohort still beats 2/100.
+  **RESOLVED (implementation):** the seed predicate yields **36** on current
+  `data/synergy.db` (the narrative "27" was a prior snapshot; user confirmed
+  the seed intentionally includes artifact-token subtypes — Clue/Food/Treasure/
+  Junk — matching the Unit 1 Approach spec, not a creature-only restriction).
+  **33** clear the High-Synergy filter; **3 dropped** for no High-Synergy EDHREC
+  data: Daryl, Jenny Flint, Miara (Sierra and Titania *did* clear). Cohort NDCG
+  slice: in-cohort n=33, mean pinned NDCG@30 **0.1436** (per_commander reporter);
+  bootstrap noise band (portfolio_sim, seed 17) half-width **0.0567**.
 - Whether the cohort slice should also surface the hidden-gem rate per
   cohort (the `hidden_gem_hit_rate` legacy field already exists per entry).
   Add only if trivial once the slice scaffold is in.
 
 ## Implementation Units
 
-- [ ] **Unit 1: Cohort-selection predicate module**
+- [x] **Unit 1: Cohort-selection predicate module**
 
 **Goal:** An extensible module that returns the archetype-payoff cohort
 commander names, with one seeded predicate (`subtype_death_payoff`).
@@ -267,7 +275,7 @@ commander names, with one seeded predicate (`subtype_death_payoff`).
 - Module returns a deterministic commander set from a synthetic DB; adding a
   second dummy predicate to `_COHORT_PREDICATES` changes the union as expected.
 
-- [ ] **Unit 2: Cohort-fixture bootstrap script + committed fixture**
+- [x] **Unit 2: Cohort-fixture bootstrap script + committed fixture**
 
 **Goal:** A script that builds and writes
 `tests/fixtures/golden_set_archetype_payoff.json`, and the committed
@@ -329,7 +337,7 @@ fixture itself.
   contains the buildable cohort (Slimefoot + Wilhelt present); builder is
   idempotent (re-run reproduces the same entries modulo `created_at`).
 
-- [ ] **Unit 3: Cohort-restricted NDCG slice in per_commander_ndcg**
+- [x] **Unit 3: Cohort-restricted NDCG slice in per_commander_ndcg**
 
 **Goal:** A cohort slice in the per-commander NDCG reporter so cohort NDCG
 is reported separately from the whole-fixture aggregate.
@@ -386,7 +394,7 @@ is reported separately from the whole-fixture aggregate.
 - Running the per-commander NDCG reporter against the cohort fixture (or
   golden-500) shows an `in-cohort` vs `rest` NDCG breakdown with counts.
 
-- [ ] **Unit 4: Cohort NDCG noise band + pin + docs**
+- [x] **Unit 4: Cohort NDCG noise band + pin + docs**
 
 **Goal:** Publish the cohort's NDCG noise band / minimum-detectable-effect
 so readouts are judged signal-vs-noise, then pin the fixture and document
