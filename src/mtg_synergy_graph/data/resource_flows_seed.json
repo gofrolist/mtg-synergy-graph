@@ -1,0 +1,239 @@
+{
+  "_readme": [
+    "PROVISIONAL five-flow demand->supply pairing table (plan 2026-07-02-005, Unit 1).",
+    "Status: Stage 0 MEASUREMENT input for the demand-coverage instrument ONLY.",
+    "NOT scoring config. NOT hash-participating: this file is deliberately absent",
+    "from ScoringConfigInputs / compute_config_hash — committing or editing it must",
+    "never flip the config hash or require a re-pin. Promotion to a scoring seed",
+    "(digest field + hash block) happens only at the Phase B flip commit, if funded.",
+    "",
+    "Authoring blindness (R1b-pin): Authored from registry gate predicates and",
+    "port-shape vocabulary only; no forensics miss list was consulted for pool",
+    "design (R1b-pin). This file is committed BEFORE any Unit 2 share computation",
+    "exists; the commit boundary is the evidence of ordering.",
+    "",
+    "Anti-gaming bound (R1b-pin): each flow's supplier pool (union of its supplier",
+    "shapes over card_ports, distinct card_name) must be <= 2,000 cards. Measured",
+    "pool sizes at authoring time (2026-07-02 DB) are recorded in each flow's",
+    "'comment'. A pool that exceeds the bound at measurement time is excluded from",
+    "the funding numerator and reported as the 'indiscriminate matching' DECLINE",
+    "branch evidence.",
+    "",
+    "Shape grammar (closed key set, validated by",
+    "port_graph/resource_flows.py::load_resource_flows):",
+    "  port_type              (required) one of the card_ports port_type values",
+    "  event_class            exact match on card_ports.event_class",
+    "  event_class_prefix     prefix match (parametrized keywords: 'Flashback:3');",
+    "                         exactly one of event_class / event_class_prefix",
+    "  cost_target            exact match on card_ports.cost_target",
+    "  cost_target_not        negated exact match on card_ports.cost_target",
+    "  zone_origin            exact match on card_ports.zone_origin",
+    "  zone_destination       exact match on card_ports.zone_destination",
+    "  valid_filter           exact match on card_ports.valid_filter",
+    "  attr_kind              port_attributes.attr_kind the port must carry",
+    "                         (paired with attr_value_not_in)",
+    "  attr_value_not_in      the carried attr value must NOT be in this list",
+    "  card_types_not_contains  card-level narrowing: cards.types must contain",
+    "                         none of these tokens (e.g. one-shot Instant/Sorcery",
+    "                         token bursts are not repeatable fodder engines)",
+    "",
+    "Consumer shapes are commander-side demand (mirroring the shipped registry",
+    "gate predicates: _gy_fuel_feeder_gate, _cost_payoff_gate, _tap_type_feeder_gate",
+    "etc. read exactly these cost_target/cost_subtype columns). Supplier shapes are",
+    "candidate-side supply, narrowed per R6 (recursion/token/undying shapes, never",
+    "'any creature' — the tribe-as-fuel falsification population must not match)."
+  ],
+  "flows": {
+    "sacrifice_fodder": {
+      "consumers": [
+        {
+          "port_type": "cost",
+          "event_class": "sacrifice",
+          "cost_target_not": "self"
+        }
+      ],
+      "suppliers": [
+        {
+          "port_type": "effect",
+          "event_class": "Token",
+          "attr_kind": "token_subtype",
+          "attr_value_not_in": [
+            "Treasure",
+            "Food",
+            "Clue",
+            "Blood",
+            "Gold",
+            "Powerstone",
+            "Junk",
+            "Map",
+            "Incubator",
+            "Shard"
+          ],
+          "card_types_not_contains": ["Instant", "Sorcery"]
+        },
+        {
+          "port_type": "effect",
+          "event_class": "ChangeZone",
+          "zone_origin": "Graveyard",
+          "zone_destination": "Battlefield",
+          "valid_filter": "Self"
+        },
+        {
+          "port_type": "effect",
+          "event_class": "ChangeZone",
+          "zone_origin": "Graveyard",
+          "zone_destination": "Hand",
+          "valid_filter": "Self"
+        },
+        {
+          "port_type": "keyword",
+          "event_class": "Undying"
+        },
+        {
+          "port_type": "keyword",
+          "event_class": "Persist"
+        }
+      ],
+      "comment": "Demand: non-self sacrifice costs (937 distinct commander-candidate cards carry the consumer shape; Yawgmoth's cost.sacrifice/other verified). Supply narrowed per R6 — NOT 'any creature': repeatable creature-token engines on permanents (1,794 cards; non-creature artifact-token subtypes and one-shot Instant/Sorcery bursts excluded), self-recursion from the graveyard (GY->Battlefield 47, GY->Hand 52; Gravecrawler shape), and Undying (22) / Persist (24). Measured supplier pool union: 1,938 distinct cards (bound <= 2,000)."
+    },
+    "discard_fuel": {
+      "consumers": [
+        {
+          "port_type": "cost",
+          "event_class": "discard"
+        }
+      ],
+      "suppliers": [
+        {
+          "port_type": "keyword",
+          "event_class_prefix": "Madness"
+        },
+        {
+          "port_type": "keyword",
+          "event_class_prefix": "Flashback"
+        },
+        {
+          "port_type": "keyword",
+          "event_class_prefix": "Jump-start"
+        },
+        {
+          "port_type": "keyword",
+          "event_class_prefix": "Retrace"
+        },
+        {
+          "port_type": "keyword",
+          "event_class_prefix": "Unearth"
+        },
+        {
+          "port_type": "keyword",
+          "event_class_prefix": "Disturb"
+        },
+        {
+          "port_type": "keyword",
+          "event_class_prefix": "Escape"
+        },
+        {
+          "port_type": "keyword",
+          "event_class_prefix": "Embalm"
+        },
+        {
+          "port_type": "keyword",
+          "event_class_prefix": "Eternalize"
+        },
+        {
+          "port_type": "keyword",
+          "event_class_prefix": "Dredge"
+        },
+        {
+          "port_type": "effect",
+          "event_class": "ChangeZone",
+          "zone_origin": "Graveyard",
+          "zone_destination": "Battlefield",
+          "valid_filter": "Self"
+        },
+        {
+          "port_type": "effect",
+          "event_class": "ChangeZone",
+          "zone_origin": "Graveyard",
+          "zone_destination": "Hand",
+          "valid_filter": "Self"
+        }
+      ],
+      "comment": "Demand: discard costs (493 distinct cards carry cost.discard; the shipped _cost_payoff_gate reads the same shape with a cost_subtype refinement — the flow deliberately keeps the broader discard demand for measurement). Supply narrowed to cards that WANT to be discarded: graveyard-castable keywords (Madness/Flashback/Jump-start/Retrace/Unearth/Disturb/Escape/Embalm/Eternalize/Dredge — parametrized event_class values like 'Flashback:3' matched by prefix) plus self-recursion from the graveyard. Generic card draw (effect.Draw, 3,045 cards) deliberately EXCLUDED — it is hand refill, not discard fuel, and would blow the pool bound. Measured supplier pool union: 559 distinct cards (bound <= 2,000)."
+    },
+    "untap_capacity": {
+      "consumers": [
+        {
+          "port_type": "cost",
+          "event_class": "tap"
+        },
+        {
+          "port_type": "cost",
+          "event_class": "tap_type"
+        }
+      ],
+      "suppliers": [
+        {
+          "port_type": "effect",
+          "event_class": "Untap"
+        }
+      ],
+      "comment": "Demand: tap costs — cost.tap (4,013 cards, the commander's own {T} activations) and cost.tap_type (202 cards, tapXType 'tap N untapped SUBJECT you control' costs; the shipped _tap_type_feeder_gate reads exactly this shape). Supply: explicit untap effects (effect.Untap). Measured supplier pool: 415 distinct cards (bound <= 2,000)."
+    },
+    "life": {
+      "consumers": [
+        {
+          "port_type": "cost",
+          "event_class": "pay_life"
+        }
+      ],
+      "suppliers": [
+        {
+          "port_type": "effect",
+          "event_class": "GainLife"
+        },
+        {
+          "port_type": "keyword",
+          "event_class_prefix": "Lifelink"
+        }
+      ],
+      "comment": "Demand: life-payment costs (cost.pay_life, 195 distinct cards; Yawgmoth's PayLife$ 1 verified). Supply: lifegain effects (effect.GainLife, 1,486 cards) plus Lifelink keyword carriers (355 cards, prefix-matched for parametrized grants). Measured supplier pool union: 1,834 distinct cards (bound <= 2,000)."
+    },
+    "graveyard_bodies": {
+      "consumers": [
+        {
+          "port_type": "cost",
+          "event_class": "exile_from_grave",
+          "cost_target": "any"
+        },
+        {
+          "port_type": "cost",
+          "event_class": "exile_any_grave"
+        }
+      ],
+      "suppliers": [
+        {
+          "port_type": "effect",
+          "event_class": "Mill"
+        },
+        {
+          "port_type": "effect",
+          "event_class": "ChangeZone",
+          "zone_origin": "Library",
+          "zone_destination": "Graveyard"
+        },
+        {
+          "port_type": "effect",
+          "event_class": "ChangeZoneAll",
+          "zone_origin": "Library",
+          "zone_destination": "Graveyard"
+        },
+        {
+          "port_type": "keyword",
+          "event_class_prefix": "Dredge"
+        }
+      ],
+      "comment": "Demand: graveyard-exile costs with external targets — cost.exile_from_grave with cost_target 'any' (115 cards; mirrors the shipped _gy_fuel_feeder_gate exactly, self-target escape-style recursion excluded as a different archetype) plus cost.exile_any_grave (16 cards). Araumi of the Dead Tide's encore-granting kit is covered: her demand surfaces as cost.exile_from_grave/any (verified in card_ports), so no granted-keyword consumer shape is needed in the provisional draft. Supply: graveyard fillers — mill effects (effect.Mill, 503), entomb-style Library->Graveyard tutors (ChangeZone 49 incl. ChangeZoneAll), and Dredge carriers. Measured supplier pool union: 565 distinct cards (bound <= 2,000)."
+    }
+  }
+}
