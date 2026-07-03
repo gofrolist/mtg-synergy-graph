@@ -28,6 +28,11 @@ REQUIRED_TRACKED_FILES = (
     # Portfolio-selection family map (plan 2026-07-02-004 Unit 1):
     # rule_id -> family authority loaded at import by portfolio.py.
     "src/mtg_synergy_graph/data/family_map.json",
+    # Provisional resource-flow pairing table (plan 2026-07-02-005
+    # Unit 1): pre-pinned Stage 0 measurement input for the
+    # demand-coverage instrument. NOT scoring config, NOT
+    # hash-participating.
+    "src/mtg_synergy_graph/data/resource_flows_seed.json",
     # Forge-Second-Oracle plan 002 unit 1: SHA pin for the vendored
     # Forge checkout. Regenerable table (forge_oracle.db) is NOT
     # tracked — only the pin that identifies which Forge commit the
