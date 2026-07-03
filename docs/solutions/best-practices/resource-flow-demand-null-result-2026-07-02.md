@@ -96,6 +96,21 @@ zero tensor rows by definition, so a delivering rule's candidates
 can never intersect them); the load-bearing evidence is the
 reachability counts, not the diagnosis labels.
 
+**Adversarial verification (post-decision)**: code review found the
+supplier matcher too strict — the self-recursion shape's
+`valid_filter='Self'` missed the 191-card empty-filter GY→BF bucket
+(Reassembling Skeleton, Bloodghast), and Gravecrawler's
+MayPlay-from-graveyard recursion has NO extracted port in
+`card_ports` at all (a port-extraction gap the grammar cannot
+reach). Sensitivity re-measurement with a maximally generous
+671-card filter-agnostic recursion flow (via the `--flows-seed`
+diagnostic facility; pinned seed untouched): share 0.0943, reach
+57 — both bars still fail by large margins. The DECLINE survives its
+own measurement defect; the correction's upper bound covers ~1/10 of
+the gap to either bar. Method lesson: an adversarial matcher check
+against named canonical supply cards should be part of any future
+Stage 0's self-checks.
+
 ## What this closes and what stays open
 
 - **Closed**: uniform demand→supply resource-flow mechanisms for the

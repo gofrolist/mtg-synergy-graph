@@ -271,6 +271,14 @@ class TestShapeMatching:
         assert shape_matches_port(shape, port, card_types="Creature Human")
         assert not shape_matches_port(shape, port, card_types="Sorcery")
 
+    def test_valid_filter_match_and_mismatch(self) -> None:
+        shape = PortShape(port_type="cost", event_class="sacrifice", valid_filter="Self")
+        base = {"port_type": "cost", "event_class": "sacrifice"}
+        assert shape_matches_port(shape, {**base, "valid_filter": "Self"})
+        assert not shape_matches_port(shape, {**base, "valid_filter": "Creature.Other"})
+        assert not shape_matches_port(shape, {**base, "valid_filter": None})
+        assert not shape_matches_port(shape, base)  # key absent == unconstrained port
+
 
 class TestReachability:
     POOLS: ClassVar[dict[str, frozenset[str]]] = {
@@ -363,6 +371,29 @@ class TestSupplierPool:
                 ),
             )
             assert supplier_pool(conn, flow) == frozenset({"Soldier Maker", "Flashback Card"})
+        finally:
+            conn.close()
+
+    def test_valid_filter_narrowing(self, tmp_path: Path) -> None:
+        # 4 committed seed shapes carry valid_filter — the SQL predicate
+        # must pool ONLY exact valid_filter matches (NULL and different
+        # values are excluded).
+        conn = open_db(tmp_path / "pool.db")
+        try:
+            _add_card(conn, "Self Sac")
+            _add_port(conn, "Self Sac", "cost", "sacrifice", valid_filter="Self")
+            _add_card(conn, "Other Sac")
+            _add_port(conn, "Other Sac", "cost", "sacrifice", valid_filter="Creature.Other")
+            _add_card(conn, "Null Sac")
+            _add_port(conn, "Null Sac", "cost", "sacrifice")  # NULL valid_filter
+            conn.commit()
+
+            flow = ResourceFlow(
+                name="test",
+                consumers=(PortShape(port_type="cost", event_class="sacrifice"),),
+                suppliers=(PortShape(port_type="cost", event_class="sacrifice", valid_filter="Self"),),
+            )
+            assert supplier_pool(conn, flow) == frozenset({"Self Sac"})
         finally:
             conn.close()
 
@@ -726,6 +757,30 @@ class TestCli:
         )
         assert rc == 2
         assert "seed" in capsys.readouterr().err
+
+    def test_malformed_fixture_exit_1_with_and_without_commander(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # A malformed --fixture must exit 1 with a named error on BOTH
+        # paths — previously only the --commander branch validated it
+        # and the bare path crashed with a raw traceback later.
+        db = tmp_path / "synergy.db"
+        open_db(db).close()
+        tags = tmp_path / "tags.db"
+        _make_tags_db(tags, [])
+        fixture = tmp_path / "fixture.json"
+        fixture.write_text("{not json", encoding="utf-8")
+        base = ["--db", str(db), "--edhrec-db", str(tags), "--fixture", str(fixture)]
+
+        rc = main(base)
+        assert rc == 1
+        err = capsys.readouterr().err
+        assert "fixture" in err and "unreadable" in err
+
+        rc = main([*base, "--commander", "X"])
+        assert rc == 1
+        err = capsys.readouterr().err
+        assert "fixture" in err and "unreadable" in err
 
     def test_stale_tensor_exit_2(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         # A DB whose tensor rows carry a DIFFERENT config hash than the

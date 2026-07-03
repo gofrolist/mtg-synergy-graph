@@ -29,6 +29,17 @@ evidence: the yield diagnosis shows the shipped feeders already
 DELIVER (Araumi's `gy_fuel_feeder` puts 29 of its 107 candidates in
 her top-30) — the misses simply are not supply-shaped.
 
+**Adversarial sensitivity check (post-decision, ce-code-review
+20260702-210134)**: review found the seed's self-recursion supplier
+shape too strict (`valid_filter='Self'` misses the 191-card
+empty-filter bucket incl. Reassembling Skeleton/Bloodghast;
+Gravecrawler's MayPlay recursion has NO extracted port at all — an
+extraction gap). Re-measured with a maximally generous diagnostic
+flow (671-card filter-agnostic GY→BF pool via `--flows-seed`, pinned
+seed untouched): share 0.0943, reach 57 — both bars still fail by
+large margins. The DECLINE is robust to the defect; the correction's
+upper bound covers ~1/10 of the gap to either bar.
+
 **Interpretation**: the measured share exceeds the null model 4.5×
 (0.0828 vs 0.0184), so the five flows carry real mechanical signal —
 but the recoverable mass is an order of magnitude below the funding

@@ -113,6 +113,21 @@ def test_loader_missing_file_raises(tmp_path: Path) -> None:
         load_resource_flows(tmp_path / "does_not_exist.json")
 
 
+def test_loader_missing_packaged_seed_raises_value_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A broken install (packaged seed absent) must surface as ValueError,
+    not a raw FileNotFoundError — demand_coverage's exit-2 precondition
+    handling keys off ValueError."""
+    import mtg_synergy_graph.port_graph.resource_flows as rf
+
+    def _raise(filename: str) -> Path:
+        raise FileNotFoundError(f"packaged seed {filename} not found")
+
+    monkeypatch.setattr(rf, "default_seed_path", _raise)
+    with pytest.raises(ValueError, match=r"resource_flows_seed.json missing.*[Rr]estore") as excinfo:
+        load_resource_flows()
+    assert not isinstance(excinfo.value, FileNotFoundError)
+
+
 def test_loader_malformed_json_raises(tmp_path: Path) -> None:
     p = tmp_path / "resource_flows_seed.json"
     p.write_text("{not json", encoding="utf-8")

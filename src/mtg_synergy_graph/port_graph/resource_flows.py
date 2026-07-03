@@ -210,7 +210,21 @@ def load_resource_flows(path: Path | None = None) -> dict[str, ResourceFlow]:
     pointer. The prose fields (``_readme``, per-flow ``comment``) are
     validated for type but excluded from the returned structure.
     """
-    p = Path(path) if path is not None else default_seed_path(_RESOURCE_FLOWS_FILENAME)
+    if path is not None:
+        p = Path(path)
+    else:
+        try:
+            p = default_seed_path(_RESOURCE_FLOWS_FILENAME)
+        except FileNotFoundError as exc:
+            # Same actionable posture as the missing-explicit-path branch
+            # below: consumers (demand_coverage's exit-2 handling) rely on
+            # ValueError, never a raw FileNotFoundError, escaping here.
+            raise ValueError(
+                f"{_RESOURCE_FLOWS_FILENAME} missing from the packaged data dir ({exc}); "
+                "this file is the pre-pinned provisional pairing table for the Stage 0 "
+                "demand-coverage instrument and must exist. Restore "
+                "src/mtg_synergy_graph/data/resource_flows_seed.json from git."
+            ) from exc
     try:
         with p.open(encoding="utf-8") as f:
             raw = json.load(f)

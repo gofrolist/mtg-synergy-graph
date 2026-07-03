@@ -1127,21 +1127,34 @@ def main(argv: Sequence[str] | None = None) -> int:
     db_path = Path(args.db)
     edhrec_path = Path(args.edhrec_db)
     fixture_path = Path(args.fixture)
-    for path, what in ((db_path, "synergy DB"), (edhrec_path, "EDHREC DB"), (fixture_path, "fixture")):
+    for path, what, remedy in (
+        (db_path, "synergy DB", "rebuild via `uv run python scripts/import_cardsfolder.py`"),
+        (edhrec_path, "EDHREC DB", "restore data/tags.db (see README for the EDHREC snapshot workflow)"),
+        (fixture_path, "fixture", "regenerate via `uv run scripts/bench.py audit --repin --yes`"),
+    ):
         if not path.exists():
-            print(f"error: {what} {path} not found", file=sys.stderr)
+            print(f"error: {what} {path} not found — {remedy}", file=sys.stderr)
             return 2
     if args.flows_seed is not None and not Path(args.flows_seed).exists():
-        print(f"error: resource-flows seed {args.flows_seed} not found", file=sys.stderr)
+        print(
+            f"error: resource-flows seed {args.flows_seed} not found — "
+            "restore src/mtg_synergy_graph/data/resource_flows_seed.json from git "
+            "(or drop --flows-seed to use the packaged seed)",
+            file=sys.stderr,
+        )
         return 2
 
+    # Fixture readability check for BOTH paths (with and without
+    # --commander) — a malformed fixture must exit 1 with a named error,
+    # never a raw traceback from deep inside the forensics pass.
+    try:
+        data = json.loads(fixture_path.read_text(encoding="utf-8"))
+        available = {e.get("commander") for e in data.get("entries", [])}
+    except (json.JSONDecodeError, AttributeError, TypeError) as exc:
+        print(f"error: fixture {fixture_path}: unreadable ({exc})", file=sys.stderr)
+        return 1
+
     if args.commander:
-        try:
-            data = json.loads(fixture_path.read_text(encoding="utf-8"))
-            available = {e.get("commander") for e in data.get("entries", [])}
-        except (json.JSONDecodeError, AttributeError, TypeError) as exc:
-            print(f"error: fixture {fixture_path}: unreadable ({exc})", file=sys.stderr)
-            return 1
         missing = sorted(name for name in args.commander if name not in available)
         if missing:
             print(
