@@ -2,8 +2,16 @@
 subtype-supply rule (plan 2026-07-07-001).
 
 Extracted verbatim from ``bench/cohorts.py`` so the scoring path
-(``complement_rules/subtype_supply.py``) can reuse the EXACT predicate that
-selects the archetype-payoff cohort without importing from ``bench``.
+(``complement_rules/subtype_supply.py``) can reuse the death-shape +
+token-subtype-vocab conjunct that selects the archetype-payoff cohort,
+without importing from ``bench``. This module reproduces that conjunct
+exactly; it does NOT reproduce the cohort predicate's additional SQL-level
+``legal_commander`` / ``Legendary`` / ``Creature`` restriction
+(``bench/cohorts.py::subtype_death_payoff``), which is an offline
+DB-wide-scan bound used only to enumerate cohort membership. The scoring
+path intentionally skips that restriction — its contract is to trust that
+the commander it is called with (``cmdr_ports``) is already a legal
+legendary creature, not to re-verify it per call.
 Behavior change here changes BOTH the cohort membership and the rule gate —
 the cohort fixture's pinned ``cohort_members`` snapshot is the regression
 oracle (tests/test_death_payoff.py::TestCohortUnchanged).

@@ -149,6 +149,29 @@ class TestPayoffSubtypesFromPorts:
 FIXTURE = Path(__file__).parent / "fixtures" / "golden_set_archetype_payoff.json"
 LIVE_DB = Path(__file__).resolve().parents[1] / "data" / "synergy.db"
 LIVE_EDHREC_DB = Path(__file__).resolve().parents[1] / "data" / "tags.db"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _load_bootstrap_min_high_synergy_rows() -> int:
+    """Import ``MIN_HIGH_SYNERGY_ROWS`` from the bootstrap script itself.
+
+    ``scripts/`` is not a package, so we load the module by file path via
+    ``importlib``. The script only defines constants/functions at module
+    scope and guards its side-effecting work behind ``if __name__ ==
+    "__main__":``, so importing it here is safe (no fixture rebuild, no DB
+    writes). This keeps the test's filter threshold mechanically tied to
+    the bootstrap script's constant instead of a second hardcoded literal
+    that could silently drift from it.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "bootstrap_apf", REPO_ROOT / "scripts" / "bootstrap_archetype_payoff_fixture.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.MIN_HIGH_SYNERGY_ROWS
 
 
 @pytest.mark.skipif(
@@ -163,20 +186,23 @@ class TestCohortUnchanged:
         filtered* subset written by ``scripts/bootstrap_archetype_payoff_fixture.py``
         (33 of the 36 raw ``archetype_payoff_cohort`` members — see CLAUDE.md's
         "dropped: Daryl, Jenny Flint, Miara"), not the raw predicate output. This
-        test replicates that same filter so it is comparing like with like.
+        test replicates that same filter (using the bootstrap script's own
+        ``MIN_HIGH_SYNERGY_ROWS`` constant, not a hardcoded literal) so it is
+        comparing like with like.
         """
         from mtg_synergy_graph.bench.cohorts import archetype_payoff_cohort
         from mtg_synergy_graph.bench.fixture import high_synergy_slug_counts
         from mtg_synergy_graph.db import open_db
         from mtg_synergy_graph.validate import commander_to_slug
 
+        min_high_synergy_rows = _load_bootstrap_min_high_synergy_rows()
         pinned = set(json.loads(FIXTURE.read_text())["cohort_members"])
         cards_conn = open_db(str(LIVE_DB), create=False)
         edhrec_conn = open_db(str(LIVE_EDHREC_DB), create=False)
         try:
             cohort = archetype_payoff_cohort(cards_conn)
             slug_counts = high_synergy_slug_counts(edhrec_conn)
-            live = {name for name in cohort if slug_counts.get(commander_to_slug(name), 0) >= 1}
+            live = {name for name in cohort if slug_counts.get(commander_to_slug(name), 0) >= min_high_synergy_rows}
         finally:
             cards_conn.close()
             edhrec_conn.close()

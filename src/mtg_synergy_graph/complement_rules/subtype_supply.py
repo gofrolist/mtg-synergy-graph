@@ -1,11 +1,18 @@
 """Subtype-supply complement rules (plan 2026-07-07-001).
 
-Commander gate: a subtype-keyed death-payoff trigger — the EXACT predicate
-that selects the archetype-payoff cohort (via
-``death_payoff.payoff_subtypes_from_ports``). Two candidate directions with
-independent rule_ids so their quality multipliers tune independently
-(whitelist evidence: flooding bodies dilutes; producers are the tougher,
-cleaner signal — see deck-context-null-result-2026-07-06.md):
+Commander gate: a subtype-keyed death-payoff trigger, via
+``death_payoff.payoff_subtypes_from_ports``. That helper reproduces the
+death-shape + token-subtype-vocab conjunct of the archetype-payoff cohort
+predicate (``bench/cohorts.py::subtype_death_payoff``) exactly, but NOT
+the cohort predicate's SQL-level ``legal_commander`` / ``Legendary`` /
+``Creature`` restriction — that restriction is an offline DB-wide-scan
+bound used to enumerate cohort membership, and is intentionally not
+re-checked per-commander here; the engine's contract is to trust that the
+commander it was called with is already a legal legendary creature. Two
+candidate directions with independent rule_ids so their quality
+multipliers tune independently (whitelist evidence: flooding bodies
+dilutes; producers are the tougher, cleaner signal — see
+deck-context-null-result-2026-07-06.md):
 
 - ``subtype_supply_producer`` — candidate has a port that produces tokens of
   the payoff subtype (``port_attributes`` ``attr_kind='token_subtype'``).
@@ -18,9 +25,13 @@ Both are IDF-weighted like any other rule via the
 ``cand_event=<subtype>``, so rare payoff subtypes (Saproling) weigh more
 than common ones (Zombie) automatically. NOT a flat bonus.
 
-Flag-gated default-OFF until the plan's decision gates pass (S1-S6);
-registration inputs (scoring_weights entries) land only on the SHIP path so
-the Task 3 commit is config-hash-neutral.
+Shipped 2026-07-07 at operating point (producer=1.5, body=0.5) — verdict
+PARTIAL, human-approved on a Pareto-dominance rationale (S1 cohort ΔNDCG
++0.0650 fell short of the +0.0697 SHIP bar; S2-S6 all passed; see
+docs/RULE_HISTORY.md 2026-07-07 entry for the full gate table and
+.audit/subtype_supply/decision.md for sweep provenance). The flag stays
+default-True as a kill-switch — flip to ``False`` to fully disable both
+rule_ids without touching ``scoring_weights.json``.
 """
 
 from __future__ import annotations

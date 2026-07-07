@@ -123,6 +123,10 @@ uv run scripts/portfolio_sim.py bands --fixture tests/fixtures/golden_set_archet
 # the same predicate a rule would key on, so a disguised whitelist scores
 # maximally by construction — any future SHIP must ALSO clear a whole-fixture
 # golden-500 no-regression check AND a whitelist-equivalence check.
+# (2026-07-07: the subtype-supply rule shipped under this discipline via the
+# plan's pre-registered PARTIAL band — S1 +0.0650 vs the +0.0697 bar,
+# human-approved on Pareto-dominance at ≤1 cliff; see docs/RULE_HISTORY.md
+# 2026-07-07.)
 
 # Tensor-driven weight optimizer (plan 2026-04-26-001 M1) — Coordinate Ascent over
 # _RULE_QUALITY_MULTIPLIER. Emits .audit/optimize_proposal.json for human review;

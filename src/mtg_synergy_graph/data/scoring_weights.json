@@ -186,7 +186,7 @@
     },
     "subtype_supply_body": {
       "value": 0.5,
-      "comment": "Plan 2026-07-07-001 Task 5 sweep, cell (1.5, 0.5): cohort ΔNDCG +0.0650, gems −0.0232, 1 shallow cliff; ships on human-approved PARTIAL (Pareto-dominates both whitelist variants at ≤1 cliff). Cliffs track producer weight (9 at 3.5) — do not raise without re-running the sweep."
+      "comment": "Plan 2026-07-07-001 Task 5 sweep: body=0.5 chosen at the shipped cell (producer=1.5, body=0.5), giving a mild NDCG benefit over body=0.0 at the same producer level (cohort ΔNDCG +0.0650 vs +0.0620), at the cost of the sole cliff (Jason Bright, Glowing Prophet −0.0533; 0 cliffs at body=0.0). Body's synergy direction overlaps tribal_density (see docs/RULE_HISTORY.md 2026-07-07 S6 correction for the measured r/VIF — a MARGINAL, not clean, collinearity result). Raising body needs BOTH a re-sweep AND a fresh collinearity re-check, not just a rescale assumption."
     },
     "subtype_supply_producer": {
       "value": 1.5,
