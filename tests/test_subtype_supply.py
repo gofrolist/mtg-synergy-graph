@@ -173,3 +173,27 @@ class TestFindSubtypeSupply:
         _add_producer(conn, "Slimefoot, the Stowaway", "Saproling")
         out = _find_subtype_supply_complements(conn, [DEATH_TRIGGER], {"Slimefoot, the Stowaway"})
         assert out == []
+
+
+class TestWiring:
+    def test_registered_in_card_level_rules(self):
+        from mtg_synergy_graph.complement_rules.registry import CARD_LEVEL_RULES
+
+        assert "subtype_supply_producer" in CARD_LEVEL_RULES
+        assert "subtype_supply_body" in CARD_LEVEL_RULES
+
+    def test_bucket_mapping(self):
+        from mtg_synergy_graph.universal_scorer import _RULE_TO_BUCKET
+
+        assert _RULE_TO_BUCKET["subtype_supply_producer"] == "port_match"
+        assert _RULE_TO_BUCKET["subtype_supply_body"] == "port_match"
+
+    def test_dispatched_from_core(self):
+        """core.py must call the helper (source-level check keeps the test
+        independent of a full engine fixture)."""
+        import inspect
+
+        from mtg_synergy_graph.complement_rules import core
+
+        src = inspect.getsource(core)
+        assert "_find_subtype_supply_complements" in src

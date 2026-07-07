@@ -163,6 +163,9 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "self_bridging_cascade": "port_match",
     # Plan 2026-05-19 Prepared / AlternateMode:Prepare mechanic capture.
     "prepared_mechanic": "port_match",
+    # Plan 2026-07-07-001 subtype-supply (flag-off default; see subtype_supply.py).
+    "subtype_supply_producer": "port_match",
+    "subtype_supply_body": "port_match",
 }
 
 # ---------------------------------------------------------------------------
