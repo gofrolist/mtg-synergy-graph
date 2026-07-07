@@ -8,6 +8,9 @@ import pytest
 from mtg_synergy_graph.bench.context_sim import (
     ContextCell,
     ContextSim,
+    ContextSimError,
+    _parse_cells,
+    _plausible_set,
     aggregate_context_scores,
     assemble_cell,
     select_context,
@@ -52,6 +55,47 @@ def test_aggregate_excludes_anti_synergy_and_self():
     comps = [_comp("X", direction="anti_synergy"), _comp("CTX")]
     out = aggregate_context_scores(comps, {}, ctx_card="CTX")
     assert out == {}
+
+
+def test_plausible_set_two_rules_qualifies_regardless_of_total():
+    # "Low" has only 1.0 total (below the positive median of the other
+    # totals) but 2 distinct rules — the >=2-rules leg alone qualifies it.
+    n_rules_map = {"Low": 2, "Mid": 1, "High": 1}
+    base_totals = {"Low": 1.0, "Mid": 5.0, "High": 10.0}
+    assert _plausible_set(n_rules_map, base_totals) == frozenset({"Low", "High"})
+
+
+def test_plausible_set_single_rule_above_median_qualifies():
+    # positive median of {1.0, 5.0, 10.0} is 5.0; only High (10.0 > 5.0)
+    # clears the median-OR leg via a single rule.
+    n_rules_map = {"Low": 1, "Mid": 1, "High": 1}
+    base_totals = {"Low": 1.0, "Mid": 5.0, "High": 10.0}
+    result = _plausible_set(n_rules_map, base_totals)
+    assert "High" in result
+    assert "Mid" not in result  # 5.0 is not > median 5.0 (strict inequality)
+    assert "Low" not in result  # 1.0 <= median
+
+
+def test_plausible_set_degenerate_all_nonpositive_totals_only_two_rules_leg_qualifies():
+    # All totals <= 0 -> the positive-total median is 0.0 (degenerate),
+    # so the median-OR leg contributes nothing; only the >=2-rules leg
+    # can admit a candidate. This is the guard the Important finding
+    # said context_sim.py was dropping (see hidden_gems._cohort_median /
+    # _plausibility_from_maps: median <= 0 forces the OR-leg to False
+    # rather than degenerating to `total > 0`).
+    n_rules_map = {"TwoRules": 2, "OneRule": 1, "ZeroRules": 0}
+    base_totals = {"TwoRules": 0.0, "OneRule": 0.0, "ZeroRules": -3.0}
+    assert _plausible_set(n_rules_map, base_totals) == frozenset({"TwoRules"})
+
+
+def test_parse_cells_malformed_raises_context_sim_error():
+    with pytest.raises(ContextSimError, match="malformed cell"):
+        _parse_cells("10,0.1;not-a-cell")
+
+
+def test_parse_cells_empty_raises_context_sim_error():
+    with pytest.raises(ContextSimError, match="produced no cells"):
+        _parse_cells("   ;  ")
 
 
 def _sim(**over):

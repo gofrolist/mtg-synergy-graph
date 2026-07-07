@@ -12,9 +12,7 @@ population (see plan 2026-07-02-005 DECLINE Correction).
 from __future__ import annotations
 
 import argparse
-import json
 import sqlite3
-import statistics
 import sys
 import time
 from collections import defaultdict
@@ -26,10 +24,12 @@ from typing import TYPE_CHECKING, Any
 from ..complement_rules import PortComplement, find_all_complements
 from ..universal_scorer import _compute_idf_weights
 from ..validate import compute_ndcg
+from .hidden_gems import _cohort_median, _plausibility_from_maps
 from .optimize import load_edhrec_labels
 from .portfolio_sim import (
     PortfolioSimError,
     SelfCheckError,
+    _write_report,
     bootstrap_band,
     load_fixture_commanders,
 )
@@ -109,6 +109,21 @@ def context_scores_for_card(
 
 
 _UNRANKED = 10**9
+
+
+def _plausible_set(n_rules_map: Mapping[str, int], base_totals: Mapping[str, float]) -> frozenset[str]:
+    """Mechanical-plausibility gate over ``base_totals`` (hidden_gems.py FR2 criteria).
+
+    Delegates to the canonical ``_cohort_median`` / ``_plausibility_from_maps``
+    helpers (``hidden_gems.py``) so this instrument's gate can never
+    silently diverge from the audit's ``hidden_gem_hit_rate`` gate:
+    >=2 distinct rules OR total above the median of *strictly-positive*
+    totals — with the degenerate-case guard (median <= 0 forces the
+    median-OR leg to False rather than degenerating to ``total > 0``,
+    which would flag every positive candidate as plausible).
+    """
+    median = _cohort_median(base_totals)
+    return frozenset(name for name in base_totals if _plausibility_from_maps(name, n_rules_map, base_totals, median))
 
 
 @dataclass(frozen=True)
@@ -195,10 +210,7 @@ def build_context_sim(engine, edhrec_conn, commander: str, *, k_max: int = 30) -
     }
     legal_pool = frozenset(engine.legal_cards([commander]))
 
-    median_total = statistics.median(list(base_totals.values())) if base_totals else 0.0
-    plausible = frozenset(
-        name for name, total in base_totals.items() if n_rules_map.get(name, 0) >= 2 or total > median_total
-    )
+    plausible = _plausible_set(n_rules_map, base_totals)
 
     graded_labels: dict[str, float] = {}
     edhrec_top_30: frozenset[str] | None = None
@@ -448,13 +460,6 @@ def _render_sweep_markdown(report: dict[str, Any], *, gates: str | None = None) 
     if gates is not None:
         lines += ["", gates]
     return "\n".join(lines) + "\n"
-
-
-def _write_report(outdir: Path, name: str, report: dict[str, Any]) -> Path:
-    outdir.mkdir(parents=True, exist_ok=True)
-    path = outdir / name
-    path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    return path
 
 
 def _write_text(outdir: Path, name: str, text: str) -> Path:
