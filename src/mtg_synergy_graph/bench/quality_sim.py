@@ -25,7 +25,7 @@ import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from ..quality import quality_multiplier, rate_signal
 from ..validate import compute_ndcg
@@ -61,8 +61,8 @@ class QualitySim:
     ``base_totals`` — ``CommanderSim`` itself only exposes per-card
     ``ScoreDecomposition`` objects via ``decomps``, not a flat totals
     dict. ``edhrec_top_30`` / ``plausible`` keep the same names/types as
-    ``CommanderSim`` so a :class:`QualitySim` can stand in for it at
-    ``gem_rate_for_assembly`` call sites (see the ``cast`` below).
+    ``CommanderSim`` so a :class:`QualitySim` structurally satisfies
+    ``portfolio_sim.GemRateSim`` at ``gem_rate_for_assembly`` call sites.
     """
 
     commander: str
@@ -76,7 +76,6 @@ class QualitySim:
     plausible: frozenset[str]
     base_ndcg: float
     base_gem_rate: float | None
-    base_gems: frozenset[str]
 
 
 def assemble_quality(
@@ -135,7 +134,6 @@ def build_quality_sim(
         plausible=cs.plausible,
         base_ndcg=cs.base_ndcg,
         base_gem_rate=cs.base_gem_rate,
-        base_gems=cs.base_gems,
     )
     check = assemble_quality(sim, rates, q=0.0, r0=1.0)
     if check != sim.base_top_30:
@@ -152,12 +150,11 @@ def gem_rate_for_quality(
 ) -> tuple[float, frozenset[str]] | None:
     """``portfolio_sim.gem_rate_for_assembly`` over a :class:`QualitySim`.
 
-    ``gem_rate_for_assembly`` only reads ``sim.edhrec_top_30`` and
-    ``sim.plausible`` — both present on :class:`QualitySim` under the
-    same names/types as :class:`CommanderSim` — so the cast is a pure
-    type-checker accommodation, not a runtime behavior change.
+    ``gem_rate_for_assembly`` is typed against ``portfolio_sim.GemRateSim``
+    (a ``Protocol`` reading only ``edhrec_top_30`` / ``plausible``), which
+    :class:`QualitySim` satisfies structurally — no cast needed.
     """
-    return gem_rate_for_assembly(cast(CommanderSim, sim), assembled, k=k)
+    return gem_rate_for_assembly(sim, assembled, k=k)
 
 
 # ---------------------------------------------------------------------------
@@ -278,6 +275,11 @@ def run_sweep(
                 "cliffs": cliff,
                 "gem_delta": mean_gem_delta,
                 "trap_deltas": dict(sorted(trap_deltas.items())),
+                #: How many trap commanders actually contributed a delta this
+                #: cell -- 0 means the trap axis has NO evidence (e.g. every
+                #: trap fragment absent from this fixture), which the gate
+                #: renderer must not read as an unqualified pass.
+                "n_traps_checked": len(trap_deltas),
                 "per_commander": dict(deltas),
             }
         )
@@ -315,24 +317,54 @@ def _render_gates_markdown(
 
     Phase C gate: mean_ndcg_delta >= h_500q AND cliffs == 0 AND
     gem_delta >= -g_500q AND every trap-commander delta >= -0.05.
+
+    The gem and trap axes render an explicit ``n/a`` when there is no
+    evidence to check — ``gem_delta is None`` (no EDHREC gem data) or
+    ``n_traps_checked == 0`` (every trap fragment absent from this
+    fixture) — instead of silently passing. A ``None``/empty axis must
+    never read as an unqualified 'Y'. When a KNOWN axis genuinely fails
+    the row still renders 'n' (a real failure is still a failure); the
+    composite gate only downgrades to 'n/a' when nothing failed but at
+    least one axis has no evidence to back a clean 'Y'.
     """
     lines = [
         "## Decision gate (Phase C)",
         "",
         f"pinned: h_500q={h_500q}  g_500q={g_500q}",
         "",
-        f"{'q':>6} {'r0':>6} {'gate':>5}",
-        f"{'-' * 6} {'-' * 6} {'-' * 5}",
+        f"{'q':>6} {'r0':>6} {'gem':>5} {'trap':>5} {'gate':>5}",
+        f"{'-' * 6} {'-' * 6} {'-' * 5} {'-' * 5} {'-' * 5}",
     ]
     for cell in report["cells"]:
+        n_traps_checked = cell.get("n_traps_checked", len(cell["trap_deltas"]))
         if h_500q is None or g_500q is None:
-            gate = "-"
+            gem_col = trap_col = gate = "-"
         else:
             gem = cell["gem_delta"]
-            gem_ok = gem is None or gem >= -g_500q
-            traps_ok = all(v >= -0.05 for v in cell["trap_deltas"].values())
-            gate = "Y" if (cell["mean_ndcg_delta"] >= h_500q and cell["cliffs"] == 0 and gem_ok and traps_ok) else "n"
-        lines.append(f"{cell['q']:>6.2f} {cell['r0']:>6.2f} {gate:>5}")
+            gem_known = gem is not None
+            gem_ok = gem_known and gem >= -g_500q
+            gem_col = "n/a" if not gem_known else ("Y" if gem_ok else "n")
+
+            trap_known = n_traps_checked > 0
+            traps_ok = trap_known and all(v >= -0.05 for v in cell["trap_deltas"].values())
+            trap_col = "n/a" if not trap_known else ("Y" if traps_ok else "n")
+
+            core_ok = cell["mean_ndcg_delta"] >= h_500q and cell["cliffs"] == 0
+            gem_fail = gem_known and not gem_ok
+            trap_fail = trap_known and not traps_ok
+            if not core_ok or gem_fail or trap_fail:
+                gate = "n"
+            elif not gem_known or not trap_known:
+                gate = "n/a"
+            else:
+                gate = "Y"
+        lines.append(f"{cell['q']:>6.2f} {cell['r0']:>6.2f} {gem_col:>5} {trap_col:>5} {gate:>5}")
+    lines += [
+        "",
+        "gem 'n/a' = no gem evidence (no EDHREC data checked this cell); "
+        "trap 'n/a' = 0 traps checked (every trap fragment absent from the fixture); "
+        "gate 'n/a' = would otherwise be an unqualified pass but rests on an unchecked axis.",
+    ]
     return "\n".join(lines) + "\n"
 
 

@@ -9,6 +9,7 @@ from mtg_synergy_graph.bench.context_sim import (
     ContextCell,
     ContextSim,
     ContextSimError,
+    _engine_lookups,
     _parse_cells,
     _plausible_set,
     aggregate_context_scores,
@@ -40,6 +41,41 @@ def test_select_context_skips_zero_rule_candidates_and_caps_at_k():
 
 def test_select_context_short_pool_returns_all_eligible():
     assert select_context(("A",), {"A": 1}, k=5) == ("A",)
+
+
+def test_select_context_k_zero_returns_empty_not_everything():
+    pool = ("A", "B", "C")
+    n_rules = {"A": 1, "B": 2, "C": 3}
+    assert select_context(pool, n_rules, k=0) == ()
+
+
+def test_select_context_negative_k_returns_empty():
+    assert select_context(("A", "B"), {"A": 1, "B": 1}, k=-1) == ()
+
+
+class _FakeCandidateCache:
+    def __init__(self, rows):
+        self.candidate_rows = rows
+
+
+class _FakeEngine:
+    def __init__(self, rows):
+        self._candidate_cache = _FakeCandidateCache(rows)
+
+
+def test_engine_lookups_derives_cmc_and_rank():
+    engine = _FakeEngine({"A": {"cmc": 2.0, "edhrec_rank": 5}, "B": {"cmc": None, "edhrec_rank": None}})
+    cmc_lookup, rank_lookup = _engine_lookups(engine)
+    assert cmc_lookup == {"A": 2.0, "B": 99.0}
+    assert rank_lookup == {"A": 5, "B": 10**9}
+
+
+def test_engine_lookups_memoized_by_candidate_cache_identity():
+    engine = _FakeEngine({"A": {"cmc": 2.0, "edhrec_rank": 5}})
+    first = _engine_lookups(engine)
+    second = _engine_lookups(engine)
+    assert first[0] is second[0]
+    assert first[1] is second[1]
 
 
 def test_aggregate_dedups_on_idf_key_and_sums_weights():
@@ -152,6 +188,54 @@ def test_assemble_whitelist_commander_never_enters():
     assert "Cmdr" not in assemble_whitelist(sim, wl, 0.5)
 
 
+def _gates_cell(**over):
+    base = dict(k_context=10, w_ctx=0.1, mean_ndcg_delta=0.5, cliffs=0, reach=200, mean_gem_delta=0.0)
+    base.update(over)
+    return base
+
+
+def test_gates_g2_gem_none_renders_na_not_unqualified_pass():
+    from mtg_synergy_graph.bench.context_sim import _render_gates_markdown
+
+    report = {"cells": [_gates_cell(mean_gem_delta=None)]}
+    md = _render_gates_markdown(report, h_cohort=0.0, h_500=0.0, g_500=0.0)
+    row = next(line for line in md.splitlines() if line.strip().startswith("10"))
+    cols = row.split()
+    # k, w, G1, G2, G3
+    assert cols[3] != "Y"  # G2 must not read as an unqualified pass with no gem evidence
+
+
+def test_gates_g2_all_evidence_present_and_passing_is_y():
+    from mtg_synergy_graph.bench.context_sim import _render_gates_markdown
+
+    report = {"cells": [_gates_cell()]}
+    md = _render_gates_markdown(report, h_cohort=0.0, h_500=0.0, g_500=0.0)
+    row = next(line for line in md.splitlines() if line.strip().startswith("10"))
+    cols = row.split()
+    assert cols[3] == "Y"
+
+
+def test_gates_g2_real_failure_still_renders_n():
+    from mtg_synergy_graph.bench.context_sim import _render_gates_markdown
+
+    report = {"cells": [_gates_cell(mean_ndcg_delta=-1.0, mean_gem_delta=None)]}
+    md = _render_gates_markdown(report, h_cohort=0.0, h_500=0.0, g_500=0.0)
+    row = next(line for line in md.splitlines() if line.strip().startswith("10"))
+    cols = row.split()
+    assert cols[3] == "n"
+
+
+def test_gates_g2_gem_operator_is_band_inclusive():
+    from mtg_synergy_graph.bench.context_sim import _render_gates_markdown
+
+    # gem delta exactly at -g_500: `>=` (band-inclusive) must pass.
+    report = {"cells": [_gates_cell(mean_gem_delta=-0.05)]}
+    md = _render_gates_markdown(report, h_cohort=0.0, h_500=0.0, g_500=0.05)
+    row = next(line for line in md.splitlines() if line.strip().startswith("10"))
+    cols = row.split()
+    assert cols[3] == "Y"
+
+
 def test_build_parser_has_subcommands():
     from mtg_synergy_graph.bench.context_sim import build_parser
 
@@ -182,6 +266,65 @@ def test_whitelist_scores_cover_subtype_bodies_and_producers():
     conn.row_factory = sqlite3.Row
     wl = whitelist_scores(conn, "Slimefoot, the Stowaway")
     assert wl  # non-empty for a cohort commander
+    # Verified present in data/synergy.db: a real Saproling creature body
+    # (cards.subtypes, NOT cards.card_types -- card_types only ever holds
+    # top-level types like Creature/Artifact and never contains a subtype
+    # token, so the old `card_types LIKE '%Saproling%'` query returned 0
+    # rows for every subtype).
+    assert "Shroofus Sproutsire" in wl
+
+
+@pytest.mark.skipif(not _DB.exists(), reason="requires built data/synergy.db")
+def test_whitelist_scores_subtype_body_query_is_token_anchored(tmp_path):
+    """Unanchored SQL LIKE substring-matches e.g. subtype 'Rat' against 'Pirate'.
+
+    Builds a minimal fake DB reproducing exactly the shape
+    ``whitelist_scores``/``payoff_subtypes`` read: a commander with a
+    death trigger keyed on subtype 'Rat' (token-producible per
+    ``port_attributes``), plus a card whose ``subtypes`` is 'Pirate'
+    (substring-contains 'Rat') and one whose ``subtypes`` is 'Rat'
+    (a true positive). Only the true positive may appear.
+    """
+    import sqlite3
+
+    from mtg_synergy_graph.bench.context_sim import whitelist_scores
+
+    db_path = tmp_path / "fake.db"
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.executescript(
+        """
+        CREATE TABLE cards (name TEXT, subtypes TEXT, card_types TEXT);
+        CREATE TABLE card_ports (
+            id INTEGER PRIMARY KEY,
+            card_name TEXT,
+            port_type TEXT,
+            event_class TEXT,
+            valid_filter TEXT,
+            zone_origin TEXT,
+            zone_destination TEXT
+        );
+        CREATE TABLE port_attributes (port_id INTEGER, attr_kind TEXT, attr_value TEXT);
+        """
+    )
+    conn.execute(
+        "INSERT INTO cards VALUES ('Rat Lord', NULL, 'Creature'), "
+        "('Bilge Rat', 'Rat', 'Creature'), "
+        "('Salty Buccaneer', 'Pirate', 'Creature')"
+    )
+    conn.execute(
+        "INSERT INTO card_ports (id, card_name, port_type, event_class, valid_filter, zone_origin, zone_destination)"
+        " VALUES (1, 'Rat Lord', 'trigger', 'Sacrificed', 'Rat.YouCtrl', NULL, NULL)"
+    )
+    # Anchors 'Rat' in the token-subtype vocabulary (payoff_subtypes only
+    # admits subtypes present in this vocab).
+    conn.execute("INSERT INTO port_attributes (port_id, attr_kind, attr_value) VALUES (1, 'token_subtype', 'Rat')")
+    conn.commit()
+
+    wl = whitelist_scores(conn, "Rat Lord")
+    assert "Bilge Rat" in wl
+    assert "Salty Buccaneer" not in wl
+    conn.close()
 
 
 @pytest.mark.skipif(not _DB.exists(), reason="requires built data/synergy.db")

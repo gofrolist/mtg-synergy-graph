@@ -59,6 +59,85 @@ def test_assemble_quality_q0_is_identity_and_reorders_at_q():
     assert assemble_quality(FakeSim(), rates, q=0.2, r0=2.0) == ("B", "A")
 
 
+# ---------------------------------------------------------------------------
+# Gate rendering: trap/gem 'n/a' semantics (PR-101 review wave Fixes 2 & 3)
+# ---------------------------------------------------------------------------
+
+
+def _cell(**over):
+    base = dict(
+        q=0.05,
+        r0=1.0,
+        mean_ndcg_delta=0.5,
+        cliffs=0,
+        gem_delta=0.0,
+        trap_deltas={"Trap Cmdr": 0.0},
+        n_traps_checked=1,
+    )
+    base.update(over)
+    return base
+
+
+def test_gate_trap_empty_renders_na_not_unqualified_pass():
+    from mtg_synergy_graph.bench.quality_sim import _render_gates_markdown
+
+    report = {"cells": [_cell(trap_deltas={}, n_traps_checked=0)]}
+    md = _render_gates_markdown(report, h_500q=0.0, g_500q=0.0)
+    row = next(line for line in md.splitlines() if line.strip().startswith("0.05"))
+    cols = row.split()
+    # q, r0, gem, trap, gate
+    assert cols[3] == "n/a"  # trap axis: nothing was checked
+    assert cols[4] != "Y"  # composite gate must not read as an unqualified pass
+
+
+def test_gate_gem_none_renders_na_not_unqualified_pass():
+    from mtg_synergy_graph.bench.quality_sim import _render_gates_markdown
+
+    report = {"cells": [_cell(gem_delta=None)]}
+    md = _render_gates_markdown(report, h_500q=0.0, g_500q=0.0)
+    row = next(line for line in md.splitlines() if line.strip().startswith("0.05"))
+    cols = row.split()
+    assert cols[2] == "n/a"  # gem axis: no gem evidence
+    assert cols[4] != "Y"
+
+
+def test_gate_all_evidence_present_and_passing_renders_unqualified_y():
+    from mtg_synergy_graph.bench.quality_sim import _render_gates_markdown
+
+    report = {"cells": [_cell()]}
+    md = _render_gates_markdown(report, h_500q=0.0, g_500q=0.0)
+    row = next(line for line in md.splitlines() if line.strip().startswith("0.05"))
+    cols = row.split()
+    assert cols[2] == "Y"
+    assert cols[3] == "Y"
+    assert cols[4] == "Y"
+
+
+def test_gate_real_failure_still_renders_n_even_with_missing_evidence():
+    from mtg_synergy_graph.bench.quality_sim import _render_gates_markdown
+
+    # ndcg below the floor -- a genuine failure -- combined with no trap
+    # evidence at all. The gate must render a definite failure ("n"), not
+    # get swallowed into a vague "n/a".
+    report = {"cells": [_cell(mean_ndcg_delta=-1.0, trap_deltas={}, n_traps_checked=0)]}
+    md = _render_gates_markdown(report, h_500q=0.0, g_500q=0.0)
+    row = next(line for line in md.splitlines() if line.strip().startswith("0.05"))
+    cols = row.split()
+    assert cols[4] == "n"
+
+
+def test_gate_gem_operator_is_band_inclusive():
+    from mtg_synergy_graph.bench.quality_sim import _render_gates_markdown
+
+    # gem_delta exactly equals -g_500q: with a `>=` (band-inclusive)
+    # comparison this must pass, not fail.
+    report = {"cells": [_cell(gem_delta=-0.05)]}
+    md = _render_gates_markdown(report, h_500q=0.0, g_500q=0.05)
+    row = next(line for line in md.splitlines() if line.strip().startswith("0.05"))
+    cols = row.split()
+    assert cols[2] == "Y"
+
+
 def test_build_parser_has_subcommands():
     from mtg_synergy_graph.bench.quality_sim import build_parser
 

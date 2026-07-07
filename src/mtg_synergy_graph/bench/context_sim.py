@@ -47,7 +47,13 @@ def select_context(
 
     Staple-only / rule-free candidates are excluded: they carry no
     mechanical signature for the context pass to match against.
+    ``k <= 0`` returns an empty tuple — without this guard the
+    ``len(out) == k`` break condition is never true for ``k <= 0`` and
+    the loop falls through, silently returning every eligible
+    candidate instead of none.
     """
+    if k <= 0:
+        return ()
     out: list[str] = []
     for name in pool_order:
         if n_rules_map.get(name, 0) >= 1:
@@ -206,27 +212,76 @@ def assemble_whitelist(sim: ContextSim, wl: Mapping[str, float], b: float) -> tu
     return _rank_top30(sim, totals)
 
 
-def build_context_sim(engine, edhrec_conn, commander: str, *, k_max: int = 30) -> ContextSim:
-    """Score one commander live, cache context scores, self-check w=0.
+#: Per-engine cache of the shared cmc/edhrec_rank lookups derived from
+#: ``engine._candidate_cache.candidate_rows`` (~32k rows, engine-lifetime
+#: constant). Keyed by ``id(candidate_cache)`` — valid for one process
+#: (same single-run assumption as ``_CTX_SCORE_CACHE`` above); avoids
+#: every :class:`ContextSim` in a run retaining its own ~2.5GB rebuilt
+#: copy of the same two dicts.
+_ENGINE_LOOKUPS_CACHE: dict[int, tuple[dict[str, float], dict[str, int]]] = {}
 
-    Mirrors ``portfolio_sim.build_commander_sim``'s engine duck-typing
-    (``page``, ``legal_cards``, ``_score_cache``, ``_candidate_cache``,
-    ``_conn``). Raises ``SelfCheckError`` when the w=0 assembly diverges
-    from ``page()``'s own top-30.
+
+def _engine_lookups(engine) -> tuple[dict[str, float], dict[str, int]]:
+    """Shared ``(cmc_lookup, rank_lookup)`` for one engine, computed once.
+
+    Callers may hold onto the returned dicts and pass them back into
+    later :func:`build_context_sim` calls — they are read-only from
+    every call site (``.get()`` only, see ``_rank_top30``), so sharing
+    the same dict references across sims is safe.
     """
-    page = engine.page([commander], offset=0, limit=1_000_000)
-    universal = engine._score_cache[(commander,)]
-    base_totals = {rec.card: rec.total_score for rec in page.items}
-    pool_order = tuple(rec.card for rec in page.items)
-
+    key = id(engine._candidate_cache)
+    cached = _ENGINE_LOOKUPS_CACHE.get(key)
+    if cached is not None:
+        return cached
     cmc_lookup: dict[str, float] = {}
     rank_lookup: dict[str, int] = {}
     for name, row in engine._candidate_cache.candidate_rows.items():
         cmc_lookup[name] = row["cmc"] if row["cmc"] is not None else 99.0
         raw = row.get("edhrec_rank")
         rank_lookup[name] = int(raw) if raw is not None else _UNRANKED
+    result = (cmc_lookup, rank_lookup)
+    _ENGINE_LOOKUPS_CACHE[key] = result
+    return result
+
+
+def build_context_sim(
+    engine,
+    edhrec_conn,
+    commander: str,
+    *,
+    k_max: int = 30,
+    cmc_lookup: dict[str, float] | None = None,
+    rank_lookup: dict[str, int] | None = None,
+) -> ContextSim:
+    """Score one commander live, cache context scores, self-check w=0.
+
+    Mirrors ``portfolio_sim.build_commander_sim``'s engine duck-typing
+    (``page``, ``legal_cards``, ``_score_cache``, ``_candidate_cache``,
+    ``_conn``). Raises ``SelfCheckError`` when the w=0 assembly diverges
+    from ``page()``'s own top-30.
+
+    ``cmc_lookup``/``rank_lookup`` default to ``None``, in which case
+    they are derived (and memoized) via :func:`_engine_lookups`. Pass
+    them explicitly (as ``run_bands`` does, computing them once and
+    sharing across every commander) to avoid every :class:`ContextSim`
+    retaining its own rebuilt copy.
+    """
+    page = engine.page([commander], offset=0, limit=1_000_000)
+    universal = engine._score_cache[(commander,)]
+    base_totals = {rec.card: rec.total_score for rec in page.items}
+    pool_order = tuple(rec.card for rec in page.items)
 
     n_rules_map = {name: len(us.distinct_rules) for name, us in universal.items()}
+
+    # Free the engine-side score dict (multi-GB across a many-commander
+    # run) now that everything this function needs from it (n_rules_map)
+    # has been derived — the portfolio_sim.build_commander_sim precedent
+    # (portfolio_sim.py, "Free the engine-side score dict").
+    engine._score_cache.clear()
+
+    if cmc_lookup is None or rank_lookup is None:
+        cmc_lookup, rank_lookup = _engine_lookups(engine)
+
     context_max = select_context(pool_order, n_rules_map, k_max)
     ctx_scores = {
         c: context_scores_for_card(engine._conn, c, candidate_cache=engine._candidate_cache) for c in context_max
@@ -322,11 +377,25 @@ def whitelist_scores(conn: sqlite3.Connection, commander: str) -> dict[str, floa
     The G4 comparator: a disguised whitelist a rule could hardcode.
     Scaled by the bonus grid (:data:`B_GRID`) at assembly time (same slot
     as ``w_ctx``).
+
+    Subtype BODIES are matched against ``cards.subtypes`` — a
+    space-separated token column (see ``importer._split_types``) — with
+    exact per-token membership, built as a single subs->names index
+    scanning ``cards`` once per call. ``cards.card_types`` holds only
+    top-level types (Creature/Artifact/...) and never a subtype, and an
+    unanchored SQL ``LIKE`` would substring-match e.g. subtype 'Rat'
+    against 'Pirate'; both were bugs in the previous
+    ``card_types LIKE '%<subtype>%'`` query.
     """
     subs = payoff_subtypes(conn, commander)
     names: set[str] = set()
+    if subs:
+        for name, subtypes in conn.execute(
+            "SELECT name, subtypes FROM cards WHERE subtypes IS NOT NULL AND subtypes != ''"
+        ):
+            if subs & set(subtypes.split()):
+                names.add(name)
     for s in subs:
-        names.update(n for (n,) in conn.execute("SELECT name FROM cards WHERE card_types LIKE ?", (f"%{s}%",)))
         names.update(
             n
             for (n,) in conn.execute(
@@ -444,8 +513,18 @@ def run_bands(
     per_commander_ndcg: dict[str, float] = {}
     sims: list[ContextSim] = []
     total = len(commanders)
+    # Computed once (on the first commander, since engine._candidate_cache
+    # is only populated after the first page() call) and shared by every
+    # later build_context_sim call, instead of each ContextSim rebuilding
+    # and retaining its own ~2.5GB copy of the same two dicts.
+    cmc_lookup: dict[str, float] | None = None
+    rank_lookup: dict[str, int] | None = None
     for i, commander in enumerate(commanders, start=1):
-        sim = build_context_sim(engine, edhrec_conn, commander, k_max=k_max)
+        sim = build_context_sim(
+            engine, edhrec_conn, commander, k_max=k_max, cmc_lookup=cmc_lookup, rank_lookup=rank_lookup
+        )
+        if cmc_lookup is None:
+            cmc_lookup, rank_lookup = sim.cmc_lookup, sim.rank_lookup
         sims.append(sim)
         print(
             f"[{i}/{total}] {commander}: pool={len(sim.pool_order)} (w=0 self-check OK)",
@@ -558,8 +637,11 @@ def _render_gates_markdown(
     """Rendered comparison only — no routing/decision logic here.
 
     G1: mean_ndcg_delta > h_cohort (cohort-fixture noise band).
-    G2: mean_ndcg_delta > -h_500 AND zero cliffs AND mean_gem_delta > -g_500
-        (500-cmdr no-regression band on both axes).
+    G2: mean_ndcg_delta > -h_500 AND zero cliffs AND mean_gem_delta >= -g_500
+        (500-cmdr no-regression band on both axes). ``mean_gem_delta is
+        None`` (no gem evidence for this cell) renders 'n/a', not an
+        unqualified 'Y' — a genuine core/gem failure still renders 'n'
+        even when gem evidence is missing.
     G3: reach >= 100 (NO_RULES-population reachability floor).
     """
     lines = [
@@ -576,10 +658,22 @@ def _render_gates_markdown(
             g2 = "-"
         else:
             gem = cell["mean_gem_delta"]
-            gem_ok = gem is None or gem > -g_500
-            g2 = "Y" if (cell["mean_ndcg_delta"] > -h_500 and cell["cliffs"] == 0 and gem_ok) else "n"
+            gem_known = gem is not None
+            gem_ok = gem_known and gem >= -g_500
+            core_ok = cell["mean_ndcg_delta"] > -h_500 and cell["cliffs"] == 0
+            if not core_ok or (gem_known and not gem_ok):
+                g2 = "n"
+            elif not gem_known:
+                g2 = "n/a"
+            else:
+                g2 = "Y"
         g3 = "Y" if cell["reach"] >= 100 else "n"
         lines.append(f"{cell['k_context']:>4} {cell['w_ctx']:>6.2f} {g1:>4} {g2:>4} {g3:>4}")
+    lines += [
+        "",
+        "G2 'n/a' = mean_gem_delta is None (no gem evidence this cell) but core "
+        "(ndcg/cliffs) checks passed -- would otherwise be an unqualified pass.",
+    ]
     return "\n".join(lines) + "\n"
 
 
