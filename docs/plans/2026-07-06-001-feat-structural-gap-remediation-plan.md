@@ -1,7 +1,7 @@
 ---
 title: "feat: Structural gap remediation — deck-context second pass + magnitude quality prior"
 type: feat
-status: proposed
+status: declined
 date: 2026-07-06
 origin: forensics readout 2026-07-06 (.audit/forensics.md, config_hash 34a9d110…) + architecture review in-session
 ---
@@ -26,6 +26,18 @@ origin: forensics readout 2026-07-06 (.audit/forensics.md, config_hash 34a9d110�
 > Tasks 6–8 skipped per pinned routing; zero scoring-path changes; pins
 > untouched. Phase C proceeds independently. Evidence:
 > docs/solutions/best-practices/deck-context-null-result-2026-07-06.md
+
+> **DECISION 2026-07-06: Phase C (magnitude quality prior) DECLINED at the
+> golden-100 screen (Task 11).** All 9 cells (q × r0) negative: mean ΔNDCG
+> −0.0228..−0.0430 with 17–35 cliffs (<−0.05) per 100 commanders; traps cliff
+> (Kess −0.145..−0.42, Edgar −0.10..−0.15 across cells). The Phase C gate
+> (golden-500 Δ ≥ +0.0136 AND zero cliffs) is unreachable — no cell advanced
+> to Stage 2. Gates were pinned first (H_500q=0.0136, G_500q=0.0355; q=0
+> band cross-validates both sibling instruments). Task 11 integration branch
+> skipped; zero scoring-path changes; pins untouched. All three OUTRANKED
+> lever classes are now measured: reweighting (plan 002/003), re-ranking
+> (plan 004), and a new-information quality prior (this cycle). Evidence:
+> docs/solutions/best-practices/quality-rate-prior-null-result-2026-07-06.md
 
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
