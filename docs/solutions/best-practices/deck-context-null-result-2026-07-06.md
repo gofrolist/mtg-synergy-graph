@@ -117,7 +117,7 @@ attempt must pre-pin gates on this cycle's instrument, which ships as
 standing infra (`scripts/context_sim.py`, reports to
 `.audit/context_sim/`).
 
-The subtype-supply rule (Whitelist Finding below) is now **TESTED and
+The subtype-supply rule (Whitelist Finding above) is now **TESTED and
 SHIPPED** (plan `docs/plans/2026-07-07-001-feat-subtype-supply-rule-plan.md`,
 2026-07-07): `subtype_supply_producer` / `subtype_supply_body`
 (producer=1.5, body=0.5), verdict PARTIAL, human-approved SHIP on a
