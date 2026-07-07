@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**status:** draft
+**status:** part A shipped (Task 1); part B declined at pre-registered gates
 **plan id:** 2026-07-07-002
 **evidence base:** `.superpowers/sdd/diagnostic-forensics-cohorts.md` (cohort hunt, 2026-07-07), `.superpowers/sdd/diagnostic-head-flatness.md` (rank_bonus finding, 2026-07-07), plan 2026-07-07-001 (the subtype-supply playbook this cycle repeats)
 
@@ -158,3 +158,57 @@ All flips uncommitted. Baselines: Task 4's pinned bands (H_outlet etc.), Task 5'
 - **Type consistency:** `outlet_direction_death_payoff(conn) -> set[str]` (Tasks 2/3/5); `_find_death_outlet_complements(conn, cmdr_ports, cmdr_set)` + flag `_ENABLE_DEATH_OUTLET_FEEDER` (Tasks 6/7/8); rule_id `death_outlet_feeder` everywhere; H_outlet defined in Task 4, consumed in Task 7's gates.
 - **Deliberate exclusions (YAGNI):** no seed-JSON edit (unsafe per `_SCOPED_TRIGGER_EVENTS` analysis); no `_COHORT_PREDICATES` union change (pinned-fixture stability); no rank_bonus removal (separate future decision); no combat.py:441 changes; the 22 Sacrificed-port commanders stay on the existing `cost_feeds_trigger` arm.
 - **Known judgment calls left to implementers with guidance:** exact `RankedCandidate` shape (read forensics.py first); the whitelist CLI selector shape (match existing style); whether Task 2 factors a shared port-level helper into `death_payoff.py` for Tasks 5/6 to reuse (preferred if clean).
+
+---
+
+## DECISION (Task 8, 2026-07-07)
+
+**Verdict: DECLINE.** Working tree reverted to the Task 6 hash-neutral state
+(`_ENABLE_DEATH_OUTLET_FEEDER = False`, no weights entry); `uv run pytest tests/ -q`
+green; `bench.py audit --expect-identity` PASS. Nothing committed for Part B beyond
+the already-merged Task 6 flag-off wiring. Full analysis:
+`docs/solutions/best-practices/death-outlet-feeder-null-result-2026-07-07.md`.
+
+**Sweep (outlet fixture n=126, vs baseline 0.1152 NDCG / 0.9616 gem):**
+
+| multiplier | ΔNDCG | gem Δ | cliffs (<−0.05) |
+|---|---|---|---|
+| 0.75 (chosen) | −0.0113 | +0.0058 | 10 |
+| 1.00 | −0.0141 | +0.0058 | 17 |
+| 1.50 | −0.0220 | +0.0082 | 22 |
+| 2.00 | −0.0255 | +0.0101 | 24 |
+| 2.50 | −0.0328 | +0.0127 | 32 |
+
+Monotone degradation at every cell; no cell NDCG-positive.
+
+**Gate table at the chosen cell (multiplier 0.75):**
+
+| Gate | Threshold | Measured | Result |
+|---|---|---|---|
+| O-noise | ΔNDCG ≥ +0.0233 | −0.0113 | **FAIL** |
+| O-gem | Δ ≥ −0.0104 | +0.0058 | PASS* |
+| O-cliffs | ≤ 1 | 10 | **FAIL** |
+| O-500 (NDCG/gem) | ≥ −0.0136 / ≥ −0.0235 | +0.0008 / −0.0005 | PASS |
+| O-100 | non-NEGATIVE, no gem warning | positive (Δ +38.01) | PASS |
+| O-quality (gate CLI) | PASS | PASS | PASS |
+| O-quality (collinearity) | no VIF>5 AND \|r\|>0.8 | max \|r\|=0.723 (edict_feeder) | PASS |
+| O-clean (golden-100) | not negative beyond noise | Δ −0.0007 | PASS |
+| O-clean (cohort) | ablated Δ ≥ +0.0233 | **−0.0069** | **FAIL** |
+
+\* the gem bump sits inside the whitelist comparator's own range at negative NDCG —
+whitelist-signature, not merit. The whitelist comparator (Task 5) was ALSO negative
+at every cell (best: bonus 0.10, ΔNDCG −0.0083, 8 cliffs), and the rule at 0.75 sits
+between the whitelist's 0.10 and 0.25 cells on every axis — whitelist-equivalent.
+
+**Root cause:** every one of 1,996 sac-outlet candidates receives one flat
+per-`filter_group` IDF contribution (0.1729 at multiplier 1.5) — zero
+per-candidate discrimination (Viscera Seer == Akki Avalanchers). This is the
+flatness-diagnostic leverage regime (`.superpowers/sdd/diagnostic-head-flatness.md`)
+measured at rule scale: a large low-dispersion class bump reshuffles the flat head
+en masse, producing 10-32 per-commander cliffs. Same failure family as the
+deck-context flood DECLINE — a per-class flat credit cannot rank within the class
+it targets.
+
+Predicate, fixture, bands, whitelist comparator, rule code (flag-off), and the
+Task 1 rank_bonus sidecar all REMAIN as standing infra for a future
+per-candidate-discriminating retry.

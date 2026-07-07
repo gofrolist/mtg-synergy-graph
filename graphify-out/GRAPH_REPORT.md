@@ -1,7 +1,7 @@
 # Graph Report - /Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph  (2026-07-07)
 
 ## Corpus Check
-- 265 files · ~586,833 words
+- 265 files · ~589,117 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -4745,11 +4745,11 @@ Nodes (1): Tap Cost (tapXType)
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `PortComplement` connect `Community 3` to `Community 1`, `Community 4`, `Community 5`, `Community 6`, `Community 8`, `Community 10`, `Community 11`, `Community 12`, `Community 14`, `Community 15`, `Community 16`, `Community 17`, `Community 18`, `Community 19`, `Community 20`, `Community 21`, `Community 25`, `Community 26`?**
-  _High betweenness centrality (0.210) - this node is a cross-community bridge._
+  _High betweenness centrality (0.182) - this node is a cross-community bridge._
 - **Why does `SynergyEngine` connect `Community 0` to `Community 1`, `Community 2`, `Community 3`, `Community 5`, `Community 6`, `Community 9`, `Community 14`, `Community 15`, `Community 16`?**
-  _High betweenness centrality (0.126) - this node is a cross-community bridge._
-- **Why does `Utility complement matchers.  Thin re-export shim so external callers can keep u` connect `Community 14` to `Community 0`, `Community 1`, `Community 32`, `Community 3`, `Community 4`, `Community 5`, `Community 7`, `Community 9`, `Community 11`, `Community 12`?**
-  _High betweenness centrality (0.077) - this node is a cross-community bridge._
+  _High betweenness centrality (0.120) - this node is a cross-community bridge._
+- **Why does `PinnedFixture` connect `Community 0` to `Community 1`, `Community 2`, `Community 3`, `Community 10`, `Community 13`, `Community 14`, `Community 23`, `Community 29`?**
+  _High betweenness centrality (0.100) - this node is a cross-community bridge._
 - **Are the 637 inferred relationships involving `PinnedFixture` (e.g. with `Tests for ``bench.py audit --vs-forge-oracle`` handler.  Plan: docs/plans/2026-0` and `Minimal synergy.db with four cards + hints so pair_scorer returns     distinguis`) actually correct?**
   _`PinnedFixture` has 637 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 516 inferred relationships involving `PortComplement` (e.g. with `Tests for ``tests/_parity.py`` rule-level parity harness (issue #16).  These tes` and `Synthetic fixture: 1 Cascade commander + 2 Cascade partners +     1 commander-se`) actually correct?**

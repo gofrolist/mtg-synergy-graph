@@ -9938,45 +9938,45 @@
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/tests/test_death_outlet.py",
       "source_location": "L1",
-      "id": "test_death_outlet_rationale_1",
       "community": 20,
-      "norm_label": "tests for complement_rules.death_outlet (plan 2026-07-07-002 task 6).  rule_plan"
+      "norm_label": "tests for complement_rules.death_outlet (plan 2026-07-07-002 task 6).  rule_plan",
+      "id": "test_death_outlet_rationale_1"
     },
     {
       "label": "Rule logic tests run with the flag ON; the default-off contract has     its own",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/tests/test_death_outlet.py",
       "source_location": "L79",
-      "id": "test_death_outlet_rationale_79",
       "community": 20,
-      "norm_label": "rule logic tests run with the flag on; the default-off contract has     its own"
+      "norm_label": "rule logic tests run with the flag on; the default-off contract has     its own",
+      "id": "test_death_outlet_rationale_79"
     },
     {
       "label": "Sacrificed-trigger commanders are served by cost_feeds_trigger already.",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/tests/test_death_outlet.py",
       "source_location": "L115",
-      "id": "test_death_outlet_rationale_115",
       "community": 20,
-      "norm_label": "sacrificed-trigger commanders are served by cost_feeds_trigger already."
+      "norm_label": "sacrificed-trigger commanders are served by cost_feeds_trigger already.",
+      "id": "test_death_outlet_rationale_115"
     },
     {
       "label": "core.py must call the helper (source-level check keeps the test         independ",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/tests/test_death_outlet.py",
       "source_location": "L208",
-      "id": "test_death_outlet_rationale_208",
       "community": 20,
-      "norm_label": "core.py must call the helper (source-level check keeps the test         independ"
+      "norm_label": "core.py must call the helper (source-level check keeps the test         independ",
+      "id": "test_death_outlet_rationale_208"
     },
     {
       "label": "Read the module source rather than the live attribute -- the         file-level",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/tests/test_death_outlet.py",
       "source_location": "L218",
-      "id": "test_death_outlet_rationale_218",
       "community": 20,
-      "norm_label": "read the module source rather than the live attribute -- the         file-level"
+      "norm_label": "read the module source rather than the live attribute -- the         file-level",
+      "id": "test_death_outlet_rationale_218"
     },
     {
       "label": "test_universal_scorer_pool_scaled.py",
@@ -48422,99 +48422,99 @@
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L224",
-      "id": "universal_scorer_rationale_224",
       "community": 3,
-      "norm_label": "sum bonuses for all synergy pairs present in a card's rule set.      cached beca"
+      "norm_label": "sum bonuses for all synergy pairs present in a card's rule set.      cached beca",
+      "id": "universal_scorer_rationale_224"
     },
     {
       "label": "Public view over the module-private scoring-config dicts.      Exposed so ``benc",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L250",
-      "id": "universal_scorer_rationale_250",
       "community": 6,
-      "norm_label": "public view over the module-private scoring-config dicts.      exposed so ``benc"
+      "norm_label": "public view over the module-private scoring-config dicts.      exposed so ``benc",
+      "id": "universal_scorer_rationale_250"
     },
     {
       "label": "SHA-256 over the functional content of a committed seed JSON.      Only ``functi",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L332",
-      "id": "universal_scorer_rationale_332",
       "community": 15,
-      "norm_label": "sha-256 over the functional content of a committed seed json.      only ``functi"
+      "norm_label": "sha-256 over the functional content of a committed seed json.      only ``functi",
+      "id": "universal_scorer_rationale_332"
     },
     {
       "label": "Return the scoring-config inputs that affect ``score()`` output.      Intended c",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L349",
-      "id": "universal_scorer_rationale_349",
       "community": 15,
-      "norm_label": "return the scoring-config inputs that affect ``score()`` output.      intended c"
+      "norm_label": "return the scoring-config inputs that affect ``score()`` output.      intended c",
+      "id": "universal_scorer_rationale_349"
     },
     {
       "label": "Multiplier in [0.7, 1.0] for the synergy sum of one candidate.      When one rul",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L425",
-      "id": "universal_scorer_rationale_425",
       "community": 3,
-      "norm_label": "multiplier in [0.7, 1.0] for the synergy sum of one candidate.      when one rul"
+      "norm_label": "multiplier in [0.7, 1.0] for the synergy sum of one candidate.      when one rul",
+      "id": "universal_scorer_rationale_425"
     },
     {
       "label": "Scoring result for one candidate under the universal port matcher.      Score is",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L468",
-      "id": "universal_scorer_rationale_468",
       "community": 3,
-      "norm_label": "scoring result for one candidate under the universal port matcher.      score is"
+      "norm_label": "scoring result for one candidate under the universal port matcher.      score is",
+      "id": "universal_scorer_rationale_468"
     },
     {
       "label": "IDF-weighted synergy score minus anti-synergy.          Applies signal concentra",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L496",
-      "id": "universal_scorer_rationale_496",
       "community": 5,
-      "norm_label": "idf-weighted synergy score minus anti-synergy.          applies signal concentra"
+      "norm_label": "idf-weighted synergy score minus anti-synergy.          applies signal concentra",
+      "id": "universal_scorer_rationale_496"
     },
     {
       "label": "Map IDF-weighted scores to legacy bucket dict.          The running ``total`` is",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L545",
-      "id": "universal_scorer_rationale_545",
       "community": 3,
-      "norm_label": "map idf-weighted scores to legacy bucket dict.          the running ``total`` is"
+      "norm_label": "map idf-weighted scores to legacy bucket dict.          the running ``total`` is",
+      "id": "universal_scorer_rationale_545"
     },
     {
       "label": "Structured return for ``_load_scoring_weights``.      The two dicts are bound at",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L642",
-      "id": "universal_scorer_rationale_642",
       "community": 5,
-      "norm_label": "structured return for ``_load_scoring_weights``.      the two dicts are bound at"
+      "norm_label": "structured return for ``_load_scoring_weights``.      the two dicts are bound at",
+      "id": "universal_scorer_rationale_642"
     },
     {
       "label": "True for int / float, False for bool (which is an int subclass).",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L656",
-      "id": "universal_scorer_rationale_656",
       "community": 15,
-      "norm_label": "true for int / float, false for bool (which is an int subclass)."
+      "norm_label": "true for int / float, false for bool (which is an int subclass).",
+      "id": "universal_scorer_rationale_656"
     },
     {
       "label": "Read ``src/mtg_synergy_graph/data/scoring_weights.json`` into the two scoring-we",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L661",
-      "id": "universal_scorer_rationale_661",
       "community": 15,
-      "norm_label": "read ``src/mtg_synergy_graph/data/scoring_weights.json`` into the two scoring-we"
+      "norm_label": "read ``src/mtg_synergy_graph/data/scoring_weights.json`` into the two scoring-we",
+      "id": "universal_scorer_rationale_661"
     },
     {
       "label": "Compute IDF weights: ``1 / log2(1 + N)`` where N is how many     distinct candid",
@@ -48530,63 +48530,63 @@
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L807",
-      "id": "universal_scorer_rationale_807",
       "community": 10,
-      "norm_label": "per-commander idf basis: weight-independent components of ``_compute_idf_weights"
+      "norm_label": "per-commander idf basis: weight-independent components of ``_compute_idf_weights",
+      "id": "universal_scorer_rationale_807"
     },
     {
       "label": "Build the weight-independent IDF basis for one commander's complements.      See",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L841",
-      "id": "universal_scorer_rationale_841",
       "community": 15,
-      "norm_label": "build the weight-independent idf basis for one commander's complements.      see"
+      "norm_label": "build the weight-independent idf basis for one commander's complements.      see",
+      "id": "universal_scorer_rationale_841"
     },
     {
       "label": "Apply current ``_RULE_QUALITY_MULTIPLIER`` to a cached :class:`IdfBasis`.      T",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L890",
-      "id": "universal_scorer_rationale_890",
       "community": 15,
-      "norm_label": "apply current ``_rule_quality_multiplier`` to a cached :class:`idfbasis`.      t"
+      "norm_label": "apply current ``_rule_quality_multiplier`` to a cached :class:`idfbasis`.      t",
+      "id": "universal_scorer_rationale_890"
     },
     {
       "label": "Compute IDF weights: ``1 / log2(1 + N)`` where N is how many     distinct candid",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L916",
-      "id": "universal_scorer_rationale_916",
       "community": 15,
-      "norm_label": "compute idf weights: ``1 / log2(1 + n)`` where n is how many     distinct candid"
+      "norm_label": "compute idf weights: ``1 / log2(1 + n)`` where n is how many     distinct candid",
+      "id": "universal_scorer_rationale_916"
     },
     {
       "label": "Score every candidate via IDF-weighted port matching.      Each complement's val",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L946",
-      "id": "universal_scorer_rationale_946",
       "community": 15,
-      "norm_label": "score every candidate via idf-weighted port matching.      each complement's val"
+      "norm_label": "score every candidate via idf-weighted port matching.      each complement's val",
+      "id": "universal_scorer_rationale_946"
     },
     {
       "label": "Build per-candidate ``UniversalScore`` results from precomputed complements.",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L986",
-      "id": "universal_scorer_rationale_986",
       "community": 15,
-      "norm_label": "build per-candidate ``universalscore`` results from precomputed complements."
+      "norm_label": "build per-candidate ``universalscore`` results from precomputed complements.",
+      "id": "universal_scorer_rationale_986"
     },
     {
       "label": "Emit one sink call per (candidate, rule_id) with the net contribution.      Mirr",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L1157",
-      "id": "universal_scorer_rationale_1157",
       "community": 15,
-      "norm_label": "emit one sink call per (candidate, rule_id) with the net contribution.      mirr"
+      "norm_label": "emit one sink call per (candidate, rule_id) with the net contribution.      mirr",
+      "id": "universal_scorer_rationale_1157"
     },
     {
       "label": "parser.py",
@@ -58259,36 +58259,36 @@
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/complement_rules/registry.py",
       "source_location": "L683",
-      "id": "registry_rationale_683",
       "community": 19,
-      "norm_label": "commander has a land-to-graveyard trigger (gitrog, titania voice).      delegate"
+      "norm_label": "commander has a land-to-graveyard trigger (gitrog, titania voice).      delegate",
+      "id": "registry_rationale_683"
     },
     {
       "label": "Derive :data:`DECLARATIVE_RULE_IDS` at import time from     ``src/mtg_synergy_gr",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/complement_rules/registry.py",
       "source_location": "L827",
-      "id": "registry_rationale_827",
       "community": 19,
-      "norm_label": "derive :data:`declarative_rule_ids` at import time from     ``src/mtg_synergy_gr"
+      "norm_label": "derive :data:`declarative_rule_ids` at import time from     ``src/mtg_synergy_gr",
+      "id": "registry_rationale_827"
     },
     {
       "label": "Set of rule_ids the registry can attribute to a specific port.",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/complement_rules/registry.py",
       "source_location": "L891",
-      "id": "registry_rationale_891",
       "community": 19,
-      "norm_label": "set of rule_ids the registry can attribute to a specific port."
+      "norm_label": "set of rule_ids the registry can attribute to a specific port.",
+      "id": "registry_rationale_891"
     },
     {
       "label": "Return rule_ids whose gate matches ``port`` \u2014 the rules a     commander carrying",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/complement_rules/registry.py",
       "source_location": "L896",
-      "id": "registry_rationale_896",
       "community": 19,
-      "norm_label": "return rule_ids whose gate matches ``port`` \u2014 the rules a     commander carrying"
+      "norm_label": "return rule_ids whose gate matches ``port`` \u2014 the rules a     commander carrying",
+      "id": "registry_rationale_896"
     },
     {
       "label": "combat.py",
@@ -59276,27 +59276,27 @@
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/complement_rules/core.py",
       "source_location": "L1229",
-      "id": "core_rationale_1229",
       "community": 3,
-      "norm_label": "extract the most specific type/subtype from a port's valid_filter.      used to"
+      "norm_label": "extract the most specific type/subtype from a port's valid_filter.      used to",
+      "id": "core_rationale_1229"
     },
     {
       "label": "Check if a candidate effect produces something matching the filter_group.      O",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/complement_rules/core.py",
       "source_location": "L1262",
-      "id": "core_rationale_1262",
       "community": 5,
-      "norm_label": "check if a candidate effect produces something matching the filter_group.      o"
+      "norm_label": "check if a candidate effect produces something matching the filter_group.      o",
+      "id": "core_rationale_1262"
     },
     {
       "label": "Find all port-pair complements between commander and candidate cards.      Algor",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/complement_rules/core.py",
       "source_location": "L1294",
-      "id": "core_rationale_1294",
       "community": 6,
-      "norm_label": "find all port-pair complements between commander and candidate cards.      algor"
+      "norm_label": "find all port-pair complements between commander and candidate cards.      algor",
+      "id": "core_rationale_1294"
     },
     {
       "label": "death_outlet.py",
@@ -59330,27 +59330,27 @@
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/complement_rules/death_outlet.py",
       "source_location": "L1",
-      "id": "death_outlet_rationale_1",
       "community": 20,
-      "norm_label": "death-outlet-feeder complement rule (plan 2026-07-07-002 task 6).  commander gat"
+      "norm_label": "death-outlet-feeder complement rule (plan 2026-07-07-002 task 6).  commander gat",
+      "id": "death_outlet_rationale_1"
     },
     {
       "label": "Port-level commander gate for ``death_outlet_feeder``.      ``has_changeszone_de",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/complement_rules/death_outlet.py",
       "source_location": "L57",
-      "id": "death_outlet_rationale_57",
       "community": 20,
-      "norm_label": "port-level commander gate for ``death_outlet_feeder``.      ``has_changeszone_de"
+      "norm_label": "port-level commander gate for ``death_outlet_feeder``.      ``has_changeszone_de",
+      "id": "death_outlet_rationale_57"
     },
     {
       "label": "Sac-outlet candidates for outlet-cohort ChangesZone-death commanders.      See t",
       "file_type": "rationale",
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/complement_rules/death_outlet.py",
       "source_location": "L81",
-      "id": "death_outlet_rationale_81",
       "community": 20,
-      "norm_label": "sac-outlet candidates for outlet-cohort changeszone-death commanders.      see t"
+      "norm_label": "sac-outlet candidates for outlet-cohort changeszone-death commanders.      see t",
+      "id": "death_outlet_rationale_81"
     },
     {
       "label": "density.py",
@@ -238629,11 +238629,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L32",
       "weight": 0.8,
-      "_src": "universal_scorer_rationale_224",
-      "_tgt": "penalties_candidatecache",
+      "_src": "penalties_candidatecache",
+      "_tgt": "universal_scorer_rationale_224",
+      "confidence_score": 0.5,
       "source": "penalties_candidatecache",
-      "target": "universal_scorer_rationale_224",
-      "confidence_score": 0.5
+      "target": "universal_scorer_rationale_224"
     },
     {
       "relation": "uses",
@@ -238641,11 +238641,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L32",
       "weight": 0.8,
-      "_src": "universal_scorer_rationale_250",
-      "_tgt": "penalties_candidatecache",
+      "_src": "penalties_candidatecache",
+      "_tgt": "universal_scorer_rationale_250",
+      "confidence_score": 0.5,
       "source": "penalties_candidatecache",
-      "target": "universal_scorer_rationale_250",
-      "confidence_score": 0.5
+      "target": "universal_scorer_rationale_250"
     },
     {
       "relation": "uses",
@@ -238653,11 +238653,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L32",
       "weight": 0.8,
-      "_src": "universal_scorer_rationale_332",
-      "_tgt": "penalties_candidatecache",
+      "_src": "penalties_candidatecache",
+      "_tgt": "universal_scorer_rationale_332",
+      "confidence_score": 0.5,
       "source": "penalties_candidatecache",
-      "target": "universal_scorer_rationale_332",
-      "confidence_score": 0.5
+      "target": "universal_scorer_rationale_332"
     },
     {
       "relation": "uses",
@@ -238665,11 +238665,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L32",
       "weight": 0.8,
-      "_src": "universal_scorer_rationale_349",
-      "_tgt": "penalties_candidatecache",
+      "_src": "penalties_candidatecache",
+      "_tgt": "universal_scorer_rationale_349",
+      "confidence_score": 0.5,
       "source": "penalties_candidatecache",
-      "target": "universal_scorer_rationale_349",
-      "confidence_score": 0.5
+      "target": "universal_scorer_rationale_349"
     },
     {
       "relation": "uses",
@@ -238677,11 +238677,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L32",
       "weight": 0.8,
-      "_src": "universal_scorer_rationale_425",
-      "_tgt": "penalties_candidatecache",
+      "_src": "penalties_candidatecache",
+      "_tgt": "universal_scorer_rationale_425",
+      "confidence_score": 0.5,
       "source": "penalties_candidatecache",
-      "target": "universal_scorer_rationale_425",
-      "confidence_score": 0.5
+      "target": "universal_scorer_rationale_425"
     },
     {
       "relation": "uses",
@@ -238689,11 +238689,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L32",
       "weight": 0.8,
-      "_src": "universal_scorer_rationale_468",
-      "_tgt": "penalties_candidatecache",
+      "_src": "penalties_candidatecache",
+      "_tgt": "universal_scorer_rationale_468",
+      "confidence_score": 0.5,
       "source": "penalties_candidatecache",
-      "target": "universal_scorer_rationale_468",
-      "confidence_score": 0.5
+      "target": "universal_scorer_rationale_468"
     },
     {
       "relation": "uses",
@@ -238701,11 +238701,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L32",
       "weight": 0.8,
-      "_src": "universal_scorer_rationale_496",
-      "_tgt": "penalties_candidatecache",
+      "_src": "penalties_candidatecache",
+      "_tgt": "universal_scorer_rationale_496",
+      "confidence_score": 0.5,
       "source": "penalties_candidatecache",
-      "target": "universal_scorer_rationale_496",
-      "confidence_score": 0.5
+      "target": "universal_scorer_rationale_496"
     },
     {
       "relation": "uses",
@@ -238713,11 +238713,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L32",
       "weight": 0.8,
-      "_src": "universal_scorer_rationale_545",
-      "_tgt": "penalties_candidatecache",
+      "_src": "penalties_candidatecache",
+      "_tgt": "universal_scorer_rationale_545",
+      "confidence_score": 0.5,
       "source": "penalties_candidatecache",
-      "target": "universal_scorer_rationale_545",
-      "confidence_score": 0.5
+      "target": "universal_scorer_rationale_545"
     },
     {
       "relation": "uses",
@@ -238725,11 +238725,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L32",
       "weight": 0.8,
-      "_src": "universal_scorer_rationale_642",
-      "_tgt": "penalties_candidatecache",
+      "_src": "penalties_candidatecache",
+      "_tgt": "universal_scorer_rationale_642",
+      "confidence_score": 0.5,
       "source": "penalties_candidatecache",
-      "target": "universal_scorer_rationale_642",
-      "confidence_score": 0.5
+      "target": "universal_scorer_rationale_642"
     },
     {
       "relation": "uses",
@@ -238737,11 +238737,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L32",
       "weight": 0.8,
-      "_src": "universal_scorer_rationale_656",
-      "_tgt": "penalties_candidatecache",
+      "_src": "penalties_candidatecache",
+      "_tgt": "universal_scorer_rationale_656",
+      "confidence_score": 0.5,
       "source": "penalties_candidatecache",
-      "target": "universal_scorer_rationale_656",
-      "confidence_score": 0.5
+      "target": "universal_scorer_rationale_656"
     },
     {
       "relation": "uses",
@@ -238749,11 +238749,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L32",
       "weight": 0.8,
-      "_src": "universal_scorer_rationale_661",
-      "_tgt": "penalties_candidatecache",
+      "_src": "penalties_candidatecache",
+      "_tgt": "universal_scorer_rationale_661",
+      "confidence_score": 0.5,
       "source": "penalties_candidatecache",
-      "target": "universal_scorer_rationale_661",
-      "confidence_score": 0.5
+      "target": "universal_scorer_rationale_661"
     },
     {
       "relation": "uses",
@@ -238773,11 +238773,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L32",
       "weight": 0.8,
-      "_src": "universal_scorer_rationale_807",
-      "_tgt": "penalties_candidatecache",
+      "_src": "penalties_candidatecache",
+      "_tgt": "universal_scorer_rationale_807",
+      "confidence_score": 0.5,
       "source": "penalties_candidatecache",
-      "target": "universal_scorer_rationale_807",
-      "confidence_score": 0.5
+      "target": "universal_scorer_rationale_807"
     },
     {
       "relation": "uses",
@@ -238785,11 +238785,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L32",
       "weight": 0.8,
-      "_src": "universal_scorer_rationale_841",
-      "_tgt": "penalties_candidatecache",
+      "_src": "penalties_candidatecache",
+      "_tgt": "universal_scorer_rationale_841",
+      "confidence_score": 0.5,
       "source": "penalties_candidatecache",
-      "target": "universal_scorer_rationale_841",
-      "confidence_score": 0.5
+      "target": "universal_scorer_rationale_841"
     },
     {
       "relation": "uses",
@@ -238797,11 +238797,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L32",
       "weight": 0.8,
-      "_src": "universal_scorer_rationale_890",
-      "_tgt": "penalties_candidatecache",
+      "_src": "penalties_candidatecache",
+      "_tgt": "universal_scorer_rationale_890",
+      "confidence_score": 0.5,
       "source": "penalties_candidatecache",
-      "target": "universal_scorer_rationale_890",
-      "confidence_score": 0.5
+      "target": "universal_scorer_rationale_890"
     },
     {
       "relation": "uses",
@@ -238809,11 +238809,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L32",
       "weight": 0.8,
-      "_src": "universal_scorer_rationale_916",
-      "_tgt": "penalties_candidatecache",
+      "_src": "penalties_candidatecache",
+      "_tgt": "universal_scorer_rationale_916",
+      "confidence_score": 0.5,
       "source": "penalties_candidatecache",
-      "target": "universal_scorer_rationale_916",
-      "confidence_score": 0.5
+      "target": "universal_scorer_rationale_916"
     },
     {
       "relation": "uses",
@@ -238821,11 +238821,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L32",
       "weight": 0.8,
-      "_src": "universal_scorer_rationale_946",
-      "_tgt": "penalties_candidatecache",
+      "_src": "penalties_candidatecache",
+      "_tgt": "universal_scorer_rationale_946",
+      "confidence_score": 0.5,
       "source": "penalties_candidatecache",
-      "target": "universal_scorer_rationale_946",
-      "confidence_score": 0.5
+      "target": "universal_scorer_rationale_946"
     },
     {
       "relation": "uses",
@@ -238833,11 +238833,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L32",
       "weight": 0.8,
-      "_src": "universal_scorer_rationale_986",
-      "_tgt": "penalties_candidatecache",
+      "_src": "penalties_candidatecache",
+      "_tgt": "universal_scorer_rationale_986",
+      "confidence_score": 0.5,
       "source": "penalties_candidatecache",
-      "target": "universal_scorer_rationale_986",
-      "confidence_score": 0.5
+      "target": "universal_scorer_rationale_986"
     },
     {
       "relation": "uses",
@@ -238845,11 +238845,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/universal_scorer.py",
       "source_location": "L32",
       "weight": 0.8,
-      "_src": "universal_scorer_rationale_1157",
-      "_tgt": "penalties_candidatecache",
+      "_src": "penalties_candidatecache",
+      "_tgt": "universal_scorer_rationale_1157",
+      "confidence_score": 0.5,
       "source": "penalties_candidatecache",
-      "target": "universal_scorer_rationale_1157",
-      "confidence_score": 0.5
+      "target": "universal_scorer_rationale_1157"
     },
     {
       "relation": "uses",
@@ -239601,11 +239601,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/complement_rules/core.py",
       "source_location": "L31",
       "weight": 0.8,
-      "_src": "core_rationale_1229",
-      "_tgt": "penalties_candidatecache",
+      "_src": "penalties_candidatecache",
+      "_tgt": "core_rationale_1229",
+      "confidence_score": 0.5,
       "source": "penalties_candidatecache",
-      "target": "core_rationale_1229",
-      "confidence_score": 0.5
+      "target": "core_rationale_1229"
     },
     {
       "relation": "uses",
@@ -239613,11 +239613,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/complement_rules/core.py",
       "source_location": "L31",
       "weight": 0.8,
-      "_src": "core_rationale_1262",
-      "_tgt": "penalties_candidatecache",
+      "_src": "penalties_candidatecache",
+      "_tgt": "core_rationale_1262",
+      "confidence_score": 0.5,
       "source": "penalties_candidatecache",
-      "target": "core_rationale_1262",
-      "confidence_score": 0.5
+      "target": "core_rationale_1262"
     },
     {
       "relation": "uses",
@@ -239625,11 +239625,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/complement_rules/core.py",
       "source_location": "L31",
       "weight": 0.8,
-      "_src": "core_rationale_1294",
-      "_tgt": "penalties_candidatecache",
+      "_src": "penalties_candidatecache",
+      "_tgt": "core_rationale_1294",
+      "confidence_score": 0.5,
       "source": "penalties_candidatecache",
-      "target": "core_rationale_1294",
-      "confidence_score": 0.5
+      "target": "core_rationale_1294"
     },
     {
       "relation": "uses",
@@ -261886,8 +261886,8 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/complement_rules/registry.py",
       "source_location": "L679",
       "weight": 1.0,
-      "_src": "registry_death_outlet_feeder_gate",
-      "_tgt": "death_payoff_has_changeszone_death_payoff",
+      "_src": "death_payoff_has_changeszone_death_payoff",
+      "_tgt": "registry_death_outlet_feeder_gate",
       "source": "death_payoff_has_changeszone_death_payoff",
       "target": "registry_death_outlet_feeder_gate"
     },
@@ -261898,8 +261898,8 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/complement_rules/death_outlet.py",
       "source_location": "L66",
       "weight": 1.0,
-      "_src": "death_outlet_commander_has_death_outlet_gate",
-      "_tgt": "death_payoff_has_changeszone_death_payoff",
+      "_src": "death_payoff_has_changeszone_death_payoff",
+      "_tgt": "death_outlet_commander_has_death_outlet_gate",
       "source": "death_payoff_has_changeszone_death_payoff",
       "target": "death_outlet_commander_has_death_outlet_gate"
     },
@@ -307005,11 +307005,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/complement_rules/death_outlet.py",
       "source_location": "L41",
       "weight": 0.8,
-      "_src": "death_outlet_rationale_1",
-      "_tgt": "core_portcomplement",
+      "_src": "core_portcomplement",
+      "_tgt": "death_outlet_rationale_1",
+      "confidence_score": 0.5,
       "source": "core_portcomplement",
-      "target": "death_outlet_rationale_1",
-      "confidence_score": 0.5
+      "target": "death_outlet_rationale_1"
     },
     {
       "relation": "uses",
@@ -307017,11 +307017,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/complement_rules/death_outlet.py",
       "source_location": "L41",
       "weight": 0.8,
-      "_src": "death_outlet_rationale_57",
-      "_tgt": "core_portcomplement",
+      "_src": "core_portcomplement",
+      "_tgt": "death_outlet_rationale_57",
+      "confidence_score": 0.5,
       "source": "core_portcomplement",
-      "target": "death_outlet_rationale_57",
-      "confidence_score": 0.5
+      "target": "death_outlet_rationale_57"
     },
     {
       "relation": "uses",
@@ -307029,11 +307029,11 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/complement_rules/death_outlet.py",
       "source_location": "L41",
       "weight": 0.8,
-      "_src": "death_outlet_rationale_81",
-      "_tgt": "core_portcomplement",
+      "_src": "core_portcomplement",
+      "_tgt": "death_outlet_rationale_81",
+      "confidence_score": 0.5,
       "source": "core_portcomplement",
-      "target": "death_outlet_rationale_81",
-      "confidence_score": 0.5
+      "target": "death_outlet_rationale_81"
     },
     {
       "relation": "uses",
@@ -307594,8 +307594,8 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/complement_rules/death_outlet.py",
       "source_location": "L112",
       "weight": 1.0,
-      "_src": "death_outlet_find_death_outlet_complements",
-      "_tgt": "core_portcomplement",
+      "_src": "core_portcomplement",
+      "_tgt": "death_outlet_find_death_outlet_complements",
       "source": "core_portcomplement",
       "target": "death_outlet_find_death_outlet_complements"
     },
@@ -310390,8 +310390,8 @@
       "source_file": "/Users/evgenii.vasilenko/gofrolist/mtg-synergy-graph/src/mtg_synergy_graph/complement_rules/death_outlet.py",
       "source_location": "L110",
       "weight": 1.0,
-      "_src": "death_outlet_find_death_outlet_complements",
-      "_tgt": "core_cost_filter_group",
+      "_src": "core_cost_filter_group",
+      "_tgt": "death_outlet_find_death_outlet_complements",
       "source": "core_cost_filter_group",
       "target": "death_outlet_find_death_outlet_complements"
     },

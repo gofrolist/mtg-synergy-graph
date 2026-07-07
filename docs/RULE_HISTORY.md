@@ -7,6 +7,41 @@ See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
 ## 2026-07-07
 
+### `death_outlet_feeder` DECLINED at pre-registered gates (plan 2026-07-07-002)
+
+Candidate rule `death_outlet_feeder` connected sacrifice-outlet candidates
+(`cost.sacrifice` ports — Viscera Seer, Ashnod's Altar, Carrion Feeder, …)
+to the 135-commander `outlet_direction_death_payoff` cohort (ChangesZone-
+shaped, non-self death triggers with no explicit Sacrificed port — Judith,
+Marchesa, Meren, Titania, The Gitrog Monster among golden-100 anchors).
+Swept {0.75, 1.0, 1.5, 2.0, 2.5}; every cell was NDCG-negative and
+cliff-heavy on the outlet fixture (best cell 0.75: ΔNDCG −0.0113, 10
+per-commander cliffs, gem Δ +0.0058), monotonically worse at higher
+multipliers. O-noise (need ≥ +0.0233) and O-cliffs (need ≤ 1) FAILED at
+every cell; O-clean's rank_bonus-ablated cohort delta also FAILED
+(−0.0069 vs ≥ +0.0233 needed) — the rule is not merely reshuffling
+EDHREC micro-credit, it genuinely damages the cohort. The disguised
+flat-bonus outlet whitelist comparator was ALSO negative at every cell,
+and the rule's best cell sits between the whitelist's 0.10/0.25 cells on
+every axis: whitelist-equivalent, exactly the failure the pre-registered
+gates existed to catch. Root cause: 1,996 sac-outlet candidates share one
+flat per-`filter_group` IDF value with zero per-candidate discrimination
+— the flatness-diagnostic leverage regime
+(`.superpowers/sdd/diagnostic-head-flatness.md`) measured at rule scale.
+Verdict **DECLINE**; working tree reverted to flag-off, hash-neutral;
+full null-result record at
+`docs/solutions/best-practices/death-outlet-feeder-null-result-2026-07-07.md`.
+The cohort predicate, fixture, bands, whitelist comparator, and rule code
+(flag `_ENABLE_DEATH_OUTLET_FEEDER = False`) all remain as standing infra.
+
+Part A of the same cycle (Task 1) shipped independently as standing
+instrumentation: a rank_bonus-ablated NDCG@30 sidecar
+(`compute_rank_bonus_ablation`, `bench/forensics.py`) plus a CLAUDE.md
+honesty correction — mechanical rule scoring uses no EDHREC, but the
+in-score `rank_bonus` micro-term and sort-key tiebreak inject EDHREC
+ordering at inference, measured at −0.0441 NDCG@30 total credit. That
+sidecar is what produced the O-clean numbers above.
+
 ### Subtype-supply rule shipped — PARTIAL, human-approved (plan 2026-07-07-001)
 
 New rule_ids `subtype_supply_producer` / `subtype_supply_body`
