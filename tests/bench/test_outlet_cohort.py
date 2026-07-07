@@ -234,3 +234,59 @@ class TestLiveAnchors:
         assert "Wilhelt, the Rotcleaver" not in cohort
 
         assert 120 <= len(cohort) <= 150, f"Cohort size {len(cohort)} outside tolerance [120, 150]"
+
+
+# ---------------------------------------------------------------------------
+# Outlet-payoff cohort fixture shape (plan 2026-07-07-002 Task 3)
+# ---------------------------------------------------------------------------
+# ``tests/fixtures/golden_set_outlet_payoff.json`` is built by
+# ``scripts/bootstrap_outlet_payoff_fixture.py`` — a thin entry point over
+# ``scripts/bootstrap_archetype_payoff_fixture.py``'s parameterized build/pin
+# protocol (Task 3), pinning ``outlet_direction_death_payoff`` the same way
+# ``golden_set_archetype_payoff.json`` pins ``archetype_payoff_cohort``. It is
+# a SEPARATE fixture: ``outlet_direction_death_payoff`` is deliberately not a
+# member of ``archetype_payoff_cohort``'s predicate union (see that
+# function's docstring), so this fixture's existence never perturbs the
+# existing one.
+
+OUTLET_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "golden_set_outlet_payoff.json"
+
+
+def test_outlet_fixture_loads_with_config_hash_and_cohort_members() -> None:
+    """The committed fixture loads and carries both provenance fields."""
+    from mtg_synergy_graph.bench.fixture import SCHEMA_VERSION, PinnedFixture
+
+    fixture = PinnedFixture.load(OUTLET_FIXTURE)
+    assert fixture.schema_version == SCHEMA_VERSION
+    assert fixture.config_hash, "fixture has no config_hash — re-pin via bootstrap_outlet_payoff_fixture.py"
+    assert fixture.cohort_members, "fixture has no cohort_members snapshot"
+    assert fixture.entries, "fixture has no per-commander entries"
+    # Every pinned entry corresponds to a snapshotted cohort member (build
+    # protocol scores exactly the kept-commander list it snapshots).
+    assert {e.commander for e in fixture.entries} <= set(fixture.cohort_members)
+
+
+@pytest.mark.skipif(not LIVE_DB.exists(), reason="live synergy.db not present")
+def test_outlet_fixture_members_are_subset_of_live_predicate() -> None:
+    """The pinned (EDHREC-filtered) snapshot never contains a non-cohort name.
+
+    The fixture's ``cohort_members`` is the EDHREC High-Synergy-filtered
+    subset of the raw predicate output (mirrors the archetype-payoff
+    fixture's ``test_membership_matches_pinned_snapshot`` in
+    ``tests/test_death_payoff.py``), so it must be a subset of — not
+    necessarily equal to — the live, unfiltered ``outlet_direction_death_payoff``
+    result.
+    """
+    import json
+
+    from mtg_synergy_graph.db import open_db as _open_db
+
+    pinned = set(json.loads(OUTLET_FIXTURE.read_text(encoding="utf-8"))["cohort_members"])
+    conn = _open_db(str(LIVE_DB), create=False)
+    try:
+        live = outlet_direction_death_payoff(conn)
+    finally:
+        conn.close()
+
+    missing = pinned - live
+    assert not missing, f"Pinned cohort_members not in live predicate output: {sorted(missing)}"
