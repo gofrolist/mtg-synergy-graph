@@ -1,5 +1,10 @@
 """Pure-function tests for the deck-context kill-test instrument (plan 2026-07-06-001)."""
 
+import json
+from pathlib import Path
+
+import pytest
+
 from mtg_synergy_graph.bench.context_sim import (
     ContextCell,
     ContextSim,
@@ -8,6 +13,8 @@ from mtg_synergy_graph.bench.context_sim import (
     select_context,
 )
 from mtg_synergy_graph.complement_rules import PortComplement
+
+_DB = Path("data/synergy.db")
 
 
 def _comp(cand, rule="trigger_effect", direction="synergy", cmdr_ev="Sacrificed", cand_ev="Token"):
@@ -82,3 +89,31 @@ def test_new_entrant_scores_and_illegal_excluded():
 def test_commander_never_enters():
     sim = _sim(ctx_scores={"A": {"Cmdr": 99.0}, "B": {}})
     assert "Cmdr" not in assemble_cell(sim, ContextCell(2, 1.0))
+
+
+def test_build_parser_has_subcommands():
+    from mtg_synergy_graph.bench.context_sim import build_parser
+
+    p = build_parser()
+    args = p.parse_args(["bands", "--fixture", "tests/fixtures/golden_set_archetype_payoff.json"])
+    assert args.command == "bands"
+
+
+@pytest.mark.skipif(not _DB.exists(), reason="requires built data/synergy.db")
+def test_bands_smoke_two_commanders(tmp_path):
+    from mtg_synergy_graph.bench.context_sim import main
+
+    rc = main(
+        [
+            "bands",
+            "--fixture",
+            "tests/fixtures/golden_set_archetype_payoff.json",
+            "--limit-commanders",
+            "2",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+    assert rc == 0
+    report = json.loads((tmp_path / "bands.json").read_text())
+    assert "ndcg_band" in report and report["n_commanders"] == 2
