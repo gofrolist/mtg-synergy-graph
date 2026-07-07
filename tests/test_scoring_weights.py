@@ -39,7 +39,11 @@ from mtg_synergy_graph.universal_scorer import (
 # 2026-07-07: shipped the subtype-supply rule (plan 2026-07-07-001,
 # producer=1.5/body=0.5) — new scoring_weights.json entries flip the
 # hash. All three fixtures re-pinned via bench.py audit --repin --yes.
-_PRODUCTION_HASH = "5adeea6eea364655c75eb6fca7859bfda092698c67ec2eee7956ce096c928ea1"
+# 2026-07-07 (review follow-up F1): _ENABLE_SUBTYPE_SUPPLY registered in
+# ScoringConfigInputs — the hash input set grew, scores unchanged
+# (post-repin audit Δ=0.000000, no_change=100). Re-pinned all three
+# fixtures again.
+_PRODUCTION_HASH = "c770b664e626d74256ea633bc1e9e8f3e5a7128b610d0c804946ad49b17cbb43"
 
 
 # ---------------------------------------------------------------------------

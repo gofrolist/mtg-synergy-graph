@@ -116,6 +116,11 @@ def compute_config_hash() -> str:
     h.update(repr(cfg.enable_pool_scaled_flat_weights).encode("utf-8"))
     h.update(b"|pool_scale_floor:")
     h.update(repr(cfg.pool_scale_floor).encode("utf-8"))
+    # Plan 2026-07-07-001 review follow-up (F1): the subtype-supply rule
+    # gate flag was previously hash-blind -- a flip could silently read a
+    # stale pinned tensor. Fold it in like every other rule-gating flag.
+    h.update(b"|subtype_supply_enable:")
+    h.update(repr(cfg.enable_subtype_supply).encode("utf-8"))
     return h.hexdigest()
 
 
