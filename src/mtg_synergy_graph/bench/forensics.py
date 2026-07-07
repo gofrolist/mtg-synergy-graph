@@ -117,6 +117,27 @@ measurement mode, ``--forensics --ablate-tiebreak``):
   commits it; the run stays read-only. The forensics history row is
   NOT extended (one-off mode; no schema change).
 
+rank_bonus ablation (Task 1 of plan 2026-07-07-002 — standing
+sidecar, computed on EVERY ``--forensics`` run, no flag):
+
+* A 2026-07-07 diagnostic measured that the EDHREC-derived
+  ``rank_bonus`` in-score micro-term (``0.005 * max(0.0, 1.0 -
+  edhrec_rank / 30000.0)``, ``universal_scorer.py:1114`` /
+  ``:1136``) PLUS the sort-key tiebreak together carry -0.0441 of the
+  golden-100 mean NDCG@30 (0.2328 raw -> 0.1887 ablated) — contrary to
+  the "no EDHREC at inference" claim CLAUDE.md used to make (see
+  CLAUDE.md for the corrected wording). :func:`compute_rank_bonus_ablation`
+  reports this measurement on every run so future ship/decline
+  verdicts can separate mechanical rule signal from this hidden
+  credit. Unlike :func:`compute_tiebreak_ablation` (R8, sort-key ONLY,
+  one-off ``--ablate-tiebreak`` mode), this sidecar subtracts the
+  IN-SCORE ``rank_bonus`` from each candidate's captured total AND
+  drops ``edhrec_rank`` from the re-sort key entirely — it measures
+  the TOTAL EDHREC-at-inference credit (in-score + in-sort), an upper
+  bound of either ablation alone, matching the diagnostic's
+  methodology exactly. The bonus itself is KEPT in the score; this is
+  a read-side measurement only, never a scoring-path change.
+
 Read-only diagnostic: nothing here mutates either database or the
 pinned fixture. CLI wiring, renderers, and the history CSV live in
 :mod:`bench.forensics_report` / :mod:`bench.forensics_history`.
@@ -1258,6 +1279,139 @@ def compute_tiebreak_ablation(
         weak_delta=agg_production - agg_weak,
         strong_delta=agg_production - agg_strong,
         run_date=run_date,
+    )
+
+
+# ---------------------------------------------------------------------------
+# rank_bonus ablation (Task 1 of plan 2026-07-07-002) — standing sidecar,
+# computed on every ``--forensics`` run over the Unit-1 capture
+# ---------------------------------------------------------------------------
+
+#: The exact in-score ``rank_bonus`` weight from ``universal_scorer.py``
+#: (both call sites, scored + staple-only).
+RANK_BONUS_WEIGHT: float = 0.005
+
+#: The exact in-score ``rank_bonus`` rank divisor from ``universal_scorer.py``.
+RANK_BONUS_RANK_DIVISOR: float = 30000.0
+
+#: ``universal_scorer.py``'s LOCAL fallback for a candidate absent from
+#: its ``rank_data`` mapping (``rank_data.get(name, 99999)`` at both
+#: rank_bonus call sites) — distinct from
+#: :data:`engine.UNRANKED_EDHREC_SENTINEL` (10**9), the sentinel
+#: :func:`load_card_meta` stamps onto a captured
+#: :class:`RankedCandidate`. Both sentinels clamp the bonus to 0.0 (a
+#: rank this large divided by :data:`RANK_BONUS_RANK_DIVISOR` exceeds
+#: 1.0, so the ``max(0.0, ...)`` floor bites either way) — the cap
+#: below is documentation of the scorer's actual constant, not a
+#: behavior change; it exists so this module's formula matches
+#: ``universal_scorer.py`` literally rather than merely producing the
+#: same clamped result by coincidence.
+RANK_BONUS_SENTINEL_CAP: int = 99999
+
+
+def rank_bonus_for(edhrec_rank: int) -> float:
+    """The exact in-score ``rank_bonus`` for a captured ``edhrec_rank``.
+
+    Mirrors ``universal_scorer.py``'s formula bit-for-bit:
+    ``0.005 * max(0.0, 1.0 - min(edhrec_rank, 99999) / 30000.0)``.
+    """
+    capped = min(edhrec_rank, RANK_BONUS_SENTINEL_CAP)
+    return RANK_BONUS_WEIGHT * max(0.0, 1.0 - capped / RANK_BONUS_RANK_DIVISOR)
+
+
+def rank_bonus_ablated_sort_key(candidate: RankedCandidate) -> tuple[float, float, str]:
+    """Ablated re-sort key: subtract :func:`rank_bonus_for` from the
+    captured ``total_score`` and DROP ``edhrec_rank`` from the key
+    entirely.
+
+    Per Task 1 of plan 2026-07-07-002 this sidecar measures TOTAL
+    EDHREC-at-inference credit (in-score bonus + in-sort tiebreak) —
+    an upper bound of either ablation alone, and the exact methodology
+    behind the 2026-07-07 diagnostic's measured -0.0441 golden-100
+    delta. Contrast :func:`strong_sort_key` (R8's tiebreaker-ONLY
+    ablation), which leaves the bonus IN ``total_score`` and only
+    swaps the replacement sort key.
+    """
+    adj_total = candidate.total_score - rank_bonus_for(candidate.edhrec_rank)
+    return (-adj_total, candidate.cmc, candidate.name)
+
+
+@dataclass(frozen=True)
+class RankBonusAblation:
+    """Task 1 (plan 2026-07-07-002) rank_bonus-ablation result.
+
+    Canonical-denominator NDCG@30 means (every fixture commander;
+    zero-label/skipped commanders contribute 0.0 to both sides — same
+    convention as :class:`TiebreakAblation`).
+
+    ``delta`` is ``ndcg_ablated - ndcg_raw`` — NEGATIVE when the
+    rank_bonus is providing unearned credit (matches the diagnostic's
+    reported "-0.0441" sign convention exactly; contrast
+    :class:`TiebreakAblation`'s production-minus-replacement,
+    positive-when-earned convention).
+    """
+
+    n_commanders: int
+    ndcg_raw: float
+    ndcg_ablated: float
+    delta: float
+
+
+def compute_rank_bonus_ablation(
+    rankings: Mapping[str, Sequence[RankedCandidate]],
+    labels_by_commander: Mapping[str, Mapping[str, float]],
+    *,
+    n_canonical: int,
+    top_n: int = TOP_N_DEFAULT,
+) -> RankBonusAblation:
+    """Task 1 (plan 2026-07-07-002): total EDHREC-at-inference credit.
+
+    Mirrors :func:`compute_tiebreak_ablation`'s structure and label
+    plumbing, but ablates the IN-SCORE ``rank_bonus`` term as well as
+    the sort-key tiebreak (see :func:`rank_bonus_ablated_sort_key`) —
+    a different, larger measurement than R8's tiebreaker-only
+    ablation. Computed on EVERY ``--forensics`` run (no flag): cheap
+    re-sort arithmetic over the already-captured Unit-1 rankings, no
+    extra scoring pass, ``engine.page()`` untouched.
+
+    ``rankings`` maps each non-skipped commander to its Unit-1
+    captured full ranking — already in production rank order, so the
+    "raw" window is read directly off ``rc.rank`` with no self-check
+    (unlike R8, this sidecar never reconstructs the production sort
+    key: only the ABLATED key is a re-sort). ``labels_by_commander``
+    carries the same canonical validate-path labels
+    (``grade_floor=0.0``) the forensics run already loaded.
+    ``n_canonical`` is the canonical denominator (every fixture
+    commander; commanders absent from ``rankings`` — zero-label skips
+    — contribute 0.0 on both sides).
+
+    Raises ``ValueError`` when ``n_canonical`` is smaller than the
+    number of supplied rankings (the canonical denominator can never
+    shrink below the classified set).
+    """
+    if n_canonical < len(rankings):
+        raise ValueError(f"n_canonical ({n_canonical}) < number of rankings ({len(rankings)})")
+
+    sum_raw = sum_ablated = 0.0
+    for commander in sorted(rankings):
+        candidates = tuple(rankings[commander])
+        labels = dict(labels_by_commander.get(commander, {}))
+        raw_window = [rc.name for rc in sorted(candidates, key=lambda rc: rc.rank)[:top_n]]
+        ablated_window = [rc.name for rc in sorted(candidates, key=rank_bonus_ablated_sort_key)[:top_n]]
+        sum_raw += compute_ndcg(raw_window, labels, k=top_n)
+        sum_ablated += compute_ndcg(ablated_window, labels, k=top_n)
+
+    if n_canonical:
+        ndcg_raw = sum_raw / n_canonical
+        ndcg_ablated = sum_ablated / n_canonical
+    else:
+        ndcg_raw = ndcg_ablated = 0.0
+
+    return RankBonusAblation(
+        n_commanders=n_canonical,
+        ndcg_raw=ndcg_raw,
+        ndcg_ablated=ndcg_ablated,
+        delta=ndcg_ablated - ndcg_raw,
     )
 
 
