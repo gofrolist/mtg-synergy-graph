@@ -100,6 +100,55 @@ def is_death_event(event_class: str, zone_origin: str | None, zone_destination: 
     return False
 
 
+def _trigger_only_matches_self(valid_filter: str | None) -> bool:
+    """True when every comma-separated alternative in a trigger's ``valid_filter``
+    starts with ``Card.Self`` — i.e. the trigger only fires on the trigger
+    source itself and cannot be "fed" by any other card.
+
+    Deliberately duplicated from ``graph_engine._trigger_only_matches_self``
+    (identical logic) rather than imported: this module is scoring-path
+    importable (``complement_rules/subtype_supply.py``) and is kept
+    dependency-free of ``graph_engine`` on purpose — see the module
+    docstring. Keep in sync if ``graph_engine``'s version changes.
+    """
+    if not valid_filter:
+        return False
+    for alt in valid_filter.split(","):
+        head = alt.strip()
+        if not head.startswith("Card.Self"):
+            return False
+    return True
+
+
+def has_changeszone_death_payoff(cmdr_ports: list) -> bool:
+    """True when some trigger port is a ``ChangesZone``/``ChangesZoneAll``-shaped
+    death event (battlefield -> graveyard, :func:`is_death_event`) that is not
+    self-only (:func:`_trigger_only_matches_self`).
+
+    This is the port-level core of ``bench.cohorts.outlet_direction_death_payoff``
+    (plan 2026-07-07-002 Task 2), factored here so the ``death_outlet_feeder``
+    rule gate and its whitelist comparator (Tasks 5/6) can reuse the exact same
+    conjunct against an already-loaded ``cmdr_ports`` list instead of a DB-wide
+    SQL scan. Deliberately does NOT check for ``Sacrificed``/``SacrificedOnce``
+    triggers (those commanders are served by the existing ``cost_feeds_trigger``
+    arm) or for ``subtype_death_payoff`` cohort membership — both are
+    cohort-enumeration-specific exclusions applied by the cohort predicate
+    itself, not part of this port-level gate.
+    """
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "trigger":
+            continue
+        event_class = (p.get("event_class") or "").strip()
+        if event_class not in _CHANGESZONE_EVENTS:
+            continue
+        if not is_death_event(event_class, p.get("zone_origin"), p.get("zone_destination")):
+            continue
+        if _trigger_only_matches_self(p.get("valid_filter")):
+            continue
+        return True
+    return False
+
+
 def payoff_subtypes_from_ports(conn: sqlite3.Connection, cmdr_ports: list) -> list[str]:
     """Sorted payoff subtypes named by the commander's death-trigger filters.
 
