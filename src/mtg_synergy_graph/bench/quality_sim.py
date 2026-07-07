@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..quality import quality_multiplier, rate_signal
 from ..validate import compute_ndcg
+from ._sim_shared import UNRANKED, add_common_sim_args, parse_grid_cells, render_bands_markdown, write_text
 from .portfolio_sim import (
     CommanderSim,
     PortfolioSimError,
@@ -43,8 +44,6 @@ from .portfolio_sim import (
 
 if TYPE_CHECKING:
     from ..engine import SynergyEngine
-
-_UNRANKED = 10**9
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +98,7 @@ def assemble_quality(
         key=lambda c: (
             -totals[c],
             sim.cmc_lookup.get(c, 99.0),
-            sim.rank_lookup.get(c, _UNRANKED),
+            sim.rank_lookup.get(c, UNRANKED),
             c,
         ),
     )
@@ -291,22 +290,6 @@ def run_sweep(
 # ---------------------------------------------------------------------------
 
 
-def _render_bands_markdown(report: dict[str, Any]) -> str:
-    nb = report["ndcg_band"]
-    gb = report["gem_band"]
-    lines = [
-        "# quality_sim bands",
-        "",
-        f"fixture: {report.get('fixture', '?')}  |  commanders: {report['n_commanders']}",
-        "",
-        f"NDCG@30   mean={nb['mean']:.4f}  95% CI [{nb['ci95_low']:.4f}, {nb['ci95_high']:.4f}]  "
-        f"half-width={nb['half_width']:.4f}",
-        f"gem rate  mean={gb['mean']:.4f}  95% CI [{gb['ci95_low']:.4f}, {gb['ci95_high']:.4f}]  "
-        f"half-width={gb['half_width']:.4f}",
-    ]
-    return "\n".join(lines) + "\n"
-
-
 def _render_gates_markdown(
     report: dict[str, Any],
     *,
@@ -398,13 +381,6 @@ def _render_sweep_markdown(report: dict[str, Any], *, gates: str | None = None) 
     return "\n".join(lines) + "\n"
 
 
-def _write_text(outdir: Path, name: str, text: str) -> Path:
-    outdir.mkdir(parents=True, exist_ok=True)
-    path = outdir / name
-    path.write_text(text, encoding="utf-8")
-    return path
-
-
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -419,33 +395,16 @@ class QualitySimError(RuntimeError):
 
 def _parse_cells(raw: str) -> list[QualityCell]:
     """Parse ``"q,r0;q,r0"`` into a :class:`QualityCell` list."""
-    cells: list[QualityCell] = []
-    for part in raw.split(";"):
-        part = part.strip()
-        if not part:
-            continue
-        try:
-            q_str, r0_str = part.split(",")
-            cells.append(QualityCell(float(q_str.strip()), float(r0_str.strip())))
-        except ValueError as exc:
-            raise QualitySimError(f"--cells: malformed cell {part!r} in {raw!r} (expected 'q,r0'): {exc}") from exc
-    if not cells:
-        raise QualitySimError(f"--cells produced no cells from {raw!r}")
-    return cells
+
+    def make_cell(part: str) -> QualityCell:
+        q_str, r0_str = part.split(",")
+        return QualityCell(float(q_str.strip()), float(r0_str.strip()))
+
+    return parse_grid_cells(raw, make_cell=make_cell, expected="q,r0", error_cls=QualitySimError)
 
 
 def _add_common_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--db", default="data/synergy.db", help="synergy DB path")
-    p.add_argument("--edhrec-db", default="data/tags.db", help="EDHREC tags DB path")
-    p.add_argument("--fixture", default=_DEFAULT_FIXTURE, help="golden-set fixture (commander names only)")
-    p.add_argument(
-        "--limit-commanders",
-        type=int,
-        default=None,
-        help="limit to the first N fixture commanders (smoke runs)",
-    )
-    p.add_argument("--output-dir", default=_DEFAULT_OUTPUT_DIR, help="report output directory")
-    p.add_argument("--seed", type=int, default=17, help="bootstrap RNG seed")
+    add_common_sim_args(p, default_fixture=_DEFAULT_FIXTURE, default_output_dir=_DEFAULT_OUTPUT_DIR)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -503,7 +462,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         report, sims = run_bands(engine, edhrec_conn, commanders, rates, seed=args.seed)
         report["fixture"] = str(fixture_path)
         bands_path = _write_report(outdir, "bands.json", report)
-        _write_text(outdir, "bands.md", _render_bands_markdown(report))
+        write_text(outdir, "bands.md", render_bands_markdown(report, title="quality_sim bands"))
         nb, gb = report["ndcg_band"], report["gem_band"]
         print(f"bands: n={report['n_commanders']} seed={args.seed}")
         print(
@@ -526,7 +485,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 gates_md = _render_gates_markdown(sweep_report, h_500q=args.h_500q, g_500q=args.g_500q)
             sweep_path = _write_report(outdir, "sweep.json", sweep_report)
             md = _render_sweep_markdown(sweep_report, gates=gates_md)
-            md_path = _write_text(outdir, "sweep.md", md)
+            md_path = write_text(outdir, "sweep.md", md)
             print(md)
             print(f"reports: {sweep_path}, {md_path}")
     except SelfCheckError as exc:

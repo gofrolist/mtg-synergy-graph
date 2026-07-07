@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 from ..complement_rules import PortComplement, find_all_complements
 from ..universal_scorer import _compute_idf_weights
 from ..validate import compute_ndcg
+from ._sim_shared import UNRANKED, add_common_sim_args, parse_grid_cells, render_bands_markdown, write_text
 from .hidden_gems import _cohort_median, _plausibility_from_maps
 from .optimize import load_edhrec_labels
 from .portfolio_sim import (
@@ -114,9 +115,6 @@ def context_scores_for_card(
     return scores
 
 
-_UNRANKED = 10**9
-
-
 def _plausible_set(n_rules_map: Mapping[str, int], base_totals: Mapping[str, float]) -> frozenset[str]:
     """Mechanical-plausibility gate over ``base_totals`` (hidden_gems.py FR2 criteria).
 
@@ -172,7 +170,7 @@ def _rank_top30(sim: ContextSim, totals: Mapping[str, float]) -> tuple[str, ...]
         key=lambda c: (
             -totals[c],
             sim.cmc_lookup.get(c, 99.0),
-            sim.rank_lookup.get(c, _UNRANKED),
+            sim.rank_lookup.get(c, UNRANKED),
             c,
         ),
     )
@@ -238,7 +236,7 @@ def _engine_lookups(engine) -> tuple[dict[str, float], dict[str, int]]:
     for name, row in engine._candidate_cache.candidate_rows.items():
         cmc_lookup[name] = row["cmc"] if row["cmc"] is not None else 99.0
         raw = row.get("edhrec_rank")
-        rank_lookup[name] = int(raw) if raw is not None else _UNRANKED
+        rank_lookup[name] = int(raw) if raw is not None else UNRANKED
     result = (cmc_lookup, rank_lookup)
     _ENGINE_LOOKUPS_CACHE[key] = result
     return result
@@ -611,22 +609,6 @@ def run_sweep(
 # ---------------------------------------------------------------------------
 
 
-def _render_bands_markdown(report: dict[str, Any]) -> str:
-    nb = report["ndcg_band"]
-    gb = report["gem_band"]
-    lines = [
-        "# context_sim bands",
-        "",
-        f"fixture: {report.get('fixture', '?')}  |  commanders: {report['n_commanders']}",
-        "",
-        f"NDCG@30   mean={nb['mean']:.4f}  95% CI [{nb['ci95_low']:.4f}, {nb['ci95_high']:.4f}]  "
-        f"half-width={nb['half_width']:.4f}",
-        f"gem rate  mean={gb['mean']:.4f}  95% CI [{gb['ci95_low']:.4f}, {gb['ci95_high']:.4f}]  "
-        f"half-width={gb['half_width']:.4f}",
-    ]
-    return "\n".join(lines) + "\n"
-
-
 def _render_gates_markdown(
     report: dict[str, Any],
     *,
@@ -718,13 +700,6 @@ def _render_whitelist_markdown(report: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _write_text(outdir: Path, name: str, text: str) -> Path:
-    outdir.mkdir(parents=True, exist_ok=True)
-    path = outdir / name
-    path.write_text(text, encoding="utf-8")
-    return path
-
-
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -739,34 +714,21 @@ class ContextSimError(RuntimeError):
 
 def _parse_cells(raw: str) -> list[ContextCell]:
     """Parse ``"K,W;K,W"`` into a :class:`ContextCell` list."""
-    cells: list[ContextCell] = []
-    for part in raw.split(";"):
-        part = part.strip()
-        if not part:
-            continue
-        try:
-            k_str, w_str = part.split(",")
-            cells.append(ContextCell(int(k_str.strip()), float(w_str.strip())))
-        except ValueError as exc:
-            raise ContextSimError(f"--cells: malformed cell {part!r} in {raw!r} (expected 'K,W'): {exc}") from exc
-    if not cells:
-        raise ContextSimError(f"--cells produced no cells from {raw!r}")
-    return cells
+
+    def make_cell(part: str) -> ContextCell:
+        k_str, w_str = part.split(",")
+        return ContextCell(int(k_str.strip()), float(w_str.strip()))
+
+    return parse_grid_cells(raw, make_cell=make_cell, expected="K,W", error_cls=ContextSimError)
 
 
 def _add_common_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--db", default="data/synergy.db", help="synergy DB path")
-    p.add_argument("--edhrec-db", default="data/tags.db", help="EDHREC tags DB path")
-    p.add_argument("--fixture", default=_DEFAULT_FIXTURE, help="golden-set fixture (commander names only)")
-    p.add_argument(
-        "--limit-commanders",
-        type=int,
-        default=None,
-        help="limit to the first N fixture commanders (smoke runs)",
+    add_common_sim_args(
+        p,
+        default_fixture=_DEFAULT_FIXTURE,
+        default_output_dir=_DEFAULT_OUTPUT_DIR,
+        include_k_max=True,
     )
-    p.add_argument("--output-dir", default=_DEFAULT_OUTPUT_DIR, help="report output directory")
-    p.add_argument("--seed", type=int, default=17, help="bootstrap RNG seed")
-    p.add_argument("--k-max", type=int, default=30, help="context-pool candidate cap (select_context k)")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -829,7 +791,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         report, sims = run_bands(engine, edhrec_conn, commanders, seed=args.seed, k_max=args.k_max)
         report["fixture"] = str(fixture_path)
         bands_path = _write_report(outdir, "bands.json", report)
-        _write_text(outdir, "bands.md", _render_bands_markdown(report))
+        write_text(outdir, "bands.md", render_bands_markdown(report, title="context_sim bands"))
         nb, gb = report["ndcg_band"], report["gem_band"]
         print(f"bands: n={report['n_commanders']} seed={args.seed}")
         print(
@@ -848,7 +810,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             wl_report["n_commanders"] = report["n_commanders"]
             wl_path = _write_report(outdir, "whitelist.json", wl_report)
             wl_md = _render_whitelist_markdown(wl_report)
-            wl_md_path = _write_text(outdir, "whitelist.md", wl_md)
+            wl_md_path = write_text(outdir, "whitelist.md", wl_md)
             print(wl_md)
             print(f"reports: {wl_path}, {wl_md_path}")
         elif args.command == "sweep":
@@ -863,7 +825,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             sweep_path = _write_report(outdir, "sweep.json", sweep_report)
             md = _render_sweep_markdown(sweep_report, gates=gates_md)
-            md_path = _write_text(outdir, "sweep.md", md)
+            md_path = write_text(outdir, "sweep.md", md)
             print(md)
             print(f"reports: {sweep_path}, {md_path}")
     except SelfCheckError as exc:
