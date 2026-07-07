@@ -14,9 +14,12 @@ from __future__ import annotations
 import sqlite3
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 
 from ..complement_rules import PortComplement, find_all_complements
 from ..universal_scorer import _compute_idf_weights
+from .optimize import load_edhrec_labels
+from .portfolio_sim import SelfCheckError
 
 
 def select_context(
@@ -87,3 +90,113 @@ def context_scores_for_card(
     scores = aggregate_context_scores(comps, idf, ctx_card)
     _CTX_SCORE_CACHE[ctx_card] = scores
     return scores
+
+
+_UNRANKED = 10**9
+
+
+@dataclass(frozen=True)
+class ContextCell:
+    k_context: int
+    w_ctx: float
+
+
+@dataclass
+class ContextSim:
+    """One commander's cached pass-1 state, ready for cheap cell re-assembly."""
+
+    commander: str
+    base_totals: dict[str, float]  # page() total per scored candidate
+    base_top_30: tuple[str, ...]
+    pool_order: tuple[str, ...]
+    legal_pool: frozenset[str]  # engine.legal_cards() — new entrants gate
+    context_max: tuple[str, ...]  # top K_MAX rule-covered candidates
+    ctx_scores: dict[str, dict[str, float]]
+    cmc_lookup: dict[str, float]
+    rank_lookup: dict[str, int]
+    graded_labels: dict[str, float]
+    edhrec_top_30: frozenset[str] | None
+    #: EDHREC labels with NO pass-1 score — the in-instrument NO_RULES proxy.
+    zero_score_labels: frozenset[str]
+
+
+def assemble_cell(sim: ContextSim, cell: ContextCell) -> tuple[str, ...]:
+    """Two-pass top-30 for one grid cell. w_ctx=0 is bitwise pass-1."""
+    totals = dict(sim.base_totals)
+    if cell.w_ctx > 0.0 and cell.k_context > 0:
+        ctx = sim.context_max[: cell.k_context]
+        agg: dict[str, float] = defaultdict(float)
+        for ctx_card in ctx:
+            for cand, s in sim.ctx_scores.get(ctx_card, {}).items():
+                agg[cand] += s
+        n = max(len(ctx), 1)
+        for cand, s in agg.items():
+            if cand == sim.commander or cand not in sim.legal_pool:
+                continue
+            totals[cand] = totals.get(cand, 0.0) + cell.w_ctx * (s / n)
+    ranked = sorted(
+        totals,
+        key=lambda c: (
+            -totals[c],
+            sim.cmc_lookup.get(c, 99.0),
+            sim.rank_lookup.get(c, _UNRANKED),
+            c,
+        ),
+    )
+    return tuple(ranked[:30])
+
+
+def build_context_sim(engine, edhrec_conn, commander: str, *, k_max: int = 30) -> ContextSim:
+    """Score one commander live, cache context scores, self-check w=0.
+
+    Mirrors ``portfolio_sim.build_commander_sim``'s engine duck-typing
+    (``page``, ``legal_cards``, ``_score_cache``, ``_candidate_cache``,
+    ``_conn``). Raises ``SelfCheckError`` when the w=0 assembly diverges
+    from ``page()``'s own top-30.
+    """
+    page = engine.page([commander], offset=0, limit=1_000_000)
+    universal = engine._score_cache[(commander,)]
+    base_totals = {rec.card: rec.total_score for rec in page.items}
+    pool_order = tuple(rec.card for rec in page.items)
+
+    cmc_lookup: dict[str, float] = {}
+    rank_lookup: dict[str, int] = {}
+    for name, row in engine._candidate_cache.candidate_rows.items():
+        cmc_lookup[name] = row["cmc"] if row["cmc"] is not None else 99.0
+        raw = row.get("edhrec_rank")
+        rank_lookup[name] = int(raw) if raw is not None else _UNRANKED
+
+    n_rules_map = {name: len(us.distinct_rules) for name, us in universal.items()}
+    context_max = select_context(pool_order, n_rules_map, k_max)
+    ctx_scores = {
+        c: context_scores_for_card(engine._conn, c, candidate_cache=engine._candidate_cache) for c in context_max
+    }
+    legal_pool = frozenset(engine.legal_cards([commander]))
+
+    graded_labels: dict[str, float] = {}
+    edhrec_top_30: frozenset[str] | None = None
+    if edhrec_conn is not None:
+        labels = load_edhrec_labels(edhrec_conn, commander)
+        graded_labels = dict(labels.graded_labels)
+        edhrec_top_30 = labels.top_30_set
+    zero_score_labels = frozenset(n for n in graded_labels if n not in base_totals)
+
+    sim = ContextSim(
+        commander=commander,
+        base_totals=base_totals,
+        base_top_30=pool_order[:30],
+        pool_order=pool_order,
+        legal_pool=legal_pool,
+        context_max=context_max,
+        ctx_scores=ctx_scores,
+        cmc_lookup=cmc_lookup,
+        rank_lookup=rank_lookup,
+        graded_labels=graded_labels,
+        edhrec_top_30=edhrec_top_30,
+        zero_score_labels=zero_score_labels,
+    )
+    check = assemble_cell(sim, ContextCell(0, 0.0))
+    if check != sim.base_top_30:
+        diff = [(a, b) for a, b in zip(check, sim.base_top_30, strict=False) if a != b][:5]
+        raise SelfCheckError(f"{commander}: w=0 assembly diverges from page(); first mismatches: {diff}")
+    return sim
