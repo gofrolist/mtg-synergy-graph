@@ -114,13 +114,15 @@ _UNRANKED = 10**9
 def _plausible_set(n_rules_map: Mapping[str, int], base_totals: Mapping[str, float]) -> frozenset[str]:
     """Mechanical-plausibility gate over ``base_totals`` (hidden_gems.py FR2 criteria).
 
-    Delegates to the canonical ``_cohort_median`` / ``_plausibility_from_maps``
-    helpers (``hidden_gems.py``) so this instrument's gate can never
-    silently diverge from the audit's ``hidden_gem_hit_rate`` gate:
-    >=2 distinct rules OR total above the median of *strictly-positive*
-    totals — with the degenerate-case guard (median <= 0 forces the
-    median-OR leg to False rather than degenerating to ``total > 0``,
-    which would flag every positive candidate as plausible).
+    Delegates to the canonical helpers in ``bench.hidden_gems`` (``_cohort_median`` /
+    ``_plausibility_from_maps``) so the FORMULA cannot drift — but the INPUTS differ
+    from the audit gate: this instrument feeds ``page()`` total scores (which include
+    staple/circuit/cmc/rank bonuses) and per-candidate distinct-rule counts, while
+    the audit / portfolio_sim feed tensor rule-net contribution totals. The resulting
+    gem rate is therefore INSTRUMENT-LOCAL and must not be compared to the audit's
+    ``hidden_gem_hit_rate`` or to quality_sim/portfolio_sim gem bands (empirically:
+    golden-500 gem half-width 0.0235 here vs 0.0355 there on the same fixture). Gate
+    any decision on THIS instrument's own pinned band.
     """
     median = _cohort_median(base_totals)
     return frozenset(name for name in base_totals if _plausibility_from_maps(name, n_rules_map, base_totals, median))
