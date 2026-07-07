@@ -175,6 +175,55 @@ class TestFindSubtypeSupply:
         assert out == []
 
 
+class _FakeCandidateCache:
+    """Minimal stand-in for ``penalties.CandidateCache`` -- only the field
+    ``_find_subtype_supply_complements``'s body direction reads."""
+
+    def __init__(self, candidate_attr_rows: dict) -> None:
+        self.candidate_attr_rows = candidate_attr_rows
+
+
+class TestCandidateCachePath:
+    def test_body_direction_matches_via_cache(self, conn):
+        _add_producer(conn, "Sprout Swarm", "Saproling")  # establishes vocab
+        _add_card(conn, "Mycoloth", subtypes="Fungus Saproling")
+        cache = _FakeCandidateCache(
+            {
+                "Sprout Swarm": {"name": "Sprout Swarm", "subtypes": ""},
+                "Mycoloth": {"name": "Mycoloth", "subtypes": "Fungus Saproling"},
+            }
+        )
+        out = _find_subtype_supply_complements(conn, [DEATH_TRIGGER], {"Slimefoot"}, candidate_cache=cache)
+        bodies = {c.candidate for c in out if c.rule_id == "subtype_supply_body"}
+        assert "Mycoloth" in bodies
+
+    def test_cache_path_and_sql_path_agree(self, conn):
+        """Same DB, same query -- cache-backed and SQL-backed body scans
+        must produce identical results (equivalence, not just a smoke test)."""
+        _add_producer(conn, "Sprout Swarm", "Saproling")
+        _add_card(conn, "Mycoloth", subtypes="Fungus Saproling")
+        _add_card(conn, "Ruthless Knave", subtypes="Human Pirate")
+
+        no_cache = _find_subtype_supply_complements(conn, [DEATH_TRIGGER], {"Slimefoot"})
+
+        rows = {}
+        for r in conn.execute("SELECT name, subtypes FROM cards"):
+            rows[r["name"]] = {"name": r["name"], "subtypes": r["subtypes"]}
+        cache = _FakeCandidateCache(rows)
+        with_cache = _find_subtype_supply_complements(conn, [DEATH_TRIGGER], {"Slimefoot"}, candidate_cache=cache)
+
+        key = lambda c: (c.rule_id, c.candidate, c.cand_event)  # noqa: E731
+        assert sorted(no_cache, key=key) == sorted(with_cache, key=key)
+
+    def test_cache_path_respects_commander_self_exclusion(self, conn):
+        _add_producer(conn, "Slimefoot, the Stowaway", "Saproling")
+        cache = _FakeCandidateCache({"Slimefoot, the Stowaway": {"name": "Slimefoot, the Stowaway", "subtypes": ""}})
+        out = _find_subtype_supply_complements(
+            conn, [DEATH_TRIGGER], {"Slimefoot, the Stowaway"}, candidate_cache=cache
+        )
+        assert out == []
+
+
 class TestWiring:
     def test_registered_in_card_level_rules(self):
         from mtg_synergy_graph.complement_rules.registry import CARD_LEVEL_RULES

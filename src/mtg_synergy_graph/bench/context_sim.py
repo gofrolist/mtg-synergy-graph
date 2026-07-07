@@ -351,22 +351,15 @@ def payoff_subtypes(conn: sqlite3.Connection, commander: str) -> frozenset[str]:
 
     Re-derives the per-commander subtype the same way
     ``cohorts.subtype_death_payoff`` selects cohort members, so the
-    whitelist baseline is exactly "the predicate as a rule".
+    whitelist baseline is exactly "the predicate as a rule". Delegates to
+    the shared ``death_payoff`` implementation (the same one the
+    ``subtype_supply`` scoring rule uses) instead of re-deriving the
+    death-trigger scan locally.
     """
-    from .cohorts import _is_death_event, _token_subtype_vocab, _valid_filter_subtype_tokens
+    from ..death_payoff import payoff_subtypes_from_ports
+    from ..graph_engine import load_ports_for_set
 
-    vocab = _token_subtype_vocab(conn)
-    subs: set[str] = set()
-    rows = conn.execute(
-        "SELECT event_class, valid_filter, zone_origin, zone_destination "
-        "FROM card_ports WHERE card_name = ? AND port_type = 'trigger'",
-        (commander,),
-    )
-    for event_class, valid_filter, zo, zd in rows:
-        if not _is_death_event(event_class, zo, zd):
-            continue
-        subs.update(t for t in _valid_filter_subtype_tokens(valid_filter or "") if t in vocab)
-    return frozenset(subs)
+    return frozenset(payoff_subtypes_from_ports(conn, load_ports_for_set(conn, [commander])))
 
 
 def whitelist_scores(conn: sqlite3.Connection, commander: str) -> dict[str, float]:

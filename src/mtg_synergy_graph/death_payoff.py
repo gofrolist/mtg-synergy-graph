@@ -100,11 +100,13 @@ def payoff_subtypes_from_ports(conn: sqlite3.Connection, cmdr_ports: list) -> li
     the token-producible vocabulary (:func:`token_subtype_vocab`) — the same
     two conditions as ``bench.cohorts.subtype_death_payoff``, applied to an
     already-loaded port list instead of a DB-wide scan.
+
+    Pass 1 (over ``cmdr_ports``, no DB access) collects every death-trigger
+    ``valid_filter``; the great majority of commanders have none, so this
+    lets us return ``[]`` before ever calling :func:`token_subtype_vocab`
+    (a DB-wide scan) on pass 2.
     """
-    vocab = token_subtype_vocab(conn)
-    if not vocab:
-        return []
-    subs: set[str] = set()
+    death_filters: list[str] = []
     for p in cmdr_ports:
         if (p.get("port_type") or "").strip() != "trigger":
             continue
@@ -114,5 +116,14 @@ def payoff_subtypes_from_ports(conn: sqlite3.Connection, cmdr_ports: list) -> li
         valid_filter = p.get("valid_filter") or ""
         if not valid_filter:
             continue
+        death_filters.append(valid_filter)
+    if not death_filters:
+        return []
+
+    vocab = token_subtype_vocab(conn)
+    if not vocab:
+        return []
+    subs: set[str] = set()
+    for valid_filter in death_filters:
         subs.update(t for t in valid_filter_subtype_tokens(valid_filter) if t in vocab)
     return sorted(subs)

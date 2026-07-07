@@ -26,10 +26,15 @@ the Task 3 commit is config-hash-neutral.
 from __future__ import annotations
 
 import sqlite3
+from collections import defaultdict
+from typing import TYPE_CHECKING
 
 from mtg_synergy_graph.death_payoff import payoff_subtypes_from_ports
 
 from .core import PortComplement, PortRow
+
+if TYPE_CHECKING:
+    from ..penalties import CandidateCache
 
 #: Shipped (plan 2026-07-07-001 Task 6, 2026-07-07) at operating point
 #: (producer=1.5, body=0.5) — verdict PARTIAL, human-approved SHIP on the
@@ -43,8 +48,15 @@ def _find_subtype_supply_complements(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
     cmdr_set: set[str],
+    candidate_cache: CandidateCache | None = None,
 ) -> list[PortComplement]:
-    """Producer + body supply for subtype-keyed death-payoff commanders."""
+    """Producer + body supply for subtype-keyed death-payoff commanders.
+
+    When ``candidate_cache`` is provided, the body direction iterates the
+    shared in-memory ``candidate_attr_rows`` instead of re-issuing the
+    full ``cards`` table scan for every commander in a batch run (see
+    ``density._find_etb_self_complements`` for the established pattern).
+    """
     if not _ENABLE_SUBTYPE_SUPPLY:
         return []
     subs = payoff_subtypes_from_ports(conn, cmdr_ports)
@@ -53,16 +65,24 @@ def _find_subtype_supply_complements(
 
     results: list[PortComplement] = []
 
+    # Producer direction: one query for all payoff subtypes at once,
+    # keyed by subtype so we can credit each card to the FIRST subtype
+    # (in sorted order) it produces -- matches the previous per-subtype
+    # query loop's dedup semantics exactly.
     seen_producer: set[str] = set()
+    placeholders = ",".join("?" * len(subs))
+    producers_by_sub: dict[str, list[str]] = defaultdict(list)
+    cur = conn.execute(
+        "SELECT DISTINCT p.card_name, a.attr_value FROM card_ports p "
+        "JOIN port_attributes a ON a.port_id = p.id "
+        f"WHERE a.attr_kind = 'token_subtype' AND a.attr_value IN ({placeholders})",
+        tuple(subs),
+    )
+    for row in cur.fetchall():
+        producers_by_sub[row["attr_value"]].append(row["card_name"])
+
     for sub in subs:
-        cur = conn.execute(
-            "SELECT DISTINCT p.card_name FROM card_ports p "
-            "JOIN port_attributes a ON a.port_id = p.id "
-            "WHERE a.attr_kind = 'token_subtype' AND a.attr_value = ?",
-            (sub,),
-        )
-        for r in cur.fetchall():
-            name = r["card_name"]
+        for name in producers_by_sub.get(sub, ()):
             if name in cmdr_set or name in seen_producer:
                 continue
             seen_producer.add(name)
@@ -78,12 +98,23 @@ def _find_subtype_supply_complements(
 
     sub_set = set(subs)
     seen_body: set[str] = set()
-    cur = conn.execute("SELECT name, subtypes FROM cards WHERE subtypes IS NOT NULL AND subtypes != ''")
-    for r in cur.fetchall():
-        name = r["name"]
+    if candidate_cache is not None:
+        body_rows: list[tuple[str, str]] = [
+            (row["name"], row["subtypes"] or "") for row in candidate_cache.candidate_attr_rows.values()
+        ]
+    else:
+        body_rows = [
+            (r["name"], r["subtypes"] or "")
+            for r in conn.execute(
+                "SELECT name, subtypes FROM cards WHERE subtypes IS NOT NULL AND subtypes != ''"
+            ).fetchall()
+        ]
+    for name, subtypes in body_rows:
+        if not subtypes:
+            continue
         if name in cmdr_set or name in seen_body:
             continue
-        matched = sub_set & set((r["subtypes"] or "").split())
+        matched = sub_set & set(subtypes.split())
         if not matched:
             continue
         seen_body.add(name)
