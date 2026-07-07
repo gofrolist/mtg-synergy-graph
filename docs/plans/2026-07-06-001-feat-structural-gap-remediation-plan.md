@@ -8,6 +8,26 @@ origin: forensics readout 2026-07-06 (.audit/forensics.md, config_hash 34a9d110�
 
 # feat: Structural Gap Remediation Implementation Plan
 
+> **DECISION 2026-07-06: Phase A (deck-context second pass) DECLINED at the
+> Stage-1 kill test (Task 5).** Every cell of the 3×3 grid failed every gate.
+> Cohort fixture (n=33): best cell mean ΔNDCG −0.0019 vs G1 bar +0.0567; all
+> cells negative; reach 0. Golden-100: mean Δ −0.0230..−0.0478, 19–35 cliffs
+> (<−0.05) per 100 commanders vs G5 bar of zero, reach 0–5 vs G3 floor 100;
+> traps cliff (Kess −0.31, Edgar −0.18 at k=10/w=0.5). G4: the disguised
+> whitelist beats the mechanism by ~0.07 (whitelist cohort Δ +0.0531 @1 cliff /
+> +0.0697 @6 cliffs vs mechanism best −0.0019) — the mechanism is strictly
+> dominated by the predicate it needed to beat. Instrument internally
+> validated: the whitelist's positive deltas flow through the SAME assembly
+> path, so the mechanism's negatives are real, and the w=0 self-check passed
+> on all 633 sims. Root cause (scale diagnostic, Slimefoot): the mean-of-IDF-
+> sums context term is flood-shaped — ~22k candidates receive it, generic
+> breadth accumulates the largest terms (top ctx 0.417 > #30 base total
+> 0.275), while zero-score labels max at 0.08, unreachable at any safe w.
+> Tasks 6–8 skipped per pinned routing; zero scoring-path changes; pins
+> untouched. Phase C proceeds independently. Evidence:
+> docs/solutions/best-practices/deck-context-null-result-2026-07-06.md
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Attack the two structural failure modes the forensics taxonomy proves rule-authoring cannot reach — NO_RULES (43.0% of misses: archetype synergy invisible to commander-pairwise matching) via a deck-context second scoring pass, and OUTRANKED (45.6%: no card-quality signal) via a magnitude-derived rate prior — each behind a committed kill-test instrument with pinned gates before any scoring-path change.
