@@ -79,6 +79,55 @@ uv run scripts/portfolio_sim.py sweep                                    # Decay
 uv run python scripts/demand_coverage.py                                 # Full 100-cmdr run (~2 min; includes a live forensics pass)
 uv run python scripts/demand_coverage.py --commander "Yawgmoth, Thran Physician"  # Filtered debug run
 
+# Kill-test instruments from plan 2026-07-06-001 (BOTH cycles DECLINED — standing infra;
+# zero scoring-path changes; reports to .audit/context_sim/ and .audit/quality_sim/).
+# Any future deck-context / pool-context mechanism or card-quality prior MUST pre-pin
+# gates on these instruments' own w=0/q=0 bands (bands are instrument-specific;
+# context_sim's gem band is instrument-local — do NOT compare it to the audit's
+# hidden_gem_hit_rate or to quality_sim's gem band). Null-result docs:
+# docs/solutions/best-practices/deck-context-null-result-2026-07-06.md,
+# docs/solutions/best-practices/quality-rate-prior-null-result-2026-07-06.md
+uv run python scripts/context_sim.py bands --fixture tests/fixtures/golden_set_archetype_payoff.json  # w=0 noise bands (pin BEFORE sweeps)
+uv run python scripts/context_sim.py sweep --fixture tests/fixtures/golden_set_run.json               # deck-context grid; --whitelist-baseline for the G4 comparator
+uv run python scripts/quality_sim.py bands --fixture tests/fixtures/golden_set_run_500.json           # q=0 noise bands
+uv run python scripts/quality_sim.py sweep --fixture tests/fixtures/golden_set_run.json               # quality-rate grid + trap sidecar
+
+# Archetype-payoff cohort fixture (plan 2026-07-03-001) — an EVAL INSTRUMENT, not a
+# scoring change. The golden-100/500 audit fixtures hold only 2/4 of the archetype-
+# payoff cohort, so a future cohort mechanism DECLINEs on eval-set dilution rather
+# than merit. This names the cohort (subtype-keyed death-payoff commanders) and
+# reports its NDCG undiluted. Zero scoring-path changes; the fixture carries its own
+# config_hash and joins the no-DB freshness gate (tests/bench/test_fixture_freshness.py).
+# Cohort predicate: src/mtg_synergy_graph/bench/cohorts.py (seeded with
+# subtype_death_payoff; 36 cohort / 33 buildable after the High-Synergy EDHREC filter
+# — dropped: Daryl, Jenny Flint, Miara). Build/pin/read/band:
+uv run python scripts/bootstrap_archetype_payoff_fixture.py               # (Re)build + pin the cohort fixture. Use THIS (not `--repin`) after a cardsfolder refresh: `--repin` preserves the OLD cohort_members snapshot and does NOT re-derive membership, and a data refresh does not flip config_hash so the freshness gate will not force a rebuild. Snapshots cohort_members for pin-reproducible slicing.
+uv run scripts/bench.py audit --repin --yes --fixture tests/fixtures/golden_set_archetype_payoff.json  # Re-pin scores + persist tensor to SQLite; preserves (does NOT re-derive) the cohort_members snapshot — correct only for a scoring-config re-pin, not a data refresh
+uv run scripts/bench.py audit --per-commander-ndcg --fixture tests/fixtures/golden_set_archetype_payoff.json  # Read the in-cohort vs rest NDCG slice (membership from the pinned snapshot)
+uv run scripts/portfolio_sim.py bands --fixture tests/fixtures/golden_set_archetype_payoff.json  # Separate page-ranking NDCG band (different instrument — see below)
+# NOISE BAND — the gate for the --per-commander-ndcg in-cohort readout is the
+# bootstrap band of THAT SAME instrument's distribution (score_commander top-N
+# NDCG@30, seed 17): cohort mean 0.1850, 95% CI [0.1286, 0.2444], half-width
+# = 0.0579. A cohort in-cohort mean-delta below +0.0579 is NOISE, not a win.
+#   Recomputed 2026-07-07 after shipping the subtype-supply rule (plan
+#   2026-07-07-001, producer=1.5/body=0.5) and re-pinning all three
+#   fixtures — the baseline this band is measured against moved, so the
+#   old 0.1436/0.0448 band is stale. Any future cohort-mechanism gate must
+#   use THIS band, not the pre-ship one.
+#   NOTE: `portfolio_sim bands` reports a DIFFERENT number (mean 0.2858, half-
+#   width 0.0567) because it ranks via full engine.page() production ranking,
+#   not score_commander top-N — do NOT compare its band to the --per-commander-
+#   ndcg readout. Recompute the reporter band by bootstrap_band()-ing the
+#   reporter's in-cohort live NDCG@30 values (seed 17) after a data refresh.
+# A cohort gain is also NECESSARY-BUT-NOT-SUFFICIENT: the cohort is selected by
+# the same predicate a rule would key on, so a disguised whitelist scores
+# maximally by construction — any future SHIP must ALSO clear a whole-fixture
+# golden-500 no-regression check AND a whitelist-equivalence check.
+# (2026-07-07: the subtype-supply rule shipped under this discipline via the
+# plan's pre-registered PARTIAL band — S1 +0.0650 vs the +0.0697 bar,
+# human-approved on Pareto-dominance at ≤1 cliff; see docs/RULE_HISTORY.md
+# 2026-07-07.)
+
 # Tensor-driven weight optimizer (plan 2026-04-26-001 M1) — Coordinate Ascent over
 # _RULE_QUALITY_MULTIPLIER. Emits .audit/optimize_proposal.json for human review;
 # never auto-mutates src/mtg_synergy_graph/data/scoring_weights.json. Append-only history at

@@ -16,7 +16,7 @@ from unittest.mock import patch
 import pytest
 
 from mtg_synergy_graph.bench.tensor import compute_config_hash
-from mtg_synergy_graph.complement_rules import pathway
+from mtg_synergy_graph.complement_rules import pathway, subtype_supply
 from mtg_synergy_graph.complement_rules.core import find_all_complements
 from mtg_synergy_graph.complement_rules.registry import CARD_LEVEL_RULES, DECLARATIVE_RULE_IDS
 from mtg_synergy_graph.db import open_db
@@ -154,6 +154,10 @@ def test_scoring_config_inputs_exposes_pathway_flag() -> None:
     (``event_match_seed_digest``, ``declarative_rules_digest``,
     ``staples``) so seed-JSON edits and STAPLES tuning also invalidate
     the pinned tensor.
+
+    Plan 2026-07-07-001 review follow-up (F1) appends
+    ``enable_subtype_supply`` so the subtype-supply rule gate
+    (previously hash-blind) also invalidates the pinned tensor.
     """
     from mtg_synergy_graph.universal_scorer import ScoringConfigInputs
 
@@ -173,6 +177,7 @@ def test_scoring_config_inputs_exposes_pathway_flag() -> None:
         "enable_tribal_payoff_tier",
         "enable_pool_scaled_flat_weights",
         "pool_scale_floor",
+        "enable_subtype_supply",
     )
 
 
@@ -193,6 +198,23 @@ def test_config_hash_flips_when_pathway_flag_flips(mini_db: sqlite3.Connection) 
     # Flag default is now True (landed 2026-04-23); patch to False
     # to observe the flip.
     with patch.object(pathway, "_ENABLE_PATHWAY_RULES", False):
+        during = compute_config_hash()
+    after = compute_config_hash()
+    assert before == after  # flag reverts cleanly
+    assert before != during  # flag flip shifts the hash
+
+
+def test_config_hash_flips_when_subtype_supply_flag_flips(mini_db: sqlite3.Connection) -> None:
+    """Plan 2026-07-07-001 review follow-up (F1): flipping
+    ``_ENABLE_SUBTYPE_SUPPLY`` must shift the config hash so flag=True vs
+    flag=False runs cannot compare against each other's pinned tensor.
+    Previously this flag was absent from ``ScoringConfigInputs`` entirely
+    (hash-blind).
+    """
+    before = compute_config_hash()
+    # Flag default is True (shipped 2026-07-07); patch to False to
+    # observe the flip.
+    with patch.object(subtype_supply, "_ENABLE_SUBTYPE_SUPPLY", False):
         during = compute_config_hash()
     after = compute_config_hash()
     assert before == after  # flag reverts cleanly

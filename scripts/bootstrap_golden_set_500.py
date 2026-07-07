@@ -17,14 +17,12 @@ Re-run after every cardsfolder import or scoring config change. Takes
 from __future__ import annotations
 
 import sys
-from datetime import UTC, datetime
 from pathlib import Path
 
 # Make src/ importable when run as a bare script.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from mtg_synergy_graph.bench.fixture import build_fixture
-from mtg_synergy_graph.bench.tensor import compute_config_hash
+from mtg_synergy_graph.bench.fixture import build_and_write_fixture, high_synergy_slug_counts
 from mtg_synergy_graph.db import open_db
 from mtg_synergy_graph.validate import commander_to_slug
 
@@ -41,15 +39,8 @@ def _select_top_commanders() -> list[str]:
     cards_conn = open_db(str(SYNERGY_DB))
     edhrec_conn = open_db(str(EDHREC_DB))
     try:
-        # Build the slug -> count map in one query instead of N round trips.
-        # The corpus is ~25k commander slugs; one GROUP BY beats 1.5k point lookups.
-        slug_counts: dict[str, int] = dict(
-            edhrec_conn.execute(
-                "SELECT commander_slug, COUNT(*) FROM edhrec_card_synergy "
-                "WHERE section = 'High Synergy Cards' "
-                "GROUP BY commander_slug"
-            ).fetchall()
-        )
+        # slug -> High-Synergy row count in one GROUP BY (shared helper).
+        slug_counts = high_synergy_slug_counts(edhrec_conn)
 
         # Pull more than 500 candidates because some will fail the high-synergy
         # filter. ~3x oversample empirically covers it.
@@ -101,20 +92,9 @@ def main() -> int:
             file=sys.stderr,
         )
 
-    config_hash = compute_config_hash()
-    conn = open_db(str(SYNERGY_DB))
-    edhrec_conn = open_db(str(EDHREC_DB))
-    try:
-        fixture = build_fixture(conn, commanders, edhrec_conn=edhrec_conn)
-    finally:
-        conn.close()
-        edhrec_conn.close()
-
-    fixture.config_hash = config_hash
-    fixture.created_at = datetime.now(UTC).isoformat(timespec="seconds")
-    fixture.write(OUTPUT_PATH)
+    fixture = build_and_write_fixture(SYNERGY_DB, EDHREC_DB, commanders, OUTPUT_PATH)
     print(
-        f"wrote {len(fixture.entries)} entries to {OUTPUT_PATH} (config_hash={config_hash[:12]}...)",
+        f"wrote {len(fixture.entries)} entries to {OUTPUT_PATH} (config_hash={fixture.config_hash[:12]}...)",
         file=sys.stderr,
     )
     return 0

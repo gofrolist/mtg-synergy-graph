@@ -33,6 +33,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from mtg_synergy_graph.bench.cohorts import archetype_payoff_cohort
 from mtg_synergy_graph.bench.fixture import FixtureEntry, PinnedFixture, score_commander
 from mtg_synergy_graph.bench.optimize import load_edhrec_labels
 from mtg_synergy_graph.db import open_db
@@ -153,6 +154,83 @@ def compute_identity_slices(
     return sorted(slices, key=lambda s: (order.get(s.identity_class, len(order)), s.identity_class))
 
 
+@dataclass(frozen=True)
+class CohortSliceRow:
+    """Aggregated pinned/live/delta stats for one cohort partition."""
+
+    slice_name: str
+    n: int
+    mean_pinned: float
+    mean_live: float
+    mean_delta: float
+    worst_delta: float
+    violations: int
+
+
+def _cohort_slice_row(slice_name: str, group: list[PerCommanderNdcgRow]) -> CohortSliceRow:
+    """Aggregate one partition; an empty group yields a guarded zero-count row."""
+    n = len(group)
+    if n == 0:
+        return CohortSliceRow(slice_name, 0, 0.0, 0.0, 0.0, 0.0, 0)
+    return CohortSliceRow(
+        slice_name=slice_name,
+        n=n,
+        mean_pinned=sum(r.pinned_ndcg for r in group) / n,
+        mean_live=sum(r.live_ndcg for r in group) / n,
+        mean_delta=sum(r.delta for r in group) / n,
+        worst_delta=min(r.delta for r in group),
+        violations=sum(1 for r in group if r.delta < PER_COMMANDER_REGRESSION_THRESHOLD),
+    )
+
+
+def compute_cohort_slices(
+    rows: list[PerCommanderNdcgRow],
+    cohort_names: set[str],
+) -> list[CohortSliceRow]:
+    """Partition per-commander rows into ``in-cohort`` / ``rest`` slices.
+
+    Both rows are always returned in a fixed order (``in-cohort`` first) even
+    when a partition is empty — a missing block would read as "no cohort" rather
+    than "cohort empty here" (plan 2026-07-03-001 Unit 3). Means are guarded
+    against division by zero.
+    """
+    in_cohort = [r for r in rows if r.commander in cohort_names]
+    rest = [r for r in rows if r.commander not in cohort_names]
+    return [
+        _cohort_slice_row("in-cohort", in_cohort),
+        _cohort_slice_row("rest", rest),
+    ]
+
+
+def _render_cohort_slices(slices: list[CohortSliceRow], *, from_snapshot: bool) -> list[str]:
+    """Render the archetype-payoff cohort slice table (plan 2026-07-03-001 R3).
+
+    A cohort-NDCG gain here is necessary-but-not-sufficient (the cohort is
+    selected by the same predicate a future rule would key on); the membership
+    provenance line records whether the partition is reproducible from the pin.
+    """
+    provenance = (
+        "membership: pinned `cohort_members` snapshot (reproducible from the pin)"
+        if from_snapshot
+        else "membership: live `archetype_payoff_cohort()` — NOT pin-reproducible "
+        "(fixture carries no cohort_members snapshot)"
+    )
+    lines = [
+        "## Cohort slices (archetype-payoff)",
+        "",
+        provenance,
+        "",
+        f"{'slice':<12} {'n':>6} {'mean pinned':>12} {'mean live':>12} {'mean delta':>12} {'violations':>10}",
+        f"{'-' * 12} {'-' * 6} {'-' * 12} {'-' * 12} {'-' * 12} {'-' * 10}",
+    ]
+    for s in slices:
+        lines.append(
+            f"{s.slice_name:<12} {s.n:>6} {s.mean_pinned:>12.4f} {s.mean_live:>12.4f} "
+            f"{s.mean_delta:>+12.4f} {s.violations:>10}"
+        )
+    return lines
+
+
 def _render_aggregate_summary(rows: list[PerCommanderNdcgRow]) -> list[str]:
     """Render the aggregate summary block (plan 2026-07-02-001 R8).
 
@@ -196,6 +274,8 @@ def render_per_commander_ndcg_markdown(
     fixture_path: str,
     config_hash: str,
     identity_class_by_commander: dict[str, str] | None = None,
+    cohort_names: set[str] | None = None,
+    cohort_from_snapshot: bool = True,
 ) -> str:
     """Render rows as a Markdown table.
 
@@ -206,7 +286,11 @@ def render_per_commander_ndcg_markdown(
     When ``rows`` is non-empty an aggregate summary block follows the
     table; when ``identity_class_by_commander`` is also provided (the
     handler passes :func:`fetch_identity_classes` output), an
-    identity-size slice table follows the aggregate block.
+    identity-size slice table follows the aggregate block. When
+    ``cohort_names`` is provided, an archetype-payoff cohort slice
+    (``in-cohort`` / ``rest``) follows the identity block;
+    ``cohort_from_snapshot`` records whether membership came from the
+    fixture snapshot (reproducible) or a live computation.
     """
     lines: list[str] = []
     lines.append("# bench.py audit --per-commander-ndcg")
@@ -239,6 +323,11 @@ def render_per_commander_ndcg_markdown(
         slices = compute_identity_slices(rows, identity_class_by_commander)
         lines.append("")
         lines.extend(_render_identity_slices(slices))
+
+    if cohort_names is not None:
+        cohort_slices = compute_cohort_slices(rows, cohort_names)
+        lines.append("")
+        lines.extend(_render_cohort_slices(cohort_slices, from_snapshot=cohort_from_snapshot))
     return "\n".join(lines)
 
 
@@ -325,6 +414,17 @@ def handle_per_commander_ndcg(args: argparse.Namespace) -> int:
     try:
         rows = compute_per_commander_ndcg_rows(conn, edhrec_conn, pinned)
         identity_classes = fetch_identity_classes(conn, [e.commander for e in pinned.entries])
+        # Cohort membership must be resolved BEFORE conn.close() — the report
+        # renders after the connection is closed, so a live cohort query issued
+        # post-close would fail. Prefer the fixture's snapshot (reproducible from
+        # the pin); fall back to a live, non-reproducible computation otherwise
+        # (Key Decision 4).
+        if pinned.cohort_members:
+            cohort_names: set[str] = set(pinned.cohort_members)
+            cohort_from_snapshot = True
+        else:
+            cohort_names = archetype_payoff_cohort(conn)
+            cohort_from_snapshot = False
     finally:
         conn.close()
         edhrec_conn.close()
@@ -335,6 +435,8 @@ def handle_per_commander_ndcg(args: argparse.Namespace) -> int:
         fixture_path=str(fixture_path),
         config_hash=pinned.config_hash,
         identity_class_by_commander=identity_classes,
+        cohort_names=cohort_names,
+        cohort_from_snapshot=cohort_from_snapshot,
     )
 
     output_target = getattr(args, "output", None)

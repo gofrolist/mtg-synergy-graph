@@ -142,6 +142,12 @@ def handle_repin(args: argparse.Namespace) -> int:
     finally:
         conn.close()
         edhrec_conn.close()
+    # build_fixture(existing=...) already inherits the cohort-membership
+    # snapshot (plan 2026-07-03-001 Key Decision 4), so --repin preserves it
+    # structurally. NOTE: --repin does NOT re-derive membership from the live
+    # predicate — after a cardsfolder refresh that shifts the cohort, rebuild
+    # via scripts/bootstrap_archetype_payoff_fixture.py instead (a data refresh
+    # does not flip config_hash, so the freshness gate will not force it).
     fresh.write(fixture_path)
     print(
         f"--repin wrote {len(fresh.entries)} commanders to {fixture_path} "
