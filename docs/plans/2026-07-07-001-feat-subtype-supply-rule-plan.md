@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**status:** draft
+**status:** shipped (PARTIAL band, human-approved)
 **plan id:** 2026-07-07-001
 **evidence base:** docs/solutions/best-practices/deck-context-null-result-2026-07-06.md (Whitelist Finding), docs/plans/2026-07-03-001-feat-archetype-payoff-cohort-fixture-plan.md (binding obligations), docs/plans/2026-07-06-001-feat-structural-gap-remediation-plan.md (Phase A DECLINE that produced the finding)
 
@@ -861,3 +861,44 @@ Rule helper + tests + death_payoff module remain as standing infra
 - **Type consistency:** `payoff_subtypes_from_ports(conn, cmdr_ports) -> list[str]` defined in Task 1, consumed in Task 2; rule_ids `subtype_supply_producer`/`subtype_supply_body` identical across Tasks 2/3/4/5/6.
 - **Known judgment calls left to the implementer with guidance:** exact `context_sim.py bands` CLI flags (check `--help`); the fixture's cohort-members JSON key (read the bootstrap script); `PortRow` import location (match `density.py`).
 - **Deliberate scope exclusions (YAGNI):** no valid_filter qualifier narrowing (e.g. `!token` handling) beyond what the cohort predicate already does — the whitelist bars were measured without it; no non-death payoff triggers (ETB tribal is `token_producer`/`tribal_density` territory); no declarative migration (grammar can't express it — revisit only if the grammar grows a parameterized-join op).
+
+---
+
+## DECISION (Task 6, 2026-07-07)
+
+**Verdict: PARTIAL, ship approved by human decision (Pareto-dominance
+rationale).** S1 did NOT pass (cohort ΔNDCG +0.0650 < the +0.0697
+whitelist bar) — this is not a claim that S1 passed. S2–S6 all pass at
+the chosen cell.
+
+**Shipped operating point: producer=1.5, body=0.5** (overriding the
+plan's own mechanical tie-break of fewer-cliffs-then-better-gems, which
+would have selected the sibling cell (1.5, 1.0)).
+
+**Chosen-cell numbers:** cohort ΔNDCG +0.0650, cohort gemΔ −0.0232
+(within the −0.0242 band), 1 shallow cliff (Jason Bright, Glowing
+Prophet −0.0533); golden-500 ΔNDCG +0.0014 / gemΔ −0.0005; golden-100
+audit positive (Δ +30.5059), no gem stderr warning.
+
+**Rationale:** at any side-effect budget the team is willing to accept
+(≤1 cliff), (1.5, 0.5) Pareto-dominates both hardcoded-whitelist
+comparators (producer-only 0.25 +0.0531 / full 0.50 +0.0523) — higher
+ΔNDCG, comparable-or-better gems, no worse cliffs. It also dominates the
+plan's mechanical tie-break choice (1.5, 1.0) on cliff depth: (1.5,
+1.0)'s single cliff is a −0.1630 hole (Lazav, Wearer of Faces) vs (1.5,
+0.5)'s shallow −0.0533, at a cost of only 0.0018 less ΔNDCG and 0.0060
+worse gemΔ. The human weighed bounded worst-case per-commander damage
+over that small gem-rate edge.
+
+**Cliffs-track-producer-weight finding:** the 3×3 sweep showed cliff
+count tracks the `producer` multiplier almost independent of `body`
+(0-1 at producer=1.5, 6 at producer=2.5, 9 at producer=3.5); do not
+raise `subtype_supply_producer` without re-running the sweep.
+
+Full gate table, sweep data, and provenance: `.audit/subtype_supply/decision.md`
+(gitignored). Permanent record: `docs/RULE_HISTORY.md` 2026-07-07 entry.
+All three fixtures (`golden_set_run.json`, `golden_set_run_500.json`,
+`golden_set_archetype_payoff.json`) re-pinned at config_hash
+`5adeea6eea364655c75eb6fca7859bfda092698c67ec2eee7956ce096c928ea1`. The
+cohort reporter noise band (`--per-commander-ndcg`, seed 17) moved to
+mean 0.1850, half-width 0.0579 (CLAUDE.md updated).

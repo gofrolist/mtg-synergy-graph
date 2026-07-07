@@ -5,6 +5,64 @@ impact notes. See `scripts/_audit_rule_impact.py` for the per-rule impact
 methodology (NDCG@30 metric + golden-set safety net + CONTENTIOUS verdict).
 See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
+## 2026-07-07
+
+### Subtype-supply rule shipped — PARTIAL, human-approved (plan 2026-07-07-001)
+
+New rule_ids `subtype_supply_producer` / `subtype_supply_body`
+(`complement_rules/subtype_supply.py`): commanders with a
+subtype-keyed death-payoff trigger (the archetype-payoff cohort
+predicate, `death_payoff.payoff_subtypes_from_ports` — Slimefoot,
+Wilhelt, Ygra, …) score candidates that produce tokens of the payoff
+subtype (`producer`, `port_attributes.attr_kind='token_subtype'`) or
+whose `cards.subtypes` contains it (`body`, exact-token split, not
+`LIKE`). Both IDF-weighted like any other rule — NOT a flat bonus —
+so rare payoff subtypes (Saproling) outweigh common ones (Zombie)
+automatically. Direct successor to the Whitelist Finding in
+`docs/solutions/best-practices/deck-context-null-result-2026-07-06.md`.
+
+**Gate table at the shipped cell (producer=1.5, body=0.5)** — full
+9-cell sweep and provenance in `.audit/subtype_supply/decision.md`
+(gitignored):
+
+| Gate | Threshold | Measured | Verdict |
+|---|---|---|---|
+| S1 cohort ΔNDCG | ≥ +0.0697 | **+0.0650** | FAIL — inside PARTIAL band [+0.0567, +0.0697) |
+| S2 cohort gemΔ | ≥ −0.0242 | **−0.0232** | PASS |
+| S3 cohort cliffs (ΔNDCG@30 < −0.05) | ≤ 1 | **1** (Jason Bright, Glowing Prophet −0.0533) | PASS |
+| S4 golden-500 ΔNDCG | ≥ −0.0136 | **+0.0014** | PASS |
+| S4 golden-500 gemΔ | ≥ −0.0235 | **−0.0005** | PASS |
+| S5 golden-100 audit verdict | non-NEGATIVE | positive (Δ +30.5059) | PASS |
+| S5 gem stderr warning | must not fire | did not fire (gemΔ −0.0010) | PASS |
+| S6 rule_quality_gate + collinearity | PASS | PASS (both rule_ids; 0 collinear pairs, VIF 1.01/1.21) | PASS |
+
+**Verdict: PARTIAL, human-approved SHIP at (1.5, 0.5)** on a
+Pareto-dominance rationale — S1 did NOT clear the whitelist bar
+(+0.0650 < +0.0697); this is not a claim that S1 passed. The
+3×3 producer×body sweep (Task 5) found the cell beats BOTH hardcoded-
+whitelist comparators (producer-only 0.25 +0.0531 / full 0.50
++0.0523) at a matched-or-better ≤1-cliff budget, with gems within the
+cohort noise band and golden-500 flat. The plan's mechanical
+tie-break (fewer cliffs, then better gems) preferred the sibling cell
+(1.5, 1.0) — same ΔNDCG band, better gemΔ (−0.0172) — but its single
+cliff is a deep −0.1630 hole (Lazav, Wearer of Faces) vs (1.5, 0.5)'s
+shallow −0.0533 (Jason Bright); the human overrode the tie-break to
+bound worst-case per-commander damage over the 0.006 gem-rate edge.
+
+**Cliffs-track-producer-weight finding:** contrary to the whitelist
+evidence's prior (bodies dilute), the sweep showed cliff count tracks
+the `producer` multiplier almost independent of `body` — 0-1 cliffs
+at producer=1.5, 6 at producer=2.5, 9 at producer=3.5, with body
+0.0→1.0 barely moving the count at any fixed producer level. The
+mechanism is candidate-list displacement: high producer weight pushes
+subtype-matching producer cards far enough up specific commanders'
+top-30 to shove out higher-EDHREC-agreement cards even at body=0.0.
+Do not raise `subtype_supply_producer` without re-running the sweep.
+
+Fixtures re-pinned (all three); the cohort reporter noise band
+(`--per-commander-ndcg`, seed 17) moved from mean 0.1436/half-width
+0.0448 to mean 0.1850/half-width 0.0579 (see CLAUDE.md).
+
 ## 2026-07-02
 
 ### Resource-flow demand mechanism — DECLINED at Stage 0 (plan 2026-07-02-005)

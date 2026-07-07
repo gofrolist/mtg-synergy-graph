@@ -31,9 +31,12 @@ from mtg_synergy_graph.death_payoff import payoff_subtypes_from_ports
 
 from .core import PortComplement, PortRow
 
-#: Decision-gated (plan 2026-07-07-001). Flip to True only on the SHIP path
-#: (gates S1-S6), together with the scoring_weights.json entries + re-pin.
-_ENABLE_SUBTYPE_SUPPLY = False
+#: Shipped (plan 2026-07-07-001 Task 6, 2026-07-07) at operating point
+#: (producer=1.5, body=0.5) — verdict PARTIAL, human-approved SHIP on the
+#: Pareto-dominance rationale (beats both whitelist variants at <=1 cliff;
+#: see docs/RULE_HISTORY.md 2026-07-07 entry and .audit/subtype_supply/
+#: decision.md for the full gate table).
+_ENABLE_SUBTYPE_SUPPLY = True
 
 
 def _find_subtype_supply_complements(

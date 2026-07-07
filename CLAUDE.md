@@ -107,8 +107,13 @@ uv run scripts/bench.py audit --per-commander-ndcg --fixture tests/fixtures/gold
 uv run scripts/portfolio_sim.py bands --fixture tests/fixtures/golden_set_archetype_payoff.json  # Separate page-ranking NDCG band (different instrument — see below)
 # NOISE BAND — the gate for the --per-commander-ndcg in-cohort readout is the
 # bootstrap band of THAT SAME instrument's distribution (score_commander top-N
-# NDCG@30, seed 17): cohort mean 0.1436, 95% CI [0.0990, 0.1885], half-width
-# = 0.0448. A cohort in-cohort mean-delta below +0.0448 is NOISE, not a win.
+# NDCG@30, seed 17): cohort mean 0.1850, 95% CI [0.1286, 0.2444], half-width
+# = 0.0579. A cohort in-cohort mean-delta below +0.0579 is NOISE, not a win.
+#   Recomputed 2026-07-07 after shipping the subtype-supply rule (plan
+#   2026-07-07-001, producer=1.5/body=0.5) and re-pinning all three
+#   fixtures — the baseline this band is measured against moved, so the
+#   old 0.1436/0.0448 band is stale. Any future cohort-mechanism gate must
+#   use THIS band, not the pre-ship one.
 #   NOTE: `portfolio_sim bands` reports a DIFFERENT number (mean 0.2858, half-
 #   width 0.0567) because it ranks via full engine.page() production ranking,
 #   not score_commander top-N — do NOT compare its band to the --per-commander-

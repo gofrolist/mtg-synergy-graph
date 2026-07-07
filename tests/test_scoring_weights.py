@@ -36,7 +36,10 @@ from mtg_synergy_graph.universal_scorer import (
 # finding: editing any of the three changed scores without flipping
 # the hash). Scores verified bitwise-identical before/after the
 # formula change via bench.py audit --expect-identity.
-_PRODUCTION_HASH = "34a9d110579dc3d12a8de8a8555497864737b2363346fc90b67fbccf8d5f8b02"
+# 2026-07-07: shipped the subtype-supply rule (plan 2026-07-07-001,
+# producer=1.5/body=0.5) — new scoring_weights.json entries flip the
+# hash. All three fixtures re-pinned via bench.py audit --repin --yes.
+_PRODUCTION_HASH = "5adeea6eea364655c75eb6fca7859bfda092698c67ec2eee7956ce096c928ea1"
 
 
 # ---------------------------------------------------------------------------
