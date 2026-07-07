@@ -79,6 +79,19 @@ uv run scripts/portfolio_sim.py sweep                                    # Decay
 uv run python scripts/demand_coverage.py                                 # Full 100-cmdr run (~2 min; includes a live forensics pass)
 uv run python scripts/demand_coverage.py --commander "Yawgmoth, Thran Physician"  # Filtered debug run
 
+# Kill-test instruments from plan 2026-07-06-001 (BOTH cycles DECLINED — standing infra;
+# zero scoring-path changes; reports to .audit/context_sim/ and .audit/quality_sim/).
+# Any future deck-context / pool-context mechanism or card-quality prior MUST pre-pin
+# gates on these instruments' own w=0/q=0 bands (bands are instrument-specific;
+# context_sim's gem band is instrument-local — do NOT compare it to the audit's
+# hidden_gem_hit_rate or to quality_sim's gem band). Null-result docs:
+# docs/solutions/best-practices/deck-context-null-result-2026-07-06.md,
+# docs/solutions/best-practices/quality-rate-prior-null-result-2026-07-06.md
+uv run python scripts/context_sim.py bands --fixture tests/fixtures/golden_set_archetype_payoff.json  # w=0 noise bands (pin BEFORE sweeps)
+uv run python scripts/context_sim.py sweep --fixture tests/fixtures/golden_set_run.json               # deck-context grid; --whitelist-baseline for the G4 comparator
+uv run python scripts/quality_sim.py bands --fixture tests/fixtures/golden_set_run_500.json           # q=0 noise bands
+uv run python scripts/quality_sim.py sweep --fixture tests/fixtures/golden_set_run.json               # quality-rate grid + trap sidecar
+
 # Archetype-payoff cohort fixture (plan 2026-07-03-001) — an EVAL INSTRUMENT, not a
 # scoring change. The golden-100/500 audit fixtures hold only 2/4 of the archetype-
 # payoff cohort, so a future cohort mechanism DECLINEs on eval-set dilution rather
