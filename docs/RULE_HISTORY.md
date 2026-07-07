@@ -34,7 +34,7 @@ automatically. Direct successor to the Whitelist Finding in
 | S4 golden-500 gemΔ | ≥ −0.0235 | **−0.0005** | PASS |
 | S5 golden-100 audit verdict | non-NEGATIVE | positive (Δ +30.5059) | PASS |
 | S5 gem stderr warning | must not fire | did not fire (gemΔ −0.0010) | PASS |
-| S6 rule_quality_gate + collinearity | PASS | PASS (both rule_ids; 0 collinear pairs, VIF 1.01/1.21) | PASS |
+| S6 rule_quality_gate + collinearity | PASS | quality gate PASS (both rule_ids); collinearity **MARGINAL** — see correction below | PASS (literal threshold) — corrected 2026-07-07 |
 
 **Verdict: PARTIAL, human-approved SHIP at (1.5, 0.5)** on a
 Pareto-dominance rationale — S1 did NOT clear the whitelist bar
@@ -62,6 +62,26 @@ Do not raise `subtype_supply_producer` without re-running the sweep.
 Fixtures re-pinned (all three); the cohort reporter noise band
 (`--per-commander-ndcg`, seed 17) moved from mean 0.1436/half-width
 0.0448 to mean 0.1850/half-width 0.0579 (see CLAUDE.md).
+
+**S6 collinearity correction (2026-07-07, review finding F2):** the
+originally recorded "0 collinear pairs, VIF 1.01/1.21" was a Task-4
+carryover measured at cell (2.5, 1.0) via a scratch live driver; the
+Task-5 carryover premise — that Pearson r and VIF are invariant to
+rescaling a rule's contribution column by a positive scalar — was
+**falsified** by the full-tensor measurement after the post-ship
+re-pin. `bench.py audit --collinearity` on the pinned tensor at the
+shipped cell (config c770b664e626…, 32 rules examined) reports:
+`subtype_supply_body` ↔ `tribal_density` r=+0.869, VIF 5.33/4.91;
+`etb_self` ↔ `subtype_supply_body` r=+0.844, VIF 3.93/5.33;
+`etb_self` ↔ `tribal_density` r=+0.813, VIF 3.93/4.91. Under the
+plan's literal threshold (|r|>0.8 AND both VIF>5) no pair trips —
+the partner VIFs (4.91, 3.93) sit below 5 — but `subtype_supply_body`
+itself carries VIF 5.33 at r=+0.869 vs `tribal_density`: a
+**MARGINAL** result, not the clean pass originally recorded
+(`subtype_supply_producer` remains clean — it appears in no flagged
+pair). If body redundancy becomes a concern, the sweep's (1.5, 0.0)
+cell (+0.0620, 0 cliffs, producer-only) removes the overlapping
+direction at a cost of −0.0030 cohort NDCG.
 
 ## 2026-07-02
 
