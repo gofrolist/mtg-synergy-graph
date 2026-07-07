@@ -792,6 +792,11 @@ CARD_LEVEL_RULES: frozenset[str] = frozenset(
         # TWO distinct commander ports to match into the candidate's
         # port bag; gating on a single port would over-attribute.
         "self_bridging_cascade",
+        # Subtype-supply (plan 2026-07-07-001): gate is a conjunction of a
+        # death-shaped trigger port AND its valid_filter naming a
+        # token-producible subtype; body direction matches cards.subtypes.
+        "subtype_supply_producer",
+        "subtype_supply_body",
     }
 )
 

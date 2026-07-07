@@ -29,6 +29,17 @@ Either substrate is sufficient for attribution; the contract is just
 on EITHER side the rule still runs but the auditor cannot attribute
 its activations — the old blindspot was real and produced spurious
 0%-coverage reports for declarative-only rules.
+
+Known residual blindspot: rules in
+``complement_rules.registry.CARD_LEVEL_RULES`` (a conjunction of two-or-more
+port conditions, or an aggregate/card-wide signal) are intentionally NOT
+gated on a single port-level predicate, so this scan cannot see them as
+covering any port shape — they are invisible to the gap scan by design, not
+by omission. Before scaffolding a new proposal, check whether a
+CARD_LEVEL_RULES entry already covers the shape: e.g. a death-trigger +
+token-subtype-filter proposal is already covered by ``subtype_supply_producer``
+/ ``subtype_supply_body`` (plan 2026-07-07-001, ``complement_rules/
+subtype_supply.py``).
 """
 
 from __future__ import annotations

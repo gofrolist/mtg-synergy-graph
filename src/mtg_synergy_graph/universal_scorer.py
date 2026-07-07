@@ -163,6 +163,9 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "self_bridging_cascade": "port_match",
     # Plan 2026-05-19 Prepared / AlternateMode:Prepare mechanic capture.
     "prepared_mechanic": "port_match",
+    # Plan 2026-07-07-001 subtype-supply (shipped 2026-07-07, flag ON; see subtype_supply.py).
+    "subtype_supply_producer": "port_match",
+    "subtype_supply_body": "port_match",
 }
 
 # ---------------------------------------------------------------------------
@@ -315,6 +318,12 @@ class ScoringConfigInputs(NamedTuple):
     #: invalidate the tensor.
     enable_pool_scaled_flat_weights: bool
     pool_scale_floor: int
+    #: Plan 2026-07-07-001 review follow-up (F1): the subtype-supply rule
+    #: gate (``complement_rules.subtype_supply._ENABLE_SUBTYPE_SUPPLY``).
+    #: Shipped default-True; flipping it to False disables both
+    #: ``subtype_supply_producer`` / ``subtype_supply_body`` and must
+    #: invalidate the pinned tensor like every other rule-gating flag here.
+    enable_subtype_supply: bool
 
 
 def _seed_digest(filename: str, functional_keys: tuple[str, ...]) -> str:
@@ -347,6 +356,7 @@ def get_scoring_config_inputs() -> ScoringConfigInputs:
     # embeddings modules — they import numpy + sqlite3 and have no
     # reason to be pulled in at scorer-module import.
     from .complement_rules import density, pathway
+    from .complement_rules import subtype_supply as _subtype_supply
     from .embeddings import contribution as emb_contribution
     from .embeddings.config import get_embedding_config_inputs as _get_emb_cfg
 
@@ -369,6 +379,7 @@ def get_scoring_config_inputs() -> ScoringConfigInputs:
         enable_tribal_payoff_tier=density._ENABLE_TRIBAL_PAYOFF_TIER,
         enable_pool_scaled_flat_weights=_ENABLE_POOL_SCALED_FLAT_WEIGHTS,
         pool_scale_floor=_POOL_SCALE_FLOOR,
+        enable_subtype_supply=_subtype_supply._ENABLE_SUBTYPE_SUPPLY,
     )
 
 

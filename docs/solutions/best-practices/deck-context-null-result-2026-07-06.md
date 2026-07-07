@@ -95,13 +95,31 @@ whitelist), clear
 the golden-500 no-regression band, and not pay for NDCG with gems the way
 the flat bonus does.
 
+**Outcome (2026-07-07, plan 2026-07-07-001):** the narrow IDF-weighted
+rule was built and swept. At the shipped cell (producer=1.5, body=0.5)
+it beat both whitelist variants at a matched-or-better ≤1-cliff budget
+(cohort ΔNDCG +0.0650 vs producer-only 0.25's +0.0531 and full 0.50's
++0.0523) without their gem/cliff bill (gemΔ −0.0232, 1 shallow cliff) —
+but it did not clear the producer-only 0.50 bar (+0.0697) at any swept
+cell, landing in the PARTIAL band and requiring a human-approved SHIP
+rather than an outright S1 pass. It also did not reach the whitelist's
+best 6-cliff cell (+0.0697) at any bounded cliff count; that headline
+number remains unbeaten by a mechanically-narrow rule.
+
 ## What is now measured-dead for NO_RULES
 
 1. Cost→supply resource-flow pairing (plan 2026-07-02-005).
 2. Additive pool-context second pass, mean-of-IDF-sums form (this cycle).
 
-Still open: subtype-supply rule (Whitelist Finding above); specificity-
-normalized context forms (e.g. per-candidate context IDF over the pool
-rather than raw sums) — unfunded, and any attempt must pre-pin gates on
-this cycle's instrument, which ships as standing infra
-(`scripts/context_sim.py`, reports to `.audit/context_sim/`).
+Still open: specificity-normalized context forms (e.g. per-candidate
+context IDF over the pool rather than raw sums) — unfunded, and any
+attempt must pre-pin gates on this cycle's instrument, which ships as
+standing infra (`scripts/context_sim.py`, reports to
+`.audit/context_sim/`).
+
+The subtype-supply rule (Whitelist Finding above) is now **TESTED and
+SHIPPED** (plan `docs/plans/2026-07-07-001-feat-subtype-supply-rule-plan.md`,
+2026-07-07): `subtype_supply_producer` / `subtype_supply_body`
+(producer=1.5, body=0.5), verdict PARTIAL, human-approved SHIP on a
+Pareto-dominance rationale — see `docs/RULE_HISTORY.md` 2026-07-07 entry
+for the gate table.
