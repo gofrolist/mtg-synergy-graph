@@ -14,9 +14,12 @@ origin: forensics readout 2026-07-06 (.audit/forensics.md, config_hash 34a9d110�
 > cells negative; reach 0. Golden-100: mean Δ −0.0230..−0.0478, 19–35 cliffs
 > (<−0.05) per 100 commanders vs G5 bar of zero, reach 0–5 vs G3 floor 100;
 > traps cliff (Kess −0.31, Edgar −0.18 at k=10/w=0.5). G4: the disguised
-> whitelist beats the mechanism by ~0.07 (whitelist cohort Δ +0.0531 @1 cliff /
-> +0.0697 @6 cliffs vs mechanism best −0.0019) — the mechanism is strictly
-> dominated by the predicate it needed to beat. Instrument internally
+> whitelist beats the mechanism by a wide margin (decision-time readout
+> +0.0531 @1 cliff / +0.0697 @6 cliffs vs mechanism best −0.0019; PR #101
+> review later found the comparator's body query hit the wrong column —
+> corrected full-whitelist numbers +0.0147/+0.0376/+0.0523, still strictly
+> dominant, DECLINE unaffected; see the null-result doc's CORRECTION) — the
+> mechanism is strictly dominated by the predicate it needed to beat. Instrument internally
 > validated: the whitelist's positive deltas flow through the SAME assembly
 > path, so the mechanism's negatives are real, and the w=0 self-check passed
 > on all 633 sims. Root cause (scale diagnostic, Slimefoot): the mean-of-IDF-

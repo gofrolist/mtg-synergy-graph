@@ -68,6 +68,14 @@ killed the deck-context additive term the same day
 2. List-level re-ranking — portfolio selection (plan 004).
 3. New-information pointwise prior — magnitude rate (this cycle).
 
+**Signal-crudeness caveat (PR #101 review, 2026-07-07):** the engine-shape
+marker is near-vacuous — 67.5% of amount-bearing cards carry a trigger/cost
+port and get the 1.0 engine weight, and ~half of all trigger ports are
+one-shot ChangesZone (ETB/dies) shapes. What this cycle measured dead is
+therefore "printed-amount rate with a crude repeatability split," not a
+well-formed engine-vs-one-shot signal; a chain-aware repeatability
+classification would be a materially different (untested) signal.
+
 What this null result does NOT rule out: a quality signal used as a
 *tiebreak-scale* term (≪ the ~0.006 gap between adjacent head ranks) rather
 than a multiplier — untested, expected value low; and simulation-derived

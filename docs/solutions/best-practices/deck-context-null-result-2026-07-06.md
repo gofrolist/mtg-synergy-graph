@@ -41,7 +41,10 @@ against the deck's own top pool.
 Instrument: `scripts/context_sim.py` (`bench/context_sim.py`) — portfolio_sim-
 style cached-sim assembly, w=0 bitwise self-check vs `engine.page()` (passed
 on all 633 sims), bands pinned before sweep (cohort H=0.0567 at mean 0.2858;
-golden-500 H=0.0136, G=0.0235 — both reproduce the portfolio_sim precedents).
+golden-500 H=0.0136 — the NDCG bands reproduce the portfolio_sim
+precedents; the gem band G=0.0235 is INSTRUMENT-LOCAL — do not compare
+it to the audit's hidden_gem_hit_rate or other instruments' gem bands,
+see the `_plausible_set` docstring).
 
 ## Results (grid 3×3: K ∈ {10,20,30} × w ∈ {0.1,0.25,0.5})
 
@@ -50,8 +53,16 @@ golden-500 H=0.0136, G=0.0235 — both reproduce the portfolio_sim precedents).
 - **Golden-100:** mean Δ −0.0230..−0.0478; **19–35 cliffs (<−0.05) per 100
   commanders**; reach 0–5 vs the ≥100 floor. Traps: Kess −0.31, Edgar −0.18.
 - **G4 whitelist-equivalence:** the hardcoded subtype whitelist through the
-  SAME assembly path scores cohort Δ **+0.0531 (1 cliff) / +0.0697 (6
-  cliffs)** — it strictly dominates the mechanism it was the bar for.
+  SAME assembly path strictly dominates the mechanism it was the bar for.
+  CORRECTION (2026-07-07, PR #101 review): the original comparator queried
+  the wrong column (`card_types` instead of `subtypes`), so the decision-time
+  numbers (+0.0531 @1 cliff / +0.0697 @6 cliffs) measured a PRODUCER-ONLY
+  whitelist. Re-measured with the fixed, token-anchored subtype query
+  (bodies + producers): **+0.0147 (b=0.1, 1 cliff) / +0.0376 (b=0.25, 2
+  cliffs) / +0.0523 (b=0.5, 5 cliffs)** — flooding all subtype bodies with a
+  flat bonus dilutes harder and cliffs earlier, so the producer-only variant
+  is the TOUGHER bar. Both variants dominate the mechanism's best cell
+  (−0.0019); the DECLINE is unaffected.
 
 ## Root cause (measured, Slimefoot scale diagnostic)
 
@@ -71,13 +82,16 @@ specificity normalization is just another density axis.**
 
 The G4 comparator — flat bonus to cards whose subtype matches the
 commander's death-payoff subtype, or that produce that subtype's tokens —
-**recovers cohort NDCG (+0.05..+0.07) but eats gems (−0.05..−0.12) and
-cliffs at b=0.5**. The cohort's EDHREC gap IS subtype-supply-shaped and IS
+**recovers cohort NDCG but eats gems and cliffs as the bonus grows**
+(corrected full whitelist: +0.015..+0.052 with gems −0.003..−0.059;
+producer-only variant, the tougher bar: +0.019..+0.070 with gems
+−0.006..−0.122). The cohort's EDHREC gap IS subtype-supply-shaped and IS
 mechanically nameable. A future cycle should test a *narrow, IDF-weighted
 subtype-supply rule* (declarative row keyed on the commander's payoff
 subtype, weighted like any other rule — NOT a flat bonus, NOT a pool-context
 pass). Binding obligations carried forward from plan 2026-07-03-001: such a
-rule must beat this whitelist's numbers (else it IS the whitelist), clear
+rule must beat BOTH whitelist variants' numbers above (else it IS the
+whitelist), clear
 the golden-500 no-regression band, and not pay for NDCG with gems the way
 the flat bonus does.
 
