@@ -664,18 +664,32 @@ def _aura_equipment_support_gate(port: PortRow) -> bool:
 def _death_outlet_feeder_gate(port: PortRow) -> bool:
     """Single-port shape matching the ``death_outlet_feeder`` commander gate.
 
-    Composed by calling ``death_payoff.has_changeszone_death_payoff`` on a
-    one-element port list -- that function's per-port conjunct (ChangesZone/
-    ChangesZoneAll trigger, reaches the graveyard from the battlefield, not
-    self-only) is exactly the single-port shape the auditor needs to
-    attribute this rule's coverage to. Deliberately does not also encode the
-    rule's commander-level "no Sacrificed trigger port" exclusion (see
-    ``complement_rules.death_outlet._commander_has_death_outlet_gate``) --
-    that conjunct depends on the *other* ports on the same commander, not on
-    this port alone, so it cannot be expressed as a single-port predicate.
+    Flag-aware: reads ``death_outlet._ENABLE_DEATH_OUTLET_FEEDER`` at CALL
+    time (module attribute access, not captured at import time) and returns
+    False immediately while the flag is off. The rule was DECLINED at
+    pre-registered gates (plan 2026-07-07-002) and never fires -- while it
+    is off, this gate must report NO coverage so ``gap_report``,
+    ``demand_coverage``, and ``rule_quality_gate`` see the truth (the
+    ChangesZone-death signature is unserved), instead of a live-looking
+    gate misattributing that gap as already covered. Self-activates with
+    zero registry edits if the flag ever flips back to True (a retry cycle
+    or Task-7-style re-measurement).
+
+    When live, composed by calling ``death_payoff.has_changeszone_death_payoff``
+    on a one-element port list -- that function's per-port conjunct
+    (ChangesZone/ChangesZoneAll trigger, reaches the graveyard from the
+    battlefield, not self-only) is exactly the single-port shape the auditor
+    needs to attribute this rule's coverage to. Deliberately does not also
+    encode the rule's commander-level "no Sacrificed trigger port" exclusion
+    (see ``complement_rules.death_outlet._commander_has_death_outlet_gate``)
+    -- that conjunct depends on the *other* ports on the same commander, not
+    on this port alone, so it cannot be expressed as a single-port predicate.
     """
     from ..death_payoff import has_changeszone_death_payoff
+    from . import death_outlet
 
+    if not death_outlet._ENABLE_DEATH_OUTLET_FEEDER:
+        return False
     return has_changeszone_death_payoff([port])
 
 

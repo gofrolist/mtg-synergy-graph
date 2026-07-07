@@ -14,7 +14,8 @@ ablated). `rank_bonus` is KEPT deliberately pending a future measured
 removal decision; `bench.py audit --forensics` reports the ablated metric
 on every run (see the forensics command block below) so ship/decline
 verdicts can separate mechanical signal from this hidden credit.
-Current aggregate NDCG@30 ~ 0.256 on the 100-commander golden set.
+Current aggregate NDCG@30 ~ 0.233 raw (~0.189 with the EDHREC-at-inference
+credit ablated) on the 100-commander golden set.
 
 For user-facing setup / quick-start, see [README.md](README.md).
 For the forward-looking rule-planning workflow (gap_report → scaffold →

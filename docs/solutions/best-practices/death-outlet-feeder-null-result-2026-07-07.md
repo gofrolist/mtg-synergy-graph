@@ -188,7 +188,11 @@ restored, since no pinned ablated-cohort baseline existed before this cycle.
 - **Rule code:** `complement_rules/death_outlet.py`, dispatch in `core.py`,
   registry gate, `_RULE_TO_BUCKET` entry — all present, flag `False`, hash-neutral
   (`bench.py audit --expect-identity` PASS). No `ScoringConfigInputs` field was
-  ever registered (correctly — Part B never reached the SHIP path).
+  ever registered (correctly — Part B never reached the SHIP path). The
+  registry's `RuleGate` predicate is flag-aware (reads
+  `death_outlet._ENABLE_DEATH_OUTLET_FEEDER` at call time), so coverage
+  instruments (`gap_report`, `demand_coverage`, `rule_quality_gate`) correctly
+  see the ChangesZone-death signature as unserved while the rule stays off.
 - **rank_bonus sidecar (Task 1, Part A):** `compute_rank_bonus_ablation` in
   `bench/forensics.py`, shipped independently as standing instrumentation this
   same cycle; used here to compute the O-clean gate.

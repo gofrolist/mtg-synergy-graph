@@ -194,6 +194,22 @@ class TestWiring:
         etb = dict(DEATH_TRIGGER, zone_origin="Any", zone_destination="Battlefield")
         assert gate.predicate(etb) is False
 
+    def test_gate_is_flag_aware(self, monkeypatch):
+        """The gate must read ``death_outlet._ENABLE_DEATH_OUTLET_FEEDER`` at
+        CALL time, not capture it at import time -- otherwise gap_report /
+        demand_coverage / rule_quality_gate would misattribute the unserved
+        ChangesZone-death signature as already covered by a rule that never
+        fires (final-review B1)."""
+        from mtg_synergy_graph.complement_rules.registry import _CARD_ATTR_GATES
+
+        gate = next(g for g in _CARD_ATTR_GATES if g.rule_id == "death_outlet_feeder")
+
+        monkeypatch.setattr(do, "_ENABLE_DEATH_OUTLET_FEEDER", False)
+        assert gate.predicate(DEATH_TRIGGER) is False
+
+        monkeypatch.setattr(do, "_ENABLE_DEATH_OUTLET_FEEDER", True)
+        assert gate.predicate(DEATH_TRIGGER) is True
+
     def test_not_in_card_level_rules(self):
         from mtg_synergy_graph.complement_rules.registry import CARD_LEVEL_RULES
 
