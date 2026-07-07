@@ -661,6 +661,24 @@ def _aura_equipment_support_gate(port: PortRow) -> bool:
     return "Equipment" in (port.get("valid_filter") or "")
 
 
+def _death_outlet_feeder_gate(port: PortRow) -> bool:
+    """Single-port shape matching the ``death_outlet_feeder`` commander gate.
+
+    Composed by calling ``death_payoff.has_changeszone_death_payoff`` on a
+    one-element port list -- that function's per-port conjunct (ChangesZone/
+    ChangesZoneAll trigger, reaches the graveyard from the battlefield, not
+    self-only) is exactly the single-port shape the auditor needs to
+    attribute this rule's coverage to. Deliberately does not also encode the
+    rule's commander-level "no Sacrificed trigger port" exclusion (see
+    ``complement_rules.death_outlet._commander_has_death_outlet_gate``) --
+    that conjunct depends on the *other* ports on the same commander, not on
+    this port alone, so it cannot be expressed as a single-port predicate.
+    """
+    from ..death_payoff import has_changeszone_death_payoff
+
+    return has_changeszone_death_payoff([port])
+
+
 def _land_to_gy_gate(port: PortRow) -> bool:
     """Commander has a land-to-graveyard trigger (Gitrog, Titania Voice).
 
@@ -720,6 +738,7 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("gy_loader", _gy_loader_gate),
     RuleGate("cost_reduction_target", _cost_reduction_gate),
     RuleGate("land_to_gy_synergy", _land_to_gy_gate),
+    RuleGate("death_outlet_feeder", _death_outlet_feeder_gate),
     RuleGate("spell_density", _spellcast_density_gate),
     RuleGate("spellcast_resonance", _spellcast_density_gate),
     # Batch 2 — registry sweep

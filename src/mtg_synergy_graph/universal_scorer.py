@@ -166,6 +166,8 @@ _RULE_TO_BUCKET: dict[str, str] = {
     # Plan 2026-07-07-001 subtype-supply (shipped 2026-07-07, flag ON; see subtype_supply.py).
     "subtype_supply_producer": "port_match",
     "subtype_supply_body": "port_match",
+    # Plan 2026-07-07-002 Task 6 death_outlet_feeder (flag-off; see death_outlet.py).
+    "death_outlet_feeder": "cost_synergy",
 }
 
 # ---------------------------------------------------------------------------
