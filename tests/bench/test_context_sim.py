@@ -13,6 +13,7 @@ from mtg_synergy_graph.bench.context_sim import (
     _plausible_set,
     aggregate_context_scores,
     assemble_cell,
+    assemble_whitelist,
     select_context,
 )
 from mtg_synergy_graph.complement_rules import PortComplement
@@ -135,12 +136,52 @@ def test_commander_never_enters():
     assert "Cmdr" not in assemble_cell(sim, ContextCell(2, 1.0))
 
 
+def test_assemble_whitelist_new_entrant_scores_and_illegal_excluded():
+    sim = _sim()
+    wl = {"NEW": 1.0, "OFFCOLOR": 1.0}
+    top = assemble_whitelist(sim, wl, 0.5)
+    # NEW (legal, not in base_totals) gets base 0 + bonus 0.5 -> ranks above C (1.0)? No:
+    # A=3.0, B=2.0, C=1.0, NEW=0.5 -> ("A", "B", "C", "NEW")
+    assert top == ("A", "B", "C", "NEW")
+    assert "OFFCOLOR" not in top  # not in legal_pool, excluded regardless of whitelist membership
+
+
+def test_assemble_whitelist_commander_never_enters():
+    sim = _sim()
+    wl = {"Cmdr": 99.0}
+    assert "Cmdr" not in assemble_whitelist(sim, wl, 0.5)
+
+
 def test_build_parser_has_subcommands():
     from mtg_synergy_graph.bench.context_sim import build_parser
 
     p = build_parser()
     args = p.parse_args(["bands", "--fixture", "tests/fixtures/golden_set_archetype_payoff.json"])
     assert args.command == "bands"
+
+
+@pytest.mark.skipif(not _DB.exists(), reason="requires built data/synergy.db")
+def test_payoff_subtypes_slimefoot():
+    import sqlite3
+
+    from mtg_synergy_graph.bench.context_sim import payoff_subtypes
+
+    conn = sqlite3.connect(_DB)
+    conn.row_factory = sqlite3.Row
+    subs = payoff_subtypes(conn, "Slimefoot, the Stowaway")
+    assert "Saproling" in subs
+
+
+@pytest.mark.skipif(not _DB.exists(), reason="requires built data/synergy.db")
+def test_whitelist_scores_cover_subtype_bodies_and_producers():
+    import sqlite3
+
+    from mtg_synergy_graph.bench.context_sim import whitelist_scores
+
+    conn = sqlite3.connect(_DB)
+    conn.row_factory = sqlite3.Row
+    wl = whitelist_scores(conn, "Slimefoot, the Stowaway")
+    assert wl  # non-empty for a cohort commander
 
 
 @pytest.mark.skipif(not _DB.exists(), reason="requires built data/synergy.db")

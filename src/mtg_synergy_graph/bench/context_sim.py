@@ -157,6 +157,20 @@ class ContextSim:
     plausible: frozenset[str] = frozenset()
 
 
+def _rank_top30(sim: ContextSim, totals: Mapping[str, float]) -> tuple[str, ...]:
+    """Shared 4-key sort (-total, cmc, edhrec_rank, name) -> top-30 names."""
+    ranked = sorted(
+        totals,
+        key=lambda c: (
+            -totals[c],
+            sim.cmc_lookup.get(c, 99.0),
+            sim.rank_lookup.get(c, _UNRANKED),
+            c,
+        ),
+    )
+    return tuple(ranked[:30])
+
+
 def assemble_cell(sim: ContextSim, cell: ContextCell) -> tuple[str, ...]:
     """Two-pass top-30 for one grid cell. w_ctx=0 is bitwise pass-1."""
     totals = dict(sim.base_totals)
@@ -171,16 +185,23 @@ def assemble_cell(sim: ContextSim, cell: ContextCell) -> tuple[str, ...]:
             if cand == sim.commander or cand not in sim.legal_pool:
                 continue
             totals[cand] = totals.get(cand, 0.0) + cell.w_ctx * (s / n)
-    ranked = sorted(
-        totals,
-        key=lambda c: (
-            -totals[c],
-            sim.cmc_lookup.get(c, 99.0),
-            sim.rank_lookup.get(c, _UNRANKED),
-            c,
-        ),
-    )
-    return tuple(ranked[:30])
+    return _rank_top30(sim, totals)
+
+
+def assemble_whitelist(sim: ContextSim, wl: Mapping[str, float], b: float) -> tuple[str, ...]:
+    """Top-30 with whitelist members bumped by a flat bonus ``b`` (G4 comparator).
+
+    Same legal-pool gating and commander exclusion as :func:`assemble_cell`,
+    but substitutes a flat per-member bonus for the context term — this is
+    "the predicate as a disguised whitelist a rule could hardcode" baseline
+    against which a real mechanism's context-term gain must be judged.
+    """
+    totals = dict(sim.base_totals)
+    for cand in wl:
+        if cand == sim.commander or cand not in sim.legal_pool:
+            continue
+        totals[cand] = totals.get(cand, 0.0) + b
+    return _rank_top30(sim, totals)
 
 
 def build_context_sim(engine, edhrec_conn, commander: str, *, k_max: int = 30) -> ContextSim:
@@ -266,6 +287,121 @@ def gem_rate_for_context(
 
 
 # ---------------------------------------------------------------------------
+# Whitelist-equivalence baseline (G4 comparator, plan 2026-07-06-001 Task 4)
+# ---------------------------------------------------------------------------
+
+
+def payoff_subtypes(conn: sqlite3.Connection, commander: str) -> frozenset[str]:
+    """The commander's subtype-keyed death-payoff subtypes.
+
+    Re-derives the per-commander subtype the same way
+    ``cohorts.subtype_death_payoff`` selects cohort members, so the
+    whitelist baseline is exactly "the predicate as a rule".
+    """
+    from .cohorts import _is_death_event, _token_subtype_vocab, _valid_filter_subtype_tokens
+
+    vocab = _token_subtype_vocab(conn)
+    subs: set[str] = set()
+    rows = conn.execute(
+        "SELECT event_class, valid_filter, zone_origin, zone_destination "
+        "FROM card_ports WHERE card_name = ? AND port_type = 'trigger'",
+        (commander,),
+    )
+    for event_class, valid_filter, zo, zd in rows:
+        if not _is_death_event(event_class, zo, zd):
+            continue
+        subs.update(t for t in _valid_filter_subtype_tokens(valid_filter or "") if t in vocab)
+    return frozenset(subs)
+
+
+def whitelist_scores(conn: sqlite3.Connection, commander: str) -> dict[str, float]:
+    """Flat 1.0 for every subtype body or subtype-token producer.
+
+    The G4 comparator: a disguised whitelist a rule could hardcode.
+    Scaled by the bonus grid (:data:`B_GRID`) at assembly time (same slot
+    as ``w_ctx``).
+    """
+    subs = payoff_subtypes(conn, commander)
+    names: set[str] = set()
+    for s in subs:
+        names.update(n for (n,) in conn.execute("SELECT name FROM cards WHERE card_types LIKE ?", (f"%{s}%",)))
+        names.update(
+            n
+            for (n,) in conn.execute(
+                "SELECT p.card_name FROM card_ports p "
+                "JOIN port_attributes a ON a.port_id = p.id "
+                "WHERE a.attr_kind = 'token_subtype' AND a.attr_value = ?",
+                (s,),
+            )
+        )
+    names.discard(commander)
+    return dict.fromkeys(names, 1.0)
+
+
+def run_whitelist_baseline(sims: Sequence[ContextSim], conn: sqlite3.Connection) -> dict[str, Any]:
+    """Whitelist-equivalence baseline (G4 comparator) over :data:`B_GRID`.
+
+    For each graded commander, ``whitelist_scores`` is built once (a
+    design-time query re-deriving the cohort predicate), then re-assembled
+    per bonus with :func:`assemble_whitelist` — same legal-pool gating and
+    metric shape as ``run_sweep``'s cells. Commanders whose
+    :func:`payoff_subtypes` returns no subtypes get an empty whitelist (their
+    delta is 0 by construction); ``n_commanders_with_whitelist`` counts the
+    rest so the readout stays honest about how many commanders the
+    comparator actually touches.
+    """
+    graded_sims = [sim for sim in sims if sim.graded_labels]
+
+    base_ndcg: dict[str, float] = {
+        sim.commander: compute_ndcg(list(sim.base_top_30), sim.graded_labels) for sim in graded_sims
+    }
+    base_gem: dict[str, float] = {}
+    for sim in graded_sims:
+        gem = gem_rate_for_context(sim, sim.base_top_30, k=30)
+        if gem is not None:
+            base_gem[sim.commander] = gem[0]
+
+    wl_by_commander: dict[str, dict[str, float]] = {}
+    n_with_whitelist = 0
+    for sim in graded_sims:
+        wl = whitelist_scores(conn, sim.commander)
+        wl_by_commander[sim.commander] = wl
+        if wl:
+            n_with_whitelist += 1
+
+    out: list[dict[str, Any]] = []
+    for b in B_GRID:
+        deltas: list[tuple[str, float]] = []
+        cliff = 0
+        reach = 0
+        gem_deltas: list[float] = []
+        for sim in graded_sims:
+            top = assemble_whitelist(sim, wl_by_commander[sim.commander], b)
+            d = compute_ndcg(list(top), sim.graded_labels) - base_ndcg[sim.commander]
+            deltas.append((sim.commander, d))
+            if d < -0.05:
+                cliff += 1
+            reach += len(sim.zero_score_labels & set(top))
+            if sim.commander in base_gem:
+                gem = gem_rate_for_context(sim, top, k=30)
+                if gem is not None:
+                    gem_deltas.append(gem[0] - base_gem[sim.commander])
+        mean = sum(d for _, d in deltas) / max(len(deltas), 1)
+        mean_gem_delta = (sum(gem_deltas) / len(gem_deltas)) if gem_deltas else None
+        out.append(
+            {
+                "bonus": b,
+                "mean_ndcg_delta": mean,
+                "cliffs": cliff,
+                "reach": reach,
+                "gem_delta": mean_gem_delta,
+                "per_commander": dict(deltas),
+            }
+        )
+    return {"cells": out, "n_commanders_with_whitelist": n_with_whitelist}
+
+
+# ---------------------------------------------------------------------------
 # Subcommand: bands
 # ---------------------------------------------------------------------------
 
@@ -273,6 +409,10 @@ def gem_rate_for_context(
 #: (`w_ctx`) swept by ``run_sweep``'s default cell set.
 K_GRID: tuple[int, ...] = (10, 20, 30)
 W_GRID: tuple[float, ...] = (0.1, 0.25, 0.5)
+
+#: Flat per-member bonus grid for the whitelist-equivalence baseline (G4
+#: comparator, plan 2026-07-06-001 Task 4) — matched to W_GRID's scale.
+B_GRID: tuple[float, ...] = (0.1, 0.25, 0.5)
 
 
 def run_bands(
@@ -462,6 +602,26 @@ def _render_sweep_markdown(report: dict[str, Any], *, gates: str | None = None) 
     return "\n".join(lines) + "\n"
 
 
+def _render_whitelist_markdown(report: dict[str, Any]) -> str:
+    lines = [
+        "# context_sim whitelist baseline (G4 comparator)",
+        "",
+        f"fixture: {report.get('fixture', '?')}  |  commanders: {report.get('n_commanders', '?')}  |  "
+        f"with whitelist: {report.get('n_commanders_with_whitelist', '?')}",
+        "",
+        f"{'bonus':>6} {'mean_ndcg_delta':>16} {'cliffs':>7} {'reach':>7} {'gem_delta':>10}",
+        f"{'-' * 6} {'-' * 16} {'-' * 7} {'-' * 7} {'-' * 10}",
+    ]
+    for cell in report["cells"]:
+        gem = cell["gem_delta"]
+        gem_str = f"{gem:+.4f}" if gem is not None else "-"
+        lines.append(
+            f"{cell['bonus']:>6.2f} {cell['mean_ndcg_delta']:>+16.4f} "
+            f"{cell['cliffs']:>7} {cell['reach']:>7} {gem_str:>10}"
+        )
+    return "\n".join(lines) + "\n"
+
+
 def _write_text(outdir: Path, name: str, text: str) -> Path:
     outdir.mkdir(parents=True, exist_ok=True)
     path = outdir / name
@@ -533,7 +693,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_sweep.add_argument(
         "--whitelist-baseline",
         action="store_true",
-        help="whitelist-equivalence baseline cell (stub — lands in Task 4)",
+        help="run the whitelist-equivalence baseline (G4 comparator) over B_GRID instead of the K_GRID x W_GRID sweep",
     )
     p_sweep.add_argument("--h-cohort", type=float, default=None, help="pinned cohort NDCG band half-width (gate G1)")
     p_sweep.add_argument("--h-500", type=float, default=None, help="pinned 500-cmdr NDCG band half-width (gate G2)")
@@ -561,10 +721,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.limit_commanders is not None:
         commanders = commanders[: args.limit_commanders]
 
-    if args.command == "sweep" and args.whitelist_baseline:
-        print("error: whitelist baseline lands in Task 4", file=sys.stderr)
-        return 1
-
     # Local import: engine pulls the scoring stack; keep module import light.
     from ..engine import SynergyEngine
 
@@ -590,7 +746,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(f"report: {bands_path}")
 
-        if args.command == "sweep":
+        if args.command == "sweep" and args.whitelist_baseline:
+            wl_report = run_whitelist_baseline(sims, engine._conn)
+            wl_report["fixture"] = str(fixture_path)
+            wl_report["n_commanders"] = report["n_commanders"]
+            wl_path = _write_report(outdir, "whitelist.json", wl_report)
+            wl_md = _render_whitelist_markdown(wl_report)
+            wl_md_path = _write_text(outdir, "whitelist.md", wl_md)
+            print(wl_md)
+            print(f"reports: {wl_path}, {wl_md_path}")
+        elif args.command == "sweep":
             cells = _parse_cells(args.cells) if args.cells else None
             sweep_report = run_sweep(sims, cells=cells)
             sweep_report["fixture"] = str(fixture_path)
