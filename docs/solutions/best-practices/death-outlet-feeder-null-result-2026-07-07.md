@@ -15,6 +15,7 @@ applies_when:
   - Considering any sacrifice-outlet / death-outlet feeder mechanism (commander with a ChangesZone-shaped death trigger paired with cost.sacrifice candidates)
   - Considering any per-class flat credit over a large (>1000-card) candidate class
   - Planning the next cohort cycle after subtype-supply — read this AND the head-flatness diagnostic (`.superpowers/sdd/diagnostic-head-flatness.md`) first
+  - Reading a `bench.py audit --forensics` `staple_only` classification for a commander OUTSIDE the currently-pinned tensor's fixture — see the 2026-07-08 CORRECTION below
 created: 2026-07-07
 plan_ref: docs/plans/2026-07-07-002-feat-outlet-cohort-rank-bonus-sidecar-plan.md
 ---
@@ -28,6 +29,25 @@ was reverted to the Task 6 hash-neutral state (flag `False`, no weights entry);
 nothing was committed for Part B beyond the flag-off wiring already on `main` via
 Task 6. Part A (the rank_bonus-ablated NDCG sidecar, Task 1) shipped separately and
 remains standing instrumentation — see `docs/RULE_HISTORY.md` 2026-07-07.
+
+> **CORRECTION (2026-07-08, PR #103 review).** The "Confirmed zero-credit
+> examples: Judith×Viscera Seer, Marchesa×Ashnod's Altar, Meren×Carrion Feeder"
+> claim below (and in the Global Constraints paragraph of the plan doc) is WRONG
+> as stated. Those three pairs already receive a `cost_feeds_trigger` complement
+> via `combat.py`'s `_find_sacrifice_outlets` — its own docstring says so. The
+> "zero tensor rows / staple_only" reading was **tensor blindness**, not zero
+> rule credit: the persisted tensor at hash `c770b664` only covers the
+> 33-commander subtype-payoff fixture, and `classify_miss` (`bench/forensics.py`)
+> tags an `OUTRANKED` miss `staple_only` whenever `has_tensor_rows` is `False` —
+> which is exactly what happens for any commander outside that pinned fixture,
+> regardless of how much live rule credit the pair actually earns. Separately,
+> during the Task 7 sweep the (working-tree, never-shipped) `death_outlet_feeder`
+> rule **double-credited** these same pairs under two `rule_id`s at once (an
+> undocumented overlap with `cost_feeds_trigger`, added to Root Cause below). The
+> DECLINE verdict itself is unaffected — the root cause (flat per-class IDF with
+> zero per-candidate discrimination) remains primary and is, if anything,
+> strengthened: the rule wasn't even reaching genuinely-unserved pairs, it was
+> re-crediting already-served ones on top of causing the measured NDCG damage.
 
 ## What was tested
 

@@ -403,8 +403,10 @@ def whitelist_scores(conn: sqlite3.Connection, commander: str) -> dict[str, floa
 def outlet_whitelist_scores(conn: sqlite3.Connection, commander: str) -> dict[str, float]:
     """Flat 1.0 for every sac-outlet body, gated on the outlet-cohort port shape.
 
-    The G4-style comparator for ``death_outlet_feeder`` (Task 6's rule, not
-    yet built) — a disguised whitelist a rule could hardcode. Gate: the
+    The G4-style comparator for ``death_outlet_feeder`` (built and DECLINED
+    at gates — see
+    ``docs/solutions/best-practices/death-outlet-feeder-null-result-2026-07-07.md``)
+    — a disguised whitelist a rule could hardcode. Gate: the
     commander's ports must satisfy ``death_payoff.has_changeszone_death_payoff``
     (a non-self-only ChangesZone/ChangesZoneAll death trigger) AND carry no
     ``Sacrificed``/``SacrificedOnce`` trigger port. The second conjunct is

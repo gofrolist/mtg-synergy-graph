@@ -84,12 +84,22 @@ def outlet_direction_death_payoff(conn: sqlite3.Connection) -> set[str]:
     trigger port whose event is a battlefield->graveyard death
     (:func:`death_payoff.is_death_event`), whose ``valid_filter`` is not
     self-only (:func:`graph_engine._trigger_only_matches_self`), it has NO
-    trigger port on ``Sacrificed``/``SacrificedOnce`` (those commanders are
-    already served by the existing ``cost_feeds_trigger`` arm), and it is not
+    trigger port on ``Sacrificed``/``SacrificedOnce``, and it is not
     already claimed by :func:`subtype_death_payoff` (that predicate owns its
     own members). Named by plan 2026-07-07-002 (the outlet-direction
     death-payoff cycle) as a candidate second archetype-payoff cohort for the
-    ``death_outlet_feeder`` rule under development in that plan.
+    ``death_outlet_feeder`` rule under development in that plan (that rule
+    was DECLINED at gates -- see
+    ``docs/solutions/best-practices/death-outlet-feeder-null-result-2026-07-07.md``).
+
+    CORRECTED (2026-07-08, PR #103 review): an earlier version of this
+    docstring said Sacrificed-trigger commanders "are already served by the
+    existing cost_feeds_trigger arm", implying ChangesZone-shaped ones (this
+    cohort) are not. That's wrong -- ``combat.py``'s ChangesZone-gated arm
+    (``_find_sacrifice_outlets``) ALSO emits ``cost_feeds_trigger``
+    complements for commanders in THIS cohort. The
+    ``death_outlet_feeder`` rule (built against this cohort) overlapped that
+    arm rather than filling a genuine gap; see the null-result doc above.
 
     Deliberately NOT appended to ``_COHORT_PREDICATES``: appending would
     change ``archetype_payoff_cohort()``'s union, silently mutate the pinned

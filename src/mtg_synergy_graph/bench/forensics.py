@@ -8,6 +8,21 @@ exactly one of five mechanical failure buckets:
 * ``OUTRANKED`` — ranked 61+ (sub-tag ``staple_only`` when the tensor
   holds zero rows for the pair: the card's live score came entirely
   from non-rule channels).
+
+  CAVEAT (added 2026-07-08, PR #103 review, after a real false-premise
+  incident during plan 2026-07-07-002): ``staple_only`` means "no rows
+  in the PERSISTED tensor at the run's ``config_hash``" — NOT "zero
+  mechanical rule credit". The persisted tensor only covers whichever
+  fixture was last pinned (``bench.py audit --repin``); for a commander
+  outside that fixture, ``has_tensor_rows`` is ``False`` regardless of
+  how many rules actually fire for the pair live. Before treating a
+  ``staple_only`` classification as evidence of a real coverage gap,
+  cross-check with a live ``find_all_complements`` call (or
+  ``bench.py audit --inspect RULE_ID``) against the current DB — do not
+  read tensor absence alone as "the scorer gives this pair zero
+  credit". See the corrected
+  ``docs/solutions/best-practices/death-outlet-feeder-null-result-2026-07-07.md``
+  for the incident this caveat documents.
 * ``FILTERED`` — unranked but the tensor HAS rows: the card was scored
   and then dropped by ``engine.page()``'s legality chain. The reason
   code re-evaluates the engine's exact predicate chain from ``cards``
@@ -779,6 +794,10 @@ def classify_miss(
         bucket, reason = BUCKET_NEAR_MISS, None
     elif rank is not None:
         bucket = BUCKET_OUTRANKED
+        # Coverage-artifact caveat (PR #103 review) -- ``has_tensor_rows``
+        # reflects the PERSISTED tensor's fixture coverage, not live rule
+        # credit; see the module docstring's OUTRANKED entry before reading
+        # this as "the scorer gives this pair zero credit".
         reason = REASON_STAPLE_ONLY if not has_tensor_rows else None
     elif has_tensor_rows:
         bucket = BUCKET_FILTERED

@@ -60,6 +60,11 @@ uv run scripts/bench.py audit --embedding-dedup --threshold 0.90         # Loose
 # EDHREC-label miss into NEAR_MISS / OUTRANKED / FILTERED / DATA_GAP / NO_RULES buckets via a live
 # production-ranking pass + the persisted tensor. Writes .audit/forensics.md and appends a
 # provenance-stamped row to .audit/forensics_history.csv. Zero scoring-path changes.
+# CAVEAT (PR #103 review): an OUTRANKED miss's `staple_only` sub-tag means "no rows in the
+# PERSISTED tensor at the current config_hash", which for a commander outside the pinned
+# fixture is a coverage artifact, not evidence of zero rule credit — cross-check with a live
+# find_all_complements call before treating it as an unserved pair (see the forensics.py
+# module docstring and docs/solutions/best-practices/death-outlet-feeder-null-result-2026-07-07.md).
 uv run scripts/bench.py audit --forensics                                 # Full per-miss failure taxonomy + metric sidecars + R9 justified-divergence view + rank_bonus-ablated NDCG sidecar (every run, no flag)
 uv run scripts/bench.py audit --forensics --format json                   # Machine-readable report
 uv run scripts/bench.py audit --forensics --ablate-tiebreak               # + one-off EDHREC tiebreaker-credit measurement (bracketed weak/strong keys)

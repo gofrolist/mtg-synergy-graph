@@ -42,6 +42,14 @@ in-score `rank_bonus` micro-term and sort-key tiebreak inject EDHREC
 ordering at inference, measured at −0.0441 NDCG@30 total credit. That
 sidecar is what produced the O-clean numbers above.
 
+**Correction (2026-07-08, PR #103 review):** the "confirmed zero-credit"
+Judith×Viscera Seer / Marchesa×Ashnod's Altar / Meren×Carrion Feeder
+examples cited during this cycle were wrong — those pairs already earn
+`cost_feeds_trigger` credit via `combat.py`; the "zero tensor rows"
+reading was tensor blindness from the pinned fixture's limited coverage,
+not zero rule credit. See the CORRECTION block in
+`docs/solutions/best-practices/death-outlet-feeder-null-result-2026-07-07.md`.
+
 ### Subtype-supply rule shipped — PARTIAL, human-approved (plan 2026-07-07-001)
 
 New rule_ids `subtype_supply_producer` / `subtype_supply_body`

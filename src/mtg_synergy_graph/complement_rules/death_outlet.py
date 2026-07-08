@@ -15,6 +15,17 @@ ChangesZone-to-graveyard but who have no dedicated sacrifice trigger of
 their own. Mirrors ``bench/context_sim.py::outlet_whitelist_scores``'s
 gate composition (Task 5's whitelist comparator) verbatim.
 
+CORRECTED (2026-07-08, PR #103 review): the paragraph above's framing
+is misleading -- it reads as though ONLY the Sacrificed-trigger half of
+the cohort is already served and this rule's ChangesZone half is
+genuinely unserved territory. In fact ``combat.py``'s ChangesZone-gated
+arm (``_find_sacrifice_outlets``) ALSO emits ``cost_feeds_trigger``
+complements for ChangesZone-to-graveyard death commanders (Judith,
+Marchesa, Meren, and the rest of this rule's own cohort) -- this rule
+overlaps that arm rather than filling a gap next to it. See
+``docs/solutions/best-practices/death-outlet-feeder-null-result-2026-07-07.md``'s
+CORRECTION block for the full incident.
+
 Candidate side: every card holding a ``cost.sacrifice`` port -- a sac
 outlet -- gets one ``PortComplement`` per card (deduped), classified via
 ``core._cost_filter_group`` (``free_outlet`` / ``paid_outlet`` /
@@ -23,13 +34,29 @@ sibling ``cost_feeds_trigger`` arm's enriched filter_group does. The
 classification is surfaced as ``cand_event`` (not a filter_group suffix)
 since this rule has no commander-side filter_group of its own to enrich.
 
-Flag: ``_ENABLE_DEATH_OUTLET_FEEDER = False`` -- decision-gated, plan
-2026-07-07-002. Flips only on the SHIP path, alongside a
-``scoring_weights.json`` multiplier entry and (if warranted) a
-``ScoringConfigInputs`` field -- neither exists yet, so flipping this
-flag today would NOT be hash-neutral. Do not flip without that
-choreography; see docs/RULE_PLANNING.md and the plan's Global
-Constraints section.
+Flag: ``_ENABLE_DEATH_OUTLET_FEEDER = False`` -- DECLINED at
+pre-registered gates (plan 2026-07-07-002; full record at
+``docs/solutions/best-practices/death-outlet-feeder-null-result-2026-07-07.md``).
+The flag stays ``False`` permanently absent a new plan. Any re-flip
+must additionally account for two issues discovered in review, neither
+swept by the original cycle:
+
+1. The live gate is BROADER than the measured cohort -- it also fires
+   for ``subtype_death_payoff`` members (e.g. Wilhelt, the Rotcleaver;
+   Slimefoot, the Stowaway), stacking with the shipped
+   ``subtype_supply_*`` rules, a combination never measured.
+2. The rule overlaps ``combat.py``'s ``cost_feeds_trigger`` arm on
+   ChangesZone-death commanders (see the CORRECTED paragraph above),
+   double-crediting the same pair from two rule_ids at once.
+
+A re-flip therefore requires a new plan with re-derived cohort
+exclusions (both the subtype-cohort overlap and the cost_feeds_trigger
+overlap) and fresh gates -- do not simply flip the flag back on top of
+the old measurements. If flipped, the choreography is: flag ``True``
+alongside a ``scoring_weights.json`` multiplier entry and (if
+warranted) a ``ScoringConfigInputs`` field -- neither exists yet, so
+flipping this flag today would NOT be hash-neutral. See
+docs/RULE_PLANNING.md and the plan's Global Constraints section.
 """
 
 from __future__ import annotations
@@ -41,10 +68,12 @@ from mtg_synergy_graph.death_payoff import has_changeszone_death_payoff, has_sac
 
 from .core import PortComplement, PortRow, _cost_filter_group
 
-#: Decision-gated (plan 2026-07-07-002) -- flips only on the SHIP path,
-#: together with a scoring_weights.json multiplier entry and
-#: ScoringConfigInputs registration. Keep False until that choreography
-#: lands; see the module docstring.
+#: DECLINED at pre-registered gates (plan 2026-07-07-002) -- stays False
+#: permanently absent a new plan. See the module docstring's re-flip
+#: warning (gate breadth vs. the subtype cohort, overlap with
+#: combat.py's cost_feeds_trigger arm) before ever considering a flip,
+#: and docs/solutions/best-practices/death-outlet-feeder-null-result-2026-07-07.md
+#: for the full null-result record.
 _ENABLE_DEATH_OUTLET_FEEDER = False
 
 
