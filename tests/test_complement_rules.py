@@ -6,6 +6,7 @@ and verifies each _find_* function produces expected results.
 
 from __future__ import annotations
 
+import gc
 from pathlib import Path
 
 import pytest
@@ -101,6 +102,43 @@ class TestFindAllComplements:
         results = find_all_complements(populated_db, ["Korvold, Fae-Cursed King"])
         synergy_candidates = {r.candidate for r in results if r.direction == "synergy"}
         assert "Wrath of God" not in synergy_candidates
+
+    def test_second_engine_on_different_db_not_poisoned_by_closed_connection(self, tmp_path_factory):
+        """Regression for the xdist-only flake (find_all_complements() == set()).
+
+        ``graph_engine._ports_cache`` used to key its entries on
+        ``id(conn)`` — a CPython memory address. Once a connection was
+        closed and garbage-collected, a *different*, unrelated connection
+        could be allocated at that same address and would then read the
+        closed connection's stale (here: empty) cached port rows instead
+        of its own data. Under pytest-xdist, running many small
+        module-scoped ``populated_db`` fixtures back-to-back in one worker
+        process made this collision common enough to flake
+        ``test_korvold_finds_phyrexian_altar``.
+
+        This reproduces the collision directly: open and close a
+        connection to an *empty* database (0 cards, so a lookup for
+        Korvold's ports caches an empty list), force garbage collection,
+        then open a second connection against the real fixtures and assert
+        its Korvold lookup is unaffected.
+        """
+        empty_dir = tmp_path_factory.mktemp("complement_empty")
+        db1_path = tmp_path_factory.mktemp("complement_leak") / "empty.db"
+        conn1 = open_db(db1_path)
+        import_cards_folder(conn1, empty_dir, scryfall_db=None)
+        assert load_ports_for_set(conn1, ["Korvold, Fae-Cursed King"]) == []
+        conn1.close()
+        del conn1
+        gc.collect()
+
+        db2_path = tmp_path_factory.mktemp("complement_real") / "real.db"
+        conn2 = open_db(db2_path)
+        import_cards_folder(conn2, FIXTURES, scryfall_db=None)
+        try:
+            results = find_all_complements(conn2, ["Korvold, Fae-Cursed King"])
+            assert "Phyrexian Altar" in _candidates(results)
+        finally:
+            conn2.close()
 
 
 # ---------------------------------------------------------------------------

@@ -252,8 +252,11 @@ def test_payoff_subtypes_slimefoot():
 
     conn = sqlite3.connect(_DB)
     conn.row_factory = sqlite3.Row
-    subs = payoff_subtypes(conn, "Slimefoot, the Stowaway")
-    assert "Saproling" in subs
+    try:
+        subs = payoff_subtypes(conn, "Slimefoot, the Stowaway")
+        assert "Saproling" in subs
+    finally:
+        conn.close()
 
 
 @pytest.mark.skipif(not _DB.exists(), reason="requires built data/synergy.db")
@@ -264,14 +267,17 @@ def test_whitelist_scores_cover_subtype_bodies_and_producers():
 
     conn = sqlite3.connect(_DB)
     conn.row_factory = sqlite3.Row
-    wl = whitelist_scores(conn, "Slimefoot, the Stowaway")
-    assert wl  # non-empty for a cohort commander
-    # Verified present in data/synergy.db: a real Saproling creature body
-    # (cards.subtypes, NOT cards.card_types -- card_types only ever holds
-    # top-level types like Creature/Artifact and never contains a subtype
-    # token, so the old `card_types LIKE '%Saproling%'` query returned 0
-    # rows for every subtype).
-    assert "Shroofus Sproutsire" in wl
+    try:
+        wl = whitelist_scores(conn, "Slimefoot, the Stowaway")
+        assert wl  # non-empty for a cohort commander
+        # Verified present in data/synergy.db: a real Saproling creature body
+        # (cards.subtypes, NOT cards.card_types -- card_types only ever holds
+        # top-level types like Creature/Artifact and never contains a subtype
+        # token, so the old `card_types LIKE '%Saproling%'` query returned 0
+        # rows for every subtype).
+        assert "Shroofus Sproutsire" in wl
+    finally:
+        conn.close()
 
 
 @pytest.mark.skipif(not _DB.exists(), reason="requires built data/synergy.db")

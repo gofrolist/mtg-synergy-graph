@@ -21,9 +21,11 @@ indexed lookups keeps the code far easier to audit.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import sqlite3
+import weakref
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from functools import lru_cache
@@ -233,7 +235,23 @@ def load_ports_for(conn: sqlite3.Connection, card_name: str) -> list[PortRow]:
     return _rows_to_dicts(cur.fetchall())
 
 
-_ports_cache: dict[tuple[int, tuple[str, ...]], list[PortRow]] = {}
+#: Keyed on the connection object itself (via ``WeakKeyDictionary``) rather
+#: than ``id(conn)``. A prior version keyed on ``(id(conn), names)``, a
+#: CPython memory address that gets reused once a connection is closed and
+#: garbage-collected — under pytest-xdist this let a closed sibling test's
+#: connection "poison" a brand-new connection's port lookups with stale (or
+#: empty) rows whenever the new object happened to land at the same address
+#: (see ``test_korvold_finds_phyrexian_altar`` xdist flake). A
+#: ``WeakKeyDictionary`` entry is removed by its weakref callback at the
+#: moment the connection is finalized — strictly before that memory can be
+#: reused by a new object — so no address-reuse collision is possible.
+#: Connections not created via :func:`db.open_db` (e.g. a raw
+#: ``sqlite3.connect()`` in a test) aren't weak-referenceable; those
+#: transparently skip caching (always correct, just uncached) rather than
+#: risk the same bug via a fallback ``id()``-keyed path.
+_ports_cache: weakref.WeakKeyDictionary[sqlite3.Connection, dict[tuple[str, ...], list[PortRow]]] = (
+    weakref.WeakKeyDictionary()
+)
 
 
 def load_ports_for_set(
@@ -242,30 +260,29 @@ def load_ports_for_set(
 ) -> list[PortRow]:
     """Union of port rows across multiple cards (partner-pair friendly).
 
-    Results are cached per ``(id(conn), names)`` so the 19+ graph_engine
-    functions that call this for the same commander set share one SQL fetch.
-    Call :func:`clear_ports_cache` between commander runs if needed.
-
-    .. warning::
-
-        The cache key uses ``id(conn)`` (CPython object address), which
-        can be reused after a connection is closed and garbage-collected.
-        Always call :func:`clear_ports_cache` before replacing a
-        connection object to avoid stale results.
+    Results are cached per connection so the 19+ graph_engine functions
+    that call this for the same commander set share one SQL fetch. Call
+    :func:`clear_ports_cache` between commander runs if needed.
     """
     if not card_names:
         return []
-    key = (id(conn), tuple(card_names))
-    cached = _ports_cache.get(key)
-    if cached is not None:
-        return cached
+    key = tuple(card_names)
+    try:
+        conn_cache = _ports_cache.get(conn)
+    except TypeError:
+        conn_cache = None
+    if conn_cache is not None:
+        cached = conn_cache.get(key)
+        if cached is not None:
+            return cached
     placeholders = ",".join("?" * len(card_names))
     cur = conn.execute(
         f"SELECT * FROM card_ports WHERE card_name IN ({placeholders})",
         tuple(card_names),
     )
     result = _rows_to_dicts(cur.fetchall())
-    _ports_cache[key] = result
+    with contextlib.suppress(TypeError):
+        _ports_cache.setdefault(conn, {})[key] = result
     return result
 
 
