@@ -15,6 +15,7 @@ import math
 
 import pytest
 
+from mtg_synergy_graph import universal_scorer
 from mtg_synergy_graph.bench.forensics import (
     BUCKETS,
     RANK_BONUS_SENTINEL_CAP,
@@ -60,6 +61,17 @@ class TestRankBonusFor:
         assert rank_bonus_for(UNRANKED_EDHREC_SENTINEL) == 0.0
         assert rank_bonus_for(RANK_BONUS_SENTINEL_CAP) == 0.0
         assert rank_bonus_for(UNRANKED_EDHREC_SENTINEL) == rank_bonus_for(RANK_BONUS_SENTINEL_CAP)
+
+
+class TestRankBonusForDelegatesToUniversalScorer:
+    """F3 (PR #103 review): the formula must live in exactly one place —
+    ``universal_scorer.rank_bonus_for_rank`` — with ``forensics.rank_bonus_for``
+    delegating to it after applying its local sentinel cap. Cross-checks both
+    sides so the two can never silently drift again."""
+
+    @pytest.mark.parametrize("rank", [1, 15000, 29999, 30000, 99999, 10**9])
+    def test_matches_universal_scorer_formula(self, rank: int) -> None:
+        assert rank_bonus_for(rank) == universal_scorer.rank_bonus_for_rank(min(rank, 99999))
 
 
 # ---------------------------------------------------------------------------

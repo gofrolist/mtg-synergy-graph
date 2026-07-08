@@ -150,11 +150,12 @@ import math
 import sqlite3
 import sys
 from collections.abc import Iterable, Mapping, Sequence, Set
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from mtg_synergy_graph import universal_scorer
 from mtg_synergy_graph.bench.fixture import PinnedFixture
 from mtg_synergy_graph.bench.hidden_gems import (
     _aggregate_contributions,
@@ -477,6 +478,14 @@ class ForensicsReport:
     aggregate_ndcg_canonical: float = 0.0
     #: Canonical-denominator mean raw DCG@30 (same denominator).
     aggregate_raw_dcg_canonical: float = 0.0
+    #: Canonical validate-path labels (``edhrec_labels_for_commander``,
+    #: ``grade_floor=0.0``) already loaded once per commander during
+    #: :func:`compute_forensics`, carried on the report so downstream
+    #: readers (e.g. ``forensics_report.handle_forensics``) don't need
+    #: to re-open ``tags.db`` and re-query per entry (PR #103 review,
+    #: F8). Empty for reports built by callers that never populated it
+    #: (backward compat) — such callers should fall back to a re-query.
+    labels_by_commander: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -876,7 +885,10 @@ def classify_commander_misses(
     )
 
 
-def aggregate_forensics(entries: Iterable[CommanderForensics]) -> ForensicsReport:
+def aggregate_forensics(
+    entries: Iterable[CommanderForensics],
+    labels_by_commander: Mapping[str, Mapping[str, float]] | None = None,
+) -> ForensicsReport:
     """Fold per-commander entries into the aggregate report.
 
     Skipped entries (zero graded labels) land in
@@ -888,6 +900,12 @@ def aggregate_forensics(entries: Iterable[CommanderForensics]) -> ForensicsRepor
     use the CANONICAL denominator — every fixture commander, with
     skipped (zero-label) commanders contributing 0.0 — matching the
     validate-path golden-set aggregate.
+
+    ``labels_by_commander`` (optional, PR #103 review F8) is carried
+    through onto :attr:`ForensicsReport.labels_by_commander` verbatim
+    so callers that already loaded labels once don't need to re-query.
+    Defaults to ``{}`` for existing callers that never had labels to
+    pass (backward compat).
     """
     kept: list[CommanderForensics] = []
     skipped: list[str] = []
@@ -911,6 +929,7 @@ def aggregate_forensics(entries: Iterable[CommanderForensics]) -> ForensicsRepor
         skipped_commanders=tuple(skipped),
         aggregate_ndcg_canonical=aggregate_ndcg,
         aggregate_raw_dcg_canonical=aggregate_raw_dcg,
+        labels_by_commander=dict(labels_by_commander) if labels_by_commander else {},
     )
 
 
@@ -1312,11 +1331,15 @@ RANK_BONUS_SENTINEL_CAP: int = 99999
 def rank_bonus_for(edhrec_rank: int) -> float:
     """The exact in-score ``rank_bonus`` for a captured ``edhrec_rank``.
 
-    Mirrors ``universal_scorer.py``'s formula bit-for-bit:
-    ``0.005 * max(0.0, 1.0 - min(edhrec_rank, 99999) / 30000.0)``.
+    Delegates to :func:`universal_scorer.rank_bonus_for_rank` — the
+    single source of truth for the formula (PR #103 review, F3) — after
+    applying this module's local sentinel cap. ``RANK_BONUS_WEIGHT`` /
+    ``RANK_BONUS_RANK_DIVISOR`` above stay as documentation constants
+    (and remain importable for callers that reference them), but the
+    arithmetic itself lives only in ``universal_scorer.py``.
     """
     capped = min(edhrec_rank, RANK_BONUS_SENTINEL_CAP)
-    return RANK_BONUS_WEIGHT * max(0.0, 1.0 - capped / RANK_BONUS_RANK_DIVISOR)
+    return universal_scorer.rank_bonus_for_rank(capped)
 
 
 def rank_bonus_ablated_sort_key(candidate: RankedCandidate) -> tuple[float, float, str]:
@@ -1375,10 +1398,14 @@ def compute_rank_bonus_ablation(
     extra scoring pass, ``engine.page()`` untouched.
 
     ``rankings`` maps each non-skipped commander to its Unit-1
-    captured full ranking — already in production rank order, so the
-    "raw" window is read directly off ``rc.rank`` with no self-check
+    captured full ranking. CONTRACT: each sequence MUST already be in
+    production rank order (``rc.rank`` ascending) — exactly what
+    :func:`extract_live_ranking` guarantees — so the "raw" window is
+    read directly with a positional slice and no defensive re-sort
     (unlike R8, this sidecar never reconstructs the production sort
-    key: only the ABLATED key is a re-sort). ``labels_by_commander``
+    key: only the ABLATED key is a re-sort). Passing an out-of-order
+    sequence silently produces a wrong ``ndcg_raw`` — this function
+    trusts the contract rather than re-deriving it. ``labels_by_commander``
     carries the same canonical validate-path labels
     (``grade_floor=0.0``) the forensics run already loaded.
     ``n_canonical`` is the canonical denominator (every fixture
@@ -1396,7 +1423,7 @@ def compute_rank_bonus_ablation(
     for commander in sorted(rankings):
         candidates = tuple(rankings[commander])
         labels = dict(labels_by_commander.get(commander, {}))
-        raw_window = [rc.name for rc in sorted(candidates, key=lambda rc: rc.rank)[:top_n]]
+        raw_window = [rc.name for rc in candidates[:top_n]]
         ablated_window = [rc.name for rc in sorted(candidates, key=rank_bonus_ablated_sort_key)[:top_n]]
         sum_raw += compute_ndcg(raw_window, labels, k=top_n)
         sum_ablated += compute_ndcg(ablated_window, labels, k=top_n)
@@ -1742,8 +1769,10 @@ def compute_forensics(
                 known_names = frozenset(card_meta)
                 entries: list[CommanderForensics] = []
                 recon_pairs: list[ReconciliationPair] = []
+                labels_by_commander: dict[str, dict[str, float]] = {}
                 for commander in commanders:
                     labels = edhrec_labels_for_commander(edhrec_conn, commander, grade_floor=0.0)
+                    labels_by_commander[commander] = dict(labels)
                     miss_universe = load_miss_universe(edhrec_conn, commander, top_n=top_n, labels=labels)
                     if not miss_universe:
                         entries.append(classify_commander_misses(commander, (), top_n=top_n))
@@ -1820,7 +1849,7 @@ def compute_forensics(
                 # Reconciliation BEFORE the report is handed back:
                 # callers write nothing when this raises.
                 reconcile_canonical_ndcg(recon_pairs)
-                report = aggregate_forensics(entries)
+                report = aggregate_forensics(entries, labels_by_commander)
                 if independent_check:
                     run_independent_engine_check(
                         report,

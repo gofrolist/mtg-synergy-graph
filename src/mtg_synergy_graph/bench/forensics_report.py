@@ -940,10 +940,20 @@ def handle_forensics(args: argparse.Namespace) -> int:
         try:
             snapshot_digest = edhrec_snapshot_digest(edhrec_conn)
             gem_rate = compute_gem_rate_forensics(report, edhrec_conn, conn, config_hash)
-            labels_by_commander: dict[str, dict[str, float]] = {
-                entry.commander: edhrec_labels_for_commander(edhrec_conn, entry.commander, grade_floor=0.0)
-                for entry in report.entries
-            }
+            # PR #103 review (F8): compute_forensics already loaded every
+            # commander's labels once and carries them on the report; reuse
+            # that instead of re-querying tags.db per entry. Fall back to
+            # the old re-query ONLY if the field is empty (backward compat
+            # for a report built by a caller that never populated it).
+            if report.labels_by_commander:
+                labels_by_commander: dict[str, dict[str, float]] = {
+                    commander: dict(labels) for commander, labels in report.labels_by_commander.items()
+                }
+            else:
+                labels_by_commander = {
+                    entry.commander: edhrec_labels_for_commander(edhrec_conn, entry.commander, grade_floor=0.0)
+                    for entry in report.entries
+                }
         finally:
             edhrec_conn.close()
     finally:

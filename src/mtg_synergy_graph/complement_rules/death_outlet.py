@@ -35,8 +35,9 @@ Constraints section.
 from __future__ import annotations
 
 import sqlite3
+from collections import defaultdict
 
-from mtg_synergy_graph.death_payoff import has_changeszone_death_payoff
+from mtg_synergy_graph.death_payoff import has_changeszone_death_payoff, has_sacrificed_trigger
 
 from .core import PortComplement, PortRow, _cost_filter_group
 
@@ -46,31 +47,21 @@ from .core import PortComplement, PortRow, _cost_filter_group
 #: lands; see the module docstring.
 _ENABLE_DEATH_OUTLET_FEEDER = False
 
-#: Trigger event classes that indicate the commander already has a
-#: dedicated sacrifice trigger -- served by the existing
-#: ``cost_feeds_trigger`` arm, so excluded here to avoid double-crediting
-#: the same commander from two rules.
-_SACRIFICE_TRIGGER_EVENTS = frozenset({"Sacrificed", "SacrificedOnce"})
-
 
 def _commander_has_death_outlet_gate(cmdr_ports: list[PortRow]) -> bool:
     """Port-level commander gate for ``death_outlet_feeder``.
 
     ``has_changeszone_death_payoff`` AND no ``Sacrificed``/
-    ``SacrificedOnce`` trigger port -- composed here rather than in
-    ``death_payoff`` because the second conjunct is specific to this
-    rule's "don't double-serve the cost_feeds_trigger cohort" contract,
-    not a property of the death-payoff shape itself. Mirrors
-    ``bench/context_sim.py::outlet_whitelist_scores`` verbatim.
+    ``SacrificedOnce`` trigger port (:func:`death_payoff.has_sacrificed_trigger`)
+    -- composed here rather than in ``death_payoff`` because the second
+    conjunct is specific to this rule's "don't double-serve the
+    cost_feeds_trigger cohort" contract, not a property of the death-payoff
+    shape itself. Mirrors ``bench/context_sim.py::outlet_whitelist_scores``
+    verbatim.
     """
     if not has_changeszone_death_payoff(cmdr_ports):
         return False
-    for p in cmdr_ports:
-        if (p.get("port_type") or "").strip() != "trigger":
-            continue
-        if (p.get("event_class") or "").strip() in _SACRIFICE_TRIGGER_EVENTS:
-            return False
-    return True
+    return not has_sacrificed_trigger(cmdr_ports)
 
 
 def _find_death_outlet_complements(
@@ -85,36 +76,49 @@ def _find_death_outlet_complements(
     ``cost.sacrifice`` port (deduped), with ``cand_event`` set to the
     ``_cost_filter_group`` classification (``free_outlet`` /
     ``paid_outlet`` / ``self_sac``) so IDF differentiates outlet classes.
+
+    Determinism (PR #103 review, F9): a card can hold more than one
+    ``cost.sacrifice`` port (e.g. one free_outlet-shaped ability and one
+    self_sac-shaped ability on the same card). The SQL query below carries
+    no ``ORDER BY``, so which row SQLite returns first is not guaranteed
+    stable across DB rebuilds -- picking "whichever classification arrived
+    first" would make ``cand_event`` a coin flip. Instead every one of a
+    card's matching ports is classified and ``min()`` (alphabetical) picks
+    the representative group, matching the same
+    take-the-alphabetically-least-match precedent used by
+    ``subtype_supply``'s ``min(matched)``. Candidate iteration itself is
+    also sorted by name for a fully deterministic ``results`` order.
     """
     if not _ENABLE_DEATH_OUTLET_FEEDER:
         return []
     if not _commander_has_death_outlet_gate(cmdr_ports):
         return []
 
-    results: list[PortComplement] = []
-    seen: set[str] = set()
+    groups_by_card: dict[str, set[str]] = defaultdict(set)
     cur = conn.execute(
         "SELECT card_name, event_class, cost_target, raw_line FROM card_ports "
         "WHERE port_type = 'cost' AND event_class = 'sacrifice'"
     )
     for row in cur.fetchall():
         name = row["card_name"]
-        if name in cmdr_set or name in seen:
+        if name in cmdr_set:
             continue
-        seen.add(name)
         cost_port = {
             "event_class": row["event_class"],
             "cost_target": row["cost_target"],
             "raw_line": row["raw_line"],
         }
-        filter_group = _cost_filter_group(cost_port)
+        groups_by_card[name].add(_cost_filter_group(cost_port))
+
+    results: list[PortComplement] = []
+    for name in sorted(groups_by_card):
         results.append(
             PortComplement(
                 rule_id="death_outlet_feeder",
                 direction="synergy",
                 candidate=name,
                 cmdr_event="death_outlet",
-                cand_event=filter_group,
+                cand_event=min(groups_by_card[name]),
             )
         )
     return results

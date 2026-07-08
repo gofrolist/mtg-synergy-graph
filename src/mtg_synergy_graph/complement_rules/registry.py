@@ -35,6 +35,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..death_payoff import has_changeszone_death_payoff
+from . import death_outlet
 from .core import COMPLEMENT_RULES, PortRow
 from .statics import _edict_benefits_from_trigger
 from .tokens import TOKEN_PRODUCER_REJECTING_FRAGMENTS
@@ -684,10 +686,16 @@ def _death_outlet_feeder_gate(port: PortRow) -> bool:
     (see ``complement_rules.death_outlet._commander_has_death_outlet_gate``)
     -- that conjunct depends on the *other* ports on the same commander, not
     on this port alone, so it cannot be expressed as a single-port predicate.
-    """
-    from ..death_payoff import has_changeszone_death_payoff
-    from . import death_outlet
 
+    The ``death_outlet`` / ``has_changeszone_death_payoff`` imports are
+    module-level (PR #103 review, F7) -- verified cycle-safe:
+    ``complement_rules/__init__`` loads ``.core``, which imports
+    ``.death_outlet`` before this module is ever reached. The flag itself
+    is still read as ``death_outlet._ENABLE_DEATH_OUTLET_FEEDER`` (a module
+    attribute lookup at CALL time, not a captured value) so
+    ``monkeypatch.setattr(death_outlet, "_ENABLE_DEATH_OUTLET_FEEDER", ...)``
+    in tests still takes effect.
+    """
     if not death_outlet._ENABLE_DEATH_OUTLET_FEEDER:
         return False
     return has_changeszone_death_payoff([port])

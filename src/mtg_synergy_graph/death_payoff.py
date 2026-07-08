@@ -15,11 +15,18 @@ legendary creature, not to re-verify it per call.
 Behavior change here changes BOTH the cohort membership and the rule gate —
 the cohort fixture's pinned ``cohort_members`` snapshot is the regression
 oracle (tests/test_death_payoff.py::TestCohortUnchanged).
+
+``_trigger_only_matches_self`` is imported from ``graph_engine`` (not
+duplicated here) — every sibling ``complement_rules`` module already
+imports it directly from there, so this module gains no new import-cycle
+exposure by doing the same (PR #103 review, F4).
 """
 
 from __future__ import annotations
 
 import sqlite3
+
+from mtg_synergy_graph.graph_engine import _trigger_only_matches_self
 
 #: Death-trigger event classes. A ``Sacrificed`` / ``SacrificedOnce`` event is
 #: unconditionally a death event; ``ChangesZone`` / ``ChangesZoneAll`` counts
@@ -100,24 +107,20 @@ def is_death_event(event_class: str, zone_origin: str | None, zone_destination: 
     return False
 
 
-def _trigger_only_matches_self(valid_filter: str | None) -> bool:
-    """True when every comma-separated alternative in a trigger's ``valid_filter``
-    starts with ``Card.Self`` — i.e. the trigger only fires on the trigger
-    source itself and cannot be "fed" by any other card.
+def has_sacrificed_trigger(cmdr_ports: list) -> bool:
+    """True when any trigger port's event_class is a Sacrificed-family event.
 
-    Deliberately duplicated from ``graph_engine._trigger_only_matches_self``
-    (identical logic) rather than imported: this module is scoring-path
-    importable (``complement_rules/subtype_supply.py``) and is kept
-    dependency-free of ``graph_engine`` on purpose — see the module
-    docstring. Keep in sync if ``graph_engine``'s version changes.
+    Factored out (PR #103 review, F4) so the "does this commander already
+    have a dedicated sacrifice trigger" conjunct — previously duplicated in
+    ``complement_rules/death_outlet.py`` and ``bench/context_sim.py`` — has
+    one canonical home.
     """
-    if not valid_filter:
-        return False
-    for alt in valid_filter.split(","):
-        head = alt.strip()
-        if not head.startswith("Card.Self"):
-            return False
-    return True
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "trigger":
+            continue
+        if (p.get("event_class") or "").strip() in _SACRIFICE_EVENTS:
+            return True
+    return False
 
 
 def has_changeszone_death_payoff(cmdr_ports: list) -> bool:

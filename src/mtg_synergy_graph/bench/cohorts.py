@@ -26,6 +26,10 @@ import sqlite3
 from collections.abc import Callable
 
 from mtg_synergy_graph.death_payoff import (
+    _CHANGESZONE_EVENTS,
+    _SACRIFICE_EVENTS,
+)
+from mtg_synergy_graph.death_payoff import (
     is_death_event as _is_death_event,
 )
 from mtg_synergy_graph.death_payoff import (
@@ -36,9 +40,9 @@ from mtg_synergy_graph.death_payoff import (
 )
 from mtg_synergy_graph.graph_engine import _trigger_only_matches_self
 
-#: Death-trigger event classes used by ``outlet_direction_death_payoff``.
-_CHANGESZONE_EVENTS = frozenset({"ChangesZone", "ChangesZoneAll"})
-_SACRIFICE_EVENTS = frozenset({"Sacrificed", "SacrificedOnce"})
+#: Re-exported from ``death_payoff`` (single source of truth, PR #103
+#: review F4) — kept as local aliases since this module's callers already
+#: reference the bare ``_CHANGESZONE_EVENTS`` / ``_SACRIFICE_EVENTS`` names.
 
 
 def subtype_death_payoff(conn: sqlite3.Connection) -> set[str]:

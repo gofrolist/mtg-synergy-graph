@@ -15,6 +15,7 @@ import pytest
 
 import mtg_synergy_graph.complement_rules.death_outlet as do
 from mtg_synergy_graph.complement_rules.death_outlet import (
+    _commander_has_death_outlet_gate,
     _find_death_outlet_complements,
 )
 
@@ -111,6 +112,28 @@ class TestFindDeathOutletComplements:
         out = _find_death_outlet_complements(conn, [self_only], {"Some Commander"})
         assert out == []
 
+    def test_gate_passes_wilhelt_shaped_subtype_cohort_commander(self, conn):
+        """Documents the gate-breadth reality (F2, PR #103 review): a
+        Wilhelt-shaped commander -- a ChangesZone-to-graveyard death trigger
+        with a subtype-naming filter (e.g. "Zombie"), and NO Sacrificed
+        trigger of its own -- PASSES ``_commander_has_death_outlet_gate``.
+
+        This is INTENTIONAL documentation, not a regression: the gate
+        (``has_changeszone_death_payoff`` AND no Sacrificed trigger) has no
+        conjunct excluding ``subtype_death_payoff`` cohort membership at the
+        port level -- that exclusion only happens at cohort-ENUMERATION time
+        (``bench/cohorts.py::outlet_direction_death_payoff`` subtracts
+        ``subtype_death_payoff(conn)``'s members from its own qualifying
+        set). A subtype-cohort commander like Wilhelt, the Rotcleaver or
+        Slimefoot, the Stowaway is therefore NOT excluded by this port-level
+        gate -- it would stack with the shipped ``subtype_supply_*`` rules
+        if the flag were ever flipped on, a combination never sweep-tested.
+        See the module docstring's re-flip warning (added PR #103 review,
+        Phase 2) before ever flipping ``_ENABLE_DEATH_OUTLET_FEEDER``.
+        """
+        subtype_death_trigger = dict(DEATH_TRIGGER, valid_filter="Zombie.YouCtrl")
+        assert _commander_has_death_outlet_gate([subtype_death_trigger]) is True
+
     def test_gate_rejects_commander_with_sacrificed_port(self, conn):
         """Sacrificed-trigger commanders are served by cost_feeds_trigger already."""
         _add_free_outlet(conn)
@@ -177,6 +200,31 @@ class TestFindDeathOutletComplements:
         _add_free_outlet(conn, "Meren of Clan Nel Toth")
         out = _find_death_outlet_complements(conn, [DEATH_TRIGGER], {"Meren of Clan Nel Toth"})
         assert out == []
+
+    def test_cand_event_deterministic_across_row_order(self, conn):
+        """F9 (PR #103 review): a card with BOTH a free_outlet-shaped and a
+        self_sac-shaped cost.sacrifice port must always classify as
+        ``free_outlet`` (min(groups) alphabetically) -- never a coin flip
+        depending on SQLite's (unordered) row-return order."""
+        _add_port(
+            conn,
+            "Ambiguous Outlet",
+            "cost",
+            "sacrifice",
+            cost_target="self",
+            raw_line="Sac<1/CARDNAME>",
+        )
+        _add_port(
+            conn,
+            "Ambiguous Outlet",
+            "cost",
+            "sacrifice",
+            cost_target="other",
+            raw_line="Sac<1/Creature/Creature>",
+        )
+        out = _find_death_outlet_complements(conn, [DEATH_TRIGGER], {"Some Commander"})
+        assert len(out) == 1
+        assert out[0].cand_event == "free_outlet"
 
 
 class TestWiring:

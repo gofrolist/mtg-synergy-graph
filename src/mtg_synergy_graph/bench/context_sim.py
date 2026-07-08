@@ -425,17 +425,14 @@ def outlet_whitelist_scores(conn: sqlite3.Connection, commander: str) -> dict[st
     against (the outlet fixture) has already had that tiebreak applied at
     fixture-build time.
     """
-    from ..death_payoff import has_changeszone_death_payoff
+    from ..death_payoff import has_changeszone_death_payoff, has_sacrificed_trigger
     from ..graph_engine import load_ports_for_set
 
     cmdr_ports = load_ports_for_set(conn, [commander])
     if not has_changeszone_death_payoff(cmdr_ports):
         return {}
-    for p in cmdr_ports:
-        if (p.get("port_type") or "").strip() != "trigger":
-            continue
-        if (p.get("event_class") or "").strip() in {"Sacrificed", "SacrificedOnce"}:
-            return {}
+    if has_sacrificed_trigger(cmdr_ports):
+        return {}
 
     names = {
         n
