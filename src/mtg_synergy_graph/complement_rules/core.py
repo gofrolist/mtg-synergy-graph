@@ -1145,6 +1145,7 @@ from .combat import (  # noqa: E402
     _find_sacrifice_outlets,
     _find_subject_zone_feeders,
 )
+from .death_outlet import _find_death_outlet_complements  # noqa: E402
 from .density import (  # noqa: E402
     _find_cheat_cmc_bonus,
     _find_cost_reduction_targets,
@@ -1187,6 +1188,7 @@ from .statics import (  # noqa: E402
     _find_edict_feeders,
     _find_graveyard_play_synergy,
 )
+from .subtype_supply import _find_subtype_supply_complements  # noqa: E402
 from .tokens import (  # noqa: E402
     _find_effect_feeds_etb,
     _find_static_strategy,
@@ -1353,6 +1355,8 @@ def find_all_complements(
         out.extend(_find_cost_payoff_complements(conn, cmdr_ports, cmdr_set))
         out.extend(_find_opponent_forcing(conn, cmdr_ports, cmdr_set))
         out.extend(_find_token_producers_for_trigger(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_subtype_supply_complements(conn, cmdr_ports, cmdr_set, candidate_cache))
+        out.extend(_find_death_outlet_complements(conn, cmdr_ports, cmdr_set))
         out.extend(_find_static_strategy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_combat_enhancers(conn, cmdr_ports, cmdr_set))
         out.extend(_find_attack_payoffs(conn, cmdr_ports, cmdr_set, candidate_cache))

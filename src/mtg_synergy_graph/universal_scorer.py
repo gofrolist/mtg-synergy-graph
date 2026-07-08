@@ -163,6 +163,11 @@ _RULE_TO_BUCKET: dict[str, str] = {
     "self_bridging_cascade": "port_match",
     # Plan 2026-05-19 Prepared / AlternateMode:Prepare mechanic capture.
     "prepared_mechanic": "port_match",
+    # Plan 2026-07-07-001 subtype-supply (shipped 2026-07-07, flag ON; see subtype_supply.py).
+    "subtype_supply_producer": "port_match",
+    "subtype_supply_body": "port_match",
+    # Plan 2026-07-07-002 Task 6 death_outlet_feeder (flag-off; see death_outlet.py).
+    "death_outlet_feeder": "cost_synergy",
 }
 
 # ---------------------------------------------------------------------------
@@ -315,6 +320,12 @@ class ScoringConfigInputs(NamedTuple):
     #: invalidate the tensor.
     enable_pool_scaled_flat_weights: bool
     pool_scale_floor: int
+    #: Plan 2026-07-07-001 review follow-up (F1): the subtype-supply rule
+    #: gate (``complement_rules.subtype_supply._ENABLE_SUBTYPE_SUPPLY``).
+    #: Shipped default-True; flipping it to False disables both
+    #: ``subtype_supply_producer`` / ``subtype_supply_body`` and must
+    #: invalidate the pinned tensor like every other rule-gating flag here.
+    enable_subtype_supply: bool
 
 
 def _seed_digest(filename: str, functional_keys: tuple[str, ...]) -> str:
@@ -347,6 +358,7 @@ def get_scoring_config_inputs() -> ScoringConfigInputs:
     # embeddings modules — they import numpy + sqlite3 and have no
     # reason to be pulled in at scorer-module import.
     from .complement_rules import density, pathway
+    from .complement_rules import subtype_supply as _subtype_supply
     from .embeddings import contribution as emb_contribution
     from .embeddings.config import get_embedding_config_inputs as _get_emb_cfg
 
@@ -369,6 +381,7 @@ def get_scoring_config_inputs() -> ScoringConfigInputs:
         enable_tribal_payoff_tier=density._ENABLE_TRIBAL_PAYOFF_TIER,
         enable_pool_scaled_flat_weights=_ENABLE_POOL_SCALED_FLAT_WEIGHTS,
         pool_scale_floor=_POOL_SCALE_FLOOR,
+        enable_subtype_supply=_subtype_supply._ENABLE_SUBTYPE_SUPPLY,
     )
 
 
@@ -961,6 +974,29 @@ def score_all_universal(
     )
 
 
+#: rank_bonus weight and rank divisor — the sole source of the
+#: EDHREC-rank-derived in-score micro-term. Both call sites below
+#: (scored candidates and staple-only candidates) route through
+#: :func:`rank_bonus_for_rank`; ``bench/forensics.py::rank_bonus_for``
+#: delegates here rather than re-deriving the formula, so there is
+#: exactly one place the arithmetic can drift (PR #103 review, F3).
+_RANK_BONUS_WEIGHT: float = 0.005
+_RANK_BONUS_RANK_DIVISOR: float = 30000.0
+
+
+def rank_bonus_for_rank(rank: int) -> float:
+    """The in-score ``rank_bonus`` micro-term for an already-resolved rank.
+
+    ``0.005 * max(0.0, 1.0 - rank / 30000.0)``. Callers resolve the
+    candidate's ``edhrec_rank`` (with whatever missing-data fallback
+    applies at the call site — this scorer uses
+    ``rank_data.get(name, 99999)``) before calling this function; it
+    performs no lookup of its own. Single source of truth for the
+    formula — see the module-level constants' docstring.
+    """
+    return _RANK_BONUS_WEIGHT * max(0.0, 1.0 - rank / _RANK_BONUS_RANK_DIVISOR)
+
+
 def score_from_complements(
     conn: sqlite3.Connection,
     commander_set: Sequence[str],
@@ -1100,7 +1136,7 @@ def score_from_complements(
             idf_weights=idf,
             circuit_bonus=0.05 if name in circuit_candidates else 0.0,
             cmc_bonus=0.01 * max(0.0, (7.0 - cmc)) / 7.0,
-            rank_bonus=0.005 * max(0.0, 1.0 - rank / 30000.0),
+            rank_bonus=rank_bonus_for_rank(rank),
             embedding_contribution=emb_contrib,
         )
     for name in staple_names:
@@ -1122,7 +1158,7 @@ def score_from_complements(
                 staple_bonus=0.01,
                 idf_weights=idf,
                 cmc_bonus=0.01 * max(0.0, (7.0 - cmc)) / 7.0,
-                rank_bonus=0.005 * max(0.0, 1.0 - rank / 30000.0),
+                rank_bonus=rank_bonus_for_rank(rank),
                 embedding_contribution=emb_contrib,
             )
 

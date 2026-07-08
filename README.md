@@ -2,7 +2,7 @@
 
 Analyze Magic: The Gathering EDH/Commander deck synergies using a deterministic, rule-based Forge-DSL Graph Engine.
 
-The system parses card abilities from MTG Forge's game engine DSL, builds a port-matching graph, and scores synergies deterministically — no training, no EDHREC at inference, fully explainable, with day-1 support for new cards.
+The system parses card abilities from MTG Forge's game engine DSL, builds a port-matching graph, and scores synergies deterministically — no training; mechanical rule scoring uses no EDHREC (a small EDHREC-derived rank tiebreak exists at inference — see CLAUDE.md), fully explainable, with day-1 support for new cards.
 
 ## Quick Start
 

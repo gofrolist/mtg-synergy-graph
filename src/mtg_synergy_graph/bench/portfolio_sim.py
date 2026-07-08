@@ -54,7 +54,7 @@ import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from mtg_synergy_graph.bench.hidden_gems import (
     _aggregate_contributions,
@@ -411,8 +411,30 @@ def _iter_sims(
 # ---------------------------------------------------------------------------
 
 
+class GemRateSim(Protocol):
+    """Structural contract for :func:`gem_rate_for_assembly`.
+
+    Any per-commander sim exposing these two fields under these names
+    (``CommanderSim`` here, ``quality_sim.QualitySim``,
+    ``context_sim.ContextSim``'s own gem helper, ...) can be passed
+    straight through — no cast needed, since ``gem_rate_for_assembly``
+    reads nothing else. Declared as read-only ``@property`` members
+    (not plain attributes) so frozen-dataclass implementers
+    (``CommanderSim``, ``QualitySim`` are both ``@dataclass(frozen=True)``)
+    satisfy the protocol structurally — pyright treats a plain
+    attribute as read-write, which a frozen dataclass field can never
+    match.
+    """
+
+    @property
+    def edhrec_top_30(self) -> frozenset[str] | None: ...
+
+    @property
+    def plausible(self) -> frozenset[str]: ...
+
+
 def gem_rate_for_assembly(
-    sim: CommanderSim,
+    sim: GemRateSim,
     assembled: Sequence[str],
     *,
     k: int = 30,

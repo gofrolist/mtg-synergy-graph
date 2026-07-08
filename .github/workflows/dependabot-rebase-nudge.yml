@@ -1,0 +1,62 @@
+name: Dependabot rebase nudge
+
+# Companion to dependabot-auto-merge.yml. That workflow arms GitHub's native
+# auto-merge, but the branch ruleset also requires the PR branch to be up to
+# date with main — and Dependabot only auto-rebases its PRs when they CONFLICT
+# with main. A PR that is merely BEHIND (e.g. after a human PR merges, or a
+# github-actions bump that touches no shared file) stalls forever with
+# auto-merge armed and checks green. This stranded PRs #96–#100 for three
+# days in July 2026.
+#
+# Fix: whenever main moves (plus a daily backstop for merges whose push event
+# doesn't cascade-trigger workflows — GITHUB_TOKEN pushes don't), comment
+# `@dependabot rebase` on every open Dependabot PR sitting at BEHIND. The
+# comment path keeps Dependabot's ownership of the branch — never use
+# `gh pr update-branch`, which disowns the PR and stops future auto-rebases.
+#
+# Security: no checkout, runs only the gh CLI against our own PR list, and
+# the token is scoped to commenting.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "37 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  pull-requests: write
+
+concurrency:
+  group: dependabot-rebase-nudge
+  cancel-in-progress: false
+
+jobs:
+  nudge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Comment "@dependabot rebase" on BEHIND Dependabot PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          prs=$(gh pr list --repo "$REPO" --author "app/dependabot" \
+                --state open --json number --jq '.[].number')
+          [ -z "$prs" ] && { echo "no open Dependabot PRs"; exit 0; }
+          for pr in $prs; do
+            # mergeStateStatus is computed lazily and reads UNKNOWN right
+            # after main moves; poll briefly before deciding.
+            for attempt in 1 2 3; do
+              status=$(gh pr view "$pr" --repo "$REPO" \
+                       --json mergeStateStatus --jq .mergeStateStatus)
+              [ "$status" != "UNKNOWN" ] && break
+              sleep 20
+            done
+            if [ "$status" = "BEHIND" ]; then
+              gh pr comment "$pr" --repo "$REPO" --body "@dependabot rebase"
+              echo "nudged #$pr"
+            else
+              echo "#$pr is $status — skipped"
+            fi
+          done
