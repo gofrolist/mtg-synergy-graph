@@ -126,6 +126,34 @@ pair). If body redundancy becomes a concern, the sweep's (1.5, 0.0)
 cell (+0.0620, 0 cliffs, producer-only) removes the overlapping
 direction at a cost of −0.0030 cohort NDCG.
 
+## 2026-07-03
+
+### gy_fuel vocabulary expansion (Surveil / DigUntil) — DECLINED at Stage 0
+
+`/ce-brainstorm` on "vocabulary expansion for the top UNKNOWN port
+shapes" (`bench.py audit --unknowns`). Pressure-tested from the broad
+card-selection/graveyard-fuel cluster (Dig 828, Mill 503, Scry 385,
+Surveil 200, DigUntil 149) down to the one mechanically-honest subset:
+add `Surveil≥3` + `DigUntil→Graveyard` self-mill supply tiers to the
+existing `gy_fuel_feeder` (~24 `cost.exile_from_grave` commanders).
+
+Died at the Stage-0 pre-flight (no scoring code written). Two premises
+failed inspection: (1) "UNKNOWN" ≠ "unconsumed" — `gy_fuel_feeder`
+already consumes `effect.Mill` via the `card_ports` path while it shows
+in the typed-view UNKNOWN list; (2) Dig/Scry are card selection, never
+touch the graveyard. `ce-doc-review` (4 personas) then caught two filter
+defects that corrected the pool *downward*: Surveil is **optional-fill**
+(the `≥3` anti-flood gate is decorative; the 17 are mostly selection
+cantrips), and DigUntil opponent-mill hides in `Defined`/`ValidTgts`/
+`IsCurse` (not the literal `Opponent` token), collapsing the self-only
+set 13 → **4** combo/value cards. Corrected net-new supply **~21 cards**,
+near-zero-to-negative expected NDCG@30; the kill-test gate was also
+structurally biased to DECLINE (hard no-regression bar over 24 commanders
+× near-zero upside). Third independent confirmation this session that
+axis-feeder *breadth* is the tapped-out lever; open lever remains
+archetype-payoff / subtype-link detection. Details:
+docs/solutions/best-practices/gy-fuel-vocab-expansion-null-result-2026-07-03.md.
+
 ## 2026-07-02
 
 ### Resource-flow demand mechanism — DECLINED at Stage 0 (plan 2026-07-02-005)
