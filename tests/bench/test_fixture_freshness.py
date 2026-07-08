@@ -31,6 +31,14 @@ _FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 _COMMITTED_GOLDEN_FIXTURES = (
     "golden_set_run.json",
     "golden_set_run_500.json",
+    # Archetype-payoff cohort fixture (plan 2026-07-03-001). Joins the no-DB
+    # freshness gate so its config_hash cannot silently go stale at re-pin time.
+    # Rebuild via `scripts/bootstrap_archetype_payoff_fixture.py`.
+    "golden_set_archetype_payoff.json",
+    # Outlet-direction death-payoff cohort fixture (plan 2026-07-07-002 Task 3).
+    # Same no-DB freshness discipline as the archetype-payoff fixture above.
+    # Rebuild via `scripts/bootstrap_outlet_payoff_fixture.py`.
+    "golden_set_outlet_payoff.json",
 )
 
 
