@@ -195,23 +195,25 @@ class GateResult:
     cohort_deltas: dict[str, int] = field(default_factory=dict)
     control_delta_mean: float = 0.0
     control_deltas: dict[str, int] = field(default_factory=dict)
-    stale_baseline: bool = False
 
 
 def run_gate(
     engine,
     conn,
-    baseline_path,
     cohort_names,
     *,
-    live_config_hash: str,
+    baseline: dict[str, CoverageMetrics],
     control_size: int = 200,
     seed: int = 17,
 ) -> GateResult:
-    baseline_hash, baseline = read_baseline(baseline_path)
-    if baseline_hash != live_config_hash:
-        return GateResult(stale_baseline=True)
+    """Score the cohort + a stratified control and diff vs a pre-loaded,
+    already-staleness-validated ``baseline``.
 
+    The caller (:func:`_cmd_gate`) reads the baseline once and owns the
+    config-hash staleness check, so it can fail fast WITHOUT opening the DB
+    (a stale gate must not require a scored database) and this function does
+    not re-read the baseline file.
+    """
     cohort_set = set(cohort_names)
     control = stratified_control(baseline, exclude=cohort_set, size=control_size, seed=seed)
     live_cohort = run_census(engine, conn, commanders=sorted(cohort_set))
@@ -224,7 +226,6 @@ def run_gate(
         cohort_deltas=cohort_deltas,
         control_delta_mean=control_mean,
         control_deltas=control_deltas,
-        stale_baseline=False,
     )
 
 
@@ -287,34 +288,33 @@ def _cmd_queue(args: argparse.Namespace) -> int:
 def _cmd_gate(args: argparse.Namespace) -> int:
     live_config_hash = args.force_config_hash if args.force_config_hash is not None else compute_config_hash()
 
-    # run_gate reads the baseline exactly once and performs the staleness
-    # check itself, so there is no separate pre-check read here (the engine is
-    # opened first only so run_gate can score; on the rare stale path it is
-    # closed immediately and we re-read the hash solely for the message).
-    engine, conn = _open_engine_and_conn(args.db)
-    try:
-        cohort_names = _resolve_cohort(args.cohort, conn)
-        result = run_gate(
-            engine,
-            conn,
-            args.baseline,
-            cohort_names,
-            live_config_hash=live_config_hash,
-            control_size=args.control_size,
-            seed=args.seed,
-        )
-    finally:
-        engine.close()
-        conn.close()
-
-    if result.stale_baseline:
-        baseline_hash, _ = read_baseline(args.baseline)
+    # Read the baseline ONCE and check staleness before opening the DB: a
+    # stale gate must fail fast without requiring a scored database (open_db
+    # would otherwise raise on a missing DB). The parsed baseline is handed to
+    # run_gate so the file is not read twice.
+    baseline_hash, baseline = read_baseline(args.baseline)
+    if baseline_hash != live_config_hash:
         print(
             f"error: baseline is stale — baseline config_hash "
             f"{baseline_hash[:12]}... != live {live_config_hash[:12]}... "
             f"Re-run `census` to refresh {args.baseline} before gating."
         )
         return 1
+
+    engine, conn = _open_engine_and_conn(args.db)
+    try:
+        cohort_names = _resolve_cohort(args.cohort, conn)
+        result = run_gate(
+            engine,
+            conn,
+            cohort_names,
+            baseline=baseline,
+            control_size=args.control_size,
+            seed=args.seed,
+        )
+    finally:
+        engine.close()
+        conn.close()
 
     print(f"cohort delta mean: {result.cohort_delta_mean:+.3f} ({len(result.cohort_deltas)} commanders)")
     for name in sorted(result.cohort_deltas):
