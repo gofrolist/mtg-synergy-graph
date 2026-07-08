@@ -10,16 +10,28 @@ stratified control sample. See
 
 from __future__ import annotations
 
+import argparse
 import json
 import random
 import sqlite3
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from mtg_synergy_graph.bench.cohorts import toughness_payoff
 from mtg_synergy_graph.bench.coverage import CoverageMetrics, compute_coverage
+from mtg_synergy_graph.bench.tensor import compute_config_hash
+from mtg_synergy_graph.db import open_db
 from mtg_synergy_graph.engine import SynergyEngine
 
 _METRIC_VERSION = 1
+
+_DEFAULT_BASELINE = ".audit/coverage/baseline.json"
+_DEFAULT_DB = "data/synergy.db"
+
+#: Cohort-name -> predicate dispatch (mirrors ``bench/demand_coverage.py``'s
+#: flat-dispatch convention). Only ``toughness_payoff`` is seeded.
+_COHORT_DISPATCH = {"toughness_payoff": toughness_payoff}
 
 
 def legal_commander_names(conn: sqlite3.Connection) -> list[str]:
@@ -180,3 +192,157 @@ def run_gate(
         control_deltas=control_deltas,
         stale_baseline=False,
     )
+
+
+# ---------------------------------------------------------------------------
+# CLI (census / queue / gate)
+# ---------------------------------------------------------------------------
+
+
+def _resolve_cohort(name: str, conn: sqlite3.Connection) -> list[str]:
+    predicate = _COHORT_DISPATCH.get(name)
+    if predicate is None:
+        raise ValueError(f"unknown cohort {name!r} — known cohorts: {sorted(_COHORT_DISPATCH)}")
+    return sorted(predicate(conn))
+
+
+def _open_engine_and_conn(db_path: str) -> tuple[SynergyEngine, sqlite3.Connection]:
+    """Two-connection pattern (mirrors ``bench/forensics.py``): ``open_db``
+    for direct SQL + a separate ``SynergyEngine`` for scoring, both against
+    the same on-disk DB path, ``create=False`` so a missing DB raises
+    ``FileNotFoundError`` with a rebuild hint instead of materializing an
+    empty one."""
+    conn = open_db(db_path, create=False)
+    engine = SynergyEngine(Path(db_path))
+    return engine, conn
+
+
+def _cmd_census(args: argparse.Namespace) -> int:
+    engine, conn = _open_engine_and_conn(args.db)
+    try:
+        metrics = run_census(engine, conn, commanders=args.commander)
+    finally:
+        engine.close()
+        conn.close()
+    config_hash = compute_config_hash()
+    write_baseline(args.out, metrics, config_hash=config_hash)
+    print(
+        f"census: {len(metrics)} commander(s) scored; baseline written to {args.out} "
+        f"(config_hash={config_hash[:12]}...)"
+    )
+    return 0
+
+
+def _print_queue(rows: list[tuple[str, int]], *, fmt: str) -> None:
+    if fmt == "csv":
+        print("name,earned_top30")
+        for name, earned in rows:
+            print(f"{name},{earned}")
+        return
+    for name, earned in rows:
+        print(f"{earned:3d}  {name}")
+
+
+def _cmd_queue(args: argparse.Namespace) -> int:
+    _config_hash, metrics = read_baseline(args.baseline)
+    rows = poverty_queue(metrics)[: args.top]
+    _print_queue(rows, fmt=args.format)
+    return 0
+
+
+def _cmd_gate(args: argparse.Namespace) -> int:
+    baseline_hash, _baseline = read_baseline(args.baseline)
+    live_config_hash = args.force_config_hash if args.force_config_hash is not None else compute_config_hash()
+
+    if baseline_hash != live_config_hash:
+        print(
+            f"error: baseline is stale — baseline config_hash "
+            f"{baseline_hash[:12]}... != live {live_config_hash[:12]}... "
+            f"Re-run `census` to refresh {args.baseline} before gating."
+        )
+        return 1
+
+    engine, conn = _open_engine_and_conn(args.db)
+    try:
+        cohort_names = _resolve_cohort(args.cohort, conn)
+        result = run_gate(
+            engine,
+            conn,
+            args.baseline,
+            cohort_names,
+            live_config_hash=live_config_hash,
+            control_size=args.control_size,
+            seed=args.seed,
+        )
+    finally:
+        engine.close()
+        conn.close()
+
+    if result.stale_baseline:
+        # Should not happen given the pre-check above, but the message is
+        # still emitted for the (racy) case a baseline was rewritten
+        # underneath a running gate.
+        print("error: baseline is stale (config_hash mismatch detected during gate run).")
+        return 1
+
+    print(f"cohort delta mean: {result.cohort_delta_mean:+.3f} ({len(result.cohort_deltas)} commanders)")
+    for name in sorted(result.cohort_deltas):
+        print(f"  {name}: {result.cohort_deltas[name]:+d}")
+
+    control_values = list(result.control_deltas.values())
+    control_min = min(control_values) if control_values else 0
+    negatives = sorted(name for name in result.control_deltas if result.control_deltas[name] < 0)
+    print(f"control delta mean: {result.control_delta_mean:+.3f} ({len(result.control_deltas)} commanders)")
+    print(f"control delta distribution: min={control_min:+d}, negatives={len(negatives)}")
+    for name in negatives:
+        print(f"  {name}: {result.control_deltas[name]:+d}")
+
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="coverage_report.py",
+        description="Activation-poverty coverage instrument (census / queue / gate).",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_census = sub.add_parser("census", help="score the full legal-commander universe and pin a baseline")
+    p_census.add_argument("--db", default=_DEFAULT_DB, help="synergy DB path")
+    p_census.add_argument("--out", default=_DEFAULT_BASELINE, help="baseline output path")
+    p_census.add_argument(
+        "--commander",
+        metavar="NAME",
+        action="append",
+        default=None,
+        help="restrict census to this commander (exact name; repeatable; debugging/test subset)",
+    )
+    p_census.set_defaults(func=_cmd_census)
+
+    p_queue = sub.add_parser("queue", help="print the poverty queue (poorest earned_top30 first) from a baseline")
+    p_queue.add_argument("--baseline", default=_DEFAULT_BASELINE, help="baseline path (from `census`)")
+    p_queue.add_argument("--top", type=int, default=50, help="number of poorest commanders to print")
+    p_queue.add_argument("--format", choices=("text", "csv"), default="text", help="output format")
+    p_queue.set_defaults(func=_cmd_queue)
+
+    p_gate = sub.add_parser(
+        "gate", help="measure a cohort's earned_top30 lift vs baseline against a stratified control"
+    )
+    p_gate.add_argument("--db", default=_DEFAULT_DB, help="synergy DB path")
+    p_gate.add_argument("--baseline", default=_DEFAULT_BASELINE, help="baseline path (from `census`)")
+    p_gate.add_argument("--cohort", choices=sorted(_COHORT_DISPATCH), required=True, help="named cohort predicate")
+    p_gate.add_argument("--control-size", type=int, default=200, help="stratified control sample size")
+    p_gate.add_argument("--seed", type=int, default=17, help="control-sample RNG seed")
+    p_gate.add_argument(
+        "--force-config-hash",
+        default=None,
+        help=argparse.SUPPRESS,  # test seam only: override the live config_hash
+    )
+    p_gate.set_defaults(func=_cmd_gate)
+
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    return args.func(args)
