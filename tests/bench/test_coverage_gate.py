@@ -19,6 +19,17 @@ def test_compute_deltas_vs_baseline():
     assert mean == 3.0
 
 
+def test_compute_deltas_warns_on_names_absent_from_baseline(caplog):
+    import logging
+
+    baseline = {"A": CoverageMetrics(5, 0, 0)}
+    live = {"A": CoverageMetrics(6, 0, 0), "NewCmdr": CoverageMetrics(9, 0, 0)}
+    with caplog.at_level(logging.WARNING):
+        deltas, _ = _compute_deltas(live, baseline)
+    assert deltas == {"A": 1}  # NewCmdr silently un-differenceable...
+    assert "NewCmdr" in caplog.text  # ...but the drop is warned, not silent
+
+
 def test_gate_flags_stale_baseline(tmp_path):
     path = tmp_path / "baseline.json"
     write_baseline(path, {"A": CoverageMetrics(0, 0, 0)}, config_hash="OLD")

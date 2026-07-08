@@ -66,11 +66,15 @@ def cohort_db(tmp_path: Path) -> Iterator[sqlite3.Connection]:
         scaling_expression="Count$CardToughness",
     )
 
-    # (c) explicit combat commander, a legal legendary creature -> selected.
+    # (c) CombatDamageToughness port (Doran/Arcades shape), a legal legendary
+    #     creature -> selected via the queryable port shape (no name whitelist).
     _insert_commander(conn, "Doran, the Siege Tower")
+    _insert_toughness_port(conn, "Doran, the Siege Tower", event_class="CombatDamageToughness")
 
-    # (d) explicit-set name that is NOT a legendary creature -> filtered out.
+    # (d) CombatDamageToughness port but NOT a legendary creature (High Alert
+    #     is an enchantment) -> the legal-legendary-creature join must drop it.
     _insert_commander(conn, "High Alert", supertypes="", card_types="Enchantment")
+    _insert_toughness_port(conn, "High Alert", event_class="CombatDamageToughness")
 
     # (e) toughness only in a buff/P-T raw_line, no CardToughness port ->
     #     must NOT be selected (predicate keys on port shape, not raw_line).
@@ -104,13 +108,15 @@ def test_selects_cardtoughness_port_commanders(cohort_db):
     assert "Tanazir-like" in cohort  # scaling_expression LIKE '%CardToughness%'
 
 
-def test_includes_explicit_combat_commander(cohort_db):
+def test_includes_combat_damage_toughness_port(cohort_db):
+    # Doran/Arcades shape: event_class = 'CombatDamageToughness' (queryable
+    # port, not a hardcoded name list).
     assert "Doran, the Siege Tower" in toughness_payoff(cohort_db)
 
 
-def test_excludes_non_creature_from_explicit_set(cohort_db):
-    # High Alert is in _TOUGHNESS_COMBAT_COMMANDERS but is not a legendary
-    # creature -> the join must drop it.
+def test_excludes_non_creature_combat_damage_toughness(cohort_db):
+    # High Alert HAS the CombatDamageToughness shape but is a non-creature
+    # enchantment -> the legal-legendary-creature join must drop it.
     assert "High Alert" not in toughness_payoff(cohort_db)
 
 

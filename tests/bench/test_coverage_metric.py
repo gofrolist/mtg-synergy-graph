@@ -69,3 +69,22 @@ def test_n_synergy_buckets_distinct_nonzero():
 def test_empty_page_all_zero():
     m = compute_coverage([], top_n=30)
     assert m == CoverageMetrics(earned_top30=0, n_scored_cands=0, n_synergy_buckets=0)
+
+
+def test_is_earned_false_for_float_residual_bucket():
+    # A bucket left at float noise (a synergy + anti-synergy row cancelling to
+    # ~1e-16 rather than exactly 0.0) must NOT count as earned.
+    assert is_earned(_Rec(scores={"port_match": 1e-16, "total": 0.037})) is False
+
+
+def test_is_earned_true_for_real_small_contribution():
+    # A genuine IDF contribution (orders of magnitude above the 1e-9 floor)
+    # still counts.
+    assert is_earned(_Rec(scores={"port_match": 0.01, "total": 0.02})) is True
+
+
+def test_float_residual_not_counted_in_metrics():
+    items = [_Rec(scores={"port_match": 1e-16, "total": 0.0}), _earned()]
+    m = compute_coverage(items, top_n=30)
+    assert m.earned_top30 == 1  # only the genuine one
+    assert m.n_scored_cands == 1

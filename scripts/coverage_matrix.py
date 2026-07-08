@@ -50,6 +50,7 @@ from mtg_synergy_graph.complement_rules.core import (
     find_all_complements,
     load_ports_for_set,
 )
+from mtg_synergy_graph.db import open_db
 from mtg_synergy_graph.penalties import build_candidate_cache
 
 
@@ -192,8 +193,12 @@ def main() -> int:
     parser.add_argument("--top", type=int, default=25)
     args = parser.parse_args()
 
-    conn = sqlite3.connect(args.db)
-    conn.row_factory = sqlite3.Row
+    # open_db (not raw sqlite3.connect): returns a weak-referenceable
+    # connection so graph_engine's port/interpreter caches actually cache
+    # this run (a raw connection silently falls through to uncached), and
+    # create=False refuses to materialize an empty DB. row_factory=Row is
+    # set by open_db.
+    conn = open_db(args.db, create=False)
     try:
         commanders = _commander_names(conn)
         if args.limit > 0:

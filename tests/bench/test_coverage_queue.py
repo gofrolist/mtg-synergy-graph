@@ -36,3 +36,14 @@ def test_stratified_control_caps_at_available():
     m = _metrics(50)
     ctrl = stratified_control(m, exclude=set(), size=200, seed=17)
     assert len(ctrl) == 50  # cannot exceed the pool
+
+
+def test_stratified_control_represents_every_band():
+    # 10 earned-bands (0, 3, 6, ... 27), 30 commanders each = 300 pool.
+    # Round-robin sampling must surface every band so a regression concentrated
+    # in any single band stays visible in the control (not drowned by band 0).
+    m = {f"b{b}_c{i:02d}": CoverageMetrics(b * 3, 0, 0) for b in range(10) for i in range(30)}
+    ctrl = stratified_control(m, exclude=set(), size=50, seed=17)
+    assert len(ctrl) == 50
+    bands = {min(m[name].earned_top30 // 3, 9) for name in ctrl}
+    assert bands == set(range(10))  # all 10 bands represented

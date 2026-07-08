@@ -12,17 +12,22 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import random
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mtg_synergy_graph.bench.cohorts import toughness_payoff
+from mtg_synergy_graph.bench.cohorts import LEGAL_LEGENDARY_CREATURE_WHERE, toughness_payoff
 from mtg_synergy_graph.bench.coverage import CoverageMetrics, compute_coverage
 from mtg_synergy_graph.bench.tensor import compute_config_hash
+from mtg_synergy_graph.complement_rules._interpreter_cache import clear_interpreter_cache
 from mtg_synergy_graph.db import open_db
 from mtg_synergy_graph.engine import SynergyEngine
+from mtg_synergy_graph.graph_engine import clear_ports_cache
+
+logger = logging.getLogger(__name__)
 
 _METRIC_VERSION = 1
 
@@ -35,20 +40,23 @@ _COHORT_DISPATCH = {"toughness_payoff": toughness_payoff}
 
 
 def legal_commander_names(conn: sqlite3.Connection) -> list[str]:
-    rows = conn.execute(
-        "SELECT name FROM cards "
-        "WHERE legal_commander = 1 "
-        "AND supertypes LIKE '%Legendary%' "
-        "AND card_types LIKE '%Creature%' "
-        "ORDER BY name"
-    )
+    # Shares LEGAL_LEGENDARY_CREATURE_WHERE (aliased ``c``) with the cohort
+    # predicates so census eligibility and cohort membership cannot drift.
+    rows = conn.execute(f"SELECT c.name FROM cards c WHERE {LEGAL_LEGENDARY_CREATURE_WHERE} ORDER BY c.name")  # noqa: S608
     return [name for (name,) in rows]
 
 
 def commander_coverage(engine: SynergyEngine, commander: str) -> CoverageMetrics:
     page = engine.page([commander], offset=0, limit=1_000_000)
     metrics = compute_coverage(page.items, top_n=30)
-    engine._score_cache.clear()  # bound memory across a ~2000-commander loop
+    # Bound memory across a ~2000-commander census: clear the engine's score
+    # cache AND the module-level per-connection port/interpreter caches, which
+    # otherwise accumulate one entry per commander for the run's lifetime
+    # (the connection stays alive the whole census). Mirrors the per-iteration
+    # clear_ports_cache() convention in bench/demand_coverage.py.
+    engine._score_cache.clear()
+    clear_ports_cache()
+    clear_interpreter_cache()
     return metrics
 
 
@@ -117,9 +125,16 @@ def stratified_control(
 ) -> list[str]:
     """Deterministic sample spanning the earned_top30 distribution.
 
-    Buckets the eligible pool into 10 strata by earned_top30, then draws
-    proportionally (seeded) so the control spans poverty-poor to
-    poverty-rich commanders — a regression anywhere is visible.
+    Buckets the eligible pool into 10 bands by earned_top30, then draws
+    ROUND-ROBIN across bands (one per band per pass, seeded shuffle within
+    each band) so every non-empty band contributes a name before any band
+    contributes a second. In this instrument's typical band-0-dominated pool
+    that keeps the thin high-earned bands represented — a regression
+    concentrated in any single band stays visible in the control, which a
+    proportional draw (dominated by band 0) would not guarantee.
+
+    Deterministic for a fixed seed; returns exactly ``size`` names when the
+    pool exceeds ``size``, or the whole (sorted) pool otherwise.
     """
     pool = sorted(name for name in metrics if name not in exclude)
     if len(pool) <= size:
@@ -130,26 +145,45 @@ def stratified_control(
     for name in pool:
         band = min(metrics[name].earned_top30 // 3, 9)  # 0..9 (earned 0..30)
         strata.setdefault(band, []).append(name)
+    for members in strata.values():
+        members.sort()
+        rng.shuffle(members)  # deterministic order within the band
 
+    order = sorted(strata)
+    cursor = dict.fromkeys(order, 0)
     picked: list[str] = []
-    per = max(1, size // max(1, len(strata)))
-    for band in sorted(strata):
-        members = sorted(strata[band])
-        rng.shuffle(members)
-        picked.extend(members[:per])
-
-    # Top up / trim deterministically to exactly `size`.
-    if len(picked) < size:
-        remaining = sorted(set(pool) - set(picked))
-        rng.shuffle(remaining)
-        picked.extend(remaining[: size - len(picked)])
-    return sorted(picked[:size])
+    while len(picked) < size:
+        progressed = False
+        for band in order:
+            if len(picked) >= size:
+                break
+            i = cursor[band]
+            if i < len(strata[band]):
+                picked.append(strata[band][i])
+                cursor[band] = i + 1
+                progressed = True
+        if not progressed:  # pool exhausted (unreachable: len(pool) > size)
+            break
+    return sorted(picked)
 
 
 def _compute_deltas(
     live: dict[str, CoverageMetrics],
     baseline: dict[str, CoverageMetrics],
 ) -> tuple[dict[str, int], float]:
+    # A commander live-scored but absent from the pinned baseline cannot be
+    # differenced and is dropped. This is silent data loss (the mean would be
+    # computed over a smaller, possibly biased population) so warn loudly —
+    # it happens when new commanders enter the legal pool after the baseline
+    # census, which a cardsfolder data refresh does NOT force via config_hash.
+    missing = sorted(name for name in live if name not in baseline)
+    if missing:
+        logger.warning(
+            "coverage gate: %d live commander(s) absent from the pinned baseline, "
+            "excluded from the delta (re-run `census` to refresh): %s",
+            len(missing),
+            ", ".join(missing),
+        )
     deltas = {name: m.earned_top30 - baseline[name].earned_top30 for name, m in live.items() if name in baseline}
     mean = sum(deltas.values()) / len(deltas) if deltas else 0.0
     return deltas, mean
@@ -251,17 +285,12 @@ def _cmd_queue(args: argparse.Namespace) -> int:
 
 
 def _cmd_gate(args: argparse.Namespace) -> int:
-    baseline_hash, _baseline = read_baseline(args.baseline)
     live_config_hash = args.force_config_hash if args.force_config_hash is not None else compute_config_hash()
 
-    if baseline_hash != live_config_hash:
-        print(
-            f"error: baseline is stale — baseline config_hash "
-            f"{baseline_hash[:12]}... != live {live_config_hash[:12]}... "
-            f"Re-run `census` to refresh {args.baseline} before gating."
-        )
-        return 1
-
+    # run_gate reads the baseline exactly once and performs the staleness
+    # check itself, so there is no separate pre-check read here (the engine is
+    # opened first only so run_gate can score; on the rare stale path it is
+    # closed immediately and we re-read the hash solely for the message).
     engine, conn = _open_engine_and_conn(args.db)
     try:
         cohort_names = _resolve_cohort(args.cohort, conn)
@@ -279,10 +308,12 @@ def _cmd_gate(args: argparse.Namespace) -> int:
         conn.close()
 
     if result.stale_baseline:
-        # Should not happen given the pre-check above, but the message is
-        # still emitted for the (racy) case a baseline was rewritten
-        # underneath a running gate.
-        print("error: baseline is stale (config_hash mismatch detected during gate run).")
+        baseline_hash, _ = read_baseline(args.baseline)
+        print(
+            f"error: baseline is stale — baseline config_hash "
+            f"{baseline_hash[:12]}... != live {live_config_hash[:12]}... "
+            f"Re-run `census` to refresh {args.baseline} before gating."
+        )
         return 1
 
     print(f"cohort delta mean: {result.cohort_delta_mean:+.3f} ({len(result.cohort_deltas)} commanders)")
