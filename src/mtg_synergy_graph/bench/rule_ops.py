@@ -80,6 +80,11 @@ def summarize_rule_contributions(
     The returned aggregate is the sum of IDF-weighted per-(cmdr, cand)
     contributions the rule emitted — NOT an ablation / score-delta
     estimate. See the module docstring for why.
+
+    Reads every commander at ``config_hash``. Since additive ``--repin``
+    lets several fixtures share one ``config_hash``, this spans the UNION
+    of pinned fixtures (pin-history-dependent) — a documented diagnostic
+    caveat; see docs/solutions/best-practices/tensor-single-owner-slot-2026-07-08.md.
     """
     h = config_hash or compute_config_hash()
     # Aggregate |contribution| per commander + overall totals in one pass.

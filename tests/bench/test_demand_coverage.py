@@ -35,6 +35,7 @@ from mtg_synergy_graph.bench.demand_coverage import (
     REACH_BURIAL_EXCLUDED,
     REACH_HEALTHY,
     REACH_NONE,
+    _rule_pool_sizes,
     build_consumption_gates,
     build_null_pools,
     classify_miss_reachability,
@@ -963,3 +964,38 @@ def test_full_run_on_real_fixture(tmp_path: Path) -> None:
     # Sanity: the classification partition sums per commander.
     for entry in report["per_commander"]:
         assert sum(entry["classification_counts"].values()) == entry["ports_total"]
+
+
+def test_rule_pool_sizes_scopes_to_fixture_commanders(tmp_path: Path) -> None:
+    """Pool sizes must be fixture-scoped, not union-wide.
+
+    Additive --repin lets a cohort fixture share the config_hash. Because
+    the pool size feeds a fixed BURIAL_POOL_FLOOR comparison, an unscoped
+    (union-inflated) count could misclassify a rule as IDF-burial. Passing
+    the fixture commanders must exclude the co-resident cohort's rows.
+    """
+    conn = open_db(tmp_path / "synergy.db")
+    try:
+        rows = [
+            # Fixture commander delivers 2 distinct candidates via r1.
+            ("Fix", "c1", "r1"),
+            ("Fix", "c2", "r1"),
+            # A co-resident cohort commander delivers 3 MORE via r1 at the
+            # same config_hash (the additive-repin union).
+            ("Cohort", "c3", "r1"),
+            ("Cohort", "c4", "r1"),
+            ("Cohort", "c5", "r1"),
+        ]
+        for cmdr, cand, rid in rows:
+            conn.execute(
+                "INSERT INTO rule_contributions "
+                "(commander, candidate, rule_id, contribution, idf_weight, raw_count, config_hash, computed_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (cmdr, cand, rid, 0.5, 0.5, 1, "cfg", "t"),
+            )
+        conn.commit()
+
+        assert _rule_pool_sizes(conn, "cfg")["r1"] == 5  # union (unscoped)
+        assert _rule_pool_sizes(conn, "cfg", ["Fix"])["r1"] == 2  # fixture-scoped
+    finally:
+        conn.close()

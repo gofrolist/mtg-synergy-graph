@@ -286,3 +286,59 @@ def test_repin_adds_gem_keys_to_gemless_legacy(
     ref_entry = reference.entries[0]
     assert entry.legacy["hidden_gem_hit_rate"] == ref_entry.legacy["hidden_gem_hit_rate"]
     assert entry.legacy["hidden_cards"] == ref_entry.legacy["hidden_cards"]
+
+
+# ---------------------------------------------------------------------------
+# Additive repin — a re-pin must not evict another fixture's rows
+# ---------------------------------------------------------------------------
+
+
+def test_repin_preserves_other_fixtures_tensor_rows(
+    synergy_db_path: Path,
+    tmp_path: Path,
+) -> None:
+    """Re-pinning one fixture leaves a co-resident fixture's rows intact.
+
+    Regression for the single-owner-slot bug (see
+    docs/solutions/best-practices/tensor-single-owner-slot-2026-07-08.md):
+    the old blanket ``DELETE ... WHERE config_hash = ?`` nuked EVERY
+    commander at the live hash, so de-blinding one fixture re-blinded any
+    other. With additive eviction, a sentinel row for a commander outside
+    the re-pinned fixture must survive at the SAME live config_hash.
+    """
+    from mtg_synergy_graph.bench.tensor import compute_config_hash
+
+    fixture_path = tmp_path / "pin.json"
+    _write_gemless_fixture(fixture_path, synergy_db_path)
+    edhrec_path = tmp_path / "tags.db"
+    _make_edhrec_db(edhrec_path, [("test-commander", "Token Maker", "High Synergy Cards", 0.5)])
+
+    # First pin establishes the live-hash tensor for Test Commander.
+    assert handle_repin(_args(fixture_path, synergy_db_path, edhrec_db=str(edhrec_path))) == 0
+
+    # A different fixture's commander occupies the SAME live config_hash.
+    live_hash = compute_config_hash()
+    conn = open_db(synergy_db_path)
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO rule_contributions "
+            "(commander, candidate, rule_id, contribution, idf_weight, raw_count, config_hash, computed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("Cohort Commander", "Some Card", "some_rule", 0.9, 0.9, 1, live_hash, "t"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Re-pin Test Commander again.
+    assert handle_repin(_args(fixture_path, synergy_db_path, edhrec_db=str(edhrec_path))) == 0
+
+    conn = open_db(synergy_db_path)
+    try:
+        survived = conn.execute(
+            "SELECT COUNT(*) AS n FROM rule_contributions WHERE commander = ? AND config_hash = ?",
+            ("Cohort Commander", live_hash),
+        ).fetchone()["n"]
+    finally:
+        conn.close()
+    assert survived == 1, "a re-pin must not evict another fixture's commander at the same config_hash"

@@ -15,7 +15,12 @@ from unittest.mock import patch
 
 import pytest
 
-from mtg_synergy_graph.bench.tensor import TensorWriter, compute_config_hash
+from mtg_synergy_graph.bench.tensor import (
+    TensorWriter,
+    commander_filter_sql,
+    compute_config_hash,
+    evict_fixture_rows,
+)
 from mtg_synergy_graph.db import open_db
 from mtg_synergy_graph.universal_scorer import (
     _FLAT_WEIGHT_OVERRIDES,
@@ -275,5 +280,185 @@ def test_writer_upserts_on_duplicate_rows(tmp_path: Path) -> None:
             "WHERE commander = 'Cmdr' AND candidate = 'Card' AND rule_id = 'rule_x'"
         ).fetchone()
         assert row["n"] == 1
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# evict_fixture_rows — additive-repin eviction (single-owner-slot fix)
+# ---------------------------------------------------------------------------
+
+
+def _seed_contrib(
+    conn: sqlite3.Connection,
+    commander: str,
+    config_hash: str,
+    *,
+    candidate: str = "Cand",
+    rule_id: str = "r1",
+) -> None:
+    """Insert one synthetic rule_contributions row for eviction tests."""
+    conn.execute(
+        "INSERT OR REPLACE INTO rule_contributions "
+        "(commander, candidate, rule_id, contribution, idf_weight, raw_count, config_hash, computed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (commander, candidate, rule_id, 0.5, 0.5, 1, config_hash, "t"),
+    )
+
+
+def _count(conn: sqlite3.Connection, **where: str) -> int:
+    clause = " AND ".join(f"{k} = ?" for k in where)
+    sql = "SELECT COUNT(*) AS n FROM rule_contributions"
+    if clause:
+        sql += f" WHERE {clause}"
+    return conn.execute(sql, tuple(where.values())).fetchone()["n"]
+
+
+def test_evict_scopes_to_named_commanders(tmp_path: Path) -> None:
+    """Re-pinning fixture A must not touch fixture B's rows at the same hash.
+
+    This is the whole point of the additive-repin fix: broad and cohort
+    fixtures coexist under one config_hash instead of one evicting the other.
+    """
+    conn = _minimal_fixture(tmp_path / "synergy.db")
+    try:
+        h = "cfg_shared"
+        _seed_contrib(conn, "Cmdr A", h)
+        _seed_contrib(conn, "Cmdr B", h)
+        conn.commit()
+
+        deleted = evict_fixture_rows(conn, h, ["Cmdr A"])
+
+        assert deleted == 1
+        assert _count(conn, commander="Cmdr A", config_hash=h) == 0
+        assert _count(conn, commander="Cmdr B", config_hash=h) == 1, "other fixture's rows must survive"
+    finally:
+        conn.close()
+
+
+def test_evict_scopes_to_config_hash(tmp_path: Path) -> None:
+    """A commander's rows under a DIFFERENT config_hash are left alone.
+
+    Guards against over-deletion: stale rows under an old scoring config
+    keep their own hash and are irrelevant to the live re-pin.
+    """
+    conn = _minimal_fixture(tmp_path / "synergy.db")
+    try:
+        _seed_contrib(conn, "Cmdr A", "cfg_live")
+        _seed_contrib(conn, "Cmdr A", "cfg_old")
+        conn.commit()
+
+        evict_fixture_rows(conn, "cfg_live", ["Cmdr A"])
+
+        assert _count(conn, commander="Cmdr A", config_hash="cfg_live") == 0
+        assert _count(conn, commander="Cmdr A", config_hash="cfg_old") == 1
+    finally:
+        conn.close()
+
+
+def test_evict_clears_all_rules_for_repinned_commander(tmp_path: Path) -> None:
+    """Every candidate/rule row of a re-pinned commander is cleared.
+
+    Orphan protection: a rule that stops firing must not leave a row
+    behind, so eviction removes the whole commander before repopulation.
+    """
+    conn = _minimal_fixture(tmp_path / "synergy.db")
+    try:
+        h = "cfg_shared"
+        _seed_contrib(conn, "Cmdr A", h, candidate="X", rule_id="r1")
+        _seed_contrib(conn, "Cmdr A", h, candidate="X", rule_id="r2")
+        _seed_contrib(conn, "Cmdr A", h, candidate="Y", rule_id="r1")
+        conn.commit()
+
+        deleted = evict_fixture_rows(conn, h, ["Cmdr A"])
+
+        assert deleted == 3
+        assert _count(conn, commander="Cmdr A", config_hash=h) == 0
+    finally:
+        conn.close()
+
+
+def test_evict_chunks_large_commander_list(tmp_path: Path) -> None:
+    """Commander lists larger than the chunk size are fully evicted.
+
+    Exercises the IN-clause chunking that keeps large fixtures (500-cmdr)
+    under SQLite's bound-variable limit.
+    """
+    conn = _minimal_fixture(tmp_path / "synergy.db")
+    try:
+        h = "cfg_shared"
+        cmdrs = [f"Cmdr {i}" for i in range(25)]
+        for c in cmdrs:
+            _seed_contrib(conn, c, h)
+        conn.commit()
+
+        deleted = evict_fixture_rows(conn, h, cmdrs, chunk_size=10)
+
+        assert deleted == 25
+        assert _count(conn, config_hash=h) == 0
+    finally:
+        conn.close()
+
+
+def test_evict_empty_list_is_noop(tmp_path: Path) -> None:
+    """Evicting an empty commander list deletes nothing."""
+    conn = _minimal_fixture(tmp_path / "synergy.db")
+    try:
+        _seed_contrib(conn, "Cmdr A", "cfg_live")
+        conn.commit()
+
+        assert evict_fixture_rows(conn, "cfg_live", []) == 0
+        assert _count(conn, config_hash="cfg_live") == 1
+    finally:
+        conn.close()
+
+
+def test_evict_rejects_nonpositive_chunk(tmp_path: Path) -> None:
+    """chunk_size <= 0 raises ValueError (a zero chunk would loop forever)."""
+    conn = _minimal_fixture(tmp_path / "synergy.db")
+    try:
+        with pytest.raises(ValueError, match="chunk_size"):
+            evict_fixture_rows(conn, "cfg", ["Cmdr A"], chunk_size=0)
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# commander_filter_sql — optional fixture-scoping fragment for reads
+# ---------------------------------------------------------------------------
+
+
+def test_commander_filter_none_is_no_filter() -> None:
+    """None -> empty fragment + no params (the whole-union read)."""
+    assert commander_filter_sql(None) == ("", [])
+
+
+def test_commander_filter_empty_matches_nothing() -> None:
+    """Empty list -> a fragment that matches no rows, never an illegal IN ()."""
+    frag, params = commander_filter_sql([])
+    assert params == []
+    assert "IN ()" not in frag
+    assert "1=0" in frag
+
+
+def test_commander_filter_nonempty_builds_in_clause() -> None:
+    """Non-empty -> one placeholder per commander + matching params."""
+    frag, params = commander_filter_sql(["A", "B", "C"])
+    assert frag == " AND commander IN (?,?,?)"
+    assert params == ["A", "B", "C"]
+
+
+def test_commander_filter_empty_actually_returns_zero_rows(tmp_path: Path) -> None:
+    """The empty-fixture fragment is valid SQL that selects nothing."""
+    conn = _minimal_fixture(tmp_path / "synergy.db")
+    try:
+        _seed_contrib(conn, "Cmdr A", "cfg")
+        conn.commit()
+        frag, params = commander_filter_sql([])
+        n = conn.execute(
+            f"SELECT COUNT(*) AS n FROM rule_contributions WHERE config_hash = ?{frag}",  # noqa: S608
+            ("cfg", *params),
+        ).fetchone()["n"]
+        assert n == 0
     finally:
         conn.close()

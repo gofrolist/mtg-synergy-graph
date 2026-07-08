@@ -102,7 +102,7 @@ from mtg_synergy_graph.bench.forensics import (
     normalize_label_name,
     synergy_content_digest,
 )
-from mtg_synergy_graph.bench.tensor import compute_config_hash
+from mtg_synergy_graph.bench.tensor import commander_filter_sql, compute_config_hash
 from mtg_synergy_graph.complement_rules.core import PortRow
 from mtg_synergy_graph.complement_rules.registry import (
     CARD_LEVEL_RULES,
@@ -519,11 +519,28 @@ def _load_port_attributes(
     return {port_id: tuple(attrs) for port_id, attrs in out.items()}
 
 
-def _rule_pool_sizes(conn: sqlite3.Connection, config_hash: str) -> dict[str, int]:
-    """Fixture-wide distinct delivered-candidate count per rule_id."""
+def _rule_pool_sizes(
+    conn: sqlite3.Connection,
+    config_hash: str,
+    commanders: Sequence[str] | None = None,
+) -> dict[str, int]:
+    """Fixture-wide distinct delivered-candidate count per rule_id.
+
+    ``commanders`` MUST be the run's fixture commanders. Additive
+    ``--repin`` lets several fixtures share one ``config_hash``, so an
+    unfiltered read spans the UNION of pinned fixtures — which inflates
+    each rule's pool size and can push it across the fixed
+    ``BURIAL_POOL_FLOOR`` (500), misclassifying a rule as IDF-burial. The
+    filter keeps the count genuinely fixture-wide (the ``pool_size``/
+    ``pool_size_fixture_wide`` this feeds is compared against a constant
+    threshold, so a widened population is NOT harmless here). ``None`` is
+    accepted only for direct callers/tests that want the union.
+    """
+    cmdr_sql, cmdr_params = commander_filter_sql(commanders)
     rows = conn.execute(
-        "SELECT rule_id, COUNT(DISTINCT candidate) AS n FROM rule_contributions WHERE config_hash = ? GROUP BY rule_id",
-        (config_hash,),
+        f"SELECT rule_id, COUNT(DISTINCT candidate) AS n FROM rule_contributions "  # noqa: S608
+        f"WHERE config_hash = ?{cmdr_sql} GROUP BY rule_id",
+        (config_hash, *cmdr_params),
     ).fetchall()
     return {str(row["rule_id"]): int(row["n"]) for row in rows}
 
@@ -716,7 +733,6 @@ def run_demand_coverage(
         )
 
         gates = build_consumption_gates(conn)
-        pool_sizes = _rule_pool_sizes(conn, config_hash)
 
         per_commander: list[dict[str, Any]] = []
         under_served_by_shape: dict[str, dict[str, Any]] = {}
@@ -733,6 +749,11 @@ def run_demand_coverage(
         skipped = set(report.skipped_commanders)
         entry_by_name = {e.commander: e for e in all_entries}
         fixture_commanders = sorted(set(entry_by_name) | skipped)
+        # Pool sizes MUST be scoped to this run's fixture commanders: they
+        # feed a fixed-threshold burial test, so the additive-repin union
+        # would otherwise inflate them and misclassify rules (see
+        # _rule_pool_sizes).
+        pool_sizes = _rule_pool_sizes(conn, config_hash, fixture_commanders)
 
         for commander in fixture_commanders:
             entry = entry_by_name.get(commander)
