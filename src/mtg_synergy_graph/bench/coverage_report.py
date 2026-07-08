@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import random
 import sqlite3
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from mtg_synergy_graph.bench.coverage import CoverageMetrics, compute_coverage
@@ -131,3 +132,51 @@ def stratified_control(
         rng.shuffle(remaining)
         picked.extend(remaining[: size - len(picked)])
     return sorted(picked[:size])
+
+
+def _compute_deltas(
+    live: dict[str, CoverageMetrics],
+    baseline: dict[str, CoverageMetrics],
+) -> tuple[dict[str, int], float]:
+    deltas = {name: m.earned_top30 - baseline[name].earned_top30 for name, m in live.items() if name in baseline}
+    mean = sum(deltas.values()) / len(deltas) if deltas else 0.0
+    return deltas, mean
+
+
+@dataclass(frozen=True)
+class GateResult:
+    cohort_delta_mean: float = 0.0
+    cohort_deltas: dict[str, int] = field(default_factory=dict)
+    control_delta_mean: float = 0.0
+    control_deltas: dict[str, int] = field(default_factory=dict)
+    stale_baseline: bool = False
+
+
+def run_gate(
+    engine,
+    conn,
+    baseline_path,
+    cohort_names,
+    *,
+    live_config_hash: str,
+    control_size: int = 200,
+    seed: int = 17,
+) -> GateResult:
+    baseline_hash, baseline = read_baseline(baseline_path)
+    if baseline_hash != live_config_hash:
+        return GateResult(stale_baseline=True)
+
+    cohort_set = set(cohort_names)
+    control = stratified_control(baseline, exclude=cohort_set, size=control_size, seed=seed)
+    live_cohort = run_census(engine, conn, commanders=sorted(cohort_set))
+    live_control = run_census(engine, conn, commanders=control)
+
+    cohort_deltas, cohort_mean = _compute_deltas(live_cohort, baseline)
+    control_deltas, control_mean = _compute_deltas(live_control, baseline)
+    return GateResult(
+        cohort_delta_mean=cohort_mean,
+        cohort_deltas=cohort_deltas,
+        control_delta_mean=control_mean,
+        control_deltas=control_deltas,
+        stale_baseline=False,
+    )
