@@ -151,3 +151,47 @@ def archetype_payoff_cohort(conn: sqlite3.Connection) -> set[str]:
     for predicate in _COHORT_PREDICATES:
         cohort |= predicate(conn)
     return cohort
+
+
+#: Toughness-payoff commanders whose toughness use is a non-``CardToughness``
+#: port shape (toughness-as-combat-damage / defender-draw). Documented intent;
+#: the legal-legendary-creature join drops any non-qualifying entry (e.g. the
+#: enchantment ``High Alert``).
+_TOUGHNESS_COMBAT_COMMANDERS: frozenset[str] = frozenset(
+    {"Doran, the Siege Tower", "Arcades, the Strategist", "High Alert"}
+)
+
+
+def toughness_payoff(conn: sqlite3.Connection) -> set[str]:
+    """Legal legendary-creature commanders whose payoff scales off toughness.
+
+    Precise signal: a ``scales_with`` port with ``event_class='CardToughness'``
+    or ``scaling_expression LIKE '%CardToughness%'`` (Phenax, Tanazir, Arwen,
+    Vhal, Betor, Orysa, The Pride of Hull Clade), UNION an explicit
+    combat/defender set (:data:`_TOUGHNESS_COMBAT_COMMANDERS`). Keys on port
+    shape, never ``raw_line LIKE '%Toughness%'`` (which matches ~300 buff/P-T
+    noise cards). Names the follow-on toughness-payoff rule's target cohort for
+    the coverage instrument; deliberately NOT part of any shared cohort union.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT p.card_name "
+        "FROM card_ports p "
+        "JOIN cards c ON c.name = p.card_name "
+        "WHERE (p.event_class = 'CardToughness' "
+        "       OR p.scaling_expression LIKE '%CardToughness%') "
+        "AND c.legal_commander = 1 "
+        "AND c.supertypes LIKE '%Legendary%' "
+        "AND c.card_types LIKE '%Creature%'"
+    )
+    cohort: set[str] = {name for (name,) in rows}
+
+    if _TOUGHNESS_COMBAT_COMMANDERS:
+        placeholders = ",".join("?" * len(_TOUGHNESS_COMBAT_COMMANDERS))
+        extra = conn.execute(
+            f"SELECT name FROM cards WHERE name IN ({placeholders}) "  # noqa: S608
+            "AND legal_commander = 1 AND supertypes LIKE '%Legendary%' "
+            "AND card_types LIKE '%Creature%'",
+            tuple(sorted(_TOUGHNESS_COMBAT_COMMANDERS)),
+        )
+        cohort.update(name for (name,) in extra)
+    return cohort
