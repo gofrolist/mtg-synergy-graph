@@ -11,6 +11,7 @@ stratified control sample. See
 from __future__ import annotations
 
 import json
+import random
 import sqlite3
 from pathlib import Path
 
@@ -83,3 +84,50 @@ def read_baseline(
         for name, v in doc["commanders"].items()
     }
     return doc["config_hash"], metrics
+
+
+def poverty_queue(
+    metrics: dict[str, CoverageMetrics],
+) -> list[tuple[str, int]]:
+    return sorted(
+        ((name, m.earned_top30) for name, m in metrics.items()),
+        key=lambda t: (t[1], t[0]),
+    )
+
+
+def stratified_control(
+    metrics: dict[str, CoverageMetrics],
+    *,
+    exclude: set[str],
+    size: int = 200,
+    seed: int = 17,
+) -> list[str]:
+    """Deterministic sample spanning the earned_top30 distribution.
+
+    Buckets the eligible pool into 10 strata by earned_top30, then draws
+    proportionally (seeded) so the control spans poverty-poor to
+    poverty-rich commanders — a regression anywhere is visible.
+    """
+    pool = sorted(name for name in metrics if name not in exclude)
+    if len(pool) <= size:
+        return pool
+
+    rng = random.Random(seed)  # noqa: S311
+    strata: dict[int, list[str]] = {}
+    for name in pool:
+        band = min(metrics[name].earned_top30 // 3, 9)  # 0..9 (earned 0..30)
+        strata.setdefault(band, []).append(name)
+
+    picked: list[str] = []
+    per = max(1, size // max(1, len(strata)))
+    for band in sorted(strata):
+        members = sorted(strata[band])
+        rng.shuffle(members)
+        picked.extend(members[:per])
+
+    # Top up / trim deterministically to exactly `size`.
+    if len(picked) < size:
+        remaining = sorted(set(pool) - set(picked))
+        rng.shuffle(remaining)
+        picked.extend(remaining[: size - len(picked)])
+    return sorted(picked[:size])
