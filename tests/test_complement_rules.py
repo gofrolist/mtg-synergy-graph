@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from mtg_synergy_graph.complement_rules._interpreter_cache import get_interpreter
 from mtg_synergy_graph.complement_rules.combat import (
     _find_combat_enhancers,
     _find_evasion_complements,
@@ -28,6 +29,7 @@ from mtg_synergy_graph.complement_rules.density import (
 from mtg_synergy_graph.complement_rules.panharmonicon import (
     _find_panharmonicon_stacking,
 )
+from mtg_synergy_graph.complement_rules.registry import DECLARATIVE_RULE_IDS
 from mtg_synergy_graph.complement_rules.tokens import (
     _find_effect_feeds_etb,
 )
@@ -137,6 +139,48 @@ class TestFindAllComplements:
         try:
             results = find_all_complements(conn2, ["Korvold, Fae-Cursed King"])
             assert "Phyrexian Altar" in _candidates(results)
+        finally:
+            conn2.close()
+
+    def test_second_interpreter_on_different_db_not_poisoned_by_closed_connection(self, tmp_path_factory):
+        """Regression for the twin id(conn) hazard in ``_interpreter_cache``.
+
+        ``complement_rules._interpreter_cache`` used to key cached
+        ``RuleInterpreter`` instances on ``id(conn)`` — the same CPython
+        address-reuse hazard fixed for ``graph_engine._ports_cache`` in
+        769e259. A connection with an *unseeded* (empty) ``rules`` table
+        builds and caches an interpreter with an empty ``rule_ids`` (the
+        empty case is tolerated with a warning, not an error). If that
+        connection is closed, garbage-collected, and a new connection with
+        a *properly seeded* rules table happens to be allocated at the same
+        address, the stale empty-rule-set interpreter would be served to
+        the new connection, silently bypassing construction-time
+        ``_validate_no_drift`` and starving every declarative rule.
+
+        This reproduces the collision directly: build+cache an interpreter
+        against an empty-rules connection, force garbage collection, then
+        assert a second, properly-seeded connection gets its own
+        correctly-populated interpreter rather than the stale one.
+        """
+        db1_path = tmp_path_factory.mktemp("interp_leak") / "empty_rules.db"
+        conn1 = open_db(db1_path)
+        interp1 = get_interpreter(conn1)
+        assert interp1.rule_ids == set(), "unseeded rules table must yield an empty rule_ids interpreter"
+        conn1.close()
+        del conn1
+        del interp1
+        gc.collect()
+
+        db2_path = tmp_path_factory.mktemp("interp_real") / "seeded.db"
+        conn2 = open_db(db2_path)
+        import_cards_folder(conn2, FIXTURES, scryfall_db=None)
+        try:
+            interp2 = get_interpreter(conn2)
+            assert interp2.rule_ids == DECLARATIVE_RULE_IDS, (
+                "second connection's interpreter must be built from its own "
+                "seeded rules table, not a stale empty-rules interpreter "
+                "from the closed first connection"
+            )
         finally:
             conn2.close()
 

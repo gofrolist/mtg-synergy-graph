@@ -7,20 +7,29 @@ candidate predicate's SQL fragment for each call is measurable hot-
 path cost. Cache per connection so each (conn, interpreter) pair is
 built exactly once.
 
-.. warning::
-
-    The cache key uses ``id(conn)`` (CPython object address), which
-    can be reused after a connection is closed and garbage-collected.
-    Always call :func:`clear_interpreter_cache` before replacing a
-    connection object to avoid stale results. This mirrors the
-    convention used by ``graph_engine._ports_cache`` /
-    :func:`graph_engine.clear_ports_cache`.
+Keyed on the connection object itself (via ``WeakKeyDictionary``)
+rather than ``id(conn)``. A prior version keyed on ``id(conn)``, a
+CPython memory address that gets reused once a connection is closed
+and garbage-collected — under pytest-xdist this let a closed sibling
+test's connection "poison" a brand-new connection with a stale
+:class:`RuleInterpreter` (built against a possibly-unseeded ``rules``
+table) whenever the new object happened to land at the same address.
+A ``WeakKeyDictionary`` entry is removed by its weakref callback at
+the moment the connection is finalized — strictly before that memory
+can be reused — so no address-reuse collision is possible. This
+mirrors ``graph_engine._ports_cache`` / :func:`graph_engine.
+clear_ports_cache`. Connections not created via :func:`db.open_db`
+(e.g. a raw ``sqlite3.connect()`` in a test) aren't weak-referenceable;
+those transparently skip caching (always correct, just uncached)
+rather than risk the same bug via a fallback ``id()``-keyed path.
 """
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import sqlite3
+import weakref
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -28,7 +37,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_interpreter_cache: dict[int, RuleInterpreter] = {}
+_interpreter_cache: weakref.WeakKeyDictionary[sqlite3.Connection, RuleInterpreter] = weakref.WeakKeyDictionary()
 
 
 def _validate_no_drift(interp: RuleInterpreter) -> None:
@@ -75,8 +84,10 @@ def get_interpreter(conn: sqlite3.Connection) -> RuleInterpreter:
     circular import (``port_graph.interpreter`` imports
     :class:`PortComplement` from ``complement_rules.core``).
     """
-    key = id(conn)
-    cached = _interpreter_cache.get(key)
+    try:
+        cached = _interpreter_cache.get(conn)
+    except TypeError:
+        cached = None
     if cached is not None:
         return cached
     # Lazy import to avoid circular dependency with complement_rules.core.
@@ -84,7 +95,8 @@ def get_interpreter(conn: sqlite3.Connection) -> RuleInterpreter:
 
     interp = RuleInterpreter(conn)
     _validate_no_drift(interp)
-    _interpreter_cache[key] = interp
+    with contextlib.suppress(TypeError):
+        _interpreter_cache[conn] = interp
     return interp
 
 
@@ -92,8 +104,6 @@ def clear_interpreter_cache() -> None:
     """Drop all cached interpreters.
 
     Call between commander runs that replace the SQLite connection
-    (e.g. test fixtures that open a fresh in-memory DB per case) —
-    CPython can reuse an ``id(conn)`` after garbage collection and a
-    stale entry would then serve the wrong rules table.
+    (e.g. test fixtures that open a fresh in-memory DB per case).
     """
     _interpreter_cache.clear()

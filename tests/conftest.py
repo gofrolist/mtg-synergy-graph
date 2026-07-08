@@ -48,25 +48,24 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 # RuleInterpreter cache reset (per-test isolation)
 # ---------------------------------------------------------------------------
 #
-# ``complement_rules._interpreter_cache`` keys cached ``RuleInterpreter``
-# instances by ``id(conn)`` (CPython object address). The docstring there
-# warns: "id(conn) can be reused after a connection is closed and
-# garbage-collected. Always call clear_interpreter_cache before replacing
-# a connection object to avoid stale results."
-#
-# Without this autouse reset, test isolation across files breaks: when
-# ``tests/bench/test_audit_*.py`` opens a conn, builds a cached
-# interpreter, and then closes that conn, CPython can recycle the same
-# memory address for a fresh tmp_path conn opened by
-# ``tests/test_rules_migration_cascade.py``. The cascade test then gets
+# ``complement_rules._interpreter_cache`` caches ``RuleInterpreter``
+# instances in a ``weakref.WeakKeyDictionary`` keyed on the connection
+# object itself. A prior version keyed on ``id(conn)`` (CPython object
+# address), which is reused once a connection is closed and garbage-
+# collected: when ``tests/bench/test_audit_*.py`` opened a conn, built a
+# cached interpreter, and then closed that conn, CPython could recycle
+# the same memory address for a fresh tmp_path conn opened by
+# ``tests/test_rules_migration_cascade.py``. The cascade test then got
 # the OLD interpreter bound to the CLOSED conn and ``find_all_complements``
-# silently returns no rows. The cascade test was historically flaky for
+# silently returned no rows. The cascade test was historically flaky for
 # exactly this reason — see the post-PR-#27 ce-code-review session notes.
-#
-# Clearing per-test is cheap (one ``dict.clear()``); the interpreter is
+# The ``WeakKeyDictionary`` conversion makes that address-reuse collision
+# structurally impossible (the entry is purged by its weakref callback at
+# finalization, strictly before the address can be reused), but this
+# autouse reset is kept as a belt-and-suspenders per-test isolation:
+# clearing is cheap (one ``dict.clear()``), and the interpreter is
 # re-built lazily on the first ``find_all_complements`` call inside a
-# given test. This eliminates the address-recycling failure mode for all
-# future tests.
+# given test.
 
 
 @pytest.fixture(autouse=True)

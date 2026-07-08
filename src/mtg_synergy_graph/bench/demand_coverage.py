@@ -976,8 +976,10 @@ def run_demand_coverage(
         return result
     finally:
         conn.close()
-        # The ports cache is keyed by id(conn); clear it so a future
-        # connection reusing the address can never read stale rows.
+        # The ports cache is a WeakKeyDictionary keyed on the connection
+        # object; clearing it here isn't strictly required for correctness
+        # (the entry is dropped automatically once conn is finalized) but
+        # frees the cached rows for this connection promptly.
         clear_ports_cache()
         if forensics_fixture != fixture_path:
             forensics_fixture.unlink(missing_ok=True)
