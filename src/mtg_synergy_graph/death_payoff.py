@@ -133,10 +133,13 @@ def has_changeszone_death_payoff(cmdr_ports: list) -> bool:
     rule gate and its whitelist comparator (Tasks 5/6) can reuse the exact same
     conjunct against an already-loaded ``cmdr_ports`` list instead of a DB-wide
     SQL scan. Deliberately does NOT check for ``Sacrificed``/``SacrificedOnce``
-    triggers (those commanders are served by the existing ``cost_feeds_trigger``
-    arm) or for ``subtype_death_payoff`` cohort membership — both are
+    triggers or for ``subtype_death_payoff`` cohort membership — both are
     cohort-enumeration-specific exclusions applied by the cohort predicate
-    itself, not part of this port-level gate.
+    itself, not part of this port-level gate. (NOTE: commanders matching THIS
+    shape also already receive ``cost_feeds_trigger`` complements via
+    ``combat.py``'s ChangesZone-gated creature-recursion arm — see the PR #103
+    review correction in the death-outlet null-result doc; do not read this
+    gate as evidence of zero existing coverage.)
     """
     for p in cmdr_ports:
         if (p.get("port_type") or "").strip() != "trigger":
