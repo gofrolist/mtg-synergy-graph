@@ -11,6 +11,20 @@ def _schema_sql() -> str:
     return resources.files(__package__).joinpath("schema.sql").read_text(encoding="utf-8")
 
 
+class _WeakReferenceableConnection(sqlite3.Connection):
+    """Identical to :class:`sqlite3.Connection`, but weak-referenceable.
+
+    The base ``sqlite3.Connection`` type does not support ``weakref`` —
+    subclassing it (with no ``__slots__``) picks up a ``__weakref__``
+    slot for free. This lets :mod:`graph_engine`'s ``_ports_cache`` use
+    a ``WeakKeyDictionary`` keyed on the connection object itself
+    instead of ``id(conn)``, which is a CPython memory address that can
+    be reused by an unrelated connection once the original is closed
+    and garbage-collected — a cross-test cache-poisoning bug under
+    pytest-xdist (see graph_engine.py ``_ports_cache``).
+    """
+
+
 def open_db(path: str | Path, *, create: bool = True) -> sqlite3.Connection:
     """Open a SQLite connection with the v1.2.2 schema applied.
 
@@ -40,7 +54,7 @@ def open_db(path: str | Path, *, create: bool = True) -> sqlite3.Connection:
         )
     # check_same_thread=False is required: consumers like mtg-edh-builder
     # run engine methods via Starlette's run_in_threadpool (multi-threaded).
-    conn = sqlite3.connect(path_str, check_same_thread=False)
+    conn = sqlite3.connect(path_str, check_same_thread=False, factory=_WeakReferenceableConnection)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")

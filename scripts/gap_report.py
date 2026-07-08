@@ -58,6 +58,7 @@ from mtg_synergy_graph.complement_rules.core import (
     load_ports_for_set,
 )
 from mtg_synergy_graph.complement_rules.registry import RULE_GATES
+from mtg_synergy_graph.db import open_db
 from mtg_synergy_graph.forge_oracle import gap_weight as _forge_gap_weight
 from mtg_synergy_graph.port_graph.interpreter import RuleInterpreter
 from mtg_synergy_graph.preflight import (
@@ -999,8 +1000,12 @@ def main() -> int:
         )
         return 2
 
-    conn = sqlite3.connect(args.db)
-    conn.row_factory = sqlite3.Row
+    # open_db (not raw sqlite3.connect): a weak-referenceable connection so
+    # graph_engine's port/interpreter caches actually cache this run — a raw
+    # connection is not weak-referenceable and silently falls through to the
+    # uncached path. create=False + the is_file guard above both refuse an
+    # empty DB; row_factory=Row is set by open_db.
+    conn = open_db(args.db, create=False)
     try:
         proposals, stats_total, eligible_total = rank_gaps(
             conn,

@@ -151,3 +151,42 @@ def archetype_payoff_cohort(conn: sqlite3.Connection) -> set[str]:
     for predicate in _COHORT_PREDICATES:
         cohort |= predicate(conn)
     return cohort
+
+
+#: Shared WHERE-clause fragment for "a legal legendary-creature commander".
+#: Assumes the ``cards`` table is aliased ``c``. Single source of truth for
+#: the eligibility predicate, reused by :func:`toughness_payoff` here and by
+#: ``bench.coverage_report.legal_commander_names`` (which aliases ``cards c``).
+LEGAL_LEGENDARY_CREATURE_WHERE = (
+    "c.legal_commander = 1 AND c.supertypes LIKE '%Legendary%' AND c.card_types LIKE '%Creature%'"
+)
+
+
+def toughness_payoff(conn: sqlite3.Connection) -> set[str]:
+    """Legal legendary-creature commanders whose payoff scales off toughness.
+
+    Keys strictly on port shape (never ``raw_line LIKE '%Toughness%'``, which
+    matches ~300 buff/P-T noise cards) via one of three signals:
+
+    * a ``scales_with`` port with ``event_class = 'CardToughness'`` or
+      ``scaling_expression LIKE '%CardToughness%'`` — Phenax, Tanazir, Arwen,
+      Vhal, Betor, Orysa, The Pride of Hull Clade; and
+    * a ``CombatDamageToughness`` port (Forge ``Mode$ CombatDamageToughness``:
+      assigns combat damage / draws equal to toughness) — Doran, Arcades.
+      This replaces a former hardcoded name whitelist: keying on the queryable
+      port shape auto-includes any future "combat damage equals toughness"
+      commander instead of silently excluding it until a human edits a list.
+
+    Names the follow-on toughness-payoff rule's target cohort for the coverage
+    instrument; deliberately NOT part of any shared cohort union.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT p.card_name "
+        "FROM card_ports p "
+        "JOIN cards c ON c.name = p.card_name "
+        "WHERE (p.event_class = 'CardToughness' "
+        "       OR p.scaling_expression LIKE '%CardToughness%' "
+        "       OR p.event_class = 'CombatDamageToughness') "
+        "AND " + LEGAL_LEGENDARY_CREATURE_WHERE
+    )
+    return {name for (name,) in rows}
