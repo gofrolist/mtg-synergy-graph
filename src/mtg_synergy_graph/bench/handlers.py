@@ -115,17 +115,22 @@ def handle_repin(args: argparse.Namespace) -> int:
     commanders = _load_commanders_from_fixture(existing)
     conn = open_db(args.db)
     try:
-        # Clear any stale rows for the current config_hash before
-        # repopulating; TensorWriter's INSERT OR REPLACE handles the
-        # per-primary-key case but a rule that no longer fires would
-        # leave an orphan row otherwise.
+        # Additive repin (see
+        # docs/solutions/best-practices/tensor-single-owner-slot-2026-07-08.md):
+        # evict ONLY this fixture's commanders at the live config_hash, not the
+        # whole hash, so a broad fixture (golden-100/500) and a cohort fixture
+        # (archetype/outlet) coexist in the tensor instead of stealing a single
+        # slot from each other. Clearing every row for the re-pinned commanders
+        # (all candidates, all rules) before repopulation still drops orphans
+        # from a rule that no longer fires; other fixtures' commanders survive.
         from mtg_synergy_graph.bench.tensor import (  # local import: avoid cycle
             TensorWriter,
             compute_config_hash,
+            evict_fixture_rows,
         )
 
         live_hash = compute_config_hash()
-        conn.execute("DELETE FROM rule_contributions WHERE config_hash = ?", (live_hash,))
+        evict_fixture_rows(conn, live_hash, commanders)
         conn.commit()
 
         writer = TensorWriter(conn, config_hash=live_hash)

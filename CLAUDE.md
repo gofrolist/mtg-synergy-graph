@@ -47,7 +47,7 @@ uv run scripts/bench.py audit --rule RULE_ID                             # Per-r
 uv run scripts/bench.py audit --inspect RULE_ID --limit 20               # Top contribution rows for RULE_ID
 uv run scripts/bench.py audit --collinearity                             # Pairwise VIF + Pearson correlation across rules
 uv run scripts/bench.py audit --expect-identity                          # Assert bitwise-identical scores (for pure refactors)
-uv run scripts/bench.py audit --repin --yes                              # Rebuild pinned fixture from current working tree
+uv run scripts/bench.py audit --repin --yes                              # Rebuild pinned fixture from current working tree. ADDITIVE since 2026-07-08 (bench.tensor.evict_fixture_rows): evicts ONLY the re-pinned fixture's commanders at the live config_hash, so broad (golden-100/500) and cohort (archetype/outlet) tensors COEXIST instead of stealing one slot. Consequence: config_hash-only aggregate readers (--rule, --collinearity, --inspect w/o --commander, --embedding-dedup) span the UNION of pinned fixtures. See docs/solutions/best-practices/tensor-single-owner-slot-2026-07-08.md
 uv run scripts/bench.py audit --unknowns                                 # List port_nodes rows with node_kind='UNKNOWN' (plan 003 Unit 6)
 uv run scripts/bench.py audit --inspect-gems                             # Per-commander lost/gained hidden-gem diff (plan 003-gem)
 uv run scripts/bench.py audit --trend hidden_gems --trend-n 20           # CSV history of aggregate hidden_gem_hit_rate across audit runs

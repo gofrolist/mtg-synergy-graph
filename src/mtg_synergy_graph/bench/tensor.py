@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+from collections.abc import Sequence
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from types import TracebackType
@@ -122,6 +123,65 @@ def compute_config_hash() -> str:
     h.update(b"|subtype_supply_enable:")
     h.update(repr(cfg.enable_subtype_supply).encode("utf-8"))
     return h.hexdigest()
+
+
+#: SQLite caps bound variables per statement (999 on the historical
+#: default build). Chunk the ``commander IN (...)`` eviction well under
+#: that so an arbitrarily large fixture can never overflow it.
+_EVICT_CHUNK = 400
+
+
+def evict_fixture_rows(
+    conn: sqlite3.Connection,
+    config_hash: str,
+    commanders: Sequence[str],
+    *,
+    chunk_size: int = _EVICT_CHUNK,
+) -> int:
+    """Delete ``rule_contributions`` rows for ``commanders`` at ``config_hash``.
+
+    This is the additive-repin eviction (see
+    ``docs/solutions/best-practices/tensor-single-owner-slot-2026-07-08.md``).
+    A ``--repin`` scopes deletion to the re-pinned fixture's commanders
+    instead of blanket-deleting the whole ``config_hash``, so broad
+    (golden-100/500) and cohort (archetype/outlet) fixtures COEXIST at
+    the same config_hash rather than evicting one another from a single
+    slot. Semantics of the two row classes:
+
+    * The re-pinned commanders: every row (all candidates, all rules) is
+      cleared here, then ``TensorWriter`` repopulates only the rules that
+      still fire -- so a rule that stopped firing leaves no orphan row.
+    * Every OTHER commander at this config_hash: untouched. Scores are
+      ``config_hash``-deterministic, so a commander shared by two fixtures
+      has identical rows regardless of which fixture last pinned it; the
+      ``INSERT OR REPLACE`` PK ``(commander, candidate, rule_id,
+      config_hash)`` set-dedups on overlap.
+
+    Aggregate readers that query ``WHERE config_hash = ?`` WITHOUT a
+    commander filter (``summarize_rule_contributions``,
+    ``compute_collinearity``, embedding-dedup, demand-coverage pool
+    counts) therefore now span the UNION of pinned fixtures rather than
+    the last-pinned one. That is a well-defined, monotonic population
+    (no double-counting) -- intended, not a regression.
+
+    Chunks the ``IN`` clause to stay under SQLite's bound-variable limit.
+    Returns the number of rows deleted. ``chunk_size <= 0`` raises
+    ``ValueError`` (a zero/negative chunk would loop forever).
+    """
+    if chunk_size <= 0:
+        raise ValueError(f"chunk_size must be >= 1; got {chunk_size}")
+    total = 0
+    for start in range(0, len(commanders), chunk_size):
+        batch = commanders[start : start + chunk_size]
+        if not batch:
+            continue
+        placeholders = ",".join("?" * len(batch))
+        cur = conn.execute(
+            f"DELETE FROM rule_contributions WHERE config_hash = ? AND commander IN ({placeholders})",
+            (config_hash, *batch),
+        )
+        total += cur.rowcount
+    return total
 
 
 class TensorWriter(AbstractContextManager["TensorWriter"]):
