@@ -154,6 +154,31 @@ axis-feeder *breadth* is the tapped-out lever; open lever remains
 archetype-payoff / subtype-link detection. Details:
 docs/solutions/best-practices/gy-fuel-vocab-expansion-null-result-2026-07-03.md.
 
+### Archetype-payoff subtype link (producer→death-payoff) — PARKED at brainstorm (IDF-flood premise falsified)
+
+`/ce-brainstorm` on the primary open NO_RULES lever: connect a token
+*producer* to a commander's subtype-keyed *death payoff* (Slimefoot's
+`Saproling.YouCtrl` payoff ↔ the 81 Saproling producers incl. Mycoloth).
+Substrate real (2,721 producer cards via `port_attributes.token_subtype`;
+~75 aristocrats-shaped commanders). 5-persona `ce-doc-review` falsified
+the core premise before any code: the doc bet on "common subtype → low
+IDF → flood self-damps," but IDF is `1/log2(1+N)` (`universal_scorer.py:869`),
+which compresses N=46–289 producers into a 0.12–0.16 window (Saproling
+0.157, Zombie 0.139, Treasure 0.122 — verified twice against the code).
+IDF damps per-item weight; the flood is count-driven, so it cannot be the
+defense. Any threshold separating the bands is a raw supply cutoff = the
+rarity whitelist `feedback_no_individual_rules` forbids. Compounding:
+eval-set dilution (only ~2–3 of the 75 sit in golden-100, so the aggregate
+SHIP gate can't see a cohort win); the link isn't even direct (needs an
+intermediate sac outlet — a depth-2 path); direction may be the minority
+half (EDHREC favors sac outlets / Blood-Artist payoff pieces over
+producers). PARKED, not DECLINED — the *lever* stands; the real blocker
+the cycle surfaced is the **eval fixture** (golden-100/500 can't register
+a few-dozen-commander cohort win). Chosen next step: rebuild/over-sample
+the audit fixture on the archetype-payoff cohort (clean infra, zero flood
+risk). Details:
+docs/solutions/best-practices/archetype-payoff-idf-flood-null-result-2026-07-03.md.
+
 ## 2026-07-02
 
 ### Resource-flow demand mechanism — DECLINED at Stage 0 (plan 2026-07-02-005)
