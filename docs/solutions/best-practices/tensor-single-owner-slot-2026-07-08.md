@@ -118,17 +118,47 @@ rule_id, config_hash)` set-dedups a commander shared by two fixtures, and
 clearing the whole re-pinned commander before repopulation still drops
 orphan rows from a rule that stopped firing.
 
-**One behavior change to know:** aggregate readers that query
-`WHERE config_hash = ?` WITHOUT a commander filter
-(`summarize_rule_contributions` / `--rule`, `compute_collinearity` /
-`--collinearity`, `--inspect` without `--commander`, `--embedding-dedup`,
-demand-coverage pool counts) now span the **union** of pinned fixtures,
-not just the last-pinned one. This is well-defined (monotonic, no
-double-counting) and more reproducible than the old history-dependent
-single-owner behavior — but if you want a rule ablation scoped to exactly
-one fixture, re-pin only that fixture into a fresh DB, or filter by
-commander. Per-commander readers (forensics main path, cohort
-`--per-commander-ndcg`) are unaffected.
+**Behavior change.** A `WHERE config_hash = ?` read with no commander
+filter now spans the **union** of pinned fixtures rather than the
+last-pinned one. The union is monotonic and PK-deduped (no
+double-counting), but its membership is the set of fixtures ever
+pinned-and-not-evicted in *this* DB — i.e. **pin-history-dependent, and
+NOT reproducible across machines/checkouts** (a single deterministic
+`--repin` reconstructs the old single-owner state; nothing reconstructs
+an arbitrary accumulated union). It is therefore wrong to treat a raw
+config_hash-only aggregate as "one fixture."
+
+Two consequences, handled differently:
+
+- **demand-coverage pool sizes are fixture-scoped (a correctness fix,
+  not just cosmetics).** `_rule_pool_sizes` feeds a comparison against
+  the fixed `BURIAL_POOL_FLOOR = 500`, so a union-inflated count could
+  push a rule across the threshold and misclassify it as IDF-burial. It
+  now receives the run's `fixture_commanders` and filters to them via
+  `bench.tensor.commander_filter_sql`, keeping the count genuinely
+  fixture-wide.
+- **`--rule`, `--collinearity`, `--embedding-dedup` still span the
+  union** — a documented diagnostic caveat, not a bug. Their numbers are
+  monotonic in population but pin-history-dependent; for a fixture-clean
+  read, run them against a DB with only that fixture pinned. (These are
+  design-time diagnostics, not gates; `--collinearity`'s VIF/Pearson are
+  additionally non-monotonic in population, so a mixed pin especially
+  warrants a single-fixture DB.)
+
+Per-commander readers (forensics main path, cohort
+`--per-commander-ndcg`) were always commander-scoped and are unaffected.
+
+**Known residual — orphan rows on fixture shrink.** Because eviction is
+scoped to the *current* fixture's commanders, a commander REMOVED from a
+fixture (a cohort re-derivation dropping members, a data refresh dropping
+commander-illegal cards — neither flips config_hash) is never re-targeted
+by a later `--repin` and its rows persist at the live config_hash. The
+old blanket `DELETE ... WHERE config_hash` self-healed this. The rows are
+now harmless to the fixture-scoped aggregate readers above (they are not
+in the fixture), but they do accumulate on disk until the next
+config_hash flip orphans them under the old hash. `--repin` now reports
+`tensor rows evicted: N` so the count is observable. A true fix (a
+fixture-id/owner column, or a periodic GC) is left as follow-up.
 
 Historical note: before this fix you had to treat the tensor slot as a
 single-owner resource and re-pin deliberately, restoring the prior owner

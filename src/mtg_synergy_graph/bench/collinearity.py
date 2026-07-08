@@ -62,7 +62,16 @@ def compute_collinearity(
     pearson_threshold: float = _PEARSON_THRESHOLD,
     vif_threshold: float = _VIF_THRESHOLD,
 ) -> CollinearityReport:
-    """Build the activation matrix and flag likely-collinear rule pairs."""
+    """Build the activation matrix and flag likely-collinear rule pairs.
+
+    Reads every commander at ``config_hash``. Additive ``--repin`` lets
+    several fixtures share one ``config_hash``, so the matrix spans the
+    UNION of pinned fixtures; because VIF / Pearson are not monotonic in
+    the commander population, mixing fixtures can shift the reported
+    pairs. Run against a DB with a single pinned fixture for a
+    fixture-clean read — a documented diagnostic caveat (see
+    docs/solutions/best-practices/tensor-single-owner-slot-2026-07-08.md).
+    """
     h = config_hash or compute_config_hash()
     rows = conn.execute(
         """

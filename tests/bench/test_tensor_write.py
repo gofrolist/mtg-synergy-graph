@@ -17,6 +17,7 @@ import pytest
 
 from mtg_synergy_graph.bench.tensor import (
     TensorWriter,
+    commander_filter_sql,
     compute_config_hash,
     evict_fixture_rows,
 )
@@ -418,5 +419,46 @@ def test_evict_rejects_nonpositive_chunk(tmp_path: Path) -> None:
     try:
         with pytest.raises(ValueError, match="chunk_size"):
             evict_fixture_rows(conn, "cfg", ["Cmdr A"], chunk_size=0)
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# commander_filter_sql — optional fixture-scoping fragment for reads
+# ---------------------------------------------------------------------------
+
+
+def test_commander_filter_none_is_no_filter() -> None:
+    """None -> empty fragment + no params (the whole-union read)."""
+    assert commander_filter_sql(None) == ("", [])
+
+
+def test_commander_filter_empty_matches_nothing() -> None:
+    """Empty list -> a fragment that matches no rows, never an illegal IN ()."""
+    frag, params = commander_filter_sql([])
+    assert params == []
+    assert "IN ()" not in frag
+    assert "1=0" in frag
+
+
+def test_commander_filter_nonempty_builds_in_clause() -> None:
+    """Non-empty -> one placeholder per commander + matching params."""
+    frag, params = commander_filter_sql(["A", "B", "C"])
+    assert frag == " AND commander IN (?,?,?)"
+    assert params == ["A", "B", "C"]
+
+
+def test_commander_filter_empty_actually_returns_zero_rows(tmp_path: Path) -> None:
+    """The empty-fixture fragment is valid SQL that selects nothing."""
+    conn = _minimal_fixture(tmp_path / "synergy.db")
+    try:
+        _seed_contrib(conn, "Cmdr A", "cfg")
+        conn.commit()
+        frag, params = commander_filter_sql([])
+        n = conn.execute(
+            f"SELECT COUNT(*) AS n FROM rule_contributions WHERE config_hash = ?{frag}",  # noqa: S608
+            ("cfg", *params),
+        ).fetchone()["n"]
+        assert n == 0
     finally:
         conn.close()

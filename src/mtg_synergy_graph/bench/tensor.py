@@ -173,8 +173,6 @@ def evict_fixture_rows(
     total = 0
     for start in range(0, len(commanders), chunk_size):
         batch = commanders[start : start + chunk_size]
-        if not batch:
-            continue
         placeholders = ",".join("?" * len(batch))
         cur = conn.execute(
             f"DELETE FROM rule_contributions WHERE config_hash = ? AND commander IN ({placeholders})",
@@ -182,6 +180,40 @@ def evict_fixture_rows(
         )
         total += cur.rowcount
     return total
+
+
+def commander_filter_sql(commanders: Sequence[str] | None) -> tuple[str, list[str]]:
+    """Optional ``AND commander IN (...)`` fragment for rule_contributions reads.
+
+    Additive ``--repin`` (see :func:`evict_fixture_rows`) lets multiple
+    fixtures share one ``config_hash``, so a ``WHERE config_hash = ?``
+    read with no commander filter spans the UNION of pinned fixtures.
+    Aggregate CLI readers that mean "over ONE fixture" (``--rule``,
+    ``--collinearity``, demand-coverage pool sizes, ``--embedding-dedup``)
+    pass that fixture's commander list here to stay fixture-scoped and
+    independent of local re-pin history (and immune to orphan rows left
+    by a shrunk fixture).
+
+    * ``None`` -> ``("", [])``: no filter (the union; historical
+      behavior, kept for direct library/test callers).
+    * empty -> ``(" AND 1=0", [])``: matches nothing -- an empty fixture
+      has no rows, and this avoids an illegal empty ``IN ()``.
+    * non-empty -> ``(" AND commander IN (?,...)", [*commanders])``.
+
+    Callers pass fixture-bounded lists (at most a few hundred
+    commanders), so a single ``IN`` clause stays well under SQLite's
+    bound-variable limit -- no chunking needed here (contrast
+    :func:`evict_fixture_rows`, which may receive an unbounded list and
+    aggregates trivially across chunks; a chunked ``GROUP BY`` read would
+    not).
+    """
+    if commanders is None:
+        return "", []
+    commanders = list(commanders)
+    if not commanders:
+        return " AND 1=0", []
+    placeholders = ",".join("?" * len(commanders))
+    return f" AND commander IN ({placeholders})", list(commanders)
 
 
 class TensorWriter(AbstractContextManager["TensorWriter"]):

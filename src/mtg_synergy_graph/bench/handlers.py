@@ -130,7 +130,7 @@ def handle_repin(args: argparse.Namespace) -> int:
         )
 
         live_hash = compute_config_hash()
-        evict_fixture_rows(conn, live_hash, commanders)
+        rows_evicted = evict_fixture_rows(conn, live_hash, commanders)
         conn.commit()
 
         writer = TensorWriter(conn, config_hash=live_hash)
@@ -157,7 +157,7 @@ def handle_repin(args: argparse.Namespace) -> int:
     print(
         f"--repin wrote {len(fresh.entries)} commanders to {fixture_path} "
         f"(config_hash={fresh.config_hash[:12]}..., "
-        f"tensor rows persisted to SQLite: ~{rows_written})",
+        f"tensor rows evicted: {rows_evicted}, persisted to SQLite: ~{rows_written})",
         file=sys.stderr,
     )
     return 0
