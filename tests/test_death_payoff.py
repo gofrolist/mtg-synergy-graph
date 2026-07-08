@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from mtg_synergy_graph.death_payoff import (
+    has_changeszone_death_payoff,
     is_death_event,
     payoff_subtypes_from_ports,
     token_subtype_vocab,
@@ -144,6 +145,77 @@ class TestPayoffSubtypesFromPorts:
         pid = _add_port(conn, "Some Producer", "effect", "Token")
         _add_token_subtype(conn, pid, "Zombie")
         assert token_subtype_vocab(conn) == {"Zombie"}
+
+
+class TestHasChangeszoneDeathPayoff:
+    """Port-level core shared with bench.cohorts.outlet_direction_death_payoff
+    (plan 2026-07-07-002 Task 2) and, per that plan, the death_outlet_feeder
+    rule gate + whitelist comparator (Tasks 5/6)."""
+
+    def test_battlefield_to_graveyard_non_self_matches(self):
+        cmdr_ports = [
+            {
+                "port_type": "trigger",
+                "event_class": "ChangesZone",
+                "valid_filter": "Creature.Other+YouCtrl",
+                "zone_origin": "Battlefield",
+                "zone_destination": "Graveyard",
+            }
+        ]
+        assert has_changeszone_death_payoff(cmdr_ports) is True
+
+    def test_etb_shaped_trigger_does_not_match(self):
+        cmdr_ports = [
+            {
+                "port_type": "trigger",
+                "event_class": "ChangesZone",
+                "valid_filter": "Creature.Other+YouCtrl",
+                "zone_origin": "Any",
+                "zone_destination": "Battlefield",
+            }
+        ]
+        assert has_changeszone_death_payoff(cmdr_ports) is False
+
+    def test_self_only_filter_does_not_match(self):
+        cmdr_ports = [
+            {
+                "port_type": "trigger",
+                "event_class": "ChangesZone",
+                "valid_filter": "Card.Self",
+                "zone_origin": "Battlefield",
+                "zone_destination": "Graveyard",
+            }
+        ]
+        assert has_changeszone_death_payoff(cmdr_ports) is False
+
+    def test_sacrificed_event_alone_does_not_match(self):
+        """Sacrificed is a death event but not ChangesZone-shaped; this helper
+        deliberately only checks the ChangesZone arm (see its docstring)."""
+        cmdr_ports = [
+            {
+                "port_type": "trigger",
+                "event_class": "Sacrificed",
+                "valid_filter": "Creature.YouCtrl",
+                "zone_origin": None,
+                "zone_destination": None,
+            }
+        ]
+        assert has_changeszone_death_payoff(cmdr_ports) is False
+
+    def test_non_trigger_port_ignored(self):
+        cmdr_ports = [
+            {
+                "port_type": "effect",
+                "event_class": "ChangesZone",
+                "valid_filter": "Creature.Other+YouCtrl",
+                "zone_origin": "Battlefield",
+                "zone_destination": "Graveyard",
+            }
+        ]
+        assert has_changeszone_death_payoff(cmdr_ports) is False
+
+    def test_empty_ports_does_not_match(self):
+        assert has_changeszone_death_payoff([]) is False
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "golden_set_archetype_payoff.json"

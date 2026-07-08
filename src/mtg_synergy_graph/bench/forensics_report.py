@@ -73,10 +73,12 @@ from mtg_synergy_graph.bench.forensics import (
     ForensicsPreconditionError,
     ForensicsReconciliationError,
     ForensicsReport,
+    RankBonusAblation,
     TiebreakAblation,
     TiebreakSelfCheckError,
     bucket_proportions,
     compute_forensics,
+    compute_rank_bonus_ablation,
     compute_tiebreak_ablation,
     load_tensor_contributions,
     synergy_content_digest,
@@ -192,6 +194,11 @@ class ForensicsRenderData:
     #: invoked with ``--ablate-tiebreak`` — the renderers emit the
     #: ablation section ONLY when this is set.
     ablation: TiebreakAblation | None = None
+    #: Task 1 (plan 2026-07-07-002) rank_bonus ablation — computed on
+    #: EVERY ``--forensics`` run (no flag). ``None`` only in tests that
+    #: build :class:`ForensicsRenderData` directly without it; a real
+    #: run via :func:`handle_forensics` always sets this.
+    rank_bonus_ablation: RankBonusAblation | None = None
 
 
 def load_port_shape_counts(
@@ -508,6 +515,12 @@ def render_forensics_markdown(data: ForensicsRenderData) -> str:
         f"commanders, zero-label commanders contribute 0.0): {report.aggregate_ndcg_canonical:.6f}"
     )
     lines.append(f"Aggregate raw DCG@30 (same canonical denominator): {report.aggregate_raw_dcg_canonical:.6f}")
+    if data.rank_bonus_ablation is not None:
+        rba = data.rank_bonus_ablation
+        lines.append(
+            f"rank_bonus-ablated NDCG@30: {rba.ndcg_ablated:.4f} (raw {rba.ndcg_raw:.4f}, "
+            f"delta {rba.delta:+.4f}) — EDHREC-at-inference credit"
+        )
     lines.append(
         f"Commanders: {n_classified + n_skipped} total = {n_classified} classified + {n_skipped} skipped (zero labels)"
     )
@@ -803,6 +816,18 @@ def render_forensics_json(data: ForensicsRenderData) -> str:
             "ratio_distribution": {label: count for label, count in justified.ratio_distribution},
         },
     }
+    # Task 1 (plan 2026-07-07-002): computed on EVERY --forensics run
+    # (no flag) — absent only when the caller never set it (renderer
+    # unit tests that build ForensicsRenderData directly).
+    if data.rank_bonus_ablation is not None:
+        rba = data.rank_bonus_ablation
+        payload["rank_bonus_ablation"] = {
+            "n_commanders": rba.n_commanders,
+            "ndcg_raw": rba.ndcg_raw,
+            "ndcg_ablated": rba.ndcg_ablated,
+            "delta": rba.delta,
+        }
+
     # Unit 6 (R8): the ablation block exists ONLY when --ablate-tiebreak
     # was passed — absent otherwise (no null placeholder).
     if data.ablation is not None:
@@ -895,10 +920,11 @@ def handle_forensics(args: argparse.Namespace) -> int:
     # it), so create=False cannot raise here. The Unit-5 history-row
     # inputs (provenance digests + in-run gem rate) are gathered on the
     # same connections while they're open; the append itself happens
-    # only after rendering succeeds below. With --ablate-tiebreak the
-    # Unit-6 label reload also rides on the open tags.db connection.
+    # only after rendering succeeds below. The label reload is used
+    # unconditionally by the Task 1 rank_bonus-ablation sidecar (every
+    # run) and, with --ablate-tiebreak, also by the Unit-6 tiebreaker
+    # ablation.
     ablate_tiebreak = bool(getattr(args, "ablate_tiebreak", False))
-    labels_by_commander: dict[str, dict[str, float]] = {}
     config_hash = compute_config_hash()
     conn = open_db(db_path, create=False)
     try:
@@ -914,7 +940,16 @@ def handle_forensics(args: argparse.Namespace) -> int:
         try:
             snapshot_digest = edhrec_snapshot_digest(edhrec_conn)
             gem_rate = compute_gem_rate_forensics(report, edhrec_conn, conn, config_hash)
-            if ablate_tiebreak:
+            # PR #103 review (F8): compute_forensics already loaded every
+            # commander's labels once and carries them on the report; reuse
+            # that instead of re-querying tags.db per entry. Fall back to
+            # the old re-query ONLY if the field is empty (backward compat
+            # for a report built by a caller that never populated it).
+            if report.labels_by_commander:
+                labels_by_commander: dict[str, dict[str, float]] = {
+                    commander: dict(labels) for commander, labels in report.labels_by_commander.items()
+                }
+            else:
                 labels_by_commander = {
                     entry.commander: edhrec_labels_for_commander(edhrec_conn, entry.commander, grade_floor=0.0)
                     for entry in report.entries
@@ -923,6 +958,17 @@ def handle_forensics(args: argparse.Namespace) -> int:
             edhrec_conn.close()
     finally:
         conn.close()
+
+    # Task 1 (plan 2026-07-07-002): cheap re-sort arithmetic over the
+    # already-captured Unit-1 rankings — no extra scoring pass, no
+    # flag. Computed on EVERY --forensics run, unlike the one-off R8
+    # tiebreaker ablation below.
+    rank_bonus_ablation = compute_rank_bonus_ablation(
+        {entry.commander: entry.ranking for entry in report.entries},
+        labels_by_commander,
+        n_canonical=len(report.entries) + len(report.skipped_commanders),
+    )
+    data = replace(data, rank_bonus_ablation=rank_bonus_ablation)
 
     if ablate_tiebreak:
         # Unit 6 (R8): pure re-sort of the already-captured rankings +

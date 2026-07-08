@@ -15,11 +15,18 @@ legendary creature, not to re-verify it per call.
 Behavior change here changes BOTH the cohort membership and the rule gate —
 the cohort fixture's pinned ``cohort_members`` snapshot is the regression
 oracle (tests/test_death_payoff.py::TestCohortUnchanged).
+
+``_trigger_only_matches_self`` is imported from ``graph_engine`` (not
+duplicated here) — every sibling ``complement_rules`` module already
+imports it directly from there, so this module gains no new import-cycle
+exposure by doing the same (PR #103 review, F4).
 """
 
 from __future__ import annotations
 
 import sqlite3
+
+from mtg_synergy_graph.graph_engine import _trigger_only_matches_self
 
 #: Death-trigger event classes. A ``Sacrificed`` / ``SacrificedOnce`` event is
 #: unconditionally a death event; ``ChangesZone`` / ``ChangesZoneAll`` counts
@@ -97,6 +104,54 @@ def is_death_event(event_class: str, zone_origin: str | None, zone_destination: 
         return True
     if event_class in _CHANGESZONE_EVENTS:
         return reaches_graveyard_from_battlefield(zone_origin, zone_destination)
+    return False
+
+
+def has_sacrificed_trigger(cmdr_ports: list) -> bool:
+    """True when any trigger port's event_class is a Sacrificed-family event.
+
+    Factored out (PR #103 review, F4) so the "does this commander already
+    have a dedicated sacrifice trigger" conjunct — previously duplicated in
+    ``complement_rules/death_outlet.py`` and ``bench/context_sim.py`` — has
+    one canonical home.
+    """
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "trigger":
+            continue
+        if (p.get("event_class") or "").strip() in _SACRIFICE_EVENTS:
+            return True
+    return False
+
+
+def has_changeszone_death_payoff(cmdr_ports: list) -> bool:
+    """True when some trigger port is a ``ChangesZone``/``ChangesZoneAll``-shaped
+    death event (battlefield -> graveyard, :func:`is_death_event`) that is not
+    self-only (:func:`_trigger_only_matches_self`).
+
+    This is the port-level core of ``bench.cohorts.outlet_direction_death_payoff``
+    (plan 2026-07-07-002 Task 2), factored here so the ``death_outlet_feeder``
+    rule gate and its whitelist comparator (Tasks 5/6) can reuse the exact same
+    conjunct against an already-loaded ``cmdr_ports`` list instead of a DB-wide
+    SQL scan. Deliberately does NOT check for ``Sacrificed``/``SacrificedOnce``
+    triggers or for ``subtype_death_payoff`` cohort membership — both are
+    cohort-enumeration-specific exclusions applied by the cohort predicate
+    itself, not part of this port-level gate. (NOTE: commanders matching THIS
+    shape also already receive ``cost_feeds_trigger`` complements via
+    ``combat.py``'s ChangesZone-gated creature-recursion arm — see the PR #103
+    review correction in the death-outlet null-result doc; do not read this
+    gate as evidence of zero existing coverage.)
+    """
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "trigger":
+            continue
+        event_class = (p.get("event_class") or "").strip()
+        if event_class not in _CHANGESZONE_EVENTS:
+            continue
+        if not is_death_event(event_class, p.get("zone_origin"), p.get("zone_destination")):
+            continue
+        if _trigger_only_matches_self(p.get("valid_filter")):
+            continue
+        return True
     return False
 
 

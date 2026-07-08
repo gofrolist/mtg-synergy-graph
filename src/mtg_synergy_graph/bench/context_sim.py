@@ -16,7 +16,7 @@ import sqlite3
 import sys
 import time
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -400,17 +400,72 @@ def whitelist_scores(conn: sqlite3.Connection, commander: str) -> dict[str, floa
     return dict.fromkeys(names, 1.0)
 
 
-def run_whitelist_baseline(sims: Sequence[ContextSim], conn: sqlite3.Connection) -> dict[str, Any]:
+def outlet_whitelist_scores(conn: sqlite3.Connection, commander: str) -> dict[str, float]:
+    """Flat 1.0 for every sac-outlet body, gated on the outlet-cohort port shape.
+
+    The G4-style comparator for ``death_outlet_feeder`` (built and DECLINED
+    at gates — see
+    ``docs/solutions/best-practices/death-outlet-feeder-null-result-2026-07-07.md``)
+    — a disguised whitelist a rule could hardcode. Gate: the
+    commander's ports must satisfy ``death_payoff.has_changeszone_death_payoff``
+    (a non-self-only ChangesZone/ChangesZoneAll death trigger) AND carry no
+    ``Sacrificed``/``SacrificedOnce`` trigger port. The second conjunct is
+    NOT part of ``has_changeszone_death_payoff`` itself (its docstring is
+    explicit that it "deliberately does NOT check for Sacrificed ...
+    triggers") — it is composed here so this gate matches
+    ``bench.cohorts.outlet_direction_death_payoff``'s port-level semantics
+    exactly (those commanders are already served by the existing
+    ``cost_feeds_trigger`` arm). Ungated commanders get ``{}`` (their delta
+    is 0 by construction, same convention as :func:`whitelist_scores`).
+
+    Unlike ``whitelist_scores``/``payoff_subtypes``, this does not re-derive
+    the cohort predicate's ``subtype_death_payoff``-overlap exclusion — that
+    exclusion is a set-level "which cohort claims this commander first"
+    tiebreak applied once at cohort-enumeration time (see
+    ``outlet_direction_death_payoff``'s docstring), not a property of the
+    commander's own ports, and every commander this function is called
+    against (the outlet fixture) has already had that tiebreak applied at
+    fixture-build time.
+    """
+    from ..death_payoff import has_changeszone_death_payoff, has_sacrificed_trigger
+    from ..graph_engine import load_ports_for_set
+
+    cmdr_ports = load_ports_for_set(conn, [commander])
+    if not has_changeszone_death_payoff(cmdr_ports):
+        return {}
+    if has_sacrificed_trigger(cmdr_ports):
+        return {}
+
+    names = {
+        n
+        for (n,) in conn.execute(
+            "SELECT DISTINCT card_name FROM card_ports WHERE port_type='cost' AND event_class='sacrifice'"
+        )
+    }
+    names.discard(commander)
+    return dict.fromkeys(names, 1.0)
+
+
+def run_whitelist_baseline(
+    sims: Sequence[ContextSim],
+    conn: sqlite3.Connection,
+    *,
+    whitelist_fn: Callable[[sqlite3.Connection, str], dict[str, float]] = whitelist_scores,
+) -> dict[str, Any]:
     """Whitelist-equivalence baseline (G4 comparator) over :data:`B_GRID`.
 
-    For each graded commander, ``whitelist_scores`` is built once (a
+    For each graded commander, ``whitelist_fn`` is built once (a
     design-time query re-deriving the cohort predicate), then re-assembled
     per bonus with :func:`assemble_whitelist` — same legal-pool gating and
-    metric shape as ``run_sweep``'s cells. Commanders whose
-    :func:`payoff_subtypes` returns no subtypes get an empty whitelist (their
-    delta is 0 by construction); ``n_commanders_with_whitelist`` counts the
-    rest so the readout stays honest about how many commanders the
-    comparator actually touches.
+    metric shape as ``run_sweep``'s cells. Commanders for whom ``whitelist_fn``
+    returns ``{}`` get an empty whitelist (their delta is 0 by construction);
+    ``n_commanders_with_whitelist`` counts the rest so the readout stays
+    honest about how many commanders the comparator actually touches.
+
+    ``whitelist_fn`` defaults to :func:`whitelist_scores` (the subtype-body
+    comparator, plan 2026-07-06-001 Task 4) — existing call sites and CLI
+    behavior are unchanged. Pass :func:`outlet_whitelist_scores` for the
+    outlet-cohort comparator (plan 2026-07-07-002 Task 5).
     """
     graded_sims = [sim for sim in sims if sim.graded_labels]
 
@@ -426,7 +481,7 @@ def run_whitelist_baseline(sims: Sequence[ContextSim], conn: sqlite3.Connection)
     wl_by_commander: dict[str, dict[str, float]] = {}
     n_with_whitelist = 0
     for sim in graded_sims:
-        wl = whitelist_scores(conn, sim.commander)
+        wl = whitelist_fn(conn, sim.commander)
         wl_by_commander[sim.commander] = wl
         if wl:
             n_with_whitelist += 1
@@ -746,6 +801,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="run the whitelist-equivalence baseline (G4 comparator) over B_GRID instead of the K_GRID x W_GRID sweep",
     )
+    p_sweep.add_argument(
+        "--whitelist-baseline-outlet",
+        action="store_true",
+        help=(
+            "like --whitelist-baseline, but uses outlet_whitelist_scores (the "
+            "outlet-cohort G4 comparator, plan 2026-07-07-002 Task 5) instead of "
+            "the subtype-body whitelist_scores comparator"
+        ),
+    )
     p_sweep.add_argument("--h-cohort", type=float, default=None, help="pinned cohort NDCG band half-width (gate G1)")
     p_sweep.add_argument("--h-500", type=float, default=None, help="pinned 500-cmdr NDCG band half-width (gate G2)")
     p_sweep.add_argument("--g-500", type=float, default=None, help="pinned 500-cmdr gem band half-width (gate G2)")
@@ -797,8 +861,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(f"report: {bands_path}")
 
-        if args.command == "sweep" and args.whitelist_baseline:
-            wl_report = run_whitelist_baseline(sims, engine._conn)
+        if args.command == "sweep" and (args.whitelist_baseline or args.whitelist_baseline_outlet):
+            wl_fn = outlet_whitelist_scores if args.whitelist_baseline_outlet else whitelist_scores
+            wl_report = run_whitelist_baseline(sims, engine._conn, whitelist_fn=wl_fn)
             wl_report["fixture"] = str(fixture_path)
             wl_report["n_commanders"] = report["n_commanders"]
             wl_path = _write_report(outdir, "whitelist.json", wl_report)

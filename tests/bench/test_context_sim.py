@@ -327,6 +327,149 @@ def test_whitelist_scores_subtype_body_query_is_token_anchored(tmp_path):
     conn.close()
 
 
+# ---------------------------------------------------------------------------
+# outlet_whitelist_scores (plan 2026-07-07-002 Task 5, G4-style comparator
+# for the outlet-direction death-payoff cohort)
+# ---------------------------------------------------------------------------
+
+
+def _insert_commander(conn, name: str) -> None:
+    conn.execute(
+        "INSERT INTO cards (name, supertypes, card_types, subtypes, cmc, "
+        "color_identity, edhrec_rank, legal_commander) VALUES (?, 'Legendary', "
+        "'Legendary Creature', '', 3, 'B', 1000, 1)",
+        (name,),
+    )
+
+
+def _insert_trigger_port(
+    conn,
+    card_name: str,
+    *,
+    event_class: str,
+    valid_filter: str | None = None,
+    zone_origin: str | None = None,
+    zone_destination: str | None = None,
+) -> None:
+    conn.execute(
+        "INSERT INTO card_ports (card_name, port_type, event_class, valid_filter, "
+        "zone_origin, zone_destination) VALUES (?, 'trigger', ?, ?, ?, ?)",
+        (card_name, event_class, valid_filter, zone_origin, zone_destination),
+    )
+
+
+def _insert_sac_outlet(conn, card_name: str) -> None:
+    # FOREIGN KEY(card_ports.card_name) -> cards(name); INSERT OR IGNORE so a
+    # commander that is also a sac-outlet body (self-exclusion test) doesn't
+    # collide with its own already-inserted cards row.
+    conn.execute(
+        "INSERT OR IGNORE INTO cards (name, supertypes, card_types, subtypes, cmc, "
+        "color_identity, edhrec_rank, legal_commander) VALUES (?, '', 'Artifact', '', 1, '', 5000, 0)",
+        (card_name,),
+    )
+    conn.execute(
+        "INSERT INTO card_ports (card_name, port_type, event_class) VALUES (?, 'cost', 'sacrifice')",
+        (card_name,),
+    )
+
+
+def test_outlet_whitelist_scores_non_cohort_commander_returns_empty(tmp_path):
+    from mtg_synergy_graph.bench.context_sim import outlet_whitelist_scores
+    from mtg_synergy_graph.db import open_db
+
+    conn = open_db(tmp_path / "synergy.db")
+    _insert_commander(conn, "Vanilla Commander")
+    # ChangesZone reaching the battlefield (ETB) is not a death event.
+    _insert_trigger_port(
+        conn,
+        "Vanilla Commander",
+        event_class="ChangesZone",
+        valid_filter="Creature.Other+YouCtrl",
+        zone_origin="Any",
+        zone_destination="Battlefield",
+    )
+    _insert_sac_outlet(conn, "Viscera Seer")
+    conn.commit()
+
+    assert outlet_whitelist_scores(conn, "Vanilla Commander") == {}
+    conn.close()
+
+
+def test_outlet_whitelist_scores_cohort_shaped_commander_gets_sac_outlet_set(tmp_path):
+    from mtg_synergy_graph.bench.context_sim import outlet_whitelist_scores
+    from mtg_synergy_graph.db import open_db
+
+    conn = open_db(tmp_path / "synergy.db")
+    _insert_commander(conn, "Meren-Shaped Commander")
+    _insert_trigger_port(
+        conn,
+        "Meren-Shaped Commander",
+        event_class="ChangesZone",
+        valid_filter="Creature.Other+YouCtrl",
+        zone_origin="Battlefield",
+        zone_destination="Graveyard",
+    )
+    _insert_sac_outlet(conn, "Viscera Seer")
+    _insert_sac_outlet(conn, "Ashnod's Altar")
+    conn.commit()
+
+    wl = outlet_whitelist_scores(conn, "Meren-Shaped Commander")
+    assert wl == {"Viscera Seer": 1.0, "Ashnod's Altar": 1.0}
+    conn.close()
+
+
+def test_outlet_whitelist_scores_commander_self_excluded(tmp_path):
+    from mtg_synergy_graph.bench.context_sim import outlet_whitelist_scores
+    from mtg_synergy_graph.db import open_db
+
+    conn = open_db(tmp_path / "synergy.db")
+    _insert_commander(conn, "Meren-Shaped Commander")
+    _insert_trigger_port(
+        conn,
+        "Meren-Shaped Commander",
+        event_class="ChangesZone",
+        valid_filter="Creature.Other+YouCtrl",
+        zone_origin="Battlefield",
+        zone_destination="Graveyard",
+    )
+    # The commander itself also happens to carry a sac-outlet cost port --
+    # must never bump itself.
+    _insert_sac_outlet(conn, "Meren-Shaped Commander")
+    _insert_sac_outlet(conn, "Viscera Seer")
+    conn.commit()
+
+    wl = outlet_whitelist_scores(conn, "Meren-Shaped Commander")
+    assert "Meren-Shaped Commander" not in wl
+    assert wl == {"Viscera Seer": 1.0}
+    conn.close()
+
+
+def test_outlet_whitelist_scores_sacrificed_port_commander_returns_empty(tmp_path):
+    """A commander with an explicit Sacrificed trigger is served by
+    ``cost_feeds_trigger`` already -- ``has_changeszone_death_payoff`` alone
+    does not exclude it (see its docstring), so this exercises the composed
+    exclusion in ``outlet_whitelist_scores`` itself."""
+    from mtg_synergy_graph.bench.context_sim import outlet_whitelist_scores
+    from mtg_synergy_graph.db import open_db
+
+    conn = open_db(tmp_path / "synergy.db")
+    _insert_commander(conn, "Sac Trigger Commander")
+    _insert_trigger_port(
+        conn,
+        "Sac Trigger Commander",
+        event_class="ChangesZone",
+        valid_filter="Creature.Other+YouCtrl",
+        zone_origin="Battlefield",
+        zone_destination="Graveyard",
+    )
+    _insert_trigger_port(conn, "Sac Trigger Commander", event_class="Sacrificed", valid_filter="Creature.YouCtrl")
+    _insert_sac_outlet(conn, "Viscera Seer")
+    conn.commit()
+
+    assert outlet_whitelist_scores(conn, "Sac Trigger Commander") == {}
+    conn.close()
+
+
 @pytest.mark.skipif(not _DB.exists(), reason="requires built data/synergy.db")
 def test_bands_smoke_two_commanders(tmp_path):
     from mtg_synergy_graph.bench.context_sim import main

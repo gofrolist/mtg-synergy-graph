@@ -35,6 +35,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..death_payoff import has_changeszone_death_payoff
+from . import death_outlet
 from .core import COMPLEMENT_RULES, PortRow
 from .statics import _edict_benefits_from_trigger
 from .tokens import TOKEN_PRODUCER_REJECTING_FRAGMENTS
@@ -661,6 +663,44 @@ def _aura_equipment_support_gate(port: PortRow) -> bool:
     return "Equipment" in (port.get("valid_filter") or "")
 
 
+def _death_outlet_feeder_gate(port: PortRow) -> bool:
+    """Single-port shape matching the ``death_outlet_feeder`` commander gate.
+
+    Flag-aware: reads ``death_outlet._ENABLE_DEATH_OUTLET_FEEDER`` at CALL
+    time (module attribute access, not captured at import time) and returns
+    False immediately while the flag is off. The rule was DECLINED at
+    pre-registered gates (plan 2026-07-07-002) and never fires -- while it
+    is off, this gate must report NO coverage so ``gap_report``,
+    ``demand_coverage``, and ``rule_quality_gate`` see the truth (the
+    ChangesZone-death signature is unserved), instead of a live-looking
+    gate misattributing that gap as already covered. Self-activates with
+    zero registry edits if the flag ever flips back to True (a retry cycle
+    or Task-7-style re-measurement).
+
+    When live, composed by calling ``death_payoff.has_changeszone_death_payoff``
+    on a one-element port list -- that function's per-port conjunct
+    (ChangesZone/ChangesZoneAll trigger, reaches the graveyard from the
+    battlefield, not self-only) is exactly the single-port shape the auditor
+    needs to attribute this rule's coverage to. Deliberately does not also
+    encode the rule's commander-level "no Sacrificed trigger port" exclusion
+    (see ``complement_rules.death_outlet._commander_has_death_outlet_gate``)
+    -- that conjunct depends on the *other* ports on the same commander, not
+    on this port alone, so it cannot be expressed as a single-port predicate.
+
+    The ``death_outlet`` / ``has_changeszone_death_payoff`` imports are
+    module-level (PR #103 review, F7) -- verified cycle-safe:
+    ``complement_rules/__init__`` loads ``.core``, which imports
+    ``.death_outlet`` before this module is ever reached. The flag itself
+    is still read as ``death_outlet._ENABLE_DEATH_OUTLET_FEEDER`` (a module
+    attribute lookup at CALL time, not a captured value) so
+    ``monkeypatch.setattr(death_outlet, "_ENABLE_DEATH_OUTLET_FEEDER", ...)``
+    in tests still takes effect.
+    """
+    if not death_outlet._ENABLE_DEATH_OUTLET_FEEDER:
+        return False
+    return has_changeszone_death_payoff([port])
+
+
 def _land_to_gy_gate(port: PortRow) -> bool:
     """Commander has a land-to-graveyard trigger (Gitrog, Titania Voice).
 
@@ -720,6 +760,7 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("gy_loader", _gy_loader_gate),
     RuleGate("cost_reduction_target", _cost_reduction_gate),
     RuleGate("land_to_gy_synergy", _land_to_gy_gate),
+    RuleGate("death_outlet_feeder", _death_outlet_feeder_gate),
     RuleGate("spell_density", _spellcast_density_gate),
     RuleGate("spellcast_resonance", _spellcast_density_gate),
     # Batch 2 — registry sweep

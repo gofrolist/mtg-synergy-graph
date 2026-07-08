@@ -110,6 +110,13 @@ number remains unbeaten by a mechanically-narrow rule.
 
 1. Cost→supply resource-flow pairing (plan 2026-07-02-005).
 2. Additive pool-context second pass, mean-of-IDF-sums form (this cycle).
+3. Per-class flat-credit outlet feeder — `death_outlet_feeder`, plan
+   2026-07-07-002 — flat bonus to every `cost.sacrifice` candidate for
+   ChangesZone-shaped death-payoff commanders; DECLINED at every sweep
+   cell (O-noise/O-cliffs/O-clean all FAIL), whitelist-equivalent. Same
+   flat-per-class-credit-cannot-discriminate-within-class root cause as
+   entry 2. See
+   `docs/solutions/best-practices/death-outlet-feeder-null-result-2026-07-07.md`.
 
 Still open: specificity-normalized context forms (e.g. per-candidate
 context IDF over the pool rather than raw sums) — unfunded, and any

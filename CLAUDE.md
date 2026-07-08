@@ -5,8 +5,17 @@ Guidance for Claude Code working in this repo.
 ## Project Overview
 
 MTG Synergy Graph — deterministic, rule-based EDH/Commander synergy scorer
-using Forge DSL ports. No training, no EDHREC at inference.
-Current aggregate NDCG@30 ~ 0.256 on the 100-commander golden set.
+using Forge DSL ports. No training. Mechanical rule scoring uses no EDHREC —
+BUT a `rank_bonus` micro-term (`0.005·(1−edhrec_rank/30000)`,
+`universal_scorer.py`) and the sort-key tiebreak (`cmc, edhrec_rank, name`)
+inject EDHREC ordering at inference; a 2026-07-07 diagnostic measured their
+TOTAL credit at −0.0441 golden-100 mean NDCG@30 (0.2328 raw → 0.1887
+ablated). `rank_bonus` is KEPT deliberately pending a future measured
+removal decision; `bench.py audit --forensics` reports the ablated metric
+on every run (see the forensics command block below) so ship/decline
+verdicts can separate mechanical signal from this hidden credit.
+Current aggregate NDCG@30 ~ 0.233 raw (~0.189 with the EDHREC-at-inference
+credit ablated) on the 100-commander golden set.
 
 For user-facing setup / quick-start, see [README.md](README.md).
 For the forward-looking rule-planning workflow (gap_report → scaffold →
@@ -51,7 +60,12 @@ uv run scripts/bench.py audit --embedding-dedup --threshold 0.90         # Loose
 # EDHREC-label miss into NEAR_MISS / OUTRANKED / FILTERED / DATA_GAP / NO_RULES buckets via a live
 # production-ranking pass + the persisted tensor. Writes .audit/forensics.md and appends a
 # provenance-stamped row to .audit/forensics_history.csv. Zero scoring-path changes.
-uv run scripts/bench.py audit --forensics                                 # Full per-miss failure taxonomy + metric sidecars + R9 justified-divergence view
+# CAVEAT (PR #103 review): an OUTRANKED miss's `staple_only` sub-tag means "no rows in the
+# PERSISTED tensor at the current config_hash", which for a commander outside the pinned
+# fixture is a coverage artifact, not evidence of zero rule credit — cross-check with a live
+# find_all_complements call before treating it as an unserved pair (see the forensics.py
+# module docstring and docs/solutions/best-practices/death-outlet-feeder-null-result-2026-07-07.md).
+uv run scripts/bench.py audit --forensics                                 # Full per-miss failure taxonomy + metric sidecars + R9 justified-divergence view + rank_bonus-ablated NDCG sidecar (every run, no flag)
 uv run scripts/bench.py audit --forensics --format json                   # Machine-readable report
 uv run scripts/bench.py audit --forensics --ablate-tiebreak               # + one-off EDHREC tiebreaker-credit measurement (bracketed weak/strong keys)
 uv run scripts/bench.py audit --trend forensics                           # History of bucket proportions / NDCG / gem rate with (config, snapshot) boundary markers

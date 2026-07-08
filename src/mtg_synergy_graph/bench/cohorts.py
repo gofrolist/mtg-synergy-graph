@@ -26,6 +26,10 @@ import sqlite3
 from collections.abc import Callable
 
 from mtg_synergy_graph.death_payoff import (
+    _CHANGESZONE_EVENTS,
+    _SACRIFICE_EVENTS,
+)
+from mtg_synergy_graph.death_payoff import (
     is_death_event as _is_death_event,
 )
 from mtg_synergy_graph.death_payoff import (
@@ -34,6 +38,11 @@ from mtg_synergy_graph.death_payoff import (
 from mtg_synergy_graph.death_payoff import (
     valid_filter_subtype_tokens as _valid_filter_subtype_tokens,
 )
+from mtg_synergy_graph.graph_engine import _trigger_only_matches_self
+
+#: Re-exported from ``death_payoff`` (single source of truth, PR #103
+#: review F4) — kept as local aliases since this module's callers already
+#: reference the bare ``_CHANGESZONE_EVENTS`` / ``_SACRIFICE_EVENTS`` names.
 
 
 def subtype_death_payoff(conn: sqlite3.Connection) -> set[str]:
@@ -68,8 +77,71 @@ def subtype_death_payoff(conn: sqlite3.Connection) -> set[str]:
     return cohort
 
 
+def outlet_direction_death_payoff(conn: sqlite3.Connection) -> set[str]:
+    """Legal legendary-creature commanders with an outlet-direction death trigger.
+
+    A commander qualifies when it has a ``ChangesZone``/``ChangesZoneAll``
+    trigger port whose event is a battlefield->graveyard death
+    (:func:`death_payoff.is_death_event`), whose ``valid_filter`` is not
+    self-only (:func:`graph_engine._trigger_only_matches_self`), it has NO
+    trigger port on ``Sacrificed``/``SacrificedOnce``, and it is not
+    already claimed by :func:`subtype_death_payoff` (that predicate owns its
+    own members). Named by plan 2026-07-07-002 (the outlet-direction
+    death-payoff cycle) as a candidate second archetype-payoff cohort for the
+    ``death_outlet_feeder`` rule under development in that plan (that rule
+    was DECLINED at gates -- see
+    ``docs/solutions/best-practices/death-outlet-feeder-null-result-2026-07-07.md``).
+
+    CORRECTED (2026-07-08, PR #103 review): an earlier version of this
+    docstring said Sacrificed-trigger commanders "are already served by the
+    existing cost_feeds_trigger arm", implying ChangesZone-shaped ones (this
+    cohort) are not. That's wrong -- ``combat.py``'s ChangesZone-gated arm
+    (``_find_sacrifice_outlets``) ALSO emits ``cost_feeds_trigger``
+    complements for commanders in THIS cohort. The
+    ``death_outlet_feeder`` rule (built against this cohort) overlapped that
+    arm rather than filling a genuine gap; see the null-result doc above.
+
+    Deliberately NOT appended to ``_COHORT_PREDICATES``: appending would
+    change ``archetype_payoff_cohort()``'s union, silently mutate the pinned
+    ``golden_set_archetype_payoff.json`` fixture's ``cohort_members``
+    snapshot on the next bootstrap, and break
+    ``tests/test_death_payoff.py::TestCohortUnchanged`` plus its pinned noise
+    bands. This function names a candidate cohort for a *separate* fixture
+    (``golden_set_outlet_payoff.json``, plan 2026-07-07-002 Task 3);
+    promoting it into the shared union is a distinct, deliberate decision
+    (its own plan/PR), never a side effect of merely defining the predicate.
+    """
+    rows = conn.execute(
+        "SELECT p.card_name, p.event_class, p.valid_filter, p.zone_origin, p.zone_destination "
+        "FROM card_ports p "
+        "JOIN cards c ON c.name = p.card_name "
+        "WHERE p.port_type = 'trigger' "
+        "AND c.legal_commander = 1 "
+        "AND c.supertypes LIKE '%Legendary%' "
+        "AND c.card_types LIKE '%Creature%'"
+    )
+
+    qualifying: set[str] = set()
+    has_sacrifice: set[str] = set()
+    for card_name, event_class, valid_filter, zone_origin, zone_destination in rows:
+        if event_class in _SACRIFICE_EVENTS:
+            has_sacrifice.add(card_name)
+            continue
+        if event_class not in _CHANGESZONE_EVENTS:
+            continue
+        if not _is_death_event(event_class, zone_origin, zone_destination):
+            continue
+        if _trigger_only_matches_self(valid_filter):
+            continue
+        qualifying.add(card_name)
+
+    return qualifying - has_sacrifice - subtype_death_payoff(conn)
+
+
 #: The archetype-payoff cohort is the union of these predicates. Seeded with one
 #: member; append a ``(conn) -> set[str]`` callable to extend (Key Decision 3).
+#: ``outlet_direction_death_payoff`` above is intentionally NOT a member of this
+#: tuple — see its docstring.
 _COHORT_PREDICATES: tuple[Callable[[sqlite3.Connection], set[str]], ...] = (subtype_death_payoff,)
 
 
