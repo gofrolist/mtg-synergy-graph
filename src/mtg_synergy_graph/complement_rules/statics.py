@@ -498,7 +498,7 @@ def _find_anthem_payoffs(
         if not any(k in raw for k in _ANTHEM_BUFF_KEYS):
             continue
         # Drawback statics pump negatively — not a payoff.
-        if re.search(r"'Add(?:Power|Toughness)':\s*'-", raw):
+        if _NEGATIVE_BUFF_RE.search(raw):
             continue
         scope = row["affected_scope"] or ""
         matched_alt: str | None = None
