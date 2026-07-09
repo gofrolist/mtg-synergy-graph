@@ -5,6 +5,7 @@ import pytest
 
 from mtg_synergy_graph.complement_rules import aristocrats as arm
 from mtg_synergy_graph.complement_rules.aristocrats import _commander_is_aristocrats
+from mtg_synergy_graph.complement_rules.registry import attributable_rules_for_port
 
 
 def _port(port_type, event_class, **kw):
@@ -190,3 +191,22 @@ def test_emitter_flag_off_returns_empty(arm_conn, monkeypatch):
     from mtg_synergy_graph.complement_rules.aristocrats import _find_aristocrats_death_bridge
 
     assert _find_aristocrats_death_bridge(arm_conn, [_SAC], set()) == []
+
+
+def test_rule_gate_flag_aware():
+    port = {
+        "port_type": "trigger",
+        "event_class": "ChangesZone",
+        "zone_origin": "Battlefield",
+        "zone_destination": "Graveyard",
+        "cost_subtype": "",
+        "cost_target": "",
+        "valid_filter": "",
+    }
+    arm._ENABLE_ARISTOCRATS_DEATH_BRIDGE = False
+    assert "aristocrats_death_bridge" not in attributable_rules_for_port(port)
+    arm._ENABLE_ARISTOCRATS_DEATH_BRIDGE = True
+    try:
+        assert "aristocrats_death_bridge" in attributable_rules_for_port(port)
+    finally:
+        arm._ENABLE_ARISTOCRATS_DEATH_BRIDGE = False
