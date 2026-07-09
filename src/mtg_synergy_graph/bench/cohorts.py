@@ -190,3 +190,29 @@ def toughness_payoff(conn: sqlite3.Connection) -> set[str]:
         "AND " + LEGAL_LEGENDARY_CREATURE_WHERE
     )
     return {name for (name,) in rows}
+
+
+def team_anthem(conn: sqlite3.Connection) -> set[str]:
+    """Legal legendary-creature commanders whose payoff is a passive team anthem.
+
+    Qualifies when the commander has a ``static.Continuous`` port whose
+    ``affected_scope`` names a ``Creature``/``Permanent`` base with a
+    ``YouCtrl`` controller scope and a positive ``AddPower``/``AddToughness``
+    or ``AddKeyword`` where every affected-scope qualifier is benign
+    (creature-*subtype* bases AND subtype/condition qualifiers stay lord's
+    territory; ``Card.Self`` and symmetric/no-``YouCtrl`` scopes are excluded).
+    This is the target cohort of the ``team_anthem_payoff`` rule (spec
+    2026-07-08); deliberately NOT part of any shared cohort union. Mirrors
+    ``complement_rules.statics._commander_has_team_anthem_static`` — that helper
+    is the single source of truth for the qualifying-static predicate.
+    """
+    from mtg_synergy_graph.complement_rules.statics import _commander_has_team_anthem_static
+
+    rows = conn.execute(
+        "SELECT p.card_name, p.port_type, p.event_class, p.affected_scope, p.raw_line "
+        "FROM card_ports p JOIN cards c ON c.name = p.card_name "
+        "WHERE p.port_type = 'static' AND p.event_class = 'Continuous' "
+        "AND p.affected_scope IS NOT NULL AND p.affected_scope != '' "
+        "AND " + LEGAL_LEGENDARY_CREATURE_WHERE
+    )
+    return {row["card_name"] for row in rows if _commander_has_team_anthem_static([dict(row)])}

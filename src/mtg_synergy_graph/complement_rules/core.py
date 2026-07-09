@@ -1187,6 +1187,7 @@ from .statics import (  # noqa: E402
     _find_cost_reduction_synergy,
     _find_edict_feeders,
     _find_graveyard_play_synergy,
+    _find_team_anthem_payoffs,
 )
 from .subtype_supply import _find_subtype_supply_complements  # noqa: E402
 from .tokens import (  # noqa: E402
@@ -1356,6 +1357,7 @@ def find_all_complements(
         out.extend(_find_opponent_forcing(conn, cmdr_ports, cmdr_set))
         out.extend(_find_token_producers_for_trigger(conn, cmdr_ports, cmdr_set))
         out.extend(_find_subtype_supply_complements(conn, cmdr_ports, cmdr_set, candidate_cache))
+        out.extend(_find_team_anthem_payoffs(conn, cmdr_ports, cmdr_set, candidate_cache))
         out.extend(_find_death_outlet_complements(conn, cmdr_ports, cmdr_set))
         out.extend(_find_static_strategy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_combat_enhancers(conn, cmdr_ports, cmdr_set))

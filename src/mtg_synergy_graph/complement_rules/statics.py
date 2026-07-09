@@ -4,9 +4,18 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from typing import TYPE_CHECKING
 
 from ..graph_engine import _trigger_only_matches_self
 from .core import PortComplement, PortRow
+
+if TYPE_CHECKING:
+    from ..penalties import CandidateCache
+
+#: Coverage-oriented rule (spec 2026-07-08-team-anthem-payoff-rule). Default
+#: OFF and hash-neutral until it clears the pre-registered coverage +
+#: no-regression gates.
+_ENABLE_TEAM_ANTHEM_PAYOFF: bool = False
 
 #: valid_filter values indicating edict-style sacrifice targeting.
 _EDICT_FILTERS: tuple[str, ...] = (
@@ -419,6 +428,73 @@ def _commander_makes_creature_tokens(cmdr_ports: list[PortRow]) -> bool:
     return False
 
 
+_NEGATIVE_BUFF_RE = re.compile(r"'Add(?:Power|Toughness)':\s*'-")
+
+#: Affected-scope base types that make a static a *team* anthem (vs a
+#: creature-subtype lord, which stays lord's territory, or Card.Self voltron).
+_TEAM_ANTHEM_BASES: frozenset[str] = frozenset({"Creature", "Permanent"})
+
+#: Affected-scope qualifier tokens that do NOT restrict a static from being an
+#: unconditional whole-team anthem. Anything else after the base type — a
+#: creature subtype (``Pirate``), a condition (``counters_GE1_P1P1``,
+#: ``tapped``, ``enchanted``), or a color (``Black``) — makes it a restricted
+#: lord / conditional anthem, which is NOT a team anthem and stays out. Without
+#: this check a subtype/condition folded in as a ``+``-qualifier after a
+#: ``Creature``/``Permanent`` base (e.g. Admiral Beckett Brass's
+#: ``Creature.Pirate+Other+YouCtrl``, Abzan Falconer's
+#: ``Creature.YouCtrl+counters_GE1_P1P1``) would slip through.
+_BENIGN_TEAM_SCOPE_QUALIFIERS: frozenset[str] = frozenset({"YouCtrl", "Other"})
+
+
+def _parse_scope_alt(alt: str) -> tuple[str, list[str]]:
+    """Split one ``affected_scope`` alternative into (base type, qualifier tokens).
+
+    ``'Creature.Pirate+Other+YouCtrl'`` -> ``('Creature', ['Pirate', 'Other',
+    'YouCtrl'])``; ``'Creature.YouCtrl'`` -> ``('Creature', ['YouCtrl'])``;
+    ``'Card.Self'`` -> ``('Card', ['Self'])``. Splits on both ``.`` and ``+``;
+    the base is the first token. Shared by ``_find_anthem_payoffs`` and
+    ``_commander_has_team_anthem_static`` so the two scope parsers cannot drift.
+    """
+    tokens = [t for t in re.split(r"[.+]", alt.strip()) if t]
+    if not tokens:
+        return "", []
+    return tokens[0], tokens[1:]
+
+
+def _commander_has_team_anthem_static(cmdr_ports: list[PortRow]) -> bool:
+    """True iff the commander has a your-team anthem static (Unit 1 gate).
+
+    Qualifies iff some ``static.Continuous`` port grants a positive
+    ``AddPower``/``AddToughness`` or an ``AddKeyword`` to an UNCONDITIONAL
+    ``Creature``/``Permanent`` team scope: base in ``_TEAM_ANTHEM_BASES``,
+    ``YouCtrl`` present, and every other affected-scope qualifier benign
+    (``_BENIGN_TEAM_SCOPE_QUALIFIERS``). Rejects symmetric anthems (no
+    ``YouCtrl``), ``Card.Self`` voltron, creature-*subtype* lords AND any
+    subtype/condition qualifier folded after the base, and negative drawback
+    statics. This is the mirror boundary of ``_find_anthem_payoffs``.
+    """
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "static":
+            continue
+        if (p.get("event_class") or "").strip() != "Continuous":
+            continue
+        raw = str(p.get("raw_line") or "")
+        if not any(k in raw for k in _ANTHEM_BUFF_KEYS):
+            continue
+        if _NEGATIVE_BUFF_RE.search(raw):
+            continue
+        for alt in (p.get("affected_scope") or "").split(","):
+            base, quals = _parse_scope_alt(alt)
+            if base not in _TEAM_ANTHEM_BASES:
+                continue
+            if "YouCtrl" not in quals:
+                continue
+            if any(q not in _BENIGN_TEAM_SCOPE_QUALIFIERS for q in quals):
+                continue
+            return True
+    return False
+
+
 def _find_anthem_payoffs(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
@@ -457,13 +533,13 @@ def _find_anthem_payoffs(
         if not any(k in raw for k in _ANTHEM_BUFF_KEYS):
             continue
         # Drawback statics pump negatively — not a payoff.
-        if re.search(r"'Add(?:Power|Toughness)':\s*'-", raw):
+        if _NEGATIVE_BUFF_RE.search(raw):
             continue
         scope = row["affected_scope"] or ""
         matched_alt: str | None = None
         for alt in scope.split(","):
             alt = alt.strip()
-            base = alt.split(".")[0].split("+")[0].strip()
+            base, _quals = _parse_scope_alt(alt)
             if base != "Creature":
                 continue
             # Own-board anthems only: an anthem for opponents'
@@ -491,4 +567,115 @@ def _find_anthem_payoffs(
                 branch_kind=row["branch_kind"] or "root",
             )
         )
+    return results
+
+
+#: ``ReplaceWith`` results that MULTIPLY the controller's own token creation
+#: (so they multiply creature bodies a team anthem can buff). Excludes
+#: ``HalveToken`` (Halving Season — reduces, inverted polarity) and the
+#: pass-through replacements ``TokenReplace``/``DBReplace`` used by
+#: non-creature-only makers (Academy Manufactor: Clue/Food/Treasure; Xorn:
+#: Treasure) which are not creature-body multipliers.
+_TOKEN_MULTIPLYING_REPLACEMENTS: frozenset[str] = frozenset({"DoubleToken", "TripleToken"})
+_REPLACEWITH_RE = re.compile(r"'ReplaceWith':\s*'([^']+)'")
+_TOKENOWNER_RE = re.compile(r"'TokenOwner':\s*'([^']+)'")
+
+#: ``TokenOwner`` values that hand the token to a non-controlling player, so the
+#: body lands off the anthem commander's board (Akroan Horse, Forbidden Orchard,
+#: the Hunted cycle). ``Opponent`` is matched as a substring (covers
+#: ``Player.Opponent`` and compound owners); these are matched exactly.
+_AWAY_TOKEN_OWNERS: frozenset[str] = frozenset({"Targeted", "TargetedPlayer", "ThisTargetedPlayer"})
+
+
+def _is_own_board_token_multiplier(raw: str) -> bool:
+    """True iff a ``replacement.CreateToken`` port multiplies the controller's
+    OWN tokens (Doubling Season, Ojer Taq) rather than halving, replacing a
+    non-creature token, or affecting an opponent's tokens."""
+    m = _REPLACEWITH_RE.search(raw)
+    if m is None or m.group(1) not in _TOKEN_MULTIPLYING_REPLACEMENTS:
+        return False
+    return "Card.OppCtrl" not in raw and "'ValidPlayer': 'Opponent'" not in raw
+
+
+def _token_lands_on_own_board(raw: str) -> bool:
+    """True iff a ``effect.Token`` port's created token is owned by the
+    controller (the anthem can buff it). ``TokenOwner`` absent defaults to the
+    controller; an ``Opponent``/``Targeted`` owner lands the body elsewhere."""
+    m = _TOKENOWNER_RE.search(raw)
+    if m is None:
+        return True
+    owner = m.group(1)
+    return "Opponent" not in owner and owner not in _AWAY_TOKEN_OWNERS
+
+
+def _find_team_anthem_payoffs(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+    candidate_cache: CandidateCache | None = None,
+) -> list[PortComplement]:
+    """Token-producer payoffs for passive team-anthem commanders (Unit 2).
+
+    Fires when the commander has a qualifying team-anthem static (Unit 1).
+    Candidates are OWN-BOARD creature-token makers, tiered ``token_doubler``
+    (strong, ``replacement.CreateToken`` multipliers) > ``token_producer``
+    (``effect.Token`` with a creature P/T TokenScript). Both tiers exclude
+    opponent-directed / inverted-polarity / non-creature makers so the anthem
+    only pairs with bodies it can actually buff. Dedup per candidate, strong
+    tier wins.
+
+    When ``candidate_cache`` is provided, the producer tier reads the shared
+    ``token_effect_rows`` instead of re-issuing the (commander-independent)
+    ``effect.Token`` scan for every commander in a batch run (see
+    ``_find_subtype_supply_complements`` for the established pattern).
+    """
+    if not _ENABLE_TEAM_ANTHEM_PAYOFF:
+        return []
+    if not _commander_has_team_anthem_static(cmdr_ports):
+        return []
+
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+
+    def _emit(name: str, cand_event: str) -> None:
+        if name in cmdr_set or name in seen:
+            return
+        seen.add(name)
+        results.append(
+            PortComplement(
+                rule_id="team_anthem_payoff",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="team_anthem",
+                cand_event=cand_event,
+            )
+        )
+
+    # Strong tier first so dedup keeps the doubler credit.
+    for name, raw in conn.execute(
+        "SELECT DISTINCT card_name, raw_line FROM card_ports "
+        "WHERE port_type = 'replacement' AND event_class = 'CreateToken'"
+    ).fetchall():
+        if _is_own_board_token_multiplier(str(raw or "")):
+            _emit(name, "token_doubler")
+
+    if candidate_cache is not None:
+        token_rows: list[tuple[str, str]] = list(candidate_cache.token_effect_rows)
+    else:
+        token_rows = [
+            (row["card_name"], row["raw_line"] or "")
+            for row in conn.execute(
+                "SELECT DISTINCT card_name, raw_line FROM card_ports "
+                "WHERE port_type = 'effect' AND event_class = 'Token'"
+            ).fetchall()
+        ]
+    for name, raw_line in token_rows:
+        raw = str(raw_line or "")
+        m = _TOKENSCRIPT_RE.search(raw)
+        if not (m and _CREATURE_TOKEN_PT_RE.search(m.group(1))):
+            continue
+        if not _token_lands_on_own_board(raw):
+            continue
+        _emit(name, "token_producer")
+
     return results

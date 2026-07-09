@@ -701,6 +701,21 @@ def _death_outlet_feeder_gate(port: PortRow) -> bool:
     return has_changeszone_death_payoff([port])
 
 
+def _team_anthem_payoff_gate(port: PortRow) -> bool:
+    """Single-port shape for team_anthem_payoff coverage attribution.
+
+    Flag-aware: reads ``statics._ENABLE_TEAM_ANTHEM_PAYOFF`` at CALL time so
+    gap_report / rule_quality_gate see NO coverage while the rule is off
+    (mirrors ``_death_outlet_feeder_gate``). Composes the Unit-1 gate on a
+    one-element port list.
+    """
+    from . import statics
+
+    if not statics._ENABLE_TEAM_ANTHEM_PAYOFF:
+        return False
+    return statics._commander_has_team_anthem_static([port])
+
+
 def _land_to_gy_gate(port: PortRow) -> bool:
     """Commander has a land-to-graveyard trigger (Gitrog, Titania Voice).
 
@@ -761,6 +776,7 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("cost_reduction_target", _cost_reduction_gate),
     RuleGate("land_to_gy_synergy", _land_to_gy_gate),
     RuleGate("death_outlet_feeder", _death_outlet_feeder_gate),
+    RuleGate("team_anthem_payoff", _team_anthem_payoff_gate),
     RuleGate("spell_density", _spellcast_density_gate),
     RuleGate("spellcast_resonance", _spellcast_density_gate),
     # Batch 2 — registry sweep

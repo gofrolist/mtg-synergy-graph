@@ -5,6 +5,35 @@ impact notes. See `scripts/_audit_rule_impact.py` for the per-rule impact
 methodology (NDCG@30 metric + golden-set safety net + CONTENTIOUS verdict).
 See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
+## 2026-07-08
+
+### `team_anthem_payoff` DECLINED at pre-registered gates (plan 2026-07-08)
+
+First coverage-oriented rule gated on the activation-poverty instrument
+(PR #106). Keys on a commander's own team-scoped `static.Continuous`
+anthem (`Creature`/`Permanent` base + `YouCtrl`, positive
+`AddPower`/`AddToughness` or `AddKeyword`) and emits creature-token-producer
+complements (tiers `token_doubler` > `token_producer`). Targeted the
+biggest census dead-zone cohort — the 155-member `team_anthem` cohort
+(25 fully dead), e.g. Avacyn, Iroas, Kaysa. **Verdict: DECLINE** despite
+all measurable pre-registered gates passing by the letter (primary
+headroom Δ`earned_top30` +30.0; Guard A golden-500 NDCG −0.00228 within
+±0.0105 noise; Guard C quality-gate neutral; Guard D hidden_gem +0.0291).
+The `+30` coverage "win" is a monotone token-producer **flood**
+(`n_synergy_buckets = 1` — one rule blankets all 30 top slots), and the
+within-noise aggregate NDCG hides concentrated **in-cohort** cliffs (all
+24 regressors are cohort members: Bruenor/Surrak −0.18, Iroas −0.12,
+Avacyn −0.11 — EDHREC-synergy cards reordered *down* to make room for the
+flood). Root cause is inherent to the design: "team anthem → all ~2700
+token producers, flat per-class credit" can't discriminate which producer
+fits which anthem, so no weight turns a flat class into diverse synergy —
+same shape as `death_outlet_feeder`. Flag `_ENABLE_TEAM_ANTHEM_PAYOFF`
+stays `False`, hash-neutral (`c770b664e626`, `--expect-identity` PASS);
+rule + `RuleGate` + `team_anthem` cohort left as standing infra. A retry
+must redesign the candidate side to be **keyword-discriminated** (the part
+this spec deferred). Full record:
+`docs/solutions/best-practices/team-anthem-payoff-null-result-2026-07-08.md`.
+
 ## 2026-07-07
 
 ### `death_outlet_feeder` DECLINED at pre-registered gates (plan 2026-07-07-002)
