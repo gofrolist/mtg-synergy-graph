@@ -690,6 +690,76 @@ def _has_creature_attack_trigger(cmdr_ports: list[PortRow]) -> bool:
     return False
 
 
+#: Trigger event classes that reward attacking with a board (Unit 1 gate).
+_ATTACK_REWARD_TRIGGER_EVENTS: frozenset[str] = frozenset(
+    {"Attacks", "AttackersDeclared", "AttackersDeclaredOneTarget"}
+)
+
+
+def _commander_has_team_attack_reward(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> bool:
+    """Unit 1 gate: a team-benefiting attack-reward commander, non-tribal, non-Exalted.
+
+    Qualifies via either acceptance path:
+
+    * **Path (a) — team-scope trigger.** An ``Attacks`` trigger whose
+      ``valid_filter`` names your creatures broadly (contains ``YouCtrl`` and is
+      not self-only), OR an ``AttackersDeclared``/``AttackersDeclaredOneTarget``
+      trigger whose ``raw_line`` carries ``'AttackingPlayer': 'You'`` (for these
+      events the attacker scope lives in ``raw_line``, not ``valid_filter``).
+    * **Path (b) — self-attack + team pump.** A self-only ``Attacks`` trigger
+      plus a ``PumpAll`` effect over ``attacking`` creatures that is not
+      Self-only (Agrus Kos).
+
+    Excluded: commanders with an ``Exalted`` keyword port (reward attacking
+    *alone* — the opposite of a wide board; the Rafiq displacement casualty) and
+    commanders with a creature subtype (routed to the tribal/lord rules).
+    """
+    # Exclusion 2 — Exalted (attack-alone) short-circuits before any acceptance.
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() == "keyword" and (p.get("event_class") or "").strip() == "Exalted":
+            return False
+
+    team_scope = False
+    self_attack = False
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "trigger":
+            continue
+        ev = (p.get("event_class") or "").strip()
+        if ev not in _ATTACK_REWARD_TRIGGER_EVENTS:
+            continue
+        vf = p.get("valid_filter") or ""
+        raw = p.get("raw_line") or ""
+        if ev == "Attacks":
+            if "YouCtrl" in vf and not _trigger_only_matches_self(vf):
+                team_scope = True
+            if _trigger_only_matches_self(vf):
+                self_attack = True
+        else:  # AttackersDeclared / AttackersDeclaredOneTarget
+            if "'AttackingPlayer': 'You'" in raw:
+                team_scope = True
+
+    accepted = team_scope
+    if not accepted and self_attack:
+        for p in cmdr_ports:
+            if (p.get("port_type") or "").strip() != "effect":
+                continue
+            if (p.get("event_class") or "").strip() != "PumpAll":
+                continue
+            vf = p.get("valid_filter") or ""
+            if "attacking" in vf and "Self" not in vf:
+                accepted = True
+                break
+    if not accepted:
+        return False
+
+    # Exclusion 1 — tribal commanders go to the tribal/lord rules.
+    return not _commander_subtypes_from_ports(conn, list(cmdr_set), cmdr_ports)
+
+
 def _find_attack_payoffs(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
