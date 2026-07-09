@@ -14,6 +14,11 @@ from .core import (
     _cost_filter_group,
 )
 
+#: Coverage-oriented rule (spec 2026-07-09-attack-reward-evasion-rule). Default
+#: OFF and hash-neutral until it clears the pre-registered coverage +
+#: no-regression gates.
+_ENABLE_ATTACK_REWARD_EVASION: bool = False
+
 #: Card types used for zone-resonance matching.
 _PRIMARY_TYPES: frozenset[str] = frozenset({"Creature", "Artifact", "Enchantment", "Land", "Planeswalker"})
 
@@ -758,6 +763,59 @@ def _commander_has_team_attack_reward(
 
     # Exclusion 1 — tribal commanders go to the tribal/lord rules.
     return not _commander_subtypes_from_ports(conn, list(cmdr_set), cmdr_ports)
+
+
+def _find_attack_reward_evasion(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+    candidate_cache: CandidateCache | None = None,
+) -> list[PortComplement]:
+    """Evasion-carrier payoffs for team attack-reward commanders (Unit 2).
+
+    Fires when the commander passes ``_commander_has_team_attack_reward``.
+    Candidates are evasion-carrying creatures in two IDF tiers scanned strong
+    first so dedup keeps the stronger credit: ``evasion_hard`` (rare evasion +
+    self-unblockable) > ``evasion_soft`` (Flying/Menace). Keyword-discriminated,
+    NOT a flat creature-class flood — the ``team_anthem_payoff`` null-result
+    lesson.
+    """
+    if not _ENABLE_ATTACK_REWARD_EVASION:
+        return []
+    if not _commander_has_team_attack_reward(conn, cmdr_ports, cmdr_set):
+        return []
+
+    if candidate_cache is not None:
+        hard = candidate_cache.evasion_hard_cards
+        soft = candidate_cache.evasion_soft_cards
+    else:
+        from ..penalties import _bulk_load_evasion_hard_cards, _bulk_load_evasion_soft_cards
+
+        hard = _bulk_load_evasion_hard_cards(conn)
+        soft = _bulk_load_evasion_soft_cards(conn)
+
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+
+    def _emit(name: str, tier: str) -> None:
+        if name in cmdr_set or name in seen:
+            return
+        seen.add(name)
+        results.append(
+            PortComplement(
+                rule_id="attack_reward_evasion",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="attack_reward",
+                cand_event=tier,
+            )
+        )
+
+    for name in sorted(hard):
+        _emit(name, "evasion_hard")
+    for name in sorted(soft):
+        _emit(name, "evasion_soft")
+    return results
 
 
 def _find_attack_payoffs(

@@ -286,6 +286,11 @@ class CandidateCache:
     #: and dominated the per-page cost (+2000% overhead in profiling).
     #: Consumed by ``complement_rules.pathway._find_self_bridging_cascade``.
     ports_by_card: dict[str, list[dict[str, Any]]]
+    #: Creatures carrying evasion, split into the two IDF tiers consumed by
+    #: ``_find_attack_reward_evasion``: ``evasion_hard`` (rare evasion +
+    #: self-unblockable, the differentiator) and ``evasion_soft`` (Flying/Menace).
+    evasion_hard_cards: frozenset[str] = frozenset()
+    evasion_soft_cards: frozenset[str] = frozenset()
 
 
 def build_candidate_cache(conn: sqlite3.Connection) -> CandidateCache:
@@ -315,6 +320,8 @@ def build_candidate_cache(conn: sqlite3.Connection) -> CandidateCache:
         untap_combo_cards=_bulk_load_untap_combo_cards(conn),
         cost_reduction_target_pool=_bulk_load_cost_reduction_target_pool(conn),
         ports_by_card=_bulk_load_ports_by_card(conn),
+        evasion_hard_cards=_bulk_load_evasion_hard_cards(conn),
+        evasion_soft_cards=_bulk_load_evasion_soft_cards(conn),
     )
 
 
@@ -703,6 +710,37 @@ def _bulk_load_attack_payoff_cards(conn: sqlite3.Connection) -> frozenset[str]:
         "  OR (e.event_class = 'Draw' AND e.valid_filter LIKE '%You%')"
         "  OR (e.event_class = 'Mana')"
         "  OR (e.event_class = 'ChangeZone' AND e.zone_origin = 'Library')"
+        ")"
+    ).fetchall()
+    return frozenset(row["card_name"] for row in rows)
+
+
+def _bulk_load_evasion_soft_cards(conn: sqlite3.Connection) -> frozenset[str]:
+    """Creatures with common evasion (Flying/Menace) — the low-IDF soft tier of
+    ``attack_reward_evasion``. Commander-independent; consumed by
+    ``complement_rules.combat._find_attack_reward_evasion``."""
+    rows = conn.execute(
+        "SELECT DISTINCT p.card_name FROM card_ports p "
+        "JOIN cards c ON c.name = p.card_name "
+        "WHERE p.port_type = 'keyword' AND p.granted_keyword IN ('Flying', 'Menace') "
+        "AND c.card_types LIKE '%Creature%'"
+    ).fetchall()
+    return frozenset(row["card_name"] for row in rows)
+
+
+def _bulk_load_evasion_hard_cards(conn: sqlite3.Connection) -> frozenset[str]:
+    """Creatures with rare evasion (Shadow/Horsemanship/Skulk/Fear/Intimidate) or
+    a self-unblockable ``CantBlockBy`` static — the high-IDF hard tier of
+    ``attack_reward_evasion`` and the real differentiator. Commander-independent;
+    consumed by ``complement_rules.combat._find_attack_reward_evasion``."""
+    rows = conn.execute(
+        "SELECT DISTINCT p.card_name FROM card_ports p "
+        "JOIN cards c ON c.name = p.card_name "
+        "WHERE c.card_types LIKE '%Creature%' AND ("
+        "  (p.port_type = 'keyword' AND p.granted_keyword IN "
+        "     ('Shadow', 'Horsemanship', 'Skulk', 'Fear', 'Intimidate')) "
+        "  OR (p.port_type = 'static' AND p.event_class = 'CantBlockBy' "
+        "      AND (p.raw_line LIKE '%Creature.Self%' OR p.raw_line LIKE '%Card.Self%'))"
         ")"
     ).fetchall()
     return frozenset(row["card_name"] for row in rows)

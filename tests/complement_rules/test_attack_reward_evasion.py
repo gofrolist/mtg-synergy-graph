@@ -1,3 +1,5 @@
+import sqlite3
+
 import pytest
 
 from mtg_synergy_graph.complement_rules import combat as combat_mod
@@ -69,3 +71,102 @@ def test_tribal_commander_rejected(monkeypatch):
 def test_no_attack_trigger_rejected():
     ports = [_trig("Sacrificed", valid_filter="Creature.YouCtrl")]
     assert _commander_has_team_attack_reward(None, ports, set()) is False
+
+
+@pytest.fixture()
+def evasion_conn(monkeypatch):
+    # Emitter tests exercise the firing path — enable the default-OFF flag here;
+    # the flag-off test overrides it back to False.
+    monkeypatch.setattr(combat_mod, "_ENABLE_ATTACK_REWARD_EVASION", True)
+    # This commander qualifies (team-scope Attacks trigger); no tribal subtype
+    # (the autouse _no_tribal fixture already stubs that).
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(
+        """
+        CREATE TABLE cards (name TEXT, card_types TEXT);
+        CREATE TABLE card_ports (
+            id INTEGER PRIMARY KEY, card_name TEXT, port_type TEXT,
+            event_class TEXT, granted_keyword TEXT, valid_filter TEXT, raw_line TEXT
+        );
+        """
+    )
+    conn.executescript(
+        """
+        INSERT INTO cards VALUES ('Serra Angel', 'Creature');
+        INSERT INTO cards VALUES ('Goblin Piker', 'Creature');
+        INSERT INTO cards VALUES ('Dauthi Slayer', 'Creature');
+        INSERT INTO cards VALUES ('Ornithopter Token', 'Artifact');
+        """
+    )
+    conn.executescript(
+        """
+        INSERT INTO card_ports (card_name, port_type, event_class, granted_keyword)
+            VALUES ('Serra Angel', 'keyword', 'Flying', 'Flying');
+        INSERT INTO card_ports (card_name, port_type, event_class, granted_keyword)
+            VALUES ('Dauthi Slayer', 'keyword', 'Shadow', 'Shadow');
+        INSERT INTO card_ports (card_name, port_type, event_class, granted_keyword)
+            VALUES ('Ornithopter Token', 'keyword', 'Flying', 'Flying');
+        """
+    )
+    conn.commit()
+    return conn
+
+
+_TEAM_TRIGGER = {"port_type": "trigger", "event_class": "Attacks", "valid_filter": "Creature.YouCtrl", "raw_line": ""}
+
+
+def test_emitter_soft_evasion_creature_fires(evasion_conn):
+    from mtg_synergy_graph.complement_rules.combat import _find_attack_reward_evasion
+
+    comps = _find_attack_reward_evasion(evasion_conn, [_TEAM_TRIGGER], set())
+    by = {c.candidate: c for c in comps}
+    assert by["Serra Angel"].rule_id == "attack_reward_evasion"
+    assert by["Serra Angel"].cand_event == "evasion_soft"
+    assert by["Serra Angel"].cmdr_event == "attack_reward"
+
+
+def test_emitter_hard_tier(evasion_conn):
+    from mtg_synergy_graph.complement_rules.combat import _find_attack_reward_evasion
+
+    comps = _find_attack_reward_evasion(evasion_conn, [_TEAM_TRIGGER], set())
+    by = {c.candidate: c for c in comps}
+    assert by["Dauthi Slayer"].cand_event == "evasion_hard"
+
+
+def test_emitter_excludes_non_creature(evasion_conn):
+    from mtg_synergy_graph.complement_rules.combat import _find_attack_reward_evasion
+
+    comps = _find_attack_reward_evasion(evasion_conn, [_TEAM_TRIGGER], set())
+    assert "Ornithopter Token" not in {c.candidate for c in comps}
+
+
+def test_emitter_no_double_no_vanilla(evasion_conn):
+    from mtg_synergy_graph.complement_rules.combat import _find_attack_reward_evasion
+
+    comps = _find_attack_reward_evasion(evasion_conn, [_TEAM_TRIGGER], set())
+    # Goblin Piker (no evasion keyword) gets no complement.
+    assert "Goblin Piker" not in {c.candidate for c in comps}
+    # One complement per candidate.
+    assert len(comps) == len({c.candidate for c in comps})
+
+
+def test_emitter_excludes_commander_itself(evasion_conn):
+    from mtg_synergy_graph.complement_rules.combat import _find_attack_reward_evasion
+
+    comps = _find_attack_reward_evasion(evasion_conn, [_TEAM_TRIGGER], {"Serra Angel"})
+    assert "Serra Angel" not in {c.candidate for c in comps}
+
+
+def test_emitter_non_qualifying_commander_empty(evasion_conn):
+    from mtg_synergy_graph.complement_rules.combat import _find_attack_reward_evasion
+
+    self_only = {"port_type": "trigger", "event_class": "Attacks", "valid_filter": "Card.Self", "raw_line": ""}
+    assert _find_attack_reward_evasion(evasion_conn, [self_only], set()) == []
+
+
+def test_emitter_flag_off_returns_empty(evasion_conn, monkeypatch):
+    monkeypatch.setattr(combat_mod, "_ENABLE_ATTACK_REWARD_EVASION", False)
+    from mtg_synergy_graph.complement_rules.combat import _find_attack_reward_evasion
+
+    assert _find_attack_reward_evasion(evasion_conn, [_TEAM_TRIGGER], set()) == []
