@@ -127,9 +127,66 @@ lesson.
   not re-run the July DECLINE loop — it produced a clean, well-evidenced
   null-result on a real gap.
 
+## Post-DECLINE code review — correctness fixes applied (2026-07-09)
+
+A high-effort review of the standing infra (`/code-review` on PR #107) found
+correctness bugs that were dormant behind the flag but confounded the
+measurement and would have shipped wrong scoring on any retry. Fixed in-tree
+(still flag-off, hash-neutral, `--expect-identity` PASS):
+
+- **Gate was over-permissive.** `base = alt.split('.')[0].split('+')[0]`
+  rejected subtype-*first* scopes (`Goblin.YouCtrl`) but not a subtype/condition
+  folded in as a `+`-qualifier after a `Creature`/`Permanent` base — Admiral
+  Beckett Brass (`Creature.Pirate+Other+YouCtrl`, a Pirate lord) and Abzan
+  Falconer (`Creature.YouCtrl+counters_GE1_P1P1`, conditional) wrongly
+  qualified. Fixed with a benign-qualifier allowlist (`{YouCtrl, Other}`); every
+  other qualifier now excludes. **The `team_anthem` cohort dropped from 155 to
+  54** — so the "155 members / 25 dead" figures in the measurement above were
+  computed on a *polluted* cohort (they over-counted restricted lords /
+  conditional / color-restricted anthems).
+- **Doubler tier scored harmful/irrelevant cards as positive.** Filtered to
+  own-board creature-token *multipliers* (`ReplaceWith ∈ {DoubleToken,
+  TripleToken}`, not opponent-scoped): drops Halving Season (`HalveToken` —
+  inverted polarity), Academy Manufactor / Xorn (non-creature `TokenReplace`),
+  Bloodspatter (opponent). Notably Academy Manufactor — cited above as a
+  "premium producer" surfaced for Avacyn/Iroas — makes NO creature bodies, so
+  the flood was even dirtier than the measurement characterized.
+- **Producer tier credited opponent-owned tokens.** Now excludes
+  `TokenOwner` = `*Opponent*` / `Targeted*` (Akroan Horse, Forbidden Orchard,
+  the Hunted cycle).
+- Also applied: `candidate_cache` for the producer tier (matches the
+  `subtype_supply` batch pattern), a shared `_parse_scope_alt` helper (removes
+  the copy-paste with `_find_anthem_payoffs`, verified byte-identical via
+  `--expect-identity`), and the gate helper renamed to
+  `_commander_has_team_anthem_static` (returns `bool`).
+
+**The DECLINE verdict is UNCHANGED.** These fixes make the flood *cleaner*, not
+*discriminated* — the rule still credits ~2120 creature-token producers at flat
+per-tier IDF (`n_synergy_buckets = 1` per commander). The root cause is
+untouched.
+
+### Retry-blockers still open (deferred — design decisions, not bugs)
+
+Two cross-rule double-counts were found but NOT fixed, because de-conflicting
+them is a redesign decision the retry must make, not a mechanical patch:
+
+- **Overlap with `token_producer` (`_find_static_strategy`, tokens.py).** That
+  already-wired rule emits `token_producer` for `Creature.YouCtrl` pump anthems;
+  team_anthem_payoff double-credits the same candidates (live: Bruenor
+  Battlehammer earns BOTH on 2130 candidates). Bruenor was the worst NDCG
+  regressor (−0.18) in the measurement — largely double-count stacking, not new
+  coverage. The rule's only non-redundant value is the `AddKeyword` / `Permanent`
+  cases (Avacyn indestructible, Iroas menace) that `_find_static_strategy`'s
+  `AddPower`-only branch misses. A retry must either narrow to the non-overlapping
+  cases or subsume `_find_static_strategy`.
+- **Overlap with `anthem_payoff` for dual-role pairs.** A commander that both
+  hosts a team anthem and makes tokens, paired with a candidate that is both an
+  anthem and a token producer, scores under both rule_ids. Run
+  `bench.py audit --collinearity` on the pair before any flag flip.
+
 ## Standing infrastructure left in-tree (flag off, hash-neutral)
 
-- `complement_rules/statics.py`: `_commander_team_anthem_statics` (gate),
+- `complement_rules/statics.py`: `_commander_has_team_anthem_static` (gate),
   `_find_team_anthem_payoffs` (emitter), `_ENABLE_TEAM_ANTHEM_PAYOFF = False`.
 - `complement_rules/registry.py`: flag-aware `RuleGate("team_anthem_payoff", …)`
   — reports NO coverage while the flag is off, so `gap_report` /

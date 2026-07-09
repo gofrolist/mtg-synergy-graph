@@ -713,7 +713,7 @@ def _team_anthem_payoff_gate(port: PortRow) -> bool:
 
     if not statics._ENABLE_TEAM_ANTHEM_PAYOFF:
         return False
-    return bool(statics._commander_team_anthem_statics([port]))
+    return statics._commander_has_team_anthem_static([port])
 
 
 def _land_to_gy_gate(port: PortRow) -> bool:

@@ -198,14 +198,15 @@ def team_anthem(conn: sqlite3.Connection) -> set[str]:
     Qualifies when the commander has a ``static.Continuous`` port whose
     ``affected_scope`` names a ``Creature``/``Permanent`` base with a
     ``YouCtrl`` controller scope and a positive ``AddPower``/``AddToughness``
-    or ``AddKeyword`` (creature-*subtype* bases stay lord's territory;
-    ``Card.Self`` and symmetric/no-``YouCtrl`` scopes are excluded). This is
-    the target cohort of the ``team_anthem_payoff`` rule (spec 2026-07-08);
-    deliberately NOT part of any shared cohort union. Mirrors
-    ``complement_rules.statics._commander_team_anthem_statics`` — that helper
+    or ``AddKeyword`` where every affected-scope qualifier is benign
+    (creature-*subtype* bases AND subtype/condition qualifiers stay lord's
+    territory; ``Card.Self`` and symmetric/no-``YouCtrl`` scopes are excluded).
+    This is the target cohort of the ``team_anthem_payoff`` rule (spec
+    2026-07-08); deliberately NOT part of any shared cohort union. Mirrors
+    ``complement_rules.statics._commander_has_team_anthem_static`` — that helper
     is the single source of truth for the qualifying-static predicate.
     """
-    from mtg_synergy_graph.complement_rules.statics import _commander_team_anthem_statics
+    from mtg_synergy_graph.complement_rules.statics import _commander_has_team_anthem_static
 
     rows = conn.execute(
         "SELECT p.card_name, p.port_type, p.event_class, p.affected_scope, p.raw_line "
@@ -214,8 +215,4 @@ def team_anthem(conn: sqlite3.Connection) -> set[str]:
         "AND p.affected_scope IS NOT NULL AND p.affected_scope != '' "
         "AND " + LEGAL_LEGENDARY_CREATURE_WHERE
     )
-    out: set[str] = set()
-    for row in rows:
-        if _commander_team_anthem_statics([dict(row)]):
-            out.add(row["card_name"])
-    return out
+    return {row["card_name"] for row in rows if _commander_has_team_anthem_static([dict(row)])}

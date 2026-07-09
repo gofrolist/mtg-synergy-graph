@@ -38,5 +38,16 @@ def test_team_anthem_excludes_symmetric_anthem():
         conn.close()
 
 
+@pytest.mark.skipif(not LIVE_DB.exists(), reason="live synergy.db not present")
+def test_team_anthem_excludes_restricted_lord():
+    conn = open_db(str(LIVE_DB), create=False)
+    try:
+        # Admiral Beckett Brass is a Pirate lord (Creature.Pirate+Other+YouCtrl):
+        # a subtype folded in as a +-qualifier, not an unconditional team anthem.
+        assert "Admiral Beckett Brass" not in team_anthem(conn)
+    finally:
+        conn.close()
+
+
 def test_team_anthem_registered_in_dispatch():
     assert _COHORT_DISPATCH.get("team_anthem") is team_anthem
