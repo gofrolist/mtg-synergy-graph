@@ -365,6 +365,22 @@ def _evasion_gate(port: PortRow) -> bool:
     return bool(ev == "DamageDone" and port.get("is_combat"))
 
 
+def _attack_reward_evasion_gate(port: PortRow) -> bool:
+    """Coarse single-port shape for attack_reward_evasion coverage attribution.
+
+    Flag-aware: reads ``combat._ENABLE_ATTACK_REWARD_EVASION`` at CALL time so
+    gap_report / rule_quality_gate see NO coverage while the rule is off. Coarse
+    by design (attribution only) — the full two-path gate lives in the runtime
+    emitter, like ``_evasion_gate`` vs ``_find_evasion_complements``."""
+    from . import combat
+
+    if not combat._ENABLE_ATTACK_REWARD_EVASION:
+        return False
+    if (port.get("port_type") or "").strip() != "trigger":
+        return False
+    return (port.get("event_class") or "").strip() in combat._ATTACK_REWARD_TRIGGER_EVENTS
+
+
 def _token_etb_damage_gate(port: PortRow) -> bool:
     """Commander has a Token-creating effect AND ETB-damage trigger
     pattern. The runtime checks this aggregately — gate uses the
@@ -770,6 +786,7 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("panharmonicon", _panharmonicon_gate),
     RuleGate("voltron", _voltron_gate),
     RuleGate("evasion", _evasion_gate),
+    RuleGate("attack_reward_evasion", _attack_reward_evasion_gate),
     RuleGate("token_etb_damage", _token_etb_damage_gate),
     RuleGate("graveyard_play", _graveyard_play_gate),
     RuleGate("gy_loader", _gy_loader_gate),

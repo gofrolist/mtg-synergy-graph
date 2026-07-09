@@ -1139,6 +1139,7 @@ def _cost_filter_group(cost_port: PortRow) -> str:
 
 from .combat import (  # noqa: E402
     _find_attack_payoffs,
+    _find_attack_reward_evasion,
     _find_changeszone_resonance,
     _find_combat_enhancers,
     _find_evasion_complements,
@@ -1371,6 +1372,7 @@ def find_all_complements(
         out.extend(_find_reverse_panharmonicon(conn, cmdr_ports, cmdr_set, candidate_cache))
         out.extend(_find_panharmonicon_stacking(conn, cmdr_ports, cmdr_set, candidate_cache))
         out.extend(_find_evasion_complements(conn, cmdr_ports, cmdr_set))
+        out.extend(_find_attack_reward_evasion(conn, cmdr_ports, cmdr_set, candidate_cache))
         out.extend(_find_spellcast_resonance(conn, cmdr_ports, cmdr_set))
         out.extend(_find_untap_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_untap_combo(conn, cmdr_ports, cmdr_set, candidate_cache))

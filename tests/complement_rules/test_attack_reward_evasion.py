@@ -4,6 +4,7 @@ import pytest
 
 from mtg_synergy_graph.complement_rules import combat as combat_mod
 from mtg_synergy_graph.complement_rules.combat import _commander_has_team_attack_reward
+from mtg_synergy_graph.complement_rules.registry import attributable_rules_for_port
 
 
 @pytest.fixture(autouse=True)
@@ -170,3 +171,19 @@ def test_emitter_flag_off_returns_empty(evasion_conn, monkeypatch):
     from mtg_synergy_graph.complement_rules.combat import _find_attack_reward_evasion
 
     assert _find_attack_reward_evasion(evasion_conn, [_TEAM_TRIGGER], set()) == []
+
+
+def test_rule_gate_flag_aware():
+    port = {
+        "port_type": "trigger",
+        "event_class": "AttackersDeclared",
+        "valid_filter": "",
+        "raw_line": "{'AttackingPlayer': 'You'}",
+    }
+    combat_mod._ENABLE_ATTACK_REWARD_EVASION = False
+    assert "attack_reward_evasion" not in attributable_rules_for_port(port)
+    combat_mod._ENABLE_ATTACK_REWARD_EVASION = True
+    try:
+        assert "attack_reward_evasion" in attributable_rules_for_port(port)
+    finally:
+        combat_mod._ENABLE_ATTACK_REWARD_EVASION = False
