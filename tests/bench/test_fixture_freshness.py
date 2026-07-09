@@ -43,6 +43,10 @@ _COMMITTED_GOLDEN_FIXTURES = (
     # as the archetype-payoff fixture above. Rebuild via
     # `scripts/bootstrap_attack_reward_fixture.py`.
     "golden_set_attack_reward.json",
+    # X-cost-scaler cohort fixture (x_cost_scaler rule cycle, Unit 4). Same
+    # no-DB freshness discipline as the archetype-payoff fixture above.
+    # Rebuild via `scripts/bootstrap_x_cost_scaler_fixture.py`.
+    "golden_set_x_cost_scaler.json",
 )
 
 

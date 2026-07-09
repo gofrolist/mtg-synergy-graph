@@ -263,3 +263,23 @@ def attack_reward(conn: sqlite3.Connection) -> set[str]:
         ports_by_name.setdefault(port["card_name"], []).append(port)
 
     return {name for name in names if _commander_has_team_attack_reward(conn, ports_by_name.get(name, []), {name})}
+
+
+def x_cost_scaler(conn: sqlite3.Connection) -> set[str]:
+    """Legal legendary-creature commanders with an X-cost ability (a
+    ``scales_with.xPaid`` port).
+
+    Encodes the same condition as
+    ``complement_rules.density._commander_has_x_cost_ability`` (a
+    ``scales_with``/``xPaid`` port existence check) directly in SQL — the gate
+    has no extra logic beyond that, so there is no drift risk. Target cohort of
+    the ``x_cost_scaler`` rule (spec 2026-07-09); deliberately NOT part of any
+    shared cohort union.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT p.card_name FROM card_ports p "  # noqa: S608 — no user input, LEGAL_LEGENDARY_CREATURE_WHERE is a module constant
+        "JOIN cards c ON c.name = p.card_name "
+        "WHERE p.port_type = 'scales_with' AND p.event_class = 'xPaid' "
+        "AND " + LEGAL_LEGENDARY_CREATURE_WHERE
+    )
+    return {row["card_name"] for row in rows}

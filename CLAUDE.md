@@ -170,6 +170,31 @@ uv run scripts/bench.py audit --per-commander-ndcg --fixture tests/fixtures/gold
 # refresh or re-pin via the snippet in docs/plans (bootstrap_band() over
 # compute_per_commander_ndcg_rows() restricted to pinned.cohort_members).
 
+# X-cost-scaler cohort fixture (x_cost_scaler rule cycle, Unit 4) — same
+# eval-instrument discipline as the archetype-payoff fixture above: zero
+# scoring-path changes, fixture carries its own config_hash, joins the no-DB
+# freshness gate (tests/bench/test_fixture_freshness.py). Cohort predicate:
+# src/mtg_synergy_graph/bench/cohorts.py::x_cost_scaler (legal legendary-
+# creature commanders with a scales_with.xPaid X-cost ability — mirrors
+# complement_rules.density._commander_has_x_cost_ability). Target cohort of
+# the x_cost_scaler rule (spec 2026-07-09). Cohort size 98 / 87 buildable
+# after the High-Synergy EDHREC filter — dropped: Berta, Wise Extrapolator;
+# Bruce Banner; Haldir, Lórien Lieutenant; Hazduhr the Abbot; Jadzi, Steward
+# of Fate; Kianne, Dean of Substance; Latulla, Keldon Overseer; Linessa,
+# Zephyr Mage; Nebuchadnezzar; Nev, the Practical Dean; Primo, the Unbounded.
+# Build/pin/read:
+uv run python scripts/bootstrap_x_cost_scaler_fixture.py                  # (Re)build + pin the cohort fixture. Same caveat as archetype-payoff: use THIS after a cardsfolder refresh, not `--repin` (which preserves the old cohort_members snapshot).
+uv run scripts/bench.py audit --repin --yes --fixture tests/fixtures/golden_set_x_cost_scaler.json          # Re-pin scores + persist tensor to SQLite (scoring-config re-pin only)
+uv run scripts/bench.py audit --per-commander-ndcg --fixture tests/fixtures/golden_set_x_cost_scaler.json   # Read the in-cohort vs rest NDCG slice
+# NOISE BAND — measured 2026-07-09 at config_hash c770b664e626 (rule still
+# flag-OFF; this is the pre-ship baseline band). Bootstrap band of the
+# score_commander top-30 NDCG@30 instrument (seed 17) over the 87 pinned
+# cohort members: mean 0.0894, 95% CI [0.0637, 0.1158], half-width = 0.0261.
+# This half-width is the primary-gate threshold (Task 5): a cohort in-cohort
+# mean-delta below +0.0261 is NOISE, not a win. Recompute after any data
+# refresh or re-pin via the snippet in docs/plans (bootstrap_band() over
+# compute_per_commander_ndcg_rows() restricted to pinned.cohort_members).
+
 # Tensor-driven weight optimizer (plan 2026-04-26-001 M1) — Coordinate Ascent over
 # _RULE_QUALITY_MULTIPLIER. Emits .audit/optimize_proposal.json for human review;
 # never auto-mutates src/mtg_synergy_graph/data/scoring_weights.json. Append-only history at
