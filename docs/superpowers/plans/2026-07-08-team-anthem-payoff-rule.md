@@ -183,7 +183,7 @@ Claude-Session: https://claude.ai/code/session_01GbVUPULJeQAGdUBy4M75m3"
 
 **Interfaces:**
 - Consumes: `_commander_team_anthem_statics` (Task 1); `_TOKENSCRIPT_RE`, `_CREATURE_TOKEN_PT_RE` (already in statics.py); `PortComplement` (from `.core`).
-- Produces: `_find_team_anthem_payoffs(conn, cmdr_ports: list[PortRow], cmdr_set: set[str]) -> list[PortComplement]`. Emits `rule_id="team_anthem_payoff"`, `cmdr_event="team_anthem"`, `cand_event ∈ {"token_doubler", "token_producer"}`. Reads the module flag `_ENABLE_TEAM_ANTHEM_PAYOFF` (defined in Task 3; until then the emitter returns unconditionally — Task 3 adds the guard).
+- Produces: the module flag `statics._ENABLE_TEAM_ANTHEM_PAYOFF: bool = False` (defined here, hash-neutral); `_find_team_anthem_payoffs(conn, cmdr_ports: list[PortRow], cmdr_set: set[str]) -> list[PortComplement]` — flag-guarded (returns `[]` when off), emits `rule_id="team_anthem_payoff"`, `cmdr_event="team_anthem"`, `cand_event ∈ {"token_doubler", "token_producer"}`.
 
 **Detection reference (verified against `data/synergy.db`):**
 - Creature-token producer: an `effect.Token` port whose `raw_line` TokenScript matches a P/T (`_\d+_\d+`) — this separates creatures from Treasure/Clue/Food (which have no P/T). Same test `_commander_makes_creature_tokens` already applies to commander ports.
@@ -198,11 +198,16 @@ import sqlite3
 
 import pytest
 
+from mtg_synergy_graph.complement_rules import statics as statics_mod
 from mtg_synergy_graph.complement_rules.statics import _find_team_anthem_payoffs
 
 
 @pytest.fixture()
-def anthem_conn():
+def anthem_conn(monkeypatch):
+    # The rule is flag-gated default-OFF (added in this task's implementation
+    # step). Every emitter test below exercises the firing path, so enable the
+    # flag here; the flag-off test overrides it back to False explicitly.
+    monkeypatch.setattr(statics_mod, "_ENABLE_TEAM_ANTHEM_PAYOFF", True)
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     conn.executescript(
@@ -291,16 +296,31 @@ def test_emitter_dedup_single_complement_per_candidate(anthem_conn):
 def test_emitter_excludes_commander_itself(anthem_conn):
     comps = _find_team_anthem_payoffs(anthem_conn, [_AVACYN_STATIC], {"Grave Titan"})
     assert "Grave Titan" not in {c.candidate for c in comps}
+
+
+def test_emitter_flag_off_returns_empty(anthem_conn, monkeypatch):
+    # anthem_conn enabled the flag; override it off — the guard must short-circuit.
+    monkeypatch.setattr(statics_mod, "_ENABLE_TEAM_ANTHEM_PAYOFF", False)
+    assert _find_team_anthem_payoffs(anthem_conn, [_AVACYN_STATIC], set()) == []
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/complement_rules/test_team_anthem_payoff.py -k emitter -v`
-Expected: FAIL with `ImportError: cannot import name '_find_team_anthem_payoffs'`.
+Expected: FAIL with `ImportError: cannot import name '_find_team_anthem_payoffs'` (or `AttributeError` on the missing `_ENABLE_TEAM_ANTHEM_PAYOFF` flag).
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `statics.py`, after Task 1's helper:
+3a. First, add the flag near the top of `statics.py` (after imports, module-level). The rule is flag-gated from birth, default OFF and hash-neutral (NOT in `ScoringConfigInputs` — Task 6 registers it there only on ship). Mirrors `death_outlet._ENABLE_DEATH_OUTLET_FEEDER`:
+
+```python
+#: Coverage-oriented rule (spec 2026-07-08-team-anthem-payoff-rule). Default
+#: OFF and hash-neutral until it clears the pre-registered coverage +
+#: no-regression gates.
+_ENABLE_TEAM_ANTHEM_PAYOFF: bool = False
+```
+
+3b. Then add the emitter, after Task 1's helper — its FIRST body line is the flag guard:
 
 ```python
 def _find_team_anthem_payoffs(
@@ -317,6 +337,8 @@ def _find_team_anthem_payoffs(
     ``_find_anthem_payoffs`` (commander IS the anthem; candidates make bodies),
     so no (cmdr_port, cand_port) pair is double-scored.
     """
+    if not _ENABLE_TEAM_ANTHEM_PAYOFF:
+        return []
     if not _commander_team_anthem_statics(cmdr_ports):
         return []
 
@@ -382,37 +404,25 @@ Claude-Session: https://claude.ai/code/session_01GbVUPULJeQAGdUBy4M75m3"
 
 ---
 
-## Task 3: Flag, wiring, RuleGate, weight (Unit 3)
+## Task 3: Wiring + flag-aware RuleGate (Unit 3)
 
 **Files:**
-- Modify: `src/mtg_synergy_graph/complement_rules/statics.py` (add flag + guard)
 - Modify: `src/mtg_synergy_graph/complement_rules/core.py` (import + invoke)
 - Modify: `src/mtg_synergy_graph/complement_rules/registry.py` (flag-aware RuleGate)
 - Test: `tests/complement_rules/test_team_anthem_payoff.py` (append)
 
-(The `scoring_weights.json` multiplier is deliberately NOT edited here — see 3e — because it would flip the config hash. It is added in Task 6.)
+(The flag `_ENABLE_TEAM_ANTHEM_PAYOFF` and its guard were added in Task 2. The `scoring_weights.json` multiplier is deliberately NOT edited here — it would flip the config hash; it is added in Task 6.)
 
 **Interfaces:**
-- Consumes: `_find_team_anthem_payoffs` (Task 2).
-- Produces: module flag `statics._ENABLE_TEAM_ANTHEM_PAYOFF: bool = False`; a `RuleGate("team_anthem_payoff", _team_anthem_payoff_gate)` in `RULE_GATES`.
+- Consumes: `_find_team_anthem_payoffs`, `statics._ENABLE_TEAM_ANTHEM_PAYOFF`, `statics._commander_team_anthem_statics` (all Task 1/2).
+- Produces: the emitter invoked in `find_all_complements`; a `RuleGate("team_anthem_payoff", _team_anthem_payoff_gate)` in `RULE_GATES`.
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `tests/complement_rules/test_team_anthem_payoff.py`:
+Append to `tests/complement_rules/test_team_anthem_payoff.py` (`statics_mod` is already imported at the top of the file from Task 2):
 
 ```python
-from mtg_synergy_graph.complement_rules import statics as statics_mod
 from mtg_synergy_graph.complement_rules.registry import attributable_rules_for_port
-
-
-def test_flag_off_emitter_returns_empty(anthem_conn, monkeypatch):
-    monkeypatch.setattr(statics_mod, "_ENABLE_TEAM_ANTHEM_PAYOFF", False)
-    assert _find_team_anthem_payoffs(anthem_conn, [_AVACYN_STATIC], set()) == []
-
-
-def test_flag_on_emitter_fires(anthem_conn, monkeypatch):
-    monkeypatch.setattr(statics_mod, "_ENABLE_TEAM_ANTHEM_PAYOFF", True)
-    assert _find_team_anthem_payoffs(anthem_conn, [_AVACYN_STATIC], set())
 
 
 def test_rule_gate_flag_aware():
@@ -436,35 +446,18 @@ Note: `attributable_rules_for_port(port) -> frozenset[str]` is the existing regi
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/complement_rules/test_team_anthem_payoff.py -k "flag or gate" -v`
-Expected: FAIL — `_ENABLE_TEAM_ANTHEM_PAYOFF` attribute missing / `team_anthem_payoff` not in gates.
+Run: `uv run pytest tests/complement_rules/test_team_anthem_payoff.py -k rule_gate -v`
+Expected: FAIL — `team_anthem_payoff` not in the gate set.
 
 - [ ] **Step 3: Write minimal implementation**
 
-3a. In `statics.py`, add the flag near the top (after imports, module-level):
-
-```python
-#: Coverage-oriented rule (spec 2026-07-08-team-anthem-payoff-rule). Default
-#: OFF and hash-neutral (NOT in ScoringConfigInputs) until it clears the
-#: pre-registered coverage + no-regression gates. Mirrors
-#: death_outlet._ENABLE_DEATH_OUTLET_FEEDER.
-_ENABLE_TEAM_ANTHEM_PAYOFF: bool = False
-```
-
-3b. In `_find_team_anthem_payoffs`, add the guard as the first line of the body:
-
-```python
-    if not _ENABLE_TEAM_ANTHEM_PAYOFF:
-        return []
-```
-
-3c. In `core.py`, add the import next to the other statics imports (find the block importing from `.statics`; if the emitter is imported via `from .statics import (...)`, add `_find_team_anthem_payoffs` there — otherwise add a dedicated import line), then add the invocation in `find_all_complements` next to `_find_anthem_payoffs`/`_find_subtype_supply_complements` (around line 1358):
+3a. In `core.py`, add the import next to the other statics imports (find the block importing from `.statics`; if the emitter is imported via `from .statics import (...)`, add `_find_team_anthem_payoffs` there — otherwise add a dedicated import line), then add the invocation in `find_all_complements` next to `_find_anthem_payoffs`/`_find_subtype_supply_complements` (around line 1358):
 
 ```python
         out.extend(_find_team_anthem_payoffs(conn, cmdr_ports, cmdr_set))
 ```
 
-3d. In `registry.py`, add a flag-aware gate mirroring `_death_outlet_feeder_gate` (line ~666). Place the predicate near it and add the `RuleGate` to `_CARD_ATTR_GATES` (the tuple at line ~724):
+3b. In `registry.py`, add a flag-aware gate mirroring `_death_outlet_feeder_gate` (line ~666). Place the predicate near it and add the `RuleGate` to `_CARD_ATTR_GATES` (the tuple at line ~724):
 
 ```python
 def _team_anthem_payoff_gate(port: PortRow) -> bool:
@@ -487,7 +480,7 @@ Add to `_CARD_ATTR_GATES`:
     RuleGate("team_anthem_payoff", _team_anthem_payoff_gate),
 ```
 
-3e. **No `scoring_weights.json` edit in this task.** Editing that file flips `compute_config_hash` (CLAUDE.md), which would break the hash-neutrality this task asserts in Step 4. Rules absent from `rule_quality_multiplier` default to a 1.0 multiplier, which is correct for the flag-off state. The `1.5` weight is added in Task 6 (ship), where a re-pin happens anyway; Task 5 measurement applies `1.5` in-process so the on-disk hash stays neutral during measurement.
+3c. **No `scoring_weights.json` edit in this task.** Editing that file flips `compute_config_hash` (CLAUDE.md), which would break the hash-neutrality this task asserts in Step 4. Rules absent from `rule_quality_multiplier` default to a 1.0 multiplier, which is correct for the flag-off state. The `1.5` weight is added in Task 6 (ship), where a re-pin happens anyway; Task 5 measurement applies `1.5` in-process so the on-disk hash stays neutral during measurement.
 
 - [ ] **Step 4: Run tests**
 
@@ -507,8 +500,8 @@ Expected: all pass (existing golden-set no-regression assertions included).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add tests/complement_rules/test_team_anthem_payoff.py src/mtg_synergy_graph/complement_rules/statics.py src/mtg_synergy_graph/complement_rules/core.py src/mtg_synergy_graph/complement_rules/registry.py
-git commit -m "feat(rules): wire team_anthem_payoff flag-off/hash-neutral (Unit 3)
+git add tests/complement_rules/test_team_anthem_payoff.py src/mtg_synergy_graph/complement_rules/core.py src/mtg_synergy_graph/complement_rules/registry.py
+git commit -m "feat(rules): wire team_anthem_payoff + flag-aware RuleGate (Unit 3)
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01GbVUPULJeQAGdUBy4M75m3"
