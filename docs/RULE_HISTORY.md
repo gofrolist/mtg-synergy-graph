@@ -17,7 +17,7 @@ commanders with a live `Attacks`/`AttackersDeclared`/
 attack-reward trigger (`_commander_has_team_attack_reward`, excludes tribal
 and Exalted commanders — the Rafiq displacement identity from
 `attack_payoffs`) and emits complements for creatures carrying evasion,
-two tiers (`evasion_hard` ~140 cards / `evasion_soft` ~3,400 cards). Targeted
+two tiers (`evasion_hard` ~405 cards / `evasion_soft` ~3,377 cards). Targeted
 the 67-member `attack_reward` cohort (60 buildable) — Agrus Kos, Aloy Savior
 of Meridian, Caesar Legion's Emperor, Linden the Steadfast Queen, Inniaz the
 Gale Force, Miriam Herd Whisperer, and 55 others. **Verdict: DECLINE** — the

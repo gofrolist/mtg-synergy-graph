@@ -42,8 +42,8 @@ in-tree as standing infrastructure (like `team_anthem_payoff` and
 
 **Does keyword-discrimination beat the flat flood? No.** This is the headline
 result of the retry: narrowing the candidate side from "all creatures" to
-"evasive creatures" (two IDF tiers, `evasion_hard` ~140 cards /
-`evasion_soft` ~3,400 cards) did **not** fix the `team_anthem_payoff`
+"evasive creatures" (two IDF tiers, `evasion_hard` ~405 cards /
+`evasion_soft` ~3,377 cards) did **not** fix the `team_anthem_payoff`
 pathology. It is *smaller* than "all token producers," but it is still one
 **commander-independent** class handed identically to every cohort member —
 and the primary gate came back more negative than a coin flip, not merely
