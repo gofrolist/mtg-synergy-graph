@@ -419,6 +419,47 @@ def _commander_makes_creature_tokens(cmdr_ports: list[PortRow]) -> bool:
     return False
 
 
+_NEGATIVE_BUFF_RE = re.compile(r"'Add(?:Power|Toughness)':\s*'-")
+
+#: Affected-scope base types that make a static a *team* anthem (vs a
+#: creature-subtype lord, which stays lord's territory, or Card.Self voltron).
+_TEAM_ANTHEM_BASES: frozenset[str] = frozenset({"Creature", "Permanent"})
+
+
+def _commander_team_anthem_statics(cmdr_ports: list[PortRow]) -> list[PortRow]:
+    """Commander statics that are your-team anthems (Unit 1 gate).
+
+    A port qualifies iff it is a ``static.Continuous`` whose ``affected_scope``
+    names a ``Creature``/``Permanent`` base with a ``YouCtrl`` controller scope,
+    and whose raw_line grants a positive ``AddPower``/``AddToughness`` or an
+    ``AddKeyword``. Symmetric anthems (no ``YouCtrl``), ``Card.Self`` voltron
+    statics, creature-*subtype* lords, and negative drawback statics are all
+    rejected. This is the mirror boundary of ``_find_anthem_payoffs``.
+    """
+    out: list[PortRow] = []
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "static":
+            continue
+        if (p.get("event_class") or "").strip() != "Continuous":
+            continue
+        raw = str(p.get("raw_line") or "")
+        if not any(k in raw for k in _ANTHEM_BUFF_KEYS):
+            continue
+        if _NEGATIVE_BUFF_RE.search(raw):
+            continue
+        scope = p.get("affected_scope") or ""
+        for alt in scope.split(","):
+            alt = alt.strip()
+            base = alt.split(".")[0].split("+")[0].strip()
+            if base not in _TEAM_ANTHEM_BASES:
+                continue
+            if "YouCtrl" not in alt:
+                continue
+            out.append(p)
+            break
+    return out
+
+
 def _find_anthem_payoffs(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
