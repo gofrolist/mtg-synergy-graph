@@ -4,6 +4,7 @@ import pytest
 
 from mtg_synergy_graph.complement_rules import density as density_mod
 from mtg_synergy_graph.complement_rules.density import _commander_has_x_cost_ability
+from mtg_synergy_graph.complement_rules.registry import attributable_rules_for_port
 
 
 def _port(port_type, event_class, valid_filter="", raw_line=""):
@@ -146,3 +147,14 @@ def test_emitter_flag_off_returns_empty(x_cost_conn, monkeypatch):
     from mtg_synergy_graph.complement_rules.density import _find_x_cost_scaler
 
     assert _find_x_cost_scaler(x_cost_conn, [_XPAID], set()) == []
+
+
+def test_rule_gate_flag_aware():
+    port = {"port_type": "scales_with", "event_class": "xPaid", "valid_filter": "", "raw_line": "{'Amount':'X'}"}
+    density_mod._ENABLE_X_COST_SCALER = False
+    assert "x_cost_scaler" not in attributable_rules_for_port(port)
+    density_mod._ENABLE_X_COST_SCALER = True
+    try:
+        assert "x_cost_scaler" in attributable_rules_for_port(port)
+    finally:
+        density_mod._ENABLE_X_COST_SCALER = False
