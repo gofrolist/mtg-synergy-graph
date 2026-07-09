@@ -216,3 +216,37 @@ def team_anthem(conn: sqlite3.Connection) -> set[str]:
         "AND " + LEGAL_LEGENDARY_CREATURE_WHERE
     )
     return {row["card_name"] for row in rows if _commander_has_team_anthem_static([dict(row)])}
+
+
+def attack_reward(conn: sqlite3.Connection) -> set[str]:
+    """Legal legendary-creature commanders with a team-benefiting attack-reward trigger.
+
+    Qualifies via ``complement_rules.combat._commander_has_team_attack_reward``
+    (the single source of truth — the cohort and the rule cannot drift): an
+    ``Attacks`` team-scope trigger, an ``AttackersDeclared`` trigger with
+    ``AttackingPlayer=You``, or a self-attack trigger + team ``PumpAll``;
+    excluding Exalted (attack-alone) and tribal-subtype commanders. Target cohort
+    of the ``attack_reward_evasion`` rule (spec 2026-07-09); deliberately NOT part
+    of any shared cohort union.
+    """
+    from mtg_synergy_graph.complement_rules.combat import _commander_has_team_attack_reward
+
+    # Prefilter to legal legendary creatures that have any attack-reward trigger,
+    # then apply the full gate (which needs every port + the subtype/Exalted checks).
+    names = [
+        row["card_name"]
+        for row in conn.execute(
+            "SELECT DISTINCT p.card_name "
+            "FROM card_ports p "
+            "JOIN cards c ON c.name = p.card_name "
+            "WHERE p.port_type = 'trigger' "
+            "AND p.event_class IN ('Attacks', 'AttackersDeclared', 'AttackersDeclaredOneTarget') "
+            "AND " + LEGAL_LEGENDARY_CREATURE_WHERE
+        )
+    ]
+    out: set[str] = set()
+    for name in names:
+        ports = [dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", (name,))]
+        if _commander_has_team_attack_reward(conn, ports, {name}):
+            out.add(name)
+    return out
