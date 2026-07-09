@@ -52,10 +52,23 @@ hand. This follows the repo's small-increment discipline: the last ~10 broad
 scoring experiments were DECLINED; subtype-supply (2026-07-07) shipped
 precisely because it was a single, hard-gated increment.
 
-Note: color-*qualified* team anthems (Ascendant Evincar's `Creature.Black`)
-fold into this rule **for free**, because the gate keys on the affected
-**base type** (`Creature`/`Permanent`), not the qualifier. Only creature-
-*subtype* anthems stay out (that is `lord`'s territory).
+Note: color-*qualified* team anthems fold into this rule **for free** *only
+when they are `YouCtrl`-scoped*, because the gate keys on the affected **base
+type** (`Creature`/`Permanent`), not the qualifier. Creature-*subtype* anthems
+stay out (that is `lord`'s territory). Ascendant Evincar, cited in the
+motivation table below, does **not** qualify: its buff scope is
+`Creature.Black+Other` with **no `YouCtrl`** — it is a *symmetric* color-hoser
+(it pumps opponents' black creatures too), which the `YouCtrl` exclusion
+correctly rejects. It remains a genuine coverage gap but belongs to a
+different (symmetric-anthem) sub-shape, out of scope here.
+
+**Measured cohort size** (against the pinned census baseline, 2026-07-08):
+**155** legal legendary commanders qualify as `team_anthem`; of those only
+**~25 are currently dead** (`earned_top30 = 0`) — e.g. Avacyn, Iroas, Aang
+(Air Nomad), Exava, Kaysa. The other ~130 already earn ≈30 via their *other*
+ports and sit at the coverage ceiling. This distribution is load-bearing for
+the gate thresholds (see below): the win is concentrated in the ~25-member
+headroom subset, not the full 155.
 
 ### What this spec is NOT
 
@@ -143,9 +156,21 @@ rule in the registry.
 Implement behind the flag, run the full battery, then flip the flag on **only
 if all gates pass**:
 
-1. **Primary — coverage lift.** `coverage_report.py gate --cohort team_anthem`:
-   cohort mean `Δearned_top30 ≥ +5` AND stratified-control mean
-   `Δearned_top30 ≥ 0` (no collateral damage to non-cohort commanders).
+1. **Primary — coverage lift on the headroom subset.**
+   `coverage_report.py gate --cohort team_anthem` reports per-commander
+   `Δearned_top30`. Because ~130 of the 155 cohort members are already
+   saturated at `earned_top30 = 30` (Δ≈0 by ceiling), a full-cohort mean is
+   the wrong yardstick. The pre-registered pass condition is:
+   - Over cohort members that were **dead at the pinned baseline**
+     (`earned_top30 == 0`, the ~25-member headroom subset): **mean
+     `Δearned_top30 ≥ +5`**.
+   - **No cohort member regresses** (every cohort `Δearned_top30 ≥ 0`) — an
+     already-earning anthem commander must not lose coverage.
+   - **No collateral:** stratified-control mean `Δearned_top30 ≥ 0` AND no
+     control member regresses beyond the census's integer noise (Δ ≥ 0).
+   The headroom-subset mean is computed from the gate's per-commander deltas
+   joined against the pinned baseline (a short read-side calculation in the
+   measurement task; no instrument change).
 2. **Guard A — no golden regression.** `bench.py audit` on the golden-500
    fixture: NDCG@30 drop within the fixture's bootstrap noise half-width.
 3. **Guard B — not collinear.** `bench.py audit --collinearity`: the new rule
