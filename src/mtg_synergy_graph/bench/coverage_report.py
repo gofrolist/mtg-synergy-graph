@@ -24,6 +24,7 @@ from mtg_synergy_graph.bench.cohorts import (
     attack_reward,
     team_anthem,
     toughness_payoff,
+    x_cost_scaler,
 )
 from mtg_synergy_graph.bench.coverage import CoverageMetrics, compute_coverage
 from mtg_synergy_graph.bench.tensor import compute_config_hash
@@ -45,6 +46,7 @@ _COHORT_DISPATCH = {
     "toughness_payoff": toughness_payoff,
     "team_anthem": team_anthem,
     "attack_reward": attack_reward,
+    "x_cost_scaler": x_cost_scaler,
 }
 
 

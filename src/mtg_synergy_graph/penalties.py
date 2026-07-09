@@ -33,6 +33,7 @@ extractors.
 
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import re
@@ -51,6 +52,14 @@ HARD_FILTER_SCORE = -1e9
 
 #: Counter type aliases that all map to "P1P1" for matching purposes.
 P1P1_ALIASES: frozenset[str] = frozenset({"P1P1"})
+
+#: Broad ``ReduceCost`` ``ValidCard`` values that reduce a wide class of *your*
+#: spells (freeing mana for a bigger X) — the ``cost_reduce_generic`` tier of
+#: ``x_cost_scaler``. Excludes self-cost (``Card.Self``) and tribe/type-narrow
+#: reducers (``Wizard``, ``Dragon``, ``Creature``, …). Spec 2026-07-09-x-cost-scaler.
+_X_COST_BROAD_VALIDCARD: frozenset[str] = frozenset(
+    {"Card", "", "Card.nonCreature", "Card.multicolor", "Card.monocolored", "Instant,Sorcery"}
+)
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +302,11 @@ class CandidateCache:
     #: self-unblockable, the differentiator) and ``evasion_soft`` (Flying/Menace).
     evasion_hard_cards: frozenset[str] = frozenset()
     evasion_soft_cards: frozenset[str] = frozenset()
+    #: X-cost mana-economics pools consumed by ``_find_x_cost_scaler``:
+    #: ``x_cost_mana_double_cards`` (ProduceTwice/Thrice doublers, high IDF) and
+    #: ``x_cost_cost_reduce_cards`` (broad generic spell-cost reducers).
+    x_cost_mana_double_cards: frozenset[str] = frozenset()
+    x_cost_cost_reduce_cards: frozenset[str] = frozenset()
 
 
 def _attack_reward_evasion_enabled() -> bool:
@@ -310,6 +324,7 @@ def build_candidate_cache(conn: sqlite3.Connection) -> CandidateCache:
     # skip their two full scans entirely while the flag is off so a declined rule
     # costs nothing per cache build (populated on flip, like other cached pools).
     ar_evasion_on = _attack_reward_evasion_enabled()
+    x_cost_on = _x_cost_scaler_enabled()
     return CandidateCache(
         candidate_rows=_bulk_load_candidates(conn),
         creature_static_scopes=_bulk_load_static_scopes(conn),
@@ -336,6 +351,8 @@ def build_candidate_cache(conn: sqlite3.Connection) -> CandidateCache:
         ports_by_card=_bulk_load_ports_by_card(conn),
         evasion_hard_cards=_bulk_load_evasion_hard_cards(conn) if ar_evasion_on else frozenset(),
         evasion_soft_cards=_bulk_load_evasion_soft_cards(conn) if ar_evasion_on else frozenset(),
+        x_cost_mana_double_cards=_bulk_load_x_cost_mana_double_cards(conn) if x_cost_on else frozenset(),
+        x_cost_cost_reduce_cards=_bulk_load_x_cost_cost_reduce_cards(conn) if x_cost_on else frozenset(),
     )
 
 
@@ -781,6 +798,71 @@ def _bulk_load_evasion_hard_cards(conn: sqlite3.Connection) -> frozenset[str]:
         if _CANTBLOCKBY_SELF_ATTACKER_RE.search(row["raw_line"] or ""):
             hard.add(row["card_name"])
     return frozenset(hard)
+
+
+def _bulk_load_x_cost_mana_double_cards(conn: sqlite3.Connection) -> frozenset[str]:
+    """Mana doublers (ReplaceWith ProduceTwice/ProduceThrice) — the high-IDF
+    ``mana_double`` tier of ``x_cost_scaler``. Mana-denial / color-warp
+    replacements carry other ``ReplaceWith`` values and are excluded.
+    Reads the structured ``card_ports.replacement_result`` column (populated
+    from ``ReplaceWith`` by ``ports.extract_replacement_ports``) rather than
+    regex-parsing ``raw_line`` — immune to any ``repr(parsed)`` format change.
+    Commander-independent; consumed by ``complement_rules.density._find_x_cost_scaler``."""
+    rows = conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE port_type = 'replacement' AND event_class = 'ProduceMana' "
+        "AND replacement_result IN ('ProduceTwice', 'ProduceThrice')"
+    ).fetchall()
+    return frozenset(row["card_name"] for row in rows)
+
+
+def _bulk_load_x_cost_cost_reduce_cards(conn: sqlite3.Connection) -> frozenset[str]:
+    """Broad generic spell-cost reducers — the ``cost_reduce_generic`` tier of
+    ``x_cost_scaler``: a ``static`` ``ReduceCost`` with ``Type=Spell``, a broad
+    ``ValidCard`` (``_X_COST_BROAD_VALIDCARD``, excluding self-cost), and a
+    numeric ``Amount``.
+
+    ``raw_line`` is ``repr(parsed)`` of the extractor's dict, so it is parsed
+    with ``ast.literal_eval`` rather than per-field single-quote regexes — the
+    latter silently miss apostrophe-containing values (``repr`` switches such a
+    value to double quotes, e.g. ``"Card.namedKarlov's Crossbow"``) and cannot
+    tell an ABSENT ``ValidCard`` (restriction living in ``ValidTarget`` /
+    ``Activator``, e.g. Accursed Witch reducing an *opponent's* spell) from an
+    explicitly-empty one. A missing ``ValidCard`` key is therefore NOT treated
+    as broad. Restricted to ``port_type='static'`` so a future one-shot
+    ``AB$ ReduceCost`` effect (same ``event_class``) is not swept in.
+    Commander-independent; consumed by ``complement_rules.density._find_x_cost_scaler``."""
+    rows = conn.execute(
+        "SELECT DISTINCT p.card_name, p.raw_line FROM card_ports p "
+        "WHERE p.port_type = 'static' AND p.event_class = 'ReduceCost'"
+    ).fetchall()
+    out: set[str] = set()
+    for row in rows:
+        try:
+            parsed = ast.literal_eval(row["raw_line"] or "{}")
+        except (ValueError, SyntaxError):
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        if parsed.get("Type") != "Spell":
+            continue
+        if "ValidCard" not in parsed:  # absent restriction is NOT broad
+            continue
+        if parsed["ValidCard"] not in _X_COST_BROAD_VALIDCARD:
+            continue
+        amount = str(parsed.get("Amount", ""))
+        if not amount.isdigit() or int(amount) < 1:
+            continue
+        out.add(row["card_name"])
+    return frozenset(out)
+
+
+def _x_cost_scaler_enabled() -> bool:
+    """Read the ``x_cost_scaler`` flag at call time (lazy import avoids a
+    module-load cycle with ``complement_rules.density``)."""
+    from .complement_rules import density
+
+    return density._ENABLE_X_COST_SCALER
 
 
 def _bulk_load_untap_combo_cards(conn: sqlite3.Connection) -> frozenset[str]:

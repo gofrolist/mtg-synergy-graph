@@ -302,6 +302,22 @@ def _mana_doubler_gate(port: PortRow) -> bool:
     return (port.get("event_class") or "").strip() == "TapsForMana"
 
 
+def _x_cost_scaler_gate(port: PortRow) -> bool:
+    """Coarse single-port shape for x_cost_scaler coverage attribution.
+
+    Flag-aware: reads ``density._ENABLE_X_COST_SCALER`` at CALL time so
+    gap_report / rule_quality_gate see NO coverage while the rule is off. Coarse
+    by design (attribution only) — the full gate + emitter live in
+    ``complement_rules.density``, like ``_mana_doubler_gate`` vs its runtime rule."""
+    from . import density
+
+    if not density._ENABLE_X_COST_SCALER:
+        return False
+    if (port.get("port_type") or "").strip() != "scales_with":
+        return False
+    return (port.get("event_class") or "").strip() == "xPaid"
+
+
 def _cost_payoff_gate(port: PortRow) -> bool:
     if (port.get("port_type") or "").strip() != "cost":
         return False
@@ -768,6 +784,7 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("opponent_forcing", _opponent_forcing_gate),
     RuleGate("wheel_synergy", _wheel_synergy_gate),
     RuleGate("mana_doubler", _mana_doubler_gate),
+    RuleGate("x_cost_scaler", _x_cost_scaler_gate),
     # Note: no RuleGate for `extra_land_plays`. The helper
     # `_find_extra_land_plays` (landfall.py) gates on commander ports whose
     # raw_line contains `AdjustLandPlays` and emits complements labelled with

@@ -1162,6 +1162,7 @@ from .density import (  # noqa: E402
     _find_spellcast_resonance,
     _find_tribal_density_complements,
     _find_value_engine_density,
+    _find_x_cost_scaler,
 )
 
 # Plan 003 Units 7 & 8: all 16 auto-generated tribal /
@@ -1389,6 +1390,7 @@ def find_all_complements(
         out.extend(_find_mana_doubler_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_graveyard_sac_value(conn, cmdr_ports, cmdr_set))
         out.extend(_find_cost_reduction_targets(conn, cmdr_ports, cmdr_set, candidate_cache))
+        out.extend(_find_x_cost_scaler(conn, cmdr_ports, cmdr_set, candidate_cache))
         out.extend(_find_land_to_gy_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_cascade_value(conn, cmdr_ports, cmdr_set))
         out.extend(_find_flicker_payoffs(conn, cmdr_ports, cmdr_set))
