@@ -39,6 +39,10 @@ _COMMITTED_GOLDEN_FIXTURES = (
     # Same no-DB freshness discipline as the archetype-payoff fixture above.
     # Rebuild via `scripts/bootstrap_outlet_payoff_fixture.py`.
     "golden_set_outlet_payoff.json",
+    # Attack-reward cohort fixture (Unit 4). Same no-DB freshness discipline
+    # as the archetype-payoff fixture above. Rebuild via
+    # `scripts/bootstrap_attack_reward_fixture.py`.
+    "golden_set_attack_reward.json",
 )
 
 

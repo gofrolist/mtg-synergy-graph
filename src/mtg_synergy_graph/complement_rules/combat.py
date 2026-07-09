@@ -14,6 +14,11 @@ from .core import (
     _cost_filter_group,
 )
 
+#: Coverage-oriented rule (spec 2026-07-09-attack-reward-evasion-rule). Default
+#: OFF and hash-neutral until it clears the pre-registered coverage +
+#: no-regression gates.
+_ENABLE_ATTACK_REWARD_EVASION: bool = False
+
 #: Card types used for zone-resonance matching.
 _PRIMARY_TYPES: frozenset[str] = frozenset({"Creature", "Artifact", "Enchantment", "Land", "Planeswalker"})
 
@@ -688,6 +693,145 @@ def _has_creature_attack_trigger(cmdr_ports: list[PortRow]) -> bool:
             if "Attacks" in raw and "'ValidCause':'Creature'" in raw:
                 return True
     return False
+
+
+#: Trigger event classes that reward attacking with a board (Unit 1 gate).
+_ATTACK_REWARD_TRIGGER_EVENTS: frozenset[str] = frozenset(
+    {"Attacks", "AttackersDeclared", "AttackersDeclaredOneTarget"}
+)
+
+#: ``AttackersDeclared``/``AttackersDeclaredOneTarget`` triggers carry an empty
+#: ``valid_filter``; their attacker scope lives in the ``raw_line`` dict repr as
+#: ``'ValidAttackers': '<scope>'``. A commander whose ValidAttackers names a
+#: ``YouCtrl`` creature ("whenever a creature you control attacks") is team-scoped
+#: even when the trigger has no ``'AttackingPlayer': 'You'`` key (Alibou, Anim
+#: Pakal, Karazikar — ~30 commanders a bare AttackingPlayer substring check missed).
+_VALID_ATTACKERS_RE = re.compile(r"'ValidAttackers':\s*'([^']*)'")
+
+
+def _commander_has_team_attack_reward(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> bool:
+    """Unit 1 gate: a team-benefiting attack-reward commander, non-tribal, non-Exalted.
+
+    Qualifies via either acceptance path:
+
+    * **Path (a) — team-scope trigger.** An ``Attacks`` trigger whose
+      ``valid_filter`` names your creatures broadly (contains ``YouCtrl`` and is
+      not self-only), OR an ``AttackersDeclared``/``AttackersDeclaredOneTarget``
+      trigger that is team-scoped in ``raw_line`` — either ``'AttackingPlayer':
+      'You'`` (you attacked) or a ``ValidAttackers`` naming a ``YouCtrl`` creature
+      (for these events the attacker scope lives in ``raw_line``, not
+      ``valid_filter``; matching only the former undercounts the cohort).
+    * **Path (b) — self-attack + team pump.** A self-only ``Attacks`` trigger
+      plus a ``PumpAll`` effect over ``attacking`` creatures that is not
+      Self-only (Agrus Kos).
+
+    Excluded: commanders with an ``Exalted`` keyword port (reward attacking
+    *alone* — the opposite of a wide board; the Rafiq displacement casualty) and
+    commanders with a creature subtype (routed to the tribal/lord rules).
+    """
+    # Exclusion 2 — Exalted (attack-alone) short-circuits before any acceptance.
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() == "keyword" and (p.get("event_class") or "").strip() == "Exalted":
+            return False
+
+    team_scope = False
+    self_attack = False
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() != "trigger":
+            continue
+        ev = (p.get("event_class") or "").strip()
+        if ev not in _ATTACK_REWARD_TRIGGER_EVENTS:
+            continue
+        vf = p.get("valid_filter") or ""
+        raw = p.get("raw_line") or ""
+        if ev == "Attacks":
+            if "YouCtrl" in vf and not _trigger_only_matches_self(vf):
+                team_scope = True
+            if _trigger_only_matches_self(vf):
+                self_attack = True
+        else:  # AttackersDeclared / AttackersDeclaredOneTarget
+            # Scope lives in raw_line: either a "you attacked" marker, or a
+            # ValidAttackers naming your creatures (the majority shape).
+            if "'AttackingPlayer': 'You'" in raw:
+                team_scope = True
+            else:
+                m = _VALID_ATTACKERS_RE.search(raw)
+                if m and "YouCtrl" in m.group(1):
+                    team_scope = True
+
+    accepted = team_scope
+    if not accepted and self_attack:
+        for p in cmdr_ports:
+            if (p.get("port_type") or "").strip() != "effect":
+                continue
+            if (p.get("event_class") or "").strip() != "PumpAll":
+                continue
+            vf = p.get("valid_filter") or ""
+            if "attacking" in vf and "Self" not in vf:
+                accepted = True
+                break
+    if not accepted:
+        return False
+
+    # Exclusion 1 — tribal commanders go to the tribal/lord rules.
+    return not _commander_subtypes_from_ports(conn, list(cmdr_set), cmdr_ports)
+
+
+def _find_attack_reward_evasion(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+    candidate_cache: CandidateCache | None = None,
+) -> list[PortComplement]:
+    """Evasion-carrier payoffs for team attack-reward commanders (Unit 2).
+
+    Fires when the commander passes ``_commander_has_team_attack_reward``.
+    Candidates are evasion-carrying creatures in two IDF tiers scanned strong
+    first so dedup keeps the stronger credit: ``evasion_hard`` (rare evasion +
+    self-unblockable) > ``evasion_soft`` (Flying/Menace). Keyword-discriminated,
+    NOT a flat creature-class flood — the ``team_anthem_payoff`` null-result
+    lesson.
+    """
+    if not _ENABLE_ATTACK_REWARD_EVASION:
+        return []
+    if not _commander_has_team_attack_reward(conn, cmdr_ports, cmdr_set):
+        return []
+
+    if candidate_cache is not None:
+        hard = candidate_cache.evasion_hard_cards
+        soft = candidate_cache.evasion_soft_cards
+    else:
+        from ..penalties import _bulk_load_evasion_hard_cards, _bulk_load_evasion_soft_cards
+
+        hard = _bulk_load_evasion_hard_cards(conn)
+        soft = _bulk_load_evasion_soft_cards(conn)
+
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+
+    def _emit(name: str, tier: str) -> None:
+        if name in cmdr_set or name in seen:
+            return
+        seen.add(name)
+        results.append(
+            PortComplement(
+                rule_id="attack_reward_evasion",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="attack_reward",
+                cand_event=tier,
+            )
+        )
+
+    for name in sorted(hard):
+        _emit(name, "evasion_hard")
+    for name in sorted(soft):
+        _emit(name, "evasion_soft")
+    return results
 
 
 def _find_attack_payoffs(

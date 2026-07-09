@@ -142,6 +142,34 @@ uv run scripts/portfolio_sim.py bands --fixture tests/fixtures/golden_set_archet
 # human-approved on Pareto-dominance at ≤1 cliff; see docs/RULE_HISTORY.md
 # 2026-07-07.)
 
+# Attack-reward cohort fixture (Unit 4) — same eval-instrument discipline as the
+# archetype-payoff fixture above: zero scoring-path changes, fixture carries its
+# own config_hash, joins the no-DB freshness gate
+# (tests/bench/test_fixture_freshness.py). Cohort predicate:
+# src/mtg_synergy_graph/bench/cohorts.py::attack_reward (legal legendary-creature
+# commanders with a team-benefiting attack-reward trigger — Attacks team-scope,
+# AttackersDeclared scoped to your creatures (AttackingPlayer=You OR
+# ValidAttackers…YouCtrl), or self-attack+team PumpAll; excludes Exalted and
+# tribal-subtype commanders). Target cohort of the attack_reward_evasion rule
+# (spec 2026-07-09). Cohort size 78 / 71 buildable after the High-Synergy EDHREC
+# filter — dropped: Araña, Heart of the Spider; Arna Kennerüd, Skycaptain;
+# Dhalsim, Pliable Pacifist; Keleth, Sunmane Familiar; Márton Stromgald; Tegan
+# Jovanka; Telim'Tor. (Corrected 2026-07-09 post-review from 67/60: the gate now
+# reads AttackersDeclared ValidAttackers…YouCtrl, adding ~11 real members it
+# previously missed.) Build/pin/read:
+uv run python scripts/bootstrap_attack_reward_fixture.py                  # (Re)build + pin the cohort fixture. Same caveat as archetype-payoff: use THIS after a cardsfolder refresh, not `--repin` (which preserves the old cohort_members snapshot).
+uv run scripts/bench.py audit --repin --yes --fixture tests/fixtures/golden_set_attack_reward.json          # Re-pin scores + persist tensor to SQLite (scoring-config re-pin only)
+uv run scripts/bench.py audit --per-commander-ndcg --fixture tests/fixtures/golden_set_attack_reward.json   # Read the in-cohort vs rest NDCG slice
+# NOISE BAND — measured 2026-07-09 at config_hash c770b664e626 (rule still
+# flag-OFF; this is the pre-ship baseline band). Bootstrap band of the
+# score_commander top-30 NDCG@30 instrument (seed 17) over the 71 pinned cohort
+# members: mean 0.0697, 95% CI [0.0499, 0.0908], half-width = 0.0204 (corrected
+# post-review from the pre-fix 60-member band mean 0.0758 / half-width 0.0240).
+# This half-width is the primary-gate threshold (Task 5): a cohort in-cohort
+# mean-delta below +0.0204 is NOISE, not a win. Recompute after any data
+# refresh or re-pin via the snippet in docs/plans (bootstrap_band() over
+# compute_per_commander_ndcg_rows() restricted to pinned.cohort_members).
+
 # Tensor-driven weight optimizer (plan 2026-04-26-001 M1) — Coordinate Ascent over
 # _RULE_QUALITY_MULTIPLIER. Emits .audit/optimize_proposal.json for human review;
 # never auto-mutates src/mtg_synergy_graph/data/scoring_weights.json. Append-only history at

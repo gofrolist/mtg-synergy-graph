@@ -55,6 +55,15 @@ def _cmdr_wants_combat_damage(cmdr_ports: list[PortRow]) -> bool:
     )
 
 
+#: Canonical evasion-keyword vocabulary. Single source of truth for what counts
+#: as "evasion" across the scorer; also consumed by
+#: ``penalties._bulk_load_evasion_*`` (the ``attack_reward_evasion`` tiers) so the
+#: staple heuristic and the rule's candidate pools cannot drift.
+EVASION_KEYWORDS: frozenset[str] = frozenset(
+    {"Flying", "Menace", "Shadow", "Fear", "Intimidate", "Skulk", "Horsemanship"}
+)
+
+
 def _evasion_boost(cand: CandidateRecord) -> bool:
     card = cand["card"]
     try:
@@ -64,7 +73,7 @@ def _evasion_boost(cand: CandidateRecord) -> bool:
     if cmc > 3:
         return False
     keywords = set(_card_keywords(card))
-    return bool(keywords & {"Flying", "Menace", "Shadow", "Fear", "Intimidate", "Skulk", "Horsemanship"})
+    return bool(keywords & EVASION_KEYWORDS)
 
 
 def _mass_pump_boost(cand: CandidateRecord) -> bool:
