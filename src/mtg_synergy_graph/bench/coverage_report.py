@@ -21,6 +21,7 @@ from pathlib import Path
 
 from mtg_synergy_graph.bench.cohorts import (
     LEGAL_LEGENDARY_CREATURE_WHERE,
+    aristocrats,
     attack_reward,
     team_anthem,
     toughness_payoff,
@@ -47,6 +48,7 @@ _COHORT_DISPATCH = {
     "team_anthem": team_anthem,
     "attack_reward": attack_reward,
     "x_cost_scaler": x_cost_scaler,
+    "aristocrats": aristocrats,
 }
 
 

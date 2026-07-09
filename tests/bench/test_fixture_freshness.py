@@ -47,6 +47,10 @@ _COMMITTED_GOLDEN_FIXTURES = (
     # no-DB freshness discipline as the archetype-payoff fixture above.
     # Rebuild via `scripts/bootstrap_x_cost_scaler_fixture.py`.
     "golden_set_x_cost_scaler.json",
+    # Aristocrats cohort fixture (aristocrats_death_bridge rule cycle). Same
+    # no-DB freshness discipline as the archetype-payoff fixture above.
+    # Rebuild via `scripts/bootstrap_aristocrats_fixture.py`.
+    "golden_set_aristocrats.json",
 )
 
 
