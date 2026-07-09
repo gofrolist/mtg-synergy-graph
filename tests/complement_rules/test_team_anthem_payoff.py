@@ -42,7 +42,11 @@ def test_team_anthem_static_qualifies(scope, raw):
         ("Card.Self", "{'AddKeyword': 'Double Strike'}", "voltron self-only"),
         ("Goblin.YouCtrl", "{'AddPower': '1', 'AddToughness': '1'}", "subtype base (lord)"),
         # Subtype folded in as a +-qualifier after a Creature base (Admiral Beckett Brass).
-        ("Creature.Pirate+Other+YouCtrl", "{'AddPower': '1', 'AddToughness': '1'}", "subtype qualifier (restricted lord)"),
+        (
+            "Creature.Pirate+Other+YouCtrl",
+            "{'AddPower': '1', 'AddToughness': '1'}",
+            "subtype qualifier (restricted lord)",
+        ),
         # Condition folded in as a qualifier (Abzan Falconer — only counter-bearing creatures).
         ("Creature.YouCtrl+counters_GE1_P1P1", "{'AddPower': '1', 'AddToughness': '1'}", "conditional anthem"),
         # Negative pump is a drawback, not a payoff.
@@ -85,11 +89,21 @@ def anthem_conn(monkeypatch):
         # Opponent-owned creature token — the body lands off the anthem's board.
         ("Akroan Horse", "effect", "Token", "{'TokenScript': 'w_1_1_soldier', 'TokenOwner': 'Player.Opponent'}"),
         # Own-board creature-token multiplier.
-        ("Doubling Season", "replacement", "CreateToken", "{'ValidToken': 'Card.YouCtrl', 'ReplaceWith': 'DoubleToken'}"),
+        (
+            "Doubling Season",
+            "replacement",
+            "CreateToken",
+            "{'ValidToken': 'Card.YouCtrl', 'ReplaceWith': 'DoubleToken'}",
+        ),
         # Halving replacement — inverted polarity, must NOT be scored as positive.
         ("Halving Season", "replacement", "CreateToken", "{'ValidToken': 'Card.OppCtrl', 'ReplaceWith': 'HalveToken'}"),
         # Non-creature-only doubler (Clue/Food/Treasure) — not a creature-body multiplier.
-        ("Academy Manufactor", "replacement", "CreateToken", "{'ValidPlayer': 'You', 'ValidToken': 'Clue,Food,Treasure', 'ReplaceWith': 'TokenReplace'}"),
+        (
+            "Academy Manufactor",
+            "replacement",
+            "CreateToken",
+            "{'ValidPlayer': 'You', 'ValidToken': 'Clue,Food,Treasure', 'ReplaceWith': 'TokenReplace'}",
+        ),
     ]
     conn.executemany(
         "INSERT INTO card_ports (card_name, port_type, event_class, raw_line) VALUES (?, ?, ?, ?)",
