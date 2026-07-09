@@ -700,6 +700,14 @@ _ATTACK_REWARD_TRIGGER_EVENTS: frozenset[str] = frozenset(
     {"Attacks", "AttackersDeclared", "AttackersDeclaredOneTarget"}
 )
 
+#: ``AttackersDeclared``/``AttackersDeclaredOneTarget`` triggers carry an empty
+#: ``valid_filter``; their attacker scope lives in the ``raw_line`` dict repr as
+#: ``'ValidAttackers': '<scope>'``. A commander whose ValidAttackers names a
+#: ``YouCtrl`` creature ("whenever a creature you control attacks") is team-scoped
+#: even when the trigger has no ``'AttackingPlayer': 'You'`` key (Alibou, Anim
+#: Pakal, Karazikar — ~30 commanders a bare AttackingPlayer substring check missed).
+_VALID_ATTACKERS_RE = re.compile(r"'ValidAttackers':\s*'([^']*)'")
+
 
 def _commander_has_team_attack_reward(
     conn: sqlite3.Connection,
@@ -713,8 +721,10 @@ def _commander_has_team_attack_reward(
     * **Path (a) — team-scope trigger.** An ``Attacks`` trigger whose
       ``valid_filter`` names your creatures broadly (contains ``YouCtrl`` and is
       not self-only), OR an ``AttackersDeclared``/``AttackersDeclaredOneTarget``
-      trigger whose ``raw_line`` carries ``'AttackingPlayer': 'You'`` (for these
-      events the attacker scope lives in ``raw_line``, not ``valid_filter``).
+      trigger that is team-scoped in ``raw_line`` — either ``'AttackingPlayer':
+      'You'`` (you attacked) or a ``ValidAttackers`` naming a ``YouCtrl`` creature
+      (for these events the attacker scope lives in ``raw_line``, not
+      ``valid_filter``; matching only the former undercounts the cohort).
     * **Path (b) — self-attack + team pump.** A self-only ``Attacks`` trigger
       plus a ``PumpAll`` effect over ``attacking`` creatures that is not
       Self-only (Agrus Kos).
@@ -744,8 +754,14 @@ def _commander_has_team_attack_reward(
             if _trigger_only_matches_self(vf):
                 self_attack = True
         else:  # AttackersDeclared / AttackersDeclaredOneTarget
+            # Scope lives in raw_line: either a "you attacked" marker, or a
+            # ValidAttackers naming your creatures (the majority shape).
             if "'AttackingPlayer': 'You'" in raw:
                 team_scope = True
+            else:
+                m = _VALID_ATTACKERS_RE.search(raw)
+                if m and "YouCtrl" in m.group(1):
+                    team_scope = True
 
     accepted = team_scope
     if not accepted and self_attack:

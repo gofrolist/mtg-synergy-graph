@@ -223,30 +223,43 @@ def attack_reward(conn: sqlite3.Connection) -> set[str]:
 
     Qualifies via ``complement_rules.combat._commander_has_team_attack_reward``
     (the single source of truth — the cohort and the rule cannot drift): an
-    ``Attacks`` team-scope trigger, an ``AttackersDeclared`` trigger with
-    ``AttackingPlayer=You``, or a self-attack trigger + team ``PumpAll``;
-    excluding Exalted (attack-alone) and tribal-subtype commanders. Target cohort
-    of the ``attack_reward_evasion`` rule (spec 2026-07-09); deliberately NOT part
-    of any shared cohort union.
+    ``Attacks`` team-scope trigger, an ``AttackersDeclared`` trigger scoped to your
+    creatures (``AttackingPlayer=You`` or ``ValidAttackers …YouCtrl``), or a
+    self-attack trigger + team ``PumpAll``; excluding Exalted (attack-alone) and
+    tribal-subtype commanders. Target cohort of the ``attack_reward_evasion`` rule
+    (spec 2026-07-09); deliberately NOT part of any shared cohort union.
     """
-    from mtg_synergy_graph.complement_rules.combat import _commander_has_team_attack_reward
+    from mtg_synergy_graph.complement_rules.combat import (
+        _ATTACK_REWARD_TRIGGER_EVENTS,
+        _commander_has_team_attack_reward,
+    )
 
     # Prefilter to legal legendary creatures that have any attack-reward trigger,
-    # then apply the full gate (which needs every port + the subtype/Exalted checks).
+    # keyed off the gate's own event set so the two cannot drift. Placeholders are
+    # ``?``-per-event from a module-level frozenset; values bound as params.
+    events = tuple(sorted(_ATTACK_REWARD_TRIGGER_EVENTS))
+    event_ph = ",".join("?" * len(events))
     names = [
         row["card_name"]
         for row in conn.execute(
-            "SELECT DISTINCT p.card_name "
-            "FROM card_ports p "
+            "SELECT DISTINCT p.card_name FROM card_ports p "  # noqa: S608 — placeholders only, values bound
             "JOIN cards c ON c.name = p.card_name "
-            "WHERE p.port_type = 'trigger' "
-            "AND p.event_class IN ('Attacks', 'AttackersDeclared', 'AttackersDeclaredOneTarget') "
-            "AND " + LEGAL_LEGENDARY_CREATURE_WHERE
+            f"WHERE p.port_type = 'trigger' AND p.event_class IN ({event_ph}) "
+            "AND " + LEGAL_LEGENDARY_CREATURE_WHERE,
+            events,
         )
     ]
-    out: set[str] = set()
-    for name in names:
-        ports = [dict(r) for r in conn.execute("SELECT * FROM card_ports WHERE card_name = ?", (name,))]
-        if _commander_has_team_attack_reward(conn, ports, {name}):
-            out.add(name)
-    return out
+    if not names:
+        return set()
+
+    # Bulk-fetch every prefiltered card's ports in one query and group by name,
+    # instead of re-querying card_ports per commander (the N+1 pattern
+    # _bulk_load_ports_by_card was built to avoid). ~482 names << SQLite's
+    # variadic limit.
+    name_ph = ",".join("?" * len(names))
+    ports_by_name: dict[str, list[dict]] = {}
+    for row in conn.execute(f"SELECT * FROM card_ports WHERE card_name IN ({name_ph})", tuple(names)):  # noqa: S608 — placeholders only, values bound
+        port = dict(row)
+        ports_by_name.setdefault(port["card_name"], []).append(port)
+
+    return {name for name in names if _commander_has_team_attack_reward(conn, ports_by_name.get(name, []), {name})}

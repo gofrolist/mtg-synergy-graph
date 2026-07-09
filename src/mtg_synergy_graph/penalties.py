@@ -41,6 +41,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from .heuristics import EVASION_KEYWORDS
+
 log = logging.getLogger(__name__)
 
 #: Score sentinel for hard filters. Cards at this score are dropped before
@@ -293,9 +295,21 @@ class CandidateCache:
     evasion_soft_cards: frozenset[str] = frozenset()
 
 
+def _attack_reward_evasion_enabled() -> bool:
+    """Read the ``attack_reward_evasion`` flag at call time (lazy import avoids a
+    module-load cycle with ``complement_rules.combat``)."""
+    from .complement_rules import combat
+
+    return combat._ENABLE_ATTACK_REWARD_EVASION
+
+
 def build_candidate_cache(conn: sqlite3.Connection) -> CandidateCache:
     """Load all commander-independent candidate data in one pass."""
     candidate_attr_rows = _bulk_load_candidate_attr_rows(conn)
+    # The evasion pools feed only the default-OFF ``attack_reward_evasion`` rule;
+    # skip their two full scans entirely while the flag is off so a declined rule
+    # costs nothing per cache build (populated on flip, like other cached pools).
+    ar_evasion_on = _attack_reward_evasion_enabled()
     return CandidateCache(
         candidate_rows=_bulk_load_candidates(conn),
         creature_static_scopes=_bulk_load_static_scopes(conn),
@@ -320,8 +334,8 @@ def build_candidate_cache(conn: sqlite3.Connection) -> CandidateCache:
         untap_combo_cards=_bulk_load_untap_combo_cards(conn),
         cost_reduction_target_pool=_bulk_load_cost_reduction_target_pool(conn),
         ports_by_card=_bulk_load_ports_by_card(conn),
-        evasion_hard_cards=_bulk_load_evasion_hard_cards(conn),
-        evasion_soft_cards=_bulk_load_evasion_soft_cards(conn),
+        evasion_hard_cards=_bulk_load_evasion_hard_cards(conn) if ar_evasion_on else frozenset(),
+        evasion_soft_cards=_bulk_load_evasion_soft_cards(conn) if ar_evasion_on else frozenset(),
     )
 
 
@@ -715,35 +729,58 @@ def _bulk_load_attack_payoff_cards(conn: sqlite3.Connection) -> frozenset[str]:
     return frozenset(row["card_name"] for row in rows)
 
 
+#: The ``attack_reward_evasion`` IDF tiers, derived from the single-source
+#: :data:`heuristics.EVASION_KEYWORDS` so they cannot drift from the staple
+#: heuristic: soft = the two common keywords, hard = the rare remainder.
+_EVASION_SOFT_KEYWORDS: frozenset[str] = frozenset({"Flying", "Menace"})
+_EVASION_HARD_KEYWORDS: frozenset[str] = EVASION_KEYWORDS - _EVASION_SOFT_KEYWORDS
+
+#: A ``CantBlockBy`` static makes the card itself unblockable only when ``Self``
+#: is the ``ValidAttacker`` ("CARDNAME can't be blocked by …"). ``Self`` under
+#: ``ValidBlocker`` is a *blocking* restriction ("CARDNAME can block only fliers"
+#: — Ascending Aven, Cloud Djinn: 44 non-evasive false positives a bare
+#: ``Creature.Self`` substring match wrongly bucketed as hard evasion).
+_CANTBLOCKBY_SELF_ATTACKER_RE = re.compile(r"'ValidAttacker':\s*'(?:Creature|Card)\.Self")
+
+
+def _evasion_creature_cards(conn: sqlite3.Connection, keywords: frozenset[str]) -> set[str]:
+    """Distinct creature cards granting any of ``keywords`` via a keyword port.
+
+    Placeholders are ``?``-per-keyword from ``len()`` of a module-level frozenset;
+    all values are bound as params (no fragment interpolation)."""
+    placeholders = ",".join("?" * len(keywords))
+    rows = conn.execute(
+        "SELECT DISTINCT p.card_name FROM card_ports p "
+        "JOIN cards c ON c.name = p.card_name "
+        f"WHERE p.port_type = 'keyword' AND p.granted_keyword IN ({placeholders}) "
+        "AND c.card_types LIKE '%Creature%'",
+        tuple(sorted(keywords)),
+    ).fetchall()
+    return {row["card_name"] for row in rows}
+
+
 def _bulk_load_evasion_soft_cards(conn: sqlite3.Connection) -> frozenset[str]:
     """Creatures with common evasion (Flying/Menace) — the low-IDF soft tier of
     ``attack_reward_evasion``. Commander-independent; consumed by
     ``complement_rules.combat._find_attack_reward_evasion``."""
-    rows = conn.execute(
-        "SELECT DISTINCT p.card_name FROM card_ports p "
-        "JOIN cards c ON c.name = p.card_name "
-        "WHERE p.port_type = 'keyword' AND p.granted_keyword IN ('Flying', 'Menace') "
-        "AND c.card_types LIKE '%Creature%'"
-    ).fetchall()
-    return frozenset(row["card_name"] for row in rows)
+    return frozenset(_evasion_creature_cards(conn, _EVASION_SOFT_KEYWORDS))
 
 
 def _bulk_load_evasion_hard_cards(conn: sqlite3.Connection) -> frozenset[str]:
     """Creatures with rare evasion (Shadow/Horsemanship/Skulk/Fear/Intimidate) or
-    a self-unblockable ``CantBlockBy`` static — the high-IDF hard tier of
-    ``attack_reward_evasion`` and the real differentiator. Commander-independent;
-    consumed by ``complement_rules.combat._find_attack_reward_evasion``."""
-    rows = conn.execute(
-        "SELECT DISTINCT p.card_name FROM card_ports p "
+    a genuinely self-unblockable ``CantBlockBy`` static — the high-IDF hard tier
+    of ``attack_reward_evasion`` and the real differentiator. Commander-
+    independent; consumed by ``complement_rules.combat._find_attack_reward_evasion``."""
+    hard = _evasion_creature_cards(conn, _EVASION_HARD_KEYWORDS)
+    for row in conn.execute(
+        "SELECT DISTINCT p.card_name, p.raw_line FROM card_ports p "
         "JOIN cards c ON c.name = p.card_name "
-        "WHERE c.card_types LIKE '%Creature%' AND ("
-        "  (p.port_type = 'keyword' AND p.granted_keyword IN "
-        "     ('Shadow', 'Horsemanship', 'Skulk', 'Fear', 'Intimidate')) "
-        "  OR (p.port_type = 'static' AND p.event_class = 'CantBlockBy' "
-        "      AND (p.raw_line LIKE '%Creature.Self%' OR p.raw_line LIKE '%Card.Self%'))"
-        ")"
-    ).fetchall()
-    return frozenset(row["card_name"] for row in rows)
+        "WHERE p.port_type = 'static' AND p.event_class = 'CantBlockBy' "
+        "AND c.card_types LIKE '%Creature%'"
+    ).fetchall():
+        if _CANTBLOCKBY_SELF_ATTACKER_RE.search(row["raw_line"] or ""):
+            hard.add(row["card_name"])
+    return frozenset(hard)
 
 
 def _bulk_load_untap_combo_cards(conn: sqlite3.Connection) -> frozenset[str]:

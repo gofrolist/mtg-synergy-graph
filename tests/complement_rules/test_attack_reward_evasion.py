@@ -38,6 +38,20 @@ def test_attackersdeclared_attackingplayer_you_qualifies():
     assert _commander_has_team_attack_reward(None, ports, set()) is True
 
 
+def test_attackersdeclared_validattackers_youctrl_qualifies():
+    # Alibou/Karazikar shape: NO AttackingPlayer key; team scope lives in
+    # ValidAttackers (the majority AttackersDeclared shape). A bare
+    # AttackingPlayer substring check silently dropped ~30 real commanders.
+    ports = [_trig("AttackersDeclared", raw_line="{'Mode': 'AttackersDeclared', 'ValidAttackers': 'Creature.YouCtrl'}")]
+    assert _commander_has_team_attack_reward(None, ports, set()) is True
+
+
+def test_attackersdeclared_validattackers_oppctrl_rejected():
+    # ValidAttackers scoped to opponents' creatures is not our board.
+    ports = [_trig("AttackersDeclared", raw_line="{'ValidAttackers': 'Creature.OppCtrl'}")]
+    assert _commander_has_team_attack_reward(None, ports, set()) is False
+
+
 def test_self_attack_plus_team_pumpall_qualifies():
     # Agrus Kos shape: Attacks Card.Self trigger + PumpAll over attacking creatures.
     ports = [_trig("Attacks", valid_filter="Card.Self"), _pumpall("Creature.attacking+Red")]

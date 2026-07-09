@@ -164,15 +164,57 @@ predecessor.
   unserved.
 - `core.py`: emitter wired into `find_all_complements` (emits nothing while
   the flag is off).
-- `bench/cohorts.py`: `attack_reward(conn)` predicate (67 members, 60
-  buildable) + `coverage_report._COHORT_DISPATCH["attack_reward"]`.
+- `bench/cohorts.py`: `attack_reward(conn)` predicate (78 members, 71
+  buildable — see the post-review correction below) +
+  `coverage_report._COHORT_DISPATCH["attack_reward"]`.
 - `tests/fixtures/golden_set_attack_reward.json` +
   `scripts/bootstrap_attack_reward_fixture.py` + the CLAUDE.md noise-band
-  note (mean 0.0758, half-width 0.0240, seed 17).
+  note (mean 0.0697, half-width 0.0204, seed 17).
 
 Self-activates for a retry cycle if the flag flips; a retry must first find a
 discriminator that is **commander-specific**, not merely a narrower flat
 class — see lessons below.
+
+## Post-DECLINE code review — correctness fixes applied (2026-07-09)
+
+A high-effort review (`/code-review` on PR #108) found two logic bugs in the
+gate/loader, dormant behind the flag but confounding the measurement above.
+Fixed in-tree (still flag-off, hash-neutral, `--expect-identity` PASS); the
+**DECLINE verdict is unchanged** — re-measured on the corrected cohort it is
+**−0.0422** vs the recomputed **+0.0204** band (was −0.0445 vs +0.0240), still a
+hard negative with the same cliffs.
+
+- **AttackersDeclared team-scope was undercounted.** The gate only matched the
+  literal `'AttackingPlayer': 'You'` in `raw_line`, but the majority of these
+  triggers scope to your board via `ValidAttackers …YouCtrl` with no
+  `AttackingPlayer` key. Verified on live data: 30 legal legendary-creature
+  commanders had `ValidAttackers …YouCtrl` without `AttackingPlayer` and were
+  silently excluded (Alibou, Karazikar, Akiri, Celeborn, …). Fixed to also read
+  `ValidAttackers`; the cohort grew **67 → 78** (+11 after the tribal/Exalted
+  exclusions; ~19 of the 30 are legitimately tribal). So the "67/60" and the
+  0.0758/0.0240 band in the measurement above were computed on an
+  **undercounted cohort** — the numbers moved, the verdict did not.
+- **`evasion_hard` credited non-evasive creatures.** The `CantBlockBy` clause
+  matched `raw_line LIKE '%Creature.Self%'`, which also matches `ValidBlocker:
+  Creature.Self` (a *blocking* restriction: "can block only fliers"), not just
+  the intended `ValidAttacker: Creature.Self` (self-unblockable). 44 of 269
+  matched cards were false positives (Ascending Aven, Cloud Djinn, …); the hard
+  tier shrank **405 → 363**. NB this pattern is **inherited from the shipped
+  `evasion` rule** (`combat.py` `_find_evasion_complements`), which has the same
+  false-positive — fixing that is a live scoring change and is left for its own
+  measured cycle (see the retry note).
+- Also applied (hash-neutral cleanups): a single-source `EVASION_KEYWORDS`
+  vocabulary in `heuristics.py` (was triplicated); the evasion pools now skip
+  their two scans entirely while the flag is off (no per-cache-build cost for a
+  declined rule); the `attack_reward` cohort predicate now bulk-loads ports (was
+  N+1) and keys its prefilter off `_ATTACK_REWARD_TRIGGER_EVENTS`; and a test
+  now covers the `ValidAttackers`-only AttackersDeclared shape that hid the
+  first bug.
+
+**Open follow-up (separate cycle):** the `CantBlockBy` false-positive also lives
+in the production `evasion` rule (`_find_evasion_complements`); correcting it
+changes live Yuriko/Saskia scores and needs a re-pin + audit, so it was
+deliberately not folded into this hash-neutral DECLINE.
 
 ## Lessons for the next coverage cycle
 

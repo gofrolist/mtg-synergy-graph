@@ -48,6 +48,17 @@ rule + `RuleGate` + `attack_reward` cohort + fixture left as standing infra.
 Full record:
 `docs/solutions/best-practices/attack-reward-evasion-null-result-2026-07-09.md`.
 
+**Post-DECLINE code review (PR #108, 2026-07-09):** a high-effort review found
+two gate/loader bugs (the `AttackersDeclared` team-scope check missed the
+`ValidAttackers …YouCtrl` shape → cohort undercounted; the `evasion_hard`
+`CantBlockBy` clause matched `ValidBlocker: Creature.Self` blocking restrictions
+→ 44 false positives). Fixed hash-neutrally (`--expect-identity` PASS). Cohort
+corrected **67 → 78** (71 buildable), band half-width **0.0240 → 0.0204** (mean
+0.0697); re-measured in-cohort Δ **−0.0422** — **DECLINE unchanged** (the flood
+pathology is design-inherent). One follow-up left open: the same `CantBlockBy`
+false-positive lives in the shipped `evasion` rule and needs its own re-pin +
+audit cycle. See the null-result doc's correction section.
+
 ## 2026-07-08
 
 ### `team_anthem_payoff` DECLINED at pre-registered gates (plan 2026-07-08)
