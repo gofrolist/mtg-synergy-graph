@@ -7,6 +7,43 @@ See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
 ## 2026-07-09
 
+### `x_cost_scaler` DECLINED at pre-registered gates (spec 2026-07-09)
+
+Third consecutive dead-zone-payoff DECLINE, after `team_anthem_payoff` and
+`attack_reward_evasion`. Surfaced by `gap_report` #2 (`scales_with.xPaid[*]`,
+98 legal legendary commanders at 0% activation). Designed to *escape* the
+`attack_reward_evasion` failure by choosing a **mechanically-principled**
+complement (not archetype affinity): a mana doubler or generic cost reducer
+literally raises the `X` payable by the commander's own `xPaid` port. Keys on
+`_commander_has_x_cost_ability` (any `scales_with.xPaid` port; no exclusions),
+emits two clean tiers — `mana_double` (3 cards: Mana Reflection, Nyxbloom
+Ancient, Virtue of Strength; `ReplaceWith ∈ {ProduceTwice,ProduceThrice}`) and
+`cost_reduce_generic` (49 broad non-self, non-tribe spell-cost reducers).
+Targeted the 98-member `x_cost_scaler` cohort (87 buildable) — Zaxara the
+Exemplary, Gadwick, Verdeloth, Rocco, Chatterfang, Gix, Polukranos, and 80
+others. **Verdict: DECLINE** — primary gate (in-cohort NDCG@30 uplift, threshold
+> +0.0261 cohort noise half-width, seed 17, mean 0.0894, n=87) came back
+**−0.025** (11 gainers / 61 regressors / 15 flat). A doubler-only salvage (3
+cards, reducers dropped) still failed at **−0.0121**, ruling out a pool-size
+fix. Gate confinement holds by construction (0 out-of-cohort collateral — the
+flag-aware gate fires only on `xPaid` ports). Guards 4–6 not measured (primary
+dispositive). **Root cause — commander-independence:** the rule credits the
+*identical* 52-card pool to every cohort member (Zaxara = Marath = Greel), so it
+cannot tell which commander wants ramp. The 11 gainers are the true ramp-hungry
+X-decks whose EDHREC lists *are* doubler/reducer-heavy (Polukranos +0.141,
+Zaxara +0.020, Verdeloth +0.018); the 61 regressors are commanders whose
+`xPaid` is incidental (Greel −0.245, Marath −0.183, Mimeoplasm −0.170) and whose
+real EDHREC staples get displaced. Sharpest lesson of the three cycles:
+**mechanical validity of the complement is necessary but not sufficient — the
+binding property all three DECLINES share is commander-independence.**
+De-flooding requires the complement to *vary with the specific commander*, not
+merely to be smaller or more mechanically valid. Retry lead: a
+commander-*dependent* gate that keeps only cohort members whose `xPaid` is a
+*primary* payoff (must clear whitelist-equivalence). Standing infra remains
+in-tree flag-off; config hash unchanged `c770b664e626`, `--expect-identity`
+PASS. Full write-up:
+`docs/solutions/best-practices/x-cost-scaler-null-result-2026-07-09.md`.
+
 ### `attack_reward_evasion` DECLINED at pre-registered gates (spec 2026-07-09)
 
 Direct retry of `team_anthem_payoff`'s DECLINE lesson ("discriminate the
