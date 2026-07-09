@@ -33,6 +33,7 @@ extractors.
 
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import re
@@ -59,10 +60,6 @@ P1P1_ALIASES: frozenset[str] = frozenset({"P1P1"})
 _X_COST_BROAD_VALIDCARD: frozenset[str] = frozenset(
     {"Card", "", "Card.nonCreature", "Card.multicolor", "Card.monocolored", "Instant,Sorcery"}
 )
-_REPLACE_WITH_RE = re.compile(r"'ReplaceWith':\s*'([^']*)'")
-_REDUCECOST_TYPE_RE = re.compile(r"'Type':\s*'([^']*)'")
-_REDUCECOST_VALIDCARD_RE = re.compile(r"'ValidCard':\s*'([^']*)'")
-_REDUCECOST_AMOUNT_RE = re.compile(r"'Amount':\s*'([^']*)'")
 
 
 # ---------------------------------------------------------------------------
@@ -807,39 +804,54 @@ def _bulk_load_x_cost_mana_double_cards(conn: sqlite3.Connection) -> frozenset[s
     """Mana doublers (ReplaceWith ProduceTwice/ProduceThrice) — the high-IDF
     ``mana_double`` tier of ``x_cost_scaler``. Mana-denial / color-warp
     replacements carry other ``ReplaceWith`` values and are excluded.
+    Reads the structured ``card_ports.replacement_result`` column (populated
+    from ``ReplaceWith`` by ``ports.extract_replacement_ports``) rather than
+    regex-parsing ``raw_line`` — immune to any ``repr(parsed)`` format change.
     Commander-independent; consumed by ``complement_rules.density._find_x_cost_scaler``."""
     rows = conn.execute(
-        "SELECT DISTINCT p.card_name, p.raw_line FROM card_ports p "
-        "WHERE p.port_type = 'replacement' AND p.event_class = 'ProduceMana'"
+        "SELECT DISTINCT card_name FROM card_ports "
+        "WHERE port_type = 'replacement' AND event_class = 'ProduceMana' "
+        "AND replacement_result IN ('ProduceTwice', 'ProduceThrice')"
     ).fetchall()
-    out: set[str] = set()
-    for row in rows:
-        m = _REPLACE_WITH_RE.search(row["raw_line"] or "")
-        if m and m.group(1) in ("ProduceTwice", "ProduceThrice"):
-            out.add(row["card_name"])
-    return frozenset(out)
+    return frozenset(row["card_name"] for row in rows)
 
 
 def _bulk_load_x_cost_cost_reduce_cards(conn: sqlite3.Connection) -> frozenset[str]:
     """Broad generic spell-cost reducers — the ``cost_reduce_generic`` tier of
-    ``x_cost_scaler``: ``ReduceCost`` with ``Type=Spell``, a broad ``ValidCard``
-    (``_X_COST_BROAD_VALIDCARD``, excluding self-cost), and a numeric ``Amount``.
+    ``x_cost_scaler``: a ``static`` ``ReduceCost`` with ``Type=Spell``, a broad
+    ``ValidCard`` (``_X_COST_BROAD_VALIDCARD``, excluding self-cost), and a
+    numeric ``Amount``.
+
+    ``raw_line`` is ``repr(parsed)`` of the extractor's dict, so it is parsed
+    with ``ast.literal_eval`` rather than per-field single-quote regexes — the
+    latter silently miss apostrophe-containing values (``repr`` switches such a
+    value to double quotes, e.g. ``"Card.namedKarlov's Crossbow"``) and cannot
+    tell an ABSENT ``ValidCard`` (restriction living in ``ValidTarget`` /
+    ``Activator``, e.g. Accursed Witch reducing an *opponent's* spell) from an
+    explicitly-empty one. A missing ``ValidCard`` key is therefore NOT treated
+    as broad. Restricted to ``port_type='static'`` so a future one-shot
+    ``AB$ ReduceCost`` effect (same ``event_class``) is not swept in.
     Commander-independent; consumed by ``complement_rules.density._find_x_cost_scaler``."""
     rows = conn.execute(
-        "SELECT DISTINCT p.card_name, p.raw_line FROM card_ports p WHERE p.event_class = 'ReduceCost'"
+        "SELECT DISTINCT p.card_name, p.raw_line FROM card_ports p "
+        "WHERE p.port_type = 'static' AND p.event_class = 'ReduceCost'"
     ).fetchall()
     out: set[str] = set()
     for row in rows:
-        raw = row["raw_line"] or ""
-        tm = _REDUCECOST_TYPE_RE.search(raw)
-        if not tm or tm.group(1) != "Spell":
+        try:
+            parsed = ast.literal_eval(row["raw_line"] or "{}")
+        except (ValueError, SyntaxError):
             continue
-        vm = _REDUCECOST_VALIDCARD_RE.search(raw)
-        valid_card = vm.group(1) if vm else ""
-        if valid_card not in _X_COST_BROAD_VALIDCARD:
+        if not isinstance(parsed, dict):
             continue
-        am = _REDUCECOST_AMOUNT_RE.search(raw)
-        if not am or not am.group(1).isdigit() or int(am.group(1)) < 1:
+        if parsed.get("Type") != "Spell":
+            continue
+        if "ValidCard" not in parsed:  # absent restriction is NOT broad
+            continue
+        if parsed["ValidCard"] not in _X_COST_BROAD_VALIDCARD:
+            continue
+        amount = str(parsed.get("Amount", ""))
+        if not amount.isdigit() or int(amount) < 1:
             continue
         out.add(row["card_name"])
     return frozenset(out)

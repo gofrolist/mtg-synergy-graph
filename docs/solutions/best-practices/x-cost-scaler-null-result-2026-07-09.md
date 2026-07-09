@@ -142,6 +142,31 @@ not a candidate-side change — and it must clear a whitelist-equivalence check,
 since selecting the exact commanders that already gain is a disguised whitelist.
 Not attempted here; noted for a future cycle.
 
+## Post-review correction (2026-07-09, PR #109 code review)
+
+A high-effort review found the `cost_reduce_generic` tier's `raw_line` parsing
+was **leakier than the "49 cards" measured above**:
+
+- The single-quote-only `ValidCard` regex missed apostrophe-containing values —
+  Python `repr()` renders `'ValidCard': "Card.namedKarlov's Crossbow"` with
+  double quotes — so those fell through the `vm.group(1) if vm else ""` sink and
+  were mis-classified as broad (Karlov's Crossbow).
+- An **absent** `ValidCard` key (restriction living in `ValidTarget` /
+  `Activator`) hit the same `""` sink — sweeping in opponent-scoped reducers
+  (Accursed Witch, whose effect reduces an *opponent's* spell — backwards for
+  this rule), plus Killian and Elderwood Scion.
+
+The loaders were rewritten to be robust: the `mana_double` tier now reads the
+structured `card_ports.replacement_result` column (identical 3-card result, no
+`raw_line` coupling); the `cost_reduce_generic` tier parses `raw_line` with
+`ast.literal_eval` and treats a missing `ValidCard` as **not** broad, restricted
+to `port_type='static'`. This tightened the tier from **49 → 35 cards**.
+**Re-measured on the cleaner pool the DECLINE holds — in-cohort mean ΔNDCG@30
+= −0.0265** (was −0.025; marginally *more* negative), reinforcing the
+commander-independence root cause: removing the mis-classified cards did not
+help, because the pool is still a fixed set handed identically to every
+commander. Hash-neutral throughout (`c770b664e626`, `--expect-identity` PASS).
+
 ## What stays in-tree
 
 Standing, hash-neutral infrastructure (flag off): the gate

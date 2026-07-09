@@ -41,7 +41,11 @@ merely to be smaller or more mechanically valid. Retry lead: a
 commander-*dependent* gate that keeps only cohort members whose `xPaid` is a
 *primary* payoff (must clear whitelist-equivalence). Standing infra remains
 in-tree flag-off; config hash unchanged `c770b664e626`, `--expect-identity`
-PASS. Full write-up:
+PASS. **PR #109 code-review fix:** the `cost_reduce_generic` `raw_line` parsing
+was leakier than the "49" above (apostrophe-quoted + absent `ValidCard` cards
+mis-classed as broad — Karlov's Crossbow, Accursed Witch); loaders rewritten
+(`replacement_result` column for doublers, `ast.literal_eval` for reducers),
+tier tightened 49→35, DECLINE re-confirmed at −0.0265. Full write-up:
 `docs/solutions/best-practices/x-cost-scaler-null-result-2026-07-09.md`.
 
 ### `attack_reward_evasion` DECLINED at pre-registered gates (spec 2026-07-09)

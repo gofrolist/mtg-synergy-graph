@@ -48,7 +48,8 @@ def x_cost_conn(monkeypatch):
         CREATE TABLE cards (name TEXT, card_types TEXT);
         CREATE TABLE card_ports (
             id INTEGER PRIMARY KEY, card_name TEXT, port_type TEXT,
-            event_class TEXT, granted_keyword TEXT, valid_filter TEXT, raw_line TEXT
+            event_class TEXT, granted_keyword TEXT, valid_filter TEXT,
+            raw_line TEXT, replacement_result TEXT
         );
         """
     )
@@ -60,14 +61,16 @@ def x_cost_conn(monkeypatch):
         INSERT INTO cards VALUES ('Wizard Lord', 'Creature');
         INSERT INTO cards VALUES ('Contamination', 'Enchantment');
         INSERT INTO cards VALUES ('Plain Bear', 'Creature');
+        INSERT INTO cards VALUES ('Apostrophe Reducer', 'Creature');
+        INSERT INTO cards VALUES ('Opponent Reducer', 'Creature');
         """
     )
     conn.executescript(
         r"""
-        -- T1 doubler
-        INSERT INTO card_ports (card_name, port_type, event_class, raw_line)
+        -- T1 doubler: matched via the structured replacement_result column
+        INSERT INTO card_ports (card_name, port_type, event_class, raw_line, replacement_result)
           VALUES ('Nyxbloom Ancient', 'replacement', 'ProduceMana',
-                  '{''Event'': ''ProduceMana'', ''ReplaceWith'': ''ProduceThrice''}');
+                  '{''Event'': ''ProduceMana'', ''ReplaceWith'': ''ProduceThrice''}', 'ProduceThrice');
         -- T2 broad generic reducer (Instant,Sorcery, Amount 1)
         INSERT INTO card_ports (card_name, port_type, event_class, raw_line)
           VALUES ('Goblin Electromancer', 'static', 'ReduceCost',
@@ -80,10 +83,21 @@ def x_cost_conn(monkeypatch):
         INSERT INTO card_ports (card_name, port_type, event_class, raw_line)
           VALUES ('Wizard Lord', 'static', 'ReduceCost',
                   '{''Mode'': ''ReduceCost'', ''ValidCard'': ''Wizard.YouCtrl'', ''Type'': ''Spell'', ''Amount'': ''1''}');
-        -- Mana DENIAL replacement -> EXCLUDED (ReplaceWith ProduceB, not Twice/Thrice)
+        -- Apostrophe-named ValidCard -> repr() uses DOUBLE quotes; the old
+        -- single-quote regex missed it (fell to "" -> broad). ast.literal_eval
+        -- parses it correctly -> narrow self-reference -> EXCLUDED.
         INSERT INTO card_ports (card_name, port_type, event_class, raw_line)
+          VALUES ('Apostrophe Reducer', 'static', 'ReduceCost',
+                  '{''Mode'': ''ReduceCost'', ''ValidCard'': "Card.namedApostrophe''s Card", ''Type'': ''Spell'', ''Amount'': ''1''}');
+        -- Absent ValidCard, restriction in ValidTarget + opponent Activator
+        -- (Accursed Witch shape) -> NOT broad -> EXCLUDED.
+        INSERT INTO card_ports (card_name, port_type, event_class, raw_line)
+          VALUES ('Opponent Reducer', 'static', 'ReduceCost',
+                  '{''Mode'': ''ReduceCost'', ''ValidTarget'': ''Card.Self'', ''Activator'': ''Player.Opponent'', ''Type'': ''Spell'', ''Amount'': ''1''}');
+        -- Mana DENIAL replacement -> EXCLUDED (ProduceB, not Twice/Thrice)
+        INSERT INTO card_ports (card_name, port_type, event_class, raw_line, replacement_result)
           VALUES ('Contamination', 'replacement', 'ProduceMana',
-                  '{''Event'': ''ProduceMana'', ''ReplaceWith'': ''ProduceB''}');
+                  '{''Event'': ''ProduceMana'', ''ReplaceWith'': ''ProduceB''}', 'ProduceB');
         """
     )
     conn.commit()
@@ -119,6 +133,8 @@ def test_emitter_excludes_self_cost_and_tribe_and_denial(x_cost_conn):
     assert "Wizard Lord" not in got  # tribe-narrow reducer
     assert "Contamination" not in got  # mana-denial, not a doubler
     assert "Plain Bear" not in got  # no relevant port
+    assert "Apostrophe Reducer" not in got  # double-quoted ValidCard (repr apostrophe) parsed, narrow
+    assert "Opponent Reducer" not in got  # absent ValidCard (ValidTarget/opponent) is NOT broad
 
 
 def test_emitter_one_complement_per_candidate(x_cost_conn):
