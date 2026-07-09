@@ -19,7 +19,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mtg_synergy_graph.bench.cohorts import LEGAL_LEGENDARY_CREATURE_WHERE, toughness_payoff
+from mtg_synergy_graph.bench.cohorts import LEGAL_LEGENDARY_CREATURE_WHERE, team_anthem, toughness_payoff
 from mtg_synergy_graph.bench.coverage import CoverageMetrics, compute_coverage
 from mtg_synergy_graph.bench.tensor import compute_config_hash
 from mtg_synergy_graph.complement_rules._interpreter_cache import clear_interpreter_cache
@@ -35,8 +35,8 @@ _DEFAULT_BASELINE = ".audit/coverage/baseline.json"
 _DEFAULT_DB = "data/synergy.db"
 
 #: Cohort-name -> predicate dispatch (mirrors ``bench/demand_coverage.py``'s
-#: flat-dispatch convention). Only ``toughness_payoff`` is seeded.
-_COHORT_DISPATCH = {"toughness_payoff": toughness_payoff}
+#: flat-dispatch convention).
+_COHORT_DISPATCH = {"toughness_payoff": toughness_payoff, "team_anthem": team_anthem}
 
 
 def legal_commander_names(conn: sqlite3.Connection) -> list[str]:
