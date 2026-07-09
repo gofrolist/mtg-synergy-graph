@@ -27,6 +27,11 @@ if TYPE_CHECKING:
     from ..penalties import CandidateCache
 
 
+#: Coverage-oriented rule (spec 2026-07-09-x-cost-scaler-rule). Default OFF and
+#: hash-neutral until it clears the pre-registered coverage + no-regression gates.
+_ENABLE_X_COST_SCALER: bool = False
+
+
 def _escape_like(value: str) -> str:
     """Escape SQL LIKE wildcard characters (%, _) in a value."""
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -1448,6 +1453,63 @@ def _commander_has_x_cost_ability(cmdr_ports: list[PortRow]) -> bool:
         if (p.get("port_type") or "").strip() == "scales_with" and (p.get("event_class") or "").strip() == "xPaid":
             return True
     return False
+
+
+def _find_x_cost_scaler(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+    candidate_cache: CandidateCache | None = None,
+) -> list[PortComplement]:
+    """Mana-economics payoffs for X-cost commanders (Unit 2).
+
+    Fires when the commander passes ``_commander_has_x_cost_ability``. Candidates
+    are the two card classes that mechanically increase the ``X`` payable, in two
+    IDF tiers scanned strong first so dedup keeps the stronger credit:
+    ``mana_double`` (ProduceTwice/Thrice doublers, ~3) > ``cost_reduce_generic``
+    (broad generic spell-cost reducers, ~49). A bounded, mechanically-discriminated
+    subset — NOT the flat ~1,979-card mana-producer flood (the team_anthem /
+    attack_reward_evasion null-result lesson).
+    """
+    if not _ENABLE_X_COST_SCALER:
+        return []
+    if not _commander_has_x_cost_ability(cmdr_ports):
+        return []
+
+    if candidate_cache is not None:
+        doublers = candidate_cache.x_cost_mana_double_cards
+        reducers = candidate_cache.x_cost_cost_reduce_cards
+    else:
+        from ..penalties import (
+            _bulk_load_x_cost_cost_reduce_cards,
+            _bulk_load_x_cost_mana_double_cards,
+        )
+
+        doublers = _bulk_load_x_cost_mana_double_cards(conn)
+        reducers = _bulk_load_x_cost_cost_reduce_cards(conn)
+
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+
+    def _emit(name: str, tier: str) -> None:
+        if name in cmdr_set or name in seen:
+            return
+        seen.add(name)
+        results.append(
+            PortComplement(
+                rule_id="x_cost_scaler",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="x_cost",
+                cand_event=tier,
+            )
+        )
+
+    for name in sorted(doublers):
+        _emit(name, "mana_double")
+    for name in sorted(reducers):
+        _emit(name, "cost_reduce_generic")
+    return results
 
 
 def _find_cost_reduction_targets(

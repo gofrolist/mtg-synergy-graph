@@ -52,6 +52,18 @@ HARD_FILTER_SCORE = -1e9
 #: Counter type aliases that all map to "P1P1" for matching purposes.
 P1P1_ALIASES: frozenset[str] = frozenset({"P1P1"})
 
+#: Broad ``ReduceCost`` ``ValidCard`` values that reduce a wide class of *your*
+#: spells (freeing mana for a bigger X) — the ``cost_reduce_generic`` tier of
+#: ``x_cost_scaler``. Excludes self-cost (``Card.Self``) and tribe/type-narrow
+#: reducers (``Wizard``, ``Dragon``, ``Creature``, …). Spec 2026-07-09-x-cost-scaler.
+_X_COST_BROAD_VALIDCARD: frozenset[str] = frozenset(
+    {"Card", "", "Card.nonCreature", "Card.multicolor", "Card.monocolored", "Instant,Sorcery"}
+)
+_REPLACE_WITH_RE = re.compile(r"'ReplaceWith':\s*'([^']*)'")
+_REDUCECOST_TYPE_RE = re.compile(r"'Type':\s*'([^']*)'")
+_REDUCECOST_VALIDCARD_RE = re.compile(r"'ValidCard':\s*'([^']*)'")
+_REDUCECOST_AMOUNT_RE = re.compile(r"'Amount':\s*'([^']*)'")
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -293,6 +305,11 @@ class CandidateCache:
     #: self-unblockable, the differentiator) and ``evasion_soft`` (Flying/Menace).
     evasion_hard_cards: frozenset[str] = frozenset()
     evasion_soft_cards: frozenset[str] = frozenset()
+    #: X-cost mana-economics pools consumed by ``_find_x_cost_scaler``:
+    #: ``x_cost_mana_double_cards`` (ProduceTwice/Thrice doublers, high IDF) and
+    #: ``x_cost_cost_reduce_cards`` (broad generic spell-cost reducers).
+    x_cost_mana_double_cards: frozenset[str] = frozenset()
+    x_cost_cost_reduce_cards: frozenset[str] = frozenset()
 
 
 def _attack_reward_evasion_enabled() -> bool:
@@ -310,6 +327,7 @@ def build_candidate_cache(conn: sqlite3.Connection) -> CandidateCache:
     # skip their two full scans entirely while the flag is off so a declined rule
     # costs nothing per cache build (populated on flip, like other cached pools).
     ar_evasion_on = _attack_reward_evasion_enabled()
+    x_cost_on = _x_cost_scaler_enabled()
     return CandidateCache(
         candidate_rows=_bulk_load_candidates(conn),
         creature_static_scopes=_bulk_load_static_scopes(conn),
@@ -336,6 +354,8 @@ def build_candidate_cache(conn: sqlite3.Connection) -> CandidateCache:
         ports_by_card=_bulk_load_ports_by_card(conn),
         evasion_hard_cards=_bulk_load_evasion_hard_cards(conn) if ar_evasion_on else frozenset(),
         evasion_soft_cards=_bulk_load_evasion_soft_cards(conn) if ar_evasion_on else frozenset(),
+        x_cost_mana_double_cards=_bulk_load_x_cost_mana_double_cards(conn) if x_cost_on else frozenset(),
+        x_cost_cost_reduce_cards=_bulk_load_x_cost_cost_reduce_cards(conn) if x_cost_on else frozenset(),
     )
 
 
@@ -781,6 +801,56 @@ def _bulk_load_evasion_hard_cards(conn: sqlite3.Connection) -> frozenset[str]:
         if _CANTBLOCKBY_SELF_ATTACKER_RE.search(row["raw_line"] or ""):
             hard.add(row["card_name"])
     return frozenset(hard)
+
+
+def _bulk_load_x_cost_mana_double_cards(conn: sqlite3.Connection) -> frozenset[str]:
+    """Mana doublers (ReplaceWith ProduceTwice/ProduceThrice) — the high-IDF
+    ``mana_double`` tier of ``x_cost_scaler``. Mana-denial / color-warp
+    replacements carry other ``ReplaceWith`` values and are excluded.
+    Commander-independent; consumed by ``complement_rules.density._find_x_cost_scaler``."""
+    rows = conn.execute(
+        "SELECT DISTINCT p.card_name, p.raw_line FROM card_ports p "
+        "WHERE p.port_type = 'replacement' AND p.event_class = 'ProduceMana'"
+    ).fetchall()
+    out: set[str] = set()
+    for row in rows:
+        m = _REPLACE_WITH_RE.search(row["raw_line"] or "")
+        if m and m.group(1) in ("ProduceTwice", "ProduceThrice"):
+            out.add(row["card_name"])
+    return frozenset(out)
+
+
+def _bulk_load_x_cost_cost_reduce_cards(conn: sqlite3.Connection) -> frozenset[str]:
+    """Broad generic spell-cost reducers — the ``cost_reduce_generic`` tier of
+    ``x_cost_scaler``: ``ReduceCost`` with ``Type=Spell``, a broad ``ValidCard``
+    (``_X_COST_BROAD_VALIDCARD``, excluding self-cost), and a numeric ``Amount``.
+    Commander-independent; consumed by ``complement_rules.density._find_x_cost_scaler``."""
+    rows = conn.execute(
+        "SELECT DISTINCT p.card_name, p.raw_line FROM card_ports p WHERE p.event_class = 'ReduceCost'"
+    ).fetchall()
+    out: set[str] = set()
+    for row in rows:
+        raw = row["raw_line"] or ""
+        tm = _REDUCECOST_TYPE_RE.search(raw)
+        if not tm or tm.group(1) != "Spell":
+            continue
+        vm = _REDUCECOST_VALIDCARD_RE.search(raw)
+        valid_card = vm.group(1) if vm else ""
+        if valid_card not in _X_COST_BROAD_VALIDCARD:
+            continue
+        am = _REDUCECOST_AMOUNT_RE.search(raw)
+        if not am or not am.group(1).isdigit() or int(am.group(1)) < 1:
+            continue
+        out.add(row["card_name"])
+    return frozenset(out)
+
+
+def _x_cost_scaler_enabled() -> bool:
+    """Read the ``x_cost_scaler`` flag at call time (lazy import avoids a
+    module-load cycle with ``complement_rules.density``)."""
+    from .complement_rules import density
+
+    return density._ENABLE_X_COST_SCALER
 
 
 def _bulk_load_untap_combo_cards(conn: sqlite3.Connection) -> frozenset[str]:
