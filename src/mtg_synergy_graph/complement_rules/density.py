@@ -1434,6 +1434,22 @@ def _query_cheat_cmc_brackets(
     return results
 
 
+def _commander_has_x_cost_ability(cmdr_ports: list[PortRow]) -> bool:
+    """Unit 1 gate (spec 2026-07-09-x-cost-scaler): the commander has an X-cost
+    ability whose effect scales with mana paid for ``X``.
+
+    True iff some port is ``port_type='scales_with'`` with
+    ``event_class='xPaid'``. No tribal/Exalted exclusion — the candidates
+    (mana doublers, cost reducers) are non-creature economics cards that do not
+    compete for a tribal/voltron creature slot, so the displacement risk that
+    gated ``attack_reward_evasion`` does not apply here.
+    """
+    for p in cmdr_ports:
+        if (p.get("port_type") or "").strip() == "scales_with" and (p.get("event_class") or "").strip() == "xPaid":
+            return True
+    return False
+
+
 def _find_cost_reduction_targets(
     conn: sqlite3.Connection,
     cmdr_ports: list[PortRow],
