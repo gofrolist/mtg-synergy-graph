@@ -8,6 +8,11 @@ import sqlite3
 from ..graph_engine import _trigger_only_matches_self
 from .core import PortComplement, PortRow
 
+#: Coverage-oriented rule (spec 2026-07-08-team-anthem-payoff-rule). Default
+#: OFF and hash-neutral until it clears the pre-registered coverage +
+#: no-regression gates.
+_ENABLE_TEAM_ANTHEM_PAYOFF: bool = False
+
 #: valid_filter values indicating edict-style sacrifice targeting.
 _EDICT_FILTERS: tuple[str, ...] = (
     "Player",
@@ -532,4 +537,66 @@ def _find_anthem_payoffs(
                 branch_kind=row["branch_kind"] or "root",
             )
         )
+    return results
+
+
+def _find_team_anthem_payoffs(
+    conn: sqlite3.Connection,
+    cmdr_ports: list[PortRow],
+    cmdr_set: set[str],
+) -> list[PortComplement]:
+    """Token-producer payoffs for passive team-anthem commanders (Unit 2).
+
+    Fires when the commander has a qualifying team-anthem static (Unit 1).
+    Candidates are creature-token producers, tiered ``token_doubler`` (strong,
+    replacement.CreateToken) > ``token_producer`` (effect.Token with a P/T
+    TokenScript). Dedup per candidate, strong tier wins. Reverse direction of
+    ``_find_anthem_payoffs`` (commander IS the anthem; candidates make bodies),
+    so no (cmdr_port, cand_port) pair is double-scored.
+    """
+    if not _ENABLE_TEAM_ANTHEM_PAYOFF:
+        return []
+    if not _commander_team_anthem_statics(cmdr_ports):
+        return []
+
+    results: list[PortComplement] = []
+    seen: set[str] = set()
+
+    # Strong tier first so dedup keeps the doubler credit.
+    for (name,) in conn.execute(
+        "SELECT DISTINCT card_name FROM card_ports WHERE port_type = 'replacement' AND event_class = 'CreateToken'"
+    ).fetchall():
+        if name in cmdr_set or name in seen:
+            continue
+        seen.add(name)
+        results.append(
+            PortComplement(
+                rule_id="team_anthem_payoff",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="team_anthem",
+                cand_event="token_doubler",
+            )
+        )
+
+    for row in conn.execute(
+        "SELECT DISTINCT card_name, raw_line FROM card_ports WHERE port_type = 'effect' AND event_class = 'Token'"
+    ).fetchall():
+        name = row["card_name"]
+        if name in cmdr_set or name in seen:
+            continue
+        m = _TOKENSCRIPT_RE.search(str(row["raw_line"] or ""))
+        if not (m and _CREATURE_TOKEN_PT_RE.search(m.group(1))):
+            continue
+        seen.add(name)
+        results.append(
+            PortComplement(
+                rule_id="team_anthem_payoff",
+                direction="synergy",
+                candidate=name,
+                cmdr_event="team_anthem",
+                cand_event="token_producer",
+            )
+        )
+
     return results
