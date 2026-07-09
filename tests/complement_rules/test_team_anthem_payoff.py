@@ -3,6 +3,7 @@ import sqlite3
 import pytest
 
 from mtg_synergy_graph.complement_rules import statics as statics_mod
+from mtg_synergy_graph.complement_rules.registry import attributable_rules_for_port
 from mtg_synergy_graph.complement_rules.statics import (
     _commander_team_anthem_statics,
     _find_team_anthem_payoffs,
@@ -160,3 +161,20 @@ def test_emitter_flag_off_returns_empty(anthem_conn, monkeypatch):
     # anthem_conn enabled the flag; override it off — the guard must short-circuit.
     monkeypatch.setattr(statics_mod, "_ENABLE_TEAM_ANTHEM_PAYOFF", False)
     assert _find_team_anthem_payoffs(anthem_conn, [_AVACYN_STATIC], set()) == []
+
+
+def test_rule_gate_flag_aware():
+    port = {
+        "port_type": "static",
+        "event_class": "Continuous",
+        "affected_scope": "Creature.YouCtrl",
+        "raw_line": "{'AddKeyword': 'Menace'}",
+    }
+    # Flag off: gate reports NO coverage so gap_report/quality see the truth.
+    statics_mod._ENABLE_TEAM_ANTHEM_PAYOFF = False
+    assert "team_anthem_payoff" not in attributable_rules_for_port(port)
+    statics_mod._ENABLE_TEAM_ANTHEM_PAYOFF = True
+    try:
+        assert "team_anthem_payoff" in attributable_rules_for_port(port)
+    finally:
+        statics_mod._ENABLE_TEAM_ANTHEM_PAYOFF = False
