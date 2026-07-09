@@ -203,18 +203,20 @@ uv run scripts/bench.py audit --per-commander-ndcg --fixture tests/fixtures/gold
 # legendary-creature commanders that establish a death/sacrifice engine — a
 # creature sacrifice outlet (cost/sacrifice of a Creature, not self) OR a
 # death-trigger payoff (trigger/ChangesZone Battlefield->Graveyard); mirrors
-# complement_rules.aristocrats._commander_is_aristocrats). Target cohort of the
-# aristocrats_death_bridge rule (spec 2026-07-09). Cohort size 292 / 267
+# complement_rules.aristocrats._commander_is_aristocrats — the SQL uses
+# instr(col,'x')>0 (case-sensitive substring == Python `in`), verified set-equal
+# to the Python gate; a drift guard test enforces it). Target cohort of the
+# aristocrats_death_bridge rule (spec 2026-07-09). Cohort size 291 / 274
 # buildable after the High-Synergy EDHREC filter. Build/pin/read:
 uv run python scripts/bootstrap_aristocrats_fixture.py                    # (Re)build + pin the cohort fixture. Same caveat as archetype-payoff: use THIS after a cardsfolder refresh, not `--repin` (which preserves the old cohort_members snapshot).
 uv run scripts/bench.py audit --repin --yes --fixture tests/fixtures/golden_set_aristocrats.json          # Re-pin scores + persist tensor to SQLite (scoring-config re-pin only)
 uv run scripts/bench.py audit --per-commander-ndcg --fixture tests/fixtures/golden_set_aristocrats.json   # Read the in-cohort vs rest NDCG slice
 # NOISE BAND — measured 2026-07-09 at config_hash c770b664e626 (rule still
 # flag-OFF; this is the pre-ship baseline band). Bootstrap band of the
-# score_commander top-30 NDCG@30 instrument (seed 17) over the 267 pinned
-# cohort members: mean 0.0698, 95% CI [0.0564, 0.0836], half-width = 0.0136.
+# score_commander top-30 NDCG@30 instrument (seed 17) over the 274 pinned
+# cohort members: mean 0.0688, 95% CI [0.0564, 0.0825], half-width = 0.0130.
 # This half-width is the primary-gate threshold (Task 5): a cohort in-cohort
-# mean-delta below +0.0136 is NOISE, not a win. Recompute after any data
+# mean-delta below +0.0130 is NOISE, not a win. Recompute after any data
 # refresh or re-pin via the snippet in docs/plans (bootstrap_band() over
 # compute_per_commander_ndcg_rows() restricted to pinned.cohort_members).
 

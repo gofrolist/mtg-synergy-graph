@@ -271,20 +271,30 @@ def aristocrats(conn: sqlite3.Connection) -> set[str]:
     not self) OR a death-trigger payoff (``trigger``/``ChangesZone``
     Battlefield->Graveyard).
 
-    Encodes the same condition as
-    ``complement_rules.aristocrats._commander_is_aristocrats``. Target cohort of
-    the ``aristocrats_death_bridge`` rule (spec 2026-07-09); deliberately NOT
-    part of any shared cohort union. Measured cohort size 292.
+    Encodes the SAME condition as
+    ``complement_rules.aristocrats._commander_is_aristocrats``, and must stay
+    bit-for-bit equivalent to it (the fixture + noise band are only valid if the
+    cohort mirrors the rule's actual firing). The Python gate uses case-sensitive
+    substring membership (``"Battlefield" in zone_origin``, ``"Creature" in
+    cost_subtype``), so the SQL uses ``instr(col, 'x') > 0`` — SQLite's
+    case-sensitive substring test — NOT ``= 'x'`` (which misses comma-list zone
+    values like ``'Graveyard,Exile'`` — God-Eternal Bontu, Athreos, …) and NOT
+    ``LIKE '%Creature%'`` (case-insensitive, which would spuriously admit
+    lowercase ``'that creature'`` — Gorbag of Minas Morgul). Target cohort of the
+    ``aristocrats_death_bridge`` rule (spec 2026-07-09); deliberately NOT part of
+    any shared cohort union. Measured cohort size 291 (verified set-equal to the
+    Python gate over the live DB).
     """
     rows = conn.execute(
         "SELECT DISTINCT c.name FROM cards c "  # noqa: S608 — no user input, LEGAL_LEGENDARY_CREATURE_WHERE is a module constant
         "WHERE " + LEGAL_LEGENDARY_CREATURE_WHERE + " AND c.name IN ("
         "  SELECT p.card_name FROM card_ports p WHERE "
         "    ( p.port_type = 'cost' AND p.event_class = 'sacrifice' "
-        "      AND p.cost_subtype LIKE '%Creature%' "
+        "      AND instr(p.cost_subtype, 'Creature') > 0 "
         "      AND (p.cost_target IS NULL OR p.cost_target != 'self') ) "
         "    OR ( p.port_type = 'trigger' AND p.event_class = 'ChangesZone' "
-        "         AND p.zone_origin = 'Battlefield' AND p.zone_destination = 'Graveyard' ) )"
+        "         AND instr(p.zone_origin, 'Battlefield') > 0 "
+        "         AND instr(p.zone_destination, 'Graveyard') > 0 ) )"
     )
     return {row["name"] for row in rows}
 
