@@ -89,10 +89,21 @@ Returns `True` iff **both** a trigger condition and both exclusions hold.
 `event_class ∈ {"Attacks", "AttackersDeclared", "AttackersDeclaredOneTarget"}`
 satisfies **either** acceptance path:
 
-- **Path (a) — team-scope trigger.** The trigger's `valid_filter` names
-  *your* creatures broadly: contains `"YouCtrl"` **and** is not
-  `_trigger_only_matches_self(valid_filter)`. Examples: `Creature.YouCtrl`,
-  `Creature.Other+YouCtrl`. ("Whenever a creature you control attacks …")
+- **Path (a) — team-scope trigger.** The trigger fires on *your* attacking
+  board. The scope is stored in **two different places** depending on event
+  class (verified against the DB — this distinction is load-bearing; a
+  `valid_filter`-only check silently misses every `AttackersDeclared`
+  commander, including the census-dead Aloy and Caesar):
+  - **`Attacks`** — scope is in `valid_filter`: accept when it contains
+    `"YouCtrl"` **and** is not `_trigger_only_matches_self(valid_filter)`
+    (e.g. `Creature.YouCtrl`, `Creature.Other+YouCtrl`).
+  - **`AttackersDeclared` / `AttackersDeclaredOneTarget`** — `valid_filter`
+    is **empty**; the scope lives in `raw_line` as `ValidAttackers` +
+    `AttackingPlayer`. Accept when `raw_line` contains
+    `'AttackingPlayer': 'You'` (Aloy: `ValidAttackers:
+    'Creature.Artifact+YouCtrl'`, `AttackingPlayer: 'You'`; Caesar:
+    `AttackingPlayer: 'You'`). ("Whenever one or more creatures you control
+    attack …")
 - **Path (b) — self-attack + team-pump.** The trigger is self-only
   (`_trigger_only_matches_self(valid_filter)` is `True`, e.g. `Card.Self`)
   **and** the commander has an `effect` port with `event_class == "PumpAll"`
