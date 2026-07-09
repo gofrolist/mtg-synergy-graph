@@ -90,39 +90,52 @@ commander set are excluded.
 
 ### Tier 1 — `death_payoff` (strong)
 
-A candidate that **triggers on a creature dying and executes a value effect**:
+A candidate that **triggers on a creature dying and executes a value effect**.
+Validated predicate (measured 218 cards at `config_hash c770b664e626`):
 
-- a `trigger` port with `event_class='ChangesZone'` (zone bf→grave) OR
-  `event_class ∈ {'Sacrificed','Dies'}`, **whose executed effect is a value
-  payoff** — the trigger's `execute_ref` / `sub_ability_ref` resolves to an
-  effect port in `{LoseLife, GainLife, DealDamage, DamageAll, PutCounter,
-  Draw, Token, Mana}`;
-- **scoped to your/any creatures dying** — exclude opponent-scoped triggers
-  (`Activator`/`ValidCard` restricted to an opponent, e.g. Accursed-Witch shape).
+- a `trigger` port with `event_class='ChangesZone'` (`zone_origin='Battlefield'`,
+  `zone_destination='Graveyard'`) OR `event_class ∈ {'Sacrificed','Dies'}`;
+- **whose executed effect is a value payoff** — the trigger's `execute_ref`
+  equals the `source_svar` of an `effect` port **on the same card** whose
+  `event_class ∈ {LoseLife, GainLife, DealDamage, DamageAll, PutCounter,
+  PutCounterAll, Token, Draw, Mana}` (`_DEATH_VALUE_EFFECTS`);
+- **watches a creature dying, scope broader than self** — the trigger's
+  `valid_filter LIKE '%Creature%'` and is not exactly `'Card.Self'` /
+  `'Creature.Self'` (a self-death one-shot is not a repeatable aristocrats
+  payoff); **exclude opponent-only** triggers (`valid_filter` restricted to
+  `*OppCtrl*` with no `YouCtrl`/`.Other`).
 
-**Anti-flood note (primary implementation risk):** the loose upper bound
-("card has a death trigger AND *some* value effect port anywhere") is ~881
-cards — a flood. The rule MUST require the value effect to be the death
-trigger's **own execution** (joined via `execute_ref`/`sub_ability_ref`), not
-merely co-present on the card. Whether that tightening + color-identity
-confinement + IDF weighting scopes below the cohort noise band is exactly what
-the primary gate (§6) decides. If the join cannot be made reliably from the port
-schema, that is a DECLINE-worthy finding to surface, not to paper over with a
-looser predicate.
+**Anti-flood note (RESOLVED — was the primary implementation risk):** the loose
+bound ("card has a death trigger AND *some* value effect port anywhere") is ~881
+cards, a flood. The `execute_ref = source_svar` value-effect join alone trims
+only to ~696 (most death triggers do something). The decisive lever is the
+`Creature.Other`/`YouCtrl` scope requirement (a repeatable payoff watches
+*creatures*, not just itself), which lands the pool at **218** — validated to
+include every canonical payoff (Blood Artist, Zulaport Cutthroat, Pitiless
+Plunderer, Bastion of Remembrance, Midnight Reaper, Grim Haruspex, Cruel
+Celebrant) and to exclude self-death one-shots / ramp (Solemn Simulacrum,
+Wurmcoil Engine, Sakura-Tribe Elder). The implementation MUST keep all three
+conditions (value-join AND creature-scope AND opponent-exclusion); dropping the
+scope condition reintroduces the flood.
 
 ### Tier 2 — `recursive_fodder` (support)
 
-A creature that **returns itself to be sacrificed again**:
+A creature that **returns itself to be sacrificed again**. Validated predicate
+(measured 131 cards):
 
-- `granted_keyword ∈ {'Undying','Persist'}`; OR
-- an `effect` port `event_class='ChangeZone'` with `zone_origin` Graveyard,
-  `zone_destination` Battlefield (self-recursion), restricted to `Creature`
-  card types.
+- a `Creature` card with `granted_keyword ∈ {'Undying','Persist'}`; OR
+- an `effect` port `event_class='ChangeZone'`, `zone_origin='Graveyard'`,
+  `zone_destination='Battlefield'`, whose `valid_filter` is empty / `Card.Self`
+  / `CARDNAME` (**self**-recursion) — this is the lever that excludes reanimator
+  value-engines that return *other* creatures (Sun Titan, Reveillark, Karmic
+  Guide, Sheoldred, all validated OUT).
 
-Loose upper bound ~416 cards. Cast-from-graveyard bodies (Gravecrawler) that do
-not surface as a grave→bf `ChangeZone` effect port are a known gap; the
-implementation should check whether a distinct port shape captures them and,
-if not, document the omission rather than widening the predicate.
+Validated IN: Reassembling Skeleton, Butcher Ghoul, Bloodsoaked Champion,
+Geralf's Messenger. **Known gaps** (documented, not widened): cast-from-graveyard
+permission bodies (Gravecrawler) surface as a `static` cast-permission, not a
+grave→bf effect port; sacrifice-cost self-return bodies (Nether Traitor,
+Tenacious Dead, Endless Cockroaches) use a different port shape. These omissions
+are acceptable — widening to capture them reintroduces reanimator noise.
 
 ## 4. Flag-off, hash-neutral wiring
 
