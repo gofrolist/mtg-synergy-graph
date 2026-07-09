@@ -5,6 +5,49 @@ impact notes. See `scripts/_audit_rule_impact.py` for the per-rule impact
 methodology (NDCG@30 metric + golden-set safety net + CONTENTIOUS verdict).
 See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
+## 2026-07-09
+
+### `attack_reward_evasion` DECLINED at pre-registered gates (spec 2026-07-09)
+
+Direct retry of `team_anthem_payoff`'s DECLINE lesson ("discriminate the
+candidate by which keyword the payoff rewards, don't credit a whole class
+flatly"), applied to the sibling activation-poverty dead-zone cluster: 94
+commanders with a live `Attacks`/`AttackersDeclared`/
+`AttackersDeclaredOneTarget` trigger earning zero. Keys on a team-benefiting
+attack-reward trigger (`_commander_has_team_attack_reward`, excludes tribal
+and Exalted commanders — the Rafiq displacement identity from
+`attack_payoffs`) and emits complements for creatures carrying evasion,
+two tiers (`evasion_hard` ~140 cards / `evasion_soft` ~3,400 cards). Targeted
+the 67-member `attack_reward` cohort (60 buildable) — Agrus Kos, Aloy Savior
+of Meridian, Caesar Legion's Emperor, Linden the Steadfast Queen, Inniaz the
+Gale Force, Miriam Herd Whisperer, and 55 others. **Verdict: DECLINE** — the
+primary gate (in-cohort NDCG@30 uplift, threshold > +0.0240 cohort noise
+half-width, seed 17) came back **−0.0445** (5 gainers / 37 regressors / 18
+flat; worst cliffs Linden −0.22, Aloy −0.17, Inniaz −0.17, Caesar −0.16; one
+notable gainer Miriam +0.24 whose own EDHREC list happens to be
+evasion-heavy — the exception that proves it's not general). A hard-tier-only
+salvage check (405 premium-evasion cards, soft flood removed) still regressed
+(−0.0416), ruling out a tier-trim fix. Golden-500 partitioned guard: aggregate
+Δ −0.00058 within noise but **only via 500-commander dilution** (zero
+out-of-cohort collateral — gate confinement holds — but in-cohort cliffs
+Caesar −0.16, Reyav −0.12). Per the plan's decision rule, the hard negative
+primary gate is dispositive; guards 4–6 (`--collinearity`, `rule_quality_gate`,
+`hidden_gem_hit_rate`) were **not measured**. Root cause, two-fold: (1) the
+evasion discriminator is commander-independent — every attack-reward
+commander gets the identical 3,782-card pool, so narrowing "all creatures" to
+"evasive creatures" shrinks the flood's size but not its shape (same
+whitelist-equivalent pathology as `team_anthem_payoff` /
+`death_outlet_feeder`); (2) evasion genuinely does not correlate with these
+commanders' EDHREC Hi-Syn lists, so crediting it displaces the correct cards
+rather than supplementing them. **The `team_anthem` retry lead
+("discriminate by keyword") is falsified for this cohort** — the honest
+complement for attack-reward really is a broad class, and broad classes
+flood regardless of how the class boundary is drawn. Flag
+`_ENABLE_ATTACK_REWARD_EVASION` stays `False`, hash-neutral (`c770b664e626`);
+rule + `RuleGate` + `attack_reward` cohort + fixture left as standing infra.
+Full record:
+`docs/solutions/best-practices/attack-reward-evasion-null-result-2026-07-09.md`.
+
 ## 2026-07-08
 
 ### `team_anthem_payoff` DECLINED at pre-registered gates (plan 2026-07-08)
