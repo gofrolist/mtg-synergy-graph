@@ -84,6 +84,10 @@ def arm_conn(monkeypatch):
         INSERT INTO cards VALUES ('Undying Body', 'Creature');
         INSERT INTO cards VALUES ('Sun Titan', 'Creature');
         INSERT INTO cards VALUES ('Plain Bear', 'Creature');
+        INSERT INTO cards VALUES ('Comma Drainer', 'Creature');
+        INSERT INTO cards VALUES ('Comma Fodder', 'Creature');
+        INSERT INTO cards VALUES ('OppOwn Payoff', 'Creature');
+        INSERT INTO cards VALUES ('Dual Tier Body', 'Creature');
         """
     )
     conn.executescript(
@@ -112,6 +116,31 @@ def arm_conn(monkeypatch):
         -- Sun Titan: reanimator returning OTHER cards -> EXCLUDED from tier2
         INSERT INTO card_ports (card_name, port_type, event_class, zone_origin, zone_destination, valid_filter)
           VALUES ('Sun Titan', 'effect', 'ChangeZone', 'Graveyard', 'Battlefield', 'Permanent.YouCtrl+cmcLE3');
+        -- Comma Drainer: comma-list zone_destination ('Graveyard,Exile') -> tier1
+        -- (regression: exact-equality zone match dropped this; instr() keeps it).
+        INSERT INTO card_ports (card_name, port_type, event_class, valid_filter, zone_origin, zone_destination, execute_ref, source_svar)
+          VALUES ('Comma Drainer', 'trigger', 'ChangesZone', 'Creature.Other+YouCtrl', 'Battlefield', 'Graveyard,Exile', 'TrigLoseLife', NULL);
+        INSERT INTO card_ports (card_name, port_type, event_class, source_svar)
+          VALUES ('Comma Drainer', 'effect', 'LoseLife', 'TrigLoseLife');
+        -- Comma Fodder: comma-list zone_origin ('Graveyard,Exile') self-return -> tier2
+        -- (regression: exact-equality zone match dropped this; instr() keeps it).
+        INSERT INTO card_ports (card_name, port_type, event_class, zone_origin, zone_destination)
+          VALUES ('Comma Fodder', 'effect', 'ChangeZone', 'Graveyard,Exile', 'Battlefield');
+        -- OppOwn Payoff: watches only opponent-OWNED creatures dying -> EXCLUDED
+        -- (regression: old exclusion only checked OppCtrl, admitting OppOwn).
+        INSERT INTO card_ports (card_name, port_type, event_class, valid_filter, zone_origin, zone_destination, execute_ref)
+          VALUES ('OppOwn Payoff', 'trigger', 'ChangesZone', 'Creature.OppOwn', 'Battlefield', 'Graveyard', 'TrigDmg2');
+        INSERT INTO card_ports (card_name, port_type, event_class, source_svar)
+          VALUES ('OppOwn Payoff', 'effect', 'DealDamage', 'TrigDmg2');
+        -- Dual Tier Body: qualifies for BOTH death_payoff (drain trigger) AND
+        -- recursive_fodder (Undying) -> must be emitted ONCE, as the stronger
+        -- death_payoff tier (cross-tier seen-set dedup).
+        INSERT INTO card_ports (card_name, port_type, event_class, valid_filter, zone_origin, zone_destination, execute_ref, source_svar)
+          VALUES ('Dual Tier Body', 'trigger', 'ChangesZone', 'Creature.Other', 'Battlefield', 'Graveyard', 'TrigDrain2', NULL);
+        INSERT INTO card_ports (card_name, port_type, event_class, source_svar)
+          VALUES ('Dual Tier Body', 'effect', 'LoseLife', 'TrigDrain2');
+        INSERT INTO card_ports (card_name, port_type, event_class, granted_keyword)
+          VALUES ('Dual Tier Body', 'keyword', 'Undying', 'Undying');
         """
     )
     conn.commit()
@@ -145,6 +174,17 @@ def test_emitter_recursive_fodder_tier_fires(arm_conn):
     got = {c.candidate: c.cand_event for c in _find_aristocrats_death_bridge(arm_conn, [_SAC], set())}
     assert got.get("Reassembling Skeleton") == "recursive_fodder"
     assert got.get("Undying Body") == "recursive_fodder"
+    # Comma-list zone_origin ('Graveyard,Exile') self-return — instr() keeps it.
+    assert got.get("Comma Fodder") == "recursive_fodder"
+
+
+def test_emitter_comma_list_zone_death_payoff_fires(arm_conn):
+    # Regression: a death trigger with a comma-list zone_destination
+    # ('Graveyard,Exile') must be admitted (exact-equality zone match dropped it).
+    from mtg_synergy_graph.complement_rules.aristocrats import _find_aristocrats_death_bridge
+
+    got = {c.candidate: c.cand_event for c in _find_aristocrats_death_bridge(arm_conn, [_SAC], set())}
+    assert got.get("Comma Drainer") == "death_payoff"
 
 
 def test_emitter_exclusions(arm_conn):
@@ -152,7 +192,8 @@ def test_emitter_exclusions(arm_conn):
 
     got = {c.candidate for c in _find_aristocrats_death_bridge(arm_conn, [_SAC], set())}
     assert "Self Death Draw" not in got  # self-death one-shot
-    assert "Opponent Payoff" not in got  # opponent-scoped
+    assert "Opponent Payoff" not in got  # opponent-scoped (OppCtrl)
+    assert "OppOwn Payoff" not in got  # opponent-scoped (OppOwn — regression)
     assert "Sun Titan" not in got  # reanimator returning other cards
     assert "Plain Bear" not in got  # no relevant port
 
@@ -162,6 +203,11 @@ def test_emitter_one_complement_per_candidate(arm_conn):
 
     comps = _find_aristocrats_death_bridge(arm_conn, [_SAC], set())
     assert len(comps) == len({c.candidate for c in comps})
+    # Dual Tier Body qualifies for BOTH tiers; cross-tier seen-set dedup must
+    # emit it exactly once, as the stronger death_payoff tier (scanned first).
+    dual = [c for c in comps if c.candidate == "Dual Tier Body"]
+    assert len(dual) == 1
+    assert dual[0].cand_event == "death_payoff"
 
 
 def test_emitter_excludes_commander_itself(arm_conn):

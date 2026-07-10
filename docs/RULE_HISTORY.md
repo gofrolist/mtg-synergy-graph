@@ -47,6 +47,12 @@ unreachable** by a pure mechanical scorer. Standing infrastructure kept flag-off
 (`_ENABLE_ARISTOCRATS_DEATH_BRIDGE=False`); `--expect-identity` PASS; config hash
 `c770b664e626` unchanged. Null-result:
 `docs/solutions/best-practices/aristocrats-death-bridge-null-result-2026-07-09.md`.
+**PR #110 review correction:** the candidate-pool loaders carried the same
+exact-match-zone bug fixed in the cohort predicate (0538bbe) — fixed to `instr()`
+(tier-1 228→229, tier-2 138→150) and the opponent-exclusion widened to the
+canonical `OppOwn`/`Player.Opponent` markers, with regression tests. DECLINE held
+on the corrected pools at −0.0111 (reinforcing pool-independence: +14 cards leave
+the aggregate unmoved). Hash-neutral.
 
 ### `x_cost_scaler` DECLINED at pre-registered gates (spec 2026-07-09)
 

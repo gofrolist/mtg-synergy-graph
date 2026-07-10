@@ -138,6 +138,28 @@ trigger feeds commander's own second ability" circuit, not a broad death-engine
 pool. Not attempted; likely a handful of commanders at best. It must clear a
 whitelist-equivalence check.
 
+## Post-review correction (2026-07-09, PR #110 high-effort code review)
+
+A recall-biased 8-angle review found the **candidate-pool loaders carried the
+same exact-match-zone bug** that the Task 4 review had already fixed in the
+cohort predicate (commit 0538bbe) — the fix was applied to `cohorts.py` but not
+to the two `penalties.py` loaders. Both `_bulk_load_aristocrats_death_payoff_cards`
+(`zone_destination = 'Graveyard'`) and `_bulk_load_aristocrats_recursive_fodder_cards`
+(`zone_origin = 'Graveyard'`) used exact-equality, silently dropping comma-list
+zone values ('Graveyard,Exile'): tier-1 228→**229** (added Reyhan, Syr Vondam),
+tier-2 138→**150** (added Bramble Familiar, Bruna, Danitha, +9). The review also
+found the opponent-exclusion only tested the `OppCtrl` substring, admitting
+`OppOwn`-scoped triggers (Grim Feast, Patron of the Nezumi); it was widened to
+the canonical opponent markers (`OppOwn`/`Player.Opponent`/`+Opp`) with a
+your/any rescue. Both loaders now use `instr()` (mirroring the cohort), and
+comma-list-zone + `OppOwn`-exclusion + cross-tier-dedup regression tests were
+added. **Re-measured on the corrected 229/150 pools the DECLINE holds — in-cohort
+mean ΔNDCG@30 = −0.0111** (was −0.0110; 79 gain / 111 reg / 84 flat). The +14
+pool cards leave the aggregate unmoved, which *reinforces* the pool-independence
+root cause: a fixed pool floods regardless of its exact contents. Hash-neutral
+throughout (`c770b664e626`, `--expect-identity` PASS — the loaders are flag-off
+candidate-side).
+
 ## What stays in-tree
 
 Standing, hash-neutral infrastructure (flag off): `_commander_is_aristocrats`,

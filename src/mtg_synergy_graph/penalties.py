@@ -895,7 +895,7 @@ def _aristocrats_death_bridge_enabled() -> bool:
 
 
 def _bulk_load_aristocrats_death_payoff_cards(conn: sqlite3.Connection) -> frozenset[str]:
-    """Tier-1 ``death_payoff`` pool (~218): a ``trigger`` on a creature dying
+    """Tier-1 ``death_payoff`` pool (~229): a ``trigger`` on a creature dying
     (``ChangesZone`` Battlefield->Graveyard, or ``Sacrificed``/``Dies``) whose
     ``execute_ref`` matches a same-card ``effect`` port's ``source_svar`` with a
     value ``event_class`` in :data:`_DEATH_VALUE_EFFECTS`, watching a Creature
@@ -909,22 +909,32 @@ def _bulk_load_aristocrats_death_payoff_cards(conn: sqlite3.Connection) -> froze
         "SELECT DISTINCT t.card_name FROM card_ports t "
         "JOIN card_ports e ON e.card_name = t.card_name AND e.source_svar = t.execute_ref "
         "WHERE t.port_type = 'trigger' "
-        "AND ( (t.event_class = 'ChangesZone' AND t.zone_origin = 'Battlefield' "
-        "       AND t.zone_destination = 'Graveyard') "
+        # Zone match is substring (instr, case-sensitive), NOT exact-equality:
+        # zone_destination can be a comma-list ('Graveyard,Exile' — Reyhan, Syr
+        # Vondam). Mirrors cohorts.py::aristocrats (fixed in 0538bbe).
+        "AND ( (t.event_class = 'ChangesZone' AND instr(t.zone_origin, 'Battlefield') > 0 "
+        "       AND instr(t.zone_destination, 'Graveyard') > 0) "
         "     OR t.event_class IN ('Sacrificed', 'Dies') ) "
         "AND t.execute_ref IS NOT NULL AND t.execute_ref != '' "
         "AND e.port_type = 'effect' AND e.event_class IN (" + ph + ") "  # ph is placeholders, values bound below
         "AND t.valid_filter LIKE '%Creature%' "
         "AND t.valid_filter NOT IN ('Card.Self', 'Creature.Self') "
-        "AND NOT (t.valid_filter LIKE '%OppCtrl%' AND t.valid_filter NOT LIKE '%YouCtrl%' "
-        "         AND t.valid_filter NOT LIKE '%.Other%')",
+        # Exclude opponent-ONLY triggers (a payoff watching only opponents'
+        # creatures dying is backwards for a sac-outlet deck). Opponent markers
+        # mirror the canonical scope detector (complement_rules/core.py): OppCtrl
+        # / OppOwn / Player.Opponent / +Opp. Rescued when the filter also carries
+        # a your/any-scope marker (YouCtrl/YouOwn, a broad '.Other', or Card.Self).
+        "AND NOT ( (t.valid_filter LIKE '%OppCtrl%' OR t.valid_filter LIKE '%OppOwn%' "
+        "           OR t.valid_filter LIKE '%Player.Opponent%' OR t.valid_filter LIKE '%+Opp%') "
+        "         AND t.valid_filter NOT LIKE '%YouCtrl%' AND t.valid_filter NOT LIKE '%YouOwn%' "
+        "         AND t.valid_filter NOT LIKE '%.Other%' AND t.valid_filter NOT LIKE '%Card.Self%')",
         tuple(sorted(_DEATH_VALUE_EFFECTS)),
     ).fetchall()
     return frozenset(row["card_name"] for row in rows)
 
 
 def _bulk_load_aristocrats_recursive_fodder_cards(conn: sqlite3.Connection) -> frozenset[str]:
-    """Tier-2 ``recursive_fodder`` pool (~131): a Creature that returns ITSELF —
+    """Tier-2 ``recursive_fodder`` pool (~150): a Creature that returns ITSELF —
     ``Undying``/``Persist`` keyword, or a grave->bf ``ChangeZone`` effect whose
     ``valid_filter`` is empty / ``Card.Self`` / ``CARDNAME`` (self-recursion).
     The self-filter condition excludes reanimator value-engines that return
@@ -935,8 +945,10 @@ def _bulk_load_aristocrats_recursive_fodder_cards(conn: sqlite3.Connection) -> f
         "JOIN cards c ON c.name = p.card_name "
         "WHERE c.card_types LIKE '%Creature%' AND ( "
         "  p.granted_keyword IN ('Undying', 'Persist') "
+        # Zone match is substring (instr), NOT exact-equality — zone_origin can
+        # be a comma-list ('Graveyard,Exile' — Bramble Familiar, Bruna, Danitha).
         "  OR ( p.port_type = 'effect' AND p.event_class = 'ChangeZone' "
-        "       AND p.zone_origin = 'Graveyard' AND p.zone_destination = 'Battlefield' "
+        "       AND instr(p.zone_origin, 'Graveyard') > 0 AND instr(p.zone_destination, 'Battlefield') > 0 "
         "       AND ( p.valid_filter IS NULL OR p.valid_filter = '' "
         "             OR p.valid_filter LIKE '%Card.Self%' OR p.valid_filter LIKE '%CARDNAME%' ) ) )"
     ).fetchall()
