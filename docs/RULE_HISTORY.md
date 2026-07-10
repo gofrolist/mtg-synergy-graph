@@ -7,6 +7,53 @@ See `docs/RULE_PLANNING.md` for the forward-looking planning workflow.
 
 ## 2026-07-09
 
+### `aristocrats_death_bridge` DECLINED at pre-registered gates (spec 2026-07-09)
+
+**Fourth** consecutive dead-zone-payoff DECLINE, and the best-grounded: the
+deliberate commander-*dependent* retry after
+`docs/solutions/best-practices/calibration-levers-exhausted-2026-07-09.md` ruled
+out weight-tuning and staple-reform. Supplies the missing substrate bridge
+`sacrifice → ChangesZone(bf→grave)` (a creature you sacrifice *dies*, triggering
+death-payoffs) so aristocrats staples that sat **unranked** for sac-outlet
+commanders finally connect. Keys on `_commander_is_aristocrats` (creature
+sacrifice outlet OR bf→grave death-trigger; 291 commanders). Two TIGHT,
+validated IDF tiers — `death_payoff` (218: a death trigger whose own
+`execute_ref` resolves to a value effect, watching a creature dying broader than
+self, opponent-excluded — Blood Artist, Bastion, Pitiless Plunderer) and
+`recursive_fodder` (131: Undying/Persist + self-returning bodies). Targeted the
+291-member cohort (274 buildable). **Verdict: DECLINE** — primary gate (in-cohort
+NDCG@30 uplift, threshold > +0.0130 cohort noise half-width, seed 17, mean
+0.0688, n=274) came back **−0.0110** (80 gainers / 110 regressors / 84 flat).
+The **closest** cycle yet (−0.011 vs −0.025) with a large real gainer set — the
+true aristocrats gain handsomely (Jerren +0.136, Judith +0.087, Athreos +0.080,
+Erebos +0.074, Elenda +0.065). But anti-flood FAILS: 13 cohort members' entire
+top-30 flooded with death cards → live NDCG **0.000** (Caesar, Cleopatra, Elder
+Arthur Maxson, Reyhan, Varolz, Torsten…). A diagnostic split shows even the
+truest sub-cohort (has-death-trigger, n=200) is negative (−0.0078); flood
+casualties span both subsets, so the flood is **not separable by any mechanical
+gate property**. Gate confinement holds by construction (0 out-of-cohort
+collateral). Guards 4–6 not measured (primary dispositive). **Root cause —
+pool-independence (terminal form of the four-cycle lesson):** this cycle made the
+GATE commander-dependent (only aristocrats fire) and still floods, because the
+POOL is commander-*in*dependent — every gated commander gets the identical
+218+131 death-engine pool. Reyhan (a counters deck that sacrifices) and Yawgmoth
+(a pure aristocrats engine) receive the same death-card flood: correct for
+Yawgmoth, top-30-destroying for Reyhan. True de-flooding needs the *pool* to vary
+per commander by which payoffs the deck actually wants — that is EDHREC
+popularity, the non-mechanical signal the scorer refuses by design. Four cycles
+(flat → keyword → mana-economic → aristocrats-bridged) converge on the same wall;
+the dead-zone-payoff class (broad-enabler complements) appears **fundamentally
+unreachable** by a pure mechanical scorer. Standing infrastructure kept flag-off
+(`_ENABLE_ARISTOCRATS_DEATH_BRIDGE=False`); `--expect-identity` PASS; config hash
+`c770b664e626` unchanged. Null-result:
+`docs/solutions/best-practices/aristocrats-death-bridge-null-result-2026-07-09.md`.
+**PR #110 review correction:** the candidate-pool loaders carried the same
+exact-match-zone bug fixed in the cohort predicate (0538bbe) — fixed to `instr()`
+(tier-1 228→229, tier-2 138→150) and the opponent-exclusion widened to the
+canonical `OppOwn`/`Player.Opponent` markers, with regression tests. DECLINE held
+on the corrected pools at −0.0111 (reinforcing pool-independence: +14 cards leave
+the aggregate unmoved). Hash-neutral.
+
 ### `x_cost_scaler` DECLINED at pre-registered gates (spec 2026-07-09)
 
 Third consecutive dead-zone-payoff DECLINE, after `team_anthem_payoff` and

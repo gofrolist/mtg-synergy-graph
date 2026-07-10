@@ -1137,6 +1137,7 @@ def _cost_filter_group(cost_port: PortRow) -> str:
 # are defined to avoid circular imports — submodules import from this module)
 # ---------------------------------------------------------------------------
 
+from .aristocrats import _find_aristocrats_death_bridge  # noqa: E402
 from .combat import (  # noqa: E402
     _find_attack_payoffs,
     _find_attack_reward_evasion,
@@ -1391,6 +1392,7 @@ def find_all_complements(
         out.extend(_find_graveyard_sac_value(conn, cmdr_ports, cmdr_set))
         out.extend(_find_cost_reduction_targets(conn, cmdr_ports, cmdr_set, candidate_cache))
         out.extend(_find_x_cost_scaler(conn, cmdr_ports, cmdr_set, candidate_cache))
+        out.extend(_find_aristocrats_death_bridge(conn, cmdr_ports, cmdr_set, candidate_cache))
         out.extend(_find_land_to_gy_synergy(conn, cmdr_ports, cmdr_set))
         out.extend(_find_cascade_value(conn, cmdr_ports, cmdr_set))
         out.extend(_find_flicker_payoffs(conn, cmdr_ports, cmdr_set))

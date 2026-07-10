@@ -307,6 +307,12 @@ class CandidateCache:
     #: ``x_cost_cost_reduce_cards`` (broad generic spell-cost reducers).
     x_cost_mana_double_cards: frozenset[str] = frozenset()
     x_cost_cost_reduce_cards: frozenset[str] = frozenset()
+    #: Aristocrats death-bridge pools consumed by
+    #: ``_find_aristocrats_death_bridge``: ``death_payoff`` (death-triggered
+    #: value payoffs, tier 1) and ``recursive_fodder`` (self-returning bodies,
+    #: tier 2).
+    aristocrats_death_payoff_cards: frozenset[str] = frozenset()
+    aristocrats_recursive_fodder_cards: frozenset[str] = frozenset()
 
 
 def _attack_reward_evasion_enabled() -> bool:
@@ -325,6 +331,7 @@ def build_candidate_cache(conn: sqlite3.Connection) -> CandidateCache:
     # costs nothing per cache build (populated on flip, like other cached pools).
     ar_evasion_on = _attack_reward_evasion_enabled()
     x_cost_on = _x_cost_scaler_enabled()
+    aristocrats_on = _aristocrats_death_bridge_enabled()
     return CandidateCache(
         candidate_rows=_bulk_load_candidates(conn),
         creature_static_scopes=_bulk_load_static_scopes(conn),
@@ -353,6 +360,12 @@ def build_candidate_cache(conn: sqlite3.Connection) -> CandidateCache:
         evasion_soft_cards=_bulk_load_evasion_soft_cards(conn) if ar_evasion_on else frozenset(),
         x_cost_mana_double_cards=_bulk_load_x_cost_mana_double_cards(conn) if x_cost_on else frozenset(),
         x_cost_cost_reduce_cards=_bulk_load_x_cost_cost_reduce_cards(conn) if x_cost_on else frozenset(),
+        aristocrats_death_payoff_cards=_bulk_load_aristocrats_death_payoff_cards(conn)
+        if aristocrats_on
+        else frozenset(),
+        aristocrats_recursive_fodder_cards=_bulk_load_aristocrats_recursive_fodder_cards(conn)
+        if aristocrats_on
+        else frozenset(),
     )
 
 
@@ -863,6 +876,83 @@ def _x_cost_scaler_enabled() -> bool:
     from .complement_rules import density
 
     return density._ENABLE_X_COST_SCALER
+
+
+#: Value-payoff effect classes that make a death trigger an aristocrats payoff
+#: (as opposed to a non-value death trigger). Consumed by
+#: ``_bulk_load_aristocrats_death_payoff_cards``.
+_DEATH_VALUE_EFFECTS = frozenset(
+    {"LoseLife", "GainLife", "DealDamage", "DamageAll", "PutCounter", "PutCounterAll", "Token", "Draw", "Mana"}
+)
+
+
+def _aristocrats_death_bridge_enabled() -> bool:
+    """Read the ``aristocrats_death_bridge`` flag at call time (lazy import
+    avoids a module-load cycle with ``complement_rules.aristocrats``)."""
+    from .complement_rules import aristocrats
+
+    return aristocrats._ENABLE_ARISTOCRATS_DEATH_BRIDGE
+
+
+def _bulk_load_aristocrats_death_payoff_cards(conn: sqlite3.Connection) -> frozenset[str]:
+    """Tier-1 ``death_payoff`` pool (~229): a ``trigger`` on a creature dying
+    (``ChangesZone`` Battlefield->Graveyard, or ``Sacrificed``/``Dies``) whose
+    ``execute_ref`` matches a same-card ``effect`` port's ``source_svar`` with a
+    value ``event_class`` in :data:`_DEATH_VALUE_EFFECTS`, watching a Creature
+    dying with scope broader than pure ``Card.Self``, excluding opponent-only
+    triggers. All three conditions are required — dropping the Creature-scope
+    condition reintroduces an ~696-card flood.
+    Commander-independent; consumed by
+    ``complement_rules.aristocrats._find_aristocrats_death_bridge``."""
+    ph = ",".join("?" * len(_DEATH_VALUE_EFFECTS))
+    rows = conn.execute(
+        "SELECT DISTINCT t.card_name FROM card_ports t "
+        "JOIN card_ports e ON e.card_name = t.card_name AND e.source_svar = t.execute_ref "
+        "WHERE t.port_type = 'trigger' "
+        # Zone match is substring (instr, case-sensitive), NOT exact-equality:
+        # zone_destination can be a comma-list ('Graveyard,Exile' — Reyhan, Syr
+        # Vondam). Mirrors cohorts.py::aristocrats (fixed in 0538bbe).
+        "AND ( (t.event_class = 'ChangesZone' AND instr(t.zone_origin, 'Battlefield') > 0 "
+        "       AND instr(t.zone_destination, 'Graveyard') > 0) "
+        "     OR t.event_class IN ('Sacrificed', 'Dies') ) "
+        "AND t.execute_ref IS NOT NULL AND t.execute_ref != '' "
+        "AND e.port_type = 'effect' AND e.event_class IN (" + ph + ") "  # ph is placeholders, values bound below
+        "AND t.valid_filter LIKE '%Creature%' "
+        "AND t.valid_filter NOT IN ('Card.Self', 'Creature.Self') "
+        # Exclude opponent-ONLY triggers (a payoff watching only opponents'
+        # creatures dying is backwards for a sac-outlet deck). Opponent markers
+        # mirror the canonical scope detector (complement_rules/core.py): OppCtrl
+        # / OppOwn / Player.Opponent / +Opp. Rescued when the filter also carries
+        # a your/any-scope marker (YouCtrl/YouOwn, a broad '.Other', or Card.Self).
+        "AND NOT ( (t.valid_filter LIKE '%OppCtrl%' OR t.valid_filter LIKE '%OppOwn%' "
+        "           OR t.valid_filter LIKE '%Player.Opponent%' OR t.valid_filter LIKE '%+Opp%') "
+        "         AND t.valid_filter NOT LIKE '%YouCtrl%' AND t.valid_filter NOT LIKE '%YouOwn%' "
+        "         AND t.valid_filter NOT LIKE '%.Other%' AND t.valid_filter NOT LIKE '%Card.Self%')",
+        tuple(sorted(_DEATH_VALUE_EFFECTS)),
+    ).fetchall()
+    return frozenset(row["card_name"] for row in rows)
+
+
+def _bulk_load_aristocrats_recursive_fodder_cards(conn: sqlite3.Connection) -> frozenset[str]:
+    """Tier-2 ``recursive_fodder`` pool (~150): a Creature that returns ITSELF —
+    ``Undying``/``Persist`` keyword, or a grave->bf ``ChangeZone`` effect whose
+    ``valid_filter`` is empty / ``Card.Self`` / ``CARDNAME`` (self-recursion).
+    The self-filter condition excludes reanimator value-engines that return
+    OTHER creatures (Sun Titan, Reveillark). Commander-independent; consumed by
+    ``complement_rules.aristocrats._find_aristocrats_death_bridge``."""
+    rows = conn.execute(
+        "SELECT DISTINCT p.card_name FROM card_ports p "
+        "JOIN cards c ON c.name = p.card_name "
+        "WHERE c.card_types LIKE '%Creature%' AND ( "
+        "  p.granted_keyword IN ('Undying', 'Persist') "
+        # Zone match is substring (instr), NOT exact-equality — zone_origin can
+        # be a comma-list ('Graveyard,Exile' — Bramble Familiar, Bruna, Danitha).
+        "  OR ( p.port_type = 'effect' AND p.event_class = 'ChangeZone' "
+        "       AND instr(p.zone_origin, 'Graveyard') > 0 AND instr(p.zone_destination, 'Battlefield') > 0 "
+        "       AND ( p.valid_filter IS NULL OR p.valid_filter = '' "
+        "             OR p.valid_filter LIKE '%Card.Self%' OR p.valid_filter LIKE '%CARDNAME%' ) ) )"
+    ).fetchall()
+    return frozenset(row["card_name"] for row in rows)
 
 
 def _bulk_load_untap_combo_cards(conn: sqlite3.Connection) -> frozenset[str]:

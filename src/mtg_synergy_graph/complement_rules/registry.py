@@ -318,6 +318,31 @@ def _x_cost_scaler_gate(port: PortRow) -> bool:
     return (port.get("event_class") or "").strip() == "xPaid"
 
 
+def _aristocrats_death_bridge_gate(port: PortRow) -> bool:
+    """Coarse single-port shape for aristocrats_death_bridge coverage attribution.
+
+    Flag-aware: reads ``aristocrats._ENABLE_ARISTOCRATS_DEATH_BRIDGE`` at CALL
+    time so gap_report / rule_quality_gate see NO coverage while the rule is off.
+    Coarse by design (attribution only) — the full gate + emitter live in
+    ``complement_rules.aristocrats``. Matches either commander-gate port shape:
+    a creature sacrifice outlet, or a Battlefield->Graveyard death trigger."""
+    from . import aristocrats
+
+    if not aristocrats._ENABLE_ARISTOCRATS_DEATH_BRIDGE:
+        return False
+    pt = (port.get("port_type") or "").strip()
+    ev = (port.get("event_class") or "").strip()
+    if pt == "cost" and ev == "sacrifice":
+        sub = port.get("cost_subtype") or ""
+        tgt = (port.get("cost_target") or "").strip()
+        return "Creature" in sub and tgt != "self"
+    if pt == "trigger" and ev == "ChangesZone":
+        zo = port.get("zone_origin") or ""
+        zd = port.get("zone_destination") or ""
+        return "Battlefield" in zo and "Graveyard" in zd
+    return False
+
+
 def _cost_payoff_gate(port: PortRow) -> bool:
     if (port.get("port_type") or "").strip() != "cost":
         return False
@@ -785,6 +810,7 @@ _CARD_ATTR_GATES: tuple[RuleGate, ...] = (
     RuleGate("wheel_synergy", _wheel_synergy_gate),
     RuleGate("mana_doubler", _mana_doubler_gate),
     RuleGate("x_cost_scaler", _x_cost_scaler_gate),
+    RuleGate("aristocrats_death_bridge", _aristocrats_death_bridge_gate),
     # Note: no RuleGate for `extra_land_plays`. The helper
     # `_find_extra_land_plays` (landfall.py) gates on commander ports whose
     # raw_line contains `AdjustLandPlays` and emits complements labelled with
