@@ -83,6 +83,8 @@ alternatives that will otherwise resurface.
 | D6 | All rules are **data rows**, no Python rule path | Partition verifiable statically; the signature miner can emit candidate rules directly; a rule's blast radius is readable without running anything |
 | D7 | Aggregate NDCG@30 vs the blended EDHREC commander page is **retired as a target** | Wrong instrument by construction: a correctly focused reanimator list *should* score worse against a mixture of all that commander's decks |
 | D8 | Strategy vocabulary is **seeded by EDHREC tags, not limited to them**; **micro-strategies** (1–5 commanders, hand-authored) are a first-class class | Rare commander-specific mechanics have no home in a global rule set, where channel (b) (§1.1) makes them cost a full regression sweep regardless of how narrowly they fire |
+| D9 | Success is measured by **`recall@30` against the theme page's 10 High Synergy Cards**, used as a **floor** (agg ≥ 0.50, no commander below 3/10), with **novelty rate** as the co-metric that guards it | Matches the stated expectation of being close to the theme page, without making the metric a maximand — under maximisation the optimal system is to serve EDHREC's list directly, contradicting D2 |
+| D10 | Both **tag-level** (`/tags/<theme>/<colors>`) and **commander-level** (`/commanders/<slug>/<theme>`) labels are collected | The pair separates "strategy signature is wrong" from "commander-specific rules are missing"; neither label does that alone (§6.2) |
 
 ## 3. Core model
 
@@ -257,6 +259,11 @@ Two endpoints, both already proven in `mtg-edh-builder`
 |---|---|---|
 | `json.edhrec.com/pages/commanders/<slug>.json` → `panels.taglinks` | strategies offered + deck counts | `commander_themes(commander_slug, theme_slug, label, deck_count, scraped_at)` |
 | `json.edhrec.com/pages/commanders/<slug>/<theme>.json` → `container.json_dict.cardlists[].cardviews[]` | the card list for that (commander, strategy) | `theme_cards(commander_slug, theme_slug, card_name, synergy, inclusion, category)` |
+| `json.edhrec.com/pages/tags/<theme>/<color-identity>.json` | the commander-independent card list for that (strategy, colours) — the tag-level label of §6.2 | `tag_cards(theme_slug, color_identity, card_name, synergy, inclusion, category)` |
+
+The `section` value (`'High Synergy Cards'`, `'Top Cards'`, the card-type
+buckets) must be preserved on every row: §6.1's label is the High Synergy
+section specifically, and it holds exactly 10 cards.
 
 Stored in a **separate `themes.db`** that the recommendation path physically
 cannot open — the design-time-only discipline kept structural rather than by
@@ -345,22 +352,107 @@ can still surface because its *ports* match the signature.
 
 ## 6. Evaluation
 
+### 6.1 The label and the metric
+
+The label is the **High Synergy Cards** section of the theme page. Measured
+structural fact: that section holds **exactly 10 cards** — 2,720 of the 2,761
+commanders in the current scrape have exactly 10, the rest fewer.
+
+Consequently `precision@30` is capped at 0.33 and is the wrong framing. The
+metric is:
+
+```
+recall@30 = |our top-30 ∩ the 10 High Synergy Cards| / |High Synergy Cards|
+```
+
+### 6.2 Two label levels
+
+Both EDHREC pages are used, and the pair is diagnostic in a way neither is
+alone:
+
+| Label | URL shape | Ground truth for |
+|---|---|---|
+| **Tag-level** | `/tags/<theme>/<color-identity>` | The **strategy manifest alone** — commander-independent |
+| **Commander-level** | `/commanders/<slug>/<theme>` | **Manifest + commander ports** |
+
+Matching the tag page while missing the commander page means the strategy
+signature is right and commander-specific rules are missing. The reverse means
+the strategy is overfitted to the commander. A single metric cannot separate
+those.
+
+### 6.3 Measured baseline (2026-08-14, current engine, blended commander page)
+
+Aggregate `recall@30` = **0.230** over ten sacrifice/counters commanders:
+
+| Commander | recall@30 |
+|---|---|
+| Reyhan, Last of the Abzan | 6/10 |
+| Teysa Karlov | 5/10 |
+| Chatterfang, Squirrel General | 4/10 |
+| Prossh, Skyraider of Kher | 3/10 |
+| Judith, the Scourge Diva | 3/10 |
+| Ghave, Guru of Spores | 2/10 |
+| Korvold / Meren / Yawgmoth / Karador | **0/10** |
+
+The distribution is the diagnosis. The engine performs where a strategy has a
+**tight mechanical signature** (Reyhan's +1/+1 counters — Corpsejack Menace,
+Hardened Scales, Winding Constrictor) and collapses to zero where the strategy
+is defined by archetype rather than port shape. The zero set is precisely the
+four DECLINE commanders.
+
+**Two distinct failure modes, which `recall@30` alone conflates and the report
+must therefore decompose:**
+
+- **Ranking failure** — Korvold: the cards are in the pool but buried. Mayhem
+  Devil rank 35 (near miss), Ruthless Technomancer 267, Tireless Provisioner
+  425, Deadly Dispute 696, Diabolic Intent 699, Warren Soultrader 779,
+  Chatterfang 783; three score nothing at all.
+- **Coverage failure** — Yawgmoth: the entire candidate pool is **49 cards**
+  out of ~2,500 legal in his colours. All 10 labels are outside it. No ranking
+  change can help.
+
+Design note this raises: deny-by-default makes pools *smaller*, and Yawgmoth's
+is already 49. The model still helps because under the partition the pool
+derives from the **strategy**, not from the commander's port bridges —
+selecting `aristocrats` fires the death-payoff rules whether or not Yawgmoth's
+own ports bridge to them, and his 10 labels are exactly that pool. This is the
+DECLINED `aristocrats_death_bridge` rule with its scope corrected; the
+null-result itself records that "Inspecting Yawgmoth's missed EDHREC cards had
+confirmed the pool *is* where his picks live." **Pool size per (commander,
+strategy) is therefore a reported diagnostic, not an afterthought.**
+
+### 6.4 Gates
+
 **Primary gate: human judgment.** ~20 commanders × 3 strategies, old top-30
-beside new top-30 in one report, each list marked good/bad with a reason. No
-proxy metric substitutes at this stage — dissatisfaction with current output
-is the thing being fixed.
+beside new top-30, each list marked good/bad with a reason. Dissatisfaction
+with current output is the thing being fixed and no proxy substitutes for it.
 
-**Secondary metrics — reported, not gated:**
+**Quantitative gate — a floor, not a maximand:**
 
-- **Cross-strategy divergence** — Jaccard between the same commander's top-30
-  under different strategies. EDHREC-free, and it measures the target property
-  directly. Near-identical lists mean the project has failed, detectable in
-  week one. The old architecture could not produce this number at all.
-- **Theme precision@30** — `|top30 ∩ theme list| / 30`. Sanity signal only;
-  explicitly not a target, since maximising it means becoming EDHREC.
+| Gate | Threshold | Baseline |
+|---|---|---|
+| Aggregate `recall@30` | ≥ **0.50** | 0.230 |
+| Per-commander `recall@30` | ≥ **3/10**, no zeros | four commanders at 0/10 |
+
+Recall is deliberately a **floor**. Maximising it is self-defeating: the
+optimal system under maximisation is to serve EDHREC's theme list directly,
+which is the option rejected at D2 and makes the mechanical engine
+strictly redundant.
+
+**Co-metrics — reported, and one of them guards the floor:**
+
 - **Novelty rate** — fraction of top-30 absent from every EDHREC list for that
   commander yet matching the strategy signature. Successor to
-  `hidden_gem_hit_rate`.
+  `hidden_gem_hit_rate`. This is the guard: `recall@30 → 1.0` with
+  `novelty → 0` means an EDHREC mirror has been built, a cheaper product that
+  needs none of this architecture. Success is clearing the floor **while**
+  retaining defensible off-list cards.
+- **Cross-strategy divergence** — Jaccard between the same commander's top-30
+  under different strategies. EDHREC-free and measures the target property
+  directly; near-identical lists mean the project failed. The old architecture
+  could not produce this number at all.
+- **Pool size** per (commander, strategy) — separates coverage failure from
+  ranking failure (§6.3).
 
 Per D7, aggregate NDCG@30 against the blended commander page is retired.
 
@@ -378,7 +470,9 @@ Per D7, aggregate NDCG@30 against the blended commander page is retired.
 ## 8. Scope of the first slice
 
 **In:** new repo `mtg-strategy-graph`; ETL move + parity test; theme scrape
-for ~20 commanders; vocabulary normalisation for the tags in play; mining for
+for ~20 commanders **plus the tag-level pages for the slice strategies × the
+colour identities in play** (§6.2); vocabulary normalisation for the tags in
+play; mining for
 `aristocrats`, `reanimator`, `plus1_counters`, `generic`; **one hand-authored
 micro-strategy** as a worked example of the class (§3.1) — chosen during
 implementation from a commander with a rare mechanic and no useful EDHREC tag;
@@ -415,6 +509,12 @@ Stop and rethink rather than scale, if:
    and building 40 strategies would multiply a broken mechanism.
 3. The generalisation guard rejects nearly every mined pattern — signatures
    are whitelists and the membership model needs rethinking.
+4. `recall@30` for the coverage-failure commanders (Yawgmoth, Karador) stays
+   at 0/10 — if a strategy-supplied pool cannot reach cards the commander's own
+   ports never bridge to, the central mechanism does not work and no amount of
+   ranking work will rescue it.
+5. `recall@30` clears the floor but novelty collapses to ~0 — the result is an
+   EDHREC mirror, which does not need this architecture (§6.4).
 
 ## 10. Roadmap beyond the slice
 
