@@ -42,6 +42,32 @@ perturbs the weights of all others. Partitioning by strategy scopes that
 computation, turning "did this rule regress anything?" from a two-hour audit
 cycle into a CI assertion.
 
+### 1.1 The three interference channels
+
+Rules affect each other through three distinct mechanisms, and only the first
+is obvious:
+
+| Channel | Mechanism | Today | Under the partition |
+|---|---|---|---|
+| **(a) Additive** | Scores sum, so a firing rule moves ranks | Global | Strategy-local |
+| **(b) Normalisation** | `_compute_idf_weights` denominators run over *all* complements; `_syn_concentration_factor` and `_compute_pair_bonus(frozenset[rules])` likewise | Global | Strategy-local |
+| **(c) Selection** | Top-N is a fixed window — cards added push others out | Global | Strategy-local |
+
+**Channel (b) is the one that makes small rules expensive.** A rule that fires
+for a single commander still changes the IDF denominators and pair bonuses of
+every commander sharing any rule with it. The cost is not the points the rule
+adds — it is the weights it perturbs. This is why a narrow,
+mechanically-correct rule for one commander cannot be added today without an
+aggregate regression sweep, and it is the direct cause of the observation that
+the rule set has hit a ceiling.
+
+Across strategies the partition drives all three channels to zero, because
+non-manifest rules are never loaded. **Within** a strategy all three remain,
+by design — rules in one manifest *should* compete. What changes is that the
+affected set is exactly `manifest(S)`, a readable list of typically 5–15
+rules rather than ~90. Interference is not eliminated; it is **bounded and
+enumerable**, and the bound is chosen by the author.
+
 ## 2. Decisions
 
 Settled during brainstorming; recorded with rationale because each closes off
@@ -56,6 +82,7 @@ alternatives that will otherwise resurface.
 | D5 | **Single strategy per query.** No multi-select | Removes union/double-counting design; makes results precomputable; near-synonym tags (Sacrifice/Aristocrats) are better handled by vocabulary merging than by user-side combination |
 | D6 | All rules are **data rows**, no Python rule path | Partition verifiable statically; the signature miner can emit candidate rules directly; a rule's blast radius is readable without running anything |
 | D7 | Aggregate NDCG@30 vs the blended EDHREC commander page is **retired as a target** | Wrong instrument by construction: a correctly focused reanimator list *should* score worse against a mixture of all that commander's decks |
+| D8 | Strategy vocabulary is **seeded by EDHREC tags, not limited to them**; **micro-strategies** (1–5 commanders, hand-authored) are a first-class class | Rare commander-specific mechanics have no home in a global rule set, where channel (b) (§1.1) makes them cost a full regression sweep regardless of how narrowly they fire |
 
 ## 3. Core model
 
@@ -82,6 +109,36 @@ to `generic` — not a special code path, just another row. This mirrors the
 portal's current no-theme behaviour, which falls back to the blended EDHREC
 commander page (`algorithm/pipeline.py:228`, guarded by
 `if constraints.theme_slugs:` — there is no default theme today).
+
+**The vocabulary is seeded by EDHREC tags but not limited to them.** Nothing
+in the model requires a strategy to be popular — it is an availability
+predicate plus a manifest, and the partition granularity goes down to a single
+commander. Two classes:
+
+| Class | Backing | Signature source | Evaluated by |
+|---|---|---|---|
+| **Tagged** | An EDHREC tag (or merged tag group) | Mined (§5) | Judgment + theme-list metrics (§6) |
+| **Micro** | Mechanical only; 1–5 commanders, no EDHREC label | Hand-authored from the Forge DSL | Judgment + the isolation test; no aggregate gate |
+
+Micro-strategies are the answer to rare, commander-specific mechanics, which
+today have nowhere to live except the global rule set — where channel (b)
+(§1.1) makes them cost a full regression sweep. A micro-strategy with two
+rules has an interference set of two rules plus `core`; every other strategy
+is bitwise identical, and the isolation test proves it, so no aggregate
+measurement is required at all.
+
+Four constraints keep the class from degenerating into hand-maintained
+whitelists:
+
+1. **Port predicate, never a card list** — a newly printed card of the same
+   shape joins automatically.
+2. **Never auto-applied** — reachable only by explicit user selection, so it
+   cannot affect anyone's default results.
+3. **Declares its availability predicate** — its commander count is
+   reportable; one claiming 400 commanders is misfiled and belongs as a
+   tagged strategy.
+4. **No aggregate gate** — judged on its own commanders. Aggregate gating is
+   what made these rules impossible before.
 
 ### 3.2 Scoring
 
@@ -110,6 +167,38 @@ candidate_predicate, weight)`. The old repo proved this out for 16 rules via
 `port_graph/interpreter.py` but kept a parallel Python path; the new repo has
 only the data path.
 
+Worked example. Forge yields these ports for two canonical reanimation cards:
+
+```
+Reanimate     effect ChangeZone  valid_filter=Creature   Graveyard → Battlefield
+Animate Dead  effect ChangeZone  valid_filter=Enchanted  Graveyard → Battlefield
+```
+
+The rule row that matches the first:
+
+```
+rule_id:             reanimation_target
+strategies:          [reanimator]
+candidate_predicate: port_type        = effect
+                     event_class      = ChangeZone
+                     zone_origin      contains Graveyard
+                     zone_destination = Battlefield
+                     valid_filter     matches ^Creature  AND NOT contains Opp
+weight_tier:         primary
+```
+
+Live-DB counts that make the authoring stakes concrete: this predicate matches
+**245** cards. Dropping the `valid_filter` clause matches **693** — the extra
+448 include `Land.YouOwn` (6), `Artifact.YouCtrl` (10) and `Creature.OppCtrl`
+(8, i.e. stealing from opponents' graveyards, a different deck). The flood is
+visible in a SQL count before any scoring code is written.
+
+Note also that `Animate Dead` carries `valid_filter=Enchanted` and is *missed*
+by the rule above, along with 164 cards using `Enchanted` / `Remembered` /
+`Targeted` / empty filters. Those need a second rule at a different weight
+tier. This is the class of omission the miner (§5) catches and hand-authoring
+reliably forgets.
+
 Accepted cost: the predicate DSL must be expressive enough, and rules that
 genuinely needed Python (the depth-2 pathway cascade) either get DSL support
 or do not come across. The starting op set is the old
@@ -127,6 +216,22 @@ identical**.
 Honest limit: this makes rules **non-interfering**, not **correct**. A bad
 aristocrats rule still ruins aristocrats. What it buys is the ability to work
 on one strategy at a time, which is exactly what the four DECLINE cycles cost.
+
+### 3.5 `core` is frozen
+
+`core` is the one surface every strategy shares, so a change there propagates
+to everything and is the single place the old regression pain survives — by
+design, and confined.
+
+Three consequences, binding on implementation:
+
+- **Core stays small**: ramp, draw, protection, and the commander's own
+  literal circuits. Nothing archetype-flavoured.
+- **Core changes require the full regression sweep** across every strategy's
+  golden snapshots (§7). Strategy-manifest changes do not.
+- **When in doubt, it goes in a strategy.** A wrong call there costs one
+  strategy; a wrong call in core costs all of them. This is the highest-stakes
+  authoring question in the system and should be treated as such in review.
 
 ## 4. Data pipeline
 
@@ -181,10 +286,15 @@ the slice is classifying them:
 - **not strategies** — deck attributes rather than spines: Budget, Midrange,
   Good Stuff, Combo
 
+This classifies the *tagged* class only. Micro-strategies (§3.1) originate
+from Forge DSL inspection, not from this table, and are added independently of
+any scrape.
+
 ## 5. Signature mining
 
 Design-time only. Produces proposals for human review; never mutates committed
-artefacts.
+artefacts. Applies to **tagged** strategies; micro-strategies are hand-authored
+and skip this pipeline entirely (they have no theme list to mine).
 
 ### 5.1 The contrast is within-commander
 
@@ -259,8 +369,9 @@ Per D7, aggregate NDCG@30 against the blended commander page is retired.
 | Test | Catches |
 |---|---|
 | Extraction parity — 108,644 ports / 32,327 cards, per-`(port_type, event_class)` histogram | Silent ETL regression poisoning every downstream signature |
-| Isolation invariant — mutate all rules outside S, assert S bitwise identical | The regression class behind the four DECLINEs |
-| Generalisation guard over committed manifests | Signatures degenerating into memorised EDHREC lists |
+| Isolation invariant — mutate all rules outside S, assert S bitwise identical, for every S including micro-strategies | The regression class behind the four DECLINEs; also the *only* gate a micro-strategy must clear (§3.1) |
+| Core-change sweep — full golden-snapshot diff across every strategy when `core` changes | The one surface where global regression survives (§3.5) |
+| Generalisation guard over committed **mined** rules (§5.4; micro-strategy rules are exempt — they have no training list, and constraint 1 of §3.1 covers them instead) | Signatures degenerating into memorised EDHREC lists |
 | Golden output snapshots per (commander, strategy) | Ranking changes become visible diffs in PRs |
 | Name-resolution coverage | Silent EDHREC-name drop biasing the mining corpus |
 
@@ -268,10 +379,17 @@ Per D7, aggregate NDCG@30 against the blended commander page is retired.
 
 **In:** new repo `mtg-strategy-graph`; ETL move + parity test; theme scrape
 for ~20 commanders; vocabulary normalisation for the tags in play; mining for
-`aristocrats`, `reanimator`, `plus1_counters`, `generic`; rule DSL +
-interpreter; deny-by-default partitioned scoring with strategy-local IDF; CLI
-`recommend --commander X --strategy Y --explain`; judgment report + three
-metrics; isolation and parity tests.
+`aristocrats`, `reanimator`, `plus1_counters`, `generic`; **one hand-authored
+micro-strategy** as a worked example of the class (§3.1) — chosen during
+implementation from a commander with a rare mechanic and no useful EDHREC tag;
+rule DSL + interpreter; deny-by-default partitioned scoring with
+strategy-local IDF; CLI `recommend --commander X --strategy Y --explain`;
+judgment report + three metrics; isolation and parity tests.
+
+The micro-strategy is in scope deliberately: it is cheap (hand-authored, 1–3
+rules, no scrape, no mining) and it validates the property that motivated the
+rebuild — that a narrow rule can be added with provably zero effect on
+anything else.
 
 **Commander selection:** ~20 commanders, chosen so that most carry **two or
 more** of the three slice strategies — the demonstration is the *same*
