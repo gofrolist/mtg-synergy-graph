@@ -83,7 +83,7 @@ alternatives that will otherwise resurface.
 | D6 | All rules are **data rows**, no Python rule path | Partition verifiable statically; the signature miner can emit candidate rules directly; a rule's blast radius is readable without running anything |
 | D7 | Aggregate NDCG@30 vs the blended EDHREC commander page is **retired as a target** | Wrong instrument by construction: a correctly focused reanimator list *should* score worse against a mixture of all that commander's decks |
 | D8 | Strategy vocabulary is **seeded by EDHREC tags, not limited to them**; **micro-strategies** (1–5 commanders, hand-authored) are a first-class class | Rare commander-specific mechanics have no home in a global rule set, where channel (b) (§1.1) makes them cost a full regression sweep regardless of how narrowly they fire |
-| D9 | Success is measured by **`recall@30` against the theme page's 10 High Synergy Cards**, used as a **floor** (agg ≥ 0.50, no commander below 3/10), with **novelty rate** as the co-metric that guards it | Matches the stated expectation of being close to the theme page, without making the metric a maximand — under maximisation the optimal system is to serve EDHREC's list directly, contradicting D2 |
+| D9 | Success is measured by **discriminative recall against theme-page inclusion rates** (`num_decks/potential_decks`), used as a **floor** with thresholds pre-registered in the plan, and **novelty rate** as the co-metric that guards it | Matches the stated expectation of being close to the theme page, without making the metric a maximand — under maximisation the optimal system is to serve EDHREC's list directly, contradicting D2. The High Synergy Cards section was rejected as the label after measurement: 7/10 shared between Korvold's Sacrifice and Reanimator (§6.1) |
 | D10 | Both **tag-level** (`/tags/<theme>/<colors>`) and **commander-level** (`/commanders/<slug>/<theme>`) labels are collected | The pair separates "strategy signature is wrong" from "commander-specific rules are missing"; neither label does that alone (§6.2) |
 
 ## 3. Core model
@@ -259,11 +259,30 @@ Two endpoints, both already proven in `mtg-edh-builder`
 |---|---|---|
 | `json.edhrec.com/pages/commanders/<slug>.json` → `panels.taglinks` | strategies offered + deck counts | `commander_themes(commander_slug, theme_slug, label, deck_count, scraped_at)` |
 | `json.edhrec.com/pages/commanders/<slug>/<theme>.json` → `container.json_dict.cardlists[].cardviews[]` | the card list for that (commander, strategy) | `theme_cards(commander_slug, theme_slug, card_name, synergy, inclusion, category)` |
-| `json.edhrec.com/pages/tags/<theme>/<color-identity>.json` | the commander-independent card list for that (strategy, colours) — the tag-level label of §6.2 | `tag_cards(theme_slug, color_identity, card_name, synergy, inclusion, category)` |
+| `json.edhrec.com/pages/tags/<theme>/<color-identity>.json` | the commander-independent card list for that (strategy, colours) — the tag-level label of §6.2 — **plus `topcommanders` (24)**, a free per-theme commander list used to pick the slice corpus honestly | `tag_cards(theme_slug, color_identity, card_name, synergy, inclusion, category)`, `tag_commanders(theme_slug, color_identity, commander_name, rank)` |
 
-The `section` value (`'High Synergy Cards'`, `'Top Cards'`, the card-type
-buckets) must be preserved on every row: §6.1's label is the High Synergy
-section specifically, and it holds exactly 10 cards.
+Every row must preserve `num_decks`, `potential_decks` and `section`.
+`num_decks / potential_decks` is the inclusion rate and **is the §6.1 label**;
+`section` is needed to reconstruct the High Synergy set as a secondary sanity
+signal.
+
+Endpoint facts established by probe (2026-08-15): sections are capped at 50
+cards, per-card-type sub-pages (`/commanders/<slug>/creatures`) return 403,
+and `/pages/themes/<theme>.json` returns 403. Commander pages yield ~319
+cards, theme pages ~313, tag pages ~338.
+
+**Optional deeper tier — real decklists.** `/pages/decks/<slug>.json` returns
+one row per deck (20,489 for Korvold) with per-deck `tags`, `urlhash`,
+bracket, price; `edhrec.com/api/deckpreview/<urlhash>` then returns the **full
+100-card list** plus that deck's tags and source URL. This enables held-out
+card prediction — hide N cards from a real deck, measure whether we rank them
+back — the strongest eval available and one needing no synergy formula at all.
+
+**Deferred out of the slice.** It costs ~300 requests per (commander, theme)
+against ~1 for the inclusion-rate path, and a 40-deck-per-theme sample
+reproduced the cheap path's answer exactly (§6.1). Tag coverage is 22.3% of
+decks (4,560 of 20,489 for Korvold), so thin themes will have thin labels.
+Revisit in sub-project E.
 
 Stored in a **separate `themes.db`** that the recommendation path physically
 cannot open — the design-time-only discipline kept structural rather than by
@@ -296,6 +315,20 @@ the slice is classifying them:
 This classifies the *tagged* class only. Micro-strategies (§3.1) originate
 from Forge DSL inspection, not from this table, and are added independently of
 any scrape.
+
+**Tags are noisy, and one measured example should govern expectations.**
+Tags come from user-authored Archidekt tags and Moxfield hubs, are
+multi-valued (a sampled Korvold deck carried 8), and do not always mean what
+the word says. Measured 2026-08-15: **Korvold's `Reanimator` cohort is
+lands-matter / graveyard-value**, not reanimation — its distinctive cards are
+Lotus Cobra, Azusa, World Shaper, Crucible of Worlds, Life from the Loam,
+Krosan Wayfarer, with almost no `Graveyard → Battlefield` present.
+
+The mitigation is already in §5.1: positives are pooled across *all*
+commanders tagged T, so Meren, Karador and Chainer wash out Korvold's
+idiosyncratic usage. The consequence is that **a per-commander label is not
+evidence about what a strategy means** — only the cross-commander aggregate
+is. This governs kill criterion 1 (§9).
 
 ## 5. Signature mining
 
@@ -354,16 +387,52 @@ can still surface because its *ports* match the signature.
 
 ### 6.1 The label and the metric
 
-The label is the **High Synergy Cards** section of the theme page. Measured
-structural fact: that section holds **exactly 10 cards** — 2,720 of the 2,761
-commanders in the current scrape have exactly 10, the rest fewer.
+**The label is the theme page's per-card inclusion rate**, not its High
+Synergy Cards section. Every `cardview` on
+`/pages/commanders/<slug>/<theme>.json` carries `num_decks` and
+`potential_decks`; their ratio is the card's inclusion rate *within that
+theme*. One request yields ~313 cards with inclusion rates.
 
-Consequently `precision@30` is capped at 0.33 and is the wrong framing. The
-metric is:
+#### Why not High Synergy Cards
+
+The High Synergy section holds exactly 10 cards (2,720 of 2,761 commanders in
+the current scrape). It was the obvious label and it is **a poor
+discriminator** — measured 2026-08-15:
+
+- Korvold's *Sacrifice* and *Reanimator* high-synergy lists share **7 of 10**.
+- The shared seven are cEDH staples with no thematic content: Dark Ritual,
+  Veil of Summer, Culling the Weak, Tinder Wall, Ragavan, Diabolic Intent,
+  Mayhem Devil.
+- Over the full 313-card lists, Jaccard(Sacrifice, Reanimator) = **0.735** —
+  ~85% is shared Jund goodstuff and lands.
+
+Gating on that label would have capped the cross-strategy divergence metric
+(§6.4) at the ground truth's own 30% separation.
+
+Ranking the same payload by **lift** — inclusion in this theme against
+inclusion in the commander's other themes — separates cleanly:
+
+| | Top distinctive cards |
+|---|---|
+| Sacrifice | Mahadi, Dockside Extortionist, Plaguecrafter, Witch's Oven, Grim Hireling, Brass's Bounty, Xorn |
+| Reanimator | Lotus Cobra, Aftermath Analyst, Lumra, Dryad Arbor, World Shaper, Azusa, Krosan Wayfarer |
+
+**Jaccard(top-15 distinctive) = 0.000.** Cross-validated against 40 real
+decklists per theme sampled through `deckpreview` (§4.2): the two independent
+methods agree, so the cheap one-request path suffices.
+
+#### The two-tier metric
 
 ```
-recall@30 = |our top-30 ∩ the 10 High Synergy Cards| / |High Synergy Cards|
+core recall        = |top-30 ∩ {cards ≥ inclusion floor in theme T}| / |labels|
+discriminative recall = |top-30 ∩ {top-N by lift(T vs commander's other themes)}| / N
 ```
+
+Core recall asks "are these sane cards for this deck". Discriminative recall
+asks "did choosing the strategy change anything" — and unlike core recall it
+cannot be gamed by returning generic staples, which is why it is the gate that
+matters. Floors and `N` are calibrated during implementation against the slice
+corpus and recorded in the plan.
 
 ### 6.2 Two label levels
 
@@ -381,6 +450,12 @@ the strategy is overfitted to the commander. A single metric cannot separate
 those.
 
 ### 6.3 Measured baseline (2026-08-14, current engine, blended commander page)
+
+**Measured against the High Synergy Cards label, which §6.1 discards.** It is
+retained because the *diagnosis* it produced — which commanders fail and how —
+is label-independent and is what the design responds to. The numbers
+themselves do not transfer: the §6.4 thresholds must be re-derived against the
+inclusion-rate label before they mean anything.
 
 Aggregate `recall@30` = **0.230** over ten sacrifice/counters commanders:
 
@@ -427,12 +502,18 @@ strategy) is therefore a reported diagnostic, not an afterthought.**
 beside new top-30, each list marked good/bad with a reason. Dissatisfaction
 with current output is the thing being fixed and no proxy substitutes for it.
 
-**Quantitative gate — a floor, not a maximand:**
+**Quantitative gate — a floor, not a maximand.** The gate is
+**discriminative recall** (§6.1); core recall is reported alongside it as a
+sanity check.
 
-| Gate | Threshold | Baseline |
-|---|---|---|
-| Aggregate `recall@30` | ≥ **0.50** | 0.230 |
-| Per-commander `recall@30` | ≥ **3/10**, no zeros | four commanders at 0/10 |
+Thresholds are **pre-registered in the implementation plan, not here.** The
+earlier draft's ≥ 0.50 aggregate / ≥ 3-of-10 per commander was calibrated
+against the High Synergy label that §6.1 discards, so carrying it over would
+be a number with no measurement behind it. Task 1 of the plan is: build the
+inclusion-rate labels for the slice corpus, measure the current engine against
+them, and set the floor from that baseline. The *shape* is fixed and binding —
+an aggregate floor plus a per-commander floor with **no zeros permitted**,
+since eliminating the 0/10 commanders is the point.
 
 Recall is deliberately a **floor**. Maximising it is self-defeating: the
 optimal system under maximisation is to serve EDHREC's theme list directly,
@@ -443,7 +524,7 @@ strictly redundant.
 
 - **Novelty rate** — fraction of top-30 absent from every EDHREC list for that
   commander yet matching the strategy signature. Successor to
-  `hidden_gem_hit_rate`. This is the guard: `recall@30 → 1.0` with
+  `hidden_gem_hit_rate`. This is the guard: discriminative recall → 1.0 with
   `novelty → 0` means an EDHREC mirror has been built, a cheaper product that
   needs none of this architecture. Success is clearing the floor **while**
   retaining defensible off-list cards.
@@ -490,8 +571,14 @@ more** of the three slice strategies — the demonstration is the *same*
 commander recommending differently per strategy. Korvold, Fae-Cursed King
 carries all three (Sacrifice 1597 / Aristocrats 876 / +1+1 Counters 439 /
 Reanimator 217). Reyhan is included deliberately: it is the documented flood
-casualty. The final list is confirmed against the scrape during
-implementation.
+casualty; Yawgmoth and Karador for the coverage-failure mode (§6.3).
+
+The rest of the list is drawn from the `topcommanders` block on each slice
+strategy's tag page (§4.2) rather than from memory — 24 ranked commanders per
+(theme, colour identity), free with the label fetch. Commanders whose label
+turns out to be miscoded (the §4.3 tag-noise case) are kept and *reported*,
+not quietly dropped, since silently curating the corpus toward agreeable
+labels would make every downstream number meaningless.
 
 **Out:** deck context — the API accepts `deck: Sequence[str] = ()` from day
 one and ignores it, documented, so adding it later is not a breaking change;
@@ -504,16 +591,20 @@ playstyle.
 Stop and rethink rather than scale, if:
 
 1. Mined Reanimator signatures do not rank `ChangeZone Graveyard→Battlefield`
-   at the top — the mining method is broken.
+   at the top **when mined across all Reanimator-tagged commanders** — the
+   mining method is broken. Measured against a *single* commander this
+   criterion is invalid: Korvold's `Reanimator` cohort is lands-matter (§4.3),
+   so a correct signature would appear to fail there. Evaluate the aggregate,
+   never one commander.
 2. Cross-strategy divergence is low — conditioning is not reaching the output,
    and building 40 strategies would multiply a broken mechanism.
 3. The generalisation guard rejects nearly every mined pattern — signatures
    are whitelists and the membership model needs rethinking.
-4. `recall@30` for the coverage-failure commanders (Yawgmoth, Karador) stays
-   at 0/10 — if a strategy-supplied pool cannot reach cards the commander's own
-   ports never bridge to, the central mechanism does not work and no amount of
-   ranking work will rescue it.
-5. `recall@30` clears the floor but novelty collapses to ~0 — the result is an
+4. Discriminative recall for the coverage-failure commanders (Yawgmoth,
+   Karador) stays at zero — if a strategy-supplied pool cannot reach cards the
+   commander's own ports never bridge to, the central mechanism does not work
+   and no amount of ranking work will rescue it.
+5. Discriminative recall clears the floor but novelty collapses to ~0 — an
    EDHREC mirror, which does not need this architecture (§6.4).
 
 ## 10. Roadmap beyond the slice
