@@ -248,7 +248,8 @@ The bench.py hook also runs advisorily on pre-commit when edits touch
 
 ## Data Model
 
-Port extraction: 108,644 ports from 32,327 cards (GenericChoice +
+Port extraction: 110,366 ports from 32,624 cards (re-verified 2026-08-15
+against `data/synergy.db`; GenericChoice +
 StaticAbilities$ expansion, deduped after A1's 2^N re-walk fix).
 
 **Extra `port_attributes`** (beyond standard valid_filter explosion):

@@ -641,8 +641,8 @@ Expected: green, and coverage back above 80% now that `cli.py` and the importer 
 git add -A
 git commit -m "feat(cli): import-cards subcommand + ETL parity gate
 
-Asserts 32,327 cards / 108,644 ports and an identical
-(port_type, event_class) histogram against the old repo's synergy.db."
+Asserts 32,624 cards / 110,366 ports (re-verified 2026-08-15) and an
+identical (port_type, event_class) histogram against the old repo's synergy.db."
 ```
 
 ---

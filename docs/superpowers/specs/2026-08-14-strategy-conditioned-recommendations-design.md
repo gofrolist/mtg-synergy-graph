@@ -245,10 +245,11 @@ Moves verbatim: `parser.py`, `ports.py`, `attributes.py`, `tokens.py`,
 Does not move: `universal_scorer`, `complement_rules/`, `penalties`,
 `heuristics`, `graph_engine`, `bench/`, `portfolio`, `quality`.
 
-Gated by a **parity test**: the new importer must produce exactly **108,644
-ports from 32,327 cards** with a per-`(port_type, event_class)` histogram
-identical to the old DB. A silent extraction regression would poison every
-mined signature downstream.
+Gated by a **parity test**: the new importer must produce exactly **110,366
+ports from 32,624 cards** (re-verified 2026-08-15 against `data/synergy.db`)
+with a per-`(port_type, event_class)` histogram identical to the old DB.
+A silent extraction regression would poison every mined signature
+downstream.
 
 ### 4.2 EDHREC theme corpus
 
@@ -541,7 +542,7 @@ Per D7, aggregate NDCG@30 against the blended commander page is retired.
 
 | Test | Catches |
 |---|---|
-| Extraction parity — 108,644 ports / 32,327 cards, per-`(port_type, event_class)` histogram | Silent ETL regression poisoning every downstream signature |
+| Extraction parity — 110,366 ports / 32,624 cards (re-verified 2026-08-15), per-`(port_type, event_class)` histogram | Silent ETL regression poisoning every downstream signature |
 | Isolation invariant — mutate all rules outside S, assert S bitwise identical, for every S including micro-strategies | The regression class behind the four DECLINEs; also the *only* gate a micro-strategy must clear (§3.1) |
 | Core-change sweep — full golden-snapshot diff across every strategy when `core` changes | The one surface where global regression survives (§3.5) |
 | Generalisation guard over committed **mined** rules (§5.4; micro-strategy rules are exempt — they have no training list, and constraint 1 of §3.1 covers them instead) | Signatures degenerating into memorised EDHREC lists |
