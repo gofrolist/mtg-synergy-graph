@@ -20,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path.home() / "gofrolist/mtg-strategy-graph/src"))
 from mtg_strategy_graph.labels import metrics
+from mtg_strategy_graph.labels.resolve import build_name_map, resolve_names
 
 from mtg_synergy_graph import SynergyEngine
 from mtg_synergy_graph.validate import commander_to_slug
@@ -65,6 +66,29 @@ def main() -> int:
     for slug in ambiguous_slugs:
         del slug_to_name[slug]
 
+    # theme_cards.card_name is EDHREC's spelling (e.g. "Dusk // Dawn"),
+    # while engine.page() ranks candidates under the Forge canonical name
+    # (e.g. "Dusk"). Resolve every label name through the same
+    # exact/front-face/normalised pipeline used for commander names before
+    # intersecting with the engine's output, or the two sides silently
+    # speak different name dialects.
+    #
+    # Names the pipeline cannot resolve (cards genuinely absent from the
+    # Forge cardsfolder snapshot, e.g. recent Universes Beyond product; see
+    # docs/DECISIONS.md "Name-resolution coverage") are kept in the label
+    # set under their ORIGINAL raw name rather than dropped. They could
+    # never intersect `top` either way (top only contains real Forge
+    # names), so this preserves the label's size/denominator and confines
+    # the fix to its intended scope: the small set of names that already
+    # exist under a different spelling on the Forge side.
+    name_map = build_name_map(engine._conn)
+
+    def _resolve_label_names(names) -> set[str]:
+        resolved, unresolved = resolve_names(names, name_map)
+        out = set(resolved.values())
+        out.update(unresolved)
+        return out
+
     per_pair = {}
     for slug, theme in pairs:
         name = slug_to_name.get(slug)
@@ -76,8 +100,10 @@ def main() -> int:
             per_pair[f"{slug}|{theme}"] = {"error": str(exc)}
             continue
         top = [i.card for i in page.items]
-        core = metrics.core_label(metrics.inclusion_rates(tconn, slug, theme), floor=CORE_FLOOR)
-        disc = set(metrics.discriminative_label(tconn, slug, theme, n=DISCRIMINATIVE_N, min_inclusion=MIN_INCLUSION))
+        core = _resolve_label_names(metrics.core_label(metrics.inclusion_rates(tconn, slug, theme), floor=CORE_FLOOR))
+        disc = _resolve_label_names(
+            metrics.discriminative_label(tconn, slug, theme, n=DISCRIMINATIVE_N, min_inclusion=MIN_INCLUSION)
+        )
         per_pair[f"{slug}|{theme}"] = {
             "core_recall": metrics.recall(top, core),
             "discriminative_recall": metrics.recall(top, disc),
@@ -90,23 +116,25 @@ def main() -> int:
     agg_disc = sum(v["discriminative_recall"] for v in scored) / max(len(scored), 1)
     agg_core = sum(v["core_recall"] for v in scored) / max(len(scored), 1)
 
-    args.out.write_text(
-        json.dumps(
-            {
-                "measured_at": dt.datetime.now(dt.UTC).isoformat(),
-                "engine": "mtg-synergy-graph (pre-rebuild baseline)",
-                "core_floor": CORE_FLOOR,
-                "discriminative_n": DISCRIMINATIVE_N,
-                "min_inclusion": MIN_INCLUSION,
-                "top_n": args.top,
-                "per_pair": per_pair,
-                "aggregate": {"core_recall": agg_core, "discriminative_recall": agg_disc},
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    out_data = {
+        "measured_at": dt.datetime.now(dt.UTC).isoformat(),
+        "engine": "mtg-synergy-graph (pre-rebuild baseline)",
+        "core_floor": CORE_FLOOR,
+        "discriminative_n": DISCRIMINATIVE_N,
+        "min_inclusion": MIN_INCLUSION,
+        "top_n": args.top,
+        "per_pair": per_pair,
+        "aggregate": {"core_recall": agg_core, "discriminative_recall": agg_disc},
+    }
+    # Preserve hand-written fields (e.g. "corpus", "gates") from an existing
+    # baseline file instead of clobbering them: only fields this script
+    # itself computes are refreshed.
+    if args.out.exists():
+        existing = json.loads(args.out.read_text(encoding="utf-8"))
+        for key, value in existing.items():
+            out_data.setdefault(key, value)
+
+    args.out.write_text(json.dumps(out_data, indent=2) + "\n", encoding="utf-8")
     print(f"aggregate discriminative_recall={agg_disc:.3f} core_recall={agg_core:.3f}")
     return 0
 
